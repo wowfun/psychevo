@@ -1,0 +1,307 @@
+.composerRequests {
+  display: grid;
+  gap: 8px;
+}
+
+.composerRequest {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  background: var(--pevo-bg-raised);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerRequest p,
+.composerRequest pre {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.82rem;
+}
+
+.composerRequest pre {
+  max-height: 120px;
+  overflow: auto;
+  padding: 8px;
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+}
+
+.composerRequest div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.composerRequest input {
+  flex: 1 1 180px;
+  min-height: 32px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerRequest button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerStatusLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  color: var(--pevo-muted);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.composerSubmitControls {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  color: var(--pevo-muted);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.statusSelect select,
+.composerStatusLine button,
+.composerSubmitControls button {
+  min-height: 24px;
+  max-width: 180px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  font: inherit;
+}
+
+.statusSelect {
+  position: relative;
+  display: inline-grid;
+  align-items: center;
+  min-width: 0;
+}
+
+.statusSelect select,
+.statusSelectDisplay {
+  grid-area: 1 / 1;
+}
+
+.statusSelectDisplay {
+  z-index: 1;
+  max-width: var(--pevo-status-select-value-width, 5ch);
+  overflow: hidden;
+  color: var(--pevo-muted);
+  pointer-events: none;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.statusSelect.has-displayValue::after {
+  content: "";
+  z-index: 2;
+  grid-area: 1 / 1;
+  justify-self: end;
+  width: 5px;
+  height: 5px;
+  margin-right: 3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  pointer-events: none;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.statusSelect.has-displayValue select {
+  appearance: none;
+  color: transparent;
+}
+
+.statusSelect.has-displayValue select option {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+}
+
+.statusSelect[data-status="permission-mode"] select {
+  max-width: 168px;
+}
+
+.statusSelect[data-status="model"] select {
+  max-width: 210px;
+}
+
+.statusSelect[data-status="variant"] select {
+  max-width: 78px;
+}
+
+.profileStatusPill {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  max-width: 120px;
+  min-width: 0;
+  color: var(--pevo-muted);
+}
+
+.profileStatusPill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composerSubmitControls .statusSelect[data-status="model"] select {
+  width: calc(var(--pevo-status-select-value-width, 5ch) + 16px);
+  min-width: calc(var(--pevo-status-select-value-width, 5ch) + 16px);
+  max-width: min(240px, 46vw);
+  padding: 0 14px 0 0;
+}
+
+.composerSubmitControls .statusSelect[data-status="variant"] select {
+  width: calc(var(--pevo-status-select-value-width, 5ch) + 16px);
+  min-width: calc(var(--pevo-status-select-value-width, 5ch) + 16px);
+  padding: 0 14px 0 0;
+}
+
+.composerStatusContext {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.contextStatusButton {
+  display: grid;
+  width: 24px;
+  min-width: 24px;
+  place-items: center;
+}
+
+.contextStatusButton span {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: conic-gradient(var(--pevo-accent) var(--pevo-context-percent, 0%), var(--pevo-panel-muted) 0);
+}
+
+.composerContextPopover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  width: min(360px, calc(100vw - 24px));
+  gap: 10px;
+  padding: 12px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-panel);
+  white-space: normal;
+}
+
+.composerContextSummary {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.composerContextSummary > div {
+  min-width: 0;
+}
+
+.composerContextSummary > span {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  color: var(--pevo-ink);
+  background:
+    radial-gradient(circle, var(--pevo-panel) 52%, transparent 54%),
+    conic-gradient(var(--pevo-accent) var(--pevo-context-percent, 0%), var(--pevo-panel-muted) 0);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.composerContextSummary small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerContextSummary strong {
+  display: block;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  font-size: 0.85rem;
+}
+
+.composerContextSummary small,
+.composerContextPopover p {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.composerContextPopover p {
+  margin: 0;
+}
+
+.composerContextUsageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  padding-top: 2px;
+}
+
+.composerContextUsageGrid div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composerContextUsageGrid span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerContextUsageGrid strong {
+  overflow: hidden;
+  color: var(--pevo-ink);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pathStatusButton {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.branchStatusButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}

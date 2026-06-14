@@ -1,0 +1,429 @@
+.pevo-panel {
+  min-width: 0;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-panel);
+}
+
+.pevo-panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--pevo-border);
+}
+
+.pevo-titleLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.pevo-titleLine h2 {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  font-weight: 650;
+}
+
+.pevo-iconRow,
+.pevo-sessionActions,
+.pevo-buttonRow,
+.pevo-composerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pevo-iconButton {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pevo-iconButton:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.pevo-iconButton:focus-visible,
+.pevo-primaryButton:focus-visible,
+.pevo-buttonRow button:focus-visible,
+.pevo-request button:focus-visible,
+.pevo-completionPopover button:focus-visible,
+.pevo-addPopover button:focus-visible,
+.pevo-planChip button:focus-visible,
+.pevo-evidenceLine:focus-visible,
+.pevo-reasoningHeader:focus-visible,
+.pevo-jumpBottom:focus-visible,
+.pevo-sessionMain:focus-visible,
+.pevo-sessionMenu summary:focus-visible,
+.pevo-sessionMenu button:focus-visible,
+.pevo-segmented button:focus-visible,
+.pevo-rename input:focus-visible,
+.pevo-request input:focus-visible,
+.pevo-composer textarea:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .pevo-iconButton:hover:not(:disabled) {
+    color: var(--pevo-ink);
+    background: var(--pevo-panel-muted);
+    border-color: var(--pevo-border);
+  }
+}
+
+.pevo-iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+@media (hover: hover) {
+  .pevo-iconButton.is-danger:hover:not(:disabled) {
+    color: var(--pevo-danger);
+    background: color-mix(in oklch, var(--pevo-danger), white 88%);
+  }
+}
+
+.pevo-empty {
+  color: var(--pevo-muted);
+  padding: 16px;
+  font-size: 0.88rem;
+}
+
+.pevo-emptyThread {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+}
+
+.pevo-utility {
+  overflow: hidden;
+}
+
+.pevo-history {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pevo-sessionList {
+  display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 2px 8px 0;
+}
+
+.pevo-sessionList,
+.pevo-threadItems {
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.pevo-sessionList:hover,
+.pevo-sessionList:has(:focus-visible),
+.pevo-threadItems:hover,
+.pevo-threadItems:has(:focus-visible),
+.pevo-threadItems.is-scrolling {
+  scrollbar-color: color-mix(in oklch, var(--pevo-muted), transparent 46%) transparent;
+}
+
+.pevo-sessionList::-webkit-scrollbar,
+.pevo-threadItems::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pevo-sessionList::-webkit-scrollbar-track,
+.pevo-threadItems::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pevo-sessionList::-webkit-scrollbar-thumb,
+.pevo-threadItems::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.pevo-sessionList:hover::-webkit-scrollbar-thumb,
+.pevo-sessionList:has(:focus-visible)::-webkit-scrollbar-thumb,
+.pevo-threadItems:hover::-webkit-scrollbar-thumb,
+.pevo-threadItems:has(:focus-visible)::-webkit-scrollbar-thumb,
+.pevo-threadItems.is-scrolling::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--pevo-muted), transparent 48%);
+}
+
+.pevo-sessionGroup {
+  display: grid;
+  gap: 3px;
+}
+
+.pevo-sessionGroupHeader {
+  align-items: center;
+  color: var(--pevo-text-muted);
+  display: flex;
+  font-size: 11px;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 1px 0 0;
+}
+
+.pevo-sessionGroupToggle {
+  align-items: center;
+  display: flex;
+  min-width: 0;
+  gap: 5px;
+  padding: 5px 4px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.pevo-sessionGroupToggle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pevo-text);
+  font-weight: 700;
+}
+
+.pevo-sessionProjectNew {
+  width: 28px;
+  height: 28px;
+}
+
+.pevo-sessionRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+  overflow: visible;
+  padding: 5px 2px 5px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, box-shadow, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pevo-sessionRow.is-active {
+  border-color: transparent;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.pevo-sessionRow.is-draft {
+  grid-template-columns: minmax(0, 1fr);
+  border-style: dashed;
+}
+
+.pevo-sessionRow.is-draft .pevo-sessionTitle {
+  font-style: italic;
+}
+
+@media (hover: hover) {
+  .pevo-sessionRow:hover {
+    background: color-mix(in oklch, var(--pevo-panel-muted), transparent 72%);
+  }
+}
+
+.pevo-sessionMain {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.pevo-sessionTitle,
+.pevo-sessionTime {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-sessionTitleRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.pevo-sessionTitle {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pevo-sessionMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 5px;
+}
+
+.pevo-sessionTime,
+.pevo-muted {
+  color: var(--pevo-muted);
+}
+
+.pevo-sessionRow .pevo-sessionTime {
+  opacity: 0;
+  transition: none;
+}
+
+.pevo-sessionRow:hover .pevo-sessionTime,
+.pevo-sessionRow:has(:focus-visible) .pevo-sessionTime {
+  opacity: 1;
+  transition: opacity 80ms ease;
+}
+
+.pevo-sessionMeta b {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  color: var(--pevo-accent-ink);
+  background: var(--pevo-accent);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.pevo-sessionRow.is-running:not(.is-active) {
+  border-color: transparent;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 48%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.pevo-sessionMenu {
+  position: relative;
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
+.pevo-sessionRow:hover .pevo-sessionMenu,
+.pevo-sessionRow.is-active .pevo-sessionMenu,
+.pevo-sessionRow:has(:focus-visible) .pevo-sessionMenu,
+.pevo-sessionMenu[open] {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 80ms ease;
+}
+
+.pevo-sessionMenu summary {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+  list-style: none;
+}
+
+.pevo-sessionMenu summary::-webkit-details-marker {
+  display: none;
+}
+
+.pevo-sessionMenu summary:hover,
+.pevo-sessionMenu[open] summary {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-sessionMenuPopover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 156px;
+  gap: 2px;
+  padding: 4px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: var(--pevo-shadow);
+}
+
+.pevo-sessionMenuPopover button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.pevo-sessionMenuPopover button:hover:not(:disabled) {
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-sessionMenuPopover button.is-danger {
+  color: var(--pevo-danger);
+}
+
+.pevo-sessionMenuPopover button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.pevo-rename {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) 32px 32px;
+  gap: 6px;
+}
+
+.pevo-rename input,
+.pevo-request input,
+.pevo-composer textarea {
+  width: 100%;
+  color: var(--pevo-ink);
+  background: var(--pevo-bg-raised);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-rename input,
+.pevo-request input {
+  min-height: 32px;
+  padding: 5px 8px;
+}

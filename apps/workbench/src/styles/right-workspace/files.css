@@ -1,0 +1,218 @@
+.filesPanel {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.filesSplit {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+}
+
+.filePreview {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.fileMarkdownPreview {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 0 16px;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.fileMarkdownPreview .pevo-markdown {
+  max-width: 76ch;
+}
+
+.filePreviewPath {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.filePreviewPath span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filePreviewPath button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 24px;
+  margin-left: auto;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.filePreviewPath button:hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 38%);
+}
+
+.filePreviewPath button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fileEditor {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fileEditorToolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 0 6px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
+}
+
+.fileEditorToolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--pevo-muted);
+}
+
+.fileEditorToolbar input {
+  width: 82px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 58%);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.fileEditorToolbar button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 24px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.fileEditorToolbar button:hover,
+.fileEditorToolbar button[aria-pressed="true"] {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 34%);
+}
+
+.fileEditorToolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fileEditorToolbar > span {
+  flex: 0 0 auto;
+  min-width: 48px;
+  color: var(--pevo-muted);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.fileEditorBody {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.fileEditorLines,
+.fileEditorBody textarea {
+  margin: 0;
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.76rem;
+  line-height: 1.48;
+}
+
+.fileEditorLines {
+  overflow: hidden;
+  padding: 10px 8px 18px 0;
+  color: var(--pevo-diff-muted);
+  text-align: right;
+  user-select: none;
+  border-right: 1px solid var(--pevo-diff-border);
+}
+
+.fileEditorBody textarea {
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 12px 18px;
+  color: var(--pevo-code-ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+  resize: none;
+  tab-size: 2;
+}
+
+.fileEditorBody.is-unwrapped textarea {
+  white-space: pre;
+  overflow: auto;
+}
+
+.fileEditorBody.is-wrapped textarea {
+  overflow: auto;
+}
+
+.fileEditorNotice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px 0 0;
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+}
+
+.fileEditorNotice span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileEditorNotice button {
+  flex: 0 0 auto;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.fileMarkdownPreview .pevo-markdown > *:first-child {
+  margin-top: 0;
+}

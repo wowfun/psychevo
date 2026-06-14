@@ -1,0 +1,209 @@
+.previewPane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.previewPane > header {
+  justify-content: space-between;
+}
+
+.previewPane > header span {
+  display: block;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.previewPane > header button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.previewPane pre,
+.debugPanel pre {
+  min-width: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.workspaceFileTree {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspaceFileTreeFilter {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  margin: 4px 0 8px 10px;
+  padding: 0 9px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 76%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.workspaceFileTreeFilter input {
+  min-width: 0;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font: inherit;
+}
+
+.workspaceFileTreeFilter input::placeholder {
+  color: color-mix(in oklch, var(--pevo-muted), transparent 18%);
+}
+
+.fileTree,
+.debugList {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0 8px 10px;
+}
+
+.debugSection {
+  display: grid;
+  min-height: 0;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 35%);
+}
+
+.debugSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 0;
+  color: var(--pevo-ink);
+  font-size: 0.78rem;
+}
+
+.debugSectionHeader span,
+.debugNotice {
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+}
+
+.debugNotice {
+  margin: 6px 8px 0;
+}
+
+.fileTree button {
+  display: grid;
+  grid-template-columns: 14px 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  padding-left: calc(8px + var(--depth, 0) * 14px);
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.fileTree button.is-directory {
+  color: var(--pevo-muted);
+}
+
+.fileTree button.is-added,
+.fileTree button.is-modified,
+.fileTree button.is-untracked {
+  color: var(--pevo-ink);
+}
+
+.fileTree button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.fileTree button:hover {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 62%);
+}
+
+.fileTree button:disabled:hover {
+  background: transparent;
+}
+
+.fileTreeDisclosure {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+}
+
+.fileTree span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileTree small {
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.fileTree p {
+  margin: 8px;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+}
+
+.filesPanel footer {
+  padding: 7px 10px;
+  color: var(--pevo-muted);
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  font-size: 0.78rem;
+}
+
+.debugList details {
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.debugList summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.debugList code {
+  color: var(--pevo-ink);
+  font-size: 0.75rem;
+}
+
+.debugList span {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}

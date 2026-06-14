@@ -1,0 +1,151 @@
+.reviewPanel {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.reviewChanges {
+  display: grid;
+  gap: 8px;
+  max-height: 190px;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 0 10px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+}
+
+.reviewChanges.is-empty {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.reviewChanges.is-empty p {
+  margin: 0;
+}
+
+.reviewChangeGroup {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reviewChangeGroup > header,
+.reviewChangeFile {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+}
+
+.reviewChangeGroup > header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.reviewChangeGroup > header b {
+  font-weight: 650;
+}
+
+.reviewChangeFile {
+  grid-template-columns: minmax(0, 1fr) auto 26px 26px;
+  gap: 5px;
+  min-height: 30px;
+}
+
+.reviewChangePath,
+.reviewChangeFile > button {
+  min-width: 0;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.reviewChangePath {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.reviewChangePath span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewChangePath small,
+.reviewChangeState {
+  color: var(--pevo-muted);
+  font-size: 0.7rem;
+}
+
+.reviewChangeState {
+  min-width: 54px;
+  text-align: right;
+}
+
+.reviewChangeFile > button:not(.reviewChangePath) {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  color: var(--pevo-muted);
+  border-color: var(--pevo-border);
+}
+
+.reviewChangePath:hover,
+.reviewChangeFile > button:not(.reviewChangePath):hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 38%);
+}
+
+.reviewChangeFile > button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.reviewChangeFile > em {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  margin-top: -2px;
+  color: var(--pevo-muted);
+  font-size: 0.7rem;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewSplit,
+.filesSplit {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.reviewSplit {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reviewPanel.has-fileTree .reviewSplit {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+}
+
+.reviewDiffPane,
+.reviewFilesPane,
+.filesTreePane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.reviewFilesPane,
+.filesTreePane {
+  display: grid;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
+  border-radius: 0;
+}

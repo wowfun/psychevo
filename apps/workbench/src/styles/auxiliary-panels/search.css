@@ -1,0 +1,85 @@
+.searchPage {
+  gap: 8px;
+}
+
+.searchPage input {
+  min-height: 38px;
+  margin: 4px 0 0;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-bg-raised);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.emptyLedger {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.emptyLedger button {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.searchResults {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  max-height: min(560px, 62dvh);
+  overflow: auto;
+  margin: 0;
+}
+
+.searchResults button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 0;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.searchResults button:hover {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 82%);
+}
+
+.searchResults strong,
+.searchResults span,
+.searchResults small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchResults strong {
+  font-size: 0.84rem;
+}
+
+.searchResults span,
+.searchResults small {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.searchResults small {
+  grid-column: 1 / -1;
+}

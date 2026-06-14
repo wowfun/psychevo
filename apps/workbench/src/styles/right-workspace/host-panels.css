@@ -1,0 +1,191 @@
+.conversationColumn .pevo-transcript,
+.statusColumn .pevo-panel {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.statusColumn .pevo-panelHeader {
+  min-height: 32px;
+  padding: 0 0 6px;
+  border-bottom: 0;
+}
+
+.statusColumn .pevo-titleLine {
+  gap: 7px;
+}
+
+.statusColumn .pevo-statusGrid {
+  padding: 2px 0 8px;
+}
+
+.statusColumn .pevo-stack {
+  gap: 7px;
+  padding: 8px 0;
+  border-top: 0;
+}
+
+.statusColumn .pevo-stack h3 {
+  font-size: 0.88rem;
+}
+
+.statusColumn .pevo-changedFiles {
+  gap: 0;
+}
+
+.statusColumn .pevo-changedFiles button {
+  min-height: 28px;
+  padding: 2px 0;
+  border-radius: var(--pevo-radius-xs);
+}
+
+.statusColumn .pevo-iconButton:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 82%);
+  border-color: transparent;
+}
+
+.centerPage,
+.previewPane,
+.filesPanel,
+.debugPanel {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.previewPane {
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 40%);
+  border-radius: var(--pevo-radius);
+}
+
+.centerPage,
+.filesPanel,
+.debugPanel {
+  display: grid;
+  align-content: start;
+}
+
+.centerPage > header,
+.previewPane > header,
+.filesPanel > header,
+.debugPanel > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 4px;
+  border-bottom: 0;
+}
+
+.debugPanel > header button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.debugPanel > header button:hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 72%);
+}
+
+.centerPageTitle {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.centerPageTitle > div {
+  min-width: 0;
+}
+
+.centerPageBack {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  min-height: 30px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+}
+
+.centerPageBack::after {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 5;
+  width: max-content;
+  max-width: min(220px, calc(100vw - 24px));
+  padding: 5px 7px;
+  color: var(--pevo-panel);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  content: attr(data-tooltip);
+  background: var(--pevo-ink);
+  border: 1px solid color-mix(in oklch, var(--pevo-ink), transparent 28%);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: var(--pevo-shadow-popover);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.centerPageBack:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .centerPageBack:hover {
+    color: var(--pevo-ink);
+    background: var(--pevo-panel-muted);
+  }
+
+  .centerPageBack:hover::after {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.centerPage h2,
+.previewPane h2,
+.filesPanel h2,
+.debugPanel h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: 0.92rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.centerPage p,
+.previewPane p,
+.filesPanel p,
+.debugPanel p {
+  margin: 2px 0 0;
+  color: var(--pevo-muted);
+  font-size: 0.8rem;
+}

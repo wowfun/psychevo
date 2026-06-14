@@ -1,0 +1,313 @@
+.rightTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 0 0 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.rightTabs.has-debug {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rightTabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.rightTabs button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 30%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.rightTabs span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rightWorkspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.rightWorkspaceHome,
+.reviewPanel,
+.filesPanel,
+.debugPanel,
+.terminalPanel {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.rightWorkspaceHome,
+.reviewPanel,
+.filesPanel {
+  align-content: start;
+}
+
+.rightWorkspaceTabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 0 5px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 55%);
+}
+
+.rightWorkspaceTabs > button,
+.rightAddMenu summary {
+  display: grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.rightWorkspaceTabs > button.is-selected,
+.rightWorkspaceTabs > button:hover,
+.rightAddMenu summary:hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 35%);
+}
+
+.rightWorkspaceTab {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  min-width: 70px;
+  max-width: 132px;
+  height: 28px;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  background: transparent;
+  border-radius: var(--pevo-radius-sm);
+}
+
+.rightWorkspaceTab.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 30%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.rightWorkspaceTab button {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  gap: 5px;
+  padding: 0 6px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.rightWorkspaceTab button:last-child {
+  justify-content: center;
+  padding: 0;
+  opacity: 0.62;
+}
+
+.rightWorkspaceTab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rightAddMenu {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.rightAddMenu summary {
+  list-style: none;
+}
+
+.rightAddMenu summary::-webkit-details-marker {
+  display: none;
+}
+
+.rightAddMenu div {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  min-width: 146px;
+  padding: 5px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: var(--pevo-shadow-popover);
+}
+
+.rightAddMenu div button {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 7px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.rightAddMenu div button:hover {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 70%);
+}
+
+.rightTabPanels,
+.rightTabPanel {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rightTabPanels {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.rightWorkspace > .rightTabPanels:first-child {
+  grid-row: 1 / -1;
+}
+
+.rightTabPanel {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+}
+
+.rightTabPanel[hidden] {
+  display: none;
+}
+
+.rightWorkspaceHome > header,
+.reviewPanel > header,
+.filesPanel > header,
+.debugPanel > header,
+.terminalPanel > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 4px;
+  border-bottom: 0;
+}
+
+.rightWorkspaceHome > header > div,
+.reviewPanel > header > div,
+.filesPanel > header > div,
+.terminalPanel > header > div {
+  min-width: 0;
+}
+
+.rightWorkspaceHome > header button,
+.rightPanelActions > button,
+.debugPanel > header button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.rightPanelActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.rightPanelActions > button {
+  margin-left: 0;
+}
+
+.rightPanelActions > .reviewFilesToggle {
+  display: inline-flex;
+  width: auto;
+  min-width: 68px;
+  padding: 0 9px;
+  gap: 6px;
+}
+
+.reviewFilesToggle.is-pressed {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 28%);
+  border-color: color-mix(in oklch, var(--pevo-border-strong), transparent 18%);
+  box-shadow: inset 0 1px 2px rgb(18 24 33 / 14%);
+}
+
+.rightWorkspaceHome h2,
+.reviewPanel h2,
+.terminalPanel h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: 0.92rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rightWorkspaceHome p,
+.reviewPanel p,
+.terminalPanel p {
+  margin: 2px 0 0;
+  color: var(--pevo-muted);
+  font-size: 0.8rem;
+}
+
+.rightWorkspaceSessionId {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.rightChangedFiles small,
+.reviewStatusRows,
+.rightSectionLabel {
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+}

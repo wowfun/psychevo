@@ -1,0 +1,495 @@
+.settingsRows {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
+  gap: 6px;
+  padding: 4px 0 0;
+}
+
+.settingsPage {
+  align-content: stretch;
+  width: min(1040px, 100%);
+  min-height: 0;
+}
+
+.settingsShell {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.28fr) minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 0 0;
+}
+
+.settingsNav {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 12px 0 0;
+  border-right: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.settingsNavTop {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settingsBackButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 7px;
+  color: var(--pevo-muted);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.settingsSearch {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 52%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.settingsSearch input {
+  min-width: 0;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.settingsSearch input::placeholder {
+  color: var(--pevo-muted);
+}
+
+.settingsNavGroups {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.settingsNavFooter {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settingsNavGroups button,
+.settingsNavFooter button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 7px;
+  color: var(--pevo-nav-text);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition-duration: 140ms;
+  transition-property: background-color, color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settingsNavGroups button:active,
+.settingsNavFooter button:active,
+.settingsBackButton:active {
+  transform: scale(0.96);
+}
+
+.settingsNavGroups button > svg,
+.settingsNavFooter button > svg {
+  justify-self: center;
+}
+
+.settingsNavGroups button > span,
+.settingsNavFooter button > span,
+.settingsBackButton > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsNavGroups button.is-selected,
+.settingsNavFooter button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 18%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.settingsNavEmpty {
+  margin: 6px 7px;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+}
+
+@media (hover: hover) {
+  .settingsBackButton:hover,
+  .settingsNavGroups button:hover,
+  .settingsNavFooter button:hover {
+    color: var(--pevo-ink);
+    background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 48%);
+  }
+}
+
+.settingsContent {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settingsSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.settingsSectionHeader > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 50%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 44%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.settingsSectionHeader > div {
+  min-width: 0;
+}
+
+.settingsSectionHeader h3 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: 0.95rem;
+}
+
+.settingsRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.settingsRow strong,
+.settingsRow span {
+  display: block;
+}
+
+.settingsRow span {
+  color: var(--pevo-muted);
+  font-size: 0.8rem;
+}
+
+.settingsContent > .agentSurfacePanel,
+.settingsContent > .archivedSessionsPanel {
+  align-self: start;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.archivedSessionsPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.archivedSessionsPanel > p {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.84rem;
+}
+
+.archivedSessionList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.archivedSessionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 7px 8px;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.archivedSessionRow > div:first-child {
+  min-width: 0;
+}
+
+.archivedSessionRow strong,
+.archivedSessionRow span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archivedSessionRow strong {
+  color: var(--pevo-ink);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.archivedSessionRow span {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.archivedSessionActions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.archivedSessionActions button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  gap: 2px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.segmentedControl button,
+.switchControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 6px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.segmentedControl button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.switchControl {
+  background: transparent;
+  border: 0;
+}
+
+.switchControl input {
+  margin: 0;
+}
+
+.appShell[data-main-view="settings"] {
+  padding: 4px;
+}
+
+.appShell[data-main-view="settings"] .mobileTabs,
+.appShell[data-main-view="settings"] .historyColumn,
+.appShell[data-main-view="settings"] .statusColumn,
+.appShell[data-main-view="settings"] .conversationChrome,
+.appShell[data-main-view="settings"] .composerDock {
+  display: none;
+}
+
+.appShell[data-main-view="settings"] .workbench,
+.appShell[data-main-view="settings"] .workbench.is-leftCollapsed,
+.appShell[data-main-view="settings"] .workbench.is-rightCollapsed,
+.appShell[data-main-view="settings"] .workbench.is-leftCollapsed.is-rightCollapsed {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .conversationColumn {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .centerWorkspace {
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .settingsPage {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+}
+
+.appShell[data-main-view="settings"] .settingsShell {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+
+.appShell[data-main-view="settings"] .settingsNav {
+  padding: 24px 14px 16px 12px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
+  border-right: 1px solid color-mix(in oklch, var(--pevo-border), transparent 46%);
+}
+
+.appShell[data-main-view="settings"] .settingsContent {
+  width: min(860px, 100%);
+  padding: 24px 32px;
+  overflow: auto;
+}
+
+@media (max-width: 860px) {
+  .settingsShell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .settingsNav {
+    padding: 0 0 10px;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  }
+
+  .settingsNavGroups {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 1px;
+  }
+
+  .settingsNavGroups button {
+    flex: 0 0 auto;
+    min-width: 126px;
+  }
+
+  .settingsNavFooter {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .settingsNavFooter button {
+    flex: 0 0 auto;
+    min-width: 150px;
+  }
+
+  .appShell[data-main-view="settings"] {
+    padding: 10px;
+  }
+
+  .appShell[data-main-view="settings"] .settingsPage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appShell[data-main-view="settings"] .settingsShell {
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .appShell[data-main-view="settings"] .settingsNav {
+    padding: 0 0 10px;
+    background: transparent;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  }
+
+  .appShell[data-main-view="settings"] .settingsContent {
+    width: 100%;
+    padding: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .settingsRow {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .agentBackendRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agentBackendSide {
+    justify-items: stretch;
+  }
+
+  .agentBackendControls,
+  .agentBackendActions {
+    justify-content: flex-start;
+  }
+
+  .backendDialogGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

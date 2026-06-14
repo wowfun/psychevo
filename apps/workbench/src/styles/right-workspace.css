@@ -1,0 +1,9 @@
+@import "./right-workspace/shell.css";
+@import "./right-workspace/usage.css";
+@import "./right-workspace/home.css";
+@import "./right-workspace/code.css";
+@import "./right-workspace/diff.css";
+@import "./right-workspace/review.css";
+@import "./right-workspace/files.css";
+@import "./right-workspace/terminal.css";
+@import "./right-workspace/host-panels.css";

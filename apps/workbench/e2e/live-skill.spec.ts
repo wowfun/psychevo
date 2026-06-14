@@ -49,8 +49,10 @@ test.describe("pevo Web live skill validation", () => {
     let sample = 0;
     try {
       await page.goto(server.url);
-      await expect(page.locator(".statePill")).toHaveText("connected");
-      await page.getByPlaceholder("Ask pevo...").fill(prompt);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      const composer = page.getByPlaceholder("Ask Psychevo...");
+      await expect(composer).toBeVisible();
+      await composer.fill(prompt);
       await page.getByRole("button", { name: "Send" }).click();
       await captureAndAssert(page, testInfo, server.dbPath, screenshotDir, sample++, "submitted");
 

@@ -1,0 +1,95 @@
+.rightHomeNav {
+  display: grid;
+  gap: 6px;
+  padding: 4px 0 12px;
+}
+
+.rightHomeNav button,
+.rightChangedFiles button {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  min-height: 32px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.rightHomeNav button {
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 36%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.rightChangedFiles button {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.rightHomeNav button:hover,
+.rightChangedFiles button:hover,
+.fileTree button.is-selected {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 62%);
+}
+
+.rightHomeNav span,
+.rightHomeNav small,
+.rightChangedFiles span,
+.rightChangedFiles small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rightSectionLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  padding: 0 4px;
+  text-transform: uppercase;
+}
+
+.filePreviewPath {
+  min-width: 0;
+  padding: 0 0 2px;
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  text-transform: none;
+}
+
+.filePreviewPath span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rightChangedFiles {
+  display: grid;
+  min-height: 0;
+  gap: 1px;
+}
+
+.rightChangedFiles p,
+.filePreview p {
+  margin: 6px 4px;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+}
+
+.reviewStatusRows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 2px 4px 9px;
+}

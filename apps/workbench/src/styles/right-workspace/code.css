@@ -1,0 +1,96 @@
+.rightCodePreview {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 8px 0 16px;
+  color: var(--pevo-code-preview-ink);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.rightCodePreview code {
+  display: block;
+  min-width: max-content;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--pevo-hl-comment);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-doctag,
+.hljs-type,
+.hljs-name,
+.hljs-strong {
+  color: var(--pevo-hl-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: var(--pevo-hl-string);
+}
+
+.hljs-addition {
+  color: var(--pevo-diff-add);
+}
+
+.hljs-deletion {
+  color: var(--pevo-diff-delete);
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: var(--pevo-hl-number);
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section .hljs-title {
+  color: var(--pevo-hl-function);
+}
+
+.hljs-class .hljs-title,
+.hljs-title.class_,
+.hljs-built_in,
+.hljs-attr {
+  color: var(--pevo-hl-type);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-property,
+.hljs-params,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--pevo-hl-builtin);
+}
+
+.hljs-meta,
+.hljs-comment .hljs-doctag {
+  color: var(--pevo-hl-meta);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 650;
+}

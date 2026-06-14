@@ -1,0 +1,66 @@
+.terminalPanel {
+  height: 100%;
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.terminalState {
+  margin-left: auto;
+  padding: 2px 6px;
+  color: var(--pevo-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-xs);
+  font-size: 0.7rem;
+}
+
+.terminalState.is-running {
+  color: var(--pevo-ink);
+}
+
+.terminalViewport {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.terminalOverlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  padding: 4px 7px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 8%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
+  border-radius: var(--pevo-radius-xs);
+  font-size: 0.72rem;
+  box-shadow: var(--pevo-shadow-popover);
+  pointer-events: none;
+}
+
+.terminalOverlay.is-error {
+  color: color-mix(in oklch, #c92a2a, white 14%);
+}
+
+.terminalViewport .xterm {
+  height: 100%;
+  padding: 12px 14px;
+  background: transparent;
+}
+
+.terminalViewport .xterm-viewport {
+  height: 100% !important;
+}
+
+.terminalViewport .xterm-viewport,
+.terminalViewport .xterm-screen {
+  background: transparent !important;
+}

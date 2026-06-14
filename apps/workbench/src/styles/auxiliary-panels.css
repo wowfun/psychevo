@@ -1,0 +1,5 @@
+@import "./auxiliary-panels/search.css";
+@import "./auxiliary-panels/preview-tree-debug.css";
+@import "./auxiliary-panels/composer-status.css";
+@import "./auxiliary-panels/agents-backends.css";
+@import "./auxiliary-panels/commands.css";

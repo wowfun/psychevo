@@ -1,0 +1,194 @@
+.sessionObservability {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 6px 0 12px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 68%);
+}
+
+.sessionObservabilitySummary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sessionObservabilitySummary strong,
+.sessionUsageGrid strong,
+.promptTokenCategorySummary strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionObservabilitySummary strong {
+  display: block;
+  font-size: 0.84rem;
+}
+
+.sessionObservabilitySummary small,
+.sessionUsageGrid span,
+.promptTokensDisclosure summary,
+.promptTokenCategorySummary span,
+.promptTokenCategorySummary small,
+.promptTokenCategoryDetails dt,
+.sessionObservabilityEmpty {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.promptTokenStack {
+  display: flex;
+  width: 100%;
+  height: 9px;
+  min-width: 0;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: 999px;
+}
+
+.promptTokenStack.is-empty {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 70%);
+}
+
+.promptTokenSegment,
+.promptTokenFreeSpace {
+  flex: 0 0 var(--prompt-token-width, 0%);
+  min-width: 0;
+}
+
+.promptTokenSegment {
+  min-width: 3px;
+  background: var(--prompt-token-color, var(--pevo-accent));
+}
+
+.promptTokenFreeSpace {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 70%);
+}
+
+.sessionUsageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+  min-width: 0;
+}
+
+.sessionUsageGrid div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sessionUsageGrid strong {
+  font-size: 0.8rem;
+}
+
+.promptTokensDisclosure {
+  min-width: 0;
+}
+
+.promptTokensDisclosure summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 2px 0;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.promptTokensDisclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.promptTokensDisclosure summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptTokensDisclosure summary svg {
+  justify-self: end;
+  transition: transform 140ms ease;
+}
+
+.promptTokensDisclosure[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.promptTokenCategoryList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0 0;
+}
+
+.promptTokenCategory {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
+}
+
+.promptTokenCategorySummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(48px, auto) minmax(42px, auto);
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  min-height: 22px;
+}
+
+.promptTokenCategorySummary span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptTokenCategorySummary strong,
+.promptTokenCategorySummary small {
+  text-align: right;
+}
+
+.promptTokenCategoryDetails {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 2px 8px;
+}
+
+.promptTokenCategoryDetails div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(58px, auto);
+  gap: 8px;
+  min-width: 0;
+}
+
+.promptTokenCategoryDetails dt,
+.promptTokenCategoryDetails dd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptTokenCategoryDetails dd {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.sessionObservabilityEmpty {
+  margin: 0;
+}

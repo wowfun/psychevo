@@ -99,11 +99,12 @@ function orderTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
     if (left.messageSeq !== null && right.messageSeq !== null && left.messageSeq !== right.messageSeq) {
       return left.messageSeq - right.messageSeq;
     }
-    if (left.messageSeq !== null && right.messageSeq === null) {
-      return -1;
-    }
-    if (left.messageSeq === null && right.messageSeq !== null) {
-      return 1;
+    if (left.messageSeq !== right.messageSeq) {
+      const timelineComparison = compareTimelineMs(left, right);
+      if (timelineComparison !== 0) {
+        return timelineComparison;
+      }
+      return left.messageSeq !== null ? -1 : 1;
     }
     const leftLiveOrder = liveOrder(left);
     const rightLiveOrder = liveOrder(right);
@@ -509,4 +510,15 @@ function liveOrder(entry: TranscriptEntry): number | null {
   const metadata = asRecord(entry.metadata);
   const value = metadata.liveOrder ?? metadata.live_order;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function compareTimelineMs(left: TranscriptEntry, right: TranscriptEntry): number {
+  const leftTime = timelineMs(left);
+  const rightTime = timelineMs(right);
+  return leftTime !== null && rightTime !== null && leftTime !== rightTime ? leftTime - rightTime : 0;
+}
+
+function timelineMs(entry: TranscriptEntry): number | null {
+  const value = entry.createdAtMs || entry.updatedAtMs;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }

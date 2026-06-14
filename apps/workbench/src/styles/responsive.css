@@ -1,0 +1,275 @@
+@media (max-width: 1120px) {
+  .workbench {
+    grid-template-columns: minmax(190px, 230px) minmax(420px, 1fr) minmax(280px, min(var(--right-column-width, 520px), 72vw, calc(100vw - 670px)));
+  }
+
+  .workbench.is-leftCollapsed {
+    grid-template-columns: 54px minmax(420px, 1fr) minmax(280px, min(var(--right-column-width, 520px), 72vw, calc(100vw - 500px)));
+  }
+
+  .workbench.is-rightCollapsed {
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
+  }
+
+  .workbench.is-leftCollapsed.is-rightCollapsed {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 460px) {
+  .reviewPanel.has-fileTree .reviewSplit,
+  .filesSplit {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(190px, 0.75fr);
+  }
+
+  .reviewFilesPane,
+  .filesTreePane {
+    min-height: 190px;
+  }
+}
+
+@media (max-width: 780px) {
+  .appShell {
+    padding: 10px;
+  }
+
+  .topBar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .topMeta {
+    justify-content: end;
+  }
+
+  .endpointPill {
+    display: none;
+  }
+
+  .mobileTabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 3px;
+    padding: 3px;
+    background: var(--pevo-panel-muted);
+    border: 1px solid var(--pevo-border);
+    border-radius: var(--pevo-radius);
+  }
+
+  .mobileTabs button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    color: var(--pevo-muted);
+    background: transparent;
+    border: 0;
+    border-radius: var(--pevo-radius-sm);
+    cursor: pointer;
+    transition-duration: 140ms;
+    transition-property: background-color, color, transform;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mobileTabs button:active {
+    transform: scale(0.96);
+  }
+
+  .mobileTabs button.is-selected {
+    color: var(--pevo-ink);
+    background: var(--pevo-panel);
+    box-shadow: 0 1px 2px rgb(21 28 36 / 9%);
+  }
+
+  .workbench,
+  .workbench.is-leftCollapsed,
+  .workbench.is-rightCollapsed,
+  .workbench.is-leftCollapsed.is-rightCollapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .historyColumn,
+  .statusColumn,
+  .conversationColumn {
+    display: none;
+  }
+
+  .statusColumn {
+    padding-left: 0;
+  }
+
+  .rightResizeHandle {
+    display: none;
+  }
+
+  .historyColumn.is-mobileSelected,
+  .statusColumn.is-mobileSelected,
+  .conversationColumn.is-mobileSelected {
+    display: grid;
+  }
+
+  .conversationColumn {
+    min-height: 0;
+  }
+
+  .appShell[data-main-view="settings"] .mobileTabs,
+  .appShell[data-main-view="settings"] .historyColumn,
+  .appShell[data-main-view="settings"] .statusColumn,
+  .appShell[data-main-view="settings"] .conversationChrome,
+  .appShell[data-main-view="settings"] .composerDock {
+    display: none;
+  }
+
+  .appShell[data-main-view="settings"] .workbench,
+  .appShell[data-main-view="settings"] .workbench.is-leftCollapsed,
+  .appShell[data-main-view="settings"] .workbench.is-rightCollapsed,
+  .appShell[data-main-view="settings"] .workbench.is-leftCollapsed.is-rightCollapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appShell[data-main-view="settings"] .conversationColumn,
+  .appShell[data-main-view="settings"] .conversationColumn.is-mobileSelected {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  .pevo-composerFooter {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .pevo-composerLeftControls,
+  .pevo-composerRightControls {
+    flex: 1 1 100%;
+  }
+
+  .pevo-composerLeftControls {
+    flex-wrap: wrap;
+  }
+
+  .pevo-composerRightControls {
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .composerRuntimeControls {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .agentRuntimeButton {
+    width: min(190px, calc(100vw - 112px));
+  }
+
+  .composerRuntimeControls .statusSelect select {
+    width: 96px;
+  }
+
+  .composerSubmitControls {
+    gap: 4px;
+  }
+
+  .composerSubmitControls .statusSelect[data-status="model"] select {
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
+    max-width: 38vw;
+  }
+
+  .composerSubmitControls .statusSelect[data-status="variant"] select {
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
+  }
+
+  .composerStatusLine {
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .branchStatusButton {
+    display: none;
+  }
+
+  .statusSelect[data-status="permission-mode"] select {
+    max-width: 160px;
+  }
+
+  .statusSelect[data-status="model"] select {
+    max-width: 56px;
+  }
+
+  .statusSelect[data-status="variant"] select {
+    max-width: 50px;
+  }
+
+  .pathStatusButton {
+    flex: 0 1 76px;
+    max-width: 76px;
+  }
+}
+
+@media (max-width: 420px) {
+  .agentRuntimeButton {
+    width: min(168px, calc(100vw - 112px));
+  }
+
+  .agentRuntimePopover {
+    width: min(260px, calc(100vw - 32px));
+  }
+
+  .composerSubmitControls {
+    font-size: 0.72rem;
+  }
+
+  .composerSubmitControls .statusSelect[data-status="model"] select {
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
+    max-width: 36vw;
+  }
+
+  .composerSubmitControls .statusSelect[data-status="variant"] select {
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
+  }
+
+  .composerStatusLine {
+    gap: 5px;
+    font-size: 0.72rem;
+  }
+
+  .statusSelect[data-status="permission-mode"] select {
+    max-width: 160px;
+  }
+
+  .statusSelect[data-status="model"] select {
+    max-width: 54px;
+  }
+
+  .statusSelect[data-status="variant"] select {
+    max-width: 48px;
+  }
+
+  .contextStatusButton {
+    width: 20px;
+    min-width: 20px;
+  }
+
+  .contextStatusButton span {
+    width: 14px;
+    height: 14px;
+  }
+
+  .composerContextPopover {
+    right: -42px;
+    width: min(280px, calc(100vw - 18px));
+  }
+
+  .pathStatusButton {
+    max-width: 54px;
+  }
+}

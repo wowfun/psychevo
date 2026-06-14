@@ -1,0 +1,509 @@
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import {
+  appendOptimisticPrompt,
+  parseThreadSnapshot,
+  scopeForWorkdir,
+  type GatewayClient
+} from "@psychevo/client";
+import {
+  SettingsReadResultSchema,
+  WorkspaceChangeMutationResultSchema,
+  WorkspaceCreateResultSchema,
+  WorkspaceDiffResultSchema,
+  WorkspaceFileReadResultSchema,
+  WorkspaceFileWriteResultSchema,
+  type ContextReadResult,
+  type GatewayInputPart,
+  type GatewayMention,
+  type GatewayRequestScope,
+  type ObservabilityReadResult,
+  type RuntimeOptionsResult,
+  type SettingsReadResult,
+  type ThreadSnapshot,
+  type WorkspaceChangesResult,
+  type WorkspaceDiffResult,
+  type WorkspaceFileWriteResult
+} from "@psychevo/protocol";
+import type { PsychevoHost } from "@psychevo/host";
+import { attachmentFromFile } from "./attachments";
+import {
+  asRecord,
+  optionalStringField,
+  parseBackendDoctor
+} from "./data";
+import { backendDraftFromBackend, parseBackendCommandJson } from "./settings-panels";
+import { transcriptSearchText } from "./search";
+import {
+  multilineList,
+  normalizeSnapshot
+} from "./session-utils";
+import type {
+  BackendDraft,
+  CommandFeedback,
+  PendingAttachment,
+  RightWorkspaceTab,
+  RightWorkspaceTabKind,
+  TraceState,
+  WorkbenchBackend,
+  WorkbenchBackendDoctor
+} from "./types";
+import {
+  createHistoryDraftSession,
+  shouldAdoptDetachedShellResult,
+  type PendingDetachedShell
+} from "./viewGuard";
+import {
+  fileBasename,
+  isUnsupportedPreviewFile
+} from "./right-workspace";
+
+type RefreshSnapshot = (
+  nextClient?: GatewayClient | null,
+  threadId?: string,
+  scope?: GatewayRequestScope,
+  readOnly?: boolean,
+  expectedEpoch?: number | null,
+  allowDetachedAdoption?: boolean
+) => Promise<void>;
+
+type RefreshWorkspaceSurface = (
+  nextClient?: GatewayClient | null,
+  scope?: GatewayRequestScope,
+  threadId?: string | null,
+  expectedEpoch?: number | null
+) => Promise<void>;
+
+type AppActionsParams = {
+  activeScope: GatewayRequestScope | null;
+  attachments: PendingAttachment[];
+  client: GatewayClient | null;
+  currentThreadId: string | null;
+  detachedShellTokenRef: MutableRefObject<number>;
+  host: PsychevoHost | null;
+  initScope: GatewayRequestScope | null;
+  pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
+  permissionMode: string;
+  runtimeAcceptsAgentPersona: boolean;
+  runtimeOptionsError: string | null;
+  runtimeSessionId: string | null;
+  selectedAgentName: string;
+  selectedModel: string | null;
+  selectedPeerRuntimeMode: string;
+  selectedRuntimeRef: string;
+  selectedVariant: string;
+  selectedThreadIdRef: MutableRefObject<string | null>;
+  settings: SettingsReadResult | undefined;
+  snapshot: ThreadSnapshot;
+  viewEpochRef: MutableRefObject<number>;
+  workMode: string;
+  adoptSnapshotScope(nextClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
+  beginExplicitViewSwitch(): number;
+  clearCommandTransientUi(): void;
+  openReviewTab(diff: WorkspaceDiffResult, path?: string | null): void;
+  openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch?: Partial<RightWorkspaceTab>, forceNew?: boolean): void;
+  refreshAgentSurface(nextClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
+  refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, workdir?: string | null): Promise<unknown>;
+  refreshSnapshot: RefreshSnapshot;
+  refreshWorkspaceSurface: RefreshWorkspaceSurface;
+  setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
+  setBackendDoctor: Dispatch<SetStateAction<Record<string, WorkbenchBackendDoctor>>>;
+  setBackendDraft: Dispatch<SetStateAction<BackendDraft | null>>;
+  setCommandFeedback: Dispatch<SetStateAction<CommandFeedback>>;
+  setContextUsage: Dispatch<SetStateAction<ContextReadResult | null>>;
+  setDraftSession: Dispatch<SetStateAction<ReturnType<typeof createHistoryDraftSession> | null>>;
+  setError: Dispatch<SetStateAction<string | null>>;
+  setMobilePanel: Dispatch<SetStateAction<"history" | "transcript" | "status">>;
+  setObservability: Dispatch<SetStateAction<ObservabilityReadResult | null>>;
+  setRightTabs: Dispatch<SetStateAction<RightWorkspaceTab[]>>;
+  setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
+  setRuntimeOptionsLoading: Dispatch<SetStateAction<boolean>>;
+  setRuntimeOptionsResult: Dispatch<SetStateAction<RuntimeOptionsResult | null>>;
+  setRuntimeSessionId: Dispatch<SetStateAction<string | null>>;
+  setSelectedAgentName: Dispatch<SetStateAction<string>>;
+  setSelectedRuntimeMode: Dispatch<SetStateAction<string>>;
+  setSelectedRuntimeRef: Dispatch<SetStateAction<string>>;
+  setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
+  setSettings: Dispatch<SetStateAction<SettingsReadResult | undefined>>;
+  setTraceState: Dispatch<SetStateAction<TraceState>>;
+  setWorkspaceChanges: Dispatch<SetStateAction<WorkspaceChangesResult | null>>;
+  setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
+  setWorkMode: Dispatch<SetStateAction<string>>;
+  updateMainView(value: "transcript" | "search" | "settings"): void;
+};
+
+export function createAppActions(params: AppActionsParams) {
+  function scope(): GatewayRequestScope {
+    return params.activeScope
+      ?? params.initScope
+      ?? scopeForWorkdir(params.settings?.workdir ?? window.location.pathname);
+  }
+
+  function resetRuntimeSelection() {
+    params.setSelectedRuntimeRef("native");
+    params.setRuntimeSessionId(null);
+    params.setRuntimeOptionsResult(null);
+    params.setRuntimeOptionsLoading(false);
+    params.setRuntimeOptionsError(null);
+    params.setSelectedRuntimeMode("");
+  }
+
+  function clearSessionObservability() {
+    params.setObservability(null);
+    params.setContextUsage(null);
+    params.setTraceState({ error: null, loading: false, result: null, threadId: null });
+  }
+
+  async function startNewThread(workdir?: string) {
+    if (!params.client) {
+      return;
+    }
+    const epoch = params.beginExplicitViewSwitch();
+    resetRuntimeSelection();
+    clearSessionObservability();
+    params.setMobilePanel("transcript");
+    const nextScope = workdir
+      ? scopeForWorkdir(workdir)
+      : scope();
+    const nextSnapshot = parseThreadSnapshot(await params.client.request("thread/start", { scope: nextScope }));
+    if (params.viewEpochRef.current === epoch) {
+      const normalized = normalizeSnapshot(nextSnapshot);
+      params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
+      params.setSnapshot(normalized);
+      params.setDraftSession(createHistoryDraftSession(epoch, nextScope.workdir));
+      await params.adoptSnapshotScope(params.client, nextSnapshot);
+    }
+    await params.refreshHistory(params.client);
+  }
+
+  async function createWorkspace(name: string) {
+    if (!params.client) {
+      return;
+    }
+    const created = WorkspaceCreateResultSchema.parse(await params.client.request("workspace/create", { name }));
+    const epoch = params.beginExplicitViewSwitch();
+    resetRuntimeSelection();
+    clearSessionObservability();
+    const nextSnapshot = parseThreadSnapshot(await params.client.request("thread/start", { scope: created.scope }));
+    if (params.viewEpochRef.current === epoch) {
+      const normalized = normalizeSnapshot(nextSnapshot);
+      params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
+      params.setSnapshot(normalized);
+      params.setDraftSession(createHistoryDraftSession(epoch, created.workdir));
+      await params.adoptSnapshotScope(params.client, nextSnapshot);
+    }
+    await params.refreshHistory(params.client);
+    params.updateMainView("transcript");
+    params.setMobilePanel("transcript");
+  }
+
+  async function submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null) {
+    const submittedMentions = params.runtimeAcceptsAgentPersona
+      ? mentions
+      : mentions.filter((mention) => mention.target.kind !== "agent");
+    const nextInput: GatewayInputPart[] = [
+      ...(text.trim() ? [{ type: "text" as const, text }] : []),
+      ...params.attachments.map((attachment) => attachment.input)
+    ];
+    if (params.selectedRuntimeRef !== "native" && params.runtimeOptionsError) {
+      params.setCommandFeedback({
+        accepted: false,
+        command: params.selectedRuntimeRef,
+        message: `Unable to load ${params.selectedRuntimeRef} runtime options: ${params.runtimeOptionsError}`,
+        feedbackAnchor: "composer"
+      });
+      return;
+    }
+    const optimisticText = displayText?.trim()
+      || text.trim()
+      || params.attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
+    const runtimeOptions = params.selectedRuntimeRef !== "native" && params.selectedPeerRuntimeMode
+      ? { mode: params.selectedPeerRuntimeMode }
+      : {};
+    params.pendingDetachedShellRef.current = null;
+    params.clearCommandTransientUi();
+    params.setSnapshot((current) => appendOptimisticPrompt(current, optimisticText));
+    await params.client?.request("turn/start", {
+      agentName: params.runtimeAcceptsAgentPersona ? params.selectedAgentName || null : null,
+      input: nextInput,
+      mentions: submittedMentions,
+      mode: params.selectedRuntimeRef === "native" ? params.workMode : null,
+      model: params.selectedModel,
+      permissionMode: params.permissionMode,
+      reasoningEffort: params.selectedVariant === "none" ? null : params.selectedVariant,
+      runtimeOptions,
+      runtimeRef: params.selectedRuntimeRef,
+      runtimeSessionId: params.runtimeSessionId,
+      scope: scope(),
+      threadId: params.snapshot.thread?.id ?? null,
+      text: null
+    });
+    params.setAttachments([]);
+    await params.refreshHistory();
+  }
+
+  async function changeAgentSelection(value: string) {
+    params.setSelectedAgentName(value);
+    if (!params.client || !params.currentThreadId) {
+      return;
+    }
+    const nextSettings = SettingsReadResultSchema.parse(await params.client.request("settings/update", {
+      agent: value || null,
+      threadId: params.currentThreadId,
+      scope: scope()
+    }));
+    params.setSettings(nextSettings);
+    params.setSelectedAgentName(nextSettings.controls?.agent ?? value);
+  }
+
+  async function startShell(command: string) {
+    params.clearCommandTransientUi();
+    const pendingShell = params.snapshot.thread?.id
+      ? null
+      : {
+          epoch: params.viewEpochRef.current,
+          token: params.detachedShellTokenRef.current + 1
+        };
+    if (pendingShell) {
+      params.detachedShellTokenRef.current = pendingShell.token;
+      params.pendingDetachedShellRef.current = pendingShell;
+    }
+    const result = await params.client?.request("shell/start", {
+      command,
+      scope: scope(),
+      threadId: params.snapshot.thread?.id ?? null
+    });
+    const record = asRecord(result);
+    if (record.accepted !== true) {
+      if (params.pendingDetachedShellRef.current?.token === pendingShell?.token) {
+        params.pendingDetachedShellRef.current = null;
+      }
+      params.setCommandFeedback({
+        accepted: false,
+        command: `!${command}`,
+        message: optionalStringField(record.message) ?? "Shell command was not accepted.",
+        feedbackAnchor: "composer"
+      });
+      params.setMobilePanel("transcript");
+      return;
+    }
+    const threadId = optionalStringField(record.threadId);
+    if (threadId) {
+      const adoptDetached = shouldAdoptDetachedShellResult(
+        params.snapshot,
+        threadId,
+        params.viewEpochRef.current,
+        params.pendingDetachedShellRef.current
+      );
+      if (adoptDetached || params.snapshot.thread?.id) {
+        if (params.pendingDetachedShellRef.current?.token === pendingShell?.token) {
+          params.pendingDetachedShellRef.current = null;
+        }
+        await params.refreshSnapshot(params.client, threadId, undefined, true, params.viewEpochRef.current, adoptDetached);
+      }
+    }
+    await params.refreshHistory();
+  }
+
+  async function openFilePreview(path: string) {
+    if (isUnsupportedPreviewFile(path)) {
+      params.openRightWorkspaceTab("files", {
+        path,
+        title: fileBasename(path),
+        file: null,
+        message: "Preview is not available for this file type."
+      });
+      return;
+    }
+    const result = WorkspaceFileReadResultSchema.parse(await params.client?.request("workspace/file/read", { scope: scope(), path }));
+    if (result.binary || result.content === null) {
+      params.openRightWorkspaceTab("files", {
+        path: result.path,
+        title: fileBasename(result.path),
+        file: result,
+        message: result.unreadable ?? "Preview is not available for this file."
+      });
+      return;
+    }
+    params.openRightWorkspaceTab("files", {
+      path: result.path,
+      title: fileBasename(result.path),
+      file: result,
+      message: result.truncated ? "Preview truncated." : null
+    });
+  }
+
+  async function saveFileFromEditor(
+    path: string,
+    content: string,
+    expectedRevision: string | null,
+    force: boolean
+  ): Promise<WorkspaceFileWriteResult> {
+    const nextScope = scope();
+    const result = WorkspaceFileWriteResultSchema.parse(await params.client?.request("workspace/file/write", {
+      scope: nextScope,
+      path,
+      content,
+      expectedRevision,
+      force
+    }));
+    const read = WorkspaceFileReadResultSchema.parse(await params.client?.request("workspace/file/read", { scope: nextScope, path: result.path }));
+    params.setRightTabs((current) => current.map((tab) => (
+      tab.kind === "files" && tab.path === result.path
+        ? { ...tab, file: read, message: null, title: fileBasename(result.path) }
+        : tab
+    )));
+    await params.refreshWorkspaceSurface(params.client, nextScope, params.currentThreadId ?? null);
+    return result;
+  }
+
+  async function acceptWorkspaceChange(turnId: string, path: string) {
+    const result = WorkspaceChangeMutationResultSchema.parse(await params.client?.request("workspace/change/accept", {
+      scope: scope(),
+      turnId,
+      path
+    }));
+    params.setWorkspaceChanges(result.changes);
+  }
+
+  async function rejectWorkspaceChange(turnId: string, path: string) {
+    const nextScope = scope();
+    const result = WorkspaceChangeMutationResultSchema.parse(await params.client?.request("workspace/change/reject", {
+      scope: nextScope,
+      turnId,
+      path
+    }));
+    params.setWorkspaceChanges(result.changes);
+    await params.refreshWorkspaceSurface(params.client, nextScope, params.currentThreadId ?? null);
+  }
+
+  async function openDiffPreview(path?: string | null) {
+    const result = WorkspaceDiffResultSchema.parse(await params.client?.request("workspace/diff", { scope: scope(), path: path ?? null }));
+    params.setWorkspaceDiff((current) => path ? current : result);
+    params.openReviewTab(result, path ?? null);
+  }
+
+  async function loadThreadSearchText(threadId: string): Promise<string> {
+    if (!params.client) {
+      return "";
+    }
+    const snapshot = parseThreadSnapshot(await params.client.request("thread/read", { threadId }));
+    return transcriptSearchText(snapshot.entries);
+  }
+
+  async function copyTranscriptText(text: string) {
+    const result = await params.host?.clipboard.writeText(text);
+    if (!result || !result.ok) {
+      const message = "Clipboard copy is not supported by this host.";
+      params.setError(message);
+      throw new Error(message);
+    }
+    params.setError(null);
+  }
+
+  async function handleAttachment() {
+    const result = await params.host?.files.pickFile();
+    if (!result || !result.ok) {
+      params.setError("Attachments are not supported by this host yet.");
+      return;
+    }
+    const attachment = await attachmentFromFile(result.value);
+    params.setAttachments((current) => [...current, attachment]);
+    params.setError(null);
+  }
+
+  async function writeBackendDraft(draft: BackendDraft) {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const commandConfig = parseBackendCommandJson(draft.commandJsonText);
+    if (commandConfig.error) {
+      throw new Error(commandConfig.error);
+    }
+    const nextScope = scope();
+    await params.client.request("backend/write", {
+      scope: nextScope,
+      id: draft.id.trim(),
+      target: "profile",
+      enabled: draft.enabled,
+      label: draft.label.trim() || null,
+      description: draft.description.trim() || null,
+      command: commandConfig.command.trim() || null,
+      args: commandConfig.args,
+      env: commandConfig.env,
+      cwd: draft.cwd.trim() || "invocation",
+      entrypoints: draft.entrypoints,
+      clientCapabilities: draft.clientCapabilities,
+      mcpServers: multilineList(draft.mcpServersText)
+    });
+    await params.refreshAgentSurface(params.client, nextScope);
+  }
+
+  async function saveBackendDraft(draft: BackendDraft) {
+    await writeBackendDraft(draft);
+    params.setBackendDraft(null);
+  }
+
+  async function updateBackendDraftFields(backend: WorkbenchBackend, patch: Partial<BackendDraft>) {
+    await writeBackendDraft({ ...backendDraftFromBackend(backend), ...patch });
+  }
+
+  async function deleteBackend(backend: WorkbenchBackend) {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const nextScope = scope();
+    await params.client.request("backend/delete", { scope: nextScope, id: backend.id, target: "profile" });
+    await params.refreshAgentSurface(params.client, nextScope);
+  }
+
+  async function doctorBackend(backend: WorkbenchBackend) {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const result = await params.client.request("backend/doctor", { scope: scope(), id: backend.id });
+    params.setBackendDoctor((current) => ({
+      ...current,
+      [backend.id]: parseBackendDoctor(result)
+    }));
+  }
+
+  async function restoreArchivedSession(threadId: string) {
+    if (!params.client) {
+      return;
+    }
+    await params.client.request("thread/restore", { threadId });
+    await params.refreshHistory(params.client);
+    await params.refreshHistory(params.client, true);
+  }
+
+  async function deleteArchivedSession(threadId: string) {
+    if (!params.client) {
+      return;
+    }
+    await params.client.request("thread/delete", { threadId });
+    await params.refreshHistory(params.client);
+    await params.refreshHistory(params.client, true);
+  }
+
+  return {
+    acceptWorkspaceChange,
+    changeAgentSelection,
+    copyTranscriptText,
+    createWorkspace,
+    deleteArchivedSession,
+    deleteBackend,
+    doctorBackend,
+    handleAttachment,
+    loadThreadSearchText,
+    openDiffPreview,
+    openFilePreview,
+    rejectWorkspaceChange,
+    restoreArchivedSession,
+    saveBackendDraft,
+    saveFileFromEditor,
+    startNewThread,
+    startShell,
+    submitTurn,
+    updateBackendDraftFields
+  };
+}

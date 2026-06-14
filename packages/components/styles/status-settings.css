@@ -1,0 +1,308 @@
+.pevo-statusTitleBlock,
+.pevo-contextSummary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pevo-statusSessionId {
+  min-width: 0;
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.pevo-contextSummary strong,
+.pevo-contextSummary small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-contextSummary strong {
+  color: var(--pevo-ink);
+  font-size: 0.84rem;
+}
+
+.pevo-contextSummary small {
+  color: var(--pevo-muted);
+  font-size: 0.76rem;
+}
+
+.pevo-promptTokenStack {
+  display: flex;
+  width: 100%;
+  height: 9px;
+  min-width: 0;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: 999px;
+}
+
+.pevo-promptTokenStack.is-empty {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 70%);
+}
+
+.pevo-promptTokenSegment,
+.pevo-promptTokenFreeSpace {
+  flex: 0 0 var(--pevo-prompt-token-width, 0%);
+  min-width: 0;
+}
+
+.pevo-promptTokenSegment {
+  min-width: 3px;
+  background: var(--pevo-prompt-token-color, var(--pevo-accent));
+}
+
+.pevo-promptTokenFreeSpace {
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 70%);
+}
+
+.pevo-changedFiles {
+  display: grid;
+  gap: 2px;
+}
+
+.pevo-sessionUsageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+  min-width: 0;
+}
+
+.pevo-sessionUsageGrid div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pevo-sessionUsageGrid span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-sessionUsageGrid strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-promptTokensDisclosure {
+  min-width: 0;
+  color: var(--pevo-muted);
+}
+
+.pevo-promptTokensDisclosure summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 2px 0;
+  cursor: pointer;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.pevo-promptTokensDisclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.pevo-promptTokensDisclosure summary span,
+.pevo-promptTokenCategorySummary span,
+.pevo-promptTokenCategorySummary strong,
+.pevo-promptTokenCategorySummary small,
+.pevo-promptTokenCategoryDetails dt,
+.pevo-promptTokenCategoryDetails dd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-promptTokensDisclosure summary svg {
+  justify-self: end;
+  transition: transform 140ms ease;
+}
+
+.pevo-promptTokensDisclosure[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.pevo-promptTokenCategoryList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0 0;
+}
+
+.pevo-promptTokenCategory {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
+}
+
+.pevo-promptTokenCategorySummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(48px, auto) minmax(42px, auto);
+  align-items: baseline;
+  gap: 7px;
+  min-height: 22px;
+}
+
+.pevo-promptTokenCategorySummary span,
+.pevo-promptTokenCategorySummary small,
+.pevo-promptTokenCategoryDetails dt {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.pevo-promptTokenCategorySummary strong {
+  color: var(--pevo-ink);
+  font-size: 0.76rem;
+}
+
+.pevo-promptTokenCategorySummary strong,
+.pevo-promptTokenCategorySummary small {
+  text-align: right;
+}
+
+.pevo-promptTokenCategoryDetails {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 2px 8px;
+}
+
+.pevo-promptTokenCategoryDetails div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(58px, auto);
+  gap: 8px;
+}
+
+.pevo-promptTokenCategoryDetails dd {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.pevo-changedFiles button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 2px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .pevo-changedFiles button:hover {
+    background: color-mix(in oklch, var(--pevo-panel-muted), transparent 76%);
+  }
+}
+
+.pevo-changedFiles code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.76rem;
+}
+
+.pevo-changedFiles span {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.pevo-settings div {
+  min-width: 0;
+}
+
+.pevo-settings dt {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.pevo-settings dd {
+  overflow-wrap: anywhere;
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+}
+
+.pevo-stack {
+  display: grid;
+  gap: 8px;
+  padding: 10px 4px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 55%);
+}
+
+.pevo-stack h3 {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.pevo-stack p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.pevo-request {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  background: var(--pevo-bg-raised);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+}
+
+.pevo-request pre {
+  max-height: 140px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+  border-radius: var(--pevo-radius-sm);
+  white-space: pre-wrap;
+}
+
+.pevo-settings {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+@media (max-width: 960px) {
+  .pevo-sessionList {
+    max-height: none;
+  }
+
+  .pevo-composerActions {
+    justify-content: flex-end;
+  }
+}

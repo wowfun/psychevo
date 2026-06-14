@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ThreadSnapshot, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
-import { appendOptimisticPrompt, applyLiveTranscriptEvent } from "./transcript";
+import { appendOptimisticPrompt, applyLiveTranscriptEvent, reconcileThreadSnapshot } from "./transcript";
 
 describe("applyLiveTranscriptEvent detached drafts", () => {
   it("ignores a stale completed turn for an empty detached draft", () => {
@@ -72,6 +72,49 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
   });
 });
 
+describe("reconcileThreadSnapshot", () => {
+  it("keeps older live overlays before newer durable messages by timeline", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:13",
+          messageSeq: null,
+          createdAtMs: 1300,
+          updatedAtMs: 1300,
+          metadata: { projection: "assistant_segment", liveOrder: 0, streamSeq: 13 },
+          blocks: [
+            block({
+              id: "live:turn-1:assistant:13:reasoning",
+              kind: "reasoning",
+              body: "Now let me write the report file.",
+              createdAtMs: 1300,
+              updatedAtMs: 1300
+            })
+          ]
+        })
+      ]
+    };
+    const incoming = {
+      ...threadSnapshot(),
+      entries: [
+        messageEntry(2, "The user wants me to run the x-daily skill.", 200),
+        messageEntry(4, "The command is still running.", 400),
+        messageEntry(15, "Now I have all the data I need.", 1500)
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(current, incoming);
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "message:2",
+      "message:4",
+      "live:turn-1:assistant:13",
+      "message:15"
+    ]);
+  });
+});
+
 function detachedSnapshot(): ThreadSnapshot {
   return {
     source: {
@@ -101,6 +144,49 @@ function detachedSnapshot(): ThreadSnapshot {
     pendingPermissions: [],
     pendingClarifies: []
   };
+}
+
+function threadSnapshot(): ThreadSnapshot {
+  return {
+    ...detachedSnapshot(),
+    thread: {
+      id: "thread-1",
+      backend: {
+        kind: "psychevo",
+        nativeId: "thread-1"
+      },
+      sourceKey: "web:test"
+    },
+    activity: {
+      running: true,
+      activeTurnId: "turn-1",
+      queuedTurns: 0
+    }
+  };
+}
+
+function messageEntry(messageSeq: number, text: string, createdAtMs: number): TranscriptEntry {
+  return entry({
+    id: `message:${messageSeq}`,
+    threadId: "thread-1",
+    turnId: `message:${messageSeq}`,
+    messageSeq,
+    source: "runtime.message",
+    status: "completed",
+    createdAtMs,
+    updatedAtMs: createdAtMs,
+    blocks: [
+      block({
+        id: `message:${messageSeq}:reasoning:0`,
+        kind: "reasoning",
+        source: "runtime.message",
+        status: "completed",
+        body: text,
+        createdAtMs,
+        updatedAtMs: createdAtMs
+      })
+    ]
+  });
 }
 
 function entry(overrides: Partial<TranscriptEntry> = {}): TranscriptEntry {

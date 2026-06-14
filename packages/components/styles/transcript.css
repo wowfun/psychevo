@@ -1,0 +1,468 @@
+.pevo-transcript {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.pevo-threadItems {
+  display: grid;
+  grid-auto-rows: max-content;
+  grid-template-columns: minmax(0, min(840px, 100%));
+  align-content: start;
+  justify-content: center;
+  gap: 11px;
+  overflow: auto;
+  padding: 12px 18px 28px;
+  background: transparent;
+}
+
+.pevo-message {
+  display: block;
+  max-width: min(760px, 100%);
+  padding: 0;
+  border-radius: 0;
+  line-height: 1.55;
+  white-space: normal;
+}
+
+.pevo-messageFrame {
+  --pevo-messageActionHitArea: 30px;
+  --pevo-messageActionHitOffset: -30px;
+  position: relative;
+  width: fit-content;
+  max-width: min(760px, 100%);
+  min-width: 0;
+  padding-bottom: var(--pevo-messageActionHitArea);
+  margin-bottom: var(--pevo-messageActionHitOffset);
+  pointer-events: none;
+}
+
+.pevo-messageFrame > * {
+  pointer-events: auto;
+}
+
+.pevo-messageFrame.is-user {
+  justify-self: end;
+  max-width: min(620px, 100%);
+}
+
+.pevo-messageFrame.is-assistant {
+  justify-self: start;
+  width: min(760px, 100%);
+}
+
+.pevo-srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.pevo-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pevo-markdown > :first-child {
+  margin-top: 0;
+}
+
+.pevo-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.pevo-markdown p,
+.pevo-markdown ul,
+.pevo-markdown ol,
+.pevo-markdown pre,
+.pevo-markdown blockquote,
+.pevo-markdown table {
+  margin: 0.65em 0;
+}
+
+.pevo-markdown code {
+  padding: 0 3px;
+  color: var(--pevo-markdown-code-ink, var(--pevo-code-ink));
+  background: var(--pevo-markdown-inline-bg, transparent);
+  border-radius: var(--pevo-radius-xs);
+  font-size: 0.92em;
+}
+
+.pevo-markdown pre {
+  max-width: 100%;
+  overflow: auto;
+  padding: 10px;
+  color: var(--pevo-markdown-code-ink, var(--pevo-code-ink));
+  background: var(--pevo-markdown-code-bg, var(--pevo-code-bg));
+  border: 1px solid var(--pevo-markdown-code-border, transparent);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-markdown pre code {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.pevo-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+
+.pevo-markdown th,
+.pevo-markdown td {
+  padding: 5px 7px;
+  border: 1px solid var(--pevo-border);
+}
+
+.pevo-markdown.is-streaming > :last-child::after {
+  display: inline-block;
+  width: 0.55em;
+  margin-left: 2px;
+  color: var(--pevo-muted);
+  content: "|";
+  animation: pevo-stream-caret 900ms steps(2, start) infinite;
+}
+
+.pevo-message > p {
+  margin: 0;
+}
+
+.pevo-message.is-user {
+  width: fit-content;
+  max-width: 100%;
+  padding: 10px 12px;
+  color: var(--pevo-ink);
+  background: var(--pevo-user-bubble);
+  border: 1px solid var(--pevo-user-bubble-border);
+  border-radius: var(--pevo-radius);
+  box-shadow: none;
+}
+
+.pevo-message.is-assistant {
+  width: 100%;
+  margin-right: auto;
+  background: transparent;
+  box-shadow: none;
+}
+
+.pevo-messageMeta {
+  position: absolute;
+  top: calc(100% + var(--pevo-messageActionHitOffset) + 4px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+  margin: 0;
+  color: var(--pevo-faint);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: auto;
+  transform: translateY(-2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.pevo-messageFrame.is-assistant .pevo-messageMeta {
+  left: 0;
+}
+
+.pevo-messageFrame.is-user .pevo-messageMeta {
+  right: 0;
+  justify-content: flex-end;
+}
+
+.pevo-messageFrame:hover .pevo-messageMeta,
+.pevo-messageFrame:focus-within .pevo-messageMeta,
+.pevo-messageMeta:hover {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pevo-messageCopy {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.pevo-messageCopy:hover,
+.pevo-messageCopy:focus-visible {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-messageCopy:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+.pevo-messageElapsed,
+.pevo-messageTime {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pevo-stream-caret {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.pevo-reasoning,
+.pevo-evidence {
+  display: grid;
+  width: min(760px, 100%);
+  justify-self: start;
+  gap: 7px;
+  padding: 4px 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pevo-reasoning {
+  color: var(--pevo-muted-strong);
+}
+
+.pevo-evidence p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pevo-reasoningHeader,
+.pevo-evidenceLine {
+  display: grid;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  gap: 8px;
+  padding: 0;
+  color: var(--pevo-muted-strong);
+  background: transparent;
+  border: 0;
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pevo-reasoningHeader {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.pevo-evidenceLine {
+  grid-template-columns: auto minmax(0, 16ch) minmax(0, 1fr) auto;
+}
+
+.pevo-evidenceLine.is-singleTitle {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.pevo-reasoningHeader span,
+.pevo-evidenceLine code,
+.pevo-evidenceLine span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-evidenceLine code {
+  max-width: 16ch;
+}
+
+.pevo-evidenceLine.is-singleTitle code {
+  max-width: none;
+}
+
+.pevo-reasoningHeader em,
+.pevo-evidenceLine em {
+  padding: 0;
+  color: var(--pevo-muted-strong);
+  background: transparent;
+  border-radius: 0;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.pevo-toolDetail {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin-left: 23px;
+  padding: 1px 0 2px 12px;
+  color: var(--pevo-muted-strong);
+  border-left: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+}
+
+.pevo-toolSection {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pevo-toolSection h4 {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.pevo-toolSection dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.pevo-toolSection dl div {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.pevo-toolSection dt,
+.pevo-toolSection dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.pevo-toolSection dt {
+  color: var(--pevo-muted);
+}
+
+.pevo-toolSection dd {
+  color: var(--pevo-ink);
+  overflow-wrap: anywhere;
+}
+
+.pevo-toolSection pre {
+  max-width: 100%;
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
+  border-radius: var(--pevo-radius-sm);
+  font-family: var(--pevo-mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.pevo-toolSection.is-code pre {
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+  border-color: color-mix(in oklch, var(--pevo-code-ink), transparent 86%);
+}
+
+.pevo-toolSection.is-error h4,
+.pevo-toolSection.is-error dt,
+.pevo-toolSection.is-error dd {
+  color: var(--pevo-danger);
+}
+
+.pevo-toolSection.is-error pre {
+  color: var(--pevo-danger);
+  background: color-mix(in oklch, var(--pevo-danger), transparent 92%);
+  border-color: color-mix(in oklch, var(--pevo-danger), transparent 68%);
+}
+
+@media (max-width: 640px) {
+  .pevo-threadItems {
+    gap: 9px;
+    padding: 12px;
+  }
+
+  .pevo-reasoning,
+  .pevo-evidence {
+    width: 100%;
+    padding: 8px 10px;
+  }
+
+  .pevo-reasoningHeader,
+  .pevo-evidenceLine {
+    gap: 4px 7px;
+  }
+
+  .pevo-evidenceLine {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+  }
+
+  .pevo-evidenceLine code {
+    grid-column: 3 / 4;
+    max-width: none;
+  }
+
+  .pevo-evidenceLine span {
+    grid-column: 3 / -1;
+  }
+
+  .pevo-evidenceLine em {
+    grid-column: 4 / 5;
+    justify-self: end;
+  }
+
+  .pevo-evidenceLine.is-singleTitle {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .pevo-evidenceLine.is-singleTitle code {
+    grid-column: 2 / 3;
+  }
+
+  .pevo-evidenceLine.is-singleTitle em {
+    grid-column: 3 / 4;
+  }
+
+  .pevo-toolDetail {
+    margin-left: 19px;
+    padding-left: 10px;
+  }
+
+  .pevo-toolSection dl div {
+    grid-template-columns: 1fr;
+    gap: 1px;
+  }
+}
+
+.pevo-evidence code {
+  color: var(--pevo-ink);
+}
+
+.pevo-artifactRefs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pevo-artifactRefs span {
+  padding: 2px 7px;
+  color: var(--pevo-brass);
+  background: var(--pevo-brass-soft);
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
