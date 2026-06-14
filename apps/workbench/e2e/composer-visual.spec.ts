@@ -11,6 +11,8 @@ test.describe("Workbench composer visual contract", () => {
     mkdirSync(screenshotDir, { recursive: true });
     try {
       await page.goto(server.url);
+      await expect(page).toHaveTitle("Psychevo");
+      await expect(page.locator('link[rel="icon"][href="/favicon.svg"]')).toHaveCount(1);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
 
       await openPanel(page, isMobile, "History");
@@ -19,10 +21,19 @@ test.describe("Workbench composer visual contract", () => {
 
       const composer = page.locator(".pevo-composer");
       await expect(composer).toBeVisible();
-      const agentSelect = page.getByRole("combobox", { name: "Agent" });
-      await expect(agentSelect).toBeVisible();
-      expect(await selectedOptionText(agentSelect)).toBe("Default Agent");
-      expect(await optionTexts(agentSelect)).toContain("translate");
+      const agentControl = page.getByRole("button", { name: "Agent" });
+      await expect(agentControl).toBeVisible();
+      await expect(agentControl).toContainText("Default Agent");
+      await agentControl.click();
+      const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
+      const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
+      await expect(agentGroup.getByRole("radio", { name: "Default Agent" })).toHaveAttribute("aria-checked", "true");
+      await expect(agentGroup.getByRole("radio", { name: "translate" })).toBeVisible();
+      await expect(agentPopover.getByRole("combobox")).toHaveCount(0);
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-agent-runtime-${testInfo.project.name}.png`)
+      });
+      await agentControl.click();
       expect(await selectedOptionText(page.getByRole("combobox", { name: "Permission mode" }))).toBe("Default Permission");
       const modelSelect = page.getByRole("combobox", { name: "Model" });
       await expect(modelSelect).toBeVisible();
@@ -31,7 +42,11 @@ test.describe("Workbench composer visual contract", () => {
       await expectSelectTextFits(modelSelect);
       await expect(page.getByRole("combobox", { name: "Variant" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Context usage" })).toBeVisible();
-      await assertComposerGeometry(page, { plan: false });
+      await expect(page.getByRole("tablist", { name: "Turn mode" })).toHaveCount(0);
+      await assertComposerGeometry(page, { isMobile, plan: false });
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-empty-${testInfo.project.name}.png`)
+      });
 
       if (!isMobile) {
         await page.getByRole("button", { name: "Context usage" }).click();
@@ -54,7 +69,7 @@ test.describe("Workbench composer visual contract", () => {
       await page.getByRole("switch", { name: "Plan mode" }).click();
       await expect(page.locator(".pevo-planChip")).toContainText("Plan");
       await page.keyboard.press("Escape");
-      await assertComposerGeometry(page, { plan: true });
+      await assertComposerGeometry(page, { isMobile, plan: true });
       await page.screenshot({
         path: path.join(screenshotDir, `composer-plan-${testInfo.project.name}.png`)
       });
@@ -66,14 +81,14 @@ test.describe("Workbench composer visual contract", () => {
       expect(oneLineBox).not.toBeNull();
       expect(multilineBox).not.toBeNull();
       expect(multilineBox!.height).toBeGreaterThan(oneLineBox!.height + 20);
-      await assertComposerGeometry(page, { plan: true });
+      await assertComposerGeometry(page, { isMobile, plan: true });
       await page.screenshot({
         path: path.join(screenshotDir, `composer-multiline-${testInfo.project.name}.png`)
       });
 
       await forceInterruptVisualState(page);
       await expect(page.getByRole("button", { name: "Interrupt active turn" })).toBeVisible({ timeout: 10_000 });
-      await assertComposerGeometry(page, { plan: true });
+      await assertComposerGeometry(page, { isMobile, plan: true });
       await page.screenshot({
         path: path.join(screenshotDir, `composer-interrupt-${testInfo.project.name}.png`)
       });
@@ -215,13 +230,6 @@ async function selectedOptionText(select: Locator): Promise<string> {
   });
 }
 
-async function optionTexts(select: Locator): Promise<string[]> {
-  return select.evaluate((element) => {
-    const control = element as HTMLSelectElement;
-    return Array.from(control.options).map((option) => option.textContent?.trim() ?? "");
-  });
-}
-
 async function expectSelectTextFits(select: Locator) {
   const result = await select.evaluate((element) => {
     const control = element as HTMLSelectElement;
@@ -248,7 +256,8 @@ async function expectSelectTextFits(select: Locator) {
       textWidth
     };
   });
-  expect(result.paddingRight).toBeGreaterThanOrEqual(22);
+  expect(result.paddingRight).toBeGreaterThanOrEqual(12);
+  expect(result.paddingRight).toBeLessThanOrEqual(16);
   expect(result.textWidth).toBeLessThanOrEqual(result.contentWidth + 1);
 }
 
@@ -311,12 +320,12 @@ async function assertComposerDockTracksTranscriptColumn(page: Page, isMobile: bo
   expect(Math.abs(dockBox!.width - probeBox!.width)).toBeLessThanOrEqual(16);
 }
 
-async function assertComposerGeometry(page: Page, options: { plan: boolean }) {
+async function assertComposerGeometry(page: Page, options: { isMobile: boolean; plan: boolean }) {
   const add = page.getByRole("button", { name: "Add attachments and options" });
   const input = page.locator(".pevo-composerInput");
   const footer = page.locator(".pevo-composerFooter");
   const action = page.locator(".pevo-sendButton");
-  const agent = page.getByRole("combobox", { name: "Agent" });
+  const agent = page.getByRole("button", { name: "Agent" });
   const model = page.getByRole("combobox", { name: "Model" });
   const variant = page.getByRole("combobox", { name: "Variant" });
   const context = page.getByRole("button", { name: "Context usage" });
@@ -341,13 +350,37 @@ async function assertComposerGeometry(page: Page, options: { plan: boolean }) {
   expect(modelBox).not.toBeNull();
   expect(variantBox).not.toBeNull();
   expect(contextBox).not.toBeNull();
-  expect(agentBox!.width).toBeLessThanOrEqual(150);
+  expect(agentBox!.width).toBeLessThanOrEqual(210);
 
   const actionCenterY = actionBox!.y + actionBox!.height / 2;
+  const addCenterY = addBox!.y + addBox!.height / 2;
   const agentCenterY = agentBox!.y + agentBox!.height / 2;
   const modelCenterY = modelBox!.y + modelBox!.height / 2;
   const variantCenterY = variantBox!.y + variantBox!.height / 2;
   const contextCenterY = contextBox!.y + contextBox!.height / 2;
+  if (options.isMobile) {
+    const viewport = await page.viewportSize();
+    expect(viewport).not.toBeNull();
+    const visibleBoxes = [addBox!, agentBox!, modelBox!, variantBox!, contextBox!, actionBox!];
+    for (const box of visibleBoxes) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport!.width);
+    }
+    expect(Math.abs(addCenterY - agentCenterY)).toBeLessThanOrEqual(5);
+    expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(5);
+    expect(Math.abs(actionCenterY - variantCenterY)).toBeLessThanOrEqual(5);
+    expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(5);
+    if (options.plan) {
+      expect(chipBox).not.toBeNull();
+      expect(Math.abs(agentCenterY - (chipBox!.y + chipBox!.height / 2))).toBeLessThanOrEqual(5);
+    }
+    expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
+    expect(addBox!.x).toBeLessThan(agentBox!.x);
+    expect(variantBox!.x).toBeGreaterThan(modelBox!.x);
+    expect(contextBox!.x).toBeGreaterThan(variantBox!.x);
+    expect(contextBox!.x).toBeLessThan(actionBox!.x);
+    return;
+  }
   expect(Math.abs(actionCenterY - agentCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - variantCenterY)).toBeLessThanOrEqual(4);

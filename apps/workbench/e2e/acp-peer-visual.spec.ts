@@ -43,9 +43,17 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await settings.getByRole("button", { name: "Back to app" }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openPanel(page, isMobile, "Transcript");
-      const agentSelect = page.getByRole("combobox", { name: "Agent" });
-      await expect(agentSelect).toContainText("visual-acp (ACP)");
-      await agentSelect.selectOption({ label: "visual-acp (ACP)" });
+      await page.getByRole("button", { name: "Agent" }).click();
+      const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
+      const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
+      await expect(agentGroup.getByRole("radio", { name: "visual-acp" })).toBeHidden();
+      const runtimeGroup = agentPopover.getByRole("radiogroup", { name: "Runtime" });
+      await expect(runtimeGroup.getByRole("radio", { name: "visual-acp" })).toBeVisible();
+      await runtimeGroup.getByRole("radio", { name: "visual-acp" }).click();
+      const modeSelect = page.getByRole("combobox", { name: "visual-acp mode" });
+      await expect(modeSelect).toBeVisible();
+      await expect(modeSelect).toContainText("Review");
+      await modeSelect.selectOption({ label: "Review" });
 
       await page.getByPlaceholder("Ask Psychevo...").fill("Exercise the ACP standard event stream.");
       await page.getByRole("button", { name: "Send message" }).click();
@@ -56,6 +64,7 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await expect(assistantMessage).toContainText("streaming hello");
       await expectVisibleTextGrowth(assistantMessage);
       await expect(assistantMessage).toContainText("model=lmstudio/noop");
+      await expect(assistantMessage).toContainText("mode=review");
       await expect(page.locator(".pevo-evidence").filter({ hasText: "Run visual tool" })).toBeVisible();
       await expect(page.locator(".pevo-evidence").filter({ hasText: "Plan" })).toContainText("Patch ACP bridge");
       await assertNoHorizontalOverflow(page, page.getByRole("region", { name: "Transcript" }));
@@ -104,6 +113,7 @@ import sys
 import time
 
 model_value = "unset"
+mode_value = "build"
 
 def send(value):
     print(json.dumps(value), flush=True)
@@ -124,6 +134,17 @@ def config_options():
         "options": [
             {"value": "lmstudio/noop", "name": "Noop"}
         ]
+    }, {
+        "id": "mode",
+        "name": "Mode",
+        "category": "mode",
+        "type": "select",
+        "currentValue": mode_value,
+        "options": [
+            {"value": "build", "name": "Build"},
+            {"value": "plan", "name": "Plan"},
+            {"value": "review", "name": "Review"}
+        ]
     }]
 
 for line in sys.stdin:
@@ -137,6 +158,8 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 2, "capabilities": {}}})
     elif method == "session/new":
         send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-visual", "configOptions": config_options()}})
+    elif method == "session/load":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": params.get("sessionId") or "native-visual", "configOptions": config_options()}})
     elif method == "session/set_config_option":
         config_id = params.get("configId") or params.get("config_id")
         value = params.get("value")
@@ -144,6 +167,8 @@ for line in sys.stdin:
             value = value.get("value")
         if config_id == "model":
             model_value = value
+        if config_id == "mode":
+            mode_value = value
         send({"jsonrpc": "2.0", "id": mid, "result": {"configOptions": config_options()}})
     elif method == "session/prompt":
         session_id = params.get("sessionId") or "native-visual"
@@ -155,6 +180,8 @@ for line in sys.stdin:
         update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-visual", "content": {"type": "text", "text": "streaming hello "}})
         time.sleep(0.4)
         update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-visual", "content": {"type": "text", "text": "model=" + model_value + " "}})
+        time.sleep(0.4)
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-visual", "content": {"type": "text", "text": "mode=" + mode_value + " "}})
         time.sleep(0.4)
         update(session_id, {"sessionUpdate": "tool_call", "toolCallId": "call-visual", "title": "Run visual tool", "kind": "execute", "status": "pending", "rawInput": {"cmd": "echo done"}})
         update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-visual", "status": "in_progress", "content": [
@@ -173,7 +200,7 @@ for line in sys.stdin:
         ], "rawOutput": {"output": "done\\n"}})
         send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
     else:
-        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
+        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found: " + str(method)}})
 `);
   chmodSync(script, 0o755);
   return script;

@@ -176,7 +176,9 @@ The composer component must match TUI submission ergonomics. Plain Enter submits
 unless an IME composition is active or a completion item is being accepted.
 Shift+Enter, Ctrl+Enter, Alt+Enter, and Ctrl+J insert a newline. During an
 active turn, plain prompt submission steers the running turn by default; queueing
-the next turn is an explicit mode or command.
+the next turn is an explicit mode or command. The Queue/Steer segmented control
+is only rendered while a turn is active and the prompt editor contains non-empty
+text, so an empty composer does not present unavailable turn-routing choices.
 The composer also owns an explicit shell input mode shared by Web and generic
 Desktop shells. Typing `!` in an empty composer switches to shell mode without
 putting a literal bang in the editable text; imported, pasted, or restored text
@@ -239,17 +241,48 @@ square stop glyph inside the same circular button. The prompt textarea grows wit
 message line count until its bounded maximum height, then scrolls internally.
 The composer does not expose the browser's native textarea resize grip.
 
+Workbench composer controls distinguish Agent persona from execution Runtime
+while presenting them through one compact `Agent` control. Opening the control
+shows two flat, directly selectable row groups separated by a divider: the
+upper group configures the Psychevo main agent, and the lower group configures
+the execution runtime (`native` or an enabled ACP peer backend). The popover
+must not contain nested native select menus for these two groups. If the
+selected runtime cannot accept a Psychevo agent persona, the upper agent group
+is disabled and the turn is submitted without `agentName`; this is not treated
+as a submit-time conflict.
+The existing composer `Plan mode` affordance represents the current runtime's
+base `default`/`plan` mode pair. Native runtime maps it to Psychevo
+`RunMode`; a peer runtime that exposes `plan` maps it to ACP
+`runtimeOptions.mode = "plan"`, while the off/default state maps to that
+runtime's active default mode. Runtime session options are conditionally
+displayed after the combined Agent control only for peer modes outside that
+base pair. For OpenCode ACP, peer-provided ACP `mode` values such as `build` or
+`review` are displayed as OpenCode runtime modes, not Psychevo agents; `plan`
+is handled by the shared Plan affordance instead of a duplicate selector.
+Runtime options are scoped to the current draft/session and must not be stored
+in Settings. The controls stay compact, list-like, keyboard accessible, and
+responsive; visual validation must cover desktop and a narrow mobile width with
+the OpenCode mode selector open.
+
 Completion popovers are shared controlled components. `/` lists Gateway slash
 commands, `$` lists skills, local agents, and ACP capability mentions, and `@`
-lists workdir file references. Arrow keys, Ctrl+N/Ctrl+P, Tab, Enter, Escape,
-and pointer selection have the same semantics on every shell that has a
-keyboard. Keyboard navigation must keep the active completion option scrolled
-into view inside the popover, including long `$` skill/agent lists whose active
-item moves beyond the visible panel. Mobile shells may present the same
-completion state through touch lists or sheets. Completion ordering is
-query-aware: exact and prefix matches against the visible command/skill/agent/file
-label rank before substring or description-only matches, so pressing Enter
-accepts the item the typed token visibly points at.
+lists workdir file references plus subagent-capable agent names. Accepted `@`
+agent entries keep visible `@agent-name` text and submit structured Gateway
+agent mentions while still allowing the runtime's text scanner to recognize
+the same prompt form as TUI when the current runtime can orchestrate Psychevo
+agent delegation. Native runtime supports this structured `@agent` path. Peer
+runtime prompts may still contain literal `@agent-name` text, but Workbench
+does not offer Psychevo agent completion or submit structured Psychevo agent
+mentions for a runtime that cannot orchestrate them; that text is left for the
+peer runtime to interpret. Arrow keys, Ctrl+N/Ctrl+P, Tab, Enter, Escape, and
+pointer selection have the same semantics on every shell that has a keyboard.
+Keyboard navigation must keep the active completion option scrolled into view
+inside the popover, including long `$` skill/agent lists whose active item moves
+beyond the visible panel. Mobile shells may present the same completion state
+through touch lists or sheets. Completion ordering is query-aware: exact and
+prefix matches against the visible command/skill/agent/file label rank before
+substring or description-only matches, so pressing Enter accepts the item the
+typed token visibly points at.
 Slash completion rows may include a short destination label such as Panel,
 Preview, Prompt, Download, or Extension. Those labels are derived from Gateway
 command presentation metadata, not from frontend command-name allowlists.
@@ -626,7 +659,9 @@ when the user clicks inert space inside the menu. This outside-click behavior
 applies to menu popovers, not slash, skill, or file completion listboxes.
 Workbench chrome uses `Psychevo` as the visible product name. Project identity
 belongs in the workdir/session grouping and settings detail surfaces, not as a
-subtitle under the product brand. GUI-created workspaces and opened projects
+subtitle under the product brand. The Workbench browser tab title is
+`Psychevo`, and the tab favicon uses the shared Psychevo logo mark rather than
+a generic browser or globe icon. GUI-created workspaces and opened projects
 are both ordinary workdirs; UI may show project affordances such as Git branch
 only when the current workdir supports them. Creating a GUI workspace is an
 icon-only Sessions header action immediately to the left of the

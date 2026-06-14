@@ -100,11 +100,13 @@ test.describe("pevo Web Workbench", () => {
   });
 
   test("shows Settings as an app-level configuration center", async ({ page, isMobile }, testInfo) => {
-      const server = await startPevoWeb({ live: false });
-      try {
-        await page.goto(server.url);
-        await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
-        await expect(page.getByRole("combobox", { name: "Agent" })).toContainText("translate");
+        const server = await startPevoWeb({ live: false });
+        try {
+          await page.goto(server.url);
+          await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+        await page.getByRole("button", { name: "Agent" }).click();
+        await expect(page.getByRole("dialog", { name: "Agent and runtime" }).getByRole("radiogroup", { name: "Main agent" }).getByRole("radio", { name: "translate" })).toBeVisible();
+        await page.getByRole("button", { name: "Agent" }).click();
         if (isMobile) {
           await openPanel(page, isMobile, "History");
         }

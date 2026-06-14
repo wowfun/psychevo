@@ -44,6 +44,7 @@ const gatewayMock = vi.hoisted(() => {
         action: { type: "passThroughPrompt", text: command }
       };
     }),
+    completionResult: { items: [], replacement: null } as Record<string, unknown>,
     commandList: [] as Array<Record<string, unknown>>,
     endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" } as { wsUrl: string; baseUrl: string } | null,
     observabilityRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
@@ -52,6 +53,7 @@ const gatewayMock = vi.hoisted(() => {
     requestLog: [] as Array<{ method: string; params: unknown }>,
     subscribers: [] as Array<(notification: { method: string; params?: unknown }) => void>,
     archivedSessionSummaries: [] as Array<Record<string, unknown>>,
+    agentRecords: [] as Array<Record<string, unknown>>,
     backendRecords: [] as Array<Record<string, unknown>>,
     scope,
     sessionSummaries: [] as Array<Record<string, unknown>>,
@@ -74,7 +76,8 @@ const gatewayMock = vi.hoisted(() => {
           permissionModeOptions: ["default"],
           modeOptions: ["default", "plan"],
           modelOptions: ["xiaomi/xiaomi-token-high", "openai/gpt-4o"],
-          variantOptions: ["none"]
+          variantOptions: ["none"],
+          runtimeRef: "native"
         }
       };
     },
@@ -168,7 +171,7 @@ vi.mock("@psychevo/client", () => {
       }
       if (method === "agent/list") {
         return {
-          agents: [
+          agents: gatewayMock.agentRecords.length > 0 ? gatewayMock.agentRecords : [
             {
               name: "translate",
               description: "Translate user messages",
@@ -257,6 +260,44 @@ vi.mock("@psychevo/client", () => {
             { name: "enabled", ok: true, message: "backend enabled", path: null },
             { name: "command", ok: true, message: "command resolved", path: "/usr/bin/opencode" }
           ]
+        };
+      }
+      if (method === "runtime/options") {
+        const record = params as { runtimeRef?: string | null; runtimeSessionId?: string | null } | undefined;
+        const runtimeRef = record?.runtimeRef?.trim() || "native";
+        return {
+          runtimeRef,
+          runtimeSessionId: record?.runtimeSessionId ?? `${runtimeRef}-session`,
+          options: runtimeRef === "native"
+            ? [
+                {
+                  id: "mode",
+                  name: "Mode",
+                  description: null,
+                  category: "mode",
+                  type: "select",
+                  currentValue: "default",
+                  values: [
+                    { value: "default", name: "default", description: null },
+                    { value: "plan", name: "plan", description: null }
+                  ]
+                }
+              ]
+            : [
+                {
+                  id: "mode",
+                  name: "Mode",
+                  description: "OpenCode mode",
+                  category: "mode",
+                  type: "select",
+                  currentValue: "build",
+                  values: [
+                    { value: "build", name: "build", description: null },
+                    { value: "plan", name: "plan", description: null },
+                    { value: "review", name: "Review", description: null }
+                  ]
+                }
+              ]
         };
       }
       if (method === "command/list") {
@@ -389,7 +430,7 @@ vi.mock("@psychevo/client", () => {
         };
       }
       if (method === "completion/list") {
-        return { items: [], replacement: null };
+        return gatewayMock.completionResult;
       }
       if (method === "turn/start") {
         return { accepted: true };
@@ -515,6 +556,7 @@ afterEach(() => {
     known: false,
     action: { type: "passThroughPrompt", text: command }
   });
+  gatewayMock.completionResult = { items: [], replacement: null };
   gatewayMock.commandList = [];
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.observabilityRead = null;
@@ -523,6 +565,7 @@ afterEach(() => {
   gatewayMock.requestLog.length = 0;
   gatewayMock.subscribers = [];
   gatewayMock.archivedSessionSummaries = [];
+  gatewayMock.agentRecords = [];
   gatewayMock.backendRecords = [];
   gatewayMock.sessionSummaries = [];
   gatewayMock.snapshot.thread = {
@@ -591,6 +634,22 @@ function sessionSummary(id: string, title: string): Record<string, unknown> {
     title,
     displayTitle: title,
     preview: "session preview"
+  };
+}
+
+function agentRecord(
+  name: string,
+  entrypoints: string[],
+  backendRef: string | null = null
+): Record<string, unknown> {
+  return {
+    name,
+    description: `${name} agent`,
+    source: backendRef ? "generated" : "project",
+    generated: Boolean(backendRef),
+    path: backendRef ? null : `/tmp/project/.psychevo/agents/${name}.md`,
+    backend: backendRef ? { ref: backendRef } : null,
+    entrypoints
   };
 }
 
@@ -975,11 +1034,11 @@ describe("Workbench composer agent wiring", () => {
   it("keeps concrete draft agent selection and submits the selected agent", async () => {
     render(<App />);
 
-    const agentSelect = await screen.findByRole("combobox", { name: "Agent" });
-    expect(screen.getByRole("option", { name: "Default Agent" })).toBeTruthy();
+    const popover = await selectMainAgent("translate");
+    const agentGroup = within(popover).getByRole("radiogroup", { name: "Main agent" });
+    expect(within(agentGroup).getByRole("radio", { name: "Default Agent" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Default Permission" })).toBeTruthy();
-    expect(await screen.findByRole("option", { name: "translate" })).toBeTruthy();
-    fireEvent.change(agentSelect, { target: { value: "translate" } });
+    expect(within(agentGroup).getByRole("radio", { name: "translate" }).getAttribute("aria-checked")).toBe("true");
 
     const textarea = screen.getByPlaceholderText("Ask Psychevo...");
     fireEvent.change(textarea, { target: { value: "hello" } });
@@ -989,6 +1048,260 @@ describe("Workbench composer agent wiring", () => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "turn/start",
         params: expect.objectContaining({ agentName: "translate" })
+      });
+    });
+  });
+
+  it("submits ACP runtime plan through the shared Plan mode switch", async () => {
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["peer", "subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+
+    render(<App />);
+
+    const popover = await selectRuntime("opencode");
+    const runtimeGroup = within(popover).getByRole("radiogroup", { name: "Runtime" });
+    expect(within(runtimeGroup).getByRole("radio", { name: "OpenCode" }).getAttribute("aria-checked")).toBe("true");
+    const modeSelect = await screen.findByRole("combobox", { name: "OpenCode mode" }) as HTMLSelectElement;
+    expect(modeSelect.value).toBe("");
+    expect(within(modeSelect).getByRole("option", { name: "Default/Plan" })).toBeTruthy();
+    expect(within(modeSelect).getByRole("option", { name: "Review" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add attachments and options" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Plan mode" }));
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "hello from opencode" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          agentName: null,
+          mode: null,
+          runtimeRef: "opencode",
+          runtimeSessionId: "opencode-session",
+          runtimeOptions: { mode: "plan" }
+        })
+      });
+    });
+  });
+
+  it("submits extra ACP runtime modes from the conditional mode selector", async () => {
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["peer", "subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+
+    render(<App />);
+
+    await selectRuntime("opencode");
+    const modeSelect = await screen.findByRole("combobox", { name: "OpenCode mode" }) as HTMLSelectElement;
+    fireEvent.change(modeSelect, { target: { value: "review" } });
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "review this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          agentName: null,
+          runtimeRef: "opencode",
+          runtimeOptions: { mode: "review" }
+        })
+      });
+    });
+  });
+
+  it("disables the main agent selector when the ACP runtime owns persona", async () => {
+    gatewayMock.agentRecords = [agentRecord("translate", ["subagent"])];
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["peer"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+
+    render(<App />);
+
+    await selectMainAgent("translate");
+    const popover = await selectRuntime("opencode");
+    const agentGroup = within(popover).getByRole("radiogroup", { name: "Main agent" });
+    expect((within(agentGroup).getByRole("radio", { name: "Default Agent" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(agentGroup).getByRole("radio", { name: "translate" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(await screen.findByText("This runtime uses its own persona.")).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("Ask Psychevo..."), { target: { value: "translate this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          agentName: null,
+          runtimeRef: "opencode",
+          runtimeOptions: { mode: "build" }
+        })
+      });
+    });
+  });
+
+  it("omits Psychevo @agent completion candidates when a peer runtime is selected", async () => {
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["peer", "subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+    gatewayMock.completionResult = {
+      replacement: { start: 0, end: 3 },
+      items: [
+        {
+          id: "agent:opencode",
+          sigil: "@",
+          label: "@opencode",
+          insertText: "@opencode",
+          kind: "agent",
+          detail: "OpenCode ACP delegate",
+          target: {
+            kind: "agent",
+            name: "opencode",
+            source: "generated",
+            entrypoints: ["subagent"],
+            backendRef: "opencode"
+          },
+          sortText: "1:opencode"
+        }
+      ]
+    };
+
+    render(<App />);
+
+    await selectRuntime("opencode");
+    fireEvent.change(await screen.findByPlaceholderText("Ask Psychevo..."), { target: { value: "@op" } });
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "completion/list")).toBe(true);
+    });
+    expect(screen.queryByRole("option", { name: /@opencode/ })).toBeNull();
+  });
+
+  it("strips structured @agent mentions when submitting to a peer runtime", async () => {
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["peer", "subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+    gatewayMock.completionResult = {
+      replacement: { start: 0, end: 3 },
+      items: [
+        {
+          id: "agent:opencode",
+          sigil: "@",
+          label: "@opencode",
+          insertText: "@opencode",
+          kind: "agent",
+          detail: "OpenCode ACP delegate",
+          target: {
+            kind: "agent",
+            name: "opencode",
+            source: "generated",
+            entrypoints: ["subagent"],
+            backendRef: "opencode"
+          },
+          sortText: "1:opencode"
+        }
+      ]
+    };
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "@op" } });
+    const option = await screen.findByRole("option", { name: /@opencode/ });
+    fireEvent.mouseDown(option);
+    await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toBe("@opencode "));
+
+    await selectRuntime("opencode");
+    fireEvent.change(textarea, { target: { value: "@opencode list tools" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          mentions: [],
+          runtimeRef: "opencode"
+        })
       });
     });
   });
@@ -1047,7 +1360,7 @@ describe("Workbench composer agent wiring", () => {
     expect(within(settingsRegion).queryByRole("combobox", { name: "Permission mode" })).toBeNull();
 
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
-    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Agent" })).toBeTruthy();
   });
 
   it("shows archived sessions from Settings without turning the sidebar into an archive filter", async () => {
@@ -1081,6 +1394,114 @@ describe("Workbench composer agent wiring", () => {
     expect(screen.queryByRole("option", { name: "xiaomi-token-high" })).toBeNull();
     expect(screen.getByText("xiaomi-token-high")).toBeTruthy();
     expect(modelSelect.closest(".statusSelect")?.getAttribute("style")).toContain("--pevo-status-select-value-width: 18ch");
+  });
+
+  it("keeps ACP peer backends in Runtime instead of the composer Agent selector", async () => {
+    gatewayMock.agentRecords = [
+      agentRecord("opencode", ["subagent"], "opencode"),
+      agentRecord("cursor", ["peer", "subagent"], "cursor"),
+      agentRecord("translate", ["subagent"])
+    ];
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      },
+      {
+        id: "cursor",
+        kind: "acp",
+        enabled: true,
+        label: "Cursor",
+        description: null,
+        command: "cursor-agent",
+        args: ["--acp"],
+        cwd: "invocation",
+        entrypoints: ["peer", "subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+
+    render(<App />);
+
+    const popover = await openAgentRuntimePopover();
+    const agentGroup = within(popover).getByRole("radiogroup", { name: "Main agent" });
+    expect(within(agentGroup).getByRole("radio", { name: "Default Agent" })).toBeTruthy();
+    expect(within(agentGroup).queryByRole("radio", { name: "cursor" })).toBeNull();
+    expect(within(agentGroup).queryByRole("radio", { name: "opencode" })).toBeNull();
+
+    const runtimeGroup = within(popover).getByRole("radiogroup", { name: "Runtime" });
+    expect(within(runtimeGroup).getByRole("radio", { name: "Native Runtime" })).toBeTruthy();
+    expect(within(runtimeGroup).getByRole("radio", { name: "Cursor" })).toBeTruthy();
+    expect(within(runtimeGroup).queryByRole("radio", { name: "OpenCode" })).toBeNull();
+  });
+
+  it("clears a selected ACP runtime when its peer entrypoint is disabled", async () => {
+    gatewayMock.agentRecords = [agentRecord("opencode", ["peer", "subagent"], "opencode")];
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["peer", "subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+
+    render(<App />);
+
+    await selectRuntime("opencode");
+    const popover = await openAgentRuntimePopover();
+    const runtimeGroup = within(popover).getByRole("radiogroup", { name: "Runtime" });
+    await waitFor(() => expect(within(runtimeGroup).getByRole("radio", { name: "OpenCode" }).getAttribute("aria-checked")).toBe("true"));
+
+    gatewayMock.agentRecords = [agentRecord("opencode", ["subagent"], "opencode")];
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
+    const agentsPanel = await within(settingsRegion).findByRole("region", { name: "Agents" });
+    fireEvent.click(await within(agentsPanel).findByLabelText("opencode peer entrypoint"));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "backend/write",
+        params: expect.objectContaining({
+          id: "opencode",
+          target: "profile",
+          entrypoints: ["subagent"]
+        })
+      });
+    });
+
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
+    const nextPopover = await openAgentRuntimePopover();
+    const nextRuntimeGroup = within(nextPopover).getByRole("radiogroup", { name: "Runtime" });
+    await waitFor(() => expect(within(nextRuntimeGroup).getByRole("radio", { name: "Native Runtime" }).getAttribute("aria-checked")).toBe("true"));
+    expect(within(nextRuntimeGroup).queryByRole("radio", { name: "OpenCode" })).toBeNull();
   });
 
   it("renders the full session id in the Status panel", async () => {
@@ -1868,3 +2289,30 @@ describe("Workbench composer agent wiring", () => {
     expect(await screen.findByText("Export download opened.")).toBeTruthy();
   });
 });
+
+async function openAgentRuntimePopover() {
+  const existing = screen.queryByRole("dialog", { name: "Agent and runtime" });
+  if (existing) {
+    return existing;
+  }
+  fireEvent.click(await screen.findByRole("button", { name: "Agent" }));
+  return await screen.findByRole("dialog", { name: "Agent and runtime" });
+}
+
+async function selectMainAgent(value: string) {
+  const popover = await openAgentRuntimePopover();
+  const label = value || "Default Agent";
+  fireEvent.click(within(popover).getByRole("radio", { name: label }));
+  return popover;
+}
+
+async function selectRuntime(value: string) {
+  const popover = await openAgentRuntimePopover();
+  const label = value === "native"
+    ? "Native Runtime"
+    : value === "opencode"
+      ? "OpenCode"
+      : value;
+  fireEvent.click(within(popover).getByRole("radio", { name: label }));
+  return popover;
+}

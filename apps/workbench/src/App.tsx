@@ -86,6 +86,9 @@ import {
   type PendingClarify,
   type PendingPermission,
   type PermissionDecision,
+  type RuntimeConfigOptionValueView,
+  type RuntimeConfigOptionView,
+  type RuntimeOptionsResult,
   type SessionSummary,
   type SettingsReadResult,
   type SessionUsageSummaryView,
@@ -380,6 +383,12 @@ export function App() {
   const [commandFeedback, setCommandFeedback] = useState<CommandFeedback>(null);
   const [activeCommandOverlay, setActiveCommandOverlay] = useState<CommandOverlay | null>(null);
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
+  const [selectedRuntimeRef, setSelectedRuntimeRef] = useState<string>("native");
+  const [runtimeSessionId, setRuntimeSessionId] = useState<string | null>(null);
+  const [runtimeOptionsResult, setRuntimeOptionsResult] = useState<RuntimeOptionsResult | null>(null);
+  const [runtimeOptionsLoading, setRuntimeOptionsLoading] = useState(false);
+  const [runtimeOptionsError, setRuntimeOptionsError] = useState<string | null>(null);
+  const [selectedRuntimeMode, setSelectedRuntimeMode] = useState<string>("");
   const [permissionMode, setPermissionMode] = useState("default");
   const [workMode, setWorkMode] = useState("default");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -439,9 +448,36 @@ export function App() {
     [pinnedSessionIds, sessions]
   );
   const runnableAgents = useMemo(
-    () => agents.filter((agent) => agent.name),
+    () => agents.filter(isComposerRunnableAgent),
     [agents]
   );
+  const runtimeBackends = useMemo(
+    () => backends.filter(isComposerRuntimeBackend),
+    [backends]
+  );
+  const selectedRuntimeBackend = selectedRuntimeRef === "native"
+    ? null
+    : runtimeBackends.find((backend) => backend.id === selectedRuntimeRef) ?? null;
+  const runtimeModeOption = useMemo(
+    () => runtimeOptionsResult?.options.find(isRuntimeModeOption) ?? null,
+    [runtimeOptionsResult]
+  );
+  const runtimeModeValues = runtimeModeOption?.values ?? [];
+  const runtimeModeProjection = useMemo(
+    () => projectRuntimeModeOption(runtimeModeOption),
+    [runtimeModeOption]
+  );
+  const extraRuntimeModeValues = runtimeModeProjection.extraValues;
+  const selectedPeerRuntimeMode = selectedRuntimeRef === "native"
+    ? ""
+    : resolvePeerRuntimeMode(runtimeModeProjection, workMode, selectedRuntimeMode);
+  const planModeAvailable = selectedRuntimeRef === "native" || runtimeModeProjection.supportsPlan;
+  const runtimeModeUnavailable = selectedRuntimeRef !== "native"
+    && !runtimeOptionsLoading
+    && !runtimeOptionsError
+    && runtimeModeOption
+    && runtimeModeValues.length === 0;
+  const runtimeAcceptsAgentPersona = runtimeSupportsAgentPersona(selectedRuntimeRef);
 
   function scheduleGatewayEventFlush() {
     if (gatewayEventRafRef.current !== null) {
@@ -505,6 +541,76 @@ export function App() {
       setSelectedAgentName("");
     }
   }, [runnableAgents, selectedAgentName]);
+
+  useEffect(() => {
+    if (selectedRuntimeRef === "native") {
+      setRuntimeSessionId(null);
+      setRuntimeOptionsResult(null);
+      setRuntimeOptionsLoading(false);
+      setRuntimeOptionsError(null);
+      setSelectedRuntimeMode("");
+      return;
+    }
+    if (!runtimeBackends.some((backend) => backend.id === selectedRuntimeRef)) {
+      setSelectedRuntimeRef("native");
+    }
+  }, [runtimeBackends, selectedRuntimeRef]);
+
+  useEffect(() => {
+    if (!client || selectedRuntimeRef === "native") {
+      return;
+    }
+    const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    let cancelled = false;
+    setRuntimeOptionsLoading(true);
+    setRuntimeOptionsError(null);
+    void client.request("runtime/options", {
+      runtimeRef: selectedRuntimeRef,
+      runtimeSessionId,
+      scope,
+      threadId: snapshot.thread?.id ?? null
+    }).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      setRuntimeOptionsResult(result);
+      setRuntimeSessionId(result.runtimeSessionId ?? null);
+      const modeOption = result.options.find(isRuntimeModeOption);
+      if (!modeOption) {
+        setSelectedRuntimeMode("");
+        return;
+      }
+      const projected = projectRuntimeModeOption(modeOption);
+      const values = projected.extraValues.map((option) => option.value);
+      setSelectedRuntimeMode((current) => (
+        current && values.includes(current)
+          ? current
+          : projected.supportsPlan
+            ? ""
+            : projected.defaultValue
+      ));
+    }).catch((error) => {
+      if (cancelled) {
+        return;
+      }
+      setRuntimeOptionsResult(null);
+      setSelectedRuntimeMode("");
+      setRuntimeOptionsError(error instanceof Error ? error.message : String(error));
+    }).finally(() => {
+      if (!cancelled) {
+        setRuntimeOptionsLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeScope, client, init?.scope, runtimeSessionId, selectedRuntimeRef, settings?.workdir, snapshot.thread?.id]);
+
+  useEffect(() => {
+    if (selectedRuntimeRef !== "native" && runtimeModeOption && !runtimeModeProjection.supportsPlan && workMode === "plan") {
+      setWorkMode("default");
+    }
+  }, [runtimeModeOption, runtimeModeProjection.supportsPlan, selectedRuntimeRef, workMode]);
 
   useEffect(() => {
     if (debugEnabled) {
@@ -977,11 +1083,15 @@ export function App() {
       setContextUsage(null);
       return;
     }
+    if (!threadId) {
+      setObservability(null);
+      setContextUsage(null);
+    }
     const [files, diff, changes, nextObservability] = await Promise.all([
       nextClient.request("workspace/files", { scope }),
       nextClient.request("workspace/diff", { scope, path: null }),
       nextClient.request("workspace/changes", { scope }),
-      nextClient.request("observability/read", { scope, threadId })
+      threadId ? nextClient.request("observability/read", { scope, threadId }) : Promise.resolve(null)
     ]);
     if (!shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
       return;
@@ -989,7 +1099,9 @@ export function App() {
     setWorkspaceFiles(WorkspaceFilesResultSchema.parse(files));
     setWorkspaceDiff(WorkspaceDiffResultSchema.parse(diff));
     setWorkspaceChanges(WorkspaceChangesResultSchema.parse(changes));
-    applyObservability(nextObservability);
+    if (nextObservability) {
+      applyObservability(nextObservability);
+    }
   }
 
   async function refreshObservability(
@@ -1083,6 +1195,11 @@ export function App() {
     }
     setPermissionMode(nextControls.permissionMode || "default");
     setWorkMode(nextControls.mode || "default");
+    setSelectedRuntimeRef(nextControls.runtimeRef || "native");
+    setRuntimeSessionId(null);
+    setRuntimeOptionsResult(null);
+    setRuntimeOptionsError(null);
+    setSelectedRuntimeMode("");
     setSelectedAgentName(nextControls.agent ?? "");
     setSelectedModel(nextControls.model ?? null);
     setSelectedVariant(nextControls.variant ?? "none");
@@ -1288,6 +1405,9 @@ export function App() {
   }
 
   async function executeCommand(command: string, trigger: CommandTrigger = "composer") {
+    if (await handleLocalRuntimeCommand(command, trigger)) {
+      return;
+    }
     const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
     const result = await client?.request("command/execute", {
       command,
@@ -1330,11 +1450,150 @@ export function App() {
     await runHostAction(record.action, trigger);
   }
 
+  async function handleLocalRuntimeCommand(command: string, trigger: CommandTrigger): Promise<boolean> {
+    const match = command.trim().match(/^\/mode(?:\s+(.+))?$/);
+    if (!match) {
+      return false;
+    }
+    const requested = match[1]?.trim() ?? "";
+    if (selectedRuntimeRef === "native") {
+      if (!requested) {
+        const feedback = {
+          accepted: true,
+          command,
+          message: `Current Psychevo mode: ${workMode}. Available: default, plan.`,
+          feedbackAnchor: trigger
+        } satisfies CommandFeedback;
+        setCommandFeedback(feedback);
+        routeCommandFeedback(feedback, trigger);
+        return true;
+      }
+      if (!["default", "plan"].includes(requested)) {
+        const feedback = {
+          accepted: false,
+          command,
+          message: `Unknown Psychevo mode: ${requested}. Available: default, plan.`,
+          feedbackAnchor: trigger
+        } satisfies CommandFeedback;
+        setCommandFeedback(feedback);
+        routeCommandFeedback(feedback, trigger);
+        return true;
+      }
+      setWorkMode(requested);
+      const feedback = {
+        accepted: true,
+        command,
+        message: `Psychevo mode set to ${requested}.`,
+        feedbackAnchor: trigger
+      } satisfies CommandFeedback;
+      setCommandFeedback(feedback);
+      routeCommandFeedback(feedback, trigger);
+      return true;
+    }
+
+    let modeOption = runtimeModeOption;
+    if (!modeOption && client) {
+      const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+      try {
+        const result = await client.request("runtime/options", {
+          runtimeRef: selectedRuntimeRef,
+          runtimeSessionId,
+          scope,
+          threadId: snapshot.thread?.id ?? null
+        });
+        setRuntimeOptionsResult(result);
+        setRuntimeSessionId(result.runtimeSessionId ?? null);
+        modeOption = result.options.find(isRuntimeModeOption) ?? null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const feedback = {
+          accepted: false,
+          command,
+          message: `Unable to load ${selectedRuntimeRef} modes: ${message}`,
+          feedbackAnchor: trigger
+        } satisfies CommandFeedback;
+        setCommandFeedback(feedback);
+        routeCommandFeedback(feedback, trigger);
+        return true;
+      }
+    }
+    if (!modeOption) {
+      const feedback = {
+        accepted: false,
+        command,
+        message: `${selectedRuntimeRef} does not expose runtime modes.`,
+        feedbackAnchor: trigger
+      } satisfies CommandFeedback;
+      setCommandFeedback(feedback);
+      routeCommandFeedback(feedback, trigger);
+      return true;
+    }
+    const projected = projectRuntimeModeOption(modeOption);
+    const values = runtimeModeCommandValues(projected);
+    const currentMode = resolvePeerRuntimeMode(projected, workMode, selectedRuntimeMode);
+    if (!requested) {
+      const feedback = {
+        accepted: true,
+        command,
+        message: `Current ${selectedRuntimeRef} mode: ${currentMode || "none"}. Available: ${formatRuntimeModeValues(projected)}.`,
+        feedbackAnchor: trigger
+      } satisfies CommandFeedback;
+      setCommandFeedback(feedback);
+      routeCommandFeedback(feedback, trigger);
+      return true;
+    }
+    const requestedMode = normalizeRequestedRuntimeMode(projected, requested);
+    if (!requestedMode || !values.includes(requestedMode)) {
+      const feedback = {
+        accepted: false,
+        command,
+        message: `Unknown ${selectedRuntimeRef} mode: ${requested}. Available: ${formatRuntimeModeValues(projected)}.`,
+        feedbackAnchor: trigger
+      } satisfies CommandFeedback;
+      setCommandFeedback(feedback);
+      routeCommandFeedback(feedback, trigger);
+      return true;
+    }
+    if (projected.supportsPlan && (requestedMode === "plan" || requestedMode === projected.defaultValue)) {
+      setWorkMode(requestedMode === "plan" ? "plan" : "default");
+      setSelectedRuntimeMode("");
+    } else {
+      setWorkMode("default");
+      setSelectedRuntimeMode(requestedMode);
+    }
+    const feedback = {
+      accepted: true,
+      command,
+      message: `${selectedRuntimeRef} mode set to ${requestedMode}.`,
+      feedbackAnchor: trigger
+    } satisfies CommandFeedback;
+    setCommandFeedback(feedback);
+    routeCommandFeedback(feedback, trigger);
+    return true;
+  }
+
+  function resetRuntimeSelection() {
+    setSelectedRuntimeRef("native");
+    setRuntimeSessionId(null);
+    setRuntimeOptionsResult(null);
+    setRuntimeOptionsLoading(false);
+    setRuntimeOptionsError(null);
+    setSelectedRuntimeMode("");
+  }
+
+  function clearSessionObservability() {
+    setObservability(null);
+    setContextUsage(null);
+    setTraceState({ error: null, loading: false, result: null, threadId: null });
+  }
+
   async function startNewThread(workdir?: string) {
     if (!client) {
       return;
     }
     const epoch = beginExplicitViewSwitch();
+    resetRuntimeSelection();
+    clearSessionObservability();
     const scope = workdir
       ? scopeForWorkdir(workdir)
       : activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
@@ -1356,6 +1615,8 @@ export function App() {
     }
     const created = WorkspaceCreateResultSchema.parse(await client.request("workspace/create", { name }));
     const epoch = beginExplicitViewSwitch();
+    resetRuntimeSelection();
+    clearSessionObservability();
     const nextSnapshot = parseThreadSnapshot(await client.request("thread/start", { scope: created.scope }));
     if (viewEpochRef.current === epoch) {
       const normalized = normalizeSnapshot(nextSnapshot);
@@ -1482,24 +1743,42 @@ export function App() {
 
   async function submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null) {
     const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+    const submittedMentions = runtimeAcceptsAgentPersona
+      ? mentions
+      : mentions.filter((mention) => mention.target.kind !== "agent");
     const nextInput: GatewayInputPart[] = [
       ...(text.trim() ? [{ type: "text" as const, text }] : []),
       ...attachments.map((attachment) => attachment.input)
     ];
+    if (selectedRuntimeRef !== "native" && runtimeOptionsError) {
+      setCommandFeedback({
+        accepted: false,
+        command: selectedRuntimeRef,
+        message: `Unable to load ${selectedRuntimeRef} runtime options: ${runtimeOptionsError}`,
+        feedbackAnchor: "composer"
+      });
+      return;
+    }
     const optimisticText = displayText?.trim()
       || text.trim()
       || attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
+    const runtimeOptions = selectedRuntimeRef !== "native" && selectedPeerRuntimeMode
+      ? { mode: selectedPeerRuntimeMode }
+      : {};
     pendingDetachedShellRef.current = null;
     clearCommandTransientUi();
     setSnapshot((current) => appendOptimisticPrompt(current, optimisticText));
     await client?.request("turn/start", {
-      agentName: selectedAgentName || null,
+      agentName: runtimeAcceptsAgentPersona ? selectedAgentName || null : null,
       input: nextInput,
-      mentions,
-      mode: workMode,
+      mentions: submittedMentions,
+      mode: selectedRuntimeRef === "native" ? workMode : null,
       model: selectedModel,
       permissionMode,
       reasoningEffort: selectedVariant === "none" ? null : selectedVariant,
+      runtimeOptions,
+      runtimeRef: selectedRuntimeRef,
+      runtimeSessionId,
       scope,
       threadId: snapshot.thread?.id ?? null,
       text: null
@@ -1987,24 +2266,53 @@ export function App() {
               attachments={attachments}
               completionProvider={async (text, cursor) => {
                 const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
-                return await client?.request("completion/list", {
+                const result = await client?.request("completion/list", {
                   cursor,
                   scope,
                   text,
                   threadId: snapshot.thread?.id ?? null
                 }) ?? { items: [], replacement: null };
+                if (runtimeAcceptsAgentPersona) {
+                  return result;
+                }
+                return {
+                  ...result,
+                  items: result.items.filter((item) => item.target?.kind !== "agent")
+                };
               }}
               disabled={disabled}
               draftPatch={composerDraftPatch ?? undefined}
               leftControls={(
-                <AgentRunSelector
+                <ComposerRuntimeControls
                   agents={runnableAgents}
+                  runtimeBackends={runtimeBackends}
                   disabled={disabled}
-                  value={selectedAgentName}
-                  onChange={(value) => void runAction(async () => changeAgentSelection(value))}
+                  agentValue={selectedAgentName}
+                  runtimeValue={selectedRuntimeRef}
+                  runtimeModeValue={selectedRuntimeMode}
+                  runtimeModeOption={runtimeModeOption}
+                  runtimeModeValues={extraRuntimeModeValues}
+                  runtimeModeError={runtimeOptionsError}
+                  runtimeModeUnavailable={Boolean(runtimeModeUnavailable)}
+                  agentPersonaEnabled={runtimeAcceptsAgentPersona}
+                  onAgentChange={(value) => void runAction(async () => changeAgentSelection(value))}
+                  onRuntimeChange={(value) => {
+                    setSelectedRuntimeRef(value);
+                    setRuntimeSessionId(null);
+                    setRuntimeOptionsResult(null);
+                    setRuntimeOptionsError(null);
+                    setSelectedRuntimeMode("");
+                  }}
+                  onRuntimeModeChange={(value) => {
+                    setSelectedRuntimeMode(value);
+                    if (value) {
+                      setWorkMode("default");
+                    }
+                  }}
                 />
               )}
               mode={workMode}
+              planModeAvailable={planModeAvailable}
               rightControls={(
                 <ComposerSubmitControls
                   context={contextUsage}
@@ -2037,7 +2345,12 @@ export function App() {
                 await client?.request("turn/interrupt", { threadId: snapshot.thread?.id ?? null });
                 await refreshSnapshot();
               })}
-              onModeChange={setWorkMode}
+              onModeChange={(mode) => {
+                setWorkMode(mode);
+                if (mode === "plan") {
+                  setSelectedRuntimeMode("");
+                }
+              }}
               onRemoveAttachment={(id) => setAttachments((current) => current.filter((attachment) => attachment.id !== id))}
               onShell={(command) => void runAction(async () => startShell(command))}
               onSteer={(text) => void runAction(async () => {
@@ -3055,7 +3368,12 @@ function RightWorkspaceHome({
           <RefreshCw size={15} />
         </button>
       </header>
-      <SessionObservability context={context} usage={usage} showCategories />
+      <SessionObservability
+        context={context}
+        hasActiveSession={Boolean(sessionId)}
+        usage={usage}
+        showCategories
+      />
       <nav className="rightHomeNav" aria-label="Open workspace tab">
         <button onClick={() => onOpenKind("review")} type="button">
           <GitPullRequest size={16} />
@@ -3089,10 +3407,12 @@ function RightWorkspaceHome({
 
 function SessionObservability({
   context,
+  hasActiveSession = true,
   usage,
   showCategories = false
 }: {
   context: ContextReadResult | null;
+  hasActiveSession?: boolean;
   usage: SessionUsageSummaryView | null;
   showCategories?: boolean;
 }) {
@@ -3100,11 +3420,13 @@ function SessionObservability({
   const orderedCategories = orderedContextCategories(context?.categories ?? []);
   const rawContextPercent = context?.percent;
   const contextPercentAvailable = typeof rawContextPercent === "number" && Number.isFinite(rawContextPercent);
+  const summaryLabel = hasActiveSession ? context?.label ?? "No active context" : "No active session";
+  const summaryStatus = hasActiveSession ? context?.status ?? "unavailable" : "unbound";
   return (
     <section className="sessionObservability" aria-label="Session observability">
       <div className="sessionObservabilitySummary">
-        <strong>{context?.label ?? "No active context"}</strong>
-        <small>{context?.status ?? "unavailable"}</small>
+        <strong>{summaryLabel}</strong>
+        <small>{summaryStatus}</small>
       </div>
       {showCategories && orderedCategories.length > 0 && (
         <PromptTokenStack
@@ -4559,7 +4881,13 @@ function ComposerSubmitControls({
         renderDisplayValue={compactModelLabel}
         onChange={(value) => onModelChange(value || null)}
       />
-      <StatusSelect label="Variant" value={variant} values={controls?.variantOptions ?? ["none"]} onChange={onVariantChange} />
+      <StatusSelect
+        label="Variant"
+        renderDisplayValue={(value) => value || "variant"}
+        value={variant}
+        values={controls?.variantOptions ?? ["none"]}
+        onChange={onVariantChange}
+      />
       <div className="composerStatusContext" ref={contextPopoverRef}>
         <button
           aria-label="Context usage"
@@ -4637,12 +4965,14 @@ function ComposerStatusLine({
 
 function StatusSelect({
   label,
+  optionLabels,
   renderDisplayValue,
   value,
   values,
   onChange
 }: {
   label: string;
+  optionLabels?: Record<string, string>;
   renderDisplayValue?(value: string): string;
   value: string;
   values: string[];
@@ -4660,7 +4990,7 @@ function StatusSelect({
       {displayValue && <span aria-hidden="true" className="statusSelectDisplay">{displayValue}</span>}
       <select aria-label={label} title={value || label} value={value} onChange={(event) => onChange(event.target.value)}>
         {values.map((option) => (
-          <option key={option || "default"} value={option}>{defaultStatusSelectValue(label, option)}</option>
+          <option key={option || "default"} value={option}>{optionLabels?.[option] ?? defaultStatusSelectValue(label, option)}</option>
         ))}
       </select>
     </label>
@@ -4833,38 +5163,335 @@ function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSu
   return scopeForWorkdir(recentWorkdir?.trim() || window.location.pathname);
 }
 
-function AgentRunSelector({
+function ComposerRuntimeControls({
   agents,
+  runtimeBackends,
   disabled,
-  value,
-  onChange
+  agentValue,
+  runtimeValue,
+  runtimeModeValue,
+  runtimeModeOption,
+  runtimeModeValues,
+  runtimeModeError,
+  runtimeModeUnavailable,
+  agentPersonaEnabled,
+  onAgentChange,
+  onRuntimeChange,
+  onRuntimeModeChange
 }: {
   agents: WorkbenchAgent[];
+  runtimeBackends: WorkbenchBackend[];
   disabled: boolean;
+  agentValue: string;
+  runtimeValue: string;
+  runtimeModeValue: string;
+  runtimeModeOption: RuntimeConfigOptionView | null;
+  runtimeModeValues: RuntimeConfigOptionValueView[];
+  runtimeModeError: string | null;
+  runtimeModeUnavailable: boolean;
+  agentPersonaEnabled: boolean;
+  onAgentChange(value: string): void;
+  onRuntimeChange(value: string): void;
+  onRuntimeModeChange(value: string): void;
+}) {
+  const selectedBackend = runtimeBackends.find((backend) => backend.id === runtimeValue) ?? null;
+  const runtimeLabel = selectedBackend ? backendRuntimeLabel(selectedBackend) : "Native";
+  const hasBaseMode = runtimeModeOption ? projectRuntimeModeOption(runtimeModeOption).supportsPlan : false;
+  const modeValues = hasBaseMode ? ["", ...runtimeModeValues.map((option) => option.value)] : runtimeModeValues.map((option) => option.value);
+  const modeLabels: Record<string, string> = {
+    ...(hasBaseMode ? { "": "Default/Plan" } : {}),
+    ...Object.fromEntries(runtimeModeValues.map((option) => [option.value, option.name]))
+  };
+  return (
+    <div className="composerRuntimeControls" aria-label="Runtime controls">
+      <AgentRuntimeSelector
+        agents={agents}
+        runtimeBackends={runtimeBackends}
+        disabled={disabled}
+        agentPersonaEnabled={agentPersonaEnabled}
+        value={agentValue}
+        runtimeValue={runtimeValue}
+        onChange={onAgentChange}
+        onRuntimeChange={onRuntimeChange}
+      />
+      {runtimeValue !== "native" && runtimeModeOption && runtimeModeValues.length > 0 && (
+        <StatusSelect
+          label={`${runtimeLabel} mode`}
+          optionLabels={modeLabels}
+          renderDisplayValue={(value) => modeLabels[value] ?? value}
+          value={hasBaseMode ? runtimeModeValue : runtimeModeValue || modeValues[0] || ""}
+          values={modeValues}
+          onChange={onRuntimeModeChange}
+        />
+      )}
+      {runtimeValue !== "native" && runtimeModeError && (
+        <span className="runtimeModeHint is-error" title={runtimeModeError}>Mode unavailable</span>
+      )}
+      {runtimeValue !== "native" && runtimeModeUnavailable && (
+        <span className="runtimeModeHint">No modes</span>
+      )}
+    </div>
+  );
+}
+
+function AgentRuntimeSelector({
+  agents,
+  runtimeBackends,
+  disabled,
+  agentPersonaEnabled,
+  value,
+  runtimeValue,
+  onChange,
+  onRuntimeChange
+}: {
+  agents: WorkbenchAgent[];
+  runtimeBackends: WorkbenchBackend[];
+  disabled: boolean;
+  agentPersonaEnabled: boolean;
   value: string;
+  runtimeValue: string;
   onChange: (value: string) => void;
+  onRuntimeChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selectedAgent = agents.find((agent) => agentOptionValue(agent) === value) ?? null;
+  const selectedRuntime = runtimeValue === "native"
+    ? null
+    : runtimeBackends.find((backend) => backend.id === runtimeValue) ?? null;
+  const agentLabel = agentPersonaEnabled ? selectedAgent?.name ?? "Default Agent" : "Agent unavailable";
+  const runtimeLabel = selectedRuntime ? backendRuntimeLabel(selectedRuntime) : "Native";
+  const displayLabel = runtimeValue === "native"
+    ? agentLabel
+    : agentPersonaEnabled
+      ? `${agentLabel} · ${runtimeLabel}`
+      : runtimeLabel;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && rootRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+
+  return (
+    <div
+      ref={rootRef}
+      className="agentRuntimeSelector"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label="Agent"
+        className="agentRuntimeButton"
+        disabled={disabled}
+        title={`${agentPersonaEnabled ? agentLabel : "Agent unavailable"} / ${runtimeLabel}`}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Bot size={14} aria-hidden="true" />
+        <span>{displayLabel}</span>
+        <ChevronDown size={13} aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="agentRuntimePopover" role="dialog" aria-label="Agent and runtime">
+          <div className="agentRuntimeGroup">
+            <div className="agentRuntimeGroupLabel">Main agent</div>
+            <div className="agentRuntimeRows" role="radiogroup" aria-label="Main agent">
+              <AgentRuntimeRow
+                disabled={disabled || !agentPersonaEnabled}
+                label="Default Agent"
+                selected={agentPersonaEnabled && value === ""}
+                onSelect={() => onChange("")}
+              />
+              {agents.map((agent) => {
+                const optionValue = agentOptionValue(agent);
+                return (
+                  <AgentRuntimeRow
+                    key={`${agent.source}:${agent.path ?? agent.name}`}
+                    disabled={disabled || !agentPersonaEnabled}
+                    label={agent.name}
+                    selected={agentPersonaEnabled && value === optionValue}
+                    onSelect={() => onChange(optionValue)}
+                  />
+                );
+              })}
+            </div>
+          </div>
+          {!agentPersonaEnabled && (
+            <div className="agentRuntimeHint">This runtime uses its own persona.</div>
+          )}
+          <div className="agentRuntimeDivider" />
+          <div className="agentRuntimeGroup">
+            <div className="agentRuntimeGroupLabel">Runtime</div>
+            <div className="agentRuntimeRows" role="radiogroup" aria-label="Runtime">
+              <AgentRuntimeRow
+                disabled={disabled}
+                label="Native Runtime"
+                selected={runtimeValue === "native"}
+                onSelect={() => onRuntimeChange("native")}
+              />
+              {runtimeBackends.map((backend) => (
+                <AgentRuntimeRow
+                  key={backend.id}
+                  disabled={disabled}
+                  label={backendRuntimeLabel(backend)}
+                  selected={runtimeValue === backend.id}
+                  onSelect={() => onRuntimeChange(backend.id)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentRuntimeRow({
+  disabled,
+  label,
+  selected,
+  onSelect
+}: {
+  disabled: boolean;
+  label: string;
+  selected: boolean;
+  onSelect(): void;
 }) {
   return (
-    <label className="agentRunSelector" title="Agent">
-      <select
-        aria-label="Agent"
-        disabled={disabled}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">Default Agent</option>
-        {agents.map((agent) => (
-          <option key={`${agent.source}:${agent.path ?? agent.name}`} value={agentOptionValue(agent)}>
-            {agent.backend?.ref ? `${agent.name} (ACP)` : agent.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <button
+      type="button"
+      className={`agentRuntimeRow ${selected ? "is-selected" : ""}`}
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onSelect}
+      role="radio"
+    >
+      <span>{label}</span>
+      {selected && <Check size={13} aria-hidden="true" />}
+    </button>
   );
 }
 
 function agentOptionValue(agent: WorkbenchAgent): string {
   return agent.source === "explicit" ? agent.path?.trim() || agent.name : agent.name;
+}
+
+function isComposerRunnableAgent(agent: WorkbenchAgent): boolean {
+  if (!agent.name) {
+    return false;
+  }
+  return !agent.backend?.ref;
+}
+
+function isComposerRuntimeBackend(backend: WorkbenchBackend): boolean {
+  return backend.enabled
+    && Boolean(backend.command?.trim())
+    && backend.entrypoints.includes("peer");
+}
+
+function runtimeSupportsAgentPersona(runtimeRef: string): boolean {
+  return runtimeRef === "native";
+}
+
+type RuntimeModeProjection = {
+  allValues: RuntimeConfigOptionValueView[];
+  defaultValue: string;
+  extraValues: RuntimeConfigOptionValueView[];
+  supportsPlan: boolean;
+};
+
+function projectRuntimeModeOption(option: RuntimeConfigOptionView | null): RuntimeModeProjection {
+  const allValues = option?.values ?? [];
+  const valueSet = new Set(allValues.map((value) => value.value));
+  const currentValue = option?.currentValue && valueSet.has(option.currentValue)
+    ? option.currentValue
+    : "";
+  const supportsPlan = valueSet.has("plan");
+  const defaultValue = valueSet.has("default")
+    ? "default"
+    : currentValue || allValues.find((value) => value.value !== "plan")?.value || allValues[0]?.value || "";
+  const extraValues = supportsPlan
+    ? allValues.filter((value) => value.value !== "plan" && value.value !== "default" && value.value !== defaultValue)
+    : allValues;
+  return {
+    allValues,
+    defaultValue,
+    extraValues,
+    supportsPlan
+  };
+}
+
+function resolvePeerRuntimeMode(
+  projection: RuntimeModeProjection,
+  workMode: string,
+  selectedExtraMode: string
+): string {
+  if (projection.supportsPlan) {
+    if (selectedExtraMode && projection.extraValues.some((value) => value.value === selectedExtraMode)) {
+      return selectedExtraMode;
+    }
+    return workMode === "plan" ? "plan" : projection.defaultValue;
+  }
+  return selectedExtraMode || projection.defaultValue;
+}
+
+function runtimeModeCommandValues(projection: RuntimeModeProjection): string[] {
+  if (projection.supportsPlan) {
+    return [
+      projection.defaultValue,
+      "plan",
+      ...projection.extraValues.map((value) => value.value)
+    ].filter((value, index, values) => value && values.indexOf(value) === index);
+  }
+  return projection.allValues.map((value) => value.value);
+}
+
+function normalizeRequestedRuntimeMode(projection: RuntimeModeProjection, requested: string): string | null {
+  if (!requested) {
+    return null;
+  }
+  if (projection.supportsPlan && requested === "default") {
+    return projection.defaultValue || null;
+  }
+  return requested;
+}
+
+function formatRuntimeModeValues(projection: RuntimeModeProjection): string {
+  if (projection.supportsPlan) {
+    const defaultLabel = projection.defaultValue && projection.defaultValue !== "default"
+      ? `default (${projection.defaultValue})`
+      : "default";
+    const labels = [
+      defaultLabel,
+      "plan",
+      ...projection.extraValues.map((value) => value.value)
+    ].filter(Boolean);
+    return labels.join(", ") || "none";
+  }
+  return projection.allValues.map((value) => value.value).join(", ") || "none";
+}
+
+function backendRuntimeLabel(backend: WorkbenchBackend): string {
+  return backend.label?.trim() || backend.id;
+}
+
+function isRuntimeModeOption(option: RuntimeConfigOptionView): boolean {
+  return option.id === "mode" || option.category === "mode";
 }
 
 function CommandOverlay({

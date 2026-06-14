@@ -65,6 +65,65 @@ describe("Composer completion mentions", () => {
     ]);
   });
 
+  it("submits an accepted agent completion as a structured @ mention", async () => {
+    const onSubmit = vi.fn();
+    const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
+      replacement: { start: 0, end: 3 },
+      items: [
+        {
+          id: "agent:opencode",
+          sigil: "@",
+          label: "@opencode",
+          insertText: "@opencode",
+          kind: "agent",
+          detail: "OpenCode ACP agent",
+          sortText: "1:agent:opencode",
+          target: {
+            kind: "agent",
+            name: "opencode",
+            source: "generated",
+            entrypoints: ["subagent"],
+            backendRef: "opencode"
+          }
+        }
+      ]
+    }));
+
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "@op" } });
+
+    const option = await screen.findByRole("option", { name: /@opencode/ });
+    fireEvent.mouseDown(option);
+    await waitFor(() => expect(textarea.value).toBe("@opencode "));
+
+    fireEvent.change(textarea, { target: { value: "@opencode summarize this" } });
+    fireEvent.submit(textarea.closest("form")!);
+
+    expect(onSubmit).toHaveBeenCalledWith("@opencode summarize this", [
+      {
+        visibleText: "@opencode",
+        range: { start: 0, end: 9 },
+        target: {
+          kind: "agent",
+          name: "opencode",
+          source: "generated",
+          entrypoints: ["subagent"],
+          backendRef: "opencode"
+        }
+      }
+    ]);
+  });
+
   it("does not reopen the completion popover when a stale request resolves after submit", async () => {
     const onSubmit = vi.fn();
     let resolveCompletion: (result: CompletionListResult) => void = () => {};
@@ -408,6 +467,28 @@ describe("Composer completion mentions", () => {
     const interruptButton = screen.getByRole("button", { name: "Interrupt active turn" });
     expect(interruptButton.closest(".pevo-composerRightControls")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  });
+
+  it("shows Queue and Steer only while a running turn has non-empty prompt text", () => {
+    render(
+      <Composer
+        running
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    expect(screen.queryByRole("tablist", { name: "Turn mode" })).toBeNull();
+
+    fireEvent.change(textarea, { target: { value: "continue the task" } });
+    expect(screen.getByRole("tablist", { name: "Turn mode" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Queue" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Steer" })).toBeTruthy();
+
+    fireEvent.change(textarea, { target: { value: "   " } });
+    expect(screen.queryByRole("tablist", { name: "Turn mode" })).toBeNull();
   });
 
   it("grows the textarea with multiline input and clamps at the maximum height", () => {

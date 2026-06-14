@@ -809,24 +809,167 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 }
 
-.agentRunSelector {
+.composerRuntimeControls {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
+  min-width: 0;
+  gap: 6px;
+  color: var(--pevo-muted);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.agentRuntimeSelector {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   min-width: 0;
   color: var(--pevo-muted);
   font-size: 0.78rem;
 }
 
-.agentRunSelector select {
-  width: 148px;
+.agentRuntimeButton {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  width: 190px;
   min-height: 30px;
-  padding: 0 28px 0 9px;
+  gap: 7px;
+  padding: 0 8px;
   color: var(--pevo-ink);
   background: var(--pevo-panel);
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
   font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agentRuntimeButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentRuntimeButton:disabled {
+  color: var(--pevo-muted);
+  background: var(--pevo-panel-muted);
+  cursor: not-allowed;
+}
+
+.agentRuntimePopover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 45;
+  display: grid;
+  width: 250px;
+  gap: 6px;
+  padding: 7px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: 0 10px 28px color-mix(in oklch, black, transparent 70%);
+}
+
+.agentRuntimeGroup {
+  display: grid;
+  gap: 3px;
+}
+
+.agentRuntimeGroupLabel,
+.agentRuntimeHint {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.agentRuntimeGroupLabel {
+  padding: 0 3px;
+}
+
+.agentRuntimeRows {
+  display: grid;
+  gap: 2px;
+}
+
+.agentRuntimeRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 28px;
+  gap: 8px;
+  padding: 0 7px;
+  color: var(--pevo-ink);
+  background: var(--pevo-page);
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agentRuntimeRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentRuntimeRow:hover:not(:disabled),
+.agentRuntimeRow:focus-visible {
+  border-color: var(--pevo-border);
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-ink) 4%);
+}
+
+.agentRuntimeRow.is-selected {
+  border-color: color-mix(in oklch, var(--pevo-border), var(--pevo-ink) 18%);
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-ink) 6%);
+}
+
+.agentRuntimeRow:disabled {
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-page), var(--pevo-panel) 35%);
+  cursor: not-allowed;
+}
+
+.agentRuntimeDivider {
+  height: 1px;
+  background: var(--pevo-border);
+}
+
+.composerRuntimeControls .statusSelect select {
+  width: 94px;
+  min-height: 30px;
+  padding: 0 24px 0 9px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerRuntimeControls .statusSelectDisplay {
+  max-width: calc(var(--pevo-status-select-value-width, 5ch) + 8px);
+  padding-left: 9px;
+  color: var(--pevo-ink);
+}
+
+.composerRuntimeControls .statusSelect.has-displayValue::after {
+  margin-right: 9px;
+}
+
+.runtimeModeHint {
+  max-width: 148px;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeModeHint.is-error {
+  color: var(--pevo-danger);
 }
 
 .rightTabs {
@@ -3270,7 +3413,7 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   justify-self: end;
   width: 5px;
   height: 5px;
-  margin-right: 5px;
+  margin-right: 3px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   pointer-events: none;
@@ -3316,14 +3459,16 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .composerSubmitControls .statusSelect[data-status="model"] select {
-  width: calc(var(--pevo-status-select-value-width, 5ch) + 26px);
-  min-width: calc(var(--pevo-status-select-value-width, 5ch) + 26px);
+  width: calc(var(--pevo-status-select-value-width, 5ch) + 16px);
+  min-width: calc(var(--pevo-status-select-value-width, 5ch) + 16px);
   max-width: min(240px, 46vw);
-  padding: 0 24px 0 0;
+  padding: 0 14px 0 0;
 }
 
 .composerSubmitControls .statusSelect[data-status="variant"] select {
-  width: 62px;
+  width: calc(var(--pevo-status-select-value-width, 5ch) + 16px);
+  min-width: calc(var(--pevo-status-select-value-width, 5ch) + 16px);
+  padding: 0 14px 0 0;
 }
 
 .composerStatusContext {
@@ -3458,11 +3603,6 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
-}
-
-.agentRunSelector select:disabled {
-  color: var(--pevo-muted);
-  background: var(--pevo-panel-muted);
 }
 
 .agentSurfacePanel {
@@ -4199,8 +4339,37 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 @media (max-width: 620px) {
-  .agentRunSelector select {
-    width: min(132px, 34vw);
+  .pevo-composerFooter {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .pevo-composerLeftControls,
+  .pevo-composerRightControls {
+    flex: 1 1 100%;
+  }
+
+  .pevo-composerLeftControls {
+    flex-wrap: wrap;
+  }
+
+  .pevo-composerRightControls {
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .composerRuntimeControls {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .agentRuntimeButton {
+    width: min(190px, calc(100vw - 112px));
+  }
+
+  .composerRuntimeControls .statusSelect select {
+    width: 96px;
   }
 
   .composerSubmitControls {
@@ -4208,13 +4377,14 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: calc(var(--pevo-status-select-value-width, 5ch) + 24px);
-    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 24px);
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
     max-width: 38vw;
   }
 
   .composerSubmitControls .statusSelect[data-status="variant"] select {
-    width: 52px;
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
   }
 
   .composerStatusLine {
@@ -4245,8 +4415,12 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 @media (max-width: 420px) {
-  .agentRunSelector select {
-    width: min(120px, 31vw);
+  .agentRuntimeButton {
+    width: min(168px, calc(100vw - 112px));
+  }
+
+  .agentRuntimePopover {
+    width: min(260px, calc(100vw - 32px));
   }
 
   .composerSubmitControls {
@@ -4254,13 +4428,14 @@ html[data-pevo-appearance="light"] .brandGlyph img {
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: calc(var(--pevo-status-select-value-width, 5ch) + 22px);
-    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 22px);
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
     max-width: 36vw;
   }
 
   .composerSubmitControls .statusSelect[data-status="variant"] select {
-    width: 50px;
+    width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
+    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
   }
 
   .composerStatusLine {

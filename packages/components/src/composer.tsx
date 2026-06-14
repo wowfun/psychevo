@@ -10,6 +10,7 @@ export interface ComposerProps {
   draftPatch?: ComposerDraftPatch | undefined;
   leftControls?: ReactNode;
   mode?: string;
+  planModeAvailable?: boolean;
   requestPanel?: ReactNode;
   rightControls?: ReactNode;
   running: boolean;
@@ -42,6 +43,7 @@ export function Composer({
   draftPatch,
   leftControls,
   mode = "default",
+  planModeAvailable = true,
   requestPanel,
   rightControls,
   running,
@@ -69,9 +71,10 @@ export function Composer({
   const trimmed = draft.trim();
   const completionItems = completion?.items ?? [];
   const shellMode = inputMode === "shell";
-  const planMode = mode === "plan";
+  const planMode = planModeAvailable && mode === "plan";
   const attachmentItems = attachments ?? [];
   const hasPromptPayload = Boolean(trimmed) || attachmentItems.length > 0;
+  const showTurnModeControls = running && !shellMode && Boolean(trimmed);
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current);
@@ -297,7 +300,7 @@ export function Composer({
   return (
     <form className={`pevo-composer ${shellMode ? "is-shellMode" : ""} ${running ? "is-running" : ""} ${planMode ? "is-planMode" : ""}`} onSubmit={submit}>
       {requestPanel && <div className="pevo-composerRequestPanel">{requestPanel}</div>}
-      {running && (
+      {showTurnModeControls && (
         <div className="pevo-segmented" role="tablist" aria-label="Turn mode">
           <button className={turnMode === "turn" ? "is-selected" : ""} onClick={() => setTurnMode("turn")} type="button">
             Queue
@@ -404,6 +407,7 @@ export function Composer({
                 <button
                   aria-checked={planMode}
                   className={`pevo-modeSwitchRow ${planMode ? "is-on" : ""}`}
+                  disabled={!planModeAvailable}
                   onClick={() => {
                     onModeChange?.(planMode ? "default" : "plan");
                   }}
