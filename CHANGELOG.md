@@ -2,16 +2,18 @@
 
 ## 2026-06-14
 
-- Expanded ACP interoperability across Gateway, Workbench, and `pevo acp`:
-  standard `session/update` streams, v2/v1 negotiation, model/effort config,
-  Thinking/tool/plan/usage events, live transcript pacing, Status usage, and
-  deterministic plus opt-in live Playwright coverage.
-- Reworked Workbench into an app-level Settings and Status experience with
-  embedded Profile ACP backend editing, optional backend metadata/CWD help,
-  command JSON editing, stale Status guards, no Artifacts surface, and no GUI
-  `/agents` overlay.
+- Expanded ACP interoperability across Gateway, Workbench, and `pevo acp` with
+  session-update streams, v2/v1 negotiation, runtime-mode mapping, live
+  Thinking/tool/plan/usage telemetry, `@agent` delegation, deterministic
+  and opt-in ACP Playwright flows.
+- Reworked Workbench/Status into a unified Settings surface with embedded
+  Profile ACP backend editing, safe peer filtering, grouped Agent/Runtime
+  composer controls, `@agent` completion, and streamlined queue/steer and
+  status routing.
 - Added typed agent/backend/status Gateway RPCs, protocol schemas, and
   Workbench/client wiring for configurable agents and ACP backends.
+- Fixed child-agent interruption propagation across Workbench, Gateway, and ACP
+  delegation paths.
 - Realigned foundation specs around storage, environment, permissions, sandbox,
   and design-system numbering, including related spec links.
 - Fixed `peval-py serve` path handling and report duration heat.
