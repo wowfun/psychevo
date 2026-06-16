@@ -2,14 +2,16 @@
 
 ## 2026-06-16
 
-- Fixed subagent/Agent lifecycle handling: durable child sessions and lineage are
-  created earlier, failed spawn rows stay non-openable, and live/projection rows
-  now reconcile without transient duplicate/interrupted placeholders.
-- Kept Workbench/TUI `Agent` handoff behavior stable by binding running results
-  to child sessions, preserving completed rows, and routing task labels/turn
-  updates with stable identity.
-- Added dedicated thread-lineage guidance for Side-chat/subagent navigation and
-  parent-scoped tab behavior.
+- Reworked Agent delegation to `spawn_agent` (`task_name`/`message`/optional
+  `agent_type`), with durable child-session lineage and stable `Agent` identity
+  across live and committed projection.
+- Fixed Agent lifecycle regressions: stable handoff rows, child-thread routing,
+  and side-thread navigation behavior for Side chat/subagent flows, with completed
+  rows staying openable and transient duplicate/interrupted states suppressed.
+- Added pending permission/clarify request handling so live request events route
+  correctly to draft/source-started turns with immediate thread-bound responses.
+- Added `peval-py serve` analysis/caching usability improvements for source
+  aliases and language selection persistence.
 
 ## 2026-06-15
 
