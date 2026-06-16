@@ -384,6 +384,14 @@ lives in Settings > Agents. If a hidden command is typed explicitly,
 `command/execute` returns `known=true`, `accepted=false`, bounded guidance, and
 optional alternate action. Unknown slash-looking input returns `known=false`
 with a `passThroughPrompt` host action.
+`/btw` is a shared `Side chat` command defined by
+[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md). Web/Desktop
+discovery and completion expose it only when the current Workbench surface has
+a concrete session id. Executing `/btw` returns a host action that opens a
+temporary `Side chat` tab and never adds a command transcript row to the
+parent. If the host action includes an inline prompt, Workbench opens the side
+tab before submitting the prompt and shows that prompt in the side transcript
+through the ordinary thread composer/reconciliation path.
 
 Workbench applies command results by destination rather than by transcript
 insertion. Navigation commands switch panels, structured inspection commands
@@ -413,6 +421,21 @@ Successful display-only feedback with no follow-up action may auto-dismiss after
 a short delay and may be dismissed by clicking outside its panel. Error feedback
 and feedback with follow-up actions must remain until explicit dismissal or a
 normal transient clear.
+
+Workbench observes accepted-turn settlement through Gateway live events and
+`thread/read` snapshots. Provider/runtime failures after turn acceptance must
+settle as a thread-scoped terminal turn status and render as diagnostic/status
+projection in the affected thread. `turn/error` is reserved for request-level
+fallback or pre-acceptance failures and is not the source of truth for accepted
+turn failure. Turn terminal events stop running activity, clear active-turn UI,
+and reconcile pending tool/reasoning rows as failed or interrupted.
+
+Interrupt actions are scoped to the current thread or opened child thread.
+Workbench may show immediate local interrupting state after sending
+`turn/interrupt`, but final UI settlement comes from the same terminal turn
+status used by TUI and history reload. Refreshes after interrupt must read the
+target thread explicitly; they must not resume an unscoped draft or unrelated
+source binding.
 
 Workbench refreshes `observability/read` after `thread/resume`, `thread/read`,
 turn completion, undo/redo workspace refresh, and explicit session switches,

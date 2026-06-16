@@ -145,9 +145,9 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         canonical: "/refresh",
         aliases: &[],
         usage: "/refresh",
-        summary: "reload context and clean side sessions",
+        summary: "reload context and clean side chats",
         help_detail: Some(
-            "Re-reads current local agents, skills, and AGENTS context, then cleans orphan /btw side sessions.",
+            "Re-reads current local agents, skills, and AGENTS context, then cleans orphan /btw side chats.",
         ),
         surface: TUI_SLASH,
         group: COMMANDS,
@@ -161,9 +161,9 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         canonical: "/btw",
         aliases: &[],
         usage: "/btw [prompt]",
-        summary: "open a side conversation",
+        summary: "open a side chat",
         help_detail: Some(
-            "Starts a temporary side conversation; Ctrl+C returns and deletes the side transcript.",
+            "Starts a temporary side chat; Ctrl+C returns and deletes the side transcript.",
         ),
         surface: TUI_SLASH,
         group: COMMANDS,

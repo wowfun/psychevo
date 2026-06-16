@@ -28,6 +28,7 @@ pub(crate) mod snapshot;
 pub(crate) mod state_runtime;
 pub(crate) mod stats;
 pub(crate) mod store;
+pub(crate) mod thread_lineage;
 pub(crate) mod tool_surface;
 pub(crate) mod tools;
 pub(crate) mod types;
@@ -123,8 +124,13 @@ pub use store::{
     ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
     GatewayControlCommandRecord, GatewayLiveEventRecord, GatewaySourceBindingInput,
-    GatewaySourceBindingRecord, SessionCompactionInput, SessionCompactionRecord,
-    SessionMessageRecord, SqliteStore,
+    GatewaySourceBindingRecord, GatewayTurnTerminalInput, GatewayTurnTerminalRecord,
+    SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord, SqliteStore,
+};
+pub use thread_lineage::{
+    SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
+    TUI_SIDE_CONVERSATION_SESSION_SOURCE, WEB_SIDE_CONVERSATION_SESSION_SOURCE,
+    side_conversation_session_source, side_inherited_metadata_hidden,
 };
 pub use tools::tool_names_for_mode;
 pub use types::{

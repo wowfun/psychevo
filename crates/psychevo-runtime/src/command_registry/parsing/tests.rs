@@ -262,6 +262,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn shared_effect_parses_btw_when_side_conversations_are_supported() {
+        let SlashCommandParse::Known(invocation) = parse_slash_command_line("/btw explain this")
+        else {
+            panic!("expected known command");
+        };
+        let effect = slash_invocation_effect(
+            &invocation,
+            &[CommandCapability::SideConversation],
+            SlashCommandSurface::WebDesktop,
+            true,
+        )
+        .expect("btw effect");
+        assert_eq!(
+            effect,
+            SlashCommandEffect::Btw {
+                prompt: Some("explain this".to_string()),
+            }
+        );
+    }
+
+    #[test]
     fn web_desktop_surface_returns_surface_specific_guidance() {
         let SlashCommandParse::Known(invocation) = parse_slash_command_line("/image ./a.png")
         else {

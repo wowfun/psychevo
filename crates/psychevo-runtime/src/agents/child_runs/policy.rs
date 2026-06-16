@@ -1,6 +1,14 @@
 
 pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     if child.abort.aborted() {
+        if let Some(child_session) = child.existing_child_session.as_deref() {
+            update_run_child_session(&child.id, child_session);
+            let _ = child
+                .context
+                .state
+                .store()
+                .set_agent_edge_status(child_session, AgentEdgeStatus::Closed);
+        }
         update_run_failed(&child.id, "parent invocation aborted");
         return Err(Error::Message("parent invocation aborted".to_string()));
     }
@@ -35,6 +43,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                     fork_context: child.fork_context,
                     spawn_depth_remaining: child.spawn_depth_remaining,
                     context: Some(&child.context),
+                    parent_tool_call_id: child.parent_tool_call_id.as_deref(),
                 })),
             )?
     };
@@ -56,6 +65,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 fork_context: child.fork_context,
                 spawn_depth_remaining: child.spawn_depth_remaining,
                 context: Some(&child.context),
+                parent_tool_call_id: child.parent_tool_call_id.as_deref(),
             })),
         )?;
     }
@@ -443,6 +453,7 @@ pub(crate) struct ChildAgentMetadataInput<'a> {
     pub(crate) fork_context: bool,
     pub(crate) spawn_depth_remaining: u8,
     pub(crate) context: Option<&'a AgentToolContext>,
+    pub(crate) parent_tool_call_id: Option<&'a str>,
 }
 
 pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value {
@@ -512,6 +523,7 @@ pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value 
             "fork_context": input.fork_context,
             "effective_max_spawn_depth": input.spawn_depth_remaining,
             "max_spawn_depth": input.spawn_depth_remaining,
+            "parent_tool_call_id": input.parent_tool_call_id,
         }),
     );
     Value::Object(object)

@@ -36,9 +36,15 @@ impl Gateway {
         thread_id: &str,
     ) -> psychevo_runtime::Result<Vec<TranscriptEntry>> {
         let summaries = self.state.store().load_tui_message_summaries(thread_id)?;
-        Ok(transcript::project_transcript_entries(
-            thread_id, &summaries,
-        ))
+        let mut entries = transcript::project_transcript_entries(thread_id, &summaries);
+        let agent_edges = self.state.store().list_agent_edges_for_parent(thread_id)?;
+        transcript::enrich_agent_blocks_from_edges(&mut entries, &agent_edges);
+        let terminals = self
+            .state
+            .store()
+            .list_gateway_turn_terminals_for_thread(thread_id)?;
+        entries.extend(transcript::project_turn_terminal_entries(&terminals));
+        Ok(entries)
     }
 
     pub fn activity_for_selector(&self, selector: GatewayThreadSelector) -> GatewayActivity {

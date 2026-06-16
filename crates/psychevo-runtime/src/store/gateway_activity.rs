@@ -415,6 +415,84 @@ impl SqliteStore {
         })?;
         Ok(changed > 0)
     }
+
+    pub fn upsert_gateway_turn_terminal(
+        &self,
+        input: GatewayTurnTerminalInput<'_>,
+    ) -> Result<GatewayTurnTerminalRecord> {
+        let metadata_json = input
+            .metadata
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        self.write_retry(|conn| {
+            conn.execute(
+                r#"
+                INSERT INTO gateway_turn_terminals (
+                    turn_id, thread_id, status, outcome, error_message,
+                    started_at_ms, completed_at_ms, metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                ON CONFLICT(turn_id) DO UPDATE SET
+                    thread_id = excluded.thread_id,
+                    status = excluded.status,
+                    outcome = excluded.outcome,
+                    error_message = excluded.error_message,
+                    started_at_ms = COALESCE(excluded.started_at_ms, gateway_turn_terminals.started_at_ms),
+                    completed_at_ms = excluded.completed_at_ms,
+                    metadata_json = excluded.metadata_json
+                "#,
+                params![
+                    input.turn_id,
+                    input.thread_id,
+                    input.status,
+                    input.outcome,
+                    input.error_message,
+                    input.started_at_ms,
+                    input.completed_at_ms,
+                    metadata_json,
+                ],
+            )
+        })?;
+        self.gateway_turn_terminal(input.turn_id)?.ok_or_else(|| {
+            Error::Message(format!(
+                "gateway turn terminal not found after write: {}",
+                input.turn_id
+            ))
+        })
+    }
+
+    pub fn gateway_turn_terminal(
+        &self,
+        turn_id: &str,
+    ) -> Result<Option<GatewayTurnTerminalRecord>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        conn.query_row(
+            gateway_turn_terminal_select_sql("WHERE turn_id = ?1").as_str(),
+            params![turn_id],
+            gateway_turn_terminal_from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn list_gateway_turn_terminals_for_thread(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<GatewayTurnTerminalRecord>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            gateway_turn_terminal_select_sql(
+                "WHERE thread_id = ?1 ORDER BY completed_at_ms ASC, turn_id ASC",
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(params![thread_id], gateway_turn_terminal_from_row)?;
+        let mut terminals = Vec::new();
+        for row in rows {
+            terminals.push(row?);
+        }
+        Ok(terminals)
+    }
 }
 
 fn gateway_activity_select_sql(where_clause: &str) -> String {
@@ -497,5 +575,39 @@ fn gateway_control_command_from_row(
         created_at_ms: row.get(6)?,
         updated_at_ms: row.get(7)?,
         error: row.get(8)?,
+    })
+}
+
+fn gateway_turn_terminal_select_sql(where_clause: &str) -> String {
+    format!(
+        r#"
+        SELECT turn_id, thread_id, status, outcome, error_message,
+               started_at_ms, completed_at_ms, metadata_json
+        FROM gateway_turn_terminals
+        {where_clause}
+        "#
+    )
+}
+
+fn gateway_turn_terminal_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<GatewayTurnTerminalRecord> {
+    let metadata_json: Option<String> = row.get(7)?;
+    let metadata = metadata_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(err))
+        })?;
+    Ok(GatewayTurnTerminalRecord {
+        turn_id: row.get(0)?,
+        thread_id: row.get(1)?,
+        status: row.get(2)?,
+        outcome: row.get(3)?,
+        error_message: row.get(4)?,
+        started_at_ms: row.get(5)?,
+        completed_at_ms: row.get(6)?,
+        metadata,
     })
 }

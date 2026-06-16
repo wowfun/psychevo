@@ -1,6 +1,62 @@
     use psychevo_runtime::{Outcome, UserContentBlock};
 
     #[test]
+    fn terminal_projection_keeps_failed_and_interrupted_turns_visible() {
+        let entries = project_turn_terminal_entries(&[
+            GatewayTurnTerminalRecord {
+                turn_id: "turn-ok".to_string(),
+                thread_id: "thread-1".to_string(),
+                status: "completed".to_string(),
+                outcome: Some("normal".to_string()),
+                error_message: None,
+                started_at_ms: Some(1),
+                completed_at_ms: 2,
+                metadata: None,
+            },
+            GatewayTurnTerminalRecord {
+                turn_id: "turn-failed".to_string(),
+                thread_id: "thread-1".to_string(),
+                status: "failed".to_string(),
+                outcome: Some("failed".to_string()),
+                error_message: Some("model service failed".to_string()),
+                started_at_ms: Some(3),
+                completed_at_ms: 4,
+                metadata: Some(json!({"source": "test"})),
+            },
+            GatewayTurnTerminalRecord {
+                turn_id: "turn-interrupted".to_string(),
+                thread_id: "thread-1".to_string(),
+                status: "interrupted".to_string(),
+                outcome: Some("aborted".to_string()),
+                error_message: None,
+                started_at_ms: Some(5),
+                completed_at_ms: 6,
+                metadata: None,
+            },
+        ]);
+
+        assert_eq!(
+            entries.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>(),
+            vec!["turn:turn-failed:terminal", "turn:turn-interrupted:terminal"]
+        );
+        assert_eq!(entries[0].role, TranscriptEntryRole::Diagnostic);
+        assert_eq!(entries[0].status, TranscriptBlockStatus::Failed);
+        assert_eq!(
+            entries[0].blocks[0].body.as_deref(),
+            Some("model service failed")
+        );
+        assert_eq!(
+            entries[0].metadata.as_ref().unwrap()["terminal"]["source"],
+            "test"
+        );
+        assert_eq!(entries[1].status, TranscriptBlockStatus::Cancelled);
+        assert_eq!(
+            entries[1].blocks[0].title.as_deref(),
+            Some("Turn interrupted")
+        );
+    }
+
+    #[test]
     fn projector_preserves_assistant_block_order_and_attaches_tool_result() {
         let summaries = vec![
             summary(
@@ -67,6 +123,245 @@
         assert_eq!(
             tool.metadata.as_ref().unwrap()["result"]["output"],
             "today\n"
+        );
+    }
+
+    #[test]
+    fn projector_reloads_agent_tool_calls_as_agent_blocks() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_agent",
+                        "Agent",
+                        json!({"agent_name": "Planck", "task": "Inspect"}),
+                    )],
+                    timestamp_ms: 10,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call_agent".to_string(),
+                    tool_name: "Agent".to_string(),
+                    content: serde_json::to_string(&json!({
+                        "agent_name": "Planck",
+                        "child_session_id": "child-thread",
+                        "parent_session_id": "thread-1",
+                        "task_name": "Inspect"
+                    }))
+                    .expect("agent result json"),
+                    is_error: false,
+                    timestamp_ms: 20,
+                },
+            ),
+        ];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+        let block = &entries[0].blocks[0];
+
+        assert_eq!(block.kind, TranscriptBlockKind::Agent);
+        assert_eq!(block.status, TranscriptBlockStatus::Completed);
+        assert_eq!(block.metadata.as_ref().unwrap()["result"]["child_session_id"], "child-thread");
+        assert_eq!(block.result.as_ref().unwrap().result_message_seq, 2);
+    }
+
+    #[test]
+    fn projector_reloads_agent_tool_prompt_into_result_metadata() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_agent",
+                        "Agent",
+                        json!({
+                            "agent_type": "translate",
+                            "task_name": "Translate user message to Chinese",
+                            "prompt": "Translate the following message to Chinese: hello"
+                        }),
+                    )],
+                    timestamp_ms: 10,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call_agent".to_string(),
+                    tool_name: "Agent".to_string(),
+                    content: serde_json::to_string(&json!({
+                        "agent_name": "translate",
+                        "child_session_id": "child-thread",
+                        "parent_session_id": "thread-1",
+                        "status": "completed",
+                        "summary": "你好"
+                    }))
+                    .expect("agent result json"),
+                    is_error: false,
+                    timestamp_ms: 20,
+                },
+            ),
+        ];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+        let block = &entries[0].blocks[0];
+        let metadata = block.metadata.as_ref().expect("metadata");
+
+        assert_eq!(block.kind, TranscriptBlockKind::Agent);
+        assert_eq!(block.status, TranscriptBlockStatus::Completed);
+        assert_eq!(
+            metadata["result"]["task"],
+            "Translate the following message to Chinese: hello"
+        );
+        assert_eq!(metadata["result"]["child_session_id"], "child-thread");
+        assert_eq!(metadata["result"]["session_id"], "child-thread");
+    }
+
+    #[test]
+    fn agent_edge_enrichment_restores_committed_child_session_target() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_agent_zh",
+                        "Agent",
+                        json!({
+                            "agent_type": "translate",
+                            "task_name": "zh-to-en",
+                            "prompt": "Translate 你好 to English"
+                        }),
+                    )],
+                    timestamp_ms: 10,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call_agent_zh".to_string(),
+                    tool_name: "Agent".to_string(),
+                    content: serde_json::to_string(&json!({
+                        "agent_id": "agent-run-1",
+                        "agent_name": "translate",
+                        "task_name": "zh-to-en",
+                        "status": "completed",
+                        "summary": "hello"
+                    }))
+                    .expect("agent result json"),
+                    is_error: false,
+                    timestamp_ms: 20,
+                },
+            ),
+        ];
+        let mut entries = project_transcript_entries("parent-thread", &summaries);
+        let edges = vec![agent_edge(
+            "parent-thread",
+            "child-thread",
+            json!({
+                "agent": {
+                    "id": "agent-run-1",
+                    "name": "translate",
+                    "task_name": "zh-to-en",
+                    "task": "Translate 你好 to English",
+                    "parent_tool_call_id": "call_agent_zh"
+                }
+            }),
+        )];
+
+        enrich_agent_blocks_from_edges(&mut entries, &edges);
+
+        let metadata = entries[0].blocks[0].metadata.as_ref().expect("metadata");
+        assert_eq!(metadata["result"]["child_session_id"], "child-thread");
+        assert_eq!(metadata["result"]["session_id"], "child-thread");
+        assert_eq!(metadata["result"]["parent_session_id"], "parent-thread");
+        assert_eq!(metadata["result"]["agent_id"], "agent-run-1");
+        assert_eq!(metadata["result"]["agent_name"], "translate");
+        assert_eq!(
+            entries[0].blocks[0]
+                .result
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()["result"]["child_session_id"],
+            "child-thread"
+        );
+    }
+
+    #[test]
+    fn agent_edge_enrichment_does_not_make_failed_agent_blocks_openable() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_agent_bad",
+                        "Agent",
+                        json!({
+                            "agent_type": "translate",
+                            "task_name": "zh-to-en",
+                            "prompt": "Translate 你好 to English"
+                        }),
+                    )],
+                    timestamp_ms: 10,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call_agent_bad".to_string(),
+                    tool_name: "Agent".to_string(),
+                    content: serde_json::to_string(&json!({
+                        "error": "unknown agent"
+                    }))
+                    .expect("agent result json"),
+                    is_error: true,
+                    timestamp_ms: 20,
+                },
+            ),
+        ];
+        let mut entries = project_transcript_entries("parent-thread", &summaries);
+        let edges = vec![agent_edge(
+            "parent-thread",
+            "child-thread",
+            json!({
+                "agent": {
+                    "id": "agent-run-1",
+                    "name": "translate",
+                    "task_name": "zh-to-en",
+                    "parent_tool_call_id": "call_agent_bad"
+                }
+            }),
+        )];
+
+        enrich_agent_blocks_from_edges(&mut entries, &edges);
+
+        let block = &entries[0].blocks[0];
+        assert_eq!(block.status, TranscriptBlockStatus::Failed);
+        assert!(block.metadata.as_ref().unwrap()["result"]["child_session_id"].is_null());
+        assert!(
+            block
+                .result
+                .as_ref()
+                .and_then(|result| result.metadata.as_ref())
+                .is_none_or(|metadata| metadata["result"]["child_session_id"].is_null())
         );
     }
 
@@ -276,6 +571,39 @@
         assert_eq!(entries[0].blocks[0].body.as_deref(), Some("new"));
     }
 
+    #[test]
+    fn projector_hides_side_inherited_parent_context() {
+        let mut inherited = summary(
+            1,
+            Message::User {
+                content: vec![UserContentBlock::text("parent history")],
+                timestamp_ms: 1,
+            },
+        );
+        let mut metadata = serde_json::Map::new();
+        metadata.insert(
+            psychevo_runtime::SIDE_INHERITED_METADATA_KEY.to_string(),
+            json!({
+                "hidden": true,
+                "parent_session_id": "parent-thread",
+            }),
+        );
+        inherited.metadata = Some(Value::Object(metadata));
+        let side_local = summary(
+            2,
+            Message::User {
+                content: vec![UserContentBlock::text("side prompt")],
+                timestamp_ms: 2,
+            },
+        );
+
+        let entries = project_transcript_entries("side-thread", &[inherited, side_local]);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].message_seq, Some(2));
+        assert_eq!(entries[0].blocks[0].body.as_deref(), Some("side prompt"));
+    }
+
     fn summary(session_seq: i64, message: Message) -> TuiMessageSummary {
         TuiMessageSummary {
             session_seq,
@@ -299,4 +627,15 @@
             "call_index": 0
         }))
         .expect("tool call block")
+    }
+
+    fn agent_edge(parent: &str, child: &str, metadata: Value) -> AgentEdgeRecord {
+        AgentEdgeRecord {
+            parent_session_id: parent.to_string(),
+            child_session_id: child.to_string(),
+            status: psychevo_runtime::AgentEdgeStatus::Closed,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+            metadata: Some(metadata),
+        }
     }

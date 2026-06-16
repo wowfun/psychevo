@@ -139,6 +139,7 @@ Sleep 200 ms
 Type "Subagent foreground VHS fixture"
 Enter
 Wait+Screen /translate\(Translate user message to Chinese\)/
+Wait+Screen /Open/
 Sleep 300 ms
 Screenshot "10-agent-tool-running.png"
 Ctrl+T

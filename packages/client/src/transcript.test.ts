@@ -9,7 +9,7 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
       type: "turnCompleted",
       threadId: "thread-old",
       turnId: "turn-old",
-      outcome: "normal",
+      turn: completedTurn("turn-old", "thread-old"),
       committedEntries: [
         entry({
           id: "message:1:user",
@@ -53,7 +53,7 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
       type: "turnCompleted",
       threadId: "thread-new",
       turnId: "turn-new",
-      outcome: "normal",
+      turn: completedTurn("turn-new", "thread-new"),
       committedEntries: [
         entry({
           id: "message:1:user",
@@ -69,6 +69,180 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
 
     expect(next.thread?.id).toBe("thread-new");
     expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:1:user"]);
+  });
+
+  it("settles a failed terminal turn and keeps the diagnostic visible", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:tool",
+          blocks: [block({
+            id: "live:turn-1:tool:block",
+            kind: "shell",
+            status: "running",
+            title: "exec_command"
+          })]
+        })
+      ]
+    };
+
+    const next = applyLiveTranscriptEvent(current, {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: {
+        ...completedTurn("turn-1", "thread-1"),
+        status: "failed",
+        outcome: "failed",
+        error: { message: "model service failed" },
+        completedAtMs: 20
+      },
+      committedEntries: []
+    });
+
+    expect(next.activity.running).toBe(false);
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "live:turn-1:tool",
+      "turn:turn-1:terminal"
+    ]);
+    expect(next.entries[0]?.status).toBe("failed");
+    expect(next.entries[0]?.blocks[0]?.status).toBe("failed");
+    expect(next.entries[1]?.blocks[0]?.body).toBe("model service failed");
+  });
+
+  it("routes child-thread live entries away from the parent snapshot", () => {
+    const childEvent = {
+      type: "entryUpdated" as const,
+      turnId: "turn-child",
+      entry: entry({
+        id: "live:turn-child:assistant:0",
+        threadId: "child-thread",
+        turnId: "turn-child",
+        blocks: [
+          block({
+            id: "live:turn-child:assistant:0:reasoning",
+            kind: "reasoning",
+            title: "Thinking",
+            body: "child work"
+          })
+        ]
+      })
+    };
+
+    const parent = threadSnapshot();
+    expect(applyLiveTranscriptEvent(parent, childEvent)).toBe(parent);
+
+    const child = {
+      ...threadSnapshot(),
+      thread: {
+        id: "child-thread",
+        backend: {
+          kind: "psychevo" as const,
+          nativeId: "child-thread"
+        },
+        sourceKey: "web:test"
+      },
+      activity: {
+        running: true,
+        activeTurnId: "turn-child",
+        queuedTurns: 0
+      }
+    };
+    const next = applyLiveTranscriptEvent(child, childEvent);
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "live:turn-child:assistant:0"
+    ]);
+    expect(next.entries[0]?.threadId).toBe("child-thread");
+    expect(next.entries[0]?.blocks[0]?.body).toBe("child work");
+  });
+
+  it("keeps a live Agent child target when committed entries replace the overlay", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:agent",
+          source: "runtime.stream",
+          messageSeq: null,
+          blocks: [
+            block({
+              id: "live:turn-1:agent:block",
+              kind: "agent",
+              title: "Agent",
+              status: "running",
+              metadata: {
+                tool_name: "Agent",
+                tool_call_id: "call-agent",
+                result: {
+                  agent_name: "translate",
+                  child_session_id: "child-thread",
+                  parent_session_id: "thread-1",
+                  task_name: "zh-to-en"
+                }
+              }
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = applyLiveTranscriptEvent(current, {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: completedTurn("turn-1", "thread-1"),
+      committedEntries: [
+        entry({
+          id: "message:2",
+          source: "runtime.message",
+          messageSeq: 2,
+          status: "completed",
+          blocks: [
+            block({
+              id: "message:2:agent",
+              kind: "agent",
+              source: "runtime.message",
+              status: "completed",
+              title: "Agent",
+              metadata: {
+                tool_name: "Agent",
+                tool_call_id: "call-agent",
+                args: {
+                  agent_type: "translate",
+                  task_name: "zh-to-en"
+                },
+                result: {
+                  agent_name: "translate",
+                  task_name: "zh-to-en"
+                }
+              },
+              result: {
+                resultMessageSeq: 3,
+                status: "completed",
+                content: "{\"agent_name\":\"translate\",\"task_name\":\"zh-to-en\"}",
+                isError: false,
+                metadata: {
+                  result: {
+                    agent_name: "translate",
+                    task_name: "zh-to-en"
+                  }
+                },
+                createdAtMs: 3,
+                updatedAtMs: 3
+              }
+            })
+          ]
+        })
+      ]
+    });
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:2"]);
+    const agentBlock = next.entries[0]?.blocks[0];
+    expect((agentBlock?.metadata as Record<string, unknown>)?.["child_session_id"]).toBe("child-thread");
+    expect(((agentBlock?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_session_id"]).toBe("child-thread");
+    expect(((agentBlock?.result?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_session_id"]).toBe("child-thread");
   });
 });
 
@@ -112,6 +286,51 @@ describe("reconcileThreadSnapshot", () => {
       "live:turn-1:assistant:13",
       "message:15"
     ]);
+  });
+
+  it("drops side-inherited parent context from thread snapshots and live entries", () => {
+    const incoming = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "message:1",
+          threadId: "thread-1",
+          turnId: "message:1",
+          messageSeq: 1,
+          role: "user",
+          status: "completed",
+          source: "runtime.message",
+          metadata: { side_inherited: { hidden: true, parent_session_id: "parent-thread" } },
+          blocks: [block({ id: "message:1:text", status: "completed", body: "parent history" })]
+        }),
+        entry({
+          id: "message:2",
+          threadId: "thread-1",
+          turnId: "message:2",
+          messageSeq: 2,
+          role: "user",
+          status: "completed",
+          source: "runtime.message",
+          blocks: [block({ id: "message:2:text", status: "completed", body: "side prompt" })]
+        })
+      ]
+    };
+
+    const reconciled = reconcileThreadSnapshot(threadSnapshot(), incoming);
+    const next = applyLiveTranscriptEvent(reconciled, {
+      type: "entryUpdated",
+      turnId: "turn-1",
+      entry: entry({
+        id: "live:parent-context",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        metadata: { side_inherited: { hidden: true, parent_session_id: "parent-thread" } },
+        blocks: [block({ id: "live:parent-context:text", body: "late parent history" })]
+      })
+    });
+
+    expect(reconciled.entries.map((candidate) => candidate.id)).toEqual(["message:2"]);
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:2"]);
   });
 });
 
@@ -187,6 +406,18 @@ function messageEntry(messageSeq: number, text: string, createdAtMs: number): Tr
       })
     ]
   });
+}
+
+function completedTurn(id: string, threadId: string | null) {
+  return {
+    id,
+    threadId,
+    status: "completed" as const,
+    outcome: "normal",
+    error: null,
+    startedAtMs: 1,
+    completedAtMs: 2
+  };
 }
 
 function entry(overrides: Partial<TranscriptEntry> = {}): TranscriptEntry {

@@ -434,7 +434,7 @@ pub(crate) fn duplicate_agents_are_available_as_shadowed_definitions() {
 }
 
 #[test]
-pub(crate) fn agent_tool_name_alias_and_conflict_resolution() {
+pub(crate) fn agent_tool_name_is_hidden_task_name_fallback_only() {
     let args = AgentToolArgs {
         agent_type: None,
         name: Some("translate".to_string()),
@@ -448,9 +448,10 @@ pub(crate) fn agent_tool_name_alias_and_conflict_resolution() {
         max_spawn_depth: None,
     };
     assert_eq!(
-        resolve_agent_tool_name(&args, &[]).expect("alias"),
-        "translate"
+        resolve_agent_tool_name(&args, &[]).expect("default agent"),
+        "general"
     );
+    assert_eq!(agent_tool_task_name(&args), Some("translate"));
 
     let args = AgentToolArgs {
         agent_type: Some("general".to_string()),
@@ -464,8 +465,51 @@ pub(crate) fn agent_tool_name_alias_and_conflict_resolution() {
         max_turns: None,
         max_spawn_depth: None,
     };
-    let err = resolve_agent_tool_name(&args, &[]).expect_err("conflict");
-    assert!(err.to_string().contains("conflict"));
+    assert_eq!(
+        resolve_agent_tool_name(&args, &[]).expect("agent_type wins"),
+        "general"
+    );
+    assert_eq!(agent_tool_task_name(&args), Some("translate"));
+
+    let args = AgentToolArgs {
+        agent_type: Some("general".to_string()),
+        name: Some("ignored-name".to_string()),
+        prompt: "translate this".to_string(),
+        task_name: Some("explicit-task".to_string()),
+        background: None,
+        model: None,
+        fork_context: false,
+        fork_turns: None,
+        max_turns: None,
+        max_spawn_depth: None,
+    };
+    assert_eq!(agent_tool_task_name(&args), Some("explicit-task"));
+}
+
+#[test]
+pub(crate) fn agent_tool_schema_omits_name_argument() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "test", "model", "provider", None)
+        .expect("parent");
+    let context = test_agent_tool_context(
+        &tmp,
+        Arc::new(FakeProvider::new(Vec::new())),
+        store,
+        db_path,
+        parent,
+        AgentCatalog {
+            agents: vec![built_in_agent("general", "General", "General.", None)],
+            shadowed_agents: Vec::new(),
+            diagnostics: Vec::new(),
+        },
+    );
+    let schema = AgentTool::new(context).parameters();
+    assert!(schema.pointer("/properties/name").is_none());
+    assert!(schema.pointer("/properties/agent_type").is_some());
+    assert!(schema.pointer("/properties/task_name").is_some());
 }
 
 #[test]

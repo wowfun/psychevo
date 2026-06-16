@@ -155,8 +155,25 @@ pub struct GatewayThread {
 #[serde(rename_all = "camelCase")]
 pub struct GatewayTurn {
     pub id: String,
-    pub thread_id: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
     pub status: GatewayTurnStatus,
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub error: Option<GatewayTurnError>,
+    #[serde(rename = "startedAtMs", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub started_at_ms: Option<i64>,
+    #[serde(rename = "completedAtMs", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub completed_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayTurnError {
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -166,7 +183,7 @@ pub enum GatewayTurnStatus {
     Running,
     Completed,
     Failed,
-    Cancelled,
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

@@ -208,6 +208,17 @@ impl SqliteStore {
                 error TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS gateway_turn_terminals (
+                turn_id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                outcome TEXT,
+                error_message TEXT,
+                started_at_ms INTEGER,
+                completed_at_ms INTEGER NOT NULL,
+                metadata_json TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
             CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
@@ -234,6 +245,8 @@ impl SqliteStore {
                 ON gateway_live_events(thread_id, seq);
             CREATE INDEX IF NOT EXISTS idx_gateway_control_commands_owner
                 ON gateway_control_commands(owner_id, status, id);
+            CREATE INDEX IF NOT EXISTS idx_gateway_turn_terminals_thread
+                ON gateway_turn_terminals(thread_id, completed_at_ms);
             "#,
         )?;
         if !sqlite_column_exists(&conn, "context_evidence", "provider_group")? {

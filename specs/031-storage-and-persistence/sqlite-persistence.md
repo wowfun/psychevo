@@ -32,12 +32,17 @@ The default first-slice SQLite shape contains:
 - `agent_edges`
 - `session_compactions`
 - `gateway_source_bindings`
+- `gateway_activities`
+- `gateway_live_events`
+- `gateway_control_commands`
+- `gateway_turn_terminals`
 
 The default first-slice SQLite shape does not create:
 - a separate per-invocation execution-root table
 - `facts`
 - `refs`
 - `artifacts`
+- a complete per-turn event-log table
 
 This attachment defines implementation shape, not public contract shape. The
 first implementation slice uses the columns below as an internal contract, not
@@ -105,6 +110,46 @@ The first implementation slice stores these columns:
 - `created_at_ms` integer
 - `updated_at_ms` integer
 - `lineage_json` text nullable
+
+## Gateway Runtime Coordination
+
+Gateway runtime coordination tables persist local coordination facts needed for
+cross-surface status, recovery, and control. They are not ordinary transcript
+material and must not become model-visible context.
+
+`gateway_activities` stores the active or recently settled Gateway activity
+claim for a running turn or shell command. Required semantics include:
+- durable ownership for a running activity across surfaces
+- relationship to a thread, source key, and turn/activity identity when known
+- status sufficient to distinguish running, queued, completed, failed,
+  interrupted, superseded, and released states
+- lease and owner fields sufficient to detect stale foreign owners
+- queued-turn count for status projection
+- optional intent metadata for local recovery/debug projection
+
+`gateway_live_events` stores a bounded retained live-event relay buffer for
+foreign-surface replay. It is an observation buffer, not the transcript source
+of truth. Consumers must reconcile events against durable message and terminal
+facts and may discard stale events after bounded retention.
+
+`gateway_control_commands` stores cross-process control requests for activities
+owned by another Gateway process. It is a command mailbox for interrupt,
+takeover, steering, permission, and clarify control paths, not a transcript or
+audit log.
+
+`gateway_turn_terminals` stores the narrow accepted-turn terminal lifecycle fact
+defined by [030 Turn Lifecycle](../030-state-and-data-model/turn-lifecycle.md).
+Required semantics include:
+- one terminal fact per accepted turn identity
+- relationship to the owning thread/session
+- status `completed`, `failed`, or `interrupted`
+- optional outcome and bounded display error message
+- timestamps sufficient for transcript diagnostic ordering
+- optional metadata for local projection only
+
+Failed and interrupted terminal facts may be projected as diagnostic/status
+rows by product transcript views. They must not be stored as assistant messages
+or counted as loop-visible transcript messages.
 
 ## Agent Edges
 

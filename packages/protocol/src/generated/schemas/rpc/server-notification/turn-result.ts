@@ -53,20 +53,66 @@ export const serverNotificationTurnResultSchema = {
     },
     "GatewayTurn": {
       "properties": {
+        "completedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayTurnError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "id": {
           "type": "string"
+        },
+        "outcome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/definitions/GatewayTurnStatus"
         },
         "threadId": {
-          "type": "string"
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "id",
-        "status",
-        "threadId"
+        "status"
+      ],
+      "type": "object"
+    },
+    "GatewayTurnError": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
       ],
       "type": "object"
     },
@@ -76,7 +122,7 @@ export const serverNotificationTurnResultSchema = {
         "running",
         "completed",
         "failed",
-        "cancelled"
+        "interrupted"
       ],
       "type": "string"
     },

@@ -408,6 +408,113 @@
     }
 
     #[tokio::test]
+    async fn command_execute_btw_creates_side_chat_session() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let parent_session = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("parent session");
+        state
+            .inner
+            .state
+            .store()
+            .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
+            .expect("parent message");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let no_thread = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/btw",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/execute no thread");
+        assert_eq!(no_thread["accepted"], false, "{no_thread:#}");
+        assert_eq!(no_thread["known"], true, "{no_thread:#}");
+        assert_eq!(
+            no_thread["message"],
+            "'/btw' is unavailable until the current conversation has started. Send a message first, then try /btw again."
+        );
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/btw explain this",
+                    "threadId": parent_session.clone()
+                })),
+            },
+        )
+        .await
+        .expect("command/execute btw");
+
+        assert_eq!(result["accepted"], true, "{result:#}");
+        assert_eq!(result["known"], true, "{result:#}");
+        assert_eq!(result["action"]["type"], "sideConversationStart");
+        assert_eq!(result["action"]["parentThreadId"], parent_session);
+        assert_eq!(result["action"]["prompt"], "explain this");
+        assert_eq!(result["action"]["title"], "Side chat");
+        let side_thread_id = result["action"]["threadId"]
+            .as_str()
+            .expect("side thread id");
+        assert_ne!(side_thread_id, parent_session);
+
+        let side_summary = state
+            .inner
+            .state
+            .store()
+            .session_summary(side_thread_id)
+            .expect("summary")
+            .expect("side chat");
+        assert_eq!(
+            side_summary.parent_session_id.as_deref(),
+            Some(parent_session.as_str())
+        );
+        assert_eq!(side_summary.source, "web-side-conversation");
+        assert_eq!(side_summary.model, "fake-model");
+        assert_eq!(side_summary.provider, "fake-provider");
+        let side_metadata = state
+            .inner
+            .state
+            .store()
+            .session_metadata(side_thread_id)
+            .expect("metadata")
+            .expect("metadata value");
+        assert_eq!(
+            side_metadata["side_conversation"]["parent_session_id"].as_str(),
+            Some(parent_session.as_str())
+        );
+        assert_eq!(side_metadata["side_conversation"]["ephemeral"].as_bool(), Some(true));
+    }
+
+    #[tokio::test]
     async fn command_execute_undo_redo_restores_session_snapshot() {
         let (_temp, state) = web_state();
         git(&state.inner.workdir, ["init"]);

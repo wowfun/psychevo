@@ -18,9 +18,11 @@ export type GatewayBackendInfo = { kind: BackendKind, nativeId: string | null, }
 
 export type GatewayThread = { id: string, backend: GatewayBackendInfo, sourceKey: SourceKey | null, };
 
-export type GatewayTurn = { id: string, threadId: string, status: GatewayTurnStatus, };
+export type GatewayTurn = { id: string, threadId: string | null, status: GatewayTurnStatus, outcome: string | null, error: GatewayTurnError | null, startedAtMs?: number, completedAtMs?: number, };
 
-export type GatewayTurnStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type GatewayTurnError = { message: string, };
+
+export type GatewayTurnStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
 
 export type GatewayInputPart = { "type": "text", text: string, } | { "type": "image", input: GatewayImageInput, } | { "type": "context", label: string, text: string, visibleToModel: boolean, };
 
@@ -34,7 +36,7 @@ export type GatewayImageInput = { "kind": "localPath", path: string, } | { "kind
 
 export type GatewaySelectedSkill = { name: string, path: string, };
 
-export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, outcome: string | null, committedEntries: Array<TranscriptEntry>, } | { "type": "entryDelta", turnId: string, entryId: string | null, blockId: string | null, delta: string, } | { "type": "entryStarted", turnId: string, entry: TranscriptEntry, } | { "type": "entryUpdated", turnId: string, entry: TranscriptEntry, } | { "type": "entryCompleted", turnId: string, entry: TranscriptEntry, } | { "type": "permissionRequested", requestId: string, toolName: string, summary: string, reason: string, matchedRule: string | null, suggestedRule: string | null, allowAlways: boolean, timeoutSecs: number, } | { "type": "permissionResolved", requestId: string, decision: PermissionDecision, } | { "type": "clarifyRequested", requestId: string, raw: unknown, } | { "type": "clarifyResolved", requestId: string, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, } | { "type": "activityChanged", threadId: string | null, activity: GatewayActivityView, } | { "type": "titleChanged", threadId: string, title: string | null, displayTitle: string | null, };
+export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, turn: GatewayTurn, committedEntries: Array<TranscriptEntry>, } | { "type": "entryDelta", turnId: string, entryId: string | null, blockId: string | null, delta: string, } | { "type": "entryStarted", turnId: string, entry: TranscriptEntry, } | { "type": "entryUpdated", turnId: string, entry: TranscriptEntry, } | { "type": "entryCompleted", turnId: string, entry: TranscriptEntry, } | { "type": "permissionRequested", requestId: string, toolName: string, summary: string, reason: string, matchedRule: string | null, suggestedRule: string | null, allowAlways: boolean, timeoutSecs: number, } | { "type": "permissionResolved", requestId: string, decision: PermissionDecision, } | { "type": "clarifyRequested", requestId: string, raw: unknown, } | { "type": "clarifyResolved", requestId: string, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, } | { "type": "activityChanged", threadId: string | null, activity: GatewayActivityView, } | { "type": "titleChanged", threadId: string, title: string | null, displayTitle: string | null, };
 
 export type PermissionDecision = "allowOnce" | "allowSession" | "allowAlways" | "deny";
 

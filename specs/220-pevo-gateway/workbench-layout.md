@@ -20,7 +20,8 @@ The desktop layout is a three-surface workbench:
   GUI `/agents` is not exposed by Web/Desktop command discovery or panel routing.
 - center: transcript/workbench and bottom-fixed composer
 - right: a resizable workspace with a status/navigation home and typed tabs for
-  `Review`, `Terminal`, and `Files`
+  `Review`, `Terminal`, `Files`, temporary side chats, and opened
+  child-agent threads
 
 On startup, Workbench creates and selects a local detached draft. The launch
 scope is preferred; if unavailable, Workbench uses the most recent project
@@ -34,10 +35,25 @@ or an explicit file/diff action.
 When the right workspace is revealed without an active tab, its home is a
 navigation and status page. It shows connection, current session or draft
 state, workdir, context usage, and changed-file summary, then offers bordered
-icon-and-label rows to open Review, Terminal, and Files tabs. Rows do not carry
-right-side explanatory copy. Once any tab is open, the tab strip includes a `+`
-menu for creating more tabs of those types. Browser is not exposed in this
-slice.
+icon-and-label rows to open Review, Terminal, Files, and, for non-draft
+sessions, `Side chat` tabs. Rows do not carry right-side explanatory copy. Once
+any tab is open, the tab strip includes a `+` menu for creating more tabs of
+those types. Browser is not exposed in this slice.
+
+Workbench follows the shared thread-navigation display contract in
+[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md). `Side
+chat` tabs are temporary side chats equivalent to submitting
+`/btw` from the GUI. Agent blocks that identify a child thread open that child
+thread in a right-workspace child tab rather than copying its content into the
+parent transcript. Workbench routes live entry events by
+`TranscriptEntry.threadId`; scoped subagent live entries whose thread id is the
+child session id are ignored by the parent snapshot and accepted by the child
+tab snapshot. Child-thread composers, including Side chat and child-agent
+thread tabs, use the same shared composer shell as the main transcript
+composer. In matching idle/running states, their input frame and full composer
+shell heights stay aligned with the main composer. In desktop split view, the
+child-thread input frame is bottom-aligned with the main composer input frame
+instead of floating immediately after the latest child-thread message.
 
 Review tabs are ordered around current work state and structured diff review.
 A Review tab has a top-right Files toggle; when pressed, the tab splits into

@@ -139,17 +139,14 @@ export const serverNotificationGatewayEventSchema = {
               },
               "type": "array"
             },
-            "outcome": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "threadId": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "turn": {
+              "$ref": "#/definitions/GatewayTurn"
             },
             "turnId": {
               "type": "string"
@@ -162,6 +159,7 @@ export const serverNotificationGatewayEventSchema = {
             }
           },
           "required": [
+            "turn",
             "turnId",
             "type"
           ],
@@ -487,6 +485,81 @@ export const serverNotificationGatewayEventSchema = {
         "path"
       ],
       "type": "object"
+    },
+    "GatewayTurn": {
+      "properties": {
+        "completedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayTurnError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "outcome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/GatewayTurnStatus"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "GatewayTurnError": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "GatewayTurnStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "interrupted"
+      ],
+      "type": "string"
     },
     "PermissionDecision": {
       "enum": [

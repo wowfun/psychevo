@@ -517,6 +517,7 @@ async fn handle_rpc(
             });
             let gateway = state.inner.gateway.clone();
             let bind_source = workdir_source(&scope.workdir);
+            let requested_thread_id = thread_id.clone();
             tokio::spawn(async move {
                 let result = gateway
                     .send_turn(crate::SendTurnRequest {
@@ -543,7 +544,10 @@ async fn handle_rpc(
                     Ok(result) => {
                         rpc_notification("turn/result", gateway_turn_result_value(result))
                     }
-                    Err(err) => rpc_notification("turn/error", json!({"message": err.to_string()})),
+                    Err(err) => rpc_notification(
+                        "turn/error",
+                        json!({"message": err.to_string(), "threadId": requested_thread_id}),
+                    ),
                 };
                 let _ = out_tx.send(notification);
             });
@@ -827,7 +831,7 @@ async fn handle_rpc(
             } else {
                 state.activity(&scope.source, None).running
             };
-            command_list_value(&state, &scope, active_turn)
+            command_list_value(&state, &scope, active_turn, params.thread_id.is_some())
         }
         "command/execute" => {
             let params = request.required_params::<wire::CommandExecuteParams>()?;

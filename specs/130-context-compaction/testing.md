@@ -17,7 +17,7 @@ Automation vocabulary and generic validation boundaries follow
 - Effective configuration applies the documented `compression.*` defaults and
   rejects invalid values before a compaction attempt mutates state.
 - Disabled compaction, disabled automatic compaction, below-threshold context,
-  side sessions, missing sessions, insufficient history, and unsafe cut points
+  side chats, missing sessions, insufficient history, and unsafe cut points
   leave the transcript and checkpoint table unchanged.
 - Completed compaction appends a checkpoint without deleting or rewriting
   original transcript messages.
@@ -48,7 +48,7 @@ Required runtime coverage:
   `reasoning_effort`.
 - Provider/model resolution for default invocation model, configured summary
   model, configured reasoning effort, and `none` reasoning suppression.
-- No-op results for disabled configuration, disabled auto mode, side sessions,
+- No-op results for disabled configuration, disabled auto mode, side chats,
   too little history, below-threshold usage, and no safe boundary.
 - Checkpoint append shape, latest-valid checkpoint lookup, and invalidation
   after undo or revert boundaries.
@@ -65,7 +65,7 @@ Required runtime coverage:
   return a bounded failure.
 - `pevo run` preflight compaction before prompt submission and one retry after
   provider context-overflow errors.
-- Child-agent automatic compaction while temporary `/btw` side sessions remain
+- Child-agent automatic compaction while temporary `/btw` side chats remain
   excluded.
 
 Required TUI and command coverage:
@@ -74,7 +74,7 @@ Required TUI and command coverage:
   `/compact [instructions]`.
 - Fullscreen manual compaction starts when idle, queues behind an active turn,
   and runs ahead of later queued prompts.
-- Fullscreen compaction rejects side conversations and reports bounded command
+- Fullscreen compaction rejects side chats and reports bounded command
   feedback.
 - Automatic TUI compaction schedules after completed turns only when latest
   context usage is bounded and due.

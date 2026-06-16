@@ -184,3 +184,73 @@ fn gateway_live_events_are_ordered_and_control_commands_track_status() {
             .is_empty()
     );
 }
+
+#[test]
+fn gateway_turn_terminals_round_trip_and_order_by_thread() {
+    let temp = tempdir().expect("tempdir");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let thread_id = store
+        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .expect("session");
+
+    let failed = store
+        .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
+            turn_id: "turn-failed",
+            thread_id: &thread_id,
+            status: "failed",
+            outcome: Some("failed"),
+            error_message: Some("model service failed"),
+            started_at_ms: Some(10),
+            completed_at_ms: 20,
+            metadata: Some(json!({"source": "test"})),
+        })
+        .expect("failed terminal");
+    assert_eq!(failed.status, "failed");
+    assert_eq!(failed.started_at_ms, Some(10));
+    assert_eq!(
+        failed.error_message.as_deref(),
+        Some("model service failed")
+    );
+
+    let updated = store
+        .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
+            turn_id: "turn-failed",
+            thread_id: &thread_id,
+            status: "interrupted",
+            outcome: Some("aborted"),
+            error_message: None,
+            started_at_ms: None,
+            completed_at_ms: 30,
+            metadata: None,
+        })
+        .expect("updated terminal");
+    assert_eq!(updated.status, "interrupted");
+    assert_eq!(updated.outcome.as_deref(), Some("aborted"));
+    assert_eq!(updated.started_at_ms, Some(10));
+    assert_eq!(updated.completed_at_ms, 30);
+
+    store
+        .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
+            turn_id: "turn-ok",
+            thread_id: &thread_id,
+            status: "completed",
+            outcome: Some("normal"),
+            error_message: None,
+            started_at_ms: Some(1),
+            completed_at_ms: 2,
+            metadata: None,
+        })
+        .expect("completed terminal");
+
+    let records = store
+        .list_gateway_turn_terminals_for_thread(&thread_id)
+        .expect("list terminals");
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.turn_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["turn-ok", "turn-failed"]
+    );
+}

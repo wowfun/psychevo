@@ -213,6 +213,77 @@ pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
 }
 
 #[tokio::test]
+pub(crate) async fn background_agent_tool_result_includes_child_session_identity() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
+        shadowed_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        test_agent_tool_context(
+            &tmp,
+            Arc::new(FakeProvider::new(vec![vec![
+                RawStreamEvent::Text("child final".to_string()),
+                RawStreamEvent::Done(Outcome::Normal),
+            ]])),
+            store.clone(),
+            db_path,
+            parent.clone(),
+            catalog,
+        ),
+        AgentToolArgs {
+            agent_type: Some("worker".to_string()),
+            name: Some("hidden-name-label".to_string()),
+            prompt: "Summarize this task.".to_string(),
+            task_name: Some("explicit-task".to_string()),
+            background: Some(true),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: Some(1),
+            max_spawn_depth: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("spawn");
+
+    assert_eq!(output.json["status"], "running");
+    assert_eq!(output.json["background"], true);
+    assert_eq!(output.json["task_name"], "explicit-task");
+    let child_session = output.json["child_session_id"]
+        .as_str()
+        .expect("child session id");
+    assert_eq!(output.json["session_id"].as_str(), Some(child_session));
+    let edge = store
+        .find_agent_edge(child_session)
+        .expect("edge")
+        .expect("edge");
+    assert_eq!(edge.parent_session_id, parent);
+    assert_eq!(edge.child_session_id, child_session);
+    let metadata = edge.metadata.as_ref().expect("edge metadata");
+    assert_eq!(metadata["agent"]["id"], output.json["id"]);
+    assert_eq!(metadata["agent"]["task_name"], "explicit-task");
+
+    let model_value: Value =
+        serde_json::from_str(output.model_content.as_deref().expect("model content"))
+            .expect("model json");
+    assert_eq!(model_value["agent_name"], "worker");
+    assert_eq!(model_value["task"], "explicit-task");
+    assert_eq!(model_value["status"], "running");
+    assert!(model_value.get("child_session_id").is_none());
+    assert!(model_value.get("session_id").is_none());
+}
+
+#[tokio::test]
 pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");

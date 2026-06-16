@@ -38,16 +38,28 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
             }
         }
         Some("task_complete") | Some("turn_complete") | Some("agent_end") => {
+            let thread_id = value
+                .get("session_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            let outcome = value
+                .get("outcome")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            let status = gateway_turn_status_from_runtime_outcome(outcome.as_deref());
+            let error = gateway_turn_error_from_runtime_value(value, status);
             GatewayEvent::TurnCompleted {
-                thread_id: value
-                    .get("session_id")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
+                thread_id: thread_id.clone(),
                 turn_id: turn_id.to_string(),
-                outcome: value
-                    .get("outcome")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
+                turn: GatewayTurn {
+                    id: turn_id.to_string(),
+                    thread_id,
+                    status,
+                    outcome,
+                    error,
+                    started_at_ms: None,
+                    completed_at_ms: None,
+                },
                 committed_entries: Vec::new(),
             }
         }
@@ -290,5 +302,36 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
             }
         }
         _ => return None,
+    })
+}
+
+fn gateway_turn_status_from_runtime_outcome(outcome: Option<&str>) -> GatewayTurnStatus {
+    match outcome {
+        Some("failed") | Some("error") => GatewayTurnStatus::Failed,
+        Some("stopped") | Some("aborted") | Some("interrupted") | Some("cancelled") => {
+            GatewayTurnStatus::Interrupted
+        }
+        _ => GatewayTurnStatus::Completed,
+    }
+}
+
+fn gateway_turn_error_from_runtime_value(
+    value: &Value,
+    status: GatewayTurnStatus,
+) -> Option<GatewayTurnError> {
+    if !matches!(
+        status,
+        GatewayTurnStatus::Failed | GatewayTurnStatus::Interrupted
+    ) {
+        return None;
+    }
+    let message = value
+        .get("error")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("message").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|message| !message.is_empty())?;
+    Some(GatewayTurnError {
+        message: message.to_string(),
     })
 }

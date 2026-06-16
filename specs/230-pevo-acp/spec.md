@@ -123,6 +123,13 @@ content model no longer has the v1 terminal content variant.
 apply the ACP session id. It also handles supported slash-command prompts
 locally before invoking the model-backed runtime path.
 
+ACP does not advertise the shared `Side chat` command capability.
+`/btw` remains a TUI/Workbench `Side chat` affordance defined by
+[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md);
+when an ACP prompt explicitly uses the known command, ACP returns bounded
+unsupported-command guidance and must not create a child thread or pass the
+command through to the model.
+
 Only a prompt consisting of a single text block is eligible for ACP slash
 command handling. Prompts with attachments or multiple blocks are passed through
 to runtime as ordered user content.

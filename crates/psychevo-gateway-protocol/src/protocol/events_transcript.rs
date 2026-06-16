@@ -26,7 +26,7 @@ pub enum GatewayEvent {
         thread_id: Option<String>,
         #[serde(rename = "turnId")]
         turn_id: String,
-        outcome: Option<String>,
+        turn: GatewayTurn,
         #[serde(rename = "committedEntries", default)]
         committed_entries: Vec<TranscriptEntry>,
     },

@@ -141,27 +141,65 @@ impl Gateway {
             stream,
             control,
         };
-        let (result, backend_info) = match peer {
+        let backend_result = match peer {
             Some(peer) => {
-                let result =
-                    acp_peer::run_acp_peer_turn(peer, backend_request, turn_id.clone()).await?;
-                (
-                    result.run,
-                    GatewayBackendInfo {
-                        kind: BackendKind::PeerAgent,
-                        native_id: Some(result.native_session_id),
-                    },
-                )
+                acp_peer::run_acp_peer_turn(peer, backend_request, turn_id.clone())
+                    .await
+                    .map(|result| {
+                        (
+                            result.run,
+                            GatewayBackendInfo {
+                                kind: BackendKind::PeerAgent,
+                                native_id: Some(result.native_session_id),
+                            },
+                        )
+                    })
             }
             None => {
-                let result = self.backend.run_turn(backend_request).await?;
-                (
-                    result,
-                    GatewayBackendInfo {
-                        kind: self.backend.kind(),
-                        native_id: None,
-                    },
-                )
+                self.backend.run_turn(backend_request).await.map(|result| {
+                    (
+                        result,
+                        GatewayBackendInfo {
+                            kind: self.backend.kind(),
+                            native_id: None,
+                        },
+                    )
+                })
+            }
+        };
+        let (result, backend_info) = match backend_result {
+            Ok(value) => value,
+            Err(err) => {
+                let thread_id = active_thread_id.clone().or_else(|| {
+                    durable_activity.as_ref().and_then(|activity| {
+                        self.state
+                            .store()
+                            .gateway_activity(&activity.activity_id)
+                            .ok()
+                            .flatten()
+                            .and_then(|record| record.thread_id)
+                    })
+                });
+                let error_message = err.to_string();
+                let turn = self.record_and_project_terminal_turn(
+                    thread_id.as_deref(),
+                    &turn_id,
+                    GatewayTurnStatus::Failed,
+                    None,
+                    Some(error_message.as_str()),
+                    durable_activity.as_ref(),
+                );
+                let committed_entries = self.project_terminal_entry_for_turn(&turn_id);
+                if let Some(event_sink) = event_sink_for_completion {
+                    event_sink(GatewayEvent::TurnCompleted {
+                        thread_id,
+                        turn_id: turn_id.clone(),
+                        turn,
+                        committed_entries,
+                    });
+                }
+                self.finish_durable_gateway_activity(durable_activity.as_ref(), "failed");
+                return Err(err);
             }
         };
         let backend_info = GatewayBackendInfo {
@@ -170,6 +208,50 @@ impl Gateway {
                 .or_else(|| Some(result.session_id.clone())),
             ..backend_info
         };
+        let summaries = self
+            .state
+            .store()
+            .load_tui_message_summaries(&result.session_id)?;
+        let turn_status = gateway_turn_status_for_outcome(result.outcome);
+        let terminal_message = terminal_message_for_result(&result);
+        let turn = self.record_and_project_terminal_turn(
+            Some(&result.session_id),
+            &turn_id,
+            turn_status,
+            Some(result.outcome.as_str()),
+            terminal_message.as_deref(),
+            durable_activity.as_ref(),
+        );
+        let mut committed_entries = transcript::project_committed_turn_entries(
+            &result.session_id,
+            &summaries,
+            first_committed_seq,
+        );
+        let agent_edges = self
+            .state
+            .store()
+            .list_agent_edges_for_parent(&result.session_id)?;
+        transcript::enrich_agent_blocks_from_edges(&mut committed_entries, &agent_edges);
+        committed_entries.extend(self.project_terminal_entry_for_turn(&turn_id));
+        if let Some(event_sink) = event_sink_for_completion {
+            event_sink(GatewayEvent::TurnCompleted {
+                thread_id: Some(result.session_id.clone()),
+                turn_id: turn_id.clone(),
+                turn: turn.clone(),
+                committed_entries: committed_entries.clone(),
+            });
+            if let Ok(Some(summary)) = self.state.store().session_summary(&result.session_id) {
+                event_sink(GatewayEvent::TitleChanged {
+                    thread_id: result.session_id.clone(),
+                    title: summary.title.clone(),
+                    display_title: summary.title,
+                });
+            }
+        }
+        self.finish_durable_gateway_activity(
+            durable_activity.as_ref(),
+            durable_activity_status_for_turn(turn_status),
+        );
 
         if let Some(source) = &bind_source {
             self.bind_source_to_result(
@@ -193,31 +275,6 @@ impl Gateway {
                 queue_source_generation,
             )?;
         }
-        let summaries = self
-            .state
-            .store()
-            .load_tui_message_summaries(&result.session_id)?;
-        let committed_entries = transcript::project_committed_turn_entries(
-            &result.session_id,
-            &summaries,
-            first_committed_seq,
-        );
-        if let Some(event_sink) = event_sink_for_completion {
-            event_sink(GatewayEvent::TurnCompleted {
-                thread_id: Some(result.session_id.clone()),
-                turn_id: turn_id.clone(),
-                outcome: Some(result.outcome.as_str().to_string()),
-                committed_entries: committed_entries.clone(),
-            });
-            if let Ok(Some(summary)) = self.state.store().session_summary(&result.session_id) {
-                event_sink(GatewayEvent::TitleChanged {
-                    thread_id: result.session_id.clone(),
-                    title: summary.title.clone(),
-                    display_title: summary.title,
-                });
-            }
-        }
-        self.finish_durable_gateway_activity(durable_activity.as_ref(), "completed");
 
         Ok(GatewayTurnResult {
             thread: GatewayThread {
@@ -227,12 +284,71 @@ impl Gateway {
             },
             turn: GatewayTurn {
                 id: turn_id,
-                thread_id: result.session_id.clone(),
-                status: GatewayTurnStatus::Completed,
+                thread_id: Some(result.session_id.clone()),
+                status: turn_status,
+                outcome: Some(result.outcome.as_str().to_string()),
+                error: terminal_message.map(|message| GatewayTurnError { message }),
+                started_at_ms: turn.started_at_ms,
+                completed_at_ms: turn.completed_at_ms,
             },
             result,
             committed_entries,
         })
+    }
+
+    fn record_and_project_terminal_turn(
+        &self,
+        thread_id: Option<&str>,
+        turn_id: &str,
+        status: GatewayTurnStatus,
+        outcome: Option<&str>,
+        error_message: Option<&str>,
+        durable_activity: Option<&DurableGatewayActivity>,
+    ) -> GatewayTurn {
+        let completed_at_ms = gateway_now_ms();
+        let started_at_ms = durable_activity
+            .and_then(|activity| persisted_gateway_activity(&self.state, activity))
+            .map(|record| record.started_at_ms);
+        let turn = GatewayTurn {
+            id: turn_id.to_string(),
+            thread_id: thread_id.map(str::to_string),
+            status,
+            outcome: outcome.map(str::to_string),
+            error: error_message
+                .filter(|message| !message.trim().is_empty())
+                .map(|message| GatewayTurnError {
+                    message: message.to_string(),
+                }),
+            started_at_ms,
+            completed_at_ms: Some(completed_at_ms),
+        };
+        if let Some(thread_id) = thread_id {
+            let _ = self.state.store().upsert_gateway_turn_terminal(
+                GatewayTurnTerminalInput {
+                    turn_id,
+                    thread_id,
+                    status: gateway_turn_status_name(status),
+                    outcome,
+                    error_message,
+                    started_at_ms,
+                    completed_at_ms,
+                    metadata: Some(json!({
+                        "source": "gateway",
+                    })),
+                },
+            );
+        }
+        turn
+    }
+
+    fn project_terminal_entry_for_turn(&self, turn_id: &str) -> Vec<TranscriptEntry> {
+        self.state
+            .store()
+            .gateway_turn_terminal(turn_id)
+            .ok()
+            .flatten()
+            .map(|terminal| transcript::project_turn_terminal_entries(&[terminal]))
+            .unwrap_or_default()
     }
 
     async fn run_shell_now(
@@ -415,4 +531,60 @@ impl Gateway {
         })
     }
 
+}
+
+fn persisted_gateway_activity(
+    state: &StateRuntime,
+    activity: &DurableGatewayActivity,
+) -> Option<GatewayActivityRecord> {
+    state
+        .store()
+        .gateway_activity(&activity.activity_id)
+        .ok()
+        .flatten()
+}
+
+fn gateway_turn_status_for_outcome(outcome: Outcome) -> GatewayTurnStatus {
+    match outcome {
+        Outcome::Normal => GatewayTurnStatus::Completed,
+        Outcome::Failed => GatewayTurnStatus::Failed,
+        Outcome::Stopped | Outcome::Aborted => {
+            GatewayTurnStatus::Interrupted
+        }
+    }
+}
+
+fn gateway_turn_status_name(status: GatewayTurnStatus) -> &'static str {
+    match status {
+        GatewayTurnStatus::Queued => "queued",
+        GatewayTurnStatus::Running => "running",
+        GatewayTurnStatus::Completed => "completed",
+        GatewayTurnStatus::Failed => "failed",
+        GatewayTurnStatus::Interrupted => "interrupted",
+    }
+}
+
+fn durable_activity_status_for_turn(status: GatewayTurnStatus) -> &'static str {
+    match status {
+        GatewayTurnStatus::Failed => "failed",
+        GatewayTurnStatus::Interrupted => "interrupted",
+        _ => "completed",
+    }
+}
+
+fn terminal_message_for_result(result: &RunResult) -> Option<String> {
+    if result.outcome == Outcome::Normal {
+        return None;
+    }
+    result
+        .terminal_reason
+        .as_ref()
+        .map(|reason| format!("{reason:?}"))
+        .or_else(|| match result.outcome {
+            Outcome::Failed => Some("The turn failed.".to_string()),
+            Outcome::Stopped | Outcome::Aborted => {
+                Some("The turn was interrupted.".to_string())
+            }
+            Outcome::Normal => None,
+        })
 }

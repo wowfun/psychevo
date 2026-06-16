@@ -10,7 +10,7 @@ Define child and forked agent execution semantics for Psychevo.
 - child-agent and forked-agent invocation semantics
 - foreground and background child-run behavior
 - generic agent control operations: list, wait, send, close, resume
-- parent/child session lineage, durable agent edges, and parent result observation
+- parent/child thread lineage, durable agent edges, and parent result observation
 - child-run tool-policy constraints
 - child-agent hook points at the runtime boundary
 
@@ -50,14 +50,17 @@ them.
 
 The `Agent` tool is the primary model-visible spawn entrypoint. Its only
 required field is `prompt`. `agent_type` is the canonical agent definition name.
-`name` is accepted only as a compatibility alias for `agent_type`; if both
-fields are supplied with different non-empty values, the tool call fails.
+`task_name` is the durable task label for this run. The model-visible schema
+does not expose `name`. If an old or malformed caller still supplies `name`,
+runtime treats it only as a hidden task-label fallback: when `task_name` is
+present, `name` is ignored; when `task_name` is absent, `name` is used as
+`task_name`. `name` never selects the agent definition.
 When no agent name is supplied, runtime defaults to `general`. When an explicit
 agent name is supplied and no matching definition exists, runtime fails the
-tool call and does not create a child session. `task_name` is a separate
-automation/debug handle and never changes definition selection. The tool also
-accepts a background flag, optional model override, optional fork behavior,
-optional max-turn override, and optional `max_spawn_depth` override.
+tool call and does not create a child thread. `task_name` never changes
+definition selection. The tool also accepts a background flag, optional model
+override, optional fork behavior, optional max-turn override, and optional
+`max_spawn_depth` override.
 
 An explicit `@agent-name` mention in the parent prompt must resolve to the same
 definition name in the Agent invocation. Runtime may inject the single required
@@ -90,7 +93,7 @@ needed. The common summary projection contains:
 - `tokens`
 
 `tokens` contains `input`, `output`, `reasoning`, and `total` when those values
-are available for the direct child session. Unavailable fields are omitted
+are available for the direct child thread. Unavailable fields are omitted
 rather than serialized as `null`. Failed runs use `status`, `exit_reason`, and
 an `error` field when an error string is available; they do not expose a
 separate `error_kind`. `task` is the explicit `task_name` when supplied;
@@ -103,14 +106,17 @@ session metadata, agent edges, mailbox metadata, debug output, and export
 metadata. Tool result messages persisted for future model context may store a
 smaller model-visible content string than the full structured event payload.
 
-Background subagents return a handle immediately. Completion records final
-summary and status, then writes one parent mailbox event. Runtime must not
-persist that completion as a normal parent `user` message. The mailbox payload
-uses structured inter-agent communication content containing a
-`subagent_notification` whose content is the compact summary projection. The
-notification does not include `agent_id`; the full mailbox record and metadata
-retain identity, child-session, outcome, and operational details for system
-inspection.
+Background subagents return a handle immediately, but only after runtime has
+created the child session, written the parent/child edge, and attached the
+`child_session_id` to the runtime-owned tool-result metadata. The model-visible
+summary remains compact; interactive surfaces use the richer metadata to open
+the child thread. Completion records final summary and status, then writes one
+parent mailbox event. Runtime must not persist that completion as a normal
+parent `user` message. The mailbox payload uses structured inter-agent
+communication content containing a `subagent_notification` whose content is the
+compact summary projection. The notification does not include `agent_id`; the
+full mailbox record and metadata retain identity, child-thread, outcome, and
+operational details for system inspection.
 
 Interactive clients may also start a background subagent directly from a
 selected definition. That run uses fresh child context by default, records the
@@ -151,30 +157,34 @@ Agent status follows a fixed status lattice: `pending_init`, `running`,
 `completed(summary)`, `errored`, `interrupted`, `shutdown`, and `not_found`.
 Timeout is reported separately and is not itself an agent status.
 
-## Lineage
+## Thread Lineage
 
-Child agent runs use session lineage to relate a child session to its parent.
-The child session is the durable agent body. Runtime projects `AgentRun` state
-from session metadata, live registry state, and a durable parent-to-child agent
-edge. The edge records coordination state as `open` or `closed`; completion
-does not automatically close the edge.
+Child agent runs use thread lineage to relate a child thread to its parent. When
+the child has durable local state, the child thread's backing session is the
+durable agent body. Runtime projects `AgentRun` state from session metadata,
+live registry state, and a durable parent-to-child agent edge. The edge records
+coordination state as `open` or `closed`; completion does not automatically
+close the edge.
 
 Parent result observations must not redefine core execution semantics. The
 child invocation still emits its own agent lifecycle under
 [002 Agent Execution](../002-agent-execution/spec.md). Foreground `Agent` tool
 calls return the child handle and concise result through the normal tool result,
-and runtime also emits a local `agent_session_start` stream event once the
-child session exists so interactive clients can open the child while it is
-running. While the child run is active, child session stream events are emitted
-with an explicit child-session scope so interactive clients can route them to
-the child transcript when it is active, or summarize them inside the parent
-Agent row when the parent transcript remains active. Clients may retain a
-bounded live-event backlog per child session so opening a running child can
-immediately show work that started before inspection. The foreground tool row
-is still the only parent-transcript inspection affordance for that invocation.
-The canonical `Agent` argument for selecting a definition is `agent_type`, but
-runtime also accepts `name` as a compatibility alias and treats it identically
-for execution and required-agent mention accounting.
+and runtime also emits a local `agent_session_start` stream event once the child
+thread exists so interactive clients can open the child while it is running.
+That start event enriches the already-visible foreground `Agent` tool
+invocation with child identity; it is not a separate parent transcript fact and
+must not cause a second parent Agent row for the same child run.
+While the child run is active, child-thread stream events are emitted with an
+explicit child-thread scope so interactive clients can route them to the child
+transcript when it is active, or summarize them inside the parent Agent row when
+the parent transcript remains active. Clients may retain a bounded live-event
+backlog per child thread so opening a running child can immediately show work
+that started before inspection. The foreground tool row is still the only
+parent-transcript inspection affordance for that invocation.
+The canonical `Agent` argument for selecting a definition is `agent_type`.
+Required-agent mention accounting must use `agent_type`; it must not treat
+`name` as an alias or infer child identity from a task label.
 Completion observations are mailbox events, not human prompts. TUI may render
 agent start, wait, close, and completion status as tool/event rows, but those
 rows must not create a second model-visible copy of the child final answer.
@@ -182,8 +192,8 @@ Legacy hidden contextual user notifications may still appear in old sessions;
 TUI must not render hidden notifications as separate rows. Start observations
 are UI-facing local records and are not human prompts.
 Child metadata records the resolved definition name, generated or provided
-`task_name`, parent session id, source/path, role, background/fork settings, and
-effective remaining spawn depth.
+`task_name`, parent thread/session id, source/path, role, background/fork
+settings, and effective remaining spawn depth.
 
 Existing session records are not migrated. Old verbose tool results and
 mailbox records remain historical development data. New records are compact by

@@ -1,5 +1,7 @@
 use super::*;
 
+const SIDE_CONVERSATION_NO_SESSION_MESSAGE: &str = "'/btw' is unavailable until the current conversation has started. Send a message first, then try /btw again.";
+
 pub(super) fn command_execute_value(
     state: &WebState,
     scope: &ResolvedScope,
@@ -22,6 +24,7 @@ pub(super) fn command_execute_value(
     let result = match parse_slash_command_line(&raw) {
         SlashCommandParse::Known(invocation) => {
             let action = invocation.spec.action;
+            let has_session = thread_id.is_some();
             if !web_desktop_action_visible(action) {
                 command_unsupported(
                     &raw,
@@ -41,10 +44,16 @@ pub(super) fn command_execute_value(
                     )),
                     Some(json!({"type": "turnInterrupt", "threadId": thread_id})),
                 )
+            } else if matches!(action, SlashCommandAction::Btw) && thread_id.is_none() {
+                command_unsupported(
+                    &raw,
+                    action,
+                    SIDE_CONVERSATION_NO_SESSION_MESSAGE.to_string(),
+                )
             } else {
                 match slash_invocation_effect(
                     &invocation,
-                    &gateway_command_capabilities(),
+                    &gateway_command_capabilities(has_session),
                     SlashCommandSurface::WebDesktop,
                     active_turn,
                 ) {
@@ -180,6 +189,9 @@ fn command_result_from_effect(
                 action,
                 json!({"type": "workspaceDiff", "diff": diff}),
             ))
+        }
+        SlashCommandEffect::Btw { prompt } => {
+            command_side_conversation_start(state, scope, raw, action, thread_id, prompt)
         }
         SlashCommandEffect::SandboxShow => {
             let options = state.run_options(scope.workdir.clone(), thread_id.clone());
@@ -395,6 +407,7 @@ fn web_desktop_unavailable_message(command: &str, action: SlashCommandAction) ->
         | SlashCommandAction::Curator => {
             format!("{command} is managed by Workbench panels.")
         }
+        SlashCommandAction::Btw => SIDE_CONVERSATION_NO_SESSION_MESSAGE.to_string(),
         _ => format!("{command} is not available in Web/Desktop."),
     }
 }
@@ -411,10 +424,83 @@ fn compact_prompt_text(instructions: Option<String>) -> String {
     }
 }
 
+fn command_side_conversation_start(
+    state: &WebState,
+    scope: &ResolvedScope,
+    raw: &str,
+    action: SlashCommandAction,
+    parent_thread_id: Option<String>,
+    prompt: Option<String>,
+) -> psychevo_runtime::Result<wire::CommandExecuteResult> {
+    let Some(parent_thread_id) = parent_thread_id else {
+        return Ok(command_unsupported(
+            raw,
+            action,
+            SIDE_CONVERSATION_NO_SESSION_MESSAGE.to_string(),
+        ));
+    };
+    let summary = state
+        .inner
+        .state
+        .store()
+        .session_summary(&parent_thread_id)?
+        .ok_or_else(|| Error::Message(format!("session not found: {parent_thread_id}")))?;
+    if Path::new(&summary.workdir) != scope.workdir.as_path() {
+        return Ok(command_unsupported(
+            raw,
+            action,
+            format!(
+                "session {parent_thread_id} does not belong to {}",
+                scope.workdir.display()
+            ),
+        ));
+    }
+
+    let options = state.run_options(scope.workdir.clone(), Some(parent_thread_id.clone()));
+    let side_thread_id = state
+        .inner
+        .state
+        .store()
+        .create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
+            parent_session_id: &parent_thread_id,
+            workdir: &scope.workdir,
+            source: WEB_SIDE_CONVERSATION_SESSION_SOURCE,
+            model: &summary.model,
+            provider: &summary.provider,
+            metadata: Some(json!({
+                SIDE_CONVERSATION_METADATA_KEY: {
+                    "ephemeral": true,
+                    "parent_session_id": parent_thread_id.clone(),
+                },
+                "provider_label": summary.provider.clone(),
+            })),
+            max_context_messages: options.max_context_messages,
+            inherited_message_metadata: json!({
+                SIDE_INHERITED_METADATA_KEY: {
+                    "hidden": true,
+                    "parent_session_id": parent_thread_id.clone(),
+                }
+            }),
+            boundary_text: side_conversation_boundary_prompt(),
+        })?;
+    Ok(command_action(
+        raw,
+        action,
+        json!({
+            "type": "sideConversationStart",
+            "threadId": side_thread_id,
+            "parentThreadId": parent_thread_id,
+            "title": "Side chat",
+            "prompt": prompt,
+        }),
+    ))
+}
+
 pub(super) fn command_list_value(
     state: &WebState,
     scope: &ResolvedScope,
     active_turn: bool,
+    has_session: bool,
 ) -> psychevo_runtime::Result<Value> {
     let dynamic = dynamic_slash_commands(state, scope)?;
     let dynamic_names = dynamic
@@ -422,7 +508,7 @@ pub(super) fn command_list_value(
         .map(|command| command.name.trim_start_matches('/').to_string())
         .collect::<std::collections::BTreeSet<_>>();
     let available = available_slash_commands_for_surface(
-        &gateway_command_capabilities(),
+        &gateway_command_capabilities(has_session),
         active_turn,
         &dynamic,
         256,
@@ -477,6 +563,7 @@ pub(super) fn web_desktop_command_visible(command: &AvailableSlashCommand) -> bo
             | SlashCommandAction::Usage
             | SlashCommandAction::Context
             | SlashCommandAction::Diff
+            | SlashCommandAction::Btw
             | SlashCommandAction::Steer
             | SlashCommandAction::Queue
             | SlashCommandAction::Pending
@@ -502,6 +589,7 @@ fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
             | SlashCommandAction::Usage
             | SlashCommandAction::Context
             | SlashCommandAction::Diff
+            | SlashCommandAction::Btw
             | SlashCommandAction::Steer
             | SlashCommandAction::Queue
             | SlashCommandAction::Pending
@@ -553,8 +641,8 @@ fn command_argument_kind(kind: CommandArgumentKind) -> &'static str {
     }
 }
 
-pub(super) fn gateway_command_capabilities() -> Vec<CommandCapability> {
-    vec![
+pub(super) fn gateway_command_capabilities(has_session: bool) -> Vec<CommandCapability> {
+    let mut capabilities = vec![
         CommandCapability::Picker,
         CommandCapability::ActiveTurnControl,
         CommandCapability::Queue,
@@ -565,5 +653,9 @@ pub(super) fn gateway_command_capabilities() -> Vec<CommandCapability> {
         CommandCapability::ConfigWrite,
         CommandCapability::PolicyWrite,
         CommandCapability::SkillStateWrite,
-    ]
+    ];
+    if has_session {
+        capabilities.push(CommandCapability::SideConversation);
+    }
+    capabilities
 }

@@ -4,13 +4,15 @@ use psychevo_runtime::{RunStreamEvent, RunWarning};
 use serde_json::{Value, json};
 
 use crate::protocol::{
-    GatewayEvent, GatewaySelectedSkill, TranscriptBlock, TranscriptBlockKind,
-    TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
+    GatewayEvent, GatewaySelectedSkill, GatewayTurn, GatewayTurnError, GatewayTurnStatus,
+    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole,
 };
 
 #[derive(Debug, Default)]
 pub struct GatewayLiveProjector {
     thread_id: Option<String>,
+    active_turn_id: Option<String>,
     assistant_segment: usize,
     stream_seq: u64,
     entries: BTreeMap<usize, LiveEntryState>,
@@ -18,6 +20,7 @@ pub struct GatewayLiveProjector {
     tool_aliases: BTreeMap<String, String>,
     tool_args: BTreeMap<String, Value>,
     exec_sessions: BTreeMap<u64, LiveExecState>,
+    child_projectors: BTreeMap<String, GatewayLiveProjector>,
 }
 
 #[derive(Debug, Clone)]

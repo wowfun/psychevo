@@ -286,7 +286,7 @@ impl SlashCommandSpec {
             }
             SlashCommandAction::Btw => {
                 format!(
-                    "{} opens a local TUI side conversation and is not available on this surface.",
+                    "{} opens a side chat and is unavailable until this surface has an active session.",
                     self.canonical
                 )
             }
@@ -309,6 +309,7 @@ impl SlashCommandSpec {
                 | SlashCommandAction::Tools
                 | SlashCommandAction::Sandbox
                 | SlashCommandAction::Agents
+                | SlashCommandAction::Btw
                 | SlashCommandAction::Steer
                 | SlashCommandAction::Queue
                 | SlashCommandAction::Pending

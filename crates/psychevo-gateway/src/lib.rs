@@ -17,12 +17,13 @@ use psychevo_runtime::{
     AbortSignal, AgentDiscoveryOptions, AgentEntrypoint, ApprovalHandler, ClarifyAnswer,
     ClarifyResponse, ClarifyResult, Error, ExternalAgentDelegate, ExternalAgentDelegateRequest,
     ExternalAgentDelegateResult, GatewayActivityClaimInput, GatewayActivityRecord,
-    GatewayControlCommandInput, GatewaySourceBindingInput, ImageInput, PermissionApprovalDecision,
-    PermissionApprovalOutcome, PermissionApprovalRequest, RunControl, RunControlHandle, RunOptions,
-    RunResult, RunStreamEvent, RunStreamSink, StateRuntime, UserShellContextOptions,
-    UserShellOptions, UserShellResult, discover_agents, load_agent_backend_configs,
-    resolve_agent_definition, resolve_skills_home, run_control, run_live, run_live_streaming,
-    run_live_streaming_controlled, run_user_shell_command_streaming_controlled,
+    GatewayControlCommandInput, GatewaySourceBindingInput, GatewayTurnTerminalInput, ImageInput,
+    Outcome, PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
+    RunControl, RunControlHandle, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
+    StateRuntime, UserShellContextOptions, UserShellOptions, UserShellResult, discover_agents,
+    load_agent_backend_configs, resolve_agent_definition, resolve_skills_home, run_control,
+    run_live, run_live_streaming, run_live_streaming_controlled,
+    run_user_shell_command_streaming_controlled,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -34,8 +35,8 @@ pub use projection::gateway_event_from_run_stream;
 pub use protocol::{
     BackendKind, GatewayActivityView, GatewayBackendInfo, GatewayEvent, GatewayImageInput,
     GatewayInputPart, GatewaySelectedSkill, GatewaySource, GatewaySourceLifetime, GatewayThread,
-    GatewayThreadSelector, GatewayTurn, GatewayTurnStatus, PermissionDecision, SourceKey,
-    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    GatewayThreadSelector, GatewayTurn, GatewayTurnError, GatewayTurnStatus, PermissionDecision,
+    SourceKey, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
     TranscriptEntryRole, TranscriptToolResult,
 };
 pub use server::{BoundGatewayWebServer, GatewayWebServerConfig, bind_gateway_web_server};

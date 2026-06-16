@@ -168,6 +168,7 @@
         assert!(names.contains(&"sessions"), "{names:?}");
         assert!(names.contains(&"undo"), "{names:?}");
         assert!(names.contains(&"redo"), "{names:?}");
+        assert!(!names.contains(&"btw"), "{names:?}");
         assert!(!names.contains(&"agents"), "{names:?}");
         assert!(!names.contains(&"model"), "{names:?}");
         assert!(!names.contains(&"tools"), "{names:?}");
@@ -181,7 +182,7 @@
         assert_eq!(diff["feedbackAnchor"], "trigger");
 
         let completion = handle_rpc(
-            state,
+            state.clone(),
             AuthContext::Bearer,
             tx,
             RpcRequest {
@@ -202,6 +203,7 @@
         assert!(items.iter().any(|item| item["label"] == "/diff"));
         assert!(items.iter().any(|item| item["label"] == "/undo"));
         assert!(items.iter().any(|item| item["label"] == "/redo"));
+        assert!(!items.iter().any(|item| item["label"] == "/btw"));
         assert!(!items.iter().any(|item| item["label"] == "/agents"));
         assert!(!items.iter().any(|item| item["label"] == "/model"));
         let diff_completion = items
@@ -211,6 +213,70 @@
         assert_eq!(
             diff_completion["detail"].as_str(),
             Some("Preview - show workspace diff")
+        );
+
+        let parent_session = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.workdir,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("parent session");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let list = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "command/list".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": parent_session.clone()
+                })),
+            },
+        )
+        .await
+        .expect("command/list with session");
+        let commands = list["commands"].as_array().expect("commands");
+        let btw = commands
+            .iter()
+            .find(|command| command["name"] == "btw")
+            .expect("btw command");
+        assert_eq!(btw["slash"], "/btw");
+        assert_eq!(btw["presentationKind"], "control");
+
+        let completion = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("4")),
+                method: "completion/list".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "text": "/bt",
+                    "cursor": 3,
+                    "threadId": parent_session
+                })),
+            },
+        )
+        .await
+        .expect("completion/list with session");
+        assert!(
+            completion["items"]
+                .as_array()
+                .expect("items")
+                .iter()
+                .any(|item| item["label"] == "/btw"),
+            "{completion:#}"
         );
     }
 

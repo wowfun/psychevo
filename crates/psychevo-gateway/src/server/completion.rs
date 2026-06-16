@@ -94,7 +94,7 @@ fn slash_completion_items(
         .unwrap_or_else(|| state.activity(&scope.source, None).running);
     let dynamic = dynamic_slash_commands(state, scope)?;
     let available = available_slash_commands_for_surface(
-        &gateway_command_capabilities(),
+        &gateway_command_capabilities(thread_id.is_some()),
         active_turn,
         &dynamic,
         MAX_COMPLETION_ITEMS,

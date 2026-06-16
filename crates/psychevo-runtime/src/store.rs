@@ -23,7 +23,7 @@ pub(crate) use crate::types::{
     TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 19;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 20;
 pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 18;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
@@ -175,6 +175,30 @@ pub struct GatewayControlCommandRecord {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayTurnTerminalInput<'a> {
+    pub turn_id: &'a str,
+    pub thread_id: &'a str,
+    pub status: &'a str,
+    pub outcome: Option<&'a str>,
+    pub error_message: Option<&'a str>,
+    pub started_at_ms: Option<i64>,
+    pub completed_at_ms: i64,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayTurnTerminalRecord {
+    pub turn_id: String,
+    pub thread_id: String,
+    pub status: String,
+    pub outcome: Option<String>,
+    pub error_message: Option<String>,
+    pub started_at_ms: Option<i64>,
+    pub completed_at_ms: i64,
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

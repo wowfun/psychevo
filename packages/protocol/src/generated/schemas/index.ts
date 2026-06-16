@@ -41,6 +41,7 @@ export const gatewaySchemas = {
   GatewayBackendInfo: gatewayBackendCoreSchemas.GatewayBackendInfo,
   GatewayThread: gatewayCoreSchemas.GatewayThread,
   GatewayTurn: gatewayCoreSchemas.GatewayTurn,
+  GatewayTurnError: systemSchemas.GatewayTurnError,
   GatewayTurnStatus: gatewayCoreSchemas.GatewayTurnStatus,
   GatewayInputPart: gatewayCoreSchemas.GatewayInputPart,
   GatewayMentionRange: gatewayCoreSchemas.GatewayMentionRange,

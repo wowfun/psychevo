@@ -449,8 +449,10 @@ fn gateway_event_thread_id(event: &GatewayEvent) -> Option<String> {
     match event {
         GatewayEvent::TurnStarted { thread_id, .. }
         | GatewayEvent::TurnQueued { thread_id, .. }
-        | GatewayEvent::TurnCompleted { thread_id, .. }
         | GatewayEvent::ActivityChanged { thread_id, .. } => thread_id.clone(),
+        GatewayEvent::TurnCompleted {
+            thread_id, turn, ..
+        } => thread_id.clone().or_else(|| turn.thread_id.clone()),
         GatewayEvent::EntryStarted { entry, .. }
         | GatewayEvent::EntryUpdated { entry, .. }
         | GatewayEvent::EntryCompleted { entry, .. } => {

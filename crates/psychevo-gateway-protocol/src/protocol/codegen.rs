@@ -718,6 +718,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(GatewayBackendInfo),
         exported_type!(GatewayThread),
         exported_type!(GatewayTurn),
+        exported_type!(GatewayTurnError),
         exported_type!(GatewayTurnStatus),
         exported_type!(GatewayInputPart),
         exported_type!(GatewayMentionRange),

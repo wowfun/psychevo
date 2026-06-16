@@ -23,6 +23,7 @@ use crate::state_runtime::StateRuntime;
 use crate::store::{
     SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord, SqliteStore,
 };
+use crate::thread_lineage::side_conversation_session_source;
 use crate::types::{ImageInput, RunMode, RunOptions};
 
 pub(crate) const SUMMARY_TOOL_TEXT_LIMIT: usize = 4_000;
@@ -93,11 +94,11 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
     let summary = store
         .session_summary(&options.session)?
         .ok_or_else(|| Error::Message(format!("session not found: {}", options.session)))?;
-    if summary.source == "tui-side" {
+    if side_conversation_session_source(&summary.source) {
         return Ok(skipped_result(
             &summary.id,
             options.reason,
-            "compaction is unavailable for side sessions",
+            "compaction is unavailable for side chats",
         ));
     }
 

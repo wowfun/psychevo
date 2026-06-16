@@ -421,8 +421,10 @@ pub fn slash_invocation_effect(
         SlashCommandAction::Share => Ok(SlashCommandEffect::Share {
             args: optional_text(&invocation.args),
         }),
+        SlashCommandAction::Btw => Ok(SlashCommandEffect::Btw {
+            prompt: optional_text(&invocation.args),
+        }),
         SlashCommandAction::Quit
-        | SlashCommandAction::Btw
         | SlashCommandAction::Thinking
         | SlashCommandAction::Raw
         | SlashCommandAction::Copy

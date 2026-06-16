@@ -2,6 +2,7 @@ impl GatewayLiveProjector {
     pub fn new(thread_id: Option<String>) -> Self {
         Self {
             thread_id,
+            active_turn_id: None,
             assistant_segment: 0,
             stream_seq: 0,
             entries: BTreeMap::new(),
@@ -9,23 +10,53 @@ impl GatewayLiveProjector {
             tool_aliases: BTreeMap::new(),
             tool_args: BTreeMap::new(),
             exec_sessions: BTreeMap::new(),
+            child_projectors: BTreeMap::new(),
         }
     }
 
     pub fn project(&mut self, turn_id: &str, event: &RunStreamEvent) -> Option<GatewayEvent> {
+        if let RunStreamEvent::Scoped { session_id, event } = event {
+            return self.project_scoped(turn_id, session_id, event);
+        }
+        self.prepare_turn(turn_id);
         let mut event = match event {
             RunStreamEvent::ReasoningDelta { text } => {
                 self.project_reasoning_delta(turn_id, text)?
             }
             RunStreamEvent::ReasoningEnd => self.project_reasoning_end(turn_id)?,
-            RunStreamEvent::Scoped { event, .. } => return self.project(turn_id, event),
             RunStreamEvent::Event(value) => self
                 .project_runtime_value(turn_id, value)
                 .or_else(|| gateway_event_from_runtime_value(turn_id, value))?,
             _ => gateway_event_from_run_stream(turn_id, event)?,
         };
+        let turn_completed = matches!(event, GatewayEvent::TurnCompleted { .. });
         self.attach_thread_id(&mut event);
+        if turn_completed {
+            self.reset_turn_state();
+        }
         Some(event)
+    }
+
+    fn project_scoped(
+        &mut self,
+        turn_id: &str,
+        session_id: &str,
+        event: &RunStreamEvent,
+    ) -> Option<GatewayEvent> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return None;
+        }
+        let nested_scoped = matches!(event, RunStreamEvent::Scoped { .. });
+        let child = self
+            .child_projectors
+            .entry(session_id.to_string())
+            .or_insert_with(|| GatewayLiveProjector::new(Some(session_id.to_string())));
+        let mut projected = child.project(turn_id, event)?;
+        if !nested_scoped {
+            force_event_thread_id(&mut projected, session_id);
+        }
+        Some(projected)
     }
 
     fn project_runtime_value(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
@@ -80,6 +111,7 @@ impl GatewayLiveProjector {
                 | "tool_execution_update"
                 | "tool_execution_end",
             ) => self.project_tool_event(turn_id, value),
+            Some("agent_session_start") => self.project_agent_session_start(turn_id, value),
             Some("exec_session_output_delta" | "exec_session_finished") => {
                 self.project_exec_session_event(turn_id, value)
             }
@@ -112,6 +144,113 @@ impl GatewayLiveProjector {
         );
         self.upsert_block(segment, block);
         Some(self.emit_entry_event(turn_id, segment, false, false))
+    }
+
+    fn project_agent_session_start(
+        &mut self,
+        turn_id: &str,
+        value: &Value,
+    ) -> Option<GatewayEvent> {
+        let child_session_id = value
+            .get("child_session_id")
+            .or_else(|| value.get("session_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|child_session_id| !child_session_id.is_empty())?;
+        let raw_tool_call_id = value
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|tool_call_id| !tool_call_id.is_empty())
+            .unwrap_or(child_session_id);
+        let (tool_call_id, segment) = self.agent_start_target(raw_tool_call_id, value);
+        let mut metadata = agent_session_start_metadata(value, &tool_call_id, child_session_id);
+        if metadata.get("args").is_none_or(Value::is_null)
+            && let Some(args) = self.tool_args.get(&tool_call_id)
+        {
+            set_metadata_field(&mut metadata, "args", args.clone());
+        }
+        self.enrich_agent_metadata_from_existing(turn_id, segment, &tool_call_id, &mut metadata);
+        enrich_agent_metadata_from_fields(&mut metadata);
+        let body = agent_task_summary(&metadata);
+        let block = self.live_tool_block_from_metadata(LiveToolBlockBuild {
+            turn_id,
+            segment,
+            tool_call_id: &tool_call_id,
+            tool_name: "Agent",
+            status: TranscriptBlockStatus::Running,
+            body,
+            metadata,
+            order: None,
+        });
+        self.upsert_block(segment, block);
+        Some(self.emit_entry_event(turn_id, segment, false, false))
+    }
+
+    fn agent_start_target(&mut self, raw_tool_call_id: &str, value: &Value) -> (String, usize) {
+        if let Some(canonical) = self.tool_aliases.get(raw_tool_call_id)
+            && let Some(segment) = self.tool_owners.get(canonical).copied()
+        {
+            return (canonical.clone(), segment);
+        }
+        if let Some(segment) = self.tool_owners.get(raw_tool_call_id).copied() {
+            return (raw_tool_call_id.to_string(), segment);
+        }
+        let candidates = self.matching_open_agent_candidates(raw_tool_call_id, value);
+        if candidates.len() == 1 {
+            let (canonical, segment) = candidates[0].clone();
+            if canonical != raw_tool_call_id {
+                self.tool_aliases
+                    .insert(raw_tool_call_id.to_string(), canonical.clone());
+                self.tool_owners
+                    .insert(raw_tool_call_id.to_string(), segment);
+            }
+            return (canonical, segment);
+        }
+        let segment = self.tool_owner_segment(raw_tool_call_id);
+        (raw_tool_call_id.to_string(), segment)
+    }
+
+    fn matching_open_agent_candidates(
+        &self,
+        raw_tool_call_id: &str,
+        value: &Value,
+    ) -> Vec<(String, usize)> {
+        let agent_name = value
+            .get("agent_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|agent_name| !agent_name.is_empty());
+        let mut candidates = Vec::new();
+        for (segment, state) in &self.entries {
+            for block in state.blocks.values() {
+                if !matches!(
+                    block.status,
+                    TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
+                ) {
+                    continue;
+                }
+                let Some(metadata) = block.metadata.as_ref() else {
+                    continue;
+                };
+                if metadata.get("tool_name").and_then(Value::as_str) != Some("Agent") {
+                    continue;
+                }
+                if agent_child_session_id(metadata).is_some() {
+                    continue;
+                }
+                let Some(candidate_id) = metadata.get("tool_call_id").and_then(Value::as_str)
+                else {
+                    continue;
+                };
+                if candidate_id == raw_tool_call_id
+                    || agent_name.is_some_and(|name| agent_metadata_name_matches(metadata, name))
+                {
+                    candidates.push((candidate_id.to_string(), *segment));
+                }
+            }
+        }
+        candidates
     }
 
     fn project_tool_event(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
@@ -261,11 +400,7 @@ impl GatewayLiveProjector {
         }))
     }
 
-    fn project_exec_session_event(
-        &mut self,
-        turn_id: &str,
-        value: &Value,
-    ) -> Option<GatewayEvent> {
+    fn project_exec_session_event(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
         let session_id = value.get("session_id").and_then(Value::as_u64)?;
         let event_type = value.get("type").and_then(Value::as_str);
         let completed = event_type == Some("exec_session_finished");
@@ -638,6 +773,11 @@ impl GatewayLiveProjector {
             {
                 TranscriptBlockStatus::Failed
             }
+            Some("tool_execution_end")
+                if background_running_agent_result_value(tool_name, value) =>
+            {
+                TranscriptBlockStatus::Running
+            }
             Some("tool_execution_end") => TranscriptBlockStatus::Completed,
             _ => TranscriptBlockStatus::Info,
         };
@@ -649,6 +789,15 @@ impl GatewayLiveProjector {
         let segment = self.tool_owner_segment(tool_call_id);
         let mut metadata = tool_value_metadata(value);
         set_metadata_field(&mut metadata, "tool_call_id", json!(tool_call_id));
+        if metadata.get("args").is_none_or(Value::is_null)
+            && let Some(args) = self.tool_args.get(tool_call_id)
+        {
+            set_metadata_field(&mut metadata, "args", args.clone());
+        }
+        if tool_name == "Agent" {
+            self.enrich_agent_metadata_from_existing(turn_id, segment, tool_call_id, &mut metadata);
+            enrich_agent_metadata_from_fields(&mut metadata);
+        }
         self.project_tool_block_from_metadata(LiveToolBlockUpdate {
             turn_id,
             segment,
@@ -666,6 +815,37 @@ impl GatewayLiveProjector {
         })
     }
 
+    fn enrich_agent_metadata_from_existing(
+        &self,
+        turn_id: &str,
+        segment: usize,
+        tool_call_id: &str,
+        metadata: &mut Value,
+    ) {
+        let Some(existing) = self
+            .entries
+            .get(&segment)
+            .and_then(|state| state.blocks.get(&live_tool_block_id(turn_id, tool_call_id)))
+            .and_then(|block| block.metadata.as_ref())
+        else {
+            return;
+        };
+        copy_agent_metadata_field_if_missing(metadata, existing, "agent_id");
+        copy_agent_metadata_field_if_missing(metadata, existing, "agent_name");
+        copy_agent_metadata_field_if_missing(metadata, existing, "agent_description");
+        copy_agent_metadata_field_if_missing(metadata, existing, "task_name");
+        copy_agent_metadata_field_if_missing(metadata, existing, "task");
+        copy_agent_metadata_field_if_missing(metadata, existing, "prompt");
+        copy_agent_metadata_field_if_missing(metadata, existing, "parent_session_id");
+        copy_agent_metadata_field_if_missing(metadata, existing, "child_session_id");
+        copy_agent_metadata_field_if_missing(metadata, existing, "session_id");
+        if metadata.get("args").is_none_or(Value::is_null)
+            && let Some(args) = existing.get("args").filter(|args| !args.is_null())
+        {
+            set_metadata_field(metadata, "args", args.clone());
+        }
+    }
+
     fn canonical_tool_call_id(
         &mut self,
         raw_tool_call_id: &str,
@@ -681,10 +861,16 @@ impl GatewayLiveProjector {
         if self.tool_owners.contains_key(raw_tool_call_id) {
             return raw_tool_call_id.to_string();
         }
-        let Some(args) = args else {
-            return raw_tool_call_id.to_string();
+        let candidates = args
+            .map(|args| self.matching_open_tool_candidates(tool_name, args))
+            .unwrap_or_default();
+        let candidates = if candidates.len() == 1 {
+            candidates
+        } else if candidates.is_empty() {
+            self.matching_open_tool_name_candidates(tool_name)
+        } else {
+            Vec::new()
         };
-        let candidates = self.matching_open_tool_candidates(tool_name, args);
         if candidates.len() != 1 {
             return raw_tool_call_id.to_string();
         }
@@ -731,6 +917,39 @@ impl GatewayLiveProjector {
                 if candidate_args == args {
                     candidates.push((candidate_id.to_string(), *segment));
                 }
+            }
+        }
+        candidates
+    }
+
+    fn matching_open_tool_name_candidates(&self, tool_name: &str) -> Vec<(String, usize)> {
+        let mut candidates = Vec::new();
+        for (segment, state) in &self.entries {
+            for block in state.blocks.values() {
+                if !matches!(
+                    block.status,
+                    TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
+                ) {
+                    continue;
+                }
+                let Some(metadata) = block.metadata.as_ref() else {
+                    continue;
+                };
+                if metadata
+                    .get("projection")
+                    .and_then(Value::as_str)
+                    .is_some_and(|projection| projection != "tool")
+                {
+                    continue;
+                }
+                if metadata.get("tool_name").and_then(Value::as_str) != Some(tool_name) {
+                    continue;
+                }
+                let Some(candidate_id) = metadata.get("tool_call_id").and_then(Value::as_str)
+                else {
+                    continue;
+                };
+                candidates.push((candidate_id.to_string(), *segment));
             }
         }
         candidates
@@ -848,6 +1067,26 @@ impl GatewayLiveProjector {
         self.assistant_segment += 1;
     }
 
+    fn prepare_turn(&mut self, turn_id: &str) {
+        if self.active_turn_id.as_deref() == Some(turn_id) {
+            return;
+        }
+        if self.active_turn_id.is_some() {
+            self.reset_turn_state();
+        }
+        self.active_turn_id = Some(turn_id.to_string());
+    }
+
+    fn reset_turn_state(&mut self) {
+        self.active_turn_id = None;
+        self.assistant_segment = 0;
+        self.entries.clear();
+        self.tool_owners.clear();
+        self.tool_aliases.clear();
+        self.tool_args.clear();
+        self.exec_sessions.clear();
+    }
+
     fn attach_thread_id(&mut self, event: &mut GatewayEvent) {
         if self.thread_id.is_none()
             && let Some(thread_id) = event_thread_id(event)
@@ -865,7 +1104,226 @@ impl GatewayLiveProjector {
                     entry.thread_id = thread_id.to_string();
                 }
             }
+            GatewayEvent::TurnStarted {
+                thread_id: event_thread_id,
+                ..
+            }
+            | GatewayEvent::TurnQueued {
+                thread_id: event_thread_id,
+                ..
+            }
+            | GatewayEvent::ActivityChanged {
+                thread_id: event_thread_id,
+                ..
+            } => {
+                if event_thread_id.is_none() {
+                    *event_thread_id = Some(thread_id.to_string());
+                }
+            }
+            GatewayEvent::TurnCompleted {
+                thread_id: event_thread_id,
+                turn,
+                committed_entries,
+                ..
+            } => {
+                if event_thread_id.is_none() {
+                    *event_thread_id = Some(thread_id.to_string());
+                }
+                if turn.thread_id.is_none() {
+                    turn.thread_id = Some(thread_id.to_string());
+                }
+                for entry in committed_entries {
+                    if entry.thread_id.is_empty() {
+                        entry.thread_id = thread_id.to_string();
+                    }
+                }
+            }
             _ => {}
         }
     }
+}
+
+fn force_event_thread_id(event: &mut GatewayEvent, thread_id: &str) {
+    match event {
+        GatewayEvent::EntryStarted { entry, .. }
+        | GatewayEvent::EntryUpdated { entry, .. }
+        | GatewayEvent::EntryCompleted { entry, .. } => {
+            entry.thread_id = thread_id.to_string();
+        }
+        GatewayEvent::TurnStarted {
+            thread_id: event_thread_id,
+            ..
+        }
+        | GatewayEvent::TurnQueued {
+            thread_id: event_thread_id,
+            ..
+        }
+        | GatewayEvent::ActivityChanged {
+            thread_id: event_thread_id,
+            ..
+        } => {
+            *event_thread_id = Some(thread_id.to_string());
+        }
+        GatewayEvent::TurnCompleted {
+            thread_id: event_thread_id,
+            turn,
+            committed_entries,
+            ..
+        } => {
+            *event_thread_id = Some(thread_id.to_string());
+            turn.thread_id = Some(thread_id.to_string());
+            for entry in committed_entries {
+                entry.thread_id = thread_id.to_string();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn agent_session_start_metadata(
+    value: &Value,
+    tool_call_id: &str,
+    child_session_id: &str,
+) -> Value {
+    let mut metadata = json!({
+        "projection": "tool",
+        "tool_name": "Agent",
+        "tool_call_id": tool_call_id,
+        "type": "agent_session_start",
+        "outcome": "normal",
+        "child_session_id": child_session_id,
+    });
+    set_metadata_result_field(&mut metadata, "child_session_id", json!(child_session_id));
+    set_metadata_result_field(&mut metadata, "session_id", json!(child_session_id));
+    set_metadata_result_field(&mut metadata, "status", json!("running"));
+    for key in [
+        "agent_id",
+        "agent_name",
+        "agent_description",
+        "task_name",
+        "parent_session_id",
+        "session_id",
+        "background",
+        "status",
+    ] {
+        if let Some(field) = value.get(key).filter(|field| !field.is_null()) {
+            set_metadata_field(&mut metadata, key, field.clone());
+            set_metadata_result_field(&mut metadata, key, field.clone());
+        }
+    }
+    metadata
+}
+
+fn enrich_agent_metadata_from_fields(metadata: &mut Value) {
+    if let Some(child_session_id) = agent_child_session_id(metadata).map(ToString::to_string) {
+        set_metadata_field(
+            metadata,
+            "child_session_id",
+            json!(child_session_id.clone()),
+        );
+        set_metadata_result_field(
+            metadata,
+            "child_session_id",
+            json!(child_session_id.clone()),
+        );
+        set_metadata_result_field(metadata, "session_id", json!(child_session_id));
+    }
+    if let Some(agent_name) = agent_metadata_string(metadata, "agent_name")
+        .or_else(|| agent_metadata_string(metadata, "agent_type"))
+        .or_else(|| agent_metadata_string(metadata, "name"))
+        .map(ToString::to_string)
+    {
+        set_metadata_field(metadata, "agent_name", json!(agent_name.clone()));
+        set_metadata_result_field(metadata, "agent_name", json!(agent_name));
+    }
+    if let Some(task_name) = agent_metadata_string(metadata, "task_name").map(ToString::to_string) {
+        set_metadata_field(metadata, "task_name", json!(task_name.clone()));
+        set_metadata_result_field(metadata, "task_name", json!(task_name));
+    }
+    if let Some(task) = agent_metadata_string(metadata, "task")
+        .or_else(|| agent_metadata_string(metadata, "prompt"))
+        .map(ToString::to_string)
+    {
+        set_metadata_field(metadata, "task", json!(task.clone()));
+        set_metadata_result_field(metadata, "task", json!(task));
+    } else if let Some(prompt) = metadata
+        .get("args")
+        .and_then(|args| args.get("prompt"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .map(ToString::to_string)
+    {
+        set_metadata_field(metadata, "task", json!(prompt.clone()));
+        set_metadata_result_field(metadata, "task", json!(prompt));
+    }
+    if let Some(parent_session_id) =
+        agent_metadata_string(metadata, "parent_session_id").map(ToString::to_string)
+    {
+        set_metadata_result_field(metadata, "parent_session_id", json!(parent_session_id));
+    }
+}
+
+fn copy_agent_metadata_field_if_missing(target: &mut Value, source: &Value, key: &str) {
+    if agent_metadata_string(target, key).is_some() {
+        return;
+    }
+    if let Some(value) = source
+        .get(key)
+        .filter(|value| !value.is_null())
+        .cloned()
+        .or_else(|| {
+            source
+                .get("result")
+                .and_then(|result| result.get(key))
+                .filter(|value| !value.is_null())
+                .cloned()
+        })
+    {
+        set_metadata_field(target, key, value.clone());
+        set_metadata_result_field(target, key, value);
+    }
+}
+
+fn agent_child_session_id(metadata: &Value) -> Option<&str> {
+    agent_metadata_string(metadata, "child_session_id")
+        .or_else(|| agent_metadata_string(metadata, "session_id"))
+}
+
+fn agent_metadata_string<'a>(metadata: &'a Value, key: &str) -> Option<&'a str> {
+    metadata
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            metadata
+                .get("result")
+                .and_then(|result| result.get(key))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            metadata
+                .get("args")
+                .and_then(|args| args.get(key))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+}
+
+fn agent_metadata_name_matches(metadata: &Value, agent_name: &str) -> bool {
+    agent_metadata_string(metadata, "agent_name").is_some_and(|value| value == agent_name)
+        || agent_metadata_string(metadata, "agent_type").is_some_and(|value| value == agent_name)
+        || agent_metadata_string(metadata, "name").is_some_and(|value| value == agent_name)
+}
+
+fn agent_task_summary(metadata: &Value) -> Option<String> {
+    agent_metadata_string(metadata, "task_name")
+        .or_else(|| agent_metadata_string(metadata, "task"))
+        .or_else(|| agent_metadata_string(metadata, "prompt"))
+        .or_else(|| agent_metadata_string(metadata, "agent_description"))
+        .map(|value| compact_text(value, 240))
 }

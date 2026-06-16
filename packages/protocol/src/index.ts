@@ -43,6 +43,14 @@ const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
 const compiled = new Map<GatewaySchemaName, ValidateFunction>();
 let schemaRefsRegistered = false;
 
+export const SIDE_INHERITED_METADATA_KEY = "side_inherited";
+
+export function sideInheritedMetadataHidden(metadata: unknown): boolean {
+  const record = recordForValue(metadata);
+  const sideInherited = recordForValue(record[SIDE_INHERITED_METADATA_KEY]);
+  return sideInherited.hidden === true;
+}
+
 export type SafeParseResult<T> =
   | { data: T; success: true }
   | { error: Error; success: false };
@@ -132,6 +140,10 @@ function schema<T>(name: GatewaySchemaName): RuntimeSchema<T> {
       }
     }
   };
+}
+
+function recordForValue(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function validator(name: GatewaySchemaName): ValidateFunction {

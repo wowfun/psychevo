@@ -76,7 +76,7 @@ reference-only continuity context, not active instructions from the user.
 ## Triggers
 
 Automatic compaction applies to main run/TUI sessions and child-agent sessions.
-Temporary `/btw` side sessions are excluded.
+Temporary `/btw` side threads are excluded.
 
 For non-interactive `pevo run`, runtime checks compaction before submitting the
 prompt. It does not perform normal post-completion compaction before process
@@ -95,7 +95,7 @@ context and retry the same prompt once. A second overflow is reported normally.
 
 `/compact [instructions]` performs manual compaction for the current main
 session. If a turn is running, the manual compaction request is queued behind
-that turn and ahead of later queued prompts. Side conversations reject
+that turn and ahead of later queued prompts. Side chats reject
 `/compact`.
 
 Fullscreen TUI reports compaction completion with before/after token estimates

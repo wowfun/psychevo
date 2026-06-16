@@ -1,4 +1,11 @@
-import type { GatewayEvent, GatewayThread, ThreadSnapshot, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
+import {
+  sideInheritedMetadataHidden,
+  type GatewayEvent,
+  type GatewayThread,
+  type ThreadSnapshot,
+  type TranscriptBlock,
+  type TranscriptEntry
+} from "@psychevo/protocol";
 
 const OPTIMISTIC_SOURCE = "client.optimistic";
 const LIVE_SOURCE = "runtime.stream";
@@ -17,6 +24,12 @@ export function applyLiveTranscriptEvent(
     case "entryUpdated":
     case "entryCompleted": {
       const nextEntry = entryForSnapshot(snapshot, event.entry);
+      if (isHiddenTranscriptEntry(nextEntry)) {
+        return {
+          ...snapshot,
+          entries: snapshot.entries.filter((entry) => entry.id !== nextEntry.id)
+        };
+      }
       const reconciled = reconcileIncomingEntryForSnapshot(snapshot.entries, nextEntry);
       const entries = reconciled.entry
         ? upsertEntry(reconciled.entries, reconciled.entry)
@@ -47,12 +60,26 @@ export function applyLiveTranscriptEvent(
       };
     case "turnCompleted": {
       const committedEntries = Array.isArray(event.committedEntries) ? event.committedEntries : [];
-      const entries = committedEntries.length > 0
-        ? mergeCommittedEntries(snapshot, event.turnId, committedEntries)
-        : removeEmptyLiveOverlayForTurn(snapshot.entries, event.turnId);
+      const terminal = event.turn;
+      const terminalStatus = terminal.status;
+      const terminalThreadId = event.threadId ?? terminal.threadId ?? null;
+      const failedTerminal = terminalStatus === "failed" || terminalStatus === "interrupted";
+      const entries = failedTerminal
+        ? ensureTerminalDiagnosticEntry(
+            finalizePendingEntriesForTurn(
+              mergeTerminalCommittedEntries(snapshot, event.turnId, committedEntries),
+              event.turnId,
+              terminalStatus === "interrupted" ? "cancelled" : "failed"
+            ),
+            snapshot,
+            event
+          )
+        : committedEntries.length > 0
+          ? mergeCommittedEntries(snapshot, event.turnId, committedEntries)
+          : removeEmptyLiveOverlayForTurn(snapshot.entries, event.turnId);
       return {
         ...snapshot,
-        thread: threadForTurn(snapshot, event.threadId),
+        thread: threadForTurn(snapshot, terminalThreadId),
         entries,
         activity: snapshot.activity.activeTurnId === event.turnId
           ? {
@@ -128,8 +155,11 @@ export function reconcileThreadSnapshot(
     return normalizeSnapshotEntries(incoming);
   }
 
-  const entries = [...incoming.entries];
+  const entries = incoming.entries.filter((entry) => !isHiddenTranscriptEntry(entry));
   for (const entry of current.entries) {
+    if (isHiddenTranscriptEntry(entry)) {
+      continue;
+    }
     if (isUnreconciledOptimisticPrompt(entry, entries)) {
       entries.push(entry);
       continue;
@@ -184,6 +214,7 @@ function eventThreadIdForEvent(event: GatewayEvent): string | null {
       return event.threadId || null;
     case "turnCompleted":
       return event.threadId ||
+        event.turn.threadId ||
         (Array.isArray(event.committedEntries)
           ? event.committedEntries.find((entry) => entry.threadId)?.threadId
           : null) ||
@@ -236,11 +267,126 @@ function mergeCommittedEntries(
   turnId: string,
   committedEntries: TranscriptEntry[]
 ): TranscriptEntry[] {
+  const enrichedCommittedEntries = committedEntries.map((entry) =>
+    enrichCommittedAgentTargetsFromLive(entry, snapshot.entries, turnId)
+  );
   let entries = snapshot.entries.filter((entry) => !isLiveOverlayForTurn(entry, turnId));
-  for (const entry of committedEntries) {
+  for (const entry of enrichedCommittedEntries) {
+    if (isHiddenTranscriptEntry(entry)) {
+      continue;
+    }
     entries = upsertEntry(entries, entryForSnapshot(snapshot, entry));
   }
   return sortTranscriptEntries(entries);
+}
+
+function mergeTerminalCommittedEntries(
+  snapshot: ThreadSnapshot,
+  turnId: string,
+  committedEntries: TranscriptEntry[]
+): TranscriptEntry[] {
+  let entries = [...snapshot.entries];
+  for (const entry of committedEntries.map((candidate) =>
+    enrichCommittedAgentTargetsFromLive(candidate, snapshot.entries, turnId)
+  )) {
+    if (isHiddenTranscriptEntry(entry)) {
+      continue;
+    }
+    entries = upsertEntry(entries, entryForSnapshot(snapshot, entry));
+  }
+  return entries.filter((entry) => !isEmptyLiveOverlayForTurn(entry, turnId));
+}
+
+function finalizePendingEntriesForTurn(
+  entries: TranscriptEntry[],
+  turnId: string,
+  status: "failed" | "cancelled"
+): TranscriptEntry[] {
+  return sortTranscriptEntries(entries.map((entry) => {
+    if (entry.turnId !== turnId) {
+      return entry;
+    }
+    let changed = false;
+    const blocks = blocksForEntry(entry).map((block) => {
+      if (block.status !== "pending" && block.status !== "running") {
+        return block;
+      }
+      changed = true;
+      return {
+        ...block,
+        status,
+        updatedAtMs: Date.now()
+      };
+    });
+    if (!changed) {
+      return entry;
+    }
+    return {
+      ...entry,
+      blocks,
+      status: entryStatusForBlocks(blocks, status),
+      updatedAtMs: Date.now()
+    };
+  }));
+}
+
+function ensureTerminalDiagnosticEntry(
+  entries: TranscriptEntry[],
+  snapshot: ThreadSnapshot,
+  event: Extract<GatewayEvent, { type: "turnCompleted" }>
+): TranscriptEntry[] {
+  const status = event.turn.status;
+  if (status !== "failed" && status !== "interrupted") {
+    return sortTranscriptEntries(entries);
+  }
+  const id = `turn:${event.turnId}:terminal`;
+  if (entries.some((entry) => entry.id === id)) {
+    return sortTranscriptEntries(entries);
+  }
+  const blockStatus = status === "interrupted" ? "cancelled" : "failed";
+  const message = event.turn.error?.message?.trim()
+    || (status === "interrupted" ? "The turn was interrupted." : "The turn failed.");
+  const now = event.turn.completedAtMs ?? Date.now();
+  const threadId = event.threadId ?? event.turn.threadId ?? snapshot.thread?.id ?? "";
+  const entry: TranscriptEntry = {
+    id,
+    threadId,
+    turnId: event.turnId,
+    messageSeq: null,
+    role: "diagnostic",
+    status: blockStatus,
+    source: "gateway.turn",
+    blocks: [{
+      id: `${id}:block`,
+      kind: "status",
+      status: blockStatus,
+      order: 0,
+      source: "gateway.turn",
+      title: status === "interrupted" ? "Turn interrupted" : "Turn failed",
+      body: message,
+      preview: compactText(message, 240),
+      detail: message,
+      artifactIds: [],
+      metadata: {
+        projection: "turn_terminal",
+        status,
+        outcome: event.turn.outcome ?? null
+      },
+      result: null,
+      createdAtMs: now,
+      updatedAtMs: now
+    }],
+    metadata: {
+      projection: "turn_terminal",
+      status,
+      outcome: event.turn.outcome ?? null
+    },
+    usage: null,
+    accounting: null,
+    createdAtMs: now,
+    updatedAtMs: now
+  };
+  return sortTranscriptEntries([...entries, entry]);
 }
 
 function bindOptimisticPromptsToTurn(entries: TranscriptEntry[], turnId: string): TranscriptEntry[] {
@@ -267,7 +413,14 @@ function removeEmptyLiveOverlayForTurn(entries: TranscriptEntry[], turnId: strin
   return entries.filter((entry) => !isLiveOverlayForTurn(entry, turnId) || entryHasVisibleTranscriptText(entry));
 }
 
+function isEmptyLiveOverlayForTurn(entry: TranscriptEntry, turnId: string): boolean {
+  return isLiveOverlayForTurn(entry, turnId) && !entryHasVisibleTranscriptText(entry);
+}
+
 function upsertEntry(entries: TranscriptEntry[], next: TranscriptEntry): TranscriptEntry[] {
+  if (isHiddenTranscriptEntry(next)) {
+    return entries.filter((entry) => entry.id !== next.id);
+  }
   const currentEntries = isAuthoritativeLiveBlockSnapshot(next)
     ? removeSupersededToolOverlayEntries(entries, next)
     : entries;
@@ -325,8 +478,7 @@ function removeSupersededToolOverlayEntries(
 ): TranscriptEntry[] {
   const signatures = new Set(
     blocksForEntry(authoritative)
-      .map(toolBlockSignature)
-      .filter((signature): signature is string => Boolean(signature))
+      .flatMap(toolBlockSignatures)
   );
   if (signatures.size === 0) {
     return entries;
@@ -345,8 +497,7 @@ function removeSupersededToolOverlayEntries(
       return true;
     }
     return !blocks.some((block) => {
-      const signature = toolBlockSignature(block);
-      return signature !== null && signatures.has(signature);
+      return toolBlockSignatures(block).some((signature) => signatures.has(signature));
     });
   });
 }
@@ -361,17 +512,184 @@ function isToolLikeBlock(block: TranscriptBlock): boolean {
   return block.kind !== "text" && block.kind !== "reasoning";
 }
 
-function toolBlockSignature(block: TranscriptBlock): string | null {
+function toolBlockSignatures(block: TranscriptBlock): string[] {
   if (!isToolLikeBlock(block)) {
-    return null;
+    return [];
   }
   const metadata = recordForValue(block.metadata);
   const toolName = stringValue(metadata.tool_name) ?? block.title ?? block.kind;
+  const signatures: string[] = [];
+  const toolCallId = stringValue(metadata.tool_call_id);
+  if (toolCallId) {
+    signatures.push(`${toolName}:id:${toolCallId}`);
+  }
+  const childSessionId = stringValue(metadata.child_session_id)
+    ?? stringValue(metadata.childSessionId)
+    ?? stringValue(recordForValue(metadata.result).child_session_id)
+    ?? stringValue(recordForValue(metadata.result).childSessionId)
+    ?? stringValue(recordForValue(metadata.result).session_id)
+    ?? stringValue(recordForValue(metadata.result).sessionId);
+  if ((toolName === "Agent" || toolName === "agent") && childSessionId) {
+    signatures.push(`${toolName}:child:${childSessionId}`);
+  }
   const args = metadata.args ?? metadata.arguments ?? null;
-  if (args === null) {
+  if (args !== null) {
+    signatures.push(`${toolName}:args:${JSON.stringify(args)}`);
+  }
+  return signatures;
+}
+
+type AgentChildTarget = {
+  agentName: string | null;
+  childSessionId: string;
+  parentSessionId: string | null;
+  task: string | null;
+  taskName: string | null;
+};
+
+function enrichCommittedAgentTargetsFromLive(
+  entry: TranscriptEntry,
+  liveEntries: TranscriptEntry[],
+  turnId: string
+): TranscriptEntry {
+  const liveAgentBlocks = liveEntries
+    .filter((candidate) => isLiveOverlayForTurn(candidate, turnId))
+    .flatMap(blocksForEntry)
+    .filter((block) => block.kind === "agent" && agentChildTargetFromBlock(block));
+  if (liveAgentBlocks.length === 0) {
+    return entry;
+  }
+  let changed = false;
+  const blocks = blocksForEntry(entry).map((block) => {
+    if (block.kind !== "agent" || agentChildTargetFromBlock(block)) {
+      return block;
+    }
+    const liveBlock = liveAgentBlocks.find((candidate) => sameAgentInvocationBlock(block, candidate));
+    const target = liveBlock ? agentChildTargetFromBlock(liveBlock) : null;
+    if (!target) {
+      return block;
+    }
+    changed = true;
+    return blockWithAgentChildTarget(block, target);
+  });
+  return changed ? { ...entry, blocks } : entry;
+}
+
+function sameAgentInvocationBlock(committed: TranscriptBlock, live: TranscriptBlock): boolean {
+  if (committed.id === live.id) {
+    return true;
+  }
+  const committedToolCallId = agentBlockToolCallId(committed);
+  const liveToolCallId = agentBlockToolCallId(live);
+  return Boolean(committedToolCallId && liveToolCallId && committedToolCallId === liveToolCallId);
+}
+
+function agentBlockToolCallId(block: TranscriptBlock): string | null {
+  const metadata = recordForValue(block.metadata);
+  const resultMetadata = recordForValue(block.result?.metadata);
+  return stringValue(metadata.tool_call_id)
+    ?? stringValue(metadata.toolCallId)
+    ?? stringValue(resultMetadata.tool_call_id)
+    ?? stringValue(resultMetadata.toolCallId);
+}
+
+function agentChildTargetFromBlock(block: TranscriptBlock): AgentChildTarget | null {
+  const metadata = recordForValue(block.metadata);
+  const metadataResult = recordForValue(metadata.result);
+  const resultMetadata = recordForValue(block.result?.metadata);
+  const resultMetadataResult = recordForValue(resultMetadata.result);
+  const blockResultContent = jsonRecord(block.result?.content);
+  const blockBody = jsonRecord(block.body);
+  const records = [
+    metadata,
+    metadataResult,
+    resultMetadata,
+    resultMetadataResult,
+    blockResultContent,
+    blockBody
+  ];
+  const childSessionId = firstStringField(records, [
+    "child_session_id",
+    "childSessionId",
+    "session_id",
+    "sessionId"
+  ]);
+  if (!childSessionId) {
     return null;
   }
-  return `${toolName}:${JSON.stringify(args)}`;
+  return {
+    agentName: firstStringField(records, ["agent_name", "agentName", "name"]),
+    childSessionId,
+    parentSessionId: firstStringField(records, ["parent_session_id", "parentSessionId"]),
+    task: firstStringField(records, ["task", "prompt"]),
+    taskName: firstStringField(records, ["task_name", "taskName"])
+  };
+}
+
+function blockWithAgentChildTarget(block: TranscriptBlock, target: AgentChildTarget): TranscriptBlock {
+  const metadata = { ...recordForValue(block.metadata) };
+  addAgentTargetFields(metadata, target);
+  const metadataResult = { ...recordForValue(metadata.result) };
+  addAgentTargetFields(metadataResult, target);
+  metadata.result = metadataResult;
+  const result = block.result
+    ? {
+        ...block.result,
+        metadata: resultMetadataWithAgentTarget(block.result.metadata, target)
+      }
+    : block.result;
+  return {
+    ...block,
+    metadata,
+    result
+  };
+}
+
+function resultMetadataWithAgentTarget(metadata: unknown, target: AgentChildTarget): unknown {
+  const record = { ...recordForValue(metadata) };
+  const result = { ...recordForValue(record.result) };
+  addAgentTargetFields(record, target);
+  addAgentTargetFields(result, target);
+  record.result = result;
+  return record;
+}
+
+function addAgentTargetFields(record: Record<string, unknown>, target: AgentChildTarget) {
+  setStringIfMissing(record, "child_session_id", target.childSessionId);
+  setStringIfMissing(record, "session_id", target.childSessionId);
+  setStringIfMissing(record, "parent_session_id", target.parentSessionId);
+  setStringIfMissing(record, "agent_name", target.agentName);
+  setStringIfMissing(record, "task_name", target.taskName);
+  setStringIfMissing(record, "task", target.task);
+}
+
+function setStringIfMissing(record: Record<string, unknown>, key: string, value: string | null) {
+  if (value && !stringValue(record[key])) {
+    record[key] = value;
+  }
+}
+
+function firstStringField(records: Array<Record<string, unknown>>, keys: string[]): string | null {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = stringValue(record[key]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== "string") {
+    return {};
+  }
+  try {
+    return recordForValue(JSON.parse(value));
+  } catch {
+    return {};
+  }
 }
 
 function applyEntryDelta(
@@ -441,7 +759,7 @@ function liveEntryForSnapshotReconcile(
 function normalizeSnapshotEntries(snapshot: ThreadSnapshot): ThreadSnapshot {
   return {
     ...snapshot,
-    entries: sortTranscriptEntries(snapshot.entries)
+    entries: sortTranscriptEntries(snapshot.entries.filter((entry) => !isHiddenTranscriptEntry(entry)))
   };
 }
 
@@ -504,12 +822,29 @@ function normalizedEntryText(entry: TranscriptEntry): string {
 }
 
 function entryHasVisibleTranscriptText(entry: TranscriptEntry): boolean {
+  if (isHiddenTranscriptEntry(entry)) {
+    return false;
+  }
   return blocksForEntry(entry).some((block) => {
-    if (recordForValue(block.metadata).hidden === true) {
+    if (metadataHidden(block.metadata)) {
       return false;
     }
-    return blockText(block).trim().length > 0;
+    if (blockText(block).trim().length > 0) {
+      return true;
+    }
+    return block.kind !== "text" &&
+      block.kind !== "reasoning" &&
+      typeof block.title === "string" &&
+      block.title.trim().length > 0;
   });
+}
+
+function isHiddenTranscriptEntry(entry: TranscriptEntry): boolean {
+  return metadataHidden(entry.metadata);
+}
+
+function metadataHidden(metadata: unknown): boolean {
+  return recordForValue(metadata).hidden === true || sideInheritedMetadataHidden(metadata);
 }
 
 function blockText(block: TranscriptBlock): string {
@@ -591,8 +926,7 @@ function anchorCoveredLiveToolBlocks(
 ): TranscriptEntry[] {
   const liveTools = new Map<string, TranscriptBlock>();
   for (const block of blocksForEntry(liveEntry)) {
-    const signature = toolBlockSignature(block);
-    if (signature) {
+    for (const signature of toolBlockSignatures(block)) {
       liveTools.set(signature, block);
     }
   }
@@ -605,8 +939,9 @@ function anchorCoveredLiveToolBlocks(
     }
     let changed = false;
     const blocks = blocksForEntry(entry).map((block) => {
-      const signature = toolBlockSignature(block);
-      const liveBlock = signature ? liveTools.get(signature) : undefined;
+      const liveBlock = toolBlockSignatures(block)
+        .map((signature) => liveTools.get(signature))
+        .find((candidate): candidate is TranscriptBlock => Boolean(candidate));
       if (!liveBlock) {
         return block;
       }
@@ -677,9 +1012,11 @@ function snapshotCoverage(entries: TranscriptEntry[]): { texts: string[]; tools:
       if (recordForValue(block.metadata).hidden === true) {
         continue;
       }
-      const signature = toolBlockSignature(block);
-      if (signature) {
-        tools.add(signature);
+      const signatures = toolBlockSignatures(block);
+      if (signatures.length > 0) {
+        for (const signature of signatures) {
+          tools.add(signature);
+        }
         continue;
       }
       const text = normalizedBlockText(block);
@@ -699,16 +1036,16 @@ function blockVisibleForCoverage(block: TranscriptBlock): boolean {
   if (recordForValue(block.metadata).hidden === true) {
     return false;
   }
-  return Boolean(toolBlockSignature(block) || normalizedBlockText(block));
+  return Boolean(toolBlockSignatures(block).length > 0 || normalizedBlockText(block));
 }
 
 function blockCoveredBySnapshot(
   block: TranscriptBlock,
   coverage: { texts: string[]; tools: Set<string> }
 ): boolean {
-  const signature = toolBlockSignature(block);
-  if (signature) {
-    return coverage.tools.has(signature);
+  const signatures = toolBlockSignatures(block);
+  if (signatures.length > 0) {
+    return signatures.some((signature) => coverage.tools.has(signature));
   }
   const text = normalizedBlockText(block);
   return Boolean(text && coverage.texts.some((candidate) => textOverlaps(candidate, text)));

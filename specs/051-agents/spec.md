@@ -120,7 +120,7 @@ metadata records the selected definition and source.
 
 Child and fork invocations use the same selected-agent identity, description,
 and instruction-body construction, with additional child-run control guidance
-owned by the subagent runtime. Their persisted child sessions record a
+owned by the subagent runtime. Their persisted child threads record a
 child-invocation prefix snapshot and prompt-scoped evidence for export and
 last-provider-request reconstruction.
 Foreground child invocations are part of the parent turn's active control
@@ -138,9 +138,9 @@ checks, and the model-visible `Agent` tool result shape. The concrete peer
 transport is injected as an optional runtime-to-Gateway delegate because
 Gateway owns ACP client sessions and peer observation. If that delegate is not
 available, the `Agent` tool must return a structured unavailable result rather
-than falling back to a native child session that only has the peer's name.
+than falling back to a native child thread that only has the peer's name.
 Ordinary local Markdown/built-in agents continue to use the existing native
-child-session path.
+child-thread path.
 
 Interactive clients may treat the selected agent as a session-scoped setting:
 changing it affects only future invocations in that session, not previous

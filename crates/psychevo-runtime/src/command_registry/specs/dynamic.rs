@@ -76,6 +76,9 @@ pub enum SlashCommandEffect {
         args: Option<String>,
     },
     Diff,
+    Btw {
+        prompt: Option<String>,
+    },
     Unsupported(String),
 }
 

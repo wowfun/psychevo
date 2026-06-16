@@ -17,7 +17,7 @@
         let internal = store
             .create_session_with_metadata(
                 &state.inner.workdir,
-                "tui-side",
+                "tui-side-conversation",
                 "fake-model",
                 "fake-provider",
                 None,
@@ -345,7 +345,17 @@
         state.record_event(&GatewayEvent::TurnCompleted {
             thread_id: Some(session_id.clone()),
             turn_id: "turn-1".to_string(),
-            outcome: Some("failed".to_string()),
+            turn: GatewayTurn {
+                id: "turn-1".to_string(),
+                thread_id: Some(session_id.clone()),
+                status: GatewayTurnStatus::Failed,
+                outcome: Some("failed".to_string()),
+                error: Some(GatewayTurnError {
+                    message: "failed".to_string(),
+                }),
+                started_at_ms: None,
+                completed_at_ms: Some(gateway_now_ms()),
+            },
             committed_entries: Vec::new(),
         });
         let scope = ResolvedScope {

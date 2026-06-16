@@ -1,4 +1,4 @@
-const INTERNAL_SESSION_SOURCES: &[&str] = &["tui-side"];
+const INTERNAL_SESSION_SOURCES: &[&str] = SIDE_CONVERSATION_SESSION_SOURCES;
 #[derive(Debug, Clone)]
 pub struct GatewayWebServerConfig {
     pub gateway: Gateway,

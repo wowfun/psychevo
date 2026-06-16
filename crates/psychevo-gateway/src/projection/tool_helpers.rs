@@ -44,7 +44,38 @@ fn live_tool_title(tool_name: &str, metadata: &Value) -> String {
     {
         return format!("exec_command {command}");
     }
+    if tool_name == "Agent"
+        && let Some(title) = live_agent_tool_title(metadata)
+    {
+        return title;
+    }
     tool_name.to_string()
+}
+
+fn live_agent_tool_title(metadata: &Value) -> Option<String> {
+    let agent = agent_metadata_string(metadata, "agent_name")
+        .or_else(|| agent_metadata_string(metadata, "agent_type"))
+        .or_else(|| agent_metadata_string(metadata, "name"))?;
+    let task_name = agent_metadata_string(metadata, "task_name")
+        .filter(|task_name| !generated_agent_task_name(agent, task_name));
+    let detail = task_name
+        .or_else(|| agent_metadata_string(metadata, "agent_description"))
+        .or_else(|| agent_metadata_string(metadata, "task"))
+        .or_else(|| agent_metadata_string(metadata, "prompt"));
+    Some(match detail {
+        Some(detail) => format!("{agent}({})", compact_text(detail, 96)),
+        None => agent.to_string(),
+    })
+}
+
+fn generated_agent_task_name(agent: &str, task_name: &str) -> bool {
+    let Some(suffix) = task_name
+        .strip_prefix(agent)
+        .and_then(|rest| rest.strip_prefix('-'))
+    else {
+        return false;
+    };
+    suffix.len() >= 8 && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn first_shell_command_line(text: &str) -> Option<&str> {
@@ -252,6 +283,20 @@ fn tool_event_failed(value: &Value) -> bool {
         .is_some_and(|outcome| outcome != "normal")
 }
 
+fn background_running_agent_result_value(tool_name: &str, value: &Value) -> bool {
+    tool_name == "Agent"
+        && value
+            .get("result")
+            .and_then(|result| result.get("background"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        && value
+            .get("result")
+            .and_then(|result| result.get("status"))
+            .and_then(Value::as_str)
+            == Some("running")
+}
+
 fn tool_result_output_runtime(value: &Value) -> String {
     value
         .get("result")
@@ -350,6 +395,7 @@ fn tool_kind(tool_name: &str) -> TranscriptBlockKind {
         "web_fetch" | "web_search" => TranscriptBlockKind::Web,
         "mcp" | "mcp_call" => TranscriptBlockKind::Mcp,
         "clarify" => TranscriptBlockKind::Clarify,
+        "Agent" | "agent" => TranscriptBlockKind::Agent,
         _ => TranscriptBlockKind::ToolCall,
     }
 }

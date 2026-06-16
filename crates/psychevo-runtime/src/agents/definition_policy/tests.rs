@@ -80,10 +80,6 @@ impl ToolBinding for AgentTool {
                     "type": "string",
                     "description": "Agent definition name to run. Defaults to general when omitted and no @agent mention requires a specific target."
                 },
-                "name": {
-                    "type": "string",
-                    "description": "Compatibility alias for agent_type; calls fail if both fields are supplied with different non-empty values."
-                },
                 "prompt": {
                     "type": "string",
                     "description": "Complete task instructions for the child agent."
