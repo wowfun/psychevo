@@ -7,4 +7,4 @@ export type { HistoryBrowserWorkspace, HistoryDraftSession, HistoryPanelProps } 
 export { StatusPanel } from "./status";
 export type { StatusPanelProps } from "./status";
 export { MarkdownText, TranscriptPanel } from "./transcript";
-export type { MarkdownTextProps, TranscriptPanelProps } from "./transcript";
+export type { MarkdownTextProps, TranscriptAgentSession, TranscriptPanelProps } from "./transcript";

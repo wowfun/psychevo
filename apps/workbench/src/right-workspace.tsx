@@ -1,9 +1,10 @@
 import { type ReactNode } from "react";
-import { Bug, FolderTree, GitPullRequest, Home, Plus, RefreshCw, TerminalSquare, X } from "lucide-react";
-import { DismissibleDetails } from "@psychevo/components";
+import { Bot, Bug, FolderTree, GitPullRequest, Home, MessageSquare, Plus, RefreshCw, TerminalSquare, X } from "lucide-react";
+import { DismissibleDetails, type TranscriptAgentSession } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
 import type {
   ContextReadResult,
+  GatewayMention,
   GatewayRequestScope,
   SessionUsageSummaryView,
   ThreadSnapshot,
@@ -12,10 +13,11 @@ import type {
   WorkspaceFileEntry,
   WorkspaceFileWriteResult
 } from "@psychevo/protocol";
-import type { Appearance, DebugEvent, RightWorkspaceTab, RightWorkspaceTabKind, TerminalNotificationEvent, TraceState } from "./types";
+import type { Appearance, DebugEvent, GatewayEventFeed, RightWorkspaceTab, RightWorkspaceTabKind, TerminalNotificationEvent, TraceState } from "./types";
 import { DebugPanel } from "./right-workspace/debug";
 import { FilesPanel } from "./right-workspace/files";
 import { ReviewPanel } from "./right-workspace/review";
+import { ThreadPanel } from "./right-workspace/thread";
 import { TerminalPanel } from "./right-workspace/terminal";
 import { SessionObservability } from "./right-workspace/usage";
 
@@ -32,6 +34,7 @@ export function RightWorkspace({
   debugEnabled,
   debugEvents,
   files,
+  latestGatewayEvent,
   root,
   scope,
   sessionId,
@@ -48,14 +51,18 @@ export function RightWorkspace({
   onAcceptChange,
   onChangedFile,
   onClose,
+  onCopyText,
   onDirtyTabChange,
   onOpenFile,
+  onOpenAgentSession,
   onOpenKind,
+  onConsumePendingPrompt,
   onRejectChange,
   onRefresh,
   onRefreshTrace,
   onSaveFile,
-  onShowHome
+  onShowHome,
+  onSubmitThreadTurn
 }: {
   activeTabId: string | null;
   activity: ThreadSnapshot["activity"];
@@ -65,6 +72,7 @@ export function RightWorkspace({
   debugEnabled: boolean;
   debugEvents: DebugEvent[];
   files: WorkspaceFileEntry[];
+  latestGatewayEvent: GatewayEventFeed | null;
   root: string;
   scope: GatewayRequestScope | null;
   sessionId: string | null;
@@ -81,24 +89,31 @@ export function RightWorkspace({
   onAcceptChange(turnId: string, path: string): void;
   onChangedFile(path: string): void;
   onClose(tabId: string): void;
+  onCopyText?(text: string): void | Promise<void>;
   onDirtyTabChange(tabId: string, dirty: boolean): void;
   onOpenFile(path: string): void;
+  onOpenAgentSession(session: TranscriptAgentSession): void;
   onOpenKind(kind: RightWorkspaceTabKind): void;
+  onConsumePendingPrompt(tabId: string): void;
   onRejectChange(turnId: string, path: string): void;
   onRefresh(): void;
   onRefreshTrace(): void;
   onSaveFile(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
   onShowHome(): void;
+  onSubmitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]): Promise<void>;
 }) {
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const visibleTabs = tabs.filter((tab) => rightWorkspaceTabVisibleForSession(tab, sessionId));
+  const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
+  const visibleActiveTabId = activeTab?.id ?? null;
   return (
     <section className="rightWorkspace" aria-label="Right workspace">
-      {tabs.length > 0 && (
+      {visibleTabs.length > 0 && (
         <RightWorkspaceTabs
-          activeTabId={activeTabId}
-          tabs={tabs}
+          activeTabId={visibleActiveTabId}
+          tabs={visibleTabs}
           onActivate={onActivate}
           onClose={onClose}
+          sessionId={sessionId}
           onOpenKind={onOpenKind}
           onShowHome={onShowHome}
         />
@@ -115,7 +130,7 @@ export function RightWorkspace({
             onRefresh={onRefresh}
           />
         </div>
-        {tabs.map((tab) => (
+        {visibleTabs.map((tab) => (
           <div className="rightTabPanel" hidden={tab.id !== activeTab?.id} key={tab.id}>
             {tab.kind === "review" && (
               <ReviewPanel
@@ -165,6 +180,23 @@ export function RightWorkspace({
                 onRefreshTrace={onRefreshTrace}
               />
             )}
+            {(tab.kind === "sideConversation" || tab.kind === "agentSession") && (
+              <ThreadPanel
+                client={client}
+                disabled={status !== "connected"}
+                kind={tab.kind}
+                latestGatewayEvent={latestGatewayEvent}
+                parentThreadId={tab.parentThreadId ?? sessionId}
+                pendingPrompt={tab.pendingPrompt ?? null}
+                scope={scope}
+                threadId={tab.threadId ?? null}
+                title={tab.title}
+                onCopyText={onCopyText}
+                onOpenAgentSession={onOpenAgentSession}
+                onPendingPromptConsumed={() => onConsumePendingPrompt(tab.id)}
+                onSubmitThreadTurn={onSubmitThreadTurn}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -172,8 +204,16 @@ export function RightWorkspace({
   );
 }
 
+export function rightWorkspaceTabVisibleForSession(tab: RightWorkspaceTab, sessionId: string | null): boolean {
+  if (tab.kind !== "sideConversation" && tab.kind !== "agentSession") {
+    return true;
+  }
+  return Boolean(sessionId) && (tab.parentThreadId ?? null) === sessionId;
+}
+
 function RightWorkspaceTabs({
   activeTabId,
+  sessionId,
   tabs,
   onActivate,
   onClose,
@@ -181,6 +221,7 @@ function RightWorkspaceTabs({
   onShowHome
 }: {
   activeTabId: string | null;
+  sessionId: string | null;
   tabs: RightWorkspaceTab[];
   onActivate(tabId: string): void;
   onClose(tabId: string): void;
@@ -192,6 +233,9 @@ function RightWorkspaceTabs({
     { icon: <TerminalSquare size={14} />, kind: "terminal", label: "Terminal" },
     { icon: <FolderTree size={14} />, kind: "files", label: "Files" }
   ];
+  if (sessionId) {
+    menuItems.push({ icon: <MessageSquare size={14} />, kind: "sideConversation", label: "Side chat" });
+  }
   return (
     <div className="rightWorkspaceTabs" aria-label="Right workspace tabs">
       <button
@@ -289,6 +333,12 @@ function RightWorkspaceHome({
           <FolderTree size={16} />
           <span>Files</span>
         </button>
+        {sessionId && (
+          <button onClick={() => onOpenKind("sideConversation")} type="button">
+            <MessageSquare size={16} />
+            <span>Side chat</span>
+          </button>
+        )}
       </nav>
       <div className="rightChangedFiles">
         <div className="rightSectionLabel">
@@ -323,6 +373,10 @@ export function rightWorkspaceTabLabel(kind: RightWorkspaceTabKind): string {
       return "Terminal";
     case "debug":
       return "Debug";
+    case "sideConversation":
+      return "Side chat";
+    case "agentSession":
+      return "Agent";
     case "review":
     default:
       return "Review";
@@ -337,6 +391,10 @@ function rightWorkspaceTabIcon(kind: RightWorkspaceTabKind): ReactNode {
       return <TerminalSquare size={14} />;
     case "debug":
       return <Bug size={14} />;
+    case "sideConversation":
+      return <MessageSquare size={14} />;
+    case "agentSession":
+      return <Bot size={14} />;
     case "review":
     default:
       return <GitPullRequest size={14} />;

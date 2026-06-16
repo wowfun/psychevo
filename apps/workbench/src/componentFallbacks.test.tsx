@@ -384,6 +384,45 @@ describe("component fallback rendering", () => {
     expect(html).not.toContain("No messages yet");
   });
 
+  it("hides side-inherited parent context from transcript rendering", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptPanel
+        entries={[
+          transcriptEntry({
+            id: "message:parent",
+            metadata: { side_inherited: { hidden: true, parent_session_id: "parent-thread" } },
+            role: "user",
+            blocks: [
+              transcriptBlock({
+                id: "message:parent:block:0",
+                body: "parent history",
+                preview: "parent history",
+                detail: "parent history"
+              })
+            ]
+          }),
+          transcriptEntry({
+            id: "message:side",
+            messageSeq: 2,
+            role: "user",
+            blocks: [
+              transcriptBlock({
+                id: "message:side:block:0",
+                body: "side prompt",
+                preview: "side prompt",
+                detail: "side prompt"
+              })
+            ]
+          })
+        ]}
+      />
+    );
+
+    expect(html).not.toContain("parent history");
+    expect(html).toContain("side prompt");
+    expect(html).not.toContain("No messages yet");
+  });
+
   it("renders hover copy and timestamp affordances on user and assistant rows", () => {
     const html = renderToStaticMarkup(
       <TranscriptPanel
@@ -1118,6 +1157,61 @@ describe("component fallback rendering", () => {
     const row = html.slice(rowStart, rowEnd);
     expect(row).toContain("Thinking");
     expect(row).not.toContain("1m05s");
+  });
+
+  it("renders Open for completed agent rows from structured result metadata", () => {
+    const onOpenAgentSession = vi.fn();
+    render(
+      <TranscriptPanel
+        entries={[
+          transcriptEntry({
+            id: "entry-agent",
+            blocks: [
+              transcriptBlock({
+                id: "block-agent",
+                kind: "agent",
+                title: "agent",
+                body: JSON.stringify({ child_session_id: "child-thread" }),
+                metadata: {
+                  projection: "tool",
+                  tool_name: "agent",
+                  tool_call_id: "call-agent"
+                },
+                result: {
+                  resultMessageSeq: 2,
+                  status: "completed",
+                  content: JSON.stringify({ summary: "done" }),
+                  isError: false,
+                  metadata: {
+                    result: {
+                      agent_name: "explore",
+                      task_name: "Investigate",
+                      parent_session_id: "thread-1",
+                      child_session: {
+                        session_id: "child-thread"
+                      }
+                    }
+                  },
+                  createdAtMs: 2,
+                  updatedAtMs: 2
+                }
+              })
+            ]
+          })
+        ]}
+        onOpenAgentSession={onOpenAgentSession}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Investigate agent session" }));
+
+    expect(onOpenAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+      agentName: "explore",
+      childSessionId: "child-thread",
+      parentSessionId: "thread-1",
+      taskName: "Investigate",
+      title: "Investigate"
+    }));
   });
 
   it("hides completed badges and renders running tool activity", () => {

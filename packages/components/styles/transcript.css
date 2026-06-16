@@ -283,6 +283,18 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
+.pevo-evidenceActionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.pevo-evidenceLine.is-openTarget {
+  color: var(--pevo-ink);
+}
+
 .pevo-reasoningHeader > span:not(.pevo-evidenceSpinner),
 .pevo-evidenceLine code,
 .pevo-evidenceLine > span:not(.pevo-evidenceSpinner) {
@@ -322,6 +334,34 @@
   font-family: var(--pevo-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+.pevo-evidenceOpenButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 26px;
+  gap: 5px;
+  padding: 0 8px;
+  color: var(--pevo-muted-strong);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-size: 0.76rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pevo-evidenceOpenButton span {
+  white-space: nowrap;
+}
+
+.pevo-evidenceOpenButton:hover,
+.pevo-evidenceOpenButton:focus-visible {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-accent) 10%);
+  border-color: color-mix(in oklch, var(--pevo-border), var(--pevo-accent) 34%);
 }
 
 .pevo-toolDetail {

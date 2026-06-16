@@ -5,5 +5,6 @@
 @import "./right-workspace/diff.css";
 @import "./right-workspace/review.css";
 @import "./right-workspace/files.css";
+@import "./right-workspace/thread.css";
 @import "./right-workspace/terminal.css";
 @import "./right-workspace/host-panels.css";

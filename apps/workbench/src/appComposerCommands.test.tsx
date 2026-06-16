@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { TranscriptEntry } from "@psychevo/protocol";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -17,6 +18,18 @@ import {
 import { App } from "./App";
 
 describe("Workbench command routing", () => {
+  async function resumeSession(threadId = "thread-1", title = "Active session") {
+    gatewayMock.sessionSummaries = [sessionSummary(threadId, title)];
+    const sessionRow = await screen.findByText(title);
+    fireEvent.click(sessionRow);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId })
+      });
+    });
+  }
+
   it("groups command panel rows by runtime presentation kind", async () => {
     gatewayMock.commandList = [
       commandItem("sessions", "navigate", "history"),
@@ -77,6 +90,163 @@ describe("Workbench command routing", () => {
     expect(screen.getByRole("region", { name: "Transcript" })).toBeTruthy();
     expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("opens side chat host actions as right workspace thread tabs", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "control",
+      feedbackAnchor: "composer",
+      action: {
+        type: "sideConversationStart",
+        threadId: "side-thread",
+        parentThreadId: "thread-1",
+        title: "Side abcd1234",
+        prompt: "explain this"
+      }
+    });
+
+    render(<App />);
+    await resumeSession();
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/btw explain this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    const rightWorkspace = await screen.findByRole("region", { name: "Right workspace" });
+    expect(within(rightWorkspace).getByRole("button", { name: "Side chat" })).toBeTruthy();
+    expect(within(rightWorkspace).getByRole("region", { name: "Side chat" })).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          input: [{ type: "text", text: "explain this" }],
+          threadId: "side-thread"
+        })
+      });
+    });
+    expect(gatewayMock.requestLog).toContainEqual({
+      method: "command/execute",
+      params: expect.objectContaining({
+        command: "/btw explain this",
+        threadId: "thread-1"
+      })
+    });
+  });
+
+  it("opens agent transcript rows in a child session tab from the explicit Open action", async () => {
+    const agentEntry: TranscriptEntry = {
+      id: "entry-agent",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      messageSeq: null,
+      role: "assistant",
+      status: "running",
+      source: "psychevo",
+      blocks: [
+        {
+          id: "block-agent",
+          kind: "agent",
+          status: "running",
+          order: 0,
+          source: "runtime",
+          title: "Planck",
+          body: "working",
+          preview: "working",
+          detail: null,
+          artifactIds: [],
+          metadata: {
+            agent_name: "Planck",
+            child_session_id: "child-thread",
+            parent_session_id: "thread-1"
+          },
+          result: null,
+          createdAtMs: 1_000,
+          updatedAtMs: 1_000
+        }
+      ],
+      metadata: null,
+      usage: null,
+      accounting: null,
+      createdAtMs: 1_000,
+      updatedAtMs: 1_000
+    };
+    (gatewayMock.snapshot as unknown as { entries: TranscriptEntry[] }).entries = [agentEntry];
+
+    render(<App />);
+    await resumeSession();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open Planck agent session" }));
+
+    expect(await screen.findByRole("button", { name: "Planck" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Planck" })).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/read",
+        params: { threadId: "child-thread" }
+      });
+    });
+  });
+
+  it("opens completed agent tool rows whose child session is stored in result metadata", async () => {
+    const agentEntry: TranscriptEntry = {
+      id: "entry-agent",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      messageSeq: 2,
+      role: "assistant",
+      status: "completed",
+      source: "psychevo",
+      blocks: [
+        {
+          id: "block-agent",
+          kind: "agent",
+          status: "completed",
+          order: 0,
+          source: "runtime",
+          title: "Agent",
+          body: "{\"child_session_id\":\"child-thread\"}",
+          preview: "child-thread",
+          detail: null,
+          artifactIds: [],
+          metadata: {
+            projection: "tool",
+            tool_name: "Agent",
+            result: {
+              agent_name: "Planck",
+              child_session_id: "child-thread",
+              parent_session_id: "thread-1",
+              task_name: "Investigate"
+            }
+          },
+          result: null,
+          createdAtMs: 1_000,
+          updatedAtMs: 2_000
+        }
+      ],
+      metadata: null,
+      usage: null,
+      accounting: null,
+      createdAtMs: 1_000,
+      updatedAtMs: 2_000
+    };
+    (gatewayMock.snapshot as unknown as { entries: TranscriptEntry[] }).entries = [agentEntry];
+
+    render(<App />);
+    await resumeSession();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open Investigate agent session" }));
+
+    expect(await screen.findByRole("button", { name: "Investigate" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Investigate" })).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/read",
+        params: { threadId: "child-thread" }
+      });
+    });
   });
 
   it("does not expose /agents as a GUI command surface", async () => {
@@ -455,7 +625,7 @@ describe("Workbench command routing", () => {
     expect(await screen.findByText("undone 2 messages; prompt restored")).toBeTruthy();
     const undoMethods = gatewayMock.requestLog.slice(beforeUndo).map((entry) => entry.method);
     expect(undoMethods).toContain("thread/read");
-    expect(undoMethods).toContain("thread/list");
+    expect(undoMethods).toContain("thread/browser");
     expect(undoMethods).toContain("workspace/diff");
     expect(undoMethods).toContain("observability/read");
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
@@ -470,7 +640,7 @@ describe("Workbench command routing", () => {
     expect(await screen.findByText("redone 2 messages; complete")).toBeTruthy();
     const redoMethods = gatewayMock.requestLog.slice(beforeRedo).map((entry) => entry.method);
     expect(redoMethods).toContain("thread/read");
-    expect(redoMethods).toContain("thread/list");
+    expect(redoMethods).toContain("thread/browser");
     expect(redoMethods).toContain("workspace/diff");
     expect(redoMethods).toContain("observability/read");
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);

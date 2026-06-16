@@ -676,7 +676,8 @@ html[data-pevo-appearance="light"] .brandGlyph img {
 }
 
 .statusColumn {
-  align-content: start;
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
   position: relative;
   overflow: hidden;
   padding-left: 7px;

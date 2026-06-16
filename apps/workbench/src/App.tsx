@@ -11,6 +11,7 @@ import {
   Composer,
   HistoryPanel,
   TranscriptPanel,
+  type TranscriptAgentSession,
   type HistoryDraftSession
 } from "@psychevo/components";
 import {
@@ -106,6 +107,7 @@ import {
   createRightTabId,
   fileBasename,
   isUnsupportedPreviewFile,
+  rightWorkspaceTabVisibleForSession,
   rightWorkspaceDefaultTitle,
   rightWorkspaceTabLabel
 } from "./right-workspace";
@@ -153,6 +155,7 @@ import type {
   CommandOverlay,
   CommandTrigger,
   DebugEvent,
+  GatewayEventFeed,
   MainView,
   PendingAttachment,
   RightWorkspaceTab,
@@ -275,6 +278,7 @@ export function App() {
   const [composerDraftPatch, setComposerDraftPatch] = useState<{ id: number; text: string } | null>(null);
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [terminalEvents, setTerminalEvents] = useState<TerminalNotificationEvent[]>([]);
+  const [latestGatewayEvent, setLatestGatewayEvent] = useState<GatewayEventFeed | null>(null);
   const [traceState, setTraceState] = useState<TraceState>({
     error: null,
     loading: false,
@@ -299,6 +303,7 @@ export function App() {
   const skipNextPinnedPersistRef = useRef(false);
   const gatewayEventQueueRef = useRef<GatewayEvent[]>([]);
   const gatewayEventRafRef = useRef<number | null>(null);
+  const gatewayEventSeqRef = useRef(0);
 
   const activity = normalizeActivity(snapshot.activity);
   const transcriptEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
@@ -312,7 +317,9 @@ export function App() {
   const showSessionChrome = mainView === "transcript" && hasSelectedSession;
   const commandContextKey = `${activeScope?.workdir ?? ""}:${currentThreadId ?? visibleDraftSession?.id ?? "none"}`;
   const activeWorkbenchWorkdir = activeScope?.workdir ?? init?.scope.workdir ?? settings?.workdir ?? window.location.pathname;
-  const activeRightTab = rightTabs.find((tab) => tab.id === activeRightTabId) ?? null;
+  const activeRightTab = rightTabs.find((tab) =>
+    tab.id === activeRightTabId && rightWorkspaceTabVisibleForSession(tab, currentThreadId ?? null)
+  ) ?? null;
   const pinnedSessions = useMemo(
     () => pinnedSessionIds
       .map((id) => sessions.find((session) => session.id === id))
@@ -371,7 +378,16 @@ export function App() {
     });
   }
 
+  function publishGatewayEvent(event: GatewayEvent) {
+    gatewayEventSeqRef.current += 1;
+    setLatestGatewayEvent({
+      event,
+      seq: gatewayEventSeqRef.current
+    });
+  }
+
   function applyGatewayEvent(event: GatewayEvent) {
+    publishGatewayEvent(event);
     if (!pacedGatewayEvent(event)) {
       setSnapshot((current) => {
         const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
@@ -630,11 +646,19 @@ export function App() {
       return;
     }
     const reusable = kind === "review" || kind === "files" || kind === "debug";
-    const nextId = reusable && !forceNew ? rightTabs.find((tab) => tab.kind === kind)?.id ?? createRightTabId(kind) : createRightTabId(kind);
+    const threadReusable = kind === "agentSession" && patch.threadId;
+    const existingThreadTab = threadReusable
+      ? rightTabs.find((tab) => tab.kind === kind && tab.threadId === patch.threadId)
+      : null;
+    const nextId = existingThreadTab?.id
+      ?? (reusable && !forceNew ? rightTabs.find((tab) => tab.kind === kind)?.id ?? createRightTabId(kind) : createRightTabId(kind));
     const nextTab: RightWorkspaceTab = {
       id: nextId,
       kind,
       title: patch.title ?? rightWorkspaceDefaultTitle(kind),
+      threadId: patch.threadId ?? null,
+      parentThreadId: patch.parentThreadId ?? null,
+      pendingPrompt: patch.pendingPrompt ?? null,
       path: patch.path ?? null,
       diff: patch.diff ?? null,
       file: patch.file ?? null,
@@ -654,9 +678,23 @@ export function App() {
     revealRightWorkspace(nextId);
   }
 
+  function clearRightWorkspaceTabPendingPrompt(tabId: string) {
+    setRightTabs((current) => current.map((tab) => (
+      tab.id === tabId ? { ...tab, pendingPrompt: null } : tab
+    )));
+  }
+
   function closeRightWorkspaceTab(tabId: string) {
     if (dirtyRightTabs[tabId] && !window.confirm("Discard unsaved file edits?")) {
       return;
+    }
+    const closingTab = rightTabs.find((tab) => tab.id === tabId) ?? null;
+    if (closingTab?.kind === "sideConversation" && closingTab.threadId) {
+      const threadId = closingTab.threadId;
+      void runAction(async () => {
+        await client?.request("turn/interrupt", { threadId });
+        await client?.request("thread/delete", { threadId });
+      });
     }
     setRightTabs((current) => current.filter((tab) => tab.id !== tabId));
     setDirtyRightTabs((current) => {
@@ -679,6 +717,14 @@ export function App() {
       diff,
       path: selectedPath,
       title: selectedPath ? fileBasename(selectedPath) : "Review"
+    });
+  }
+
+  function openAgentSessionTab(session: TranscriptAgentSession) {
+    openRightWorkspaceTab("agentSession", {
+      parentThreadId: session.parentSessionId ?? currentThreadId ?? null,
+      threadId: session.childSessionId,
+      title: session.taskName ?? session.agentName ?? session.title ?? "Agent"
     });
   }
 
@@ -781,6 +827,45 @@ export function App() {
     updateMainView
   });
 
+  async function submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]) {
+    const trimmed = text.trim();
+    if (!client || !trimmed) {
+      return;
+    }
+    const submittedMentions = runtimeAcceptsAgentPersona
+      ? mentions
+      : mentions.filter((mention) => mention.target.kind !== "agent");
+    if (selectedRuntimeRef !== "native" && runtimeOptionsError) {
+      setCommandFeedback({
+        accepted: false,
+        command: selectedRuntimeRef,
+        message: `Unable to load ${selectedRuntimeRef} runtime options: ${runtimeOptionsError}`,
+        feedbackAnchor: "composer"
+      });
+      return;
+    }
+    const runtimeOptions = selectedRuntimeRef !== "native" && selectedPeerRuntimeMode
+      ? { mode: selectedPeerRuntimeMode }
+      : {};
+    clearCommandTransientUi();
+    await client.request("turn/start", {
+      agentName: runtimeAcceptsAgentPersona ? selectedAgentName || null : null,
+      input: [{ type: "text", text: trimmed }],
+      mentions: submittedMentions,
+      mode: selectedRuntimeRef === "native" ? workMode : null,
+      model: selectedModel,
+      permissionMode,
+      reasoningEffort: selectedVariant === "none" ? null : selectedVariant,
+      runtimeOptions,
+      runtimeRef: selectedRuntimeRef,
+      runtimeSessionId,
+      scope: activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname),
+      threadId,
+      text: null
+    });
+    await refreshHistory();
+  }
+
   const { executeCommand, runCommandAlternateAction } = createCommandActions({
     activeScope,
     activity,
@@ -826,6 +911,7 @@ export function App() {
     setWorkMode,
     setWorkspaceDiff,
     startNewThread,
+    submitThreadTurn,
     submitTurn,
     updateMainView
   });
@@ -836,8 +922,8 @@ export function App() {
     beginRightResize, changeAgentSelection, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
     commands, composerDraftPatch, contextUsage, controls, copyTranscriptText, createWorkspace, currentThreadId,
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, disabled, doctorBackend, endpoint, error,
-    executeCommand, extraRuntimeModeValues, handleAttachment, host, init, leftCollapsed, loadThreadSearchText,
-    loadingOlderWorkdir, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openFilePreview, openRightWorkspaceTab, openSettingsSection,
+    executeCommand, extraRuntimeModeValues, handleAttachment, host, init, latestGatewayEvent, leftCollapsed, loadThreadSearchText,
+    loadingOlderWorkdir, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
     pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable,
     refreshAgentSurface, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
     restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runnableAgents, runAction,
@@ -848,8 +934,8 @@ export function App() {
     setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
     setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel, setSelectedRuntimeMode, setSelectedRuntimeRef,
     setSelectedVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, settings, settingsSection,
-    showSessionChrome, snapshot, startNewThread, startShell, status, submitTurn, switchMainView, terminalEvents,
-    togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateMainView, workMode,
+    clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
+    togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateMainView, viewEpochRef, workMode,
     workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;
 }

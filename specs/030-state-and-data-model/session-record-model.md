@@ -29,7 +29,9 @@ The first implementation slice uses a linear session transcript with session rec
 
 The model does not introduce a persistent activity root. Agent invocation remains a live and semantic relationship assembled by runtime and represented through session, message, evidence, and outcome relationships.
 
-Turn index is live-visible for observation when needed. It is not required as a field on message records.
+Turn index is live-visible for observation when needed. It is not required as a
+field on message records. Accepted turn terminal lifecycle state may be retained
+outside message records as defined by [030 Turn Lifecycle](turn-lifecycle.md).
 
 ## Session Record
 
@@ -112,12 +114,12 @@ Final result material must be reachable through retained session, evidence, mess
 
 The first implementation slice does not introduce:
 - entry trees
-- activity records
-- separate fact records
+- complete activity history records
+- generic separate fact records
 - storage-level reference records
 - artifact records
 - branch or fork navigation structures
-- durable turn records
+- durable per-turn event logs
 
 ## Related Topics
 

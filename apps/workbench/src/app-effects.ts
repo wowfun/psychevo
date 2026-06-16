@@ -394,8 +394,11 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           if (event.type === "activityChanged" || event.type === "titleChanged") {
             void params.refreshHistory(nextClient);
           }
-          if (event.type === "turnCompleted" && event.threadId) {
-            const threadId = event.threadId;
+          if (event.type === "turnCompleted" && (event.threadId || event.turn.threadId)) {
+            const threadId = event.threadId ?? event.turn.threadId;
+            if (!threadId) {
+              return;
+            }
             const eventEpoch = params.viewEpochRef.current;
             params.scheduleSnapshotRefreshAfterLiveSettle(nextClient, threadId, eventEpoch);
             void params.refreshHistory(nextClient);
@@ -465,7 +468,14 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         void params.refreshHistory(nextClient);
       }
       if (notification.method === "turn/error") {
-        void params.refreshSnapshot(nextClient);
+        const record = asRecord(notification.params);
+        params.setError(optionalStringField(record.message) ?? "Turn failed");
+        const threadId = optionalStringField(record.threadId);
+        if (threadId) {
+          void params.refreshSnapshot(nextClient, threadId, undefined, true, params.viewEpochRef.current);
+        } else {
+          void params.refreshSnapshot(nextClient);
+        }
         void params.refreshHistory(nextClient);
       }
     });

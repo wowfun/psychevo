@@ -14,6 +14,9 @@ Define Psychevo's semantic state and data model across foundation specs.
 - recoverability classes for durable, reconstructable, and transient facts
 - first-slice session record model attachment
 - transcript state ownership attachment
+- turn lifecycle attachment for accepted turn terminal facts
+- thread lineage attachment for parent, child, forked, side, and subagent
+  thread relationships
 
 Out of scope:
 - Rust structs, traits, APIs, modules, or type names
@@ -38,7 +41,11 @@ Session -> runtime assembly facts -> context, tool, resource, memory, extension,
 
 Agent Invocation in this graph is a semantic relationship, not a required persistent root, table, public identifier, or storage object.
 
-The first implementation slice centers persistence on sessions and messages. Turn index may be live-visible for observation, but this spec does not require a turn field in message records.
+The first implementation slice centers persistence on sessions and messages.
+Turn index may be live-visible for observation, but this spec does not require
+a turn field in message records. Accepted turn terminal status may be retained
+as a narrow lifecycle fact when needed for cross-surface reload and failure
+visibility.
 
 This graph defines semantic relationships only. It does not define storage layout, object identifiers, foreign keys, in-memory structs, wire payloads, or event payloads.
 
@@ -46,6 +53,8 @@ State facts may be live, durable, reconstructable, or derived. A state fact shou
 Transcript state follows the same rule: ordinary transcript facts belong to
 runtime messages, while product transcript views are projections owned by their
 interface specs.
+Turn lifecycle follows the same rule: terminal status for an accepted turn is a
+turn lifecycle fact, not assistant transcript content.
 
 ## State Families
 
@@ -65,7 +74,7 @@ Durable evidence facts cover final session and agent-invocation facts and causal
 
 Gateway state covers source identity, source-to-thread binding, active-turn control handles, in-memory queues, and caller-facing item/event projections. [021 Gateway](../021-gateway/spec.md) owns gateway state semantics. Persistent source-to-thread bindings may be durable; invocation and process source bindings, active queues, and live control handles are transient.
 
-Session continuity state covers session identity, session lifecycle semantics, parent session lineage, and continuity inputs. [008 Session Continuity](../008-session-continuity/spec.md) owns session continuity semantics.
+Session continuity state covers session identity, session lifecycle semantics, parent session lineage, and continuity inputs. [008 Session Continuity](../008-session-continuity/spec.md) owns session continuity semantics. [Thread Lineage](thread-lineage.md) defines caller-facing parent, child, forked, side, and subagent thread vocabulary and its relationship to durable sessions.
 
 Resource state covers resource facts, resource operations, access gates, and resource decisions. [009 Resource Surface](../009-resource-surface/spec.md) owns resource surface and decision semantics.
 
@@ -114,6 +123,10 @@ Recoverability class is semantic. It does not define persistence format, retenti
 - [Session Record Model](session-record-model.md) defines the first implementation slice contract for session and message records.
 - [Transcript State](transcript-state.md) defines ordinary transcript fact
   ownership and recoverability boundaries.
+- [Turn Lifecycle](turn-lifecycle.md) defines accepted turn terminal status
+  ownership and projection boundaries.
+- [Thread Lineage](thread-lineage.md) defines shared caller-facing thread
+  vocabulary and parent/child relationship semantics.
 
 ## Related Topics
 

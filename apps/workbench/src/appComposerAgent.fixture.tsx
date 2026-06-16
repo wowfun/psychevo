@@ -598,6 +598,8 @@ afterEach(() => {
   };
   gatewayMock.snapshot.pendingPermissions = [];
   gatewayMock.snapshot.pendingClarifies = [];
+  gatewayMock.snapshot.entries = [];
+  gatewayMock.snapshot.activity = { running: false, activeTurnId: null, queuedTurns: 0 };
   gatewayMock.workspaceDiffResult = {
     isGitRepo: true,
     files: [],

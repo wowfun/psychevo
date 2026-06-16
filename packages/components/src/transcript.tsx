@@ -1,15 +1,30 @@
-import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { GatewayActivity, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
-import { asRecord } from "./shared";
+import {
+  sideInheritedMetadataHidden,
+  type GatewayActivity,
+  type TranscriptBlock,
+  type TranscriptEntry
+} from "@psychevo/protocol";
+import { asRecord, stringValue } from "./shared";
 import { evidenceDisplay, type EvidenceDisplay, type ToolDetailSection } from "./toolEvidence";
+
+export type TranscriptAgentSession = {
+  agentName?: string | null;
+  childSessionId: string;
+  parentSessionId?: string | null;
+  task?: string | null;
+  taskName?: string | null;
+  title?: string | null;
+};
 
 export interface TranscriptPanelProps {
   activity?: GatewayActivity;
   entries: TranscriptEntry[];
-  onCopyText?(text: string): void | Promise<void>;
+  onCopyText?: ((text: string) => void | Promise<void>) | undefined;
+  onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
 }
 
 export interface MarkdownTextProps {
@@ -18,13 +33,14 @@ export interface MarkdownTextProps {
 }
 
 type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
+type OpenAgentSessionHandler = ((session: TranscriptAgentSession) => void) | undefined;
 
 const STREAM_REVEAL_INITIAL_CHARS = 24;
 const STREAM_REVEAL_INTERVAL_MS = 24;
 const STREAM_REVEAL_MAX_STEP_CHARS = 16;
 const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
-export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPanelProps) {
+export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSession }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -91,6 +107,7 @@ export function TranscriptPanel({ activity, entries, onCopyText }: TranscriptPan
               entry={entry}
               key={entry.id}
               onCopyText={onCopyText}
+              onOpenAgentSession={onOpenAgentSession}
             />
           ))
         )}
@@ -146,6 +163,9 @@ function orderTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
 }
 
 function visibleBlocks(entry: TranscriptEntry): TranscriptBlock[] {
+  if (isHiddenTranscriptEntry(entry)) {
+    return [];
+  }
   return transcriptBlocks(entry)
     .sort((left, right) => {
       if (left.order !== right.order) {
@@ -160,7 +180,7 @@ function visibleBlocks(entry: TranscriptEntry): TranscriptBlock[] {
 }
 
 function isHiddenTranscriptBlock(entry: TranscriptEntry, block: TranscriptBlock): boolean {
-  if (asRecord(block.metadata).hidden === true) {
+  if (metadataHidden(block.metadata)) {
     return true;
   }
   if (block.kind === "reasoning") {
@@ -172,14 +192,24 @@ function isHiddenTranscriptBlock(entry: TranscriptEntry, block: TranscriptBlock)
   return false;
 }
 
+function isHiddenTranscriptEntry(entry: TranscriptEntry): boolean {
+  return metadataHidden(entry.metadata);
+}
+
+function metadataHidden(metadata: unknown): boolean {
+  return asRecord(metadata).hidden === true || sideInheritedMetadataHidden(metadata);
+}
+
 function TranscriptEntryView({
   activityTick,
   entry,
-  onCopyText
+  onCopyText,
+  onOpenAgentSession
 }: {
   activityTick: number;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
+  onOpenAgentSession: OpenAgentSessionHandler;
 }) {
   return (
     <>
@@ -190,6 +220,7 @@ function TranscriptEntryView({
           entry={entry}
           key={block.id}
           onCopyText={onCopyText}
+          onOpenAgentSession={onOpenAgentSession}
         />
       ))}
     </>
@@ -200,12 +231,14 @@ function TranscriptBlockView({
   activityTick,
   block,
   entry,
-  onCopyText
+  onCopyText,
+  onOpenAgentSession
 }: {
   activityTick: number;
   block: TranscriptBlock;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
+  onOpenAgentSession: OpenAgentSessionHandler;
 }) {
   const [open, setOpen] = useState(defaultReasoningOpen(block));
   const [copied, setCopied] = useState(false);
@@ -296,27 +329,54 @@ function TranscriptBlockView({
     );
   }
   const display = evidenceDisplay(block, text);
+  const agentSession = agentSessionFromBlock(block, display);
+  const canOpenAgentSession = Boolean(agentSession && onOpenAgentSession);
   const runningTool = isRunningToolActivityBlock(block);
   const elapsed = runningTool ? liveToolBlockElapsed(block) : transcriptToolBlockElapsed(block);
   const evidenceLineClass = [
     "pevo-evidenceLine",
     display.singleTitle ? "is-singleTitle" : "",
-    runningTool ? "is-runningTool" : ""
+    runningTool ? "is-runningTool" : "",
+    canOpenAgentSession ? "is-openTarget" : ""
   ].filter(Boolean).join(" ");
+  const lineButton = (
+    <button
+      aria-expanded={display.sections.length > 0 ? open : undefined}
+      className={evidenceLineClass}
+      onClick={() => setOpen((value) => !value)}
+      type="button"
+    >
+      {runningTool ? (
+        <span className="pevo-evidenceSpinner" aria-hidden="true">
+          {ACTIVITY_SPINNER[activityTick % ACTIVITY_SPINNER.length]}
+        </span>
+      ) : (
+        open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />
+      )}
+      <code>{display.title}</code>
+      {display.summary && <span>{display.summary}</span>}
+      {elapsed ? <em className="pevo-evidenceElapsed">{elapsed}</em> : !runningTool && status && <em>{status}</em>}
+    </button>
+  );
   return (
     <article className={`pevo-evidence is-${block.status} is-tool-${display.category}`} {...transcriptBlockDataAttributes(entry, block)}>
-      <button className={evidenceLineClass} onClick={() => setOpen((value) => !value)} type="button">
-        {runningTool ? (
-          <span className="pevo-evidenceSpinner" aria-hidden="true">
-            {ACTIVITY_SPINNER[activityTick % ACTIVITY_SPINNER.length]}
-          </span>
-        ) : (
-          open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />
-        )}
-        <code>{display.title}</code>
-        {display.summary && <span>{display.summary}</span>}
-        {elapsed ? <em className="pevo-evidenceElapsed">{elapsed}</em> : !runningTool && status && <em>{status}</em>}
-      </button>
+      {canOpenAgentSession && agentSession ? (
+        <div className="pevo-evidenceActionRow">
+          {lineButton}
+          <button
+            aria-label={`Open ${agentSession.title ?? display.title} agent session`}
+            className="pevo-evidenceOpenButton"
+            onClick={() => {
+              onOpenAgentSession?.(agentSession);
+            }}
+            title="Open agent session"
+            type="button"
+          >
+            <ExternalLink size={13} aria-hidden />
+            <span>Open</span>
+          </button>
+        </div>
+      ) : lineButton}
       {open && display.sections.length > 0 && <ToolDetail display={display} />}
       {artifactIds.length > 0 && (
         <div className="pevo-artifactRefs">
@@ -325,6 +385,76 @@ function TranscriptBlockView({
       )}
     </article>
   );
+}
+
+function agentSessionFromBlock(block: TranscriptBlock, display: EvidenceDisplay): TranscriptAgentSession | null {
+  if (block.kind !== "agent") {
+    return null;
+  }
+  const metadata = asRecord(block.metadata);
+  const metadataResult = asRecord(metadata.result);
+  const metadataResultChildSession = asRecord(metadataResult.child_session ?? metadataResult.childSession);
+  const resultMetadata = asRecord(block.result?.metadata);
+  const resultMetadataResult = asRecord(resultMetadata.result);
+  const resultMetadataResultChildSession = asRecord(
+    resultMetadataResult.child_session ?? resultMetadataResult.childSession
+  );
+  const resultMetadataChildSession = asRecord(resultMetadata.child_session ?? resultMetadata.childSession);
+  const blockResult = asRecord(block.result);
+  const blockResultContent = jsonRecord(block.result?.content);
+  const blockBody = jsonRecord(block.body);
+  const records = [
+    metadata,
+    metadataResult,
+    metadataResultChildSession,
+    resultMetadata,
+    resultMetadataResult,
+    resultMetadataResultChildSession,
+    resultMetadataChildSession,
+    blockResult,
+    blockResultContent,
+    blockBody
+  ];
+  const childSessionId = firstStringField(
+    records,
+    ["child_session_id", "childSessionId", "session_id", "sessionId"]
+  );
+  if (!childSessionId) {
+    return null;
+  }
+  const agentName = firstStringField(records, ["agent_name", "agentName", "name"]);
+  const taskName = firstStringField(records, ["task_name", "taskName"]);
+  return {
+    agentName,
+    childSessionId,
+    parentSessionId: firstStringField(records, ["parent_session_id", "parentSessionId"]),
+    task: firstStringField(records, ["task", "prompt"]),
+    taskName,
+    title: taskName ?? agentName ?? display.title,
+  };
+}
+
+function firstStringField(records: Array<Record<string, unknown>>, keys: string[]): string | null {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = stringValue(record[key]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== "string") {
+    return {};
+  }
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return {};
+  }
 }
 
 function ToolDetail({ display }: { display: EvidenceDisplay }) {

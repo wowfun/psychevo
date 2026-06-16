@@ -139,6 +139,12 @@ start the turn against that id. `entryStarted`, `entryUpdated`, and
 `entryCompleted` events must carry transcript entries whose `threadId` is the
 owning thread id; clients must not assign live entries to the currently visible
 thread as a fallback.
+When runtime wraps a stream event in an explicit child-thread scope, Gateway
+must project that event with the scoped child thread id, not with the visible
+parent thread id. The parent Agent entry may still be updated by parent-owned
+Agent lifecycle/tool events, but scoped child transcript entries remain child
+thread entries so clients can route or retain them without leaking them into
+the parent transcript.
 
 Live Gateway events are also relayed across Gateway processes. The owner stores
 presentation-only live events with a monotonic sequence and short retention.
@@ -323,7 +329,7 @@ sessions, while a missing or `null` workdir returns the human-visible session
 set across all workdirs in the local state database. Runtime `source` is an
 internal persistence/runtime classification and is not part of the user-facing
 session summary. Human-facing lists include top-level sessions, exclude
-internal/noisy sessions such as `tui-side`, and keep empty top-level sessions
+internal/noisy sessions such as `tui-side-conversation`, and keep empty top-level sessions
 manageable instead of using message count as a visibility gate. They also
 include per-session activity so multi-client shells can show background
 running state. A `SessionSummaryView` carries enough display projection for

@@ -1,0 +1,115 @@
+.threadPanel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 30px;
+}
+
+.threadPanel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 4px;
+}
+
+.threadPanelTitle {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 9px;
+}
+
+.threadPanelTitle svg {
+  flex: 0 0 auto;
+  color: var(--pevo-muted);
+}
+
+.threadPanelTitle > div {
+  min-width: 0;
+}
+
+.threadPanelTitle h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: 0.92rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.threadPanelTitle p,
+.threadPanelParent,
+.threadPanelError {
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.threadPanelParent {
+  padding: 0 4px 6px;
+}
+
+.threadPanelError {
+  padding: 6px 4px;
+  color: var(--pevo-danger, #b42318);
+  white-space: normal;
+}
+
+.threadPanel > header button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.threadPanel > header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.threadPanel > header button:hover:not(:disabled) {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 72%);
+}
+
+.threadPanelTranscript {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.threadPanel .pevo-transcript {
+  height: 100%;
+}
+
+.threadPanelComposerDock {
+  min-width: 0;
+  padding-top: 8px;
+}
+
+.threadPanelComposerDock .pevo-composer {
+  margin-top: 0;
+}
+
+.threadPanel .pevo-composer textarea {
+  min-height: 42px;
+}
+
+.threadPanel .pevo-composerFooter {
+  min-height: 34px;
+}

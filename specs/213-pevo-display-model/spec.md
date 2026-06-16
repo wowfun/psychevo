@@ -19,6 +19,8 @@ and how live presentation events are reconciled with committed history.
 - transcript projection, protocol semantics, and committed replacement behavior
 - reusable renderable component expectations for transcript surfaces
 - separation between model-visible history and display-only UI state
+- shared thread display/navigation behavior for Side chat and
+  child-agent thread inspection
 
 Out of scope:
 
@@ -220,6 +222,8 @@ but must not require TUI-specific layout fields.
 
 ## Attachments
 
+- [Thread Navigation](thread-navigation.md) defines shared display/navigation
+  behavior for Side chat and child-agent thread inspection.
 - [Testing](testing.md) defines display-model validation expectations.
 
 ## Related Topics

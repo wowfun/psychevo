@@ -102,6 +102,7 @@ type CommandActionsParams = {
   setWorkMode: Dispatch<SetStateAction<string>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   startNewThread(workdir?: string): Promise<void>;
+  submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]): Promise<void>;
   submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null): Promise<void>;
   updateMainView(value: MainView): void;
 };
@@ -352,6 +353,21 @@ export function createCommandActions(params: CommandActionsParams) {
         await params.startNewThread();
         break;
       }
+      case "sideConversationStart": {
+        const threadId = optionalStringField(record.threadId);
+        if (!threadId) {
+          params.setError("Side chat did not include a thread id.");
+          break;
+        }
+        const prompt = optionalStringField(record.prompt)?.trim() ?? null;
+        params.openRightWorkspaceTab("sideConversation", {
+          parentThreadId: optionalStringField(record.parentThreadId) ?? params.snapshot.thread?.id ?? null,
+          pendingPrompt: prompt,
+          threadId,
+          title: "Side chat"
+        }, true);
+        break;
+      }
       case "threadArchive":
         if (params.snapshot.thread?.id) {
           params.setDraftSession(null);
@@ -367,8 +383,11 @@ export function createCommandActions(params: CommandActionsParams) {
         }
         break;
       case "turnInterrupt":
-        await params.client?.request("turn/interrupt", { threadId: params.snapshot.thread?.id ?? null });
-        await params.refreshSnapshot();
+        {
+          const threadId = params.snapshot.thread?.id ?? null;
+          await params.client?.request("turn/interrupt", { threadId });
+          await params.refreshSnapshot(params.client, threadId ?? undefined, undefined, true, params.viewEpochRef.current);
+        }
         break;
       case "sessionUndo": {
         const threadId = optionalStringField(record.threadId) ?? params.snapshot.thread?.id ?? null;

@@ -145,10 +145,19 @@ function toolDisplaySpec(toolName: string, metadata: Record<string, unknown>): T
       category: "update"
     };
   }
-  if (toolName === "clarify" || toolName === "Agent") {
+  if (toolName === "clarify") {
     return {
       ...genericDisplaySpec(),
       category: "status"
+    };
+  }
+  if (toolName === "Agent" || toolName === "agent") {
+    return {
+      ...genericDisplaySpec(),
+      category: "status",
+      summaryKeys: ["task_name", "taskName", "task", "prompt", "summary", "status"],
+      titleArgKeys: ["agent_type", "agentType", "name"],
+      titleResultKeys: ["agent_name", "agentName", "agent_type", "agentType", "name"]
     };
   }
   if (toolName === "web_fetch") {

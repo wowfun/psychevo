@@ -53,7 +53,7 @@ describe("applyLiveTranscriptEvent", () => {
       type: "turnCompleted",
       threadId: "thread-1",
       turnId: "turn-1",
-      outcome: "normal",
+      turn: completedTurn("turn-1", "thread-1"),
       committedEntries: [committed]
     });
 
@@ -61,6 +61,49 @@ describe("applyLiveTranscriptEvent", () => {
     expect(next.activity.activeTurnId).toBeNull();
     expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:2:assistant"]);
     expect(next.entries[0]?.blocks[0]?.body).toBe("committed answer");
+  });
+
+  it("settles failed turn completion without leaving tool rows running", () => {
+    const current = {
+      ...snapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:tool",
+          messageSeq: null,
+          source: "runtime.stream",
+          blocks: [
+            block({
+              id: "live:turn-1:tool:block",
+              kind: "shell",
+              title: "exec_command",
+              status: "running"
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = applyLiveTranscriptEvent(current, {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: {
+        ...completedTurn("turn-1", "thread-1"),
+        status: "failed",
+        outcome: "failed",
+        error: { message: "model service failed" }
+      },
+      committedEntries: []
+    });
+
+    expect(next.activity.running).toBe(false);
+    expect(next.activity.activeTurnId).toBeNull();
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "live:turn-1:tool",
+      "turn:turn-1:terminal"
+    ]);
+    expect(next.entries[0]?.blocks[0]?.status).toBe("failed");
+    expect(next.entries[1]?.blocks[0]?.body).toBe("model service failed");
   });
 
   it("binds an empty snapshot to the real thread on first turn completion", () => {
@@ -99,7 +142,7 @@ describe("applyLiveTranscriptEvent", () => {
       type: "turnCompleted",
       threadId: "thread-1",
       turnId: "turn-1",
-      outcome: "normal",
+      turn: completedTurn("turn-1", "thread-1"),
       committedEntries: [committed]
     });
 
@@ -125,7 +168,8 @@ describe("applyLiveTranscriptEvent", () => {
       type: "turnCompleted",
       threadId: "thread-1",
       turnId: "turn-1",
-      outcome: "normal"
+      turn: completedTurn("turn-1", "thread-1"),
+      committedEntries: []
     } as GatewayEvent);
 
     expect(next.activity.running).toBe(false);
@@ -166,7 +210,8 @@ describe("applyLiveTranscriptEvent", () => {
       type: "turnCompleted",
       threadId: "thread-1",
       turnId: "turn-1",
-      outcome: "normal"
+      turn: completedTurn("turn-1", "thread-1"),
+      committedEntries: []
     } as GatewayEvent);
 
     expect(next.entries.map((candidate) => candidate.id)).toEqual(["live:turn-1:assistant"]);
@@ -206,7 +251,7 @@ describe("applyLiveTranscriptEvent", () => {
       type: "turnCompleted",
       threadId: "thread-1",
       turnId: "turn-1",
-      outcome: "normal",
+      turn: completedTurn("turn-1", "thread-1"),
       committedEntries: [committed]
     });
 
@@ -905,6 +950,111 @@ describe("applyLiveTranscriptEvent", () => {
     expect(next.entries[1]?.blocks[0]?.body).toBe("Now I am analyzing the latest output.");
   });
 
+  it("removes stale running agent and wait overlays covered by committed tool ids", () => {
+    const current = {
+      ...snapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:0",
+          metadata: { projection: "assistant_segment", liveOrder: 0, streamSeq: 8 },
+          blocks: [
+            block({
+              id: "live:turn-1:tool:call_agent_translate",
+              kind: "agent",
+              title: "Agent",
+              status: "running",
+              order: 1,
+              metadata: {
+                projection: "tool",
+                tool_name: "Agent",
+                tool_call_id: "call_agent_translate",
+                args: {
+                  agent_type: "translate",
+                  prompt: "Translate the following message to Chinese: hello"
+                }
+              }
+            }),
+            block({
+              id: "live:turn-1:tool:call_wait_agent",
+              kind: "toolCall",
+              title: "wait_agent",
+              status: "running",
+              order: 2,
+              metadata: {
+                projection: "tool",
+                tool_name: "wait_agent",
+                tool_call_id: "call_wait_agent"
+              }
+            })
+          ]
+        })
+      ]
+    };
+    const incoming = {
+      ...snapshot(),
+      activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      entries: [
+        entry({
+          id: "message:6",
+          source: "runtime.message",
+          messageSeq: 6,
+          turnId: "message:6",
+          status: "completed",
+          blocks: [
+            block({
+              id: "message:6:block:1",
+              kind: "agent",
+              source: "runtime.message",
+              title: "Agent",
+              status: "completed",
+              order: 1,
+              metadata: {
+                projection: "tool",
+                tool_name: "Agent",
+                tool_call_id: "call_agent_translate",
+                args: {
+                  agent_type: "translate",
+                  prompt: "Translate the following message to Chinese: hello"
+                },
+                result: {
+                  agent_name: "translate",
+                  child_session_id: "child-thread",
+                  status: "completed",
+                  summary: "你好"
+                }
+              }
+            }),
+            block({
+              id: "message:6:block:2",
+              kind: "toolCall",
+              source: "runtime.message",
+              title: "wait_agent",
+              status: "completed",
+              order: 2,
+              metadata: {
+                projection: "tool",
+                tool_name: "wait_agent",
+                tool_call_id: "call_wait_agent",
+                result: {
+                  message: "both agents completed",
+                  timed_out: false
+                }
+              }
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(current, incoming);
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:6"]);
+    expect(next.entries[0]?.blocks.map((candidate) => candidate.status)).toEqual([
+      "completed",
+      "completed"
+    ]);
+  });
+
   it("anchors incoming covered live tool updates to the message-derived block", () => {
     const current = {
       ...snapshot(),
@@ -1033,6 +1183,18 @@ function eventWithEntry(
     type,
     turnId: nextEntry.turnId ?? "turn-1",
     entry: nextEntry
+  };
+}
+
+function completedTurn(id: string, threadId: string | null) {
+  return {
+    id,
+    threadId,
+    status: "completed" as const,
+    outcome: "normal",
+    error: null,
+    startedAtMs: 1,
+    completedAtMs: 2
   };
 }
 

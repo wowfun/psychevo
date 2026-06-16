@@ -147,7 +147,15 @@ describe("Workbench session status observability", () => {
             type: "turnCompleted",
             threadId: "old-thread",
             turnId: "old-turn",
-            outcome: "normal",
+            turn: {
+              id: "old-turn",
+              threadId: "old-thread",
+              status: "completed",
+              outcome: "normal",
+              error: null,
+              startedAtMs: 1,
+              completedAtMs: 2
+            },
             committedEntries: []
           }
         });

@@ -1,5 +1,6 @@
 import type {
   ContextReadResult,
+  GatewayEvent,
   GatewayInputPart,
   SessionUsageSummaryView,
   TerminalExitedPayload,
@@ -84,12 +85,15 @@ export type WorkbenchCommand = {
   alternateAction: CommandAlternateAction | null;
 };
 
-export type RightWorkspaceTabKind = "review" | "terminal" | "files" | "debug";
+export type RightWorkspaceTabKind = "review" | "terminal" | "files" | "debug" | "sideConversation" | "agentSession";
 
 export type RightWorkspaceTab = {
   id: string;
   kind: RightWorkspaceTabKind;
   title: string;
+  threadId?: string | null;
+  parentThreadId?: string | null;
+  pendingPrompt?: string | null;
   path?: string | null;
   diff?: WorkspaceDiffResult | null;
   file?: WorkspaceFileReadResult | null;
@@ -162,6 +166,11 @@ export type WorkbenchPrefs = {
 export type TerminalNotificationEvent =
   | { method: "terminal/output"; params: TerminalOutputPayload; seq: number }
   | { method: "terminal/exited"; params: TerminalExitedPayload; seq: number };
+
+export type GatewayEventFeed = {
+  event: GatewayEvent;
+  seq: number;
+};
 
 export type WorkspaceFileTreeItem = {
   badge?: string | null;

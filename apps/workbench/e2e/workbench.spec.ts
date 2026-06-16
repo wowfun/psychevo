@@ -1,5 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
-import { startPevoWeb } from "./harness";
+import { repoRoot, startPevoWeb } from "./harness";
 
 test.describe("pevo Web Workbench", () => {
   test("connects to Gateway and manages a source thread", async ({ page, isMobile }) => {
@@ -94,6 +96,62 @@ test.describe("pevo Web Workbench", () => {
         textOverflow: "clip",
         whiteSpace: "normal"
       });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("opens scoped side chats with visible first prompt", async ({ page, isMobile }, testInfo) => {
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await openPanel(page, isMobile, "Transcript");
+
+      const composer = page.getByPlaceholder("Ask Psychevo...");
+      await composer.fill("Create a parent session for side chat validation.");
+      await page.getByRole("button", { name: "Send message" }).click();
+      await expect(page.locator(".pevo-message.is-user")).toContainText("Create a parent session");
+
+      await openPanel(page, isMobile, "Status");
+      const statusRegion = page.getByRole("region", { name: "Workspace status" });
+      await expect(statusRegion.getByRole("button", { name: "Side chat" })).toBeVisible();
+      await statusRegion.getByRole("button", { name: "Side chat" }).click();
+      await expect(sideConversationPanel(page)).toBeVisible();
+      await page.getByRole("button", { name: /^Close Side/ }).click();
+
+      await openPanel(page, isMobile, "Transcript");
+      const sidePrompt = "Inspect isolated side prompt visibility.";
+      await composer.fill(`/btw ${sidePrompt}`);
+      await page.keyboard.press("Enter");
+
+      const sideConversation = sideConversationPanel(page);
+      await expect(sideConversation).toBeVisible({ timeout: 30_000 });
+      await expect(sideConversation.locator(".pevo-message.is-user")).toContainText(sidePrompt, { timeout: 30_000 });
+      await assertNoHorizontalOverflow(page, sideConversation);
+
+      const sideComposer = sideConversation.locator(".pevo-composer");
+      const sideTextarea = sideComposer.locator("textarea");
+      await expect(sideTextarea).toBeVisible();
+      const sideMetrics = await composerBoxMetrics(sideComposer);
+      expect(sideMetrics.textarea).toBeGreaterThanOrEqual(42);
+      if (!isMobile) {
+        const mainMetrics = await composerBoxMetrics(page.locator(".composerDock .pevo-composer"));
+        const metrics = JSON.stringify({ main: mainMetrics, side: sideMetrics });
+        expect(Math.abs(sideMetrics.textarea - mainMetrics.textarea), metrics).toBeLessThanOrEqual(1);
+        expect(Math.abs(sideMetrics.input - mainMetrics.input), metrics).toBeLessThanOrEqual(1);
+        expect(Math.abs(sideMetrics.composer - mainMetrics.composer), metrics).toBeLessThanOrEqual(1);
+        expect(Math.abs(sideMetrics.inputTop - mainMetrics.inputTop), metrics).toBeLessThanOrEqual(8);
+      }
+      await captureWorkbench(page, testInfo, `side-conversation-${isMobile ? "mobile" : "desktop"}`);
+
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      }
+      await page.getByRole("button", { name: "New Session", exact: true }).click();
+      await expect(page.locator(".threadPanel")).toHaveCount(0);
+      await openPanel(page, isMobile, "Status");
+      await expect(page.getByRole("region", { name: "Workspace status" }).getByRole("button", { name: "Side chat" })).toHaveCount(0);
     } finally {
       await server.stop();
     }
@@ -345,7 +403,52 @@ test.describe("pevo Web Workbench", () => {
       await server.stop();
     }
   });
+
+  test("opens live translate subagent sessions from the GUI @live", async ({ page, isMobile }, testInfo) => {
+    test.skip(process.env.PSYCHEVO_PLAYWRIGHT_LIVE !== "1", "live provider validation is opt-in");
+    test.skip(isMobile, "live provider validation runs once on the desktop project");
+    test.setTimeout(420_000);
+    const server = await startPevoWeb({ live: true, workdir: ensureLiveSubagentWorkdir() });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+
+      await page.getByPlaceholder("Ask Psychevo...").fill(LIVE_TRANSLATE_SUBAGENT_PROMPT);
+      await page.getByRole("button", { name: "Send message" }).click();
+
+      const openAgentButtons = page.getByRole("button", { name: /Open .*agent session/i });
+      await expect.poll(async () => openAgentButtons.count(), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
+      await captureWorkbench(page, testInfo, "live-translate-agent-rows");
+
+      await openAgentButtons.first().click();
+      await expect(page.locator(".threadPanel")).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator(".threadPanel")).toContainText(/Parent/);
+      await expect(page.locator(".threadPanel .pevo-message").first()).toBeVisible({ timeout: 120_000 });
+      await captureWorkbench(page, testInfo, "live-translate-agent-session");
+    } finally {
+      await server.stop();
+    }
+  });
 });
+
+const LIVE_TRANSLATE_SUBAGENT_PROMPT = "使用 translate agent 并发演示简单的中译英和英译中";
+
+function ensureLiveSubagentWorkdir(): string {
+  const workdir = process.env.PSYCHEVO_PLAYWRIGHT_LIVE_SUBAGENT_WORKDIR
+    ? path.resolve(process.env.PSYCHEVO_PLAYWRIGHT_LIVE_SUBAGENT_WORKDIR)
+    : path.join(repoRoot, ".local/.psychevo-dev/live-validation/gui-workdir");
+  const agentDir = path.join(workdir, ".psychevo", "agents");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(
+    path.join(agentDir, "translate.md"),
+    `---
+description: Translate between Chinese and English.
+---
+Translate the assigned text between Chinese and English. Return only the translation and direction.
+`
+  );
+  return workdir;
+}
 
 async function assertLeftNavigationSectionAlignment(page: Page) {
   const actionIcon = page.locator(".leftActions button").first().locator("svg");
@@ -396,6 +499,24 @@ async function captureWorkbench(page: Page, testInfo: TestInfo, label: string) {
   await page.screenshot({
     fullPage: true,
     path: testInfo.outputPath(`${label}-${testInfo.project.name}.png`)
+  });
+}
+
+function sideConversationPanel(page: Page): Locator {
+  return page.getByRole("region", { name: /^Side chat$/i });
+}
+
+async function composerBoxMetrics(composer: Locator) {
+  return composer.evaluate((element) => {
+    const input = element.querySelector(".pevo-composerInput");
+    const textarea = element.querySelector("textarea");
+    return {
+      composer: element.getBoundingClientRect().height,
+      composerTop: element.getBoundingClientRect().top,
+      input: input?.getBoundingClientRect().height ?? 0,
+      inputTop: input?.getBoundingClientRect().top ?? 0,
+      textarea: textarea?.getBoundingClientRect().height ?? 0
+    };
   });
 }
 

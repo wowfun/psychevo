@@ -30,6 +30,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     beginExplicitViewSwitch,
     beginRightResize,
     changeAgentSelection,
+    clearRightWorkspaceTabPendingPrompt,
     client,
     commandFeedback,
     commands,
@@ -52,12 +53,14 @@ export function WorkbenchLayout(props: Record<string, any>) {
     host,
     init,
     leftCollapsed,
+    latestGatewayEvent,
     loadingOlderWorkdir,
     loadOlderSessions,
     loadThreadSearchText,
     mainView,
     mobilePanel,
     openDiffPreview,
+    openAgentSessionTab,
     openFilePreview,
     openRightWorkspaceTab,
     pendingClarifies,
@@ -126,6 +129,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     startNewThread,
     startShell,
     submitTurn,
+    submitThreadTurn,
     switchMainView,
     terminalEvents,
     togglePinnedSession,
@@ -350,7 +354,14 @@ export function WorkbenchLayout(props: Record<string, any>) {
               })}
               onSettingsSectionChange={setSettingsSection}
               onSaveBackendDraft={(draft) => void runAction(async () => saveBackendDraft(draft))}
-              transcript={<TranscriptPanel activity={activity} entries={transcriptEntries} onCopyText={copyTranscriptText} />}
+              transcript={(
+                <TranscriptPanel
+                  activity={activity}
+                  entries={transcriptEntries}
+                  onCopyText={copyTranscriptText}
+                  onOpenAgentSession={openAgentSessionTab}
+                />
+              )}
             />
             {showSessionChrome && activeCommandOverlay && (
               <CommandOverlayView
@@ -459,8 +470,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onAttach={() => void runAction(async () => handleAttachment())}
               onCommand={(command) => void runAction(async () => executeCommand(command, "composer"))}
               onInterrupt={() => void runAction(async () => {
-                await client?.request("turn/interrupt", { threadId: snapshot.thread?.id ?? null });
-                await refreshSnapshot();
+                const threadId = snapshot.thread?.id ?? null;
+                await client?.request("turn/interrupt", { threadId });
+                await refreshSnapshot(client, threadId ?? undefined, undefined, true, props.viewEpochRef.current);
               })}
               onModeChange={(mode) => {
                 setWorkMode(mode);
@@ -523,6 +535,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               debugEnabled={debugEnabled}
               debugEvents={debugEvents}
               files={workspaceFiles?.entries ?? []}
+              latestGatewayEvent={latestGatewayEvent}
               root={workspaceFiles?.root ?? settings?.workdir ?? ""}
               scope={activeScope ?? init?.scope ?? null}
               sessionId={snapshot.thread?.id ?? null}
@@ -539,12 +552,21 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onAcceptChange={(turnId, path) => void runAction(async () => acceptWorkspaceChange(turnId, path))}
               onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
               onClose={props.closeRightWorkspaceTab}
+              onCopyText={copyTranscriptText}
               onDirtyTabChange={(tabId, dirty) => {
                 setDirtyRightTabs((current: Record<string, boolean>) => current[tabId] === dirty ? current : { ...current, [tabId]: dirty });
               }}
               onOpenFile={(path) => void runAction(async () => openFilePreview(path))}
-              onOpenKind={(kind) => openRightWorkspaceTab(kind, {}, true)}
+              onOpenAgentSession={openAgentSessionTab}
+              onOpenKind={(kind) => {
+                if (kind === "sideConversation") {
+                  void runAction(async () => executeCommand("/btw", "commandsPanel"));
+                  return;
+                }
+                openRightWorkspaceTab(kind, {}, true);
+              }}
               onRejectChange={(turnId, path) => void runAction(async () => rejectWorkspaceChange(turnId, path))}
+              onConsumePendingPrompt={clearRightWorkspaceTabPendingPrompt}
               onRefresh={() => void runAction(async () => {
                 await refreshSnapshot();
                 await refreshHistory();
@@ -554,6 +576,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onRefreshTrace={() => void props.refreshTrace()}
               onSaveFile={(path, content, expectedRevision, force) => saveFileFromEditor(path, content, expectedRevision, force)}
               onShowHome={() => props.revealRightWorkspace(null)}
+              onSubmitThreadTurn={submitThreadTurn}
             />
           </aside>
         )}

@@ -11,7 +11,7 @@ Define session lifecycle behavior owned by the interactive `pevo tui` surface.
 
 Without `--session` or `--new`, TUI resumes the latest human-visible session
 from the local state database, regardless of the directory where TUI was
-opened. Internal sessions such as `tui-side` are excluded. If no matching
+opened. Internal sessions such as `tui-side-conversation` are excluded. If no matching
 session exists, the first submitted prompt creates a new session with
 `source = "tui"` for the opened working directory.
 
