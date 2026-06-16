@@ -447,12 +447,35 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 <ComposerRequests
                   clarifies={pendingClarifies}
                   permissions={pendingPermissions}
-                  onClarify={(requestId, answer) => void runAction(async () => {
-                    await client?.request("clarify/respond", { requestId, threadId: snapshot.thread?.id ?? null, answers: [[answer]] });
-                    await refreshSnapshot();
+                  onClarify={(request, answers, cancel) => void runAction(async () => {
+                    const response = await client?.request("clarify/respond", {
+                      requestId: request.requestId,
+                      threadId: request.threadId ?? snapshot.thread?.id ?? null,
+                      sourceKey: request.sourceKey ?? null,
+                      activityId: request.activityId ?? null,
+                      answers,
+                      cancel
+                    });
+                    if (!acceptedInteractionResponse(response)) {
+                      setCommandFeedback?.({
+                        accepted: false,
+                        command: "clarify/respond",
+                        message: "Clarify response was not accepted.",
+                        feedbackAnchor: "composer"
+                      });
+                    }
+                    if (request.threadId) {
+                      await refreshSnapshot(client, request.threadId, undefined, true);
+                    }
                   })}
-                  onPermission={(requestId, decision) => void runAction(async () => {
-                    const response = await client?.request("permission/respond", { requestId, threadId: snapshot.thread?.id ?? null, decision });
+                  onPermission={(request, decision) => void runAction(async () => {
+                    const response = await client?.request("permission/respond", {
+                      requestId: request.requestId,
+                      threadId: request.threadId ?? snapshot.thread?.id ?? null,
+                      sourceKey: request.sourceKey ?? null,
+                      activityId: request.activityId ?? null,
+                      decision
+                    });
                     if (!acceptedInteractionResponse(response)) {
                       setCommandFeedback?.({
                         accepted: false,
@@ -461,7 +484,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
                         feedbackAnchor: "composer"
                       });
                     }
-                    await refreshSnapshot();
+                    if (request.threadId) {
+                      await refreshSnapshot(client, request.threadId, undefined, true);
+                    }
                   })}
                 />
               ) : null}

@@ -48,6 +48,7 @@ const gatewayMock = vi.hoisted(() => {
     endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" } as { wsUrl: string; baseUrl: string } | null,
     observabilityRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     permissionRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
+    clarifyRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     openDownloadLog: [] as string[],
     optimisticLog: [] as string[],
     projectBranch: "main" as string | null,
@@ -111,7 +112,9 @@ const gatewayMock = vi.hoisted(() => {
 
 export { gatewayMock };
 
-vi.mock("@psychevo/client", () => {
+vi.mock("@psychevo/client", async () => {
+  const actual = await vi.importActual<typeof import("@psychevo/client")>("@psychevo/client");
+
   class GatewayClient {
     subscribe = vi.fn((callback: (notification: { method: string; params?: unknown }) => void) => {
       gatewayMock.subscribers.push(callback);
@@ -456,6 +459,9 @@ vi.mock("@psychevo/client", () => {
       if (method === "permission/respond") {
         return gatewayMock.permissionRespond(params);
       }
+      if (method === "clarify/respond") {
+        return gatewayMock.clarifyRespond(params);
+      }
       if (method === "terminal/start") {
         return { terminalId: "terminal-1", cwd: gatewayMock.scope.workdir, pid: null };
       }
@@ -472,7 +478,7 @@ vi.mock("@psychevo/client", () => {
       gatewayMock.optimisticLog.push(text);
       return current;
     },
-    applyLiveTranscriptEvent: (current: unknown) => current,
+    applyLiveTranscriptEvent: actual.applyLiveTranscriptEvent,
     parseThreadSnapshot: (value: unknown) => value,
     reconcileThreadSnapshot: (_current: unknown, next: unknown) => next,
     scopeForWorkdir: (workdir: string) => ({ ...gatewayMock.scope, workdir })
@@ -582,6 +588,7 @@ afterEach(() => {
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.observabilityRead = null;
   gatewayMock.permissionRespond = () => ({ accepted: true });
+  gatewayMock.clarifyRespond = () => ({ accepted: true });
   gatewayMock.openDownloadLog.length = 0;
   gatewayMock.optimisticLog.length = 0;
   gatewayMock.projectBranch = "main";

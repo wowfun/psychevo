@@ -207,18 +207,19 @@ describe("Workbench command routing", () => {
           order: 0,
           source: "runtime",
           title: "Agent",
-          body: "{\"child_session_id\":\"child-thread\"}",
+          body: "{\"child_thread_id\":\"child-thread\"}",
           preview: "child-thread",
           detail: null,
           artifactIds: [],
           metadata: {
             projection: "tool",
-            tool_name: "Agent",
+            tool_name: "spawn_agent",
+            tool_call_id: "call-agent",
             result: {
               agent_name: "Planck",
-              child_session_id: "child-thread",
-              parent_session_id: "thread-1",
-              task_name: "Investigate"
+              child_thread_id: "child-thread",
+              parent_thread_id: "thread-1",
+              task_name: "investigate"
             }
           },
           result: null,
@@ -237,10 +238,10 @@ describe("Workbench command routing", () => {
     render(<App />);
     await resumeSession();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open Investigate agent session" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open investigate agent session" }));
 
-    expect(await screen.findByRole("button", { name: "Investigate" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Investigate" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "investigate" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "investigate" })).toBeTruthy();
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "thread/read",

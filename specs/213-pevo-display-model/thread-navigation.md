@@ -32,13 +32,12 @@ they are not copied transcript fragments. A surface that opens a child thread
 must render and submit against that child thread while keeping the parent thread
 identity available for return, status, and notifications.
 
-Subsession is the shared display term for parent-scoped child thread views.
-Side chat and subagent inspection use the same navigation model: the visible
-tab or split view points at a concrete child thread identity, while parent
-transcript rows and right-column buttons are only affordances for opening that
-identity. Display surfaces must consume the lineage/display metadata projected
-from the shared state model instead of maintaining a second source of truth for
-side chat or subagent identity.
+Side chat and subagent inspection use the same child thread view navigation
+model: the visible tab or split view points at a concrete child thread
+identity, while parent transcript rows and right-column buttons are only
+affordances for opening that identity. Display surfaces must consume the
+lineage/display metadata projected from the shared state model instead of
+maintaining a second source of truth for side chat or subagent identity.
 
 Child thread navigation is display state. Opening, focusing, closing, or
 returning from a child thread must not create ordinary transcript entries,
@@ -100,23 +99,44 @@ with bounded feedback from inside a side chat.
 ## Child-Agent Threads
 
 Runtime-owned subagents remain defined by [051 Subagents](../051-agents/subagents.md).
-For display, the parent Agent block is the parent-session affordance for the
-child run. When the block or its metadata identifies a `child_session_id`, an
-interactive surface should provide a way to open that original subagent thread.
+For display, the parent `AgentInvocationBlock` is the parent-thread affordance
+for the child run. When the block carries a `child_thread_id`, an interactive
+surface should provide a way to open that original subagent thread.
 Pointer-based surfaces expose this as an explicit `Open` action on the Agent
-row, separate from expanding or collapsing the row's inline detail.
+row/block, separate from expanding or collapsing the inline detail.
 Opening the subagent thread preserves the child thread identity, selected-agent
 identity, policy, transcript, live state, and future prompt submissions.
 
-`agent_session_start` is an identity and status enrichment for the parent
-`Agent` tool block. It must not project as a second ordinary parent transcript
-entry for the same child invocation. Live and committed projection must use the
-same `Agent` block identity across pending, running, completed, failed,
-interrupted, and reloaded states. The block keeps the resolved agent name, task
-summary, original task prompt when available, parent thread/session identity,
-and child thread/session identity in structured metadata. Completion updates
-the same block instead of appending a trailing openable Agent row below the
-assistant answer.
+`AgentInvocationBlock` is the shared display object consumed by TUI and GUI for
+parent transcript Agent blocks. Its stable block id is derived from
+`tool_call_id`. Its open target is `child_thread_id`. Its parent block status
+is separate from the child thread's internal turn state, so a successful
+background handoff remains an openable running Agent block instead of becoming
+a completed parent tool row or an interrupted placeholder. The block contains
+structured metadata for `tool_call_id`, `parent_thread_id`, `child_thread_id`,
+`task_name`, `agent_path`, `agent_type`, original `message`, status, summaries,
+token usage, and error state when known. Display labels may be derived from
+those fields, but labels are never identity.
+
+`agent_session_start`, `spawn_agent` begin/end events, child activity, and
+committed history are all inputs to the same shared display projector. They
+must upsert one `AgentInvocationBlock` by `tool_call_id` and never project as a
+second ordinary parent transcript entry for the same child invocation. Live and
+committed projection must use the same block identity across pending, running,
+completed, failed, interrupted, and reloaded states. The block keeps the
+resolved agent name, canonical task name, original task message when available,
+parent thread/session identity, and child thread/session identity in structured
+metadata. Completion updates the same block instead of appending a trailing
+openable Agent row below the assistant answer.
+Partial live tool-call frames are display previews only. They may introduce a
+provisional Agent block and update incomplete argument text, but they do not
+define a new identity once a block is bound to a concrete `tool_call_id` or
+`child_thread_id`. The projector must merge Agent metadata by typed field
+ownership: durable identity fields such as `tool_call_id`, `parent_thread_id`,
+and `child_thread_id` are preserved for that invocation, while volatile fields
+such as `args`, `arguments`, `result`, status, and summaries are replaced only
+by events for the same invocation. This prevents one parallel Agent's partial
+arguments from changing another Agent block's title, status, or open target.
 
 While the parent remains visible, scoped child events may be summarized inside
 the parent Agent block, but their transcript entries belong to the child
@@ -138,9 +158,11 @@ before accepting events for a later turn. Later turns must not inherit Agent,
 tool, Thinking, text, diagnostic, or terminal blocks from an earlier turn's
 live overlay.
 
-The parent Agent block is openable only when it carries a real child thread
-identity, such as `child_session_id` or `session_id`, from runtime or Gateway
-metadata. Running and completed Agent blocks use the same identity extraction
+The parent Agent block is openable only when it carries a real `child_thread_id`
+from runtime or Gateway metadata. Storage-specific `child_session_id` values may
+be used internally to enrich that public thread id, but UI code must not infer
+an open target from title text, task labels, prompts, summaries, result text, or
+agent definition name. Running and completed Agent blocks use the same identity
 contract; completion must not drop the child thread id or change the block into
 a generic tool row that cannot open the original child thread.
 Authoritative snapshot replacement must preserve a child thread target learned

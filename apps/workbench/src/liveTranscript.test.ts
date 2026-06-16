@@ -966,11 +966,12 @@ describe("applyLiveTranscriptEvent", () => {
               order: 1,
               metadata: {
                 projection: "tool",
-                tool_name: "Agent",
+                tool_name: "spawn_agent",
                 tool_call_id: "call_agent_translate",
                 args: {
                   agent_type: "translate",
-                  prompt: "Translate the following message to Chinese: hello"
+                  task_name: "translate_to_chinese",
+                  message: "Translate the following message to Chinese: hello"
                 }
               }
             }),
@@ -1010,15 +1011,16 @@ describe("applyLiveTranscriptEvent", () => {
               order: 1,
               metadata: {
                 projection: "tool",
-                tool_name: "Agent",
+                tool_name: "spawn_agent",
                 tool_call_id: "call_agent_translate",
                 args: {
                   agent_type: "translate",
-                  prompt: "Translate the following message to Chinese: hello"
+                  task_name: "translate_to_chinese",
+                  message: "Translate the following message to Chinese: hello"
                 },
                 result: {
                   agent_name: "translate",
-                  child_session_id: "child-thread",
+                  child_thread_id: "child-thread",
                   status: "completed",
                   summary: "你好"
                 }

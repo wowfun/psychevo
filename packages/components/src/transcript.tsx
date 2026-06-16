@@ -417,7 +417,7 @@ function agentSessionFromBlock(block: TranscriptBlock, display: EvidenceDisplay)
   ];
   const childSessionId = firstStringField(
     records,
-    ["child_session_id", "childSessionId", "session_id", "sessionId"]
+    ["child_thread_id", "childThreadId", "child_session_id", "childSessionId", "session_id", "sessionId"]
   );
   if (!childSessionId) {
     return null;
@@ -427,8 +427,8 @@ function agentSessionFromBlock(block: TranscriptBlock, display: EvidenceDisplay)
   return {
     agentName,
     childSessionId,
-    parentSessionId: firstStringField(records, ["parent_session_id", "parentSessionId"]),
-    task: firstStringField(records, ["task", "prompt"]),
+    parentSessionId: firstStringField(records, ["parent_thread_id", "parentThreadId", "parent_session_id", "parentSessionId"]),
+    task: firstStringField(records, ["message", "task", "prompt"]),
     taskName,
     title: taskName ?? agentName ?? display.title,
   };

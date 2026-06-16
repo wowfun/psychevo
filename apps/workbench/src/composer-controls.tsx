@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { GitBranch, Pin } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Check, GitBranch, Pin, ShieldCheck, ShieldPlus, X } from "lucide-react";
 import type {
   ContextReadResult,
   InitializeResult,
@@ -19,8 +19,8 @@ export function ComposerRequests({
 }: {
   clarifies: PendingClarify[];
   permissions: PendingPermission[];
-  onClarify(requestId: string, answer: string): void;
-  onPermission(requestId: string, decision: PermissionDecision): void;
+  onClarify(request: PendingClarify, answers: string[][] | null, cancel: boolean): void;
+  onPermission(request: PendingPermission, decision: PermissionDecision): void;
 }) {
   if (permissions.length === 0 && clarifies.length === 0) {
     return null;
@@ -29,12 +29,39 @@ export function ComposerRequests({
     <div className="composerRequests" aria-label="Pending requests">
       {permissions.map((permission) => (
         <div className="composerRequest" key={permission.requestId}>
-          <strong>{permission.toolName}</strong>
-          <p>{permission.reason}</p>
-          <div>
-            <button onClick={() => onPermission(permission.requestId, "allowOnce")} type="button">Once</button>
-            <button onClick={() => onPermission(permission.requestId, "allowSession")} type="button">Session</button>
-            <button onClick={() => onPermission(permission.requestId, "deny")} type="button">Deny</button>
+          <div className="composerRequestHeader">
+            <strong>{permission.toolName}</strong>
+            {permission.timeoutSecs ? <span>{permission.timeoutSecs}s</span> : null}
+          </div>
+          <p>{permission.summary || permission.reason}</p>
+          {permission.summary && permission.reason && permission.summary !== permission.reason ? (
+            <p>{permission.reason}</p>
+          ) : null}
+          {(permission.matchedRule || permission.suggestedRule) ? (
+            <div className="composerRequestMeta">
+              {permission.matchedRule ? <code>{permission.matchedRule}</code> : null}
+              {permission.suggestedRule ? <code>{permission.suggestedRule}</code> : null}
+            </div>
+          ) : null}
+          <div className="composerRequestActions">
+            <button onClick={() => onPermission(permission, "allowOnce")} type="button">
+              <Check size={14} />
+              <span>Once</span>
+            </button>
+            <button onClick={() => onPermission(permission, "allowSession")} type="button">
+              <ShieldCheck size={14} />
+              <span>Session</span>
+            </button>
+            {permission.allowAlways ? (
+              <button onClick={() => onPermission(permission, "allowAlways")} type="button">
+                <ShieldPlus size={14} />
+                <span>Always</span>
+              </button>
+            ) : null}
+            <button onClick={() => onPermission(permission, "deny")} type="button">
+              <X size={14} />
+              <span>Deny</span>
+            </button>
           </div>
         </div>
       ))}
@@ -50,26 +77,182 @@ function ClarifyComposerRequest({
   onSubmit
 }: {
   request: PendingClarify;
-  onSubmit(requestId: string, answer: string): void;
+  onSubmit(request: PendingClarify, answers: string[][] | null, cancel: boolean): void;
 }) {
-  const [answer, setAnswer] = useState("");
+  const questions = useMemo(() => parseClarifyQuestions(request.raw), [request.raw]);
+  const [answers, setAnswers] = useState<ClarifyAnswerState[]>(() => initialClarifyAnswers(questions));
+  const [fallbackAnswer, setFallbackAnswer] = useState("");
+
+  useEffect(() => {
+    setAnswers(initialClarifyAnswers(questions));
+    setFallbackAnswer("");
+  }, [questions, request.requestId]);
+
+  const resolvedAnswers = questions.map((question, index) => {
+    const answer = answers[index] ?? defaultClarifyAnswer(question);
+    return answer.kind === "other" ? answer.custom.trim() : answer.value;
+  });
+  const canSubmit = questions.length === 0
+    ? fallbackAnswer.trim().length > 0
+    : resolvedAnswers.every((answer) => answer.trim().length > 0);
+
+  function submitClarify() {
+    if (!canSubmit) {
+      return;
+    }
+    if (questions.length === 0) {
+      onSubmit(request, [[fallbackAnswer.trim()]], false);
+      setFallbackAnswer("");
+      return;
+    }
+    onSubmit(request, resolvedAnswers.map((answer) => [answer]), false);
+  }
+
   return (
-    <form
-      className="composerRequest"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit(request.requestId, answer);
-        setAnswer("");
-      }}
-    >
-      <strong>Clarify</strong>
-      <pre>{JSON.stringify(request.raw, null, 2)}</pre>
-      <div>
-        <input value={answer} onChange={(event) => setAnswer(event.target.value)} />
-        <button type="submit">Submit</button>
+    <div className="composerRequest">
+      <div className="composerRequestHeader">
+        <strong>Clarify</strong>
+        {request.turnId ? <span>{request.turnId}</span> : null}
       </div>
-    </form>
+      {questions.length === 0 ? (
+        <input
+          value={fallbackAnswer}
+          onChange={(event) => setFallbackAnswer(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              submitClarify();
+            }
+          }}
+        />
+      ) : (
+        <div className="composerClarifyQuestions">
+          {questions.map((question, questionIndex) => {
+            const answer = answers[questionIndex] ?? defaultClarifyAnswer(question);
+            return (
+              <fieldset className="composerClarifyQuestion" key={`${request.requestId}:${questionIndex}`}>
+                <legend>{question.question}</legend>
+                {[...question.options, OTHER_OPTION].map((option) => {
+                  const isOther = option.label === OTHER_OPTION.label;
+                  const checked = isOther
+                    ? answer.kind === "other"
+                    : answer.kind === "option" && answer.value === option.label;
+                  return (
+                    <label className="composerClarifyOption" key={option.label}>
+                      <input
+                        checked={checked}
+                        name={`${request.requestId}:${questionIndex}`}
+                        type="radio"
+                        onChange={() => {
+                          setAnswers((current) => replaceClarifyAnswer(
+                            current,
+                            questionIndex,
+                            isOther
+                              ? { kind: "other", value: OTHER_OPTION.label, custom: "" }
+                              : { kind: "option", value: option.label, custom: "" }
+                          ));
+                        }}
+                      />
+                      <span>
+                        <strong>{option.label}</strong>
+                        {option.description ? <small>{option.description}</small> : null}
+                      </span>
+                    </label>
+                  );
+                })}
+                {answer.kind === "other" ? (
+                  <input
+                    value={answer.custom}
+                    onChange={(event) => {
+                      setAnswers((current) => replaceClarifyAnswer(current, questionIndex, {
+                        ...answer,
+                        custom: event.target.value
+                      }));
+                    }}
+                  />
+                ) : null}
+              </fieldset>
+            );
+          })}
+        </div>
+      )}
+      <div className="composerRequestActions">
+        <button disabled={!canSubmit} onClick={submitClarify} type="button">Submit</button>
+        <button onClick={() => onSubmit(request, null, true)} type="button">Cancel</button>
+      </div>
+    </div>
   );
+}
+
+type ClarifyOption = {
+  label: string;
+  description: string;
+};
+
+type ClarifyQuestion = {
+  question: string;
+  options: ClarifyOption[];
+};
+
+type ClarifyAnswerState =
+  | { kind: "option"; value: string; custom: string }
+  | { kind: "other"; value: string; custom: string };
+
+const OTHER_OPTION: ClarifyOption = {
+  label: "Other",
+  description: ""
+};
+
+function parseClarifyQuestions(raw: unknown): ClarifyQuestion[] {
+  const record = asRecord(raw);
+  const questions = Array.isArray(record.questions) ? record.questions : [];
+  return questions.slice(0, 3).flatMap((value): ClarifyQuestion[] => {
+    const question = asRecord(value);
+    const text = typeof question.question === "string" ? question.question.trim() : "";
+    const options = Array.isArray(question.options)
+      ? question.options.slice(0, 3).flatMap((option): ClarifyOption[] => {
+          const optionRecord = asRecord(option);
+          const label = typeof optionRecord.label === "string" ? optionRecord.label.trim() : "";
+          if (!label) {
+            return [];
+          }
+          return [{
+            label,
+            description: typeof optionRecord.description === "string" ? optionRecord.description.trim() : ""
+          }];
+        })
+      : [];
+    if (!text || options.length < 2) {
+      return [];
+    }
+    return [{ question: text, options }];
+  });
+}
+
+function initialClarifyAnswers(questions: ClarifyQuestion[]): ClarifyAnswerState[] {
+  return questions.map(defaultClarifyAnswer);
+}
+
+function defaultClarifyAnswer(question: ClarifyQuestion): ClarifyAnswerState {
+  return {
+    kind: "option",
+    value: question.options[0]?.label ?? "",
+    custom: ""
+  };
+}
+
+function replaceClarifyAnswer(
+  answers: ClarifyAnswerState[],
+  index: number,
+  answer: ClarifyAnswerState
+): ClarifyAnswerState[] {
+  const next = [...answers];
+  next[index] = answer;
+  return next;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 export function ComposerSubmitControls({

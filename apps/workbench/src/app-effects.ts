@@ -417,7 +417,10 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             }, 750);
           }
           if (["permissionRequested", "permissionResolved", "clarifyRequested", "clarifyResolved"].includes(event.type)) {
-            void params.refreshSnapshot(nextClient);
+            const threadId = "threadId" in event && event.threadId ? event.threadId : null;
+            if (threadId) {
+              void params.refreshSnapshot(nextClient, threadId, undefined, true, params.viewEpochRef.current);
+            }
           }
         }
       }

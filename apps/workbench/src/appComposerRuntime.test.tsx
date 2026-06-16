@@ -54,9 +54,16 @@ describe("Workbench runtime and agent controls", () => {
       {
         requestId: "permission-1",
         toolName: "exec_command",
+        summary: "Run exec_command",
         reason: "requires approval",
+        matchedRule: "exec:python3 -c",
+        suggestedRule: null,
+        allowAlways: false,
+        timeoutSecs: 300,
         threadId: "thread-1",
-        turnId: "turn-1"
+        turnId: "turn-1",
+        activityId: "activity-1",
+        sourceKey: "source-thread-1"
       }
     ];
     gatewayMock.permissionRespond = () => ({ accepted: false });
@@ -70,12 +77,158 @@ describe("Workbench runtime and agent controls", () => {
         method: "permission/respond",
         params: {
           requestId: "permission-1",
-          threadId: null,
+          threadId: "thread-1",
+          sourceKey: "source-thread-1",
+          activityId: "activity-1",
           decision: "allowOnce"
         }
       });
     });
     expect(await screen.findByText("Permission response was not accepted.")).toBeTruthy();
+  });
+
+  it("shows live draft permission requests and routes allow-always by request context", async () => {
+    render(<App />);
+
+    await screen.findByPlaceholderText("Ask Psychevo...");
+    gatewayMock.subscribers.forEach((subscriber) => subscriber({
+      method: "gateway/event",
+      params: {
+        type: "permissionRequested",
+        requestId: "permission-draft",
+        toolName: "exec_command",
+        summary: "inline Python could not be statically reduced",
+        reason: "requires approval",
+        matchedRule: "exec:python3 -c",
+        suggestedRule: "exec:python3 -c",
+        allowAlways: true,
+        timeoutSecs: 300,
+        turnId: "turn-draft",
+        activityId: "activity-draft",
+        sourceKey: "web:draft"
+      }
+    }));
+
+    expect(await screen.findByText("inline Python could not be statically reduced")).toBeTruthy();
+    expect(screen.getAllByText("exec:python3 -c").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Always" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "permission/respond",
+        params: {
+          requestId: "permission-draft",
+          threadId: null,
+          sourceKey: "web:draft",
+          activityId: "activity-draft",
+          decision: "allowAlways"
+        }
+      });
+    });
+  });
+
+  it("submits structured live clarify answers and supports cancel", async () => {
+    render(<App />);
+
+    await screen.findByPlaceholderText("Ask Psychevo...");
+    gatewayMock.subscribers.forEach((subscriber) => subscriber({
+      method: "gateway/event",
+      params: {
+        type: "clarifyRequested",
+        requestId: "clarify-draft",
+        raw: {
+          questions: [
+            {
+              question: "Which environment should I use?",
+              options: [
+                { label: "Local", description: "Use local files" },
+                { label: "Remote", description: "Use remote API" }
+              ]
+            },
+            {
+              question: "How should I proceed?",
+              options: [
+                { label: "Fix", description: "Apply the patch" },
+                { label: "Explain", description: "Only explain" }
+              ]
+            }
+          ]
+        },
+        turnId: "turn-draft",
+        activityId: "activity-draft",
+        sourceKey: "web:draft"
+      }
+    }));
+
+    expect(await screen.findByText("Which environment should I use?")).toBeTruthy();
+    const environmentQuestion = screen.getByRole("group", { name: "Which environment should I use?" });
+    fireEvent.click(within(environmentQuestion).getByRole("radio", { name: /Other/ }));
+    fireEvent.change(within(environmentQuestion).getByRole("textbox"), { target: { value: "Use a temporary sandbox" } });
+    fireEvent.click(within(screen.getByRole("group", { name: "How should I proceed?" })).getByRole("radio", { name: /Explain/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "clarify/respond",
+        params: {
+          requestId: "clarify-draft",
+          threadId: null,
+          sourceKey: "web:draft",
+          activityId: "activity-draft",
+          answers: [["Use a temporary sandbox"], ["Explain"]],
+          cancel: false
+        }
+      });
+    });
+
+    gatewayMock.subscribers.forEach((subscriber) => subscriber({
+      method: "gateway/event",
+      params: {
+        type: "clarifyResolved",
+        requestId: "clarify-draft",
+        reason: "answered"
+      }
+    }));
+    await waitFor(() => {
+      expect(screen.queryByText("Which environment should I use?")).toBeNull();
+    });
+
+    gatewayMock.requestLog.length = 0;
+    gatewayMock.subscribers.forEach((subscriber) => subscriber({
+      method: "gateway/event",
+      params: {
+        type: "clarifyRequested",
+        requestId: "clarify-cancel",
+        raw: {
+          questions: [
+            {
+              question: "Cancel this request?",
+              options: [
+                { label: "Yes", description: "" },
+                { label: "No", description: "" }
+              ]
+            }
+          ]
+        },
+        activityId: "activity-cancel",
+        sourceKey: "web:draft"
+      }
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "clarify/respond",
+        params: {
+          requestId: "clarify-cancel",
+          threadId: null,
+          sourceKey: "web:draft",
+          activityId: "activity-cancel",
+          answers: null,
+          cancel: true
+        }
+      });
+    });
   });
 
   it("submits ACP runtime plan through the shared Plan mode switch", async () => {

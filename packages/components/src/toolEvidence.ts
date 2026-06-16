@@ -151,13 +151,13 @@ function toolDisplaySpec(toolName: string, metadata: Record<string, unknown>): T
       category: "status"
     };
   }
-  if (toolName === "Agent" || toolName === "agent") {
+  if (toolName === "spawn_agent") {
     return {
       ...genericDisplaySpec(),
       category: "status",
-      summaryKeys: ["task_name", "taskName", "task", "prompt", "summary", "status"],
-      titleArgKeys: ["agent_type", "agentType", "name"],
-      titleResultKeys: ["agent_name", "agentName", "agent_type", "agentType", "name"]
+      summaryKeys: ["task_name", "taskName", "message", "task", "summary", "status"],
+      titleArgKeys: ["agent_type", "agentType"],
+      titleResultKeys: ["agent_name", "agentName", "agent_type", "agentType"]
     };
   }
   if (toolName === "web_fetch") {

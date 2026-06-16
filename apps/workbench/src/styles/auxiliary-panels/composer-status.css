@@ -19,6 +19,23 @@
   font-size: 0.82rem;
 }
 
+.composerRequestHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 8px;
+}
+
+.composerRequestHeader span {
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-family: var(--pevo-mono);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composerRequest pre {
   max-height: 120px;
   overflow: auto;
@@ -27,10 +44,20 @@
   background: var(--pevo-code-bg);
 }
 
-.composerRequest div {
+.composerRequestActions,
+.composerRequestMeta {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.composerRequestMeta code {
+  padding: 2px 5px;
+  color: var(--pevo-code-ink);
+  background: var(--pevo-code-bg);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-size: 0.72rem;
 }
 
 .composerRequest input {
@@ -43,12 +70,68 @@
 }
 
 .composerRequest button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 32px;
+  gap: 5px;
   padding: 0 10px;
   color: var(--pevo-ink);
   background: var(--pevo-panel);
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
+}
+
+.composerRequest button:disabled {
+  color: var(--pevo-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.composerClarifyQuestions {
+  display: grid;
+  gap: 8px;
+}
+
+.composerClarifyQuestion {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.composerClarifyQuestion legend {
+  margin-bottom: 2px;
+  color: var(--pevo-ink);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.composerClarifyOption {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+  color: var(--pevo-ink);
+  font-size: 0.82rem;
+}
+
+.composerClarifyOption input {
+  min-height: 16px;
+  margin: 2px 0 0;
+}
+
+.composerClarifyOption span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.composerClarifyOption small {
+  color: var(--pevo-muted);
+  line-height: 1.25;
 }
 
 .composerStatusLine {
