@@ -92,6 +92,11 @@ Coverage must verify:
 - analysis config defaults `analysis_eval_slug` to `default`, reads the top-level
   key from discovered `peval-py.toml`, and allows explicit `-c/--config` to
   override only that key without resetting other workspace values.
+- adapter config accepts reserved `default_db_path`, resolves relative values
+  against the TOML file that defines them, expands `~`, keeps the remaining raw
+  adapter options available to adapters, and lets `-d @adapter` expand to the
+  configured DB while rejecting missing defaults or conflicting `-a dN=...`
+  selectors.
 - malformed JSONL lines fail with a clear line-number diagnostic.
 - ATIF step ids are sequential and tool observations link to source tool calls.
 - final metrics aggregate available usage, accounting, turn, tool-call, and
@@ -119,8 +124,9 @@ Coverage must verify:
   manifest order.
 - input table rows support `path`/`p`, `db`/`d`, `session_id`/`session`/`s`,
   `adapter`/`a`, `note`/`notes`/`n`, `report_note`/`report_notes`,
-  `agent_name`, `agent_version`, and `model`; row-level adapter and
-  agent/model fields override command defaults for only that row.
+  `alias`/`label`/`source_alias`, `agent_name`, `agent_version`, and `model`;
+  row-level adapter, alias, and agent/model fields override command defaults for
+  only that row.
 - input table relative path and DB values resolve against the table file's
   directory; row notes bind to the expanded row index unless they use explicit
   `N=TEXT` syntax, and report notes bind to index `0`.
@@ -128,6 +134,10 @@ Coverage must verify:
   with both path and DB, rows with neither path nor DB, path rows with
   session ids, unsupported `.xls`, and `.xlsx` files when `openpyxl` is not
   importable.
+- `--source-alias N=TEXT` binds display-only aliases to expanded input sessions,
+  rejects duplicate and out-of-range aliases, writes `source_alias` to
+  `trajectory_meta[]` and leaderboard rows, and does not change source identity,
+  `trajectory.session_id`, `trial_key`, or Evidence/Input Source paths.
 - with multiple DB inputs, `-s dN=ID` binds session ids to the one-based DB
   input, while bare `-s ID` fails clearly.
 - with one DB input, bare `-s ID` remains compatible.
@@ -283,10 +293,11 @@ Coverage must verify:
   and row state while keeping isolated table state by table id.
 - HTML Timeline Waterfall and Timeline Detail Table diagnostics render from
   existing selected-Trial step/tool timing metadata, derive a flat performance
-  trace with latency-bearing stages and near-zero user/system markers, load the
-  fixed ECharts 6.0.0 CDN build for the Waterfall, show a readable Waterfall
-  fallback if ECharts is unavailable, omit retained-session idle gaps from the
-  Timeline, preserve true model and tool wall start/end values in the detail
+  trace with latency-bearing stages and near-zero user/system markers, keep the
+  fixed ECharts 6.0.0 CDN build for static reports, load the local-first
+  `/assets/echarts/6.0.0/echarts.min.js` script in serve mode with CDN fallback,
+  show a readable Waterfall fallback if ECharts is unavailable, omit
+  retained-session idle gaps from the Timeline, preserve true model and tool wall start/end values in the detail
   table, render model generation as `Model: <model_name>` or `Model`, render
   estimated model timing with visible `≈` prefixes when explicit model duration
   is unavailable, suppress estimated model stages for order-only source
@@ -323,9 +334,11 @@ Coverage must verify:
 - serve UI HTML and interaction tests verify Source Manager form shells do not
   use the old pink/tinted filled background, source adapters render as compact
   single-select dropdowns in each form action row rather than radio groups,
-  Export and table filter submenus stay open for inside clicks, close on outside
-  clicks, and do not apply this outside-click behavior to Timeline or Step
-  collapsible sections.
+  configured adapter default DB paths are exposed to the DB form, source alias
+  inputs and alias edit controls render in serve mode, the language select
+  renders only in serve mode, Export and table filter submenus stay open for
+  inside clicks, close on outside clicks, and do not apply this outside-click
+  behavior to Timeline or Step collapsible sections.
 - HTML shows visibly marked estimated token chips for steps that lack real
   token metrics, preserves exact token chips when real step metrics exist, can
   use an optional `tiktoken` module, falls back to a deterministic byte-length
@@ -355,7 +368,7 @@ Coverage must verify:
   `peval-py.toml`, explicit `--root` and `PEVAL_ROOT` handling as a peval-py
   root override without requiring `peval.toml`, `<workspace>/peval-py.toml` defaults,
   `<workspace>/state.db` creation, `peval_py_*` migrations, stable source keys,
-  source update instead of duplicate append, active/archive lifecycle, latest
+  source alias storage without changing stable keys, source update instead of duplicate append, active/archive lifecycle, latest
   canonical Trial snapshots including refreshed cached analysis JSON/Markdown
   and cell-local notes, refresh-log rows, and no non-peval-py table writes.
 - CLI smoke tests cover `init --root`, `init --root --json`, `serve -p`,
@@ -366,7 +379,9 @@ Coverage must verify:
   verify `/`, report JSON, source listing, add source, archive/activate, refresh,
   JSONL upload, ATIF JSON upload, report JSON upload, unsupported upload
   rejection, 20 MiB upload cap rejection, no CORS header, JSON POST requirement,
-  and same-origin rejection for mutating APIs.
+  same-origin rejection for mutating APIs, `/api/config/locale` TOML updates,
+  `/api/sources/{source_key}/alias`, and the ECharts cached asset route using
+  fake cache/download paths rather than real network.
 - legacy top-level `report` and `convert` commands are rejected.
 - translated evaluation docs exist under `docs/i18n/zh-CN/...`, the peval-py
   tool README translation exists beside `tools/peval-py/README.md`, English

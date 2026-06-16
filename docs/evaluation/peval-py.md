@@ -109,6 +109,15 @@ adapter = "custom"
 input_mode = "transcript"
 ```
 
+Adapter tables may also set `default_db_path`. This reserved key is not passed
+to adapter code. `~` is expanded, and relative paths resolve against the TOML
+file that defines the value:
+
+```toml
+[adapters.psychevo]
+default_db_path = ".psychevo/state.db"
+```
+
 Run the adapter like any built-in adapter:
 
 ```bash
@@ -287,6 +296,11 @@ Use `-a ADAPTER` as the default adapter for every input. Use `-a pN=ADAPTER`
 or `-a dN=ADAPTER` when one path or DB input needs a different adapter. Path
 and DB indexes are one-based and counted independently.
 
+If an adapter has `[adapters.<id>].default_db_path`, pass `-d @<id>` instead of
+typing the database path. The token also binds that DB input to the same
+adapter. `-d @psychevo -a d1=opencode` fails because the selector conflicts
+with the token adapter.
+
 When multiple DB inputs need explicit sessions, bind each session id to its DB
 with `-s dN=<session-id>`:
 
@@ -321,6 +335,13 @@ session order in the command. Repeating `-n/--note` appends notes in CLI order.
 HTML report notes, Leaderboard note snippets, and selected Trial notes follow
 the same display style as `peval view`.
 
+Use `--source-alias N=TEXT` to assign a display-only alias to the one-based
+expanded input session. Input tables can use any of `alias`, `label`, or
+`source_alias` columns for the same value. Aliases improve Leaderboard and
+source-list readability but do not change `trajectory.session_id`, `trial_key`,
+`source_key`, `data_ref.relative_path`, or the original Evidence/Input Source
+path.
+
 ## Serve UI Layout
 
 Use `init` once when you want a local saved workspace for `serve`:
@@ -344,6 +365,14 @@ uses the same report body instead of a separate dashboard layout: Report Notes,
 Leaderboard, Trajectory Overview, and the selected Trial trajectory keep the
 static report order and styling.
 
+Static `view tr --format html` reports load ECharts from the fixed CDN script.
+`serve` is local-first: the page loads
+`/assets/echarts/6.0.0/echarts.min.js` and falls back to that CDN URL only if
+the local script fails. The serve route reads
+`<workspace>/.cache/echarts/6.0.0/echarts.min.js`; on a cache miss it downloads
+the fixed ECharts `6.0.0` CDN asset with the Python standard library, writes it
+atomically, and serves the cached bytes.
+
 Serve UI mode only adds web-only controls around that shared body. It shows a
 compact source/status toolbar and opens source management in a modal for
 Session/ATIF paths, SQLite DBs, input tables, JSONL uploads, ATIF JSON uploads,
@@ -360,6 +389,12 @@ refreshable sources, the selected Trial Notes section can edit the matching
 peval cell `notes.md`; snapshot uploads remain read-only. Source import forms
 and Timeline diagnostic sections use transparent report-integrated shells,
 while inputs and menus keep solid readable surfaces.
+
+Source Manager exposes configured adapter default DB paths in DB forms. Choose
+an adapter with a default DB path to inspect or import without retyping the
+path. Source add/upload forms also accept an alias, and each saved source row
+has an alias editor. The alias is stored separately from the source identity
+and can be cleared.
 
 In the Leaderboard, web UI mode may add row checkboxes for export selection and
 one `Export` menu with Table, JSON Report, and HTML Report choices. Row clicks
@@ -447,11 +482,15 @@ An explicit `-c` file overlays `peval-py.toml`; keys omitted from `-c` keep the
 workspace value.
 
 `zh` is accepted as an alias for `zh-CN`, and `en-US` normalizes to `en`.
-Locale is config-only; there is no CLI flag. In Simplified Chinese reports,
-domain terms such as Run, Result, Notes, Evidence, Steps/events, Session,
-variant, evaluator, reasoning, selected trial trajectory, Turns, Tool Calls,
-tool success / total, cache read, and cache write remain English. The final
-selected Trial Steps detail section also remains English.
+Locale is config-only; there is no CLI flag. In `serve`, the top toolbar
+includes an English/Simplified Chinese selector. It writes top-level `locale`
+to `<workspace>/peval-py.toml`, updates the running server config, then reloads
+the page so embedded i18n messages refresh. Static reports remain controlled
+by config at render time. In Simplified Chinese reports, domain terms such as
+Run, Result, Notes, Evidence, Steps/events, Session, variant, evaluator,
+reasoning, selected trial trajectory, Turns, Tool Calls, tool success / total,
+cache read, and cache write remain English. The final selected Trial Steps
+detail section also remains English.
 
 ## Useful Flags
 
@@ -459,7 +498,8 @@ selected Trial Steps detail section also remains English.
   exported ATIF JSON is accepted without an adapter, and custom path adapters
   may parse their own file format.
 - `-d, --db PATH`: read an adapter-owned SQLite database. Repeat it with
-  `view tr` for cross-DB comparison.
+  `view tr` for cross-DB comparison. Use `-d @adapter` to expand that
+  adapter's configured `default_db_path`.
 - `-s, --session-id ID`: select a DB session. With one DB, bare `-s ID`
   remains valid and repeatable. Use `-s #N` for list indexes; with multiple
   DBs, use `-s dN=ID` or `-s dN=#M`.
@@ -479,6 +519,8 @@ selected Trial Steps detail section also remains English.
   not.
 - `-n, --note N=TEXT`: add a report note (`0`) or session note (`1..N`) for
   `view tr`.
+- `--source-alias N=TEXT`: add a display-only alias for a one-based expanded
+  input session in `view tr` or `serve`.
 - `--max-content-chars N`: bound large message/tool payloads.
 - `--no-redact`: disable default secret redaction.
 

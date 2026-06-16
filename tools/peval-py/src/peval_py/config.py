@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from dataclasses import dataclass, field, replace
@@ -40,6 +41,7 @@ class ToolConfig:
         default_factory=dict,
         repr=False,
     )
+    adapter_default_db_paths: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 def load_config(path: str | None, *, workspace_root: str | None = None) -> ToolConfig:
@@ -48,10 +50,21 @@ def load_config(path: str | None, *, workspace_root: str | None = None) -> ToolC
     if workspace_config is not None:
         data = tomllib.loads(workspace_config.read_text(encoding="utf-8"))
         config = replace(config, workspace_root=str(workspace_config.parent))
-        config = apply_toml_config(config, data, top_level_locale=True)
+        config = apply_toml_config(
+            config,
+            data,
+            top_level_locale=True,
+            base_dir=workspace_config.parent,
+        )
     if path:
-        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
-        config = apply_toml_config(config, data, top_level_locale=True)
+        config_path = Path(path).expanduser()
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        config = apply_toml_config(
+            config,
+            data,
+            top_level_locale=True,
+            base_dir=config_path.parent,
+        )
     return config
 
 
@@ -74,6 +87,7 @@ def apply_toml_config(
     data: dict[str, Any],
     *,
     top_level_locale: bool = False,
+    base_dir: Path | None = None,
 ) -> ToolConfig:
     if top_level_locale and "locale" in data:
         config = replace(config, locale=normalize_locale(data["locale"]))
@@ -129,7 +143,14 @@ def apply_toml_config(
                 db_updates[key] = _safe_identifier(db[key])
         if db_updates:
             config = replace(config, db=replace(config.db, **db_updates))
-    adapter_options_by_id = _adapter_options_by_id(data.get("adapters", {}))
+    adapter_options_by_id, adapter_default_db_paths = _adapter_config_by_id(
+        data.get("adapters", {}),
+        base_dir=base_dir,
+    )
+    if adapter_default_db_paths:
+        merged_default_db_paths = dict(config.adapter_default_db_paths)
+        merged_default_db_paths.update(adapter_default_db_paths)
+        config = replace(config, adapter_default_db_paths=merged_default_db_paths)
     if adapter_options_by_id:
         merged_options = {
             key: dict(value) for key, value in config.adapter_options_by_id.items()
@@ -181,6 +202,29 @@ def config_for_adapter(config: ToolConfig, adapter: object) -> ToolConfig:
     )
 
 
+def write_workspace_locale(config_path: Path, locale: str) -> None:
+    normalized = normalize_locale(locale)
+    path = config_path.expanduser()
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = text.splitlines(keepends=True)
+    locale_line = f"locale = {json.dumps(normalized)}\n"
+    first_table_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.lstrip().startswith("[")
+        ),
+        len(lines),
+    )
+    for index, line in enumerate(lines[:first_table_index]):
+        if line.lstrip().startswith("locale") and "=" in line:
+            lines[index] = locale_line
+            path.write_text("".join(lines), encoding="utf-8")
+            return
+    lines.insert(first_table_index, locale_line)
+    path.write_text("".join(lines), encoding="utf-8")
+
+
 def _adapter_override(value: object) -> str | None:
     if value is None:
         return None
@@ -195,17 +239,39 @@ def _adapter_override(value: object) -> str | None:
     return _normalize_adapter_id(value)
 
 
-def _adapter_options_by_id(value: object) -> dict[str, dict[str, Any]]:
+def _adapter_config_by_id(
+    value: object,
+    *,
+    base_dir: Path | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
     if not value:
-        return {}
+        return {}, {}
     if not isinstance(value, dict):
         raise ValueError("adapters config must be a TOML table")
     options: dict[str, dict[str, Any]] = {}
+    default_db_paths: dict[str, str] = {}
     for key, raw_options in value.items():
         if not isinstance(raw_options, dict):
             raise ValueError(f"adapter options for {key} must be a TOML table")
-        options[str(key).strip().lower()] = dict(raw_options)
-    return options
+        adapter_id = str(key).strip().lower()
+        adapter_options = dict(raw_options)
+        if "default_db_path" in adapter_options:
+            default_db_paths[adapter_id] = _resolve_config_path(
+                adapter_options.pop("default_db_path"),
+                base_dir=base_dir,
+            )
+        options[adapter_id] = adapter_options
+    return options, default_db_paths
+
+
+def _resolve_config_path(value: object, *, base_dir: Path | None = None) -> str:
+    text = str(value).strip()
+    if not text:
+        raise ValueError("default_db_path must not be empty")
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = (base_dir or Path.cwd()) / path
+    return str(path.resolve())
 
 
 def _adapter_options_for(

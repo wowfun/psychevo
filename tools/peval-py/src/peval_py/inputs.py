@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from peval_py.atif import is_atif_json_path
@@ -15,6 +15,7 @@ ADAPTER_SELECTOR_RE = re.compile(r"^([pd])([1-9][0-9]*)=(.+)$")
 SESSION_SELECTOR_RE = re.compile(r"^d([1-9][0-9]*)=(.+)$")
 PSEUDO_ADAPTERS = {"atif", "report"}
 PATH_TOKEN_RE = re.compile(r"[^a-z0-9]+")
+DEFAULT_DB_TOKEN_RE = re.compile(r"^@([A-Za-z0-9_.-]+)$")
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class LoadedSession:
     agent_name: str | None = None
     agent_version: str | None = None
     model: str | None = None
+    source_alias: str | None = None
     source_kind: str = "path"
 
 
@@ -88,6 +90,7 @@ def load_sessions(
     adapter_assignments: AdapterAssignments,
     *,
     require_sources: bool = True,
+    config: object | None = None,
 ) -> list[LoadedSession]:
     paths = list(getattr(args, "path", None) or [])
     dbs = list(getattr(args, "db", None) or [])
@@ -138,8 +141,9 @@ def load_sessions(
         db_count=len(dbs),
     )
     for index, db in enumerate(dbs, start=1):
-        db_path = Path(db)
-        adapter_id = adapter_for_input_path(
+        resolved_db, token_adapter = resolve_db_input(db, index, adapter_assignments, config)
+        db_path = Path(resolved_db)
+        adapter_id = token_adapter or adapter_for_input_path(
             str(db_path),
             index,
             adapter_assignments,
@@ -175,11 +179,13 @@ def load_inputs(
     adapter_assignments: AdapterAssignments,
     *,
     require_sources: bool = True,
+    config: object | None = None,
 ) -> LoadedInputs:
     sessions = load_sessions(
         args,
         adapter_assignments,
         require_sources=require_sources,
+        config=config,
     )
     notes: list[str] = []
     available = set(available_adapter_ids())
@@ -192,6 +198,10 @@ def load_inputs(
         )
         notes.extend(table_note_for_session(note, session_index) for note in row.notes)
         notes.extend(f"0={note}" for note in row.report_notes)
+    sessions = apply_source_aliases(
+        sessions,
+        getattr(args, "source_alias", None) or [],
+    )
     validate_required_adapters(sessions)
     return LoadedInputs(sessions=sessions, notes=notes)
 
@@ -226,6 +236,7 @@ def loaded_session_from_table_row(
             agent_name=row.agent_name,
             agent_version=row.agent_version,
             model=row.model,
+            source_alias=row.source_alias,
             source_kind="path",
         )
     if row.db is None:
@@ -258,8 +269,68 @@ def loaded_session_from_table_row(
         agent_name=row.agent_name,
         agent_version=row.agent_version,
         model=row.model,
+        source_alias=row.source_alias,
         source_kind="db",
     )
+
+
+def resolve_db_input(
+    raw_db: str,
+    index: int,
+    adapter_assignments: AdapterAssignments,
+    config: object | None,
+) -> tuple[str, str | None]:
+    text = str(raw_db).strip()
+    match = DEFAULT_DB_TOKEN_RE.fullmatch(text)
+    if not match:
+        return raw_db, None
+    adapter_id = normalize_adapter_id(match.group(1))
+    selected_adapter = adapter_assignments.db_adapters.get(index)
+    if selected_adapter is not None and selected_adapter != adapter_id:
+        raise ValueError(
+            f"DB input d{index} uses {text} but adapter selector d{index}={selected_adapter}"
+        )
+    defaults = dict(getattr(config, "adapter_default_db_paths", {}) or {})
+    path = defaults.get(adapter_id)
+    if not path:
+        raise ValueError(f"no default_db_path configured for adapter: {adapter_id}")
+    return path, adapter_id
+
+
+def apply_source_aliases(
+    sessions: list[LoadedSession],
+    raw_aliases: list[str],
+) -> list[LoadedSession]:
+    aliases = parse_source_aliases(raw_aliases, len(sessions))
+    if not aliases:
+        return sessions
+    return [
+        replace(session, source_alias=aliases.get(index, session.source_alias))
+        for index, session in enumerate(sessions, start=1)
+    ]
+
+
+def parse_source_aliases(raw_aliases: list[str], session_count: int) -> dict[int, str]:
+    aliases: dict[int, str] = {}
+    for raw in raw_aliases:
+        text = str(raw)
+        if "=" not in text:
+            raise ValueError("--source-alias must use N=TEXT syntax")
+        raw_index, alias = text.split("=", 1)
+        if not raw_index.isdigit() or int(raw_index) <= 0:
+            raise ValueError("--source-alias index must be a positive integer")
+        index = int(raw_index)
+        if index in aliases:
+            raise ValueError(f"duplicate --source-alias index: {index}")
+        if index > session_count:
+            raise ValueError(
+                f"--source-alias index {index} is out of range for {session_count} sessions"
+            )
+        alias = alias.strip()
+        if not alias:
+            raise ValueError("--source-alias text must not be empty")
+        aliases[index] = alias
+    return aliases
 
 
 def table_note_for_session(note: str, session_index: int) -> str:

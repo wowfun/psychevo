@@ -30,6 +30,7 @@ class ReportSession:
     session_hint: str | None = None
     adapter_id: str | None = None
     analysis_agent_id: str | None = None
+    source_alias: str | None = None
 
 
 @dataclass(frozen=True)
@@ -215,6 +216,7 @@ def prepare_session_report(
         "score_message": "offline session conversion",
         "warnings": conversion.warnings,
         "data_ref": data_ref,
+        **optional("source_alias", session.source_alias),
         "total_events": conversion.total_events,
         "unmapped_events": conversion.unmapped_events,
         "prompt_unavailable": not any(
@@ -226,6 +228,7 @@ def prepare_session_report(
         "index": index,
         "input_label": session.input_label,
         "input_path": session.input_path,
+        "source_alias": session.source_alias,
         "analysis_agent_id": session.analysis_agent_id or adapter_id,
         "trajectory": trajectory,
         "meta": meta,
@@ -309,6 +312,7 @@ def comparison_row(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "trial_key": meta["trial_key"],
         "session_id": trajectory.get("session_id") or "-",
+        **optional("source_alias", meta.get("source_alias")),
         "adapter": meta.get("adapter"),
         "model": trajectory.get("agent", {}).get("model_name"),
         "status": meta.get("status"),

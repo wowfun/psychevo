@@ -23,6 +23,9 @@ COLUMN_ALIASES = {
     "n": "notes",
     "report_note": "report_notes",
     "report_notes": "report_notes",
+    "alias": "source_alias",
+    "label": "source_alias",
+    "source_alias": "source_alias",
     "agent_name": "agent_name",
     "agent_version": "agent_version",
     "model": "model",
@@ -39,6 +42,7 @@ class InputTableRow:
     adapter: str | None = None
     notes: tuple[str, ...] = ()
     report_notes: tuple[str, ...] = ()
+    source_alias: str | None = None
     agent_name: str | None = None
     agent_version: str | None = None
     model: str | None = None
@@ -215,6 +219,7 @@ def row_from_mapping(
         adapter=optional_text(normalized.get("adapter")),
         notes=tuple(string_values(normalized.get("notes"))),
         report_notes=tuple(string_values(normalized.get("report_notes"))),
+        source_alias=optional_text(normalized.get("source_alias")),
         agent_name=optional_text(normalized.get("agent_name")),
         agent_version=optional_text(normalized.get("agent_version")),
         model=optional_text(normalized.get("model")),

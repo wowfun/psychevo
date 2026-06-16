@@ -73,12 +73,21 @@ Use `-a ADAPTER` to set the default adapter for all inputs. For comparison
 reports, repeat `-a` with `pN=ADAPTER` or `dN=ADAPTER` to parse individual
 path or DB inputs with different adapters.
 
+Adapter TOML tables may set `default_db_path`; relative values resolve from
+the TOML file that defines them. Use `-d @adapter` to expand that configured
+DB path and bind the DB input to the same adapter.
+
 Use `-i, --input-table PATH` when the inputs are easier to maintain as a CSV,
 JSON, or `.xlsx` manifest. Each table row becomes one session in the same
 report. Direct `-p/--path` and `-d/--db` inputs are loaded first, then table
 rows are appended in file order. Relative `path` and `db` values resolve from
 the manifest directory. `.xlsx` works only when `openpyxl` is installed; save
 as CSV when you want the standard-library-only path.
+
+Use `--source-alias N=TEXT` or input-table `alias`/`label`/`source_alias`
+columns to add display-only source names. Aliases improve report readability
+without changing session ids, trial keys, source identity, or Evidence/Input
+Source paths.
 
 In comparison reports, the Leaderboard Duration column and JSON `duration_ms`
 fields show active agent/tool work time. Long retained-session idle gaps are
@@ -97,12 +106,18 @@ These appear in JSON `annotations.notes[]` before CLI/table notes. In
 `peval-py serve`, refreshable sources can edit or add that cell-local
 `notes.md`; snapshot uploads remain read-only.
 
+`peval-py serve` keeps static reports CDN-based, but serves ECharts local-first
+from `<workspace>/.cache/echarts/6.0.0/echarts.min.js` and falls back to the
+fixed CDN URL if the local script fails. Its Source Manager exposes configured
+default DB paths, alias editing, and an English/Simplified Chinese selector
+that persists top-level `locale` in `peval-py.toml`.
+
 CSV example:
 
 ```csv
-path,db,session_id,adapter,n,report_note,agent_name,agent_version,model
-runs/hermes.jsonl,,,,Hermes row note,Cross-agent comparison,Hermes,,deepseek-v4-flash
-,state.db,ses_123,opencode,OpenCode row note,,,,
+path,db,session_id,adapter,alias,n,report_note,agent_name,agent_version,model
+runs/hermes.jsonl,,,,Hermes source,Hermes row note,Cross-agent comparison,Hermes,,deepseek-v4-flash
+,state.db,ses_123,opencode,OpenCode source,OpenCode row note,,,,
 ```
 
 Then render one multi-session HTML report:
@@ -122,8 +137,8 @@ JSON manifests may be a top-level array or an object with `rows` and
 {
   "report_notes": ["Local cross-agent comparison."],
   "rows": [
-    {"path": "runs/hermes.jsonl", "adapter": "hermes", "note": "Hermes row"},
-    {"db": "opencode.db", "session_id": "ses_123", "adapter": "opencode"}
+    {"path": "runs/hermes.jsonl", "adapter": "hermes", "alias": "Hermes source", "note": "Hermes row"},
+    {"db": "opencode.db", "session_id": "ses_123", "adapter": "opencode", "source_alias": "OpenCode source"}
   ]
 }
 ```

@@ -30,6 +30,11 @@ function fmtScore(value) { return hasMetricValue(value) ? Number(value).toLocale
 function hasMetricValue(value) { return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value)); }
 function data() { return JSON.parse($("peval-py-data").textContent || "{}"); }
 function serveMode() { return RENDER_OPTIONS?.mode === "serve"; }
+function adapterDefaults() {
+  return RENDER_OPTIONS?.adapter_defaults && typeof RENDER_OPTIONS.adapter_defaults === "object"
+    ? RENDER_OPTIONS.adapter_defaults
+    : {};
+}
 const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], notesEditor: null };
 const SUBMENU_DETAILS_SELECTOR = ".export-menu,.filter-control";
 const OPEN_SUBMENU_DETAILS_SELECTOR = ".export-menu[open],.filter-control[open]";
@@ -127,6 +132,21 @@ function renderNotesCell(trialKey) {
   const summary = noteSnippetFor(trialKey);
   return summary === "-" ? `<span class="muted">-</span>` : `<span class="note-snippet">${esc(summary)}</span>`;
 }
+function sourceAliasFor(row) {
+  return String(row?.source_alias || "").trim();
+}
+function sourceIdentityFor(row) {
+  return row?.session_id || row?.trial_key || "-";
+}
+function sourceDisplayFor(row) {
+  return sourceAliasFor(row) || sourceIdentityFor(row);
+}
+function renderSourceLabel(row) {
+  const alias = sourceAliasFor(row);
+  const identity = sourceIdentityFor(row);
+  if (!alias) return esc(identity);
+  return `<span class="source-label-stack"><strong>${esc(alias)}</strong><span>${esc(identity)}</span></span>`;
+}
 function renderComparisonPanels(options = {}) {
   const rows = leaderboardRows();
   syncSelectionWithVisibleRows(rows);
@@ -146,7 +166,7 @@ function selectionColumn() {
 }
 function leaderboardColumns() {
   return [
-    { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => row.session_id || row.trial_key },
+    { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => sourceDisplayFor(row), html: row => renderSourceLabel(row), cellTitle: row => sourceIdentityFor(row) },
     { key: "agent", label: t("agent", "Agent"), width: "120px", filterable: true, value: row => agentNameFor(row) },
     { key: "model", label: t("model", "Model"), width: "150px", filterable: true, value: row => row.model || "-" },
     { key: "status", label: t("result", "Result"), width: "104px", filterable: true, value: row => row.status || "-", filterLabel: value => statusLabel(value), html: row => `<span class="stamp ${lower(row.status || "passed")}">${esc(statusLabel(row.status))}</span>` },
@@ -586,10 +606,11 @@ function renderTrajectoryOverviewRow(row) {
   const trajectory = trajectoryFor(row.trial_key);
   const steps = trajectory?.steps || [];
   const selected = row.trial_key === selectedKey();
-  const session = row.session_id || row.trial_key || "-";
+  const session = sourceDisplayFor(row);
   const agent = agentNameFor(row);
+  const secondary = sourceAliasFor(row) ? `${sourceIdentityFor(row)} / ${agent}` : agent;
   const timingModel = trajectoryOverviewTimingModel(row.trial_key);
-  return `<div class="trajectory-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}"><div class="trajectory-label"><strong>${esc(session)}</strong><span>${esc(agent)}</span></div><div class="trajectory-track">${steps.map((step, index) => renderTrajectoryNode(step, index, row.trial_key, timingModel)).join("")}</div></div>`;
+  return `<div class="trajectory-row ${selected ? "selected-row" : ""}" data-trial-key="${esc(row.trial_key)}" title="${esc(row.trial_key)}"><div class="trajectory-label"><strong>${esc(session)}</strong><span>${esc(secondary)}</span></div><div class="trajectory-track">${steps.map((step, index) => renderTrajectoryNode(step, index, row.trial_key, timingModel)).join("")}</div></div>`;
 }
 function trajectoryOverviewTimingModel(trialKey) {
   const meta = metaFor(trialKey);
@@ -659,21 +680,25 @@ function renderTrace() {
   const status = lower(trial.status || "passed");
   const agentName = trajectory?.agent?.name || "-";
   const model = trajectory?.agent?.model_name || "-";
+  const runItems = [
+    [t("trial", "Trial"), trial.trial_key || "-"],
+    [t("variant", "Variant"), trial.variant_label || "-"],
+    [t("session", "Session"), trajectory?.session_id || "-"],
+    [t("agent_model", "Agent / model"), `${agentName} / ${model}`],
+    [t("time", "Time"), `${fmtDate(trial.started_at_ms)} -> ${fmtDate(trial.finished_at_ms)}`],
+    [t("wall_duration", "Wall duration"), fmtMs(trialWallDurationMs(trial))],
+    [t("steps_events", "Steps/events"), `${(trajectory?.steps || []).length}/${trial.total_events ?? "-"}`],
+    [t("system_exposed", "System exposed"), systemExposed(trajectory) ? t("yes", "yes") : t("no", "no")],
+    [t("reasoning_exposed", "Reasoning exposed"), reasoningExposed(trajectory) ? t("yes", "yes") : t("no", "no")]
+  ];
+  if (trial.source_alias) {
+    runItems.splice(3, 0, [t("source_alias", "Source alias"), trial.source_alias]);
+  }
   disposeTimelineChart();
   $("trace").innerHTML = `
     <div class="trace-head"><div><p class="eyebrow">${esc(t("selected_trial_trajectory", "selected trial trajectory"))}</p><h2 id="trace-title" class="trace-title"><span>${esc(t("selected_session_label", "session"))}</span><code>${esc(trial.trial_key || "-")}</code></h2></div><span class="status ${status}">${esc(statusLabel(status))}</span></div>
     <h3>${esc(t("run", "Run"))}</h3>
-    ${infoGrid([
-      [t("trial", "Trial"), trial.trial_key || "-"],
-      [t("variant", "Variant"), trial.variant_label || "-"],
-      [t("session", "Session"), trajectory?.session_id || "-"],
-      [t("agent_model", "Agent / model"), `${agentName} / ${model}`],
-      [t("time", "Time"), `${fmtDate(trial.started_at_ms)} -> ${fmtDate(trial.finished_at_ms)}`],
-      [t("wall_duration", "Wall duration"), fmtMs(trialWallDurationMs(trial))],
-      [t("steps_events", "Steps/events"), `${(trajectory?.steps || []).length}/${trial.total_events ?? "-"}`],
-      [t("system_exposed", "System exposed"), systemExposed(trajectory) ? t("yes", "yes") : t("no", "no")],
-      [t("reasoning_exposed", "Reasoning exposed"), reasoningExposed(trajectory) ? t("yes", "yes") : t("no", "no")]
-    ])}
+    ${infoGrid(runItems)}
     <h3>${esc(t("result", "Result"))}</h3>
     ${infoGrid([
       [t("status", "Status"), statusLabel(trial.status || "-")],
@@ -811,6 +836,11 @@ function bindServeSourceControls() {
   document.querySelectorAll("[data-refresh-sources]").forEach(button => {
     button.addEventListener("click", () => refreshServeSourcesFromServer());
   });
+  document.querySelectorAll("[data-locale-select]").forEach(select => {
+    select.addEventListener("change", event => {
+      changeServeLocale(event.target.value);
+    });
+  });
   document.querySelectorAll("[data-source-add-form]").forEach(form => {
     form.addEventListener("submit", event => {
       event.preventDefault();
@@ -842,15 +872,60 @@ function bindServeSourceControls() {
       submitServeUploadForm(form);
     });
   });
+  bindAdapterDefaultDbControls();
   const sourceList = document.querySelector("[data-source-list]");
   if (sourceList) {
     sourceList.addEventListener("click", event => {
+      const aliasButton = event.target?.closest?.("[data-source-alias-save]");
+      if (aliasButton) {
+        event.preventDefault();
+        saveSourceAlias(aliasButton);
+        return;
+      }
       const button = event.target?.closest?.("[data-source-action]");
       if (!button) return;
       event.preventDefault();
       mutateServeSource(button.dataset.sourceKey, button.dataset.sourceAction);
     });
   }
+}
+async function changeServeLocale(locale) {
+  try {
+    await serveApi("/api/config/locale", {
+      method: "POST",
+      body: { locale }
+    });
+    window.location.reload();
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+  }
+}
+function bindAdapterDefaultDbControls() {
+  document.querySelectorAll("[data-source-add-form][data-source-kind=\"db\"]").forEach(form => {
+    const select = form.querySelector("[name=\"adapter\"]");
+    if (!select) return;
+    select.addEventListener("change", () => applyDefaultDbToForm(form, { force: true }));
+    applyDefaultDbToForm(form);
+  });
+}
+function dbFieldFor(form) {
+  return form?.querySelector?.("[name=\"db\"]") || null;
+}
+function defaultDbForAdapter(form) {
+  const select = form?.querySelector?.("[name=\"adapter\"]");
+  const value = selectedAdapterValue(form);
+  if (!select || !value) return "";
+  const selected = Array.from(select.options || []).find(option => option.value === value);
+  return selected?.dataset?.defaultDb || adapterDefaults()[value] || "";
+}
+function applyDefaultDbToForm(form, options = {}) {
+  const field = dbFieldFor(form);
+  if (!field) return "";
+  const defaultDb = defaultDbForAdapter(form);
+  if (defaultDb && (options.force || !String(field.value || "").trim())) {
+    field.value = defaultDb;
+  }
+  return defaultDb;
 }
 function openServeSourceManager() {
   const manager = document.querySelector("[data-source-manager]");
@@ -885,6 +960,10 @@ function renderServeSourceRow(source) {
   const refreshable = source?.refreshable !== false && !snapshot;
   const status = source?.last_status || "-";
   const stateLabel = active ? t("serve_active", "active") : t("serve_archived", "archived");
+  const label = source?.label || key || "source";
+  const alias = String(source?.source_alias || "").trim();
+  const displayLabel = alias || label;
+  const origin = alias ? `<span class="source-origin">${esc(label)}</span>` : "";
   const refreshButton = refreshable && key
     ? `<button type="button" data-source-action="refresh" data-source-key="${esc(key)}">${esc(t("serve_refresh", "Refresh"))}</button>`
     : `<span>${esc(t("serve_snapshot", "snapshot"))}</span>`;
@@ -894,13 +973,20 @@ function renderServeSourceRow(source) {
   const deleteButton = key ? `<button type="button" data-source-action="delete" data-source-key="${esc(key)}">${esc(t("serve_delete", "Delete"))}</button>` : "";
   return `<li class="source-row ${active ? "" : "archived"}">
     <div class="source-row-main">
-      <strong>${esc(source?.label || key || "source")}</strong>
+      <strong>${esc(displayLabel)}</strong>
+      ${origin}
       <span>${esc(source?.kind || "source")} / ${esc(source?.adapter || "-")} / ${esc(status)} / ${esc(stateLabel)}</span>
+      <label class="source-alias-edit">
+        <span>${esc(t("serve_source_alias", "Alias"))}</span>
+        <input data-source-alias-input data-source-key="${esc(key)}" value="${esc(alias)}" autocomplete="off">
+        <button type="button" data-source-alias-save data-source-key="${esc(key)}">${esc(t("serve_save_alias", "Save alias"))}</button>
+      </label>
     </div>
     <div class="source-row-actions">${refreshButton}${archiveButton}${deleteButton}</div>
   </li>`;
 }
 async function submitServeSourceForm(form) {
+  if (form?.dataset?.sourceKind === "db") applyDefaultDbToForm(form);
   const body = formPayload(form);
   const kind = form.dataset.sourceKind;
   if (!kind) return;
@@ -918,6 +1004,7 @@ async function submitServeSourceForm(form) {
 }
 async function inspectDbSessions(form) {
   if (!form) return;
+  applyDefaultDbToForm(form);
   const body = formPayload(form);
   const db = String(body.db || "").trim();
   if (!db) return;
@@ -1018,7 +1105,8 @@ async function addSelectedDbSessions(form) {
       body: {
         db: form.dataset.inspectedDb || body.db,
         adapter: form.dataset.inspectedAdapter || selectedAdapterValue(form),
-        session_ids: sessionIds
+        session_ids: sessionIds,
+        alias: body.alias
       }
     });
     form.reset();
@@ -1046,7 +1134,8 @@ async function submitServeUploadForm(form) {
       body: {
         filename: file.name,
         content: await file.text(),
-        adapter: normalizeAdapterValue(formData.get("adapter"))
+        adapter: normalizeAdapterValue(formData.get("adapter")),
+        alias: String(formData.get("alias") || "").trim()
       }
     });
     form.reset();
@@ -1071,6 +1160,22 @@ async function mutateServeSource(sourceKey, action) {
   try {
     const payload = await serveApi(`/api/sources/${encodeURIComponent(sourceKey)}/${encodeURIComponent(action)}`, { method: "POST", body: {} });
     applyServeMutationPayload(payload);
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+  }
+}
+async function saveSourceAlias(button) {
+  const sourceKey = button?.dataset?.sourceKey;
+  if (!sourceKey) return;
+  const row = button.closest(".source-row");
+  const input = row?.querySelector?.("[data-source-alias-input]");
+  const alias = String(input?.value || "").trim();
+  try {
+    const payload = await serveApi(`/api/sources/${encodeURIComponent(sourceKey)}/alias`, {
+      method: "POST",
+      body: { alias }
+    });
+    applyServeMutationPayload(payload, { preserveTrial: selectedKey() });
   } catch (error) {
     setServeStatus(error.message || String(error), true);
   }

@@ -148,6 +148,37 @@ enabled = true
                 {"label_prefix": "configured", "enabled": True},
             )
 
+    def test_adapter_default_db_path_resolves_relative_to_defining_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / "configs"
+            config_dir.mkdir()
+            config_path = config_dir / "adapters.toml"
+            config_path.write_text(
+                """
+[adapters.psychevo]
+default_db_path = "state.db"
+label_prefix = "configured"
+
+[adapters.hermes]
+default_db_path = "../hermes/state.db"
+""",
+                encoding="utf-8",
+            )
+
+            config = load_config(str(config_path))
+            self.assertEqual(
+                config.adapter_default_db_paths,
+                {
+                    "psychevo": str((config_dir / "state.db").resolve()),
+                    "hermes": str((config_dir / "../hermes/state.db").resolve()),
+                },
+            )
+            self.assertEqual(
+                config.adapter_options_by_id["psychevo"],
+                {"label_prefix": "configured"},
+            )
+            self.assertEqual(config.adapter_options_by_id["hermes"], {})
+
 
     def test_adapter_registry_discovers_builtins_and_entry_points_lazily(self) -> None:
         custom_entry = FakeEntryPoint("custom", CustomPathAdapter)

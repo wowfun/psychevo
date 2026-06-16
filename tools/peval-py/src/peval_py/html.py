@@ -12,6 +12,9 @@ from peval_py.i18n import messages_for, normalize_locale
 
 
 ASSET_PACKAGE = "peval_py.assets"
+ECHARTS_VERSION = "6.0.0"
+ECHARTS_LOCAL_SRC = f"/assets/echarts/{ECHARTS_VERSION}/echarts.min.js"
+ECHARTS_CDN_SRC = f"https://cdn.jsdelivr.net/npm/echarts@{ECHARTS_VERSION}/dist/echarts.min.js"
 
 
 def render_html(
@@ -19,6 +22,7 @@ def render_html(
     locale: str = "en",
     mode: str = "report",
     sources: list[dict[str, Any]] | None = None,
+    adapter_defaults: dict[str, str] | None = None,
 ) -> str:
     normalized_mode = normalize_render_mode(mode)
     normalized_locale = normalize_locale(locale)
@@ -26,15 +30,27 @@ def render_html(
     serve_source_payload = (
         list(sources) if sources is not None else serve_sources(report)
     )
+    render_options: dict[str, Any] = {
+        "mode": normalized_mode,
+        "sources": serve_source_payload if normalized_mode == "serve" else [],
+    }
+    if normalized_mode == "serve":
+        render_options["adapter_defaults"] = adapter_defaults or {}
     payload = load_asset_text("report.html").replace("__LANG__", escape(normalized_locale))
     payload = payload.replace("__TITLE__", escape(messages["title"]))
     payload = payload.replace("__BODY_CLASS__", escape(f"{normalized_mode}-mode"))
     payload = payload.replace(
         "__SERVE_SOURCE_MANAGER__",
-        render_serve_source_manager(serve_source_payload, messages)
+        render_serve_source_manager(
+            serve_source_payload,
+            messages,
+            normalized_locale,
+            adapter_defaults or {},
+        )
         if normalized_mode == "serve"
         else "",
     )
+    payload = payload.replace("__ECHARTS_SCRIPT__", render_echarts_script(normalized_mode))
     payload = payload.replace("__CSS__", load_asset_text("report.css"))
     payload = payload.replace("__JS__", load_asset_text("report.js"))
     payload = payload.replace(
@@ -54,13 +70,7 @@ def render_html(
     payload = payload.replace(
         "__RENDER_OPTIONS__",
         safe_json_for_script(
-            json.dumps(
-                {
-                    "mode": normalized_mode,
-                    "sources": serve_source_payload if normalized_mode == "serve" else [],
-                },
-                ensure_ascii=False,
-            )
+            json.dumps(render_options, ensure_ascii=False)
         ),
     )
     return payload
@@ -70,8 +80,15 @@ def render_serve_html(
     report: dict[str, Any],
     locale: str = "en",
     sources: list[dict[str, Any]] | None = None,
+    adapter_defaults: dict[str, str] | None = None,
 ) -> str:
-    return render_html(report, locale=locale, mode="serve", sources=sources)
+    return render_html(
+        report,
+        locale=locale,
+        mode="serve",
+        sources=sources,
+        adapter_defaults=adapter_defaults,
+    )
 
 
 def normalize_render_mode(mode: object) -> str:
@@ -84,6 +101,8 @@ def normalize_render_mode(mode: object) -> str:
 def render_serve_source_manager(
     sources: list[dict[str, Any]],
     messages: dict[str, str],
+    locale: str,
+    adapter_defaults: dict[str, str],
 ) -> str:
     count = len(sources)
     source_word = messages["serve_source_count"]
@@ -97,15 +116,16 @@ def render_serve_source_manager(
             "LATEST_SNAPSHOTS": escape(messages["serve_latest_snapshots"]),
             "REFRESH": escape(messages["serve_refresh"]),
             "SOURCE_MANAGER": escape(messages["serve_source_manager"]),
+            "LANGUAGE_CONTROL": render_language_control(messages, locale),
             "DROP_COPY": escape(messages["serve_drop_copy"]),
             "CLOSE": escape(messages["close"]),
             "ADD_SOURCE": escape(messages["serve_add_source"]),
             "SOURCE_FORMS": "".join(
                 [
-                    render_source_add_form("path", messages),
-                    render_source_add_form("db", messages),
-                    render_source_add_form("input_table", messages),
-                    render_upload_form(messages),
+                    render_source_add_form("path", messages, adapter_defaults),
+                    render_source_add_form("db", messages, adapter_defaults),
+                    render_source_add_form("input_table", messages, adapter_defaults),
+                    render_upload_form(messages, adapter_defaults),
                 ]
             ),
             "SOURCES": escape(messages["serve_sources"]),
@@ -115,7 +135,40 @@ def render_serve_source_manager(
     )
 
 
-def render_source_add_form(kind: str, messages: dict[str, str]) -> str:
+def render_echarts_script(mode: str) -> str:
+    cdn = escape(ECHARTS_CDN_SRC)
+    if mode == "serve":
+        local = escape(ECHARTS_LOCAL_SRC)
+        return (
+            f'<script src="{local}" '
+            f'onerror="this.onerror=null;this.src=\'{cdn}\'"></script>'
+        )
+    return f'<script src="{cdn}"></script>'
+
+
+def render_language_control(messages: dict[str, str], locale: str) -> str:
+    options = [
+        ("en", messages["language_en"]),
+        ("zh-CN", messages["language_zh_cn"]),
+    ]
+    option_html = "".join(
+        f'<option value="{escape(value)}" {"selected" if value == locale else ""}>{escape(label)}</option>'
+        for value, label in options
+    )
+    return f"""
+      <label class="serve-language-select">
+        <span>{escape(messages["language"])}</span>
+        <select data-locale-select aria-label="{escape(messages["language"])}">
+          {option_html}
+        </select>
+      </label>"""
+
+
+def render_source_add_form(
+    kind: str,
+    messages: dict[str, str],
+    adapter_defaults: dict[str, str],
+) -> str:
     label_key = {
         "path": "serve_path_source",
         "db": "serve_db_source",
@@ -145,11 +198,14 @@ def render_source_add_form(kind: str, messages: dict[str, str]) -> str:
             <label>{escape(messages[label_key])}
               {field_tag}
             </label>
+            <label>{escape(messages["serve_source_alias"])}
+              <input name="alias" autocomplete="off">
+            </label>
             {session_field}
             <div class="source-form-actions">
               {inspect_button}
               <span class="source-add-actions">
-                {render_adapter_select(messages)}
+                {render_adapter_select(messages, adapter_defaults)}
                 <button class="step-toggle-button" type="submit">{escape(messages["serve_add_source"])}</button>
               </span>
             </div>
@@ -157,29 +213,32 @@ def render_source_add_form(kind: str, messages: dict[str, str]) -> str:
           </form>"""
 
 
-def render_upload_form(messages: dict[str, str]) -> str:
+def render_upload_form(messages: dict[str, str], adapter_defaults: dict[str, str]) -> str:
     return f"""
           <form class="source-form upload-form" data-source-upload-form>
             <strong>{escape(messages["serve_upload_snapshot"])}</strong>
             <label>{escape(messages["serve_upload_file"])}
               <input name="file" type="file" accept=".json,.jsonl,application/json,application/x-ndjson" required>
             </label>
+            <label>{escape(messages["serve_source_alias"])}
+              <input name="alias" autocomplete="off">
+            </label>
             <div class="source-form-actions">
               <span class="source-add-actions">
-                {render_adapter_select(messages)}
+                {render_adapter_select(messages, adapter_defaults)}
                 <button class="step-toggle-button" type="submit">{escape(messages["serve_upload"])}</button>
               </span>
             </div>
           </form>"""
 
 
-def render_adapter_select(messages: dict[str, str]) -> str:
+def render_adapter_select(messages: dict[str, str], adapter_defaults: dict[str, str]) -> str:
     options = [
         ("auto", messages["serve_adapter_auto"]),
         *[(adapter_id, adapter_id) for adapter_id in available_adapter_ids()],
     ]
     option_html = "".join(
-        f'<option value="{escape(value)}" {"selected" if value == "auto" else ""}>{escape(label)}</option>'
+        render_adapter_option(value, label, adapter_defaults)
         for value, label in options
     )
     return f"""
@@ -189,6 +248,17 @@ def render_adapter_select(messages: dict[str, str]) -> str:
                   {option_html}
                 </select>
               </label>"""
+
+
+def render_adapter_option(
+    value: str,
+    label: str,
+    adapter_defaults: dict[str, str],
+) -> str:
+    default_db = adapter_defaults.get(value)
+    default_attr = f' data-default-db="{escape(default_db)}"' if default_db else ""
+    selected = "selected" if value == "auto" else ""
+    return f'<option value="{escape(value)}" {selected}{default_attr}>{escape(label)}</option>'
 
 
 def render_source_list_items(
@@ -205,6 +275,8 @@ def render_source_list_item(
     messages: dict[str, str],
 ) -> str:
     label = str(source.get("label") or source.get("source_key") or "source")
+    alias = str(source.get("source_alias") or "")
+    display_label = alias or label
     kind = str(source.get("kind") or "source")
     adapter = str(source.get("adapter") or "-")
     status = str(source.get("last_status") or "-")
@@ -233,11 +305,23 @@ def render_source_list_item(
     return f"""
             <li class="source-row {'archived' if not active else ''}">
               <div class="source-row-main">
-                <strong>{escape(label)}</strong>
+                <strong>{escape(display_label)}</strong>
+                {render_source_origin(label, alias)}
                 <span>{escape(kind)} / {escape(adapter)} / {escape(status)} / {escape(state_label)}</span>
+                <label class="source-alias-edit">
+                  <span>{escape(messages["serve_source_alias"])}</span>
+                  <input data-source-alias-input data-source-key="{escape(source_key)}" value="{escape(alias)}" autocomplete="off">
+                  <button type="button" data-source-alias-save data-source-key="{escape(source_key)}">{escape(messages["serve_save_alias"])}</button>
+                </label>
               </div>
               <div class="source-row-actions">{refresh_button}{archive_button}{delete_button}</div>
             </li>"""
+
+
+def render_source_origin(label: str, alias: str) -> str:
+    if not alias:
+        return ""
+    return f'<span class="source-origin">{escape(label)}</span>'
 
 
 def serve_sources(report: dict[str, Any]) -> list[dict[str, str]]:

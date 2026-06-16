@@ -50,14 +50,14 @@ def main(argv: list[str] | None = None) -> int:
             run_serve_command(args, config, adapter_assignments)
             return 0
         if args.command == "view" and getattr(args, "list_sessions", False):
-            print_session_lists(args, adapter_assignments)
+            print_session_lists(args, adapter_assignments, config)
             return 0
         if args.command == "view" and getattr(args, "list_interactive", False):
-            selected = interactive_session_selection(args, adapter_assignments)
+            selected = interactive_session_selection(args, adapter_assignments, config)
             if not selected:
                 return 0
             args = argparse.Namespace(**{**vars(args), "session_id": selected})
-        loaded_inputs = load_inputs(args, adapter_assignments)
+        loaded_inputs = load_inputs(args, adapter_assignments, config=config)
         if args.command == "export":
             if len(loaded_inputs.sessions) != 1:
                 raise ValueError("export trajectory accepts exactly one input session")
@@ -153,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="list DB sessions, prompt for selection, and render selected sessions",
     )
     add_note_arg(view_trajectory)
+    add_source_alias_arg(view_trajectory)
 
     export = verbs.add_parser(
         "export",
@@ -182,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_shared_args(serve, include_output=False)
     add_note_arg(serve)
+    add_source_alias_arg(serve)
     serve.add_argument(
         "-r",
         "--root",
@@ -273,11 +275,22 @@ def add_note_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_source_alias_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--source-alias",
+        action="append",
+        default=[],
+        metavar="N=TEXT",
+        help="display alias for a one-based input session; repeatable",
+    )
+
+
 def print_session_lists(
     args: argparse.Namespace,
     adapter_assignments,
+    config,
 ) -> None:
-    for input_db in db_inputs_with_adapters(args, adapter_assignments):
+    for input_db in db_inputs_with_adapters(args, adapter_assignments, config):
         if len(input_db["all"]) > 1:
             print(f"d{input_db['index']} {input_db['path']} ({input_db['adapter']})")
         print(format_session_table(input_db["sessions"]), end="")
@@ -286,12 +299,13 @@ def print_session_lists(
 def interactive_session_selection(
     args: argparse.Namespace,
     adapter_assignments,
+    config,
 ) -> list[str]:
     if getattr(args, "session_id", None):
         raise ValueError("--list-interactive cannot be combined with --session-id")
     if not sys.stdin.isatty():
         raise ValueError("--list-interactive requires an interactive terminal")
-    inputs = db_inputs_with_adapters(args, adapter_assignments)
+    inputs = db_inputs_with_adapters(args, adapter_assignments, config)
     if len(inputs) != 1:
         raise ValueError(
             "--list-interactive requires exactly one --db; "
@@ -307,8 +321,9 @@ def interactive_session_selection(
 def db_inputs_with_adapters(
     args: argparse.Namespace,
     adapter_assignments,
+    config,
 ) -> list[dict]:
-    from peval_py.inputs import adapter_for_input_path
+    from peval_py.inputs import adapter_for_input_path, resolve_db_input
     from peval_py.adapters import available_adapter_ids
 
     dbs = list(getattr(args, "db", None) or [])
@@ -317,8 +332,9 @@ def db_inputs_with_adapters(
     available = set(available_adapter_ids())
     inputs = []
     for index, path in enumerate(dbs, start=1):
-        adapter = adapter_for_input_path(
-            path,
+        resolved_path, token_adapter = resolve_db_input(path, index, adapter_assignments, config)
+        adapter = token_adapter or adapter_for_input_path(
+            resolved_path,
             index,
             adapter_assignments,
             "db",
@@ -327,9 +343,9 @@ def db_inputs_with_adapters(
         inputs.append(
             {
                 "index": index,
-                "path": path,
+                "path": resolved_path,
                 "adapter": adapter,
-                "sessions": list_adapter_sessions(adapter, path),
+                "sessions": list_adapter_sessions(adapter, resolved_path),
                 "all": dbs,
             }
         )

@@ -602,7 +602,10 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         )
 
         static_html = render_html(report)
-        serve_html = render_serve_html(report)
+        serve_html = render_serve_html(
+            report,
+            adapter_defaults={"opencode": "/tmp/opencode.db"},
+        )
 
         self.assertIn('<body class="report-mode">', static_html)
         self.assertNotIn('class="serve-import-panel"', static_html)
@@ -611,6 +614,11 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertNotIn('type="button" data-db-inspect', static_html)
         self.assertIn("Timeline Waterfall", static_html)
         self.assertIn("Timeline Detail Table", static_html)
+        self.assertIn(
+            '<script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>',
+            static_html,
+        )
+        self.assertNotIn("/assets/echarts/6.0.0/echarts.min.js", static_html)
         self.assertEqual(
             script_json(static_html, "peval-py-render-options"),
             {"mode": "report", "sources": []},
@@ -619,9 +627,19 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         serve_options = script_json(serve_html, "peval-py-render-options")
         self.assertEqual(serve_options["mode"], "serve")
         self.assertEqual(len(serve_options["sources"]), 2)
+        self.assertEqual(
+            serve_options["adapter_defaults"],
+            {"opencode": "/tmp/opencode.db"},
+        )
         self.assertIn('<body class="serve-mode">', serve_html)
+        self.assertIn('/assets/echarts/6.0.0/echarts.min.js', serve_html)
+        self.assertIn(
+            "this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js'",
+            serve_html,
+        )
         self.assertNotIn('class="serve-import-panel"', serve_html)
         self.assertIn('class="serve-source-toolbar"', serve_html)
+        self.assertIn('data-locale-select', serve_html)
         self.assertIn('class="source-manager-modal"', serve_html)
         self.assertIn("Upload snapshot", serve_html)
         self.assertIn("report JSON uploads", serve_html)
@@ -638,6 +656,9 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertEqual(serve_html.count('class="source-add-actions"'), 4)
         self.assertIn('name="adapter" aria-label="Adapter"', serve_html)
         self.assertIn('<option value="auto" selected>Auto</option>', serve_html)
+        self.assertIn('<option value="opencode"  data-default-db="/tmp/opencode.db">opencode</option>', serve_html)
+        self.assertEqual(serve_html.count('name="alias"'), 4)
+        self.assertIn('data-source-alias-save', serve_html)
         self.assertNotIn("adapter-choice-group", serve_html)
         self.assertNotIn('type="radio" name="adapter"', serve_html)
         self.assertIn('data-source-action="delete"', serve_html)
@@ -656,6 +677,9 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("data-row-select", serve_html)
         self.assertIn("leaderboard-export", serve_html)
         self.assertIn("function bindServeSourceControls()", serve_html)
+        self.assertIn('serveApi("/api/config/locale"', serve_html)
+        self.assertIn("function bindAdapterDefaultDbControls()", serve_html)
+        self.assertIn("function saveSourceAlias(button)", serve_html)
         self.assertIn('serveApi("/api/db-sessions"', serve_html)
         self.assertIn("function inspectDbSessions(form)", serve_html)
         self.assertIn("function addSelectedDbSessions(form)", serve_html)

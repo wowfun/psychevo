@@ -722,6 +722,69 @@ label_prefix = "selected"
             self.assertNotEqual(bad_note.returncode, 0)
             self.assertIn("out of range", bad_note.stderr)
 
+    def test_cli_db_default_token_uses_configured_adapter_path(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "state.db"
+            create_messages_db(db_path)
+            config_path = root / "peval-py.toml"
+            config_path.write_text(
+                """
+[adapters.psychevo]
+default_db_path = "state.db"
+""",
+                encoding="utf-8",
+            )
+            out_path = root / "default-db.json"
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-c",
+                    str(config_path),
+                    "-d",
+                    "@psychevo",
+                    "-s",
+                    "db-a",
+                    "-f",
+                    "json",
+                    "-o",
+                    str(out_path),
+                ]
+            )
+            self.assertEqual(result, 0)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["trajectory"][0]["session_id"], "db-a")
+            self.assertEqual(payload["trajectory_meta"][0]["adapter"], "psychevo")
+
+            for argv, message in [
+                (
+                    [
+                        "view",
+                        "tr",
+                        "-c",
+                        str(config_path),
+                        "-d",
+                        "@psychevo",
+                        "-a",
+                        "d1=opencode",
+                    ],
+                    "uses @psychevo but adapter selector d1=opencode",
+                ),
+                (
+                    ["view", "tr", "-c", str(config_path), "-d", "@missing"],
+                    "no default_db_path configured for adapter: missing",
+                ),
+            ]:
+                with self.subTest(message=message):
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = main(argv)
+                    self.assertNotEqual(result, 0)
+                    self.assertIn(message, stderr.getvalue())
+
 
     def test_cli_input_table_csv_expands_sessions_and_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -785,6 +848,97 @@ label_prefix = "selected"
                 [item["markdown"] for item in payload["annotations"]["notes"]],
                 ["CSV row note", "DB indexed note"],
             )
+
+    def test_cli_source_aliases_are_display_only(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copy(FIXTURES / "common_session.jsonl", root / "common_session.jsonl")
+            db_path = root / "state.db"
+            create_messages_db(db_path)
+            table = root / "inputs.json"
+            table.write_text(
+                json.dumps(
+                    [
+                        {
+                            "path": str(root / "common_session.jsonl"),
+                            "adapter": "opencode",
+                            "alias": "Table path alias",
+                        },
+                        {
+                            "db": str(db_path),
+                            "session_id": "db-a",
+                            "adapter": "psychevo",
+                            "source_alias": "Table DB alias",
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            out_path = root / "aliases.json"
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-i",
+                    str(table),
+                    "--source-alias",
+                    "1=CLI path alias",
+                    "-f",
+                    "json",
+                    "-o",
+                    str(out_path),
+                ]
+            )
+            self.assertEqual(result, 0)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [item.get("source_alias") for item in payload["trajectory_meta"]],
+                ["CLI path alias", "Table DB alias"],
+            )
+            self.assertEqual(
+                [
+                    item.get("source_alias")
+                    for item in payload["comparison"]["leaderboard"]["entries"]
+                ],
+                ["CLI path alias", "Table DB alias"],
+            )
+            self.assertEqual(
+                [item["session_id"] for item in payload["trajectory"]],
+                ["common_session", "db-a"],
+            )
+            self.assertEqual(
+                payload["trajectory_meta"][0]["data_ref"]["label"],
+                "common_session.jsonl",
+            )
+            self.assertEqual(
+                payload["trajectory_meta"][1]["data_ref"]["label"],
+                "state.db:db-a",
+            )
+
+            for alias_arg, message in [
+                ("2=duplicate", "duplicate --source-alias index: 2"),
+                ("3=missing", "out of range for 2 sessions"),
+                ("1=", "text must not be empty"),
+            ]:
+                with self.subTest(alias_arg=alias_arg):
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = main(
+                            [
+                                "view",
+                                "tr",
+                                "-i",
+                                str(table),
+                                "--source-alias",
+                                "2=first",
+                                "--source-alias",
+                                alias_arg,
+                            ]
+                        )
+                    self.assertNotEqual(result, 0)
+                    self.assertIn(message, stderr.getvalue())
 
 
     def test_cli_input_table_json_forms_notes_and_export_boundary(self) -> None:

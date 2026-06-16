@@ -43,6 +43,7 @@ def report_session_for_loaded(
         session_hint=session.session_hint,
         adapter_id=session.adapter_id,
         analysis_agent_id=session.agent_name or config.agent_name or session.adapter_id,
+        source_alias=session.source_alias,
     )
 
 

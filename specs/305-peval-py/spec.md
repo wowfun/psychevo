@@ -64,7 +64,9 @@ The command supports path and DB input sources:
   one JSON object per line or an exported ATIF JSON trajectory object. Adapters
   may parse other path formats directly.
 - `-d, --db PATH` reads an adapter-owned SQLite persistence format. `view
-  trajectory` may repeat `-d` to compare sessions across adapters.
+  trajectory` may repeat `-d` to compare sessions across adapters. `-d
+  @adapter` expands to that adapter's configured `default_db_path` and binds
+  that DB input to the token adapter.
 - `-i, --input-table PATH` reads a structured input manifest and appends its
   rows after any direct `-p/--path` and `-d/--db` inputs. CSV and JSON manifests
   use only the Python standard library. `.xlsx` manifests are supported only
@@ -111,6 +113,8 @@ Common trajectory flags use both long and short forms:
 - `-f, --format json|html` for `view trajectory`
 - `-n, --note N=TEXT` for `view trajectory`, where `0` is report-level and
   positive one-based indexes attach to the ordered input sessions
+- `--source-alias N=TEXT` for `view trajectory` and `serve`, where positive
+  one-based indexes attach display-only aliases to the ordered input sessions
 - `--list, -l` for `view trajectory` with one or more `-d/--db` inputs, which
   prints DB sessions and exits
 - `--list-interactive, -li` for `view trajectory` with exactly one `-d/--db`
@@ -135,14 +139,16 @@ none is found, `serve` fails clearly and names `peval-py init`, `--root/-r`,
 and `PEVAL_ROOT`. `serve` discovery must not read or require Rust
 `peval.toml` or `$PSYCHEVO_HOME/peval-config.toml`.
 
-`serve` accepts `-c`, `-a`, `-p`, `-d`, `-s`, `-i`, and `-n` with the same
-trajectory-source semantics as `view trajectory`. Source flags are persistent:
-they create or update stable saved sources in `<workspace>/state.db`, then
-immediately refresh those sources into the canonical state layer before the
-server starts. Stable source keys are derived from adapter, input kind,
-normalized path, and selected session id so repeated imports update the same
-source instead of appending duplicates. Uploaded JSONL, ATIF JSON, and report
-JSON sources are stored as canonical snapshots and are not refreshable.
+`serve` accepts `-c`, `-a`, `-p`, `-d`, `-s`, `-i`, `-n`, and
+`--source-alias` with the same trajectory-source semantics as `view
+trajectory`. Source flags are persistent: they create or update stable saved
+sources in `<workspace>/state.db`, then immediately refresh those sources into
+the canonical state layer before the server starts. Stable source keys are
+derived from adapter, input kind, normalized path, and selected session id so
+repeated imports update the same source instead of appending duplicates. Source
+aliases are display-only metadata and must not contribute to source keys.
+Uploaded JSONL, ATIF JSON, and report JSON sources are stored as canonical
+snapshots and are not refreshable.
 In the web UI, DB sources may also be added through a session picker: the user
 enters a DB path, inspects it, selects one or more listed sessions, and saves
 each selected session as its own refreshable source. This picker must reuse the
@@ -163,8 +169,11 @@ and selector forms override only their matching input. Invalid selectors,
 duplicate selectors, selectors that reference missing inputs, and unknown
 adapter ids must fail clearly and list available adapters for unknown ids.
 Selector forms apply only to directly supplied `-p/--path` and `-d/--db`
-inputs. Manifest rows use their own `adapter` or `a` column for row-level
-adapter selection, falling back to the effective default adapter when omitted.
+inputs. A DB token of `@adapter` expands through that adapter's configured
+`default_db_path`; if the same DB index also has `-a dN=...`, it must match the
+token adapter or fail clearly. Manifest rows use their own `adapter` or `a`
+column for row-level adapter selection, falling back to the effective default
+adapter when omitted.
 For direct `-p` and `-d` inputs without a per-input selector and without a bare
 CLI `-a ADAPTER`, `peval-py` may infer the adapter from the path before falling
 back to the config/default adapter. Inference is generic over available adapter
@@ -186,13 +195,15 @@ use the active worksheet with the first row as a header. Headers are normalized
 by removing leading dashes, lowercasing, and converting hyphens and spaces to
 underscores. Supported manifest columns are `path`/`p`, `db`/`d`,
 `session_id`/`session`/`s`, `adapter`/`a`, `note`/`notes`/`n`,
-`report_note`/`report_notes`, `agent_name`, `agent_version`, and `model`.
+`report_note`/`report_notes`, `alias`/`label`/`source_alias`, `agent_name`,
+`agent_version`, and `model`.
 Unknown or duplicate columns must fail clearly. Each non-blank row must provide
 exactly one of `path` or `db`; `session_id` is valid only for `db` rows. A DB
 with multiple selected sessions is represented by multiple manifest rows.
 Existing CLI `--agent-name`, `--agent-version`, and `--model` values are
 defaults for every session; manifest row values override those defaults only
-for that row's conversion.
+for that row's conversion. Manifest aliases are display-only and override only
+that row's source alias.
 
 When `-o/--output` is omitted, commands write to stdout. When `-o/--output` is
 present without a path, the default file name includes the effective adapter and
@@ -219,7 +230,10 @@ keys present in the explicit config replace workspace values. There is no CLI
 locale flag. Supported values are `en`, `en-US`, `zh-CN`, and `zh`; `en-US`
 normalizes to `en`, and `zh` normalizes to `zh-CN`. Unsupported locale values
 must fail with a clear config error. Adapter-specific options live under
-`[adapters.<adapter-id>]`. `peval-py` passes each effective adapter's raw option
+`[adapters.<adapter-id>]`. The reserved adapter option `default_db_path =
+"PATH"` is consumed by peval-py for `-d @adapter` and serve Source Manager
+defaults; `~` is expanded and relative paths resolve against the TOML file that
+defined the value. `peval-py` passes the remaining effective adapter option
 table through to that adapter and does not define adapter-specific CLI flags.
 Top-level `analysis_eval_slug = "default"` selects the peval run subtree used
 for read-only cached analysis enrichment. Explicit `-c/--config` files may
@@ -326,14 +340,16 @@ stay standard and must not include peval-only fields.
 `peval-py serve` is backed by a selected peval-py workspace. Python-owned
 configuration lives at `<workspace>/peval-py.toml`. The first version stores
 `state_db = "state.db"`, optional top-level `locale`, and serve defaults only.
+Serve may also create an ECharts cache at
+`<workspace>/.cache/echarts/6.0.0/echarts.min.js`.
 Runtime state lives in
 `<workspace>/state.db`, which may become a shared state database later; this
 version creates and updates only `peval_py_*` tables:
 
 - `peval_py_schema_migrations` records peval-py state schema versions.
 - `peval_py_sources` stores stable source keys, source kind, adapter, original
-  path or DB/session metadata, active/archived state, refreshability, and latest
-  status/error summary.
+  path or DB/session metadata, optional display alias, active/archived state,
+  refreshability, and latest status/error summary.
 - `peval_py_trials` stores the latest canonical trajectory/report JSON blobs and
   index columns for session, status, duration, wall duration, turns, tools,
   tokens, and cost.
@@ -376,7 +392,9 @@ writes either JSON or HTML:
   per-step timing/tool/observation metadata. It must not emit peval matrix/task
   placeholder fields such as `matrix_cell_key`, `benchmark`, `cell_root_relative`,
   `case_id`, `task_set_id`, `task_id`, `task_family`, `score_passed`, or
-  `score_details`. Trial-level `duration_ms` is active model/tool work time,
+  `score_details`. `trajectory_meta[]` may include display-only `source_alias`;
+  aliases must not change `trajectory.session_id`, `trial_key`, input source
+  paths, or source identity. Trial-level `duration_ms` is active model/tool work time,
   not the first-to-last session wall span. When runtime trace timing separates
   model generation from tool execution, active duration is model generation
   duration plus tool execution duration rather than a duplicated outer step
@@ -439,13 +457,18 @@ writes either JSON or HTML:
   cumulative active-latency Gantt with a shared x-axis, category-colored
   rectangular bars, per-stage duration labels on or beside bars, user/system
   markers, and tooltips containing true wall start/end, active offsets,
-  duration, percent of active Timeline duration, category, and source refs. If
-  ECharts is unavailable, the Waterfall shows a readable fallback message while
-  the Detail Table still renders. The chart left gutter is sized from the
+  duration, percent of active Timeline duration, category, and source refs.
+  Static report mode loads this CDN script directly. Serve UI mode loads
+  `/assets/echarts/6.0.0/echarts.min.js` first, then falls back to the same CDN
+  URL if the local asset cannot load. The serve asset endpoint reads
+  `<workspace>/.cache/echarts/6.0.0/echarts.min.js`; on cache miss it may fetch
+  the fixed CDN URL with standard-library HTTP, write the file atomically, and
+  then serve it. If ECharts is unavailable, the Waterfall shows a readable
+  fallback message while the Detail Table still renders. The chart left gutter is sized from the
   rendered y-axis labels instead of using a large fixed margin, so short labels
   do not leave excessive empty space. The active-latency x-axis uses stable
   nice tick intervals and interval-aware labels, so short traces do not collapse
-  multiple ticks into the same rounded value.
+	  multiple ticks into the same rounded value.
 - Timeline Detail Table preserves true wall start, end, duration, and
   active-share values. It uses heuristic categories
   (`I/O`, `Agent`, `Network`, `External`, `Tool`, and `Error`) derived from step
@@ -491,8 +514,9 @@ Overview, then the selected Trial trajectory. The comparison panels render one
 primary section title without a duplicate eyebrow label. `Leaderboard` is a
 preserved report UI term and remains English in localized reports.
 `peval-py` treats each input session as one Trial. Multi-session HTML no longer
-renders a separate Visible Heatmap panel. The Leaderboard shows session, agent,
-model, result, active duration, turns, tools, tokens, cost, and notes. The
+renders a separate Visible Heatmap panel. The Leaderboard shows source alias
+when present, otherwise session, plus agent, model, result, active duration,
+turns, tools, tokens, cost, and notes. The
 Agent column uses the trajectory agent name and falls back to the adapter id
 when the trajectory does not provide an agent name. The Session, Agent, Model,
 and Result columns provide multi-value filters whose values are collected from
@@ -512,7 +536,8 @@ task-family, or matrix task-axis fields.
 
 Serve UI mode keeps the report body as the primary mental model rather than
 turning the page into a separate dashboard. It shows a compact source/status
-toolbar above the report title and opens source management in a modal dialog.
+toolbar with a persistent language select above the report title and opens
+source management in a modal dialog.
 The modal supports Session/ATIF path, DB, and input-table source forms, upload
 of JSONL, ATIF JSON, or peval-py report JSON snapshots, explicit refresh,
 active/archive/delete source lifecycle, and per-source status display. The
@@ -523,12 +548,17 @@ paths and do not upload file contents. The DB Inspect action still inspects
   compact single-select dropdowns in each source form's action row, immediately
   before the add/upload action area, with `auto` as the default; `auto` omits
   the adapter override and lets existing inference/default adapter rules apply.
-  The DB form includes an Inspect action that lists adapter-owned sessions in
-  the modal, supports checkbox multi-select, and adds selected sessions as
-  independent DB sources.
-  Failed source imports show a transient error containing the concrete server
-  message and must not persist the failed source or show it in the source list.
-  It does not add a persistent left sidebar or reduce the report body width.
+  When an adapter has a configured `default_db_path`, the DB form exposes that
+  path as a default so the user can inspect/import without retyping the SQLite
+  path. Source add forms accept an optional alias field. The DB form includes an
+  Inspect action that lists adapter-owned sessions in the modal, supports
+  checkbox multi-select, and adds selected sessions as independent DB sources.
+	  Failed source imports show a transient error containing the concrete server
+	  message and must not persist the failed source or show it in the source list.
+	  Source aliases can be edited from the source list and affect only display in
+	  the source list, Leaderboard, Trajectory Overview, and selected Trial summary;
+	  Evidence/Input Source continues to show the original path.
+	  It does not add a persistent left sidebar or reduce the report body width.
   Serve-only controls use the same color, radius, typography, and panel tokens as
   static reports but sit at a lower visual priority than report content.
   Source Manager form shells are structural carriers rather than filled cards:
@@ -553,6 +583,18 @@ Mutating APIs require JSON `POST` requests and must reject non-same-origin
 model in this version; there is no token, account, or remote-host authentication
 surface.
 
+`GET /assets/echarts/6.0.0/echarts.min.js` serves the workspace ECharts cache.
+It must not expose arbitrary file paths. On cache miss, the endpoint may fetch
+the fixed ECharts CDN URL, create parent directories under
+`<workspace>/.cache/echarts/6.0.0/`, write atomically, and return the cached
+script. If fetching fails, the endpoint returns an error so the browser can fall
+back to CDN.
+
+`POST /api/config/locale` accepts JSON `{ "locale": "en|en-US|zh|zh-CN" }`,
+normalizes the locale, writes top-level `locale` to `<workspace>/peval-py.toml`,
+updates the running serve config, and returns the normalized locale. The browser
+then reloads the page so embedded i18n messages are regenerated.
+
 `POST /api/db-sessions` accepts JSON `{ "db": "PATH", "adapter": "optional" }`.
 The DB path resolves like other serve source paths: relative paths are resolved
 under the workspace root and absolute paths are expanded directly. Without an
@@ -572,9 +614,12 @@ through `/mnt/<drive>/...`. New source imports are all-or-nothing: if any
 newly submitted source fails to load, convert, or refresh, the endpoint returns
 a JSON error and does not persist any source from that request. Refreshing an
 already persisted source keeps the existing status-and-log behavior. `POST
-/api/sources/{source_key}/delete` deletes only peval-py state for that source,
-including its canonical Trial snapshot and refresh-log rows; it never deletes
-the original local file or DB.
+/api/sources/{source_key}/alias` accepts JSON `{ "alias": "..." }`, updates only
+the display alias for that source, rebuilds the composed report payload from
+stored snapshots, and does not refresh or mutate the original source file or DB.
+An empty alias clears the alias. `POST /api/sources/{source_key}/delete` deletes
+only peval-py state for that source, including its canonical Trial snapshot and
+refresh-log rows; it never deletes the original local file or DB.
 
 `POST /api/sources/{source_key}/notes` accepts JSON
 `{ "markdown": "..." }`, requires the same JSON POST and same-origin checks as
@@ -679,7 +724,9 @@ labels, and the selected Trial summary, notes, result, and evidence sections.
 Only the final selected Trial Steps detail section remains English in this
 version. English is the default.
 Simplified Chinese is selected with `defaults.locale = "zh-CN"` or the `zh`
-alias. In Simplified Chinese reports, domain terms such as Run, Result, Notes,
+alias. Serve UI mode also exposes a language select that writes the normalized
+top-level workspace `locale`; static reports remain config-driven and there is
+still no CLI locale flag. In Simplified Chinese reports, domain terms such as Run, Result, Notes,
 Evidence, Steps, events, Session, variant, evaluator, reasoning, selected
 trial trajectory, cache read, and cache write remain English, as do metric/tool
 labels such as Turns, Tool Calls, and tool success / total. Report JSON schema,

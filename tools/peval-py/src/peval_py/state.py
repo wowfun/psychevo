@@ -27,7 +27,7 @@ from peval_py.sources import read_jsonl_text
 
 PEVAL_PY_CONFIG = "peval-py.toml"
 PEVAL_ROOT_ENV = "PEVAL_ROOT"
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
 UPLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 REFRESH_LOG_LIMIT = 200
 
@@ -135,6 +135,7 @@ class ServeStateStore:
                 input_path TEXT,
                 db_path TEXT,
                 session_id TEXT,
+                source_alias TEXT,
                 agent_name TEXT,
                 agent_version TEXT,
                 model TEXT,
@@ -175,6 +176,7 @@ class ServeStateStore:
             );
             """
         )
+        self.ensure_column("peval_py_sources", "source_alias", "TEXT")
         self.conn.execute(
             """
             INSERT OR IGNORE INTO peval_py_schema_migrations(version, applied_at_ms)
@@ -183,6 +185,14 @@ class ServeStateStore:
             (STATE_SCHEMA_VERSION, now_ms()),
         )
         self.conn.commit()
+
+    def ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = {
+            str(row["name"])
+            for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def upsert_loaded_sources(
         self,
@@ -208,9 +218,9 @@ class ServeStateStore:
             """
             INSERT INTO peval_py_sources
             (source_key, kind, adapter, label, input_path, db_path, session_id,
-             agent_name, agent_version, model,
+             source_alias, agent_name, agent_version, model,
              refreshable, active, snapshot, created_at_ms, updated_at_ms, last_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?, 'pending')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?, 'pending')
             ON CONFLICT(source_key) DO UPDATE SET
                 kind = excluded.kind,
                 adapter = excluded.adapter,
@@ -218,6 +228,7 @@ class ServeStateStore:
                 input_path = excluded.input_path,
                 db_path = excluded.db_path,
                 session_id = excluded.session_id,
+                source_alias = COALESCE(excluded.source_alias, peval_py_sources.source_alias),
                 agent_name = excluded.agent_name,
                 agent_version = excluded.agent_version,
                 model = excluded.model,
@@ -234,6 +245,7 @@ class ServeStateStore:
                 normalized_optional_path(session.input_path),
                 normalized_optional_path(session.db_path),
                 session.session_hint,
+                session.source_alias,
                 session.agent_name,
                 session.agent_version,
                 session.model,
@@ -453,15 +465,16 @@ class ServeStateStore:
                 """
                 INSERT INTO peval_py_sources
                 (source_key, kind, adapter, label, input_path, db_path, session_id,
-                 agent_name, agent_version, model,
+                 source_alias, agent_name, agent_version, model,
                  refreshable, active, snapshot, created_at_ms, updated_at_ms,
                  last_status, last_refreshed_at_ms)
-                VALUES (?, 'snapshot', ?, ?, NULL, NULL, ?, NULL, NULL, NULL,
+                VALUES (?, 'snapshot', ?, ?, NULL, NULL, ?, NULL, NULL, NULL, NULL,
                         0, 1, 1, ?, ?, 'ok', ?)
                 ON CONFLICT(source_key) DO UPDATE SET
                     adapter = excluded.adapter,
                     label = excluded.label,
                     session_id = excluded.session_id,
+                    source_alias = COALESCE(excluded.source_alias, peval_py_sources.source_alias),
                     active = 1,
                     updated_at_ms = excluded.updated_at_ms,
                     last_status = 'ok',
@@ -488,7 +501,7 @@ class ServeStateStore:
     def active_report(self) -> dict[str, Any]:
         rows = self.conn.execute(
             """
-            SELECT t.trajectory_json, t.meta_json, t.report_json
+            SELECT s.source_alias, t.trajectory_json, t.meta_json, t.report_json
             FROM peval_py_sources s
             JOIN peval_py_trials t ON t.source_key = s.source_key
             WHERE s.active = 1
@@ -498,7 +511,12 @@ class ServeStateStore:
         if not rows:
             return empty_report("serve")
         trajectories = [json.loads(row["trajectory_json"]) for row in rows]
-        metas = uniquify_trial_keys([json.loads(row["meta_json"]) for row in rows])
+        metas = uniquify_trial_keys(
+            [
+                meta_with_source_alias(json.loads(row["meta_json"]), row["source_alias"])
+                for row in rows
+            ]
+        )
         reports = [json.loads(row["report_json"]) for row in rows]
         return build_report_from_snapshots(
             trajectories,
@@ -543,6 +561,15 @@ class ServeStateStore:
         cursor = self.conn.execute(
             "UPDATE peval_py_sources SET active = ?, updated_at_ms = ? WHERE source_key = ?",
             (1 if active else 0, now_ms(), source_key),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"unknown source: {source_key}")
+        self.conn.commit()
+
+    def set_source_alias(self, source_key: str, alias: str | None) -> None:
+        cursor = self.conn.execute(
+            "UPDATE peval_py_sources SET source_alias = ?, updated_at_ms = ? WHERE source_key = ?",
+            (alias or None, now_ms(), source_key),
         )
         if cursor.rowcount == 0:
             raise ValueError(f"unknown source: {source_key}")
@@ -640,8 +667,9 @@ def open_workspace_state(root: str | None = None) -> ServeStateStore:
 def load_serve_inputs(
     args: Any,
     adapter_assignments: AdapterAssignments,
+    config: ToolConfig | None = None,
 ) -> LoadedInputs:
-    return load_inputs(args, adapter_assignments, require_sources=False)
+    return load_inputs(args, adapter_assignments, require_sources=False, config=config)
 
 
 def loaded_session_from_source(source: dict[str, Any]) -> LoadedSession:
@@ -655,6 +683,7 @@ def loaded_session_from_source(source: dict[str, Any]) -> LoadedSession:
         agent_name=source.get("agent_name"),
         agent_version=source.get("agent_version"),
         model=source.get("model"),
+        source_alias=source.get("source_alias"),
         source_kind=str(source["kind"]),
     )
 
@@ -718,6 +747,18 @@ def uniquify_trial_keys(metas: list[dict[str, Any]]) -> list[dict[str, Any]]:
             copy["trial_key"] = f"{base}:{count}"
         out.append(copy)
     return out
+
+
+def meta_with_source_alias(meta: dict[str, Any], alias: Any) -> dict[str, Any]:
+    if alias:
+        copy = dict(meta)
+        copy["source_alias"] = str(alias)
+        return copy
+    if "source_alias" in meta:
+        copy = dict(meta)
+        copy.pop("source_alias", None)
+        return copy
+    return meta
 
 
 def optional_str(value: Any) -> str | None:

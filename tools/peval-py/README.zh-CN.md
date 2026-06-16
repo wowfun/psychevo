@@ -69,11 +69,18 @@ Nuitka 也是一种选择，适合想做 compiled-Python 构建并且本机有 C
 用 `-a ADAPTER` 为所有输入设置默认 adapter。生成对比报告时，可以重复传入
 `-a pN=ADAPTER` 或 `-a dN=ADAPTER`，让单个 path 或 DB 输入使用不同 adapter。
 
+adapter TOML 表可以设置 `default_db_path`；相对路径按定义该值的 TOML 文件解析。
+使用 `-d @adapter` 可以展开这个默认 DB 路径，并把该 DB 输入绑定到同一个 adapter。
+
 当输入更适合放在 CSV、JSON 或 `.xlsx` 清单中维护时，使用
 `-i, --input-table PATH`。表格每一行都会展开成同一份报告中的一个 session。
 直接传入的 `-p/--path` 和 `-d/--db` 会先加载，然后按文件顺序追加表格行。
 相对 `path` 和 `db` 会按清单文件所在目录解析。`.xlsx` 只在本机已安装
 `openpyxl` 时可用；如果希望保持标准库路径，请另存为 CSV。
+
+使用 `--source-alias N=TEXT`，或 input table 的 `alias`/`label`/`source_alias`
+列，可以给来源添加仅用于显示的名称。Alias 只提升报告可读性，不改变 session id、
+trial key、source identity 或 Evidence/Input Source 路径。
 
 在对比报告中，Leaderboard 的 Duration 列和 JSON `duration_ms` 字段表示 active
 agent/tool work time。已保留 session 中较长的空闲间隔会单独保存在
@@ -89,12 +96,18 @@ analysis：`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysi
 JSON `annotations.notes[]`，并排在 CLI/table notes 前面。在 `peval-py serve` 中，
 可刷新的 source 可以编辑或添加这个 cell-local `notes.md`；snapshot 上传来源保持只读。
 
+`peval-py serve` 保持静态报告继续使用 CDN，但在 serve 页面中会优先从
+`<workspace>/.cache/echarts/6.0.0/echarts.min.js` 提供 ECharts，本地脚本失败时
+回退到固定 CDN URL。Source Manager 会暴露配置好的默认 DB path、source alias 编辑，
+并提供 English/简体中文选择器；语言选择会把顶层 `locale` 持久化到
+`peval-py.toml`。
+
 CSV 示例：
 
 ```csv
-path,db,session_id,adapter,n,report_note,agent_name,agent_version,model
-runs/hermes.jsonl,,,,Hermes row note,跨 agent 对比,Hermes,,deepseek-v4-flash
-,state.db,ses_123,opencode,OpenCode row note,,,,
+path,db,session_id,adapter,alias,n,report_note,agent_name,agent_version,model
+runs/hermes.jsonl,,,,Hermes source,Hermes row note,跨 agent 对比,Hermes,,deepseek-v4-flash
+,state.db,ses_123,opencode,OpenCode source,OpenCode row note,,,,
 ```
 
 生成一份多 session HTML 报告：
@@ -113,8 +126,8 @@ JSON 清单可以是顶层 array，也可以是带有 `rows` 和 `report_notes` 
 {
   "report_notes": ["本地跨 agent 对比。"],
   "rows": [
-    {"path": "runs/hermes.jsonl", "adapter": "hermes", "note": "Hermes row"},
-    {"db": "opencode.db", "session_id": "ses_123", "adapter": "opencode"}
+    {"path": "runs/hermes.jsonl", "adapter": "hermes", "alias": "Hermes source", "note": "Hermes row"},
+    {"db": "opencode.db", "session_id": "ses_123", "adapter": "opencode", "source_alias": "OpenCode source"}
   ]
 }
 ```

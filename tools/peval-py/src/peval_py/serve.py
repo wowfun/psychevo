@@ -12,16 +12,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import unquote, urlsplit
+from urllib.request import urlopen
 
 from peval_py.adapters import available_adapter_ids, normalize_adapter_id
-from peval_py.config import ToolConfig
+from peval_py.config import ToolConfig, write_workspace_locale
 from peval_py.html import render_serve_html
 from peval_py.inputs import (
     AdapterAssignments,
+    LoadedInputs,
     infer_adapter_from_path,
     parse_adapter_assignments,
     validate_selected_adapter,
 )
+from peval_py.i18n import normalize_locale
 from peval_py.session_select import list_adapter_sessions
 from peval_py.state import (
     UPLOAD_LIMIT_BYTES,
@@ -36,6 +39,9 @@ LOCALHOSTS = {"127.0.0.1", "localhost", "::1"}
 MAX_JSON_BODY_BYTES = UPLOAD_LIMIT_BYTES + 2 * 1024 * 1024
 WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 WINDOWS_DRIVE_MOUNT_ROOT = Path("/mnt")
+ECHARTS_VERSION = "6.0.0"
+ECHARTS_ASSET_PATH = f"/assets/echarts/{ECHARTS_VERSION}/echarts.min.js"
+ECHARTS_CDN_URL = f"https://cdn.jsdelivr.net/npm/echarts@{ECHARTS_VERSION}/dist/echarts.min.js"
 
 
 class HttpError(Exception):
@@ -59,7 +65,7 @@ def run_serve_command(
     config = replace(config, workspace_root=str(store.paths.root))
     server: HTTPServer | None = None
     try:
-        loaded_inputs = load_serve_inputs(args, adapter_assignments)
+        loaded_inputs = load_serve_inputs(args, adapter_assignments, config)
         source_keys = store.upsert_loaded_sources(loaded_inputs, config)
         if source_keys:
             store.refresh_sources(source_keys, config)
@@ -112,6 +118,8 @@ def make_handler(
     store: ServeStateStore,
     config: ToolConfig,
 ) -> type[BaseHTTPRequestHandler]:
+    runtime = SimpleNamespace(config=config)
+
     class ServeHandler(BaseHTTPRequestHandler):
         server_version = "peval-py-serve/1"
 
@@ -125,10 +133,14 @@ def make_handler(
                     self.write_html(
                         render_serve_html(
                             store.active_report(),
-                            locale=config.locale,
+                            locale=runtime.config.locale,
                             sources=store.source_payload(),
+                            adapter_defaults=runtime.config.adapter_default_db_paths,
                         )
                     )
+                    return
+                if path == ECHARTS_ASSET_PATH:
+                    self.write_js(cached_echarts_asset(store))
                     return
                 if path == "/api/report":
                     self.write_json(store.active_report())
@@ -146,22 +158,37 @@ def make_handler(
             path = urlsplit(self.path).path
             try:
                 payload = self.read_json_payload()
+                if path == "/api/config/locale":
+                    locale = normalize_locale(required_string(payload, "locale"))
+                    write_workspace_locale(store.paths.config_path, locale)
+                    runtime.config = replace(runtime.config, locale=locale)
+                    self.write_json({"locale": locale})
+                    return
                 if path == "/api/db-sessions":
                     self.write_json(db_sessions_payload(store, payload))
                     return
                 if path == "/api/sources":
-                    keys = add_source_payload(store, config, payload)
+                    add_source_payload(store, runtime.config, payload)
                     self.write_json(mutation_payload(store))
                     return
                 if path == "/api/upload":
                     filename = required_string(payload, "filename")
                     content = required_string(payload, "content")
                     adapter = adapter_override_payload(payload)
-                    store.ingest_upload(filename, content, config, adapter=adapter)
+                    keys = store.ingest_upload(
+                        filename,
+                        content,
+                        runtime.config,
+                        adapter=adapter,
+                    )
+                    upload_alias = alias_payload(payload)
+                    if upload_alias is not None:
+                        for source_key in keys:
+                            store.set_source_alias(source_key, upload_alias)
                     self.write_json(mutation_payload(store))
                     return
                 if path == "/api/refresh":
-                    store.refresh_sources(source_keys_payload(payload), config)
+                    store.refresh_sources(source_keys_payload(payload), runtime.config)
                     self.write_json(mutation_payload(store))
                     return
 
@@ -173,14 +200,16 @@ def make_handler(
                     elif action == "activate":
                         store.set_source_active(source_key, True)
                     elif action == "refresh":
-                        store.refresh_sources([source_key], config)
+                        store.refresh_sources([source_key], runtime.config)
                     elif action == "delete":
                         store.delete_source(source_key)
+                    elif action == "alias":
+                        store.set_source_alias(source_key, alias_payload(payload))
                     elif action == "notes":
                         store.save_source_notes(
                             source_key,
                             markdown_payload(payload),
-                            config,
+                            runtime.config,
                         )
                     else:
                         raise HttpError(404, "unknown source action")
@@ -247,6 +276,13 @@ def make_handler(
             self.end_headers()
             self.wfile.write(data)
 
+        def write_js(self, data: bytes, status: int = 200) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
         def write_error(self, status: int, message: str) -> None:
             if urlsplit(self.path).path.startswith("/api/"):
                 self.write_json({"error": message}, status=status)
@@ -254,6 +290,32 @@ def make_handler(
             self.write_html(f"{status} {message}\n", status=status)
 
     return ServeHandler
+
+
+def cached_echarts_asset(store: ServeStateStore) -> bytes:
+    path = echarts_cache_path(store)
+    if path.is_file():
+        return path.read_bytes()
+    try:
+        data = download_echarts_asset()
+    except Exception as exc:  # noqa: BLE001 - HTTP asset boundary.
+        raise HttpError(502, f"failed to cache ECharts: {exc}") from exc
+    if not data:
+        raise HttpError(502, "failed to cache ECharts: empty response")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_bytes(data)
+    tmp_path.replace(path)
+    return data
+
+
+def echarts_cache_path(store: ServeStateStore) -> Path:
+    return store.paths.root / ".cache" / "echarts" / ECHARTS_VERSION / "echarts.min.js"
+
+
+def download_echarts_asset() -> bytes:
+    with urlopen(ECHARTS_CDN_URL, timeout=15) as response:  # noqa: S310 - fixed URL.
+        return response.read()
 
 
 def mutation_payload(store: ServeStateStore) -> dict[str, Any]:
@@ -274,8 +336,18 @@ def add_source_payload(
         [raw_adapter] if raw_adapter else [],
         config.adapter,
     )
-    loaded = load_serve_inputs(source_args, assignments)
+    loaded = load_serve_inputs(source_args, assignments, config)
+    loaded = apply_payload_alias(loaded, optional_string(payload.get("alias")))
     return store.import_loaded_sources(loaded, config)
+
+
+def apply_payload_alias(loaded: LoadedInputs, alias: str | None) -> LoadedInputs:
+    if alias is None:
+        return loaded
+    return LoadedInputs(
+        sessions=[replace(session, source_alias=alias) for session in loaded.sessions],
+        notes=loaded.notes,
+    )
 
 
 def db_sessions_payload(
@@ -490,6 +562,14 @@ def markdown_payload(payload: dict[str, Any]) -> str:
     if not isinstance(value, str):
         raise HttpError(400, "markdown is required")
     return value
+
+
+def alias_payload(payload: dict[str, Any]) -> str | None:
+    value = payload.get("alias")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def optional_string(value: Any) -> str | None:

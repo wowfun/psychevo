@@ -10,9 +10,12 @@ from peval_py.inputs import parse_adapter_assignments
 from peval_py.serve import (
     DEFAULT_PORT_END,
     DEFAULT_PORT_START,
+    ECHARTS_ASSET_PATH,
     HttpError,
     LocalHTTPServer,
     bind_server,
+    cached_echarts_asset,
+    echarts_cache_path,
     make_handler,
     source_path_values,
     workspace_relative_path,
@@ -289,6 +292,210 @@ class PevalPyServeStateTests(unittest.TestCase):
                 conn.close()
                 self.assertEqual(response.status, 200)
                 self.assertEqual(len(payload["trajectory"]), 1)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_echarts_asset_uses_workspace_cache_and_fake_download(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode")
+            store = open_workspace_state(str(root))
+            try:
+                cache_path = echarts_cache_path(store)
+                self.assertEqual(
+                    cache_path,
+                    root / ".cache" / "echarts" / "6.0.0" / "echarts.min.js",
+                )
+                cache_path.parent.mkdir(parents=True)
+                cache_path.write_bytes(b"console.log('cached');")
+                self.assertEqual(cached_echarts_asset(store), b"console.log('cached');")
+
+                cache_path.unlink()
+                with patch("peval_py.serve.download_echarts_asset", return_value=b"console.log('downloaded');"):
+                    self.assertEqual(cached_echarts_asset(store), b"console.log('downloaded');")
+                self.assertEqual(cache_path.read_bytes(), b"console.log('downloaded');")
+
+                cache_path.unlink()
+                with patch("peval_py.serve.download_echarts_asset", side_effect=RuntimeError("network down")):
+                    with self.assertRaisesRegex(HttpError, "failed to cache ECharts"):
+                        cached_echarts_asset(store)
+            finally:
+                store.close()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode")
+            store = open_workspace_state(str(root))
+            cache_path = echarts_cache_path(store)
+            cache_path.parent.mkdir(parents=True)
+            cache_path.write_bytes(b"window.echarts={};")
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            try:
+                status, headers, body = request_bytes(port, ECHARTS_ASSET_PATH)
+                self.assertEqual(status, 200)
+                self.assertIn("application/javascript", headers["content-type"])
+                self.assertEqual(body, b"window.echarts={};")
+
+                cache_path.unlink()
+                with patch("peval_py.serve.download_echarts_asset", side_effect=RuntimeError("network down")):
+                    status, _, body = request_bytes(port, ECHARTS_ASSET_PATH)
+                self.assertEqual(status, 502)
+                self.assertIn(b"failed to cache ECharts", body)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_source_alias_is_display_only_and_editable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source = root / "common_session.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source)
+            config = ToolConfig(adapter="opencode")
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {
+                        "path": "common_session.jsonl",
+                        "adapter": "opencode",
+                        "alias": "Readable source",
+                    },
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                source_key = body["sources"][0]["source_key"]
+                self.assertEqual(body["sources"][0]["source_alias"], "Readable source")
+                self.assertEqual(
+                    body["report"]["trajectory_meta"][0]["source_alias"],
+                    "Readable source",
+                )
+                self.assertEqual(
+                    body["report"]["trajectory"][0]["session_id"],
+                    "common_session",
+                )
+                self.assertEqual(
+                    body["report"]["trajectory_meta"][0]["data_ref"]["label"],
+                    "common_session.jsonl",
+                )
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_key}/alias",
+                    {"alias": "Renamed source"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["sources"][0]["source_key"], source_key)
+                self.assertEqual(body["sources"][0]["source_alias"], "Renamed source")
+                self.assertEqual(
+                    body["report"]["trajectory_meta"][0]["source_alias"],
+                    "Renamed source",
+                )
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {"path": "common_session.jsonl", "adapter": "opencode"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["sources"][0]["source_key"], source_key)
+                self.assertEqual(body["sources"][0]["source_alias"], "Renamed source")
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_key}/alias",
+                    {"alias": ""},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["sources"][0]["source_key"], source_key)
+                self.assertIsNone(body["sources"][0]["source_alias"])
+                self.assertNotIn("source_alias", body["report"]["trajectory_meta"][0])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_locale_endpoint_writes_workspace_config_and_updates_rendering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode", locale="en")
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, rejected = request_json(
+                    port,
+                    "POST",
+                    "/api/config/locale",
+                    {"locale": "zh"},
+                    origin="http://example.test",
+                )
+                self.assertEqual(status, 403)
+                self.assertIn("same-origin", rejected["error"])
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/config/locale",
+                    {"locale": "zh"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body, {"locale": "zh-CN"})
+                config_text = (root / "peval-py.toml").read_text(encoding="utf-8")
+                self.assertIn('locale = "zh-CN"\n', config_text)
+
+                status, _, html = request_text(port, "/")
+                self.assertEqual(status, 200)
+                self.assertIn('<html lang="zh-CN">', html)
+                self.assertIn("<h1>Agent 轨迹报告</h1>", html)
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/config/locale",
+                    {"locale": "en-US"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body, {"locale": "en"})
+                self.assertIn(
+                    'locale = "en"\n',
+                    (root / "peval-py.toml").read_text(encoding="utf-8"),
+                )
             finally:
                 server.shutdown()
                 server.server_close()
@@ -1037,6 +1244,21 @@ def request_json(
     response_headers = {key.lower(): value for key, value in response.getheaders()}
     conn.close()
     return response.status, response_headers, result
+
+
+def request_bytes(port: int, path: str) -> tuple[int, dict[str, str], bytes]:
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", path)
+    response = conn.getresponse()
+    body = response.read()
+    response_headers = {key.lower(): value for key, value in response.getheaders()}
+    conn.close()
+    return response.status, response_headers, body
+
+
+def request_text(port: int, path: str) -> tuple[int, dict[str, str], str]:
+    status, headers, body = request_bytes(port, path)
+    return status, headers, body.decode("utf-8")
 
 
 if __name__ == "__main__":
