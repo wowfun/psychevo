@@ -180,7 +180,7 @@ impl<'a> FullscreenUi<'a> {
             "args": call.args.clone(),
             "result": {}
         });
-        if call.name == "Agent" {
+        if call.name == "spawn_agent" {
             row.full_text = running_agent_tool_full_text(&tool_value);
         }
         row.tool_call_id = Some(call.id.clone());
@@ -211,7 +211,7 @@ impl<'a> FullscreenUi<'a> {
             "args": call.args.clone(),
             "result": {}
         });
-        if call.name == "Agent" {
+        if call.name == "spawn_agent" {
             row.full_text = running_agent_tool_full_text(&tool_value);
         }
         row.tool_name = Some(call.name);
@@ -263,7 +263,7 @@ impl<'a> FullscreenUi<'a> {
         }
         let interrupted = tool_event_interrupted(&value);
         let clarify_no_answer = tool == "clarify" && clarify_no_answer_result(&value);
-        let title = if matches!(tool, "Agent" | "clarify") {
+        let title = if matches!(tool, "spawn_agent" | "clarify") {
             tool_title(tool, &value)
         } else {
             self.history_tool_titles
@@ -283,7 +283,7 @@ impl<'a> FullscreenUi<'a> {
         row.tool_elapsed = metadata_elapsed_duration(metadata)
             .or_else(|| row.tool_started.map(|started| started.elapsed()));
         row.tool_started = None;
-        if tool == "Agent" {
+        if tool == "spawn_agent" {
             row.agent_target = agent_target_from_tool_event(&value);
         }
         if interrupted {

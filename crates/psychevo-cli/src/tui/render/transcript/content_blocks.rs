@@ -424,7 +424,7 @@ pub(crate) fn inline_edit_tool_lines(
 }
 
 pub(crate) fn is_agent_tool_row(row: &TranscriptRow) -> bool {
-    row.tool_name.as_deref() == Some("Agent")
+    row.tool_name.as_deref() == Some("spawn_agent")
 }
 
 pub(crate) fn tool_ledger_view(

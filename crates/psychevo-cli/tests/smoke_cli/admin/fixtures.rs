@@ -114,7 +114,7 @@ pub(crate) fn insert_export_fixture_messages(conn: &Connection, session_id: &str
             "invalidation_reason": "new_session",
             "effective_tools": [
                 "read",
-                "Agent",
+                "spawn_agent",
                 "list_agents",
                 "wait_agent",
                 "send_message",
@@ -279,7 +279,7 @@ pub(crate) fn insert_export_fixture_prompt_prefix(
         "agents_enabled": true,
         "effective_tools": [
             "read",
-            "Agent",
+            "spawn_agent",
             "list_agents",
             "wait_agent",
             "send_message",

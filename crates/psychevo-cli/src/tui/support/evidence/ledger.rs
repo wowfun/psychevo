@@ -47,8 +47,8 @@ pub(crate) fn completed_tool_title_from_active(kind: TranscriptKind, title: &str
 }
 
 pub(crate) fn tool_title(tool: &str, value: &Value) -> String {
-    if tool == "Agent" {
-        return agent_tool_title(value).unwrap_or_else(|| "Agent".to_string());
+    if tool == "spawn_agent" {
+        return agent_tool_title(value).unwrap_or_else(|| "spawn_agent".to_string());
     }
     if tool == "clarify" {
         return clarify_tool_title(value);
@@ -95,7 +95,7 @@ pub(crate) fn clarify_no_answer_result(value: &Value) -> bool {
 }
 
 pub(crate) fn active_tool_title(tool: &str, value: &Value) -> String {
-    if tool == "Agent" {
+    if tool == "spawn_agent" {
         return active_agent_tool_title(value);
     }
     if tool == "clarify" {
@@ -297,7 +297,7 @@ pub(crate) fn tool_output_text(value: &Value) -> (String, Option<String>) {
     if let Some(timeout) = exec_timeout_output_text(value) {
         return collapse_ledger_body(&timeout);
     }
-    if value.get("tool_name").and_then(Value::as_str) == Some("Agent")
+    if value.get("tool_name").and_then(Value::as_str) == Some("spawn_agent")
         && let Some(output) = agent_tool_output_text(value)
     {
         return output;
@@ -556,18 +556,11 @@ pub(crate) fn agent_session_start_title(value: &Value) -> Option<String> {
         .filter(|task_name| !generated_agent_task_name(agent, task_name));
     let detail = task_name
         .or_else(|| value.get("agent_description").and_then(Value::as_str))
+        .or_else(|| value.get("message").and_then(Value::as_str))
         .or_else(|| value.get("task").and_then(Value::as_str))
         .map(str::trim)
         .filter(|value| !value.is_empty());
     Some(agent_title(agent, detail))
-}
-
-pub(crate) fn agent_session_start_name(value: &Value) -> Option<&str> {
-    value
-        .get("agent_name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
 }
 
 pub(crate) fn agent_title_name(title: &str) -> &str {
@@ -586,18 +579,12 @@ pub(crate) fn agent_title_detail(title: &str) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-pub(crate) fn agent_placeholder_title_matches(row: &TranscriptRow, agent_name: &str) -> bool {
-    let title_name = agent_title_name(&row.title);
-    title_name == agent_name || matches!(title_name, "agent" | "Agent")
-}
-
 pub(crate) fn agent_name_from<'a>(args: &'a Value, result: &'a Value) -> &'a str {
     result
         .get("agent_name")
         .and_then(Value::as_str)
         .or_else(|| result.get("agent_type").and_then(Value::as_str))
         .or_else(|| args.get("agent_type").and_then(Value::as_str))
-        .or_else(|| args.get("name").and_then(Value::as_str))
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("agent")
@@ -615,6 +602,8 @@ pub(crate) fn agent_detail_from<'a>(args: &'a Value, result: &'a Value) -> Optio
     task_name
         .or_else(|| result.get("agent_description").and_then(Value::as_str))
         .or_else(|| args.get("description").and_then(Value::as_str))
+        .or_else(|| result.get("message").and_then(Value::as_str))
+        .or_else(|| args.get("message").and_then(Value::as_str))
         .or_else(|| result.get("task").and_then(Value::as_str))
         .or_else(|| args.get("task").and_then(Value::as_str))
         .map(str::trim)
@@ -631,7 +620,7 @@ pub(crate) fn agent_title(agent: &str, detail: Option<&str>) -> String {
 fn generated_agent_task_name(agent: &str, task_name: &str) -> bool {
     let Some(suffix) = task_name
         .strip_prefix(agent)
-        .and_then(|rest| rest.strip_prefix('-'))
+        .and_then(|rest| rest.strip_prefix('_'))
     else {
         return false;
     };
@@ -671,18 +660,20 @@ pub(crate) fn agent_edge_title(
     catalog: Option<&AgentCatalog>,
 ) -> Option<String> {
     let name = agent_edge_agent_name(edge)?;
-    let detail = catalog
-        .and_then(|catalog| {
-            catalog
-                .agents
-                .iter()
-                .find(|agent| agent.name == name)
-                .map(|agent| agent.description.as_str())
+    let detail = agent_edge_agent_string(edge, "task_name")
+        .or_else(|| agent_edge_agent_string(edge, "message"))
+        .or_else(|| {
+            catalog.and_then(|catalog| {
+                catalog
+                    .agents
+                    .iter()
+                    .find(|agent| agent.name == name)
+                    .map(|agent| agent.description.as_str())
+            })
         })
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .or_else(|| agent_edge_agent_string(edge, "description"))
-        .or_else(|| agent_edge_agent_string(edge, "task_name"))
         .or_else(|| agent_edge_agent_string(edge, "task"));
     Some(agent_title(name, detail))
 }
@@ -694,6 +685,7 @@ pub(crate) fn agent_edge_metadata_matches(edge: &AgentEdgeRecord, target: &str) 
 
 pub(crate) fn agent_edge_task_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
     agent_edge_agent_string(edge, "task_name").is_some_and(|value| value == target)
+        || agent_edge_agent_string(edge, "message").is_some_and(|value| value == target)
         || agent_edge_agent_string(edge, "task").is_some_and(|value| value == target)
 }
 
@@ -711,7 +703,7 @@ fn agent_row_prompt_detail(row: &TranscriptRow) -> Option<&str> {
 }
 
 pub(crate) fn agent_edge_agent_name(edge: &AgentEdgeRecord) -> Option<&str> {
-    agent_edge_agent_string(edge, "name")
+    agent_edge_agent_string(edge, "agent_type").or_else(|| agent_edge_agent_string(edge, "name"))
 }
 
 pub(crate) fn agent_edge_agent_string<'a>(edge: &'a AgentEdgeRecord, key: &str) -> Option<&'a str> {
@@ -749,27 +741,28 @@ pub(crate) fn agent_tool_output_text(value: &Value) -> Option<(String, Option<St
         .get("child_session")
         .and_then(agent_child_latest_tokens)
         .map(|tokens| format!(" · {} tokens", format_compact_count(tokens)));
-    let preview =
-        if result.get("background").and_then(Value::as_bool) == Some(true) && status == "running" {
-            "Started in background".to_string()
-        } else if status == "completed" || outcome == "normal" {
-            let tool_use_label = pluralize(tool_calls, "tool use");
-            format!(
-                "Done ({} {}{})",
-                tool_calls,
-                tool_use_label,
-                token_suffix.unwrap_or_default()
-            )
-        } else {
-            let tool_use_label = pluralize(tool_calls, "tool use");
-            format!(
-                "{} ({} {}{})",
-                status_label(status, outcome),
-                tool_calls,
-                tool_use_label,
-                token_suffix.unwrap_or_default()
-            )
-        };
+    let preview = if status == "running"
+        && value.get("type").and_then(Value::as_str) != Some("agent_session_start")
+    {
+        "Started in background".to_string()
+    } else if status == "completed" || outcome == "normal" {
+        let tool_use_label = pluralize(tool_calls, "tool use");
+        format!(
+            "Done ({} {}{})",
+            tool_calls,
+            tool_use_label,
+            token_suffix.unwrap_or_default()
+        )
+    } else {
+        let tool_use_label = pluralize(tool_calls, "tool use");
+        format!(
+            "{} ({} {}{})",
+            status_label(status, outcome),
+            tool_calls,
+            tool_use_label,
+            token_suffix.unwrap_or_default()
+        )
+    };
 
     let prompt = agent_tool_prompt(value);
     let response = result
@@ -808,8 +801,10 @@ pub(crate) fn running_agent_tool_full_text(value: &Value) -> Option<String> {
 fn agent_tool_prompt(value: &Value) -> Option<&str> {
     let args = value.get("args").unwrap_or(&Value::Null);
     let result = value.get("result").unwrap_or(&Value::Null);
-    args.get("prompt")
+    args.get("message")
+        .or_else(|| args.get("prompt"))
         .or_else(|| args.get("task"))
+        .or_else(|| result.get("message"))
         .or_else(|| result.get("prompt"))
         .or_else(|| result.get("task"))
         .and_then(Value::as_str)
@@ -876,21 +871,31 @@ pub(crate) fn status_label(status: &str, outcome: &str) -> String {
 }
 
 pub(crate) fn agent_target_from_tool_event(value: &Value) -> Option<String> {
-    let result = value.get("result")?;
-    result
-        .get("session_id")
-        .or_else(|| result.get("child_session_id"))
+    value
+        .get("child_thread_id")
+        .or_else(|| value.get("child_session_id"))
+        .or_else(|| {
+            value
+                .get("result")
+                .and_then(|result| result.get("child_thread_id"))
+        })
+        .or_else(|| {
+            value
+                .get("result")
+                .and_then(|result| result.get("child_session_id"))
+        })
+        .or_else(|| {
+            value
+                .get("result")
+                .and_then(|result| result.get("session_id"))
+        })
         .and_then(Value::as_str)
         .map(str::to_string)
 }
 
 pub(crate) fn background_running_agent_result(tool: &str, value: &Value) -> bool {
-    tool == "Agent"
-        && value
-            .get("result")
-            .and_then(|result| result.get("background"))
-            .and_then(Value::as_bool)
-            == Some(true)
+    tool == "spawn_agent"
+        && value.get("type").and_then(Value::as_str) != Some("agent_session_start")
         && value
             .get("result")
             .and_then(|result| result.get("status"))

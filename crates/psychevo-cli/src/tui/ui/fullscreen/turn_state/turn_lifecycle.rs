@@ -130,26 +130,33 @@ impl<'a> FullscreenUi<'a> {
             );
         }
         let id_key = call.id.as_deref().map(tool_id_key);
-        let intent_key = tool_intent_key(&call.tool_name);
-        let stale_agent_index = (call.tool_name == "Agent")
+        let intent_key =
+            (call.tool_name != "spawn_agent").then(|| tool_intent_key(&call.tool_name));
+        let stale_agent_index = (call.tool_name == "spawn_agent")
             .then(|| self.completed_agent_invocation_index(&value, call.id.as_deref()))
             .flatten();
         let idx = id_key
             .as_ref()
             .and_then(|key| self.tool_rows.get(key))
             .or_else(|| self.tool_rows.get(&call.position_key))
-            .or_else(|| self.tool_rows.get(&intent_key))
+            .or_else(|| {
+                intent_key
+                    .as_ref()
+                    .and_then(|intent_key| self.tool_rows.get(intent_key))
+            })
             .copied()
             .or_else(|| {
-                self.matching_agent_placeholder_index(
-                    &call.tool_name,
-                    &value,
-                    call.id.as_deref().unwrap_or_default(),
-                )
+                (call.tool_name != "spawn_agent").then(|| {
+                    self.matching_agent_placeholder_index(
+                        &call.tool_name,
+                        &value,
+                        call.id.as_deref().unwrap_or_default(),
+                    )
+                })?
             });
         let mut active_tool_frame_requested = false;
         let idx = if let Some(idx) = idx {
-            if call.tool_name == "Agent"
+            if call.tool_name == "spawn_agent"
                 && self
                     .transcript
                     .get(idx)
@@ -161,7 +168,9 @@ impl<'a> FullscreenUi<'a> {
                 }
                 return false;
             }
-            self.tool_rows.remove(&intent_key);
+            if let Some(intent_key) = &intent_key {
+                self.tool_rows.remove(intent_key);
+            }
             let row = &mut self.transcript[idx];
             row.kind = evidence_kind_for_value(&call.tool_name, &value);
             row.tool_name = Some(call.tool_name.clone());
@@ -169,7 +178,7 @@ impl<'a> FullscreenUi<'a> {
             if row.text.is_empty() {
                 row.text = "preparing".to_string();
             }
-            if call.tool_name == "Agent"
+            if call.tool_name == "spawn_agent"
                 && let Some(full_text) = running_agent_tool_full_text(&value)
             {
                 row.full_text = Some(full_text);
@@ -196,7 +205,7 @@ impl<'a> FullscreenUi<'a> {
             );
             row.tool_name = Some(call.tool_name.clone());
             row.tool_call_id = call.id.clone();
-            if call.tool_name == "Agent" {
+            if call.tool_name == "spawn_agent" {
                 row.full_text = running_agent_tool_full_text(&value);
             }
             row.tool_started = Some(Instant::now());
@@ -225,7 +234,9 @@ impl<'a> FullscreenUi<'a> {
         if let Some(position_key) = position_key {
             keys.push(position_key.to_string());
         }
-        keys.push(tool_intent_key(tool_name));
+        if tool_name != "spawn_agent" {
+            keys.push(tool_intent_key(tool_name));
+        }
 
         let mut index = None;
         for key in &keys {
@@ -301,6 +312,16 @@ impl<'a> FullscreenUi<'a> {
                 continue;
             };
             row.tool_elapsed = Some(started.elapsed());
+            if row.tool_name.as_deref() == Some("spawn_agent") {
+                row.failed = false;
+                row.interrupted = false;
+                if row.agent_target.is_none()
+                    && matches!(row.text.as_str(), "preparing" | "running" | "")
+                {
+                    row.text = "not completed".to_string();
+                }
+                continue;
+            }
             row.title = completed_tool_title_from_active(row.kind, &row.title);
             row.failed = false;
             row.interrupted = true;
@@ -497,124 +518,62 @@ impl<'a> FullscreenUi<'a> {
 
     pub(crate) fn completed_agent_invocation_index(
         &self,
-        value: &Value,
+        _value: &Value,
         tool_call_id: Option<&str>,
     ) -> Option<usize> {
-        let agent_name = agent_name_from_tool_value(value);
-        let candidates = self
-            .transcript
+        let tool_call_id = tool_call_id
+            .map(str::trim)
+            .filter(|tool_call_id| !tool_call_id.is_empty())?;
+        self.transcript
             .iter()
             .enumerate()
-            .filter(|(_, row)| {
+            .find(|(_, row)| {
                 completed_agent_invocation_row(row)
-                    && agent_placeholder_title_matches(row, agent_name)
+                    && row.tool_call_id.as_deref() == Some(tool_call_id)
             })
-            .collect::<Vec<_>>();
-
-        if let Some(tool_call_id) = tool_call_id.filter(|id| !id.is_empty())
-            && let Some((index, _)) = candidates
-                .iter()
-                .find(|(_, row)| row.tool_call_id.as_deref() == Some(tool_call_id))
-        {
-            return Some(*index);
-        }
-
-        let strong_matches = candidates
-            .iter()
-            .filter_map(|(index, row)| {
-                agent_placeholder_identity_matches(row, value).then_some(*index)
-            })
-            .collect::<Vec<_>>();
-        (strong_matches.len() == 1).then(|| strong_matches[0])
+            .map(|(index, _)| index)
     }
 
     pub(crate) fn matching_agent_placeholder_index(
         &self,
         tool: &str,
-        value: &Value,
+        _value: &Value,
         tool_call_id: &str,
     ) -> Option<usize> {
-        if tool != "Agent" {
+        if tool != "spawn_agent" {
             return None;
         }
-        let agent_name = agent_name_from_tool_value(value);
-        let candidates = self
-            .transcript
+        let tool_call_id = tool_call_id.trim();
+        if tool_call_id.is_empty() {
+            return None;
+        }
+        self.transcript
             .iter()
             .enumerate()
-            .filter(|(_, row)| {
-                row.tool_name.as_deref() == Some("Agent")
-                    && row.agent_target.is_none()
+            .find(|(_, row)| {
+                row.tool_name.as_deref() == Some("spawn_agent")
                     && active_tool_row(row)
-                    && agent_placeholder_title_matches(row, agent_name)
+                    && row.tool_call_id.as_deref() == Some(tool_call_id)
             })
-            .collect::<Vec<_>>();
-
-        if !tool_call_id.is_empty()
-            && let Some((index, _)) = candidates
-                .iter()
-                .find(|(_, row)| row.tool_call_id.as_deref() == Some(tool_call_id))
-        {
-            return Some(*index);
-        }
-
-        let strong_matches = candidates
-            .iter()
-            .filter_map(|(index, row)| {
-                agent_placeholder_identity_matches(row, value).then_some(*index)
-            })
-            .collect::<Vec<_>>();
-        if strong_matches.len() == 1 {
-            return strong_matches.first().copied();
-        }
-
-        let incoming_has_identity = agent_identity_task_from_value(value).is_some()
-            || agent_identity_prompt_from_value(value).is_some();
-        if incoming_has_identity {
-            let weak_matches = candidates
-                .iter()
-                .filter_map(|(index, row)| weak_agent_placeholder_row(row).then_some(*index))
-                .collect::<Vec<_>>();
-            if weak_matches.len() == 1 {
-                return weak_matches.first().copied();
-            }
-            return None;
-        }
-
-        let unbound_matches = candidates
-            .iter()
-            .filter_map(|(index, row)| row.tool_call_id.is_none().then_some(*index))
-            .collect::<Vec<_>>();
-        if unbound_matches.len() == 1 {
-            return unbound_matches.first().copied();
-        }
-
-        None
+            .map(|(index, _)| index)
     }
 
     pub(crate) fn remove_duplicate_agent_placeholders(&mut self, keep_index: usize, value: &Value) {
-        let Some(agent_name) = agent_session_start_name(value) else {
-            return;
-        };
         let tool_call_id = value
             .get("tool_call_id")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let has_identity = agent_identity_task_from_value(value).is_some()
-            || agent_identity_prompt_from_value(value).is_some();
         let mut indices = self
             .transcript
             .iter()
             .enumerate()
             .filter_map(|(index, row)| {
                 (index != keep_index
-                    && row.tool_name.as_deref() == Some("Agent")
+                    && row.tool_name.as_deref() == Some("spawn_agent")
                     && row.agent_target.is_none()
                     && active_tool_row(row)
-                    && (row.tool_call_id.as_deref() == Some(tool_call_id)
-                        || (row.tool_call_id.is_none() && !has_identity)
-                        || agent_placeholder_identity_matches(row, value))
-                    && agent_placeholder_title_matches(row, agent_name))
+                    && !tool_call_id.is_empty()
+                    && row.tool_call_id.as_deref() == Some(tool_call_id))
                 .then_some(index)
             })
             .collect::<Vec<_>>();
@@ -629,7 +588,11 @@ impl<'a> FullscreenUi<'a> {
         keep_index: usize,
         value: &Value,
     ) {
-        let agent_name = agent_name_from_tool_value(value);
+        let incoming_tool_call_id = value
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
         let incoming_target = agent_target_from_tool_event(value);
         let mut indices = self
             .transcript
@@ -639,13 +602,11 @@ impl<'a> FullscreenUi<'a> {
                 let duplicate_child_target = incoming_target
                     .as_deref()
                     .is_some_and(|target| row.agent_target.as_deref() == Some(target));
-                let duplicate_active_placeholder = row.agent_target.is_none()
-                    && active_tool_row(row)
-                    && agent_placeholder_title_matches(row, agent_name)
-                    && agent_placeholder_identity_matches(row, value);
+                let duplicate_tool_call_id = incoming_tool_call_id
+                    .is_some_and(|tool_call_id| row.tool_call_id.as_deref() == Some(tool_call_id));
                 (index != keep_index
-                    && row.tool_name.as_deref() == Some("Agent")
-                    && (duplicate_child_target || duplicate_active_placeholder))
+                    && row.tool_name.as_deref() == Some("spawn_agent")
+                    && (duplicate_child_target || duplicate_tool_call_id))
                     .then_some(index)
             })
             .collect::<Vec<_>>();
@@ -900,119 +861,14 @@ pub(crate) fn current_session_matches(
     }
 }
 
-pub(crate) fn agent_placeholder_identity_matches(row: &TranscriptRow, value: &Value) -> bool {
-    if let (Some(row_prompt), Some(value_prompt)) = (
-        agent_row_prompt(row),
-        agent_identity_prompt_from_value(value),
-    ) {
-        return row_prompt == value_prompt;
-    }
-    matches!(
-        (agent_title_detail(&row.title), agent_identity_task_from_value(value)),
-        (Some(row_task), Some(value_task)) if row_task == value_task
-    )
-}
-
 fn completed_agent_invocation_row(row: &TranscriptRow) -> bool {
-    row.tool_name.as_deref() == Some("Agent")
+    row.tool_name.as_deref() == Some("spawn_agent")
         && !active_tool_row(row)
         && (row.tool_started.is_none()
             || row.tool_elapsed.is_some()
             || row.agent_target.is_some()
             || row.failed
             || row.interrupted)
-}
-
-fn weak_agent_placeholder_row(row: &TranscriptRow) -> bool {
-    row.tool_name.as_deref() == Some("Agent")
-        && row.agent_target.is_none()
-        && row.tool_call_id.is_none()
-        && active_tool_row(row)
-        && agent_row_prompt(row).is_none()
-        && agent_title_detail(&row.title).is_none()
-}
-
-fn agent_name_from_tool_value(value: &Value) -> &str {
-    value
-        .get("agent_name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| {
-            let args = value.get("args").unwrap_or(&Value::Null);
-            let result = value.get("result").unwrap_or(&Value::Null);
-            agent_name_from(args, result)
-        })
-}
-
-fn agent_row_prompt(row: &TranscriptRow) -> Option<&str> {
-    let full_text = row.full_text.as_deref()?;
-    let prompt = full_text.strip_prefix("Prompt:\n")?;
-    let prompt = prompt
-        .split_once("\n\nResponse:")
-        .map(|(prompt, _)| prompt)
-        .unwrap_or(prompt)
-        .trim();
-    (!prompt.is_empty()).then_some(prompt)
-}
-
-fn agent_identity_prompt_from_value(value: &Value) -> Option<&str> {
-    value
-        .get("prompt")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            value
-                .get("args")
-                .and_then(|args| args.get("prompt"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| {
-            value
-                .get("args")
-                .and_then(|args| args.get("task"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| {
-            value
-                .get("result")
-                .and_then(|result| result.get("prompt"))
-                .and_then(Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|prompt| !prompt.is_empty())
-}
-
-fn agent_identity_task_from_value(value: &Value) -> Option<&str> {
-    value
-        .get("task_name")
-        .and_then(Value::as_str)
-        .or_else(|| value.get("task").and_then(Value::as_str))
-        .or_else(|| {
-            value
-                .get("args")
-                .and_then(|args| args.get("task_name"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| {
-            value
-                .get("args")
-                .and_then(|args| args.get("task"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| {
-            value
-                .get("result")
-                .and_then(|result| result.get("task_name"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| {
-            value
-                .get("result")
-                .and_then(|result| result.get("task"))
-                .and_then(Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|task| !task.is_empty())
 }
 
 pub(crate) fn apply_agent_child_value_preview(row: &mut TranscriptRow, value: &Value) -> bool {

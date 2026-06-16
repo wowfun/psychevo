@@ -743,7 +743,7 @@ pub(crate) fn typed_gateway_agent_session_start_makes_running_row_openable() {
                 artifact_ids: Vec::new(),
                 metadata: Some(serde_json::json!({
                     "projection": "tool",
-                    "tool_name": "Agent",
+                    "tool_name": "spawn_agent",
                     "tool_call_id": "call_agent_translate",
                     "type": "agent_session_start",
                     "agent_name": "translate",
@@ -770,7 +770,7 @@ pub(crate) fn typed_gateway_agent_session_start_makes_running_row_openable() {
     let row = ui
         .transcript
         .iter()
-        .find(|row| row.tool_name.as_deref() == Some("Agent"))
+        .find(|row| row.tool_name.as_deref() == Some("spawn_agent"))
         .expect("agent row");
     assert_eq!(row.agent_target.as_deref(), Some("child-session"));
     assert_eq!(row.tool_call_id.as_deref(), Some("call_agent_translate"));
@@ -808,7 +808,7 @@ pub(crate) fn typed_gateway_background_agent_handoff_reuses_row_for_session_star
                 artifact_ids: Vec::new(),
                 metadata: Some(serde_json::json!({
                     "projection": "tool",
-                    "tool_name": "Agent",
+                    "tool_name": "spawn_agent",
                     "tool_call_id": "call_agent_translate",
                     "type": "tool_execution_end",
                     "result": {
@@ -817,7 +817,6 @@ pub(crate) fn typed_gateway_background_agent_handoff_reuses_row_for_session_star
                         "task_name": "translate-en-to-zh",
                         "task": "Please translate this English text into Chinese.",
                         "status": "running",
-                        "background": true,
                         "session_id": "child-session",
                         "child_session_id": "child-session"
                     }
@@ -858,7 +857,7 @@ pub(crate) fn typed_gateway_background_agent_handoff_reuses_row_for_session_star
                 artifact_ids: Vec::new(),
                 metadata: Some(serde_json::json!({
                     "projection": "tool",
-                    "tool_name": "Agent",
+                    "tool_name": "spawn_agent",
                     "tool_call_id": "call_agent_translate",
                     "type": "agent_session_start",
                     "agent_name": "translate",
@@ -886,7 +885,7 @@ pub(crate) fn typed_gateway_background_agent_handoff_reuses_row_for_session_star
     let rows = ui
         .transcript
         .iter()
-        .filter(|row| row.tool_name.as_deref() == Some("Agent"))
+        .filter(|row| row.tool_name.as_deref() == Some("spawn_agent"))
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1, "{:#?}", ui.transcript);
     assert_eq!(rows[0].agent_target.as_deref(), Some("child-session"));
@@ -903,7 +902,7 @@ pub(crate) fn typed_gateway_background_agent_handoff_reuses_row_for_session_star
     let row = ui
         .transcript
         .iter()
-        .find(|row| row.tool_name.as_deref() == Some("Agent"))
+        .find(|row| row.tool_name.as_deref() == Some("spawn_agent"))
         .expect("agent row");
     assert!(!row.interrupted, "{row:#?}");
     assert_eq!(row.text, "Started in background");

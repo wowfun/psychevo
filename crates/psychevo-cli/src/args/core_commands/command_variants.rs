@@ -54,7 +54,7 @@ pub(crate) struct TuiArgs {
         help = "Use this agent as the main TUI session identity"
     )]
     pub(crate) agent: Option<String>,
-    #[arg(long, help = "Disable agent discovery and the Agent tool")]
+    #[arg(long, help = "Disable agent discovery and the spawn_agent tool")]
     pub(crate) no_agents: bool,
     #[arg(
         long = "skill",

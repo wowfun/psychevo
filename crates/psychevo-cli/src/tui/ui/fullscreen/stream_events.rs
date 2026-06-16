@@ -527,11 +527,23 @@ impl<'a> FullscreenUi<'a> {
                     return false;
                 }
                 let id_key = (!tool_call_id.is_empty()).then(|| tool_id_key(&tool_call_id));
+                let position_key =
+                    event_scoped_tool_position_key(self.streaming_tool_message_seq, value);
                 let idx = id_key
                     .as_ref()
                     .and_then(|key| self.tool_rows.get(key))
                     .copied()
-                    .or_else(|| self.matching_agent_placeholder_index(tool, value, &tool_call_id))
+                    .or_else(|| {
+                        position_key
+                            .as_ref()
+                            .and_then(|key| self.tool_rows.get(key))
+                            .copied()
+                    })
+                    .or_else(|| {
+                        (tool != "spawn_agent").then(|| {
+                            self.matching_agent_placeholder_index(tool, value, &tool_call_id)
+                        })?
+                    })
                     .unwrap_or_else(|| {
                         let mut row = TranscriptRow::with_title(
                             evidence_kind_for_value(tool, value),
@@ -549,7 +561,7 @@ impl<'a> FullscreenUi<'a> {
                 row.kind = evidence_kind_for_value(tool, value);
                 row.tool_name = Some(tool.to_string());
                 row.title = active_tool_title(tool, value);
-                if tool == "Agent" {
+                if tool == "spawn_agent" {
                     row.text = agent_child_status_text("Running", 0, None);
                     row.full_text = running_agent_tool_full_text(value);
                     row.agent_child_tool_uses = 0;
@@ -568,7 +580,10 @@ impl<'a> FullscreenUi<'a> {
                 if let Some(id_key) = id_key {
                     self.tool_rows.insert(id_key, idx);
                 }
-                if tool == "Agent" {
+                if let Some(position_key) = position_key {
+                    self.tool_rows.insert(position_key, idx);
+                }
+                if tool == "spawn_agent" {
                     self.remove_duplicate_agent_placeholders_for_tool_value(idx, value);
                 }
                 true
@@ -587,7 +602,7 @@ impl<'a> FullscreenUi<'a> {
                 let value = if tool == "clarify" {
                     cached_value = self.value_with_cached_clarify_args(value, tool_call_id);
                     &cached_value
-                } else if tool == "Agent"
+                } else if tool == "spawn_agent"
                     && value.get("args").is_none_or(Value::is_null)
                     && let Some(args) = self.live_tool_args.get(tool_call_id).cloned()
                 {
@@ -678,11 +693,24 @@ impl<'a> FullscreenUi<'a> {
                 if user_confirmed_interrupt {
                     self.turn_interrupted = true;
                 }
-                let idx = self
-                    .tool_rows
-                    .get(&tool_id_key(tool_call_id))
+                let id_key = (!tool_call_id.is_empty()).then(|| tool_id_key(tool_call_id));
+                let position_key =
+                    event_scoped_tool_position_key(self.streaming_tool_message_seq, value);
+                let idx = id_key
+                    .as_ref()
+                    .and_then(|key| self.tool_rows.get(key))
                     .copied()
-                    .or_else(|| self.matching_agent_placeholder_index(tool, value, tool_call_id))
+                    .or_else(|| {
+                        position_key
+                            .as_ref()
+                            .and_then(|key| self.tool_rows.get(key))
+                            .copied()
+                    })
+                    .or_else(|| {
+                        (tool != "spawn_agent").then(|| {
+                            self.matching_agent_placeholder_index(tool, value, tool_call_id)
+                        })?
+                    })
                     .unwrap_or_else(|| {
                         let mut row = TranscriptRow::with_title(
                             evidence_kind_for_value(tool, value),
@@ -702,7 +730,7 @@ impl<'a> FullscreenUi<'a> {
                 row.tool_elapsed = completed_live_tool_elapsed(row, Some(value));
                 row.tool_started = None;
                 row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
-                if tool == "Agent" {
+                if tool == "spawn_agent" {
                     if let Some(agent_target) = agent_target_from_tool_event(value) {
                         row.agent_target = Some(agent_target);
                     }
@@ -734,11 +762,14 @@ impl<'a> FullscreenUi<'a> {
                 if is_write_like_tool(tool) {
                     self.remove_orphan_provisional_tool_intents(tool, Some(idx));
                 }
-                if tool == "Agent" {
+                if tool == "spawn_agent" {
                     self.remove_duplicate_agent_placeholders_for_tool_value(idx, value);
-                    if background_running_agent_result(tool, value) && !tool_call_id.is_empty() {
-                        self.tool_rows.insert(tool_id_key(tool_call_id), idx);
-                    }
+                }
+                if let Some(id_key) = id_key {
+                    self.tool_rows.insert(id_key, idx);
+                }
+                if let Some(position_key) = position_key {
+                    self.tool_rows.insert(position_key, idx);
                 }
                 if tool == "clarify" {
                     self.clarify_tool_args.remove(tool_call_id);
@@ -767,16 +798,25 @@ impl<'a> FullscreenUi<'a> {
         let Some(event_type) = assistant_message_stream_event_type(value) else {
             return false;
         };
-        if !self.streaming_tool_message_open {
+        let calls = streaming_tool_calls_from_event(value)
+            .into_iter()
+            .filter(|call| call.tool_name != "clarify")
+            .collect::<Vec<_>>();
+        let reuse_last_scope = event_type == "tool_call_pending"
+            && !self.streaming_tool_message_open
+            && calls.iter().any(|call| {
+                self.tool_rows.contains_key(&scoped_tool_position_key(
+                    self.streaming_tool_message_seq,
+                    &call.position_key,
+                ))
+            });
+        if !self.streaming_tool_message_open && !reuse_last_scope {
             self.streaming_tool_message_seq = self.streaming_tool_message_seq.saturating_add(1);
-            self.streaming_tool_message_open = true;
         }
+        self.streaming_tool_message_open = true;
         let message_scope = self.streaming_tool_message_seq;
         let mut active_tool_frame_requested = false;
-        for mut call in streaming_tool_calls_from_event(value) {
-            if call.tool_name == "clarify" {
-                continue;
-            }
+        for mut call in calls {
             call.position_key = scoped_tool_position_key(message_scope, &call.position_key);
             active_tool_frame_requested |= self.upsert_streaming_tool_call(call);
         }
@@ -793,39 +833,43 @@ impl<'a> FullscreenUi<'a> {
     pub(crate) fn apply_agent_session_start(&mut self, value: &Value) {
         let Some(child_session_id) = value
             .get("child_session_id")
+            .or_else(|| value.get("child_thread_id"))
+            .or_else(|| value.get("session_id"))
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
         else {
             return;
         };
-        let index = value
+        let tool_call_id = value
             .get("tool_call_id")
             .and_then(Value::as_str)
-            .filter(|id| !id.is_empty())
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let index = tool_call_id
             .and_then(|id| self.tool_rows.get(&tool_id_key(id)).copied())
-            .or_else(|| {
-                let tool_call_id = value
-                    .get("tool_call_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                self.completed_agent_invocation_index(value, Some(tool_call_id))
-            })
-            .or_else(|| {
-                let tool_call_id = value
-                    .get("tool_call_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                self.matching_agent_placeholder_index("Agent", value, tool_call_id)
+            .or_else(|| self.completed_agent_invocation_index(value, tool_call_id))
+            .unwrap_or_else(|| {
+                let mut row = TranscriptRow::with_title(
+                    evidence_kind("spawn_agent"),
+                    agent_session_start_title(value).unwrap_or_else(|| "spawn_agent".to_string()),
+                    agent_child_status_text("Running", 0, None),
+                );
+                row.tool_name = Some("spawn_agent".to_string());
+                row.tool_call_id = tool_call_id.map(str::to_string);
+                row.agent_target = Some(child_session_id.to_string());
+                row.tool_started = Some(Instant::now());
+                self.insert_evidence_row(row)
             });
-        let Some(index) = index else {
-            return;
-        };
         let row = &mut self.transcript[index];
-        row.tool_name = Some("Agent".to_string());
+        row.tool_name = Some("spawn_agent".to_string());
         row.agent_target = Some(child_session_id.to_string());
+        row.tool_call_id = tool_call_id.map(str::to_string);
         if let Some(title) = agent_session_start_title(value) {
             row.title = title;
+        }
+        if let Some(tool_call_id) = tool_call_id {
+            self.tool_rows.insert(tool_id_key(tool_call_id), index);
         }
         self.remove_duplicate_agent_placeholders(index, value);
     }
@@ -899,4 +943,16 @@ fn value_with_args(value: &Value, args: Value) -> Value {
         object.insert("args".to_string(), args);
     }
     merged
+}
+
+fn event_scoped_tool_position_key(message_scope: u64, value: &Value) -> Option<String> {
+    let content_index = value
+        .get("content_index")
+        .or_else(|| value.get("content_array_index"))
+        .and_then(Value::as_u64)?;
+    let call_index = value.get("call_index").and_then(Value::as_u64)?;
+    Some(scoped_tool_position_key(
+        message_scope,
+        &tool_position_key(content_index, call_index),
+    ))
 }

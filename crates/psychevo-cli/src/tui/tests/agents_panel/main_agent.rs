@@ -623,18 +623,18 @@ pub(crate) fn history_agent_edge_reconcile_does_not_make_failed_rows_openable() 
     let mut ui = FullscreenUi::new(&app);
     let mut failed_zh =
         TranscriptRow::with_title(TranscriptKind::Ran, "translate(zh-to-en)", "Failed");
-    failed_zh.tool_name = Some("Agent".to_string());
+    failed_zh.tool_name = Some("spawn_agent".to_string());
     failed_zh.failed = true;
     let mut failed_en =
         TranscriptRow::with_title(TranscriptKind::Ran, "translate(en-to-zh)", "Failed");
-    failed_en.tool_name = Some("Agent".to_string());
+    failed_en.tool_name = Some("spawn_agent".to_string());
     failed_en.failed = true;
     let mut success_zh =
         TranscriptRow::with_title(TranscriptKind::Ran, "translate(zh-to-en)", "Started");
-    success_zh.tool_name = Some("Agent".to_string());
+    success_zh.tool_name = Some("spawn_agent".to_string());
     let mut success_en =
         TranscriptRow::with_title(TranscriptKind::Ran, "translate(en-to-zh)", "Started");
-    success_en.tool_name = Some("Agent".to_string());
+    success_en.tool_name = Some("spawn_agent".to_string());
     ui.transcript = vec![failed_zh, failed_en, success_zh, success_en];
     let edges = vec![
         psychevo_runtime::AgentEdgeRecord {
@@ -684,12 +684,12 @@ pub(crate) async fn foreground_agent_tool_result_is_single_claude_style_inspecti
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_start",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "tool_call_id": "agent-1",
             "args": {
                 "agent_type": "translate",
-                "task_name": "Translate user message to Chinese",
-                "prompt": "Translate the following message to Chinese: hello"
+                "task_name": "translate_to_chinese",
+                "message": "Translate the following message to Chinese: hello"
             }
         }),
         false,
@@ -700,7 +700,10 @@ pub(crate) async fn foreground_agent_tool_result_is_single_claude_style_inspecti
             "tool_call_id": "agent-1",
             "agent_id": "agent-run-1",
             "agent_name": "translate",
+            "agent_type": "translate",
+            "task_name": "translate_to_chinese",
             "agent_description": "Translate user message to Chinese",
+            "message": "Translate the following message to Chinese: hello",
             "child_session_id": "019e33e0-a38c-72a0-8320-9d13124af9d8"
         }),
         false,
@@ -712,16 +715,17 @@ pub(crate) async fn foreground_agent_tool_result_is_single_claude_style_inspecti
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_end",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "tool_call_id": "agent-1",
             "outcome": "normal",
             "elapsed_ms": 1000,
             "result": {
                 "id": "agent-run-1",
                 "agent_name": "translate",
+                "agent_type": "translate",
                 "agent_description": "Translate user message to Chinese",
-                "task_name": "translate-019e33e0",
-                "task": "Translate the following message to Chinese: hello",
+                "task_name": "translate_to_chinese",
+                "message": "Translate the following message to Chinese: hello",
                 "status": "completed",
                 "background": false,
                 "child_session_id": "019e33e0-a38c-72a0-8320-9d13124af9d8",
@@ -752,9 +756,9 @@ pub(crate) async fn foreground_agent_tool_result_is_single_claude_style_inspecti
 
     assert_eq!(ui.transcript.len(), 1);
     let row = &ui.transcript[0];
-    assert_eq!(row.title, "translate(Translate user message to Chinese)");
+    assert_eq!(row.title, "translate(translate_to_chinese)");
     assert_eq!(row.text, "Done (0 tool uses · 14.5k tokens)");
-    assert_eq!(row.tool_name.as_deref(), Some("Agent"));
+    assert_eq!(row.tool_name.as_deref(), Some("spawn_agent"));
     assert_eq!(
         row.agent_target.as_deref(),
         Some("019e33e0-a38c-72a0-8320-9d13124af9d8")
@@ -765,10 +769,7 @@ pub(crate) async fn foreground_agent_tool_result_is_single_claude_style_inspecti
 
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 20);
     let text = buffer_text(&buffer);
-    assert!(
-        text.contains("translate(Translate user message to Chinese)"),
-        "{text}"
-    );
+    assert!(text.contains("translate(translate_to_chinese)"), "{text}");
     assert!(text.contains("Done (0 tool uses · 14.5k tokens)"), "{text}");
 
     app.handle_fullscreen_key(
@@ -787,7 +788,7 @@ pub(crate) async fn foreground_agent_tool_result_is_single_claude_style_inspecti
 }
 
 #[test]
-pub(crate) fn agent_session_start_reuses_partial_agent_placeholder_row() {
+pub(crate) fn agent_session_start_reuses_position_bound_partial_agent_placeholder_row() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -795,25 +796,28 @@ pub(crate) fn agent_session_start_reuses_partial_agent_placeholder_row() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
-            "arguments_json": "{\"name\":\"general\"}",
+            "tool_name": "spawn_agent",
+            "arguments_json": "{\"agent_type\":\"general\",\"task_name\":\"fetch_failed_articles\",\"message\":\"Fetch the failed articles and comments.\"}",
             "content_index": 0,
             "call_index": 0
         }),
         false,
     );
     assert_eq!(ui.transcript.len(), 1);
-    assert_eq!(ui.transcript[0].title, "general");
+    assert_eq!(ui.transcript[0].title, "general(fetch_failed_articles)");
     assert!(ui.transcript[0].agent_target.is_none());
 
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_start",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "tool_call_id": "agent-1",
+            "content_index": 0,
+            "call_index": 0,
             "args": {
-                "name": "general",
-                "prompt": "Fetch the failed articles and comments."
+                "agent_type": "general",
+                "task_name": "fetch_failed_articles",
+                "message": "Fetch the failed articles and comments."
             }
         }),
         false,
@@ -824,7 +828,10 @@ pub(crate) fn agent_session_start_reuses_partial_agent_placeholder_row() {
             "tool_call_id": "agent-1",
             "agent_id": "agent-run-1",
             "agent_name": "general",
+            "agent_type": "general",
+            "task_name": "fetch_failed_articles",
             "agent_description": "General-purpose subagent for focused coding tasks.",
+            "message": "Fetch the failed articles and comments.",
             "child_session_id": "019e33e0-a38c-72a0-8320-9d13124af9d8"
         }),
         false,
@@ -832,10 +839,7 @@ pub(crate) fn agent_session_start_reuses_partial_agent_placeholder_row() {
 
     assert_eq!(ui.transcript.len(), 1);
     let row = &ui.transcript[0];
-    assert_eq!(
-        row.title,
-        "general(General-purpose subagent for focused coding tasks.)"
-    );
+    assert_eq!(row.title, "general(fetch_failed_articles)");
     assert_eq!(
         row.agent_target.as_deref(),
         Some("019e33e0-a38c-72a0-8320-9d13124af9d8")
@@ -854,12 +858,12 @@ pub(crate) fn running_agent_tool_row_keeps_original_prompt_detail() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_start",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "tool_call_id": "agent-1",
             "args": {
                 "agent_type": "translate",
-                "task_name": "Translate user message to Chinese",
-                "prompt": "Translate the following message to Chinese: hello"
+                "task_name": "translate_to_chinese",
+                "message": "Translate the following message to Chinese: hello"
             }
         }),
         false,
@@ -867,7 +871,7 @@ pub(crate) fn running_agent_tool_row_keeps_original_prompt_detail() {
 
     assert_eq!(ui.transcript.len(), 1);
     let row = &ui.transcript[0];
-    assert_eq!(row.tool_name.as_deref(), Some("Agent"));
+    assert_eq!(row.tool_name.as_deref(), Some("spawn_agent"));
     assert_eq!(row.text, "Running (0 tool uses)");
     let full = row.full_text.as_deref().expect("running agent detail");
     assert!(full.contains("Prompt:\nTranslate the following message to Chinese: hello"));
@@ -882,7 +886,7 @@ pub(crate) fn completed_agent_tool_row_uses_cached_prompt_when_result_omits_task
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_start",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "tool_call_id": "agent-1",
             "args": {
                 "agent_type": "translate",
@@ -895,7 +899,7 @@ pub(crate) fn completed_agent_tool_row_uses_cached_prompt_when_result_omits_task
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_execution_end",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "tool_call_id": "agent-1",
             "outcome": "normal",
             "elapsed_ms": 1000,
@@ -910,7 +914,7 @@ pub(crate) fn completed_agent_tool_row_uses_cached_prompt_when_result_omits_task
     );
 
     let row = &ui.transcript[0];
-    assert_eq!(row.tool_name.as_deref(), Some("Agent"));
+    assert_eq!(row.tool_name.as_deref(), Some("spawn_agent"));
     assert_eq!(row.agent_target.as_deref(), Some("child-thread"));
     let full = row.full_text.as_deref().expect("completed agent detail");
     assert!(full.contains("Prompt:\nTranslate the following message to Chinese: hello"));

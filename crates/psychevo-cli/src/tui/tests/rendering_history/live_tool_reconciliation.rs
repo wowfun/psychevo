@@ -919,7 +919,7 @@ pub(crate) fn streaming_tool_completion_reuses_pending_row_as_completed_evidence
 }
 
 #[test]
-pub(crate) fn agent_pending_row_with_provisional_id_merges_into_resolved_child_row() {
+pub(crate) fn agent_pending_row_with_position_id_upgrade_merges_into_resolved_child_row() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -933,7 +933,7 @@ pub(crate) fn agent_pending_row_with_provisional_id_merges_into_resolved_child_r
         &serde_json::json!({
             "type": "tool_call_pending",
             "tool_call_id": "provisional-agent-id",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": agent_args,
             "content_index": 0,
             "call_index": 0
@@ -946,8 +946,10 @@ pub(crate) fn agent_pending_row_with_provisional_id_merges_into_resolved_child_r
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "resolved-agent-id",
-            "tool_name": "Agent",
-            "args": agent_args
+            "tool_name": "spawn_agent",
+            "args": agent_args,
+            "content_index": 0,
+            "call_index": 0
         }),
         false,
     );
@@ -965,7 +967,7 @@ pub(crate) fn agent_pending_row_with_provisional_id_merges_into_resolved_child_r
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "resolved-agent-id",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "args": agent_args,
             "result": {
                 "agent_name": "translate",
@@ -992,7 +994,7 @@ pub(crate) fn agent_pending_row_with_provisional_id_merges_into_resolved_child_r
 }
 
 #[test]
-pub(crate) fn parallel_agent_pending_rows_match_by_task_identity_not_agent_name() {
+pub(crate) fn parallel_agent_pending_rows_match_by_position_not_agent_name() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -1010,7 +1012,7 @@ pub(crate) fn parallel_agent_pending_rows_match_by_task_identity_not_agent_name(
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": cn_args,
             "content_index": 0,
             "call_index": 0
@@ -1020,7 +1022,7 @@ pub(crate) fn parallel_agent_pending_rows_match_by_task_identity_not_agent_name(
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": en_args,
             "content_index": 1,
             "call_index": 1
@@ -1032,8 +1034,10 @@ pub(crate) fn parallel_agent_pending_rows_match_by_task_identity_not_agent_name(
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "resolved-en",
-            "tool_name": "Agent",
-            "args": en_args
+            "tool_name": "spawn_agent",
+            "args": en_args,
+            "content_index": 1,
+            "call_index": 1
         }),
         false,
     );
@@ -1056,7 +1060,7 @@ pub(crate) fn parallel_agent_pending_rows_match_by_task_identity_not_agent_name(
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "resolved-en",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "args": en_args,
             "result": {
                 "agent_name": "translate",
@@ -1074,8 +1078,10 @@ pub(crate) fn parallel_agent_pending_rows_match_by_task_identity_not_agent_name(
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "resolved-cn",
-            "tool_name": "Agent",
-            "args": cn_args
+            "tool_name": "spawn_agent",
+            "args": cn_args,
+            "content_index": 0,
+            "call_index": 0
         }),
         false,
     );
@@ -1083,7 +1089,7 @@ pub(crate) fn parallel_agent_pending_rows_match_by_task_identity_not_agent_name(
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "resolved-cn",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "args": cn_args,
             "result": {
                 "agent_name": "translate",
@@ -1131,7 +1137,7 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": cn_args,
             "content_index": 0,
             "call_index": 0
@@ -1141,7 +1147,7 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": en_args,
             "content_index": 1,
             "call_index": 1
@@ -1166,8 +1172,10 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call-cn",
-            "tool_name": "Agent",
-            "args": cn_args
+            "tool_name": "spawn_agent",
+            "args": cn_args,
+            "content_index": 0,
+            "call_index": 0
         }),
         false,
     );
@@ -1185,7 +1193,7 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-cn",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "args": cn_args,
             "result": {
                 "agent_name": "translate",
@@ -1203,8 +1211,10 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call-en",
-            "tool_name": "Agent",
-            "args": en_args
+            "tool_name": "spawn_agent",
+            "args": en_args,
+            "content_index": 1,
+            "call_index": 1
         }),
         false,
     );
@@ -1237,7 +1247,7 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-en",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "args": en_args,
             "result": {
                 "agent_name": "translate",
@@ -1255,7 +1265,7 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": en_args,
             "content_index": 1,
             "call_index": 1
@@ -1277,7 +1287,7 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
 }
 
 #[test]
-pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_invocation() {
+pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_position() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -1293,7 +1303,7 @@ pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_invoca
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": cn_args,
             "content_index": 0,
             "call_index": 0
@@ -1304,8 +1314,10 @@ pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_invoca
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call-cn",
-            "tool_name": "Agent",
-            "args": cn_args
+            "tool_name": "spawn_agent",
+            "args": cn_args,
+            "content_index": 0,
+            "call_index": 0
         }),
         false,
     );
@@ -1323,7 +1335,7 @@ pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_invoca
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-cn",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "args": cn_args,
             "result": {
                 "agent_name": "translate",
@@ -1341,7 +1353,7 @@ pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_invoca
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": {"agent_type": "translate"},
             "content_index": 1,
             "call_index": 1
@@ -1352,8 +1364,10 @@ pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_invoca
         &serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call-en",
-            "tool_name": "Agent",
-            "args": en_args
+            "tool_name": "spawn_agent",
+            "args": en_args,
+            "content_index": 1,
+            "call_index": 1
         }),
         false,
     );
@@ -1371,7 +1385,7 @@ pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_invoca
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-en",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "args": en_args,
             "result": {
                 "agent_name": "translate",
@@ -1401,7 +1415,7 @@ pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_invoca
 }
 
 #[test]
-pub(crate) fn agent_session_start_matches_pending_row_by_task_identity() {
+pub(crate) fn agent_session_start_with_unknown_id_does_not_steal_pending_row() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -1419,7 +1433,7 @@ pub(crate) fn agent_session_start_matches_pending_row_by_task_identity() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": cn_args,
             "content_index": 0,
             "call_index": 0
@@ -1429,7 +1443,7 @@ pub(crate) fn agent_session_start_matches_pending_row_by_task_identity() {
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": en_args,
             "content_index": 1,
             "call_index": 1
@@ -1447,18 +1461,19 @@ pub(crate) fn agent_session_start_matches_pending_row_by_task_identity() {
         false,
     );
 
-    let en_row = ui
+    let resolved_en_row = ui
         .transcript
         .iter()
-        .find(|row| row.title == "translate(en-to-cn)")
-        .expect("en row");
-    assert_eq!(en_row.agent_target.as_deref(), Some("child-en"));
+        .find(|row| row.tool_call_id.as_deref() == Some("resolved-en"))
+        .expect("resolved en row");
+    assert_eq!(resolved_en_row.agent_target.as_deref(), Some("child-en"));
     let cn_row = ui
         .transcript
         .iter()
         .find(|row| row.title == "translate(cn-to-en)")
         .expect("cn row");
     assert!(cn_row.agent_target.is_none(), "{cn_row:#?}");
+    assert_eq!(agent_rows(&ui).len(), 3, "{:#?}", ui.transcript);
 }
 
 #[test]
@@ -1480,7 +1495,7 @@ pub(crate) fn background_agent_handoff_keeps_single_row_for_late_partial_pending
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": cn_pending,
             "content_index": 0,
             "call_index": 0
@@ -1490,7 +1505,7 @@ pub(crate) fn background_agent_handoff_keeps_single_row_for_late_partial_pending
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": en_pending,
             "content_index": 1,
             "call_index": 1
@@ -1502,7 +1517,9 @@ pub(crate) fn background_agent_handoff_keeps_single_row_for_late_partial_pending
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-cn",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
+            "content_index": 0,
+            "call_index": 0,
             "result": {
                 "agent_name": "translate",
                 "agent_description": "Detect the source language automatically. Translate Chinese to English; translate all other languages to Chinese.",
@@ -1522,7 +1539,9 @@ pub(crate) fn background_agent_handoff_keeps_single_row_for_late_partial_pending
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-en",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
+            "content_index": 1,
+            "call_index": 1,
             "result": {
                 "agent_name": "translate",
                 "agent_description": "Detect the source language automatically. Translate Chinese to English; translate all other languages to Chinese.",
@@ -1554,7 +1573,7 @@ pub(crate) fn background_agent_handoff_keeps_single_row_for_late_partial_pending
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": en_pending,
             "content_index": 1,
             "call_index": 1
@@ -1588,6 +1607,121 @@ pub(crate) fn background_agent_handoff_keeps_single_row_for_late_partial_pending
 }
 
 #[test]
+pub(crate) fn background_agent_handoff_stepwise_never_duplicates_or_interrupts() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let cn_args = serde_json::json!({
+        "agent_type": "translate",
+        "task_name": "cn_to_en",
+        "message": "Translate this Chinese sentence to English."
+    });
+    let en_args = serde_json::json!({
+        "agent_type": "translate",
+        "task_name": "en_to_cn",
+        "message": "Translate this English sentence to Chinese."
+    });
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_name": "spawn_agent",
+            "arguments": cn_args,
+            "content_index": 0,
+            "call_index": 0
+        }),
+        false,
+    );
+    assert_stable_agent_rows(&ui, 1);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_name": "spawn_agent",
+            "arguments": en_args,
+            "content_index": 1,
+            "call_index": 1
+        }),
+        false,
+    );
+    assert_stable_agent_rows(&ui, 2);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call-cn",
+            "tool_name": "spawn_agent",
+            "content_index": 0,
+            "call_index": 0,
+            "result": {
+                "agent_name": "translate",
+                "task_name": "cn_to_en",
+                "status": "running",
+                "background": true,
+                "child_session_id": "child-cn"
+            },
+            "outcome": "normal",
+            "elapsed_ms": 8
+        }),
+        false,
+    );
+    assert_stable_agent_rows(&ui, 2);
+    assert_agent_row_target(&ui, "call-cn", Some("child-cn"));
+    assert_agent_row_target(&ui, "", None);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "agent_session_start",
+            "tool_call_id": "call-cn",
+            "agent_name": "translate",
+            "task_name": "cn_to_en",
+            "child_session_id": "child-cn"
+        }),
+        false,
+    );
+    assert_stable_agent_rows(&ui, 2);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call-en",
+            "tool_name": "spawn_agent",
+            "content_index": 1,
+            "call_index": 1,
+            "result": {
+                "agent_name": "translate",
+                "task_name": "en_to_cn",
+                "status": "running",
+                "background": true,
+                "child_session_id": "child-en"
+            },
+            "outcome": "normal",
+            "elapsed_ms": 11
+        }),
+        false,
+    );
+    assert_stable_agent_rows(&ui, 2);
+    assert_agent_row_target(&ui, "call-en", Some("child-en"));
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_name": "spawn_agent",
+            "arguments": en_args,
+            "content_index": 1,
+            "call_index": 1
+        }),
+        false,
+    );
+    assert_stable_agent_rows(&ui, 2);
+    assert_agent_row_target(&ui, "call-en", Some("child-en"));
+
+    ui.turn_outcome = Some(Outcome::Normal);
+    ui.finish_turn();
+    assert_stable_agent_rows(&ui, 2);
+}
+
+#[test]
 pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrupted() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
@@ -1607,7 +1741,7 @@ pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrup
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": weak_pending,
             "content_index": 0,
             "call_index": 0
@@ -1617,7 +1751,7 @@ pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrup
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": weak_pending,
             "content_index": 1,
             "call_index": 1
@@ -1628,7 +1762,9 @@ pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrup
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-cn",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
+            "content_index": 0,
+            "call_index": 0,
             "result": {
                 "agent_name": "translate",
                 "task": "cn-to-en",
@@ -1645,7 +1781,7 @@ pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrup
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": cn_pending,
             "content_index": 0,
             "call_index": 0
@@ -1666,7 +1802,9 @@ pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrup
         &serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-en",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
+            "content_index": 1,
+            "call_index": 1,
             "result": {
                 "agent_name": "translate",
                 "task": "en-to-cn",
@@ -1682,7 +1820,7 @@ pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrup
     ui.apply_value_event(
         &serde_json::json!({
             "type": "tool_call_pending",
-            "tool_name": "Agent",
+            "tool_name": "spawn_agent",
             "arguments": en_pending,
             "content_index": 1,
             "call_index": 1
@@ -1897,6 +2035,30 @@ pub(crate) fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_
 fn agent_rows<'a>(ui: &'a FullscreenUi<'_>) -> Vec<&'a TranscriptRow> {
     ui.transcript
         .iter()
-        .filter(|row| row.tool_name.as_deref() == Some("Agent"))
+        .filter(|row| row.tool_name.as_deref() == Some("spawn_agent"))
         .collect()
+}
+
+fn assert_stable_agent_rows(ui: &FullscreenUi<'_>, expected_len: usize) {
+    let rows = agent_rows(ui);
+    assert_eq!(rows.len(), expected_len, "{:#?}", ui.transcript);
+    assert!(rows.iter().all(|row| !row.interrupted), "{rows:#?}");
+}
+
+fn assert_agent_row_target(
+    ui: &FullscreenUi<'_>,
+    tool_call_id: &str,
+    expected_target: Option<&str>,
+) {
+    let row = agent_rows(ui)
+        .into_iter()
+        .find(|row| {
+            if tool_call_id.is_empty() {
+                row.tool_call_id.is_none()
+            } else {
+                row.tool_call_id.as_deref() == Some(tool_call_id)
+            }
+        })
+        .expect("agent row");
+    assert_eq!(row.agent_target.as_deref(), expected_target, "{row:#?}");
 }

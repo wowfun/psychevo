@@ -50,6 +50,22 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 delay=0.1,
             )
+        elif "call_agent_cn_vhs" in body or "call_agent_en_vhs" in body:
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_background_agent_parent_final",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "BACKGROUND_AGENT_FINAL: both background translate agents were started without duplicate rows."
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+                delay=4.0,
+            )
         elif "call_agent_translate_vhs" in body:
             self.send_event(
                 {
@@ -65,6 +81,46 @@ class Handler(BaseHTTPRequestHandler):
                     ],
                 },
                 delay=0.2,
+            )
+        elif "VHS background Chinese child" in body:
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_background_agent_child_cn",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "Artificial intelligence changes daily life."
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 120,
+                        "completion_tokens": 30,
+                        "total_tokens": 150,
+                    },
+                },
+                delay=1.5,
+            )
+        elif "VHS background English child" in body:
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_background_agent_child_en",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {"content": "软件设计需要清晰的边界。"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 120,
+                        "completion_tokens": 30,
+                        "total_tokens": 150,
+                    },
+                },
+                delay=1.5,
             )
         elif "Translate the VHS sentence to Chinese" in body:
             self.send_event(
@@ -116,6 +172,53 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 }
             )
+        elif "Subagent background intermediate VHS fixture" in body:
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_background_agent_parent_tool",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_agent_cn_vhs",
+                                        "function": {
+                                            "name": "spawn_agent",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "agent_type": "translate",
+                                                    "task_name": "cn_to_en_vhs",
+                                                    "message": "VHS background Chinese child: translate 人工智能改变日常生活。",
+                                                    "background": True,
+                                                }
+                                            ),
+                                        },
+                                    },
+                                    {
+                                        "index": 1,
+                                        "id": "call_agent_en_vhs",
+                                        "function": {
+                                            "name": "spawn_agent",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "agent_type": "translate",
+                                                    "task_name": "en_to_cn_vhs",
+                                                    "message": "VHS background English child: translate Software design needs clear boundaries.",
+                                                    "background": True,
+                                                }
+                                            ),
+                                        },
+                                    },
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                },
+                delay=0.2,
+            )
         elif "Subagent foreground VHS fixture" in body:
             self.send_event(
                 {
@@ -129,8 +232,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "index": 0,
                                         "id": "call_agent_translate_vhs",
                                         "function": {
-                                            "name": "Agent",
-                                            "arguments": "{\"agent_type\":\"translate\",\"prompt\":\"Translate the VHS sentence to Chinese: Added the fullscreen /agents console with Running and Available tabs.\",\"task_name\":\"Translate user message to Chinese\"}",
+                                            "name": "spawn_agent",
+                                            "arguments": "{\"agent_type\":\"translate\",\"task_name\":\"translate_to_chinese\",\"message\":\"Translate the VHS sentence to Chinese: Added the fullscreen /agents console with Running and Available tabs.\"}",
                                         },
                                     }
                                 ]

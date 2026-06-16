@@ -187,11 +187,12 @@ fn sse_tool_read_call(call_id: &str) -> String {
 fn sse_tool_agent_call(call_id: &str, agent: &str, prompt: &str) -> String {
     let args = serde_json::json!({
         "agent_type": agent,
-        "prompt": prompt,
+        "task_name": "translate_greeting",
+        "message": prompt,
     })
     .to_string();
     format!(
-        "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"id\":{},\"function\":{{\"name\":\"Agent\",\"arguments\":{}}}}}]}},\"finish_reason\":\"tool_calls\"}}]}}\n\n\
+        "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"id\":{},\"function\":{{\"name\":\"spawn_agent\",\"arguments\":{}}}}}]}},\"finish_reason\":\"tool_calls\"}}]}}\n\n\
          data: [DONE]\n\n",
         serde_json::to_string(call_id).expect("call id"),
         serde_json::to_string(&args).expect("args")

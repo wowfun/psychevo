@@ -475,7 +475,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
         value["header"]["prompt_prefix"]["metadata"]["effective_tools"],
         serde_json::json!([
             "read",
-            "Agent",
+            "spawn_agent",
             "list_agents",
             "wait_agent",
             "send_message",

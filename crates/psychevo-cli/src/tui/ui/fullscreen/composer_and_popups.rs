@@ -11,7 +11,7 @@ impl<'a> FullscreenUi<'a> {
         }
         let mut used_edges = std::collections::BTreeSet::<usize>::new();
         for row in &mut self.transcript {
-            if row.tool_name.as_deref() != Some("Agent") || row.agent_target.is_some() {
+            if row.tool_name.as_deref() != Some("spawn_agent") || row.agent_target.is_some() {
                 continue;
             }
             let row_was_active = active_tool_row(row);

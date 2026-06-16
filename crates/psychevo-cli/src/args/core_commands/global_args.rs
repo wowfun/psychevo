@@ -411,7 +411,7 @@ pub(crate) struct RunArgs {
         help = "Run this turn with a selected agent definition"
     )]
     pub(crate) agent: Option<String>,
-    #[arg(long, help = "Disable agent discovery and the Agent tool")]
+    #[arg(long, help = "Disable agent discovery and the spawn_agent tool")]
     pub(crate) no_agents: bool,
     #[arg(
         long,

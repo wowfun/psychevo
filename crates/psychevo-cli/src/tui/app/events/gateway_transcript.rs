@@ -111,6 +111,7 @@ impl TuiApp {
                 suggested_rule,
                 allow_always,
                 timeout_secs,
+                ..
             } => {
                 let request = PermissionApprovalRequest {
                     tool_call_id: request_id.clone(),
@@ -467,22 +468,22 @@ impl TuiApp {
                             .and_then(|id| ui.tool_rows.get(&tool_id_key(id)).copied())
                     })
                     .unwrap_or_else(|| {
-                    let mut row = TranscriptRow::with_title(
-                        kind,
-                        transcript_block_title(&block),
-                        transcript_block_running_text(&block),
-                    );
-                    row.tool_name = block.title.clone();
-                    if matches!(
-                        block.status,
-                        TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
-                    ) {
-                        row.tool_started = Some(Instant::now());
-                    }
-                    let idx = ui.insert_evidence_row(row);
-                    ui.tool_rows.insert(key.clone(), idx);
-                    idx
-                });
+                        let mut row = TranscriptRow::with_title(
+                            kind,
+                            transcript_block_title(&block),
+                            transcript_block_running_text(&block),
+                        );
+                        row.tool_name = block.title.clone();
+                        if matches!(
+                            block.status,
+                            TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
+                        ) {
+                            row.tool_started = Some(Instant::now());
+                        }
+                        let idx = ui.insert_evidence_row(row);
+                        ui.tool_rows.insert(key.clone(), idx);
+                        idx
+                    });
                 ui.tool_rows.insert(key, idx);
                 if let Some(tool_call_id) = tool_call_id.as_deref() {
                     ui.tool_rows.insert(tool_id_key(tool_call_id), idx);

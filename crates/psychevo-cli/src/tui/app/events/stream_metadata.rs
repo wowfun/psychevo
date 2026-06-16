@@ -83,7 +83,7 @@ impl TuiApp {
             record_gateway_block_row(ui, &block.id, idx);
             ui.tool_rows.insert(key.clone(), idx);
             ui.remove_turn_meta();
-            let existing_agent_handoff = tool == "Agent"
+            let existing_agent_handoff = tool == "spawn_agent"
                 && value.get("type").and_then(Value::as_str) == Some("agent_session_start")
                 && ui.transcript.get(idx).is_some_and(|row| {
                     row.agent_target.is_some()
@@ -99,7 +99,7 @@ impl TuiApp {
             let row = &mut ui.transcript[idx];
             row.kind = evidence_kind_for_value(tool, &value);
             row.tool_name = Some(tool.to_string());
-            row.title = if tool == "Agent" {
+            row.title = if tool == "spawn_agent" {
                 block
                     .title
                     .as_deref()
@@ -131,7 +131,7 @@ impl TuiApp {
                 handoff_text
             } else if block.status == TranscriptBlockStatus::Pending {
                 "preparing".to_string()
-            } else if tool == "Agent" {
+            } else if tool == "spawn_agent" {
                 agent_child_status_text("Running", 0, None)
             } else {
                 "running".to_string()
@@ -143,7 +143,7 @@ impl TuiApp {
             row.interrupted = false;
             row.user_shell = user_shell;
             row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
-            if tool == "Agent"
+            if tool == "spawn_agent"
                 && let Some(agent_target) = agent_target_from_tool_event(&value)
             {
                 row.agent_target = Some(agent_target);
@@ -157,7 +157,7 @@ impl TuiApp {
                 row.tool_elapsed = None;
             }
             tag_gateway_transcript_row(ui, idx, entry_meta, block);
-            if tool == "Agent" {
+            if tool == "spawn_agent" {
                 ui.remove_duplicate_agent_placeholders_for_tool_value(idx, &value);
             }
             return true;
@@ -327,7 +327,7 @@ impl TuiApp {
         row.tool_elapsed = completed_live_tool_elapsed(row, Some(&value));
         row.tool_started = None;
         row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
-        if tool == "Agent" {
+        if tool == "spawn_agent" {
             if let Some(agent_target) = agent_target_from_tool_event(&value) {
                 row.agent_target = Some(agent_target);
             }
@@ -360,7 +360,7 @@ impl TuiApp {
         if is_write_like_tool(tool) {
             ui.remove_orphan_provisional_tool_intents(tool, Some(idx));
         }
-        if tool == "Agent" {
+        if tool == "spawn_agent" {
             ui.remove_duplicate_agent_placeholders_for_tool_value(idx, &value);
         }
         if block.status != TranscriptBlockStatus::Running

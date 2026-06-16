@@ -32,9 +32,9 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
             Some(serde_json::json!({
                 "agent": {
                     "id": "agent-run-1",
-                    "task_name": "general-task",
-                    "name": "general",
-                    "task": "Fetch the failed articles and comments."
+                    "agent_type": "general",
+                    "task_name": "fetch_failed_articles",
+                    "message": "Fetch the failed articles and comments."
                 }
             })),
         )
@@ -63,12 +63,13 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
             "content": [{
                 "type": "tool_call",
                 "id": "agent-1",
-                "name": "Agent",
+                "name": "spawn_agent",
                 "arguments": {
-                    "name": "general",
-                    "prompt": "Fetch the failed articles and comments."
+                    "agent_type": "general",
+                    "task_name": "fetch_failed_articles",
+                    "message": "Fetch the failed articles and comments."
                 },
-                "arguments_json": "{\"name\":\"general\",\"prompt\":\"Fetch the failed articles and comments.\"}",
+                "arguments_json": "{\"agent_type\":\"general\",\"task_name\":\"fetch_failed_articles\",\"message\":\"Fetch the failed articles and comments.\"}",
                 "content_index": 0,
                 "call_index": 0
             }],
@@ -88,14 +89,11 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
     let agent_rows = ui
         .transcript
         .iter()
-        .filter(|row| row.tool_name.as_deref() == Some("Agent"))
+        .filter(|row| row.tool_name.as_deref() == Some("spawn_agent"))
         .collect::<Vec<_>>();
     assert_eq!(agent_rows.len(), 1);
     let row = agent_rows[0];
-    assert_eq!(
-        row.title,
-        "general(General-purpose subagent for focused coding tasks.)"
-    );
+    assert_eq!(row.title, "general(fetch_failed_articles)");
     assert_eq!(row.agent_target.as_deref(), Some(child.as_str()));
     assert!(row.interrupted);
     assert_eq!(row.text, "interrupted");
@@ -159,7 +157,7 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
         "translate(Translate user message to Chinese)",
         "running",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.tool_started = Some(Instant::now());
     ui.transcript.push(row);
@@ -242,7 +240,7 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
         "translate(Translate user message to Chinese)",
         "running",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.tool_started = Some(Instant::now());
     ui.transcript.push(row);
@@ -336,7 +334,7 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
             "content": [{
                 "type": "tool_call",
                 "id": "call_agent",
-                "name": "Agent",
+                "name": "spawn_agent",
                 "arguments": {
                     "agent": "translate",
                     "task": "translate text"
@@ -373,7 +371,7 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
         "translate(Translate user message to Chinese)",
         "running",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.tool_started = Some(Instant::now());
     ui.transcript.push(row);
@@ -511,7 +509,7 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
         "translate(Translate user message to Chinese)",
         "Running (0 tool uses)",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.full_text = Some("Running (0 tool uses)\nPrompt:\ntranslate text".to_string());
     let row_id = row.id;
@@ -588,7 +586,7 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
         "translate(Translate user message to Chinese)",
         "Running (0 tool uses)",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.full_text = Some("Prompt:\ntranslate text".to_string());
     ui.transcript.push(row);
@@ -644,7 +642,7 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
         "translate(Translate user message to Chinese)",
         "Running (0 tool uses)",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.tool_started = Some(Instant::now());
     ui.transcript.push(row);
@@ -725,7 +723,7 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
         "translate(Translate user message to Chinese)",
         "Running (0 tool uses)",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.tool_started = Some(Instant::now());
     ui.transcript.push(row);
@@ -791,7 +789,7 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
         "translate(Translate user message to Chinese)",
         "Running (0 tool uses)",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.tool_started = Some(Instant::now());
     ui.transcript.push(row);
@@ -864,7 +862,7 @@ pub(crate) fn parent_agent_preview_coalesces_streamed_reasoning_chunks() {
         "translate(Translate user message to Chinese)",
         "Running (0 tool uses)",
     );
-    row.tool_name = Some("Agent".to_string());
+    row.tool_name = Some("spawn_agent".to_string());
     row.agent_target = Some(child.clone());
     row.tool_started = Some(Instant::now());
     ui.transcript.push(row);

@@ -139,7 +139,7 @@ render_tape() {
 check_demo_artifacts() {
   local out_dir="$1"
   local missing=()
-  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-exec-command.png 10-agent-tool-running.png 11-agent-session-running.png 12-agent-parent-completed.png 12-agents-running.png 13-agents-available.png 14-agent-actions.png 15-agent-run-prompt.png 16-clarify-panel.png 17-clarify-other-inline.png 18-clarify-result.png 19-diff-overlay.png 20-inline-edit-diff.png 21-permission-approval.png; do
+  for file in 01-model-picker.png 02-running-thinking.png 03-final-ledger.png 04-shell-mode.png 05-long-markdown-bottom-scroll.png 06-reasoning-only-collapsed.png 07-reasoning-only-bottom-scroll.png 08-visible-write-preamble.png 09-interrupted-exec-command.png 10-agent-tool-running.png 11-agent-session-running.png 12-agent-parent-completed.png 12-agents-running.png 13-agents-available.png 14-agent-actions.png 15-agent-run-prompt.png 16-clarify-panel.png 17-clarify-other-inline.png 18-clarify-result.png 19-diff-overlay.png 20-inline-edit-diff.png 21-permission-approval.png 22-agent-background-handoff.png; do
     if [[ ! -s "$out_dir/$file" ]]; then
       missing+=("$file")
     fi

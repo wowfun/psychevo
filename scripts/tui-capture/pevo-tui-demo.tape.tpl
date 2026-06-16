@@ -136,15 +136,28 @@ Type "/new"
 Enter
 Wait+Screen /Ask pevo/
 Sleep 200 ms
+Type "Subagent background intermediate VHS fixture"
+Enter
+Wait+Screen /translate\(cn_to_en_vhs\)/
+Wait+Screen /translate\(en_to_cn_vhs\)/
+Wait+Screen /Started in background/
+Sleep 300 ms
+Screenshot "22-agent-background-handoff.png"
+Wait+Screen /BACKGROUND_AGENT_FINAL/
+Sleep 200 ms
+Type "/new"
+Enter
+Wait+Screen /Ask pevo/
+Sleep 200 ms
 Type "Subagent foreground VHS fixture"
 Enter
-Wait+Screen /translate\(Translate user message to Chinese\)/
+Wait+Screen /translate\(translate_to_chinese\)/
 Wait+Screen /Open/
 Sleep 300 ms
 Screenshot "10-agent-tool-running.png"
 Ctrl+T
 Enter
-Wait+Screen /Alt\+P/
+Wait+Screen /session:/
 Sleep 300 ms
 Screenshot "11-agent-session-running.png"
 Sleep 5600 ms

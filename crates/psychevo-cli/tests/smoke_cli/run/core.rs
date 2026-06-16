@@ -185,12 +185,12 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
         .expect("parent messages")
         .iter()
         .find(|message| message["role"] == "tool" && message["tool_call_id"] == "call_agent")
-        .expect("Agent tool result");
+        .expect("spawn_agent tool result");
     let parent_tool_content = parent_tool_result["content"].as_str().expect("content");
     let parent_tool_summary: Value =
         serde_json::from_str(parent_tool_content).expect("summary json");
     assert_eq!(parent_tool_summary["agent_name"], "translate");
-    assert_eq!(parent_tool_summary["task"], "Translate greeting");
+    assert_eq!(parent_tool_summary["task_name"], "translate_greeting");
     assert_eq!(parent_tool_summary["status"], "completed");
     assert_eq!(parent_tool_summary["summary"], "child translated");
     assert!(!parent_tool_content.contains("agent_id"));

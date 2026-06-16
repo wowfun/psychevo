@@ -391,7 +391,7 @@ pub(crate) fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
             "view_skill",
             "skill_hub",
             "skill_config",
-            "Agent",
+            "spawn_agent",
             "list_agents",
             "wait_agent",
             "send_message",
