@@ -18,6 +18,8 @@ same command tree.
 - minimal `peval-py serve` workspace initialization for local report state
 - a local `serve` web UI over a saved peval-py workspace, backed by a
   Python-owned state layer
+- read-only peval cell cached analysis and manual cell notes enrichment, plus
+  explicit serve editing of cell-local `notes.md`
 - config-selected English and Simplified Chinese HTML report UI localization
 - translated canonical docs under `docs/i18n/<locale>/...`
 - localized tool README files beside their original README files
@@ -219,6 +221,9 @@ normalizes to `en`, and `zh` normalizes to `zh-CN`. Unsupported locale values
 must fail with a clear config error. Adapter-specific options live under
 `[adapters.<adapter-id>]`. `peval-py` passes each effective adapter's raw option
 table through to that adapter and does not define adapter-specific CLI flags.
+Top-level `analysis_eval_slug = "default"` selects the peval run subtree used
+for read-only cached analysis enrichment. Explicit `-c/--config` files may
+override this key while preserving other workspace TOML values.
 
 JSONL accepts either direct message objects or wrapper objects containing
 `message`, optional `usage`, optional `metadata`, optional `accounting`, and
@@ -358,7 +363,7 @@ writes either JSON or HTML:
 - JSON is a self-contained peval view v18 subset with `schema_version`,
   `includes`, `scope`, `path_selections`, `trajectory`, and
   `trajectory_meta`. Multi-session view reports also include `comparison`;
-  reports with notes also include `annotations`.
+  reports with notes or cached analysis also include `annotations`.
 - JSON v18 removes legacy generated-report data that is no longer consumed by
   the peval-py HTML renderer. Multi-session `comparison` contains only
   `selected_trial_key`, `summary`, and `leaderboard.entries`; it must not emit
@@ -535,6 +540,13 @@ that invocation. The page opens from the latest canonical snapshots and marks
 sources with their latest status. Refresh is explicit from the source manager or
 through source flags on the `serve` command.
 
+In serve UI mode, the selected Trial Notes section shows `Edit notes` when the
+selected Trial maps to a refreshable source with an existing cell-local note and
+`Add notes` when the selected Trial maps to a refreshable source without one.
+The editor only edits the peval cell `notes.md`; CLI and input-table notes
+remain read-only. Snapshot and uploaded non-refreshable sources must not expose
+a save entry point, though their persisted notes still render read-only.
+
 Serve HTTP APIs are same-origin local APIs. The server must not enable CORS.
 Mutating APIs require JSON `POST` requests and must reject non-same-origin
 `Origin` or `Referer` headers. Localhost binding is the only network exposure
@@ -563,6 +575,26 @@ already persisted source keeps the existing status-and-log behavior. `POST
 /api/sources/{source_key}/delete` deletes only peval-py state for that source,
 including its canonical Trial snapshot and refresh-log rows; it never deletes
 the original local file or DB.
+
+`POST /api/sources/{source_key}/notes` accepts JSON
+`{ "markdown": "..." }`, requires the same JSON POST and same-origin checks as
+other mutating APIs, and writes UTF-8 `notes.md` only for refreshable sources.
+The Markdown payload is limited to 1 MiB after UTF-8 encoding. On success, the
+server refreshes that source immediately and returns the standard mutation
+payload `{ sources, report }`. Saving chooses the target as follows:
+
+1. If exactly one existing `notes.md` cell exists for the source task,
+   overwrite that file.
+2. If no notes cell exists and exactly one analysis cell exists, write
+   `notes.md` beside that cell's `analysis.json` or `analysis.md`.
+3. If neither notes nor analysis cells exist, create
+   `<task-root>/peval-py-notes/notes.md` without writing Rust peval cell
+   metadata.
+4. If multiple notes cells exist, or multiple analysis cells exist when no
+   unique notes cell exists, return a JSON error and do not write.
+
+Saving an empty string writes an empty `notes.md`; delete semantics are not part
+of v1.
 
 In serve UI mode, the Leaderboard may add a row-selection checkbox column at
 the start of the existing full column set. Header and row checkboxes control
@@ -594,17 +626,18 @@ Each row shows a compact left-to-right node track where each ATIF step is one
 node. Overview nodes use a neutral visual style and show source initials:
 `S` for system, `U` for user, `A` for agent, and `?` for unknown or unsupported
 sources. Nodes with positive `trajectory_meta.steps[].duration_ms` also render a
-subtle duration heat fill or ring scaled against the slowest timed step in that
-same visible Trial; untimed or zero-duration nodes remain neutral, and selected
-node styling stays stronger than heat styling. Node title and aria text include
-the step duration when available. All rows share a grid width based on the
-largest step count among visible sessions, so nodes at the same step index align
-vertically and shorter trajectories leave empty positions at the end. Clicking a
-Trajectory Overview row selects that Trial. Clicking a node selects that Trial
-and opens a fixed right-side Step details drawer showing the same expanded step
-markup and block content used by the final Steps section. On desktop, the drawer uses a wider
-inspection width than the initial compact rail so longer reasoning, tool, and
-observation content can be read without excessive wrapping. The widened drawer
+subtle, very low-contrast ten-level duration heat background shade scaled against
+the slowest timed step in that same visible Trial; untimed or zero-duration nodes
+remain neutral, and selected node styling stays stronger than heat styling. Node
+title and aria text include the step duration when available. All rows share a
+grid width based on the largest step count among visible sessions, so nodes at
+the same step index align vertically and shorter trajectories leave empty
+positions at the end. Clicking a Trajectory Overview row selects that Trial.
+Clicking a node selects that Trial and opens a fixed right-side Step details
+drawer showing the same expanded step markup and block content used by the
+final Steps section. On desktop, the drawer uses a wider inspection width than
+the initial compact rail so longer reasoning, tool, and observation content can
+be read without excessive wrapping. The widened drawer
 must not obscure the middle report content: when it opens on desktop, the page
 layout reserves the drawer's right-side width and constrains the main workspace
 to the remaining viewport. Its expanded step layout is content-sized: the step
@@ -706,6 +739,40 @@ notes must be escaped before Markdown display and must not execute. Manifest
 index; values with `N=TEXT` reuse the CLI note syntax. Manifest `report_note`
 or `report_notes` values are report-level notes equivalent to `-n 0=TEXT`.
 JSON note fields may be strings or arrays of strings.
+
+When a peval-py workspace root is known, report generation may also read peval
+cell manual notes from
+`<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md`.
+These notes are Trial annotations, not Analysis. `<session-id>` is the
+displayed trajectory session id, and `<agent-id>` is the input `agent_name`
+when provided, otherwise the effective adapter id. A static read accepts the
+note only when exactly one cell directory under the task directory contains
+`notes.md`. Missing, unreadable, invalid UTF-8, oversized, or ambiguous note
+files are silently omitted so ordinary view/export/serve workflows keep
+rendering. Valid cell notes enter `annotations.notes[]` with `trial_key`,
+`source = "cell"`, `label = "notes.md"`, `markdown`, and a
+`source_ref = { kind = "note", label = "notes.md", relative_path = "..." }`
+object. For the same Trial, cell notes render before CLI or input-table notes.
+CLI and input-table notes continue to use `source = "cli"` and labels such as
+`CLI note N`.
+
+When a peval-py workspace root is known, report generation may enrich Trials
+with Rust peval cached analysis from
+`<workspace>/runs/<analysis_eval_slug>/<agent-id>/<task-id>/<cell_key>/analysis.json`
+and `analysis.md`. The default `analysis_eval_slug` is `default`; `<task-id>`
+is the displayed session id; `<agent-id>` is the input `agent_name` when
+provided, otherwise the effective adapter id. The `cell_key` segment is selected
+only when exactly one cell directory under the task directory contains
+`analysis.json` or `analysis.md`. Missing files, malformed JSON, unreadable
+Markdown, or ambiguous cell matches are silently omitted so ordinary
+view/export/serve workflows keep rendering. Valid cached analysis is exposed as
+`annotations.analysis[]` entries with `trial_key`, `status = "cached"`,
+`relative_path`, optional `summary` from the analysis JSON top-level `summary`
+field, optional `md_report` from `analysis.md`, and optional `relative_paths`
+with `json` and `md` entries. `relative_path` is retained for compatibility and
+points to JSON when present, otherwise Markdown. Absolute paths are not exposed,
+ATIF trajectory data is not changed, and peval-py never executes analysis agents
+or writes analysis cache.
 
 ## Redaction
 

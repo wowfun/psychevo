@@ -336,17 +336,19 @@ Windows drive path 和 UNC path 会被保留，不会错误拼到 workspace root
 Adapter 控件是每个表单 action row 里的紧凑下拉单选框，放在 add/upload 操作旁边，
 默认是 `auto`，也就是沿用 CLI 的推断/默认 adapter 规则。导入失败会显示后端错误，
 并且不会保存为 source。Source 可以 archive 以便恢复，也可以只从 peval-py state 中
-delete；delete 不会删除原始文件或 database。Source 导入表单和 Timeline diagnostics
-section 使用融入报告主体的透明 shell，输入框和菜单仍保持可读的实底。
+delete；delete 不会删除原始文件或 database。对于可刷新的 source，selected Trial 的
+Notes section 可以编辑匹配 peval cell 下的 `notes.md`；snapshot 上传来源保持只读。
+Source 导入表单和 Timeline diagnostics section 使用融入报告主体的透明 shell，输入框和菜单仍保持可读的实底。
 
 Leaderboard 在 web UI 中可以增加用于导出选择的行复选框，并在 section header 右侧
 提供一个 `Export` 菜单，包含 Table、JSON Report 和 HTML Report。点击行仍然选择
 Trial；点击复选框只影响导出范围。导出时，如果当前可见行里有已勾选行，就导出
 这些行；否则导出当前筛选和排序后的可见行。JSON 和 HTML 导出与 table 导出使用
 同一行范围。点击 Export 或 table filter 菜单外部区域会自动收起菜单。Trajectory
-Overview 的长节点序列会换行显示；有用时的节点会按当前 Trial 内最慢 step 进行热度
-填充，便于快速发现慢节点且不增加文字标签。Timeline Waterfall 和 Timeline Detail
-Table section 可以折叠，点击 user/system marker 或计时行会打开对应的 Step 详情抽屉。
+Overview 的长节点序列会换行显示；有用时的节点会按当前 Trial 内最慢 step 以更低
+对比度 10 档背景颜色深浅表达相对耗时，便于快速发现慢节点且不增加文字标签。
+Timeline Waterfall 和 Timeline Detail Table section 可以折叠，点击 user/system
+marker 或计时行会打开对应的 Step 详情抽屉。
 
 对于 SQLite DB source，modal 内提供 Inspect 流程。输入或粘贴单个 DB 路径，可选
 adapter，然后点击 Inspect DB。没有显式 adapter 时，`serve` 使用与 `view tr -d`
@@ -354,6 +356,45 @@ adapter，然后点击 Inspect DB。没有显式 adapter 时，`serve` 使用与
 推断为对应 adapter。如果路径无法推断或同时匹配多个 adapter，需要手动选择
 adapter 后重新 inspect。勾选的 sessions 会保存为独立、可刷新的 sources，因此每个
 session 都可以单独 archive、delete 或 refresh。
+
+## Cached Analysis 与 Cell Notes
+
+当 peval-py 能确定 workspace root 时，`view tr` 和 `serve` refresh 会只读地尝试
+读取 peval cell 的 cached analysis，不会修改原始 trajectory。读取路径为：
+
+```text
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.md
+```
+
+`analysis_eval_slug` 默认为 `default`。`<session-id>` 使用报告中的 session id；
+`<agent-id>` 优先使用输入侧 `agent_name`，没有时使用 effective adapter id。
+只有匹配 session 目录下恰好有一个 cell 目录包含 `analysis.json` 或 `analysis.md`
+时才会采用；同一个 cell 目录里两者同时存在时，会合并 JSON summary 和 Markdown
+report。缺失、JSON 格式错误、Markdown 无法读取或多个 cell 同时匹配时都会静默省略
+对应内容。
+
+JSON report 会把匹配结果写入 `annotations.analysis[]`，包含兼容旧消费者的
+`relative_path`、可选 JSON 顶层 `summary`、可选 Markdown `md_report`，以及按格式
+区分的 `relative_paths`。HTML 的 selected Trial 区域仅在存在 cached analysis 时
+显示 Analysis section。`serve` refresh 会把 enrichment 写入持久化 report
+snapshot，所以外部 `analysis.json` 或 `analysis.md` 改动后需要 Refresh 才会更新页面。
+
+peval-py 也会从同一个 task 目录树读取 peval cell manual notes：
+
+```text
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md
+```
+
+`notes.md` 是 Trial note，不属于 Analysis。只有恰好一个 cell 目录包含
+`notes.md` 时才会采用，并写入 `annotations.notes[]`：`source = "cell"`、label 为
+`notes.md`、包含 Markdown 正文和相对 `source_ref`。Cell notes 会排在同一个 Trial
+的 CLI 或 input-table notes 前面。
+
+在 `serve` 中，`Edit notes` / `Add notes` 会为可刷新 source 写入这个 cell-local
+`notes.md`，并立即刷新该 source snapshot。如果当前没有 note cell，peval-py 会写到
+唯一 analysis cell 同级；如果也没有 cell，则创建 `peval-py-notes/notes.md`。多个
+note 或 analysis cell 同时匹配时会失败且不写入。
 
 ## 本地化 HTML 报告
 
@@ -370,6 +411,7 @@ locale = "zh-CN"
 ```toml
 state_db = "state.db"
 locale = "zh-CN"
+analysis_eval_slug = "default"
 ```
 
 显式 `-c` 文件会 overlay `peval-py.toml`；`-c` 中没有写到的 key 会保留 workspace

@@ -355,9 +355,11 @@ WSL-style path is used. Adapter controls are compact dropdowns in each form's
 action row next to the add/upload action and default to `auto`, which uses the
 same inference/default adapter rules as the CLI. Failed imports show the server
 error and are not saved as sources. Sources can be archived for later restore or
-deleted from peval-py state without deleting the original file or database.
-Source import forms and Timeline diagnostic sections use transparent
-report-integrated shells, while inputs and menus keep solid readable surfaces.
+deleted from peval-py state without deleting the original file or database. For
+refreshable sources, the selected Trial Notes section can edit the matching
+peval cell `notes.md`; snapshot uploads remain read-only. Source import forms
+and Timeline diagnostic sections use transparent report-integrated shells,
+while inputs and menus keep solid readable surfaces.
 
 In the Leaderboard, web UI mode may add row checkboxes for export selection and
 one `Export` menu with Table, JSON Report, and HTML Report choices. Row clicks
@@ -366,10 +368,11 @@ visible checked rows when any currently visible row is checked, otherwise they
 use the current filtered and sorted visible rows. JSON and HTML exports follow
 the same row scope as table exports. Export and table filter menus close when
 clicking outside them. Long Trajectory Overview rows wrap nodes onto additional
-lines, and timed nodes use duration heat relative to the slowest step in that
-Trial so slow steps stand out without adding text labels. Timeline Waterfall and
-Timeline Detail Table sections are collapsible, and clicking user/system markers
-or timed rows opens the corresponding Step details drawer.
+lines, and timed nodes use very low-contrast ten-level background shade depth
+relative to the slowest step in that Trial so slow steps stand out without
+adding text labels. Timeline Waterfall and Timeline Detail Table sections are
+collapsible, and clicking user/system markers or timed rows opens the
+corresponding Step details drawer.
 
 For SQLite DB sources, the modal includes an Inspect flow. Enter or paste one
 DB path, optionally choose an adapter, and click Inspect DB. Without an explicit
@@ -378,6 +381,49 @@ paths under `.hermes/`, `.psychevo/`, or `.opencode/` infer those adapters. If
 the path cannot be inferred or matches multiple adapters, choose the adapter and
 inspect again. Selected sessions are saved as independent refreshable sources,
 so each can be archived, deleted, or refreshed on its own.
+
+## Cached Analysis And Cell Notes
+
+When a peval-py workspace root is known, `view tr` and `serve` refresh can read
+cached peval cell analysis without modifying the source trajectory. The lookup
+is read-only and uses:
+
+```text
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.md
+```
+
+`analysis_eval_slug` defaults to `default`. `<session-id>` is the rendered
+session id. `<agent-id>` is the input `agent_name` when available, otherwise
+the effective adapter id. peval-py only uses cached analysis when exactly one
+cell directory under the matching session directory contains `analysis.json` or
+`analysis.md`. If both files exist in that one cell directory, JSON summary and
+Markdown report are merged. Missing files, malformed JSON, unreadable Markdown,
+or ambiguous cell matches are silently ignored.
+
+The JSON report stores matching analysis under `annotations.analysis[]` with
+compatible `relative_path`, optional top-level JSON `summary`, optional Markdown
+`md_report`, and per-format `relative_paths`. The HTML selected Trial area
+shows an Analysis section only when cached analysis exists. `serve` persists
+the enriched report snapshot during refresh, so changes to `analysis.json` or
+`analysis.md` need Refresh before the browser view updates.
+
+peval-py also reads peval cell manual notes from the same task tree:
+
+```text
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md
+```
+
+`notes.md` is a Trial note, not analysis. It is accepted only when exactly one
+cell directory with `notes.md` matches the task, then appears in
+`annotations.notes[]` with `source = "cell"`, label `notes.md`, Markdown text,
+and a relative `source_ref`. Cell notes render before CLI or input-table notes.
+
+In `serve`, `Edit notes` or `Add notes` writes that cell-local `notes.md` for a
+refreshable source and immediately refreshes the source snapshot. If no note
+cell exists, peval-py writes beside a unique analysis cell, or creates
+`peval-py-notes/notes.md` when no cell exists. Ambiguous note or analysis cells
+fail without writing.
 
 ## Localized HTML Reports
 
@@ -394,6 +440,7 @@ For workspace-local defaults, put top-level locale in `peval-py.toml`:
 ```toml
 state_db = "state.db"
 locale = "zh-CN"
+analysis_eval_slug = "default"
 ```
 
 An explicit `-c` file overlays `peval-py.toml`; keys omitted from `-c` keep the

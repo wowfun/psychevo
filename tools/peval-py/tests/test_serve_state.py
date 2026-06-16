@@ -101,7 +101,25 @@ class PevalPyServeStateTests(unittest.TestCase):
             root = peval_py_workspace(Path(tmp))
             source = root / "common_session.jsonl"
             shutil.copy(FIXTURES / "common_session.jsonl", source)
-            config = ToolConfig(adapter="opencode")
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            analysis_path = write_cached_analysis(
+                root,
+                agent_id="opencode",
+                session_id="common_session",
+                summary="Initial cached analysis.",
+            )
+            markdown_path = write_cached_markdown(
+                root,
+                agent_id="opencode",
+                session_id="common_session",
+                markdown="Initial cached markdown.",
+            )
+            note_path = write_cached_note(
+                root,
+                agent_id="opencode",
+                session_id="common_session",
+                markdown="Initial cell note.",
+            )
             store = open_workspace_state(str(root))
             try:
                 args = serve_args(path=[str(source)])
@@ -131,11 +149,44 @@ class PevalPyServeStateTests(unittest.TestCase):
                     all(name.startswith("peval_py_") or name == "sqlite_sequence" for name in table_names)
                 )
                 self.assertEqual(len(store.source_payload()), 1)
-                self.assertEqual(len(store.active_report()["trajectory"]), 1)
+                active_report = store.active_report()
+                self.assertEqual(len(active_report["trajectory"]), 1)
+                self.assertEqual(
+                    active_report["annotations"]["analysis"][0]["summary"],
+                    "Initial cached analysis.",
+                )
+                self.assertEqual(
+                    active_report["annotations"]["analysis"][0]["md_report"],
+                    "Initial cached markdown.",
+                )
+                self.assertEqual(
+                    active_report["annotations"]["notes"][0]["markdown"],
+                    "Initial cell note.",
+                )
+                self.assertEqual(
+                    active_report["annotations"]["notes"][0]["source_ref"]["relative_path"],
+                    note_path.relative_to(root).as_posix(),
+                )
 
                 duplicate_keys = store.upsert_loaded_sources(loaded, config)
                 self.assertEqual(duplicate_keys, keys)
                 self.assertEqual(len(store.source_payload()), 1)
+
+                analysis_path.write_text(
+                    json.dumps({"summary": "Updated cached analysis.", "checks": {}}),
+                    encoding="utf-8",
+                )
+                markdown_path.write_text("Updated cached markdown.", encoding="utf-8")
+                note_path.write_text("Updated cell note.", encoding="utf-8")
+                store.refresh_sources(keys, config)
+                refreshed_report = store.active_report()
+                refreshed_analysis = refreshed_report["annotations"]["analysis"][0]
+                self.assertEqual(refreshed_analysis["summary"], "Updated cached analysis.")
+                self.assertEqual(refreshed_analysis["md_report"], "Updated cached markdown.")
+                self.assertEqual(
+                    refreshed_report["annotations"]["notes"][0]["markdown"],
+                    "Updated cell note.",
+                )
 
                 store.set_source_active(keys[0], False)
                 self.assertEqual(store.active_report()["trajectory"], [])
@@ -344,6 +395,220 @@ class PevalPyServeStateTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+                store.close()
+
+    def test_http_source_notes_save_refreshes_snapshot_and_validates_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source = root / "common_session.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source)
+            note_path = write_cached_note(
+                root,
+                agent_id="opencode",
+                session_id="common_session",
+                markdown="Initial HTTP note.",
+            )
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {"path": "common_session.jsonl", "adapter": "opencode"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                source_key = body["sources"][0]["source_key"]
+                self.assertEqual(
+                    body["report"]["annotations"]["notes"][0]["markdown"],
+                    "Initial HTTP note.",
+                )
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_key}/notes",
+                    {"markdown": "Updated HTTP note."},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(note_path.read_text(encoding="utf-8"), "Updated HTTP note.")
+                self.assertEqual(
+                    body["report"]["annotations"]["notes"][0]["markdown"],
+                    "Updated HTTP note.",
+                )
+
+                note_path.unlink()
+                analysis_path = write_cached_markdown(
+                    root,
+                    agent_id="opencode",
+                    session_id="common_session",
+                    markdown="Analysis-only cell.",
+                )
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_key}/notes",
+                    {"markdown": "Saved beside analysis."},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(
+                    (analysis_path.parent / "notes.md").read_text(encoding="utf-8"),
+                    "Saved beside analysis.",
+                )
+                self.assertEqual(
+                    body["report"]["annotations"]["notes"][0]["markdown"],
+                    "Saved beside analysis.",
+                )
+
+                status, _, rejected = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_key}/notes",
+                    {"markdown": "bad origin"},
+                    origin="http://example.test",
+                )
+                self.assertEqual(status, 403)
+                self.assertIn("same-origin", rejected["error"])
+
+                status, _, too_large = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_key}/notes",
+                    {"markdown": "x" * (1024 * 1024 + 1)},
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("1 MiB", too_large["error"])
+
+                snapshot_keys = store.ingest_upload(
+                    "saved-report.json",
+                    json.dumps(sample_report(config)),
+                    config,
+                )
+                status, _, snapshot_error = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{snapshot_keys[0]}/notes",
+                    {"markdown": "snapshot note"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("refreshable", snapshot_error["error"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source = root / "common_session.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source)
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            store = open_workspace_state(str(root))
+            try:
+                args = serve_args(path=[str(source)])
+                loaded = load_serve_inputs(
+                    args,
+                    parse_adapter_assignments(["opencode"], config.adapter),
+                )
+                keys = store.upsert_loaded_sources(loaded, config)
+                store.refresh_sources(keys, config)
+                store.save_source_notes(keys[0], "", config)
+                created = (
+                    root
+                    / "runs"
+                    / "default"
+                    / "opencode"
+                    / "common_session"
+                    / "peval-py-notes"
+                    / "notes.md"
+                )
+                self.assertTrue(created.is_file())
+                self.assertEqual(created.read_text(encoding="utf-8"), "")
+                self.assertEqual(
+                    store.active_report()["annotations"]["notes"][0]["source_ref"]["relative_path"],
+                    created.relative_to(root).as_posix(),
+                )
+            finally:
+                store.close()
+
+    def test_source_notes_save_rejects_ambiguous_cells(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source = root / "common_session.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source)
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            write_cached_note(
+                root,
+                agent_id="opencode",
+                session_id="common_session",
+                cell_key="one",
+                markdown="one",
+            )
+            write_cached_note(
+                root,
+                agent_id="opencode",
+                session_id="common_session",
+                cell_key="two",
+                markdown="two",
+            )
+            store = open_workspace_state(str(root))
+            try:
+                args = serve_args(path=[str(source)])
+                loaded = load_serve_inputs(
+                    args,
+                    parse_adapter_assignments(["opencode"], config.adapter),
+                )
+                keys = store.upsert_loaded_sources(loaded, config)
+                store.refresh_sources(keys, config)
+                with self.assertRaisesRegex(ValueError, "multiple notes cells"):
+                    store.save_source_notes(keys[0], "cannot pick", config)
+            finally:
+                store.close()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source = root / "common_session.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source)
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            write_cached_markdown(
+                root,
+                agent_id="opencode",
+                session_id="common_session",
+                cell_key="one",
+                markdown="one",
+            )
+            write_cached_markdown(
+                root,
+                agent_id="opencode",
+                session_id="common_session",
+                cell_key="two",
+                markdown="two",
+            )
+            store = open_workspace_state(str(root))
+            try:
+                args = serve_args(path=[str(source)])
+                loaded = load_serve_inputs(
+                    args,
+                    parse_adapter_assignments(["opencode"], config.adapter),
+                )
+                keys = store.upsert_loaded_sources(loaded, config)
+                store.refresh_sources(keys, config)
+                with self.assertRaisesRegex(ValueError, "multiple analysis cells"):
+                    store.save_source_notes(keys[0], "cannot pick", config)
+            finally:
                 store.close()
 
     def test_source_path_values_preserve_windows_paths_and_wsl_fallback(self) -> None:
@@ -680,6 +945,54 @@ def peval_py_workspace(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     (root / "peval-py.toml").write_text('state_db = "state.db"\n', encoding="utf-8")
     return root
+
+
+def write_cached_analysis(
+    root: Path,
+    *,
+    agent_id: str,
+    session_id: str,
+    summary: str,
+    eval_slug: str = "default",
+    cell_key: str = "abcdef0123456789",
+) -> Path:
+    path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"summary": summary, "checks": {}}),
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_cached_markdown(
+    root: Path,
+    *,
+    agent_id: str,
+    session_id: str,
+    markdown: str,
+    eval_slug: str = "default",
+    cell_key: str = "abcdef0123456789",
+) -> Path:
+    path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown, encoding="utf-8")
+    return path
+
+
+def write_cached_note(
+    root: Path,
+    *,
+    agent_id: str,
+    session_id: str,
+    markdown: str,
+    eval_slug: str = "default",
+    cell_key: str = "abcdef0123456789",
+) -> Path:
+    path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "notes.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown, encoding="utf-8")
+    return path
 
 
 def serve_args(**overrides):

@@ -28,7 +28,9 @@ class PevalPyConfigAdapterTests(unittest.TestCase):
             old_cwd = Path.cwd()
             try:
                 os.chdir(tmp)
-                self.assertEqual(load_config(None).locale, "en")
+                default_config = load_config(None)
+                self.assertEqual(default_config.locale, "en")
+                self.assertEqual(default_config.analysis_eval_slug, "default")
             finally:
                 os.chdir(old_cwd)
             for value, expected in [
@@ -62,21 +64,30 @@ class PevalPyConfigAdapterTests(unittest.TestCase):
             child = root / "nested" / "child"
             child.mkdir(parents=True)
             root.joinpath("peval-py.toml").write_text(
-                'state_db = "state.db"\nlocale = "zh-CN"\n',
+                'state_db = "state.db"\nlocale = "zh-CN"\nanalysis_eval_slug = "custom-eval"\n',
                 encoding="utf-8",
             )
             explicit = root / "explicit.toml"
             explicit.write_text("[defaults]\nadapter = \"opencode\"\n", encoding="utf-8")
             explicit_locale = root / "explicit-locale.toml"
             explicit_locale.write_text("[defaults]\nlocale = \"en\"\n", encoding="utf-8")
+            explicit_analysis = root / "explicit-analysis.toml"
+            explicit_analysis.write_text('analysis_eval_slug = "override-eval"\n', encoding="utf-8")
             old_cwd = Path.cwd()
             try:
                 os.chdir(child)
-                self.assertEqual(load_config(None).locale, "zh-CN")
+                discovered = load_config(None)
+                self.assertEqual(discovered.locale, "zh-CN")
+                self.assertEqual(discovered.analysis_eval_slug, "custom-eval")
+                self.assertEqual(discovered.workspace_root, str(root.resolve()))
                 overlaid = load_config(str(explicit))
                 self.assertEqual(overlaid.adapter, "opencode")
                 self.assertEqual(overlaid.locale, "zh-CN")
+                self.assertEqual(overlaid.analysis_eval_slug, "custom-eval")
                 self.assertEqual(load_config(str(explicit_locale)).locale, "en")
+                analysis_overlaid = load_config(str(explicit_analysis))
+                self.assertEqual(analysis_overlaid.locale, "zh-CN")
+                self.assertEqual(analysis_overlaid.analysis_eval_slug, "override-eval")
             finally:
                 os.chdir(old_cwd)
 

@@ -26,6 +26,8 @@ class DbMapping:
 class ToolConfig:
     adapter: str = "psychevo"
     locale: str = "en"
+    workspace_root: str | None = None
+    analysis_eval_slug: str = "default"
     agent_name: str | None = None
     agent_version: str = "0.1.0"
     model: str | None = None
@@ -45,6 +47,7 @@ def load_config(path: str | None, *, workspace_root: str | None = None) -> ToolC
     workspace_config = discover_peval_py_config(workspace_root)
     if workspace_config is not None:
         data = tomllib.loads(workspace_config.read_text(encoding="utf-8"))
+        config = replace(config, workspace_root=str(workspace_config.parent))
         config = apply_toml_config(config, data, top_level_locale=True)
     if path:
         data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
@@ -74,6 +77,11 @@ def apply_toml_config(
 ) -> ToolConfig:
     if top_level_locale and "locale" in data:
         config = replace(config, locale=normalize_locale(data["locale"]))
+    if "analysis_eval_slug" in data:
+        config = replace(
+            config,
+            analysis_eval_slug=_safe_path_segment(data["analysis_eval_slug"]),
+        )
     defaults = data.get("defaults", {})
     if defaults:
         if not isinstance(defaults, dict):
@@ -218,6 +226,13 @@ def _safe_identifier(value: object) -> str:
     text = str(value)
     if not IDENTIFIER_RE.match(text):
         raise ValueError(f"unsafe SQL identifier: {text}")
+    return text
+
+
+def _safe_path_segment(value: object) -> str:
+    text = str(value).strip()
+    if not text or text in {".", ".."} or "/" in text or "\\" in text:
+        raise ValueError(f"unsafe path segment: {text}")
     return text
 
 

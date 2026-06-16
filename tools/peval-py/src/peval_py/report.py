@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from peval_py.analysis import cached_analysis_report, cached_note_report
 from peval_py.adapters.base import (
     ConversionResult,
     ObservationMeta,
@@ -28,6 +29,7 @@ class ReportSession:
     input_path: str | None = None
     session_hint: str | None = None
     adapter_id: str | None = None
+    analysis_agent_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -82,7 +84,12 @@ def build_multi_report(
     if multi:
         includes.append("comparison")
         report["comparison"] = comparison_report(prepared)
-    annotations = annotations_report(notes, metas)
+    annotations = annotations_report(
+        notes,
+        metas,
+        cell_note_reports(config, prepared),
+        analysis_reports(config, prepared),
+    )
     if annotations:
         includes.append("annotations")
         report["annotations"] = annotations
@@ -94,6 +101,7 @@ def build_report_from_snapshots(
     metas: list[dict[str, Any]],
     *,
     input_label: str = "serve",
+    source_reports: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if len(trajectories) != len(metas):
         raise ValueError("trajectory and meta snapshot counts differ")
@@ -142,6 +150,13 @@ def build_report_from_snapshots(
                 )
             ]
         )
+    notes = note_reports_from_snapshots(source_reports or [], metas)
+    analyses = analysis_reports_from_snapshots(source_reports or [], metas)
+    if notes or analyses:
+        includes.append("annotations")
+        report["annotations"] = {"report_notes": [], "notes": notes}
+        if analyses:
+            report["annotations"]["analysis"] = analyses
     return report
 
 
@@ -211,6 +226,7 @@ def prepare_session_report(
         "index": index,
         "input_label": session.input_label,
         "input_path": session.input_path,
+        "analysis_agent_id": session.analysis_agent_id or adapter_id,
         "trajectory": trajectory,
         "meta": meta,
     }
@@ -307,13 +323,26 @@ def comparison_row(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def annotations_report(notes: list[NoteInput], metas: list[dict[str, Any]]) -> dict[str, Any] | None:
-    if not notes:
+def annotations_report(
+    notes: list[NoteInput],
+    metas: list[dict[str, Any]],
+    cell_notes: list[dict[str, Any]] | None = None,
+    analyses: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    cell_notes = cell_notes or []
+    analyses = analyses or []
+    if not notes and not cell_notes and not analyses:
         return None
     report_notes: list[dict[str, Any]] = []
-    trial_notes: list[dict[str, Any]] = []
+    cli_notes_by_trial: dict[str, list[dict[str, Any]]] = {}
+    cell_notes_by_trial: dict[str, list[dict[str, Any]]] = {}
     report_count = 0
     trial_counts: dict[str, int] = {}
+    for note in cell_notes:
+        trial_key = str(note.get("trial_key") or "")
+        if not trial_key:
+            continue
+        cell_notes_by_trial.setdefault(trial_key, []).append(deepcopy(note))
     for note in notes:
         if note.index == 0:
             report_count += 1
@@ -324,7 +353,7 @@ def annotations_report(notes: list[NoteInput], metas: list[dict[str, Any]]) -> d
         meta = metas[note.index - 1]
         trial_key = str(meta["trial_key"])
         trial_counts[trial_key] = trial_counts.get(trial_key, 0) + 1
-        trial_notes.append(
+        cli_notes_by_trial.setdefault(trial_key, []).append(
             {
                 "trial_key": trial_key,
                 "source": "cli",
@@ -332,7 +361,105 @@ def annotations_report(notes: list[NoteInput], metas: list[dict[str, Any]]) -> d
                 "markdown": note.markdown,
             }
         )
-    return {"report_notes": report_notes, "notes": trial_notes}
+    trial_notes: list[dict[str, Any]] = []
+    for meta in metas:
+        trial_key = str(meta["trial_key"])
+        trial_notes.extend(cell_notes_by_trial.get(trial_key, []))
+        trial_notes.extend(cli_notes_by_trial.get(trial_key, []))
+    annotations: dict[str, Any] = {"report_notes": report_notes, "notes": trial_notes}
+    if analyses:
+        annotations["analysis"] = analyses
+    return annotations
+
+
+def analysis_reports(
+    config: ToolConfig,
+    prepared: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    for item in prepared:
+        meta = item["meta"]
+        trajectory = item["trajectory"]
+        report = cached_analysis_report(
+            workspace_root=config.workspace_root,
+            eval_slug=config.analysis_eval_slug,
+            agent_id=item.get("analysis_agent_id"),
+            session_id=trajectory.get("session_id"),
+            trial_key=str(meta.get("trial_key") or ""),
+        )
+        if report is not None:
+            reports.append(report)
+    return reports
+
+
+def cell_note_reports(
+    config: ToolConfig,
+    prepared: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    for item in prepared:
+        meta = item["meta"]
+        trajectory = item["trajectory"]
+        report = cached_note_report(
+            workspace_root=config.workspace_root,
+            eval_slug=config.analysis_eval_slug,
+            agent_id=item.get("analysis_agent_id"),
+            session_id=trajectory.get("session_id"),
+            trial_key=str(meta.get("trial_key") or ""),
+        )
+        if report is not None:
+            reports.append(report)
+    return reports
+
+
+def note_reports_from_snapshots(
+    source_reports: list[dict[str, Any]],
+    metas: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    for index, source_report in enumerate(source_reports):
+        if index >= len(metas) or not isinstance(source_report, dict):
+            continue
+        annotations = source_report.get("annotations")
+        if not isinstance(annotations, dict):
+            continue
+        for item in annotations.get("notes") or []:
+            if not isinstance(item, dict) or not isinstance(item.get("markdown"), str):
+                continue
+            remapped = {
+                key: deepcopy(value)
+                for key, value in item.items()
+                if key in {"source", "label", "markdown", "source_ref"}
+            }
+            remapped["trial_key"] = str(metas[index].get("trial_key") or "")
+            reports.append(remapped)
+    return reports
+
+
+def analysis_reports_from_snapshots(
+    source_reports: list[dict[str, Any]],
+    metas: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    for index, source_report in enumerate(source_reports):
+        if index >= len(metas) or not isinstance(source_report, dict):
+            continue
+        annotations = source_report.get("annotations")
+        if not isinstance(annotations, dict):
+            continue
+        for item in annotations.get("analysis") or []:
+            if not isinstance(item, dict):
+                continue
+            remapped = {
+                key: value
+                for key, value in item.items()
+                if key in {"status", "relative_path", "summary", "md_report", "relative_paths"}
+            }
+            if remapped.get("status") != "cached" or not remapped.get("relative_path"):
+                continue
+            remapped["trial_key"] = str(metas[index].get("trial_key") or "")
+            reports.append(remapped)
+    return reports
 
 
 def trial_active_duration_ms(

@@ -21,6 +21,8 @@ from peval_py.adapters.base import ConversionResult, StepMeta
 from peval_py.config import ToolConfig, apply_overrides, config_for_adapter, load_config
 from peval_py.html import load_asset_text, render_html, render_serve_html
 from peval_py.input_table import read_input_table
+from peval_py.inputs import LoadedInputs, LoadedSession
+from peval_py.pipeline import build_report_from_loaded_inputs
 from peval_py.report import NoteInput, ReportSession, build_multi_report, build_report
 from peval_py.sources import (
     ACCOUNTING_COLUMNS,

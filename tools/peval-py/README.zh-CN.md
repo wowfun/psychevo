@@ -79,6 +79,16 @@ Nuitka 也是一种选择，适合想做 compiled-Python 构建并且本机有 C
 agent/tool work time。已保留 session 中较长的空闲间隔会单独保存在
 `wall_duration_ms` 字段中。
 
+当 peval-py 能确定 workspace root 时，报告还会尝试读取 peval cell cached
+analysis：`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json`
+和 `analysis.md`。默认 slug 是 `default`；匹配到的 summary 和 Markdown report 会
+显示在 selected Trial 的 Analysis section，并写入 JSON `annotations.analysis[]`。
+
+同一个 task 目录树也可以提供 manual Trial notes：
+`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md`。这些内容会写入
+JSON `annotations.notes[]`，并排在 CLI/table notes 前面。在 `peval-py serve` 中，
+可刷新的 source 可以编辑或添加这个 cell-local `notes.md`；snapshot 上传来源保持只读。
+
 CSV 示例：
 
 ```csv

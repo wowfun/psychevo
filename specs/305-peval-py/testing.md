@@ -89,6 +89,9 @@ Coverage must verify:
   aliases, reads top-level `locale` from discovered `peval-py.toml`, overlays
   explicit `-c/--config` without resetting unspecified workspace values, and
   rejects unsupported values with a clear config error.
+- analysis config defaults `analysis_eval_slug` to `default`, reads the top-level
+  key from discovered `peval-py.toml`, and allows explicit `-c/--config` to
+  override only that key without resetting other workspace values.
 - malformed JSONL lines fail with a clear line-number diagnostic.
 - ATIF step ids are sequential and tool observations link to source tool calls.
 - final metrics aggregate available usage, accounting, turn, tool-call, and
@@ -147,6 +150,22 @@ Coverage must verify:
 - `-n/--note 0=TEXT` creates report-level notes, `-n/--note N=TEXT` attaches
   to the one-based session index, repeated notes preserve CLI order, and
   out-of-range indexes fail clearly.
+- cached analysis enrichment reads exactly one cell directory matching
+  `runs/<eval-slug>/<agent-id>/<session-id>/*/analysis.{json,md}`, prefers
+  `agent_name` over adapter id for the path, writes `annotations.analysis[]`
+  with cached status, compatible `relative_path`, optional `summary`,
+  optional `md_report`, and per-format `relative_paths`, and silently omits
+  missing or ambiguous cell matches while keeping valid Markdown when sibling
+  JSON is malformed.
+- cell-local peval manual notes read exactly one
+  `runs/<eval-slug>/<agent-id>/<session-id>/*/notes.md` cell, prefer
+  `agent_name` over adapter id for the path, write `annotations.notes[]` with
+  `source = "cell"`, `label = "notes.md"`, Markdown body, and a note
+  `source_ref.relative_path`, render before CLI/table Trial notes, stay
+  separate from `annotations.analysis[]`, and silently omit missing or
+  ambiguous note cells.
+- report snapshot aggregation preserves and remaps both cached analysis and
+  cell-local notes when serve composes active source snapshots.
 - comparison JSON contains one canonical `leaderboard.entries` row list, omits
   legacy duplicate `session_heatmap.rows` and `session_table.rows`, and does not
   emit benchmark, task, task-set, task-family, matrix task-axis, row `selected`,
@@ -170,6 +189,11 @@ Coverage must verify:
 - serve UI source manager renders a DB Inspect control, adapter single-choice
   controls defaulting to `auto`, session multi-select table, select-all-visible
   control, and add-selected action only in serve mode.
+- serve UI selected Trial Notes section renders Edit/Add notes controls only in
+  serve mode for refreshable sources, saves through the source-specific notes
+  endpoint, rerenders from the returned mutation payload, keeps CLI/table notes
+  read-only, hides save controls for snapshot sources, and escapes raw HTML in
+  Markdown notes.
 - serve HTTP exposes `POST /api/db-sessions` for local DB inspection. Tests cover
   `.hermes`, `.psychevo`, and `.opencode` path-token adapter inference,
   explicit adapter retry after failed inference, ambiguous path errors,
@@ -191,6 +215,13 @@ Coverage must verify:
   removes only peval-py state rows for the source, keeps source files untouched,
   returns clear errors for unknown sources, and is covered by the same-origin
   mutating API checks.
+- serve HTTP exposes `POST /api/sources/{source_key}/notes`; tests verify it
+  rejects snapshots and unknown sources, enforces the 1 MiB Markdown limit and
+  same-origin JSON POST rules, overwrites an existing unique notes cell, saves
+  beside a unique analysis cell when no notes cell exists, creates
+  `peval-py-notes/notes.md` when no cell exists, returns a clear error for
+  ambiguous note or analysis cells, refreshes the source snapshot immediately,
+  and returns the standard `{ sources, report }` mutation payload.
 - serve UI row-selection state is independent from selected-Trial state:
   checkbox clicks stop row selection, row clicks still update the selected
   Trial, and Trajectory Overview rows keep following filtered and sorted
@@ -221,9 +252,10 @@ Coverage must verify:
   Leaderboard row, preserving the same row count and order, aligns step nodes by
   the largest visible step count, renders neutral lettered nodes for `S`
   system, `U` user, `A` agent, and `?` unknown roles, renders positive step
-  durations as per-Trial heat on nodes while leaving untimed or zero-duration
-  nodes neutral, includes duration text in node title/aria labels, and row/node
-  clicks update the selected Trial panel.
+  durations as very low-contrast ten-level per-Trial background-shade heat
+  classes on nodes while leaving untimed or zero-duration nodes neutral, includes
+  duration text in node title/aria labels, and row/node clicks update the
+  selected Trial panel.
 - Clicking a Trajectory Overview node opens a Step details drawer that reuses
   the final Steps section's expanded step markup, supports close and Escape,
   closes when the user clicks blank page space outside the drawer, swaps content
@@ -324,7 +356,8 @@ Coverage must verify:
   root override without requiring `peval.toml`, `<workspace>/peval-py.toml` defaults,
   `<workspace>/state.db` creation, `peval_py_*` migrations, stable source keys,
   source update instead of duplicate append, active/archive lifecycle, latest
-  canonical Trial snapshots, refresh-log rows, and no non-peval-py table writes.
+  canonical Trial snapshots including refreshed cached analysis JSON/Markdown
+  and cell-local notes, refresh-log rows, and no non-peval-py table writes.
 - CLI smoke tests cover `init --root`, `init --root --json`, `serve -p`,
   `serve -d`, `serve -i`, persistent save-and-refresh behavior, default
   `58010..58029` port fallback, strict explicit-port failure, config-free

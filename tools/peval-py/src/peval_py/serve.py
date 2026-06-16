@@ -6,6 +6,7 @@ import re
 import shlex
 import sys
 from argparse import Namespace
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,6 +56,7 @@ def run_serve_command(
 ) -> None:
     host = validate_localhost(getattr(args, "host", None) or "127.0.0.1")
     store = open_workspace_state(getattr(args, "root", None))
+    config = replace(config, workspace_root=str(store.paths.root))
     server: HTTPServer | None = None
     try:
         loaded_inputs = load_serve_inputs(args, adapter_assignments)
@@ -174,6 +176,12 @@ def make_handler(
                         store.refresh_sources([source_key], config)
                     elif action == "delete":
                         store.delete_source(source_key)
+                    elif action == "notes":
+                        store.save_source_notes(
+                            source_key,
+                            markdown_payload(payload),
+                            config,
+                        )
                     else:
                         raise HttpError(404, "unknown source action")
                     self.write_json(mutation_payload(store))
@@ -474,6 +482,13 @@ def required_string(payload: dict[str, Any], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value:
         raise HttpError(400, f"{key} is required")
+    return value
+
+
+def markdown_payload(payload: dict[str, Any]) -> str:
+    value = payload.get("markdown")
+    if not isinstance(value, str):
+        raise HttpError(400, "markdown is required")
     return value
 
 

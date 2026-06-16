@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from peval_py.analysis import save_cell_note
 from peval_py.atif import convert_atif_trajectory, is_atif_trajectory
 from peval_py.config import ToolConfig, config_for_adapter
 from peval_py.inputs import AdapterAssignments, LoadedInputs, LoadedSession, load_inputs
@@ -487,7 +488,7 @@ class ServeStateStore:
     def active_report(self) -> dict[str, Any]:
         rows = self.conn.execute(
             """
-            SELECT t.trajectory_json, t.meta_json
+            SELECT t.trajectory_json, t.meta_json, t.report_json
             FROM peval_py_sources s
             JOIN peval_py_trials t ON t.source_key = s.source_key
             WHERE s.active = 1
@@ -498,7 +499,13 @@ class ServeStateStore:
             return empty_report("serve")
         trajectories = [json.loads(row["trajectory_json"]) for row in rows]
         metas = uniquify_trial_keys([json.loads(row["meta_json"]) for row in rows])
-        return build_report_from_snapshots(trajectories, metas, input_label="serve")
+        reports = [json.loads(row["report_json"]) for row in rows]
+        return build_report_from_snapshots(
+            trajectories,
+            metas,
+            input_label="serve",
+            source_reports=reports,
+        )
 
     def source_rows(
         self,
@@ -555,6 +562,45 @@ class ServeStateStore:
         )
         self.conn.execute("DELETE FROM peval_py_sources WHERE source_key = ?", (source_key,))
         self.conn.commit()
+
+    def save_source_notes(
+        self,
+        source_key: str,
+        markdown: str,
+        config: ToolConfig,
+    ) -> None:
+        row = self.conn.execute(
+            """
+            SELECT s.*, t.trajectory_json AS trajectory_json
+            FROM peval_py_sources s
+            LEFT JOIN peval_py_trials t ON t.source_key = s.source_key
+            WHERE s.source_key = ?
+            """,
+            (source_key,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown source: {source_key}")
+        source = dict(row)
+        if not source.get("refreshable") or source.get("snapshot"):
+            raise ValueError("notes.md can only be saved for refreshable sources")
+        trajectory: dict[str, Any] = {}
+        if source.get("trajectory_json"):
+            try:
+                parsed = json.loads(source["trajectory_json"])
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                trajectory = parsed
+        session_id = optional_str(trajectory.get("session_id")) or source.get("session_id")
+        agent_id = source.get("agent_name") or source.get("adapter")
+        save_cell_note(
+            workspace_root=str(self.paths.root),
+            eval_slug=config.analysis_eval_slug,
+            agent_id=agent_id,
+            session_id=session_id,
+            markdown=markdown,
+        )
+        self.refresh_source(source, config)
 
     def log_refresh(
         self,

@@ -84,6 +84,19 @@ In comparison reports, the Leaderboard Duration column and JSON `duration_ms`
 fields show active agent/tool work time. Long retained-session idle gaps are
 kept separately as `wall_duration_ms`.
 
+When a peval-py workspace root is available, reports also try to read cached
+peval cell analysis from
+`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json`
+and `analysis.md`. The default slug is `default`; matching summaries and
+Markdown reports appear in the selected Trial Analysis section and in JSON
+`annotations.analysis[]`.
+
+The same task tree can also provide manual Trial notes at
+`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md`.
+These appear in JSON `annotations.notes[]` before CLI/table notes. In
+`peval-py serve`, refreshable sources can edit or add that cell-local
+`notes.md`; snapshot uploads remain read-only.
+
 CSV example:
 
 ```csv

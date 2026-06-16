@@ -7,6 +7,61 @@ def compact_css_text(value: str) -> str:
     return re.sub(r"\s+", "", value).replace(";}", "}")
 
 
+def write_cached_analysis(
+    root: Path,
+    *,
+    eval_slug: str = "default",
+    agent_id: str = "agent-a",
+    session_id: str = "common_session",
+    cell_key: str = "abcdef0123456789",
+    summary: str = "Cached analysis summary.",
+) -> Path:
+    path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "trial_name": session_id,
+                "summary": summary,
+                "checks": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_cached_markdown(
+    root: Path,
+    *,
+    eval_slug: str = "default",
+    agent_id: str = "agent-a",
+    session_id: str = "common_session",
+    cell_key: str = "abcdef0123456789",
+    markdown: str = "## Finding\n\n- Cached markdown report.",
+) -> Path:
+    path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown, encoding="utf-8")
+    return path
+
+
+def write_cached_note(
+    root: Path,
+    *,
+    eval_slug: str = "default",
+    agent_id: str = "agent-a",
+    session_id: str = "common_session",
+    cell_key: str = "abcdef0123456789",
+    markdown: str = "Manual cell note.",
+) -> Path:
+    path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "notes.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown, encoding="utf-8")
+    return path
+
+
 class PevalPyReportHtmlTests(unittest.TestCase):
     def test_report_json_subset_and_html_safe_embedding(self) -> None:
         records = read_jsonl(str(FIXTURES / "psychevo_session.jsonl"))
@@ -138,6 +193,7 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertNotIn("Session Table", html)
         self.assertIn("report-note-list", html)
         self.assertIn("report-note", html)
+
         self.assertNotIn("Visible Heatmap", html)
         self.assertNotIn("visible_heatmap", html)
         self.assertNotIn("visible_heatmap_eyebrow", html)
@@ -192,10 +248,12 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("trajectory-overview-title", html)
         self.assertIn("trajectory-node", html)
         self.assertIn("trajectory-node-letter", html)
-        self.assertIn("trajectory-node.time-gradient", html)
+        self.assertIn("trajectory-node.duration-heat-1", html)
+        self.assertIn("trajectory-node.duration-heat-10", html)
         self.assertIn("function trajectoryOverviewTimingModel", html)
         self.assertIn("function overviewStepMeta", html)
-        self.assertIn("timeGradientClass(ratio)", html)
+        self.assertIn("trajectoryDurationHeatClass(ratio)", html)
+        self.assertIn("function trajectoryDurationHeatClass", html)
         self.assertIn('timeTitle("step", stepDuration, durationRatio, "slowest step")', html)
         self.assertIn('if (role === "system") return "S"', html)
         self.assertIn('if (role === "user") return "U"', html)
@@ -277,6 +335,248 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("Report \\u003cscript", html)
         self.assertNotIn("<script>note</script>", html)
 
+    def test_report_reads_cached_analysis_from_peval_runs_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            analysis_path = write_cached_analysis(root)
+            markdown_path = write_cached_markdown(
+                root,
+                markdown=(
+                    "## Slow step\n\n"
+                    "- Check cached markdown.\n\n"
+                    "<script>alert(1)</script>"
+                ),
+            )
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            report = build_report_from_loaded_inputs(
+                LoadedInputs(
+                    sessions=[
+                        LoadedSession(
+                            records=read_jsonl(str(FIXTURES / "common_session.jsonl")),
+                            input_label="common_session.jsonl",
+                            adapter_id="opencode",
+                            session_hint="common_session",
+                            agent_name="agent-a",
+                        )
+                    ],
+                    notes=[],
+                ),
+                config,
+            )
+
+            self.assertEqual(report["includes"], ["core", "annotations"])
+            analysis = report["annotations"]["analysis"][0]
+            self.assertEqual(analysis["trial_key"], report["trajectory_meta"][0]["trial_key"])
+            self.assertEqual(analysis["status"], "cached")
+            self.assertEqual(analysis["summary"], "Cached analysis summary.")
+            self.assertIn("## Slow step", analysis["md_report"])
+            self.assertEqual(
+                analysis["relative_path"],
+                analysis_path.relative_to(root).as_posix(),
+            )
+            self.assertEqual(
+                analysis["relative_paths"],
+                {
+                    "json": analysis_path.relative_to(root).as_posix(),
+                    "md": markdown_path.relative_to(root).as_posix(),
+                },
+            )
+            self.assertNotIn(str(root), json.dumps(analysis))
+
+            html = render_html(report)
+            self.assertIn("Analysis", html)
+            self.assertIn("Cached analysis summary.", html)
+            self.assertIn("## Slow step", html)
+            self.assertIn("Check cached markdown.", html)
+            self.assertIn("renderMarkdown(analysis.md_report)", html)
+            self.assertIn("\\u003cscript", html)
+            self.assertNotIn("<script>alert(1)</script>", html)
+            self.assertIn(
+                "runs/default/agent-a/common_session/abcdef0123456789/analysis.json",
+                html,
+            )
+            self.assertIn(
+                "runs/default/agent-a/common_session/abcdef0123456789/analysis.md",
+                html,
+            )
+
+    def test_report_reads_cell_notes_separately_from_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            note_path = write_cached_note(
+                root,
+                markdown="Cell note with <script>alert(1)</script>.",
+            )
+            write_cached_markdown(root, markdown="Cached analysis body.")
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            report = build_report_from_loaded_inputs(
+                LoadedInputs(
+                    sessions=[
+                        LoadedSession(
+                            records=read_jsonl(str(FIXTURES / "common_session.jsonl")),
+                            input_label="common_session.jsonl",
+                            adapter_id="opencode",
+                            session_hint="common_session",
+                            agent_name="agent-a",
+                        )
+                    ],
+                    notes=["1=CLI note after cell note"],
+                ),
+                config,
+            )
+
+            self.assertEqual(report["includes"], ["core", "annotations"])
+            notes = report["annotations"]["notes"]
+            self.assertEqual([note["source"] for note in notes], ["cell", "cli"])
+            self.assertEqual(notes[0]["label"], "notes.md")
+            self.assertEqual(notes[0]["markdown"], "Cell note with <script>alert(1)</script>.")
+            self.assertEqual(
+                notes[0]["source_ref"],
+                {
+                    "kind": "note",
+                    "label": "notes.md",
+                    "relative_path": note_path.relative_to(root).as_posix(),
+                },
+            )
+            self.assertEqual(notes[1]["markdown"], "CLI note after cell note")
+            self.assertEqual(
+                report["annotations"]["analysis"][0]["md_report"],
+                "Cached analysis body.",
+            )
+
+            html = render_html(report)
+            self.assertIn("notes.md", html)
+            self.assertIn("runs/default/agent-a/common_session/abcdef0123456789/notes.md", html)
+            self.assertIn("Cell note with \\u003cscript", html)
+            self.assertNotIn("<script>alert(1)</script>", html)
+
+    def test_report_omits_ambiguous_cell_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_cached_note(root, agent_id="opencode", cell_key="one")
+            write_cached_note(root, agent_id="opencode", cell_key="two")
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            conversion = convert_records(read_jsonl(str(FIXTURES / "common_session.jsonl")), config)
+            report = build_multi_report(
+                [
+                    ReportSession(
+                        conversion=conversion,
+                        input_label="common_session.jsonl",
+                        session_hint="common_session",
+                        adapter_id="opencode",
+                    )
+                ],
+                config,
+                [],
+            )
+            self.assertNotIn("annotations", report)
+
+    def test_report_reads_markdown_only_cached_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            markdown_path = write_cached_markdown(
+                root,
+                agent_id="opencode",
+                markdown="Markdown-only cached report.",
+            )
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            conversion = convert_records(read_jsonl(str(FIXTURES / "common_session.jsonl")), config)
+            report = build_multi_report(
+                [
+                    ReportSession(
+                        conversion=conversion,
+                        input_label="common_session.jsonl",
+                        session_hint="common_session",
+                        adapter_id="opencode",
+                    )
+                ],
+                config,
+                [],
+            )
+
+            analysis = report["annotations"]["analysis"][0]
+            self.assertNotIn("summary", analysis)
+            self.assertEqual(analysis["md_report"], "Markdown-only cached report.")
+            self.assertEqual(
+                analysis["relative_path"],
+                markdown_path.relative_to(root).as_posix(),
+            )
+            self.assertEqual(
+                analysis["relative_paths"],
+                {"md": markdown_path.relative_to(root).as_posix()},
+            )
+
+    def test_report_omits_missing_malformed_or_ambiguous_analysis(self) -> None:
+        config = ToolConfig(adapter="opencode")
+        conversion = convert_records(read_jsonl(str(FIXTURES / "common_session.jsonl")), config)
+        missing = build_multi_report(
+            [
+                ReportSession(
+                    conversion=conversion,
+                    input_label="common_session.jsonl",
+                    session_hint="common_session",
+                    adapter_id="opencode",
+                    analysis_agent_id="opencode",
+                )
+            ],
+            config,
+            [],
+        )
+        self.assertNotIn("annotations", missing)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_cached_analysis(root, agent_id="opencode", cell_key="one")
+            write_cached_analysis(root, agent_id="opencode", cell_key="two")
+            ambiguous = build_multi_report(
+                [
+                    ReportSession(
+                        conversion=conversion,
+                        input_label="common_session.jsonl",
+                        session_hint="common_session",
+                        adapter_id="opencode",
+                    )
+                ],
+                ToolConfig(adapter="opencode", workspace_root=str(root)),
+                [],
+            )
+            self.assertNotIn("annotations", ambiguous)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bad_path = (
+                root
+                / "runs"
+                / "default"
+                / "opencode"
+                / "common_session"
+                / "cell"
+                / "analysis.json"
+            )
+            bad_path.parent.mkdir(parents=True)
+            bad_path.write_text("{not json", encoding="utf-8")
+            write_cached_markdown(
+                root,
+                agent_id="opencode",
+                cell_key="cell",
+                markdown="Markdown survives malformed JSON.",
+            )
+            malformed = build_multi_report(
+                [
+                    ReportSession(
+                        conversion=conversion,
+                        input_label="common_session.jsonl",
+                        session_hint="common_session",
+                        adapter_id="opencode",
+                    )
+                ],
+                ToolConfig(adapter="opencode", workspace_root=str(root)),
+                [],
+            )
+            analysis = malformed["annotations"]["analysis"][0]
+            self.assertNotIn("summary", analysis)
+            self.assertNotIn("json", analysis["relative_paths"])
+            self.assertEqual(analysis["md_report"], "Markdown survives malformed JSON.")
 
     def test_serve_html_mode_reuses_report_body_with_export_selection_controls(self) -> None:
         config = ToolConfig(adapter="opencode")
@@ -381,6 +681,19 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("renderComparisonPanels({ trace: false })", serve_html)
         self.assertIn("event.stopPropagation();", serve_html)
         self.assertIn("function reportSubset(rows)", serve_html)
+        self.assertIn("function renderAnalysisPaths(analysis)", serve_html)
+        self.assertIn("analysis.md_report", serve_html)
+        self.assertIn("analysis.relative_paths", serve_html)
+        self.assertIn("renderMarkdown(analysis.md_report)", serve_html)
+        self.assertIn("function editableNotesSource(trialKey)", serve_html)
+        self.assertIn("function saveSelectedNotes(button)", serve_html)
+        self.assertIn("data-notes-edit", serve_html)
+        self.assertIn("data-notes-save", serve_html)
+        self.assertIn("/notes", serve_html)
+        self.assertIn(
+            "analysis: (original.annotations.analysis || []).filter(item => selectedKeys.has(item.trial_key))",
+            serve_html,
+        )
         self.assertIn('downloadText("peval-report-v18.json"', serve_html)
         self.assertIn('downloadText("peval-report.html"', serve_html)
         self.assertIn('downloadText("peval-leaderboard-visible.csv"', serve_html)
@@ -1437,13 +1750,14 @@ console.log(result);
         self.assertIn("1", buttons)
         self.assertIn("2", buttons)
         self.assertIn("3", buttons)
-        self.assertNotIn("time-gradient", buttons["1"])
+        self.assertNotIn("duration-heat-", buttons["1"])
+        self.assertNotIn("--time-pct", buttons["1"])
         self.assertIn("step 0.0s", buttons["1"])
-        self.assertIn("time-gradient", buttons["2"])
-        self.assertIn("--time-pct: 50.0%", buttons["2"])
-        self.assertIn("time-gradient", buttons["3"])
+        self.assertIn("duration-heat-5", buttons["2"])
+        self.assertNotIn("--time-pct", buttons["2"])
+        self.assertIn("duration-heat-10", buttons["3"])
         self.assertIn("selected-node", buttons["3"])
-        self.assertIn("--time-pct: 100.0%", buttons["3"])
+        self.assertNotIn("--time-pct", buttons["3"])
         self.assertIn("step 0.2s; 100% of slowest step", buttons["3"])
 
 
@@ -1572,8 +1886,16 @@ console.log(result);
         self.assertIn(".source-add-actions", css)
         self.assertIn(".source-form select", css)
         self.assertNotIn(".adapter-choice-group", css)
-        self.assertIn(".trajectory-node.time-gradient", css)
-        self.assertIn(".trajectory-node.selected-node.time-gradient", css)
+        for level in range(1, 11):
+            self.assertIn(f".trajectory-node.duration-heat-{level}", css)
+        self.assertIn("background:#d6a456", css)
+        self.assertNotIn("background:#b88431", css)
+        self.assertNotIn("background:#56380d", css)
+        self.assertNotIn("color:#fff8ec", css)
+        self.assertIn('.trajectory-node.selected-node[class*="duration-heat-"]', css)
+        self.assertNotIn(".trajectory-node.time-gradient", css)
+        self.assertNotIn(".trajectory-node.selected-node.time-gradient", css)
+        self.assertNotIn("conic-gradient", css)
         self.assertIn(".serve-notice", css)
         self.assertIn(
             compact_css_text(

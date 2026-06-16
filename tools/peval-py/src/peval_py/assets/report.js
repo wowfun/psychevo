@@ -30,7 +30,7 @@ function fmtScore(value) { return hasMetricValue(value) ? Number(value).toLocale
 function hasMetricValue(value) { return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value)); }
 function data() { return JSON.parse($("peval-py-data").textContent || "{}"); }
 function serveMode() { return RENDER_OPTIONS?.mode === "serve"; }
-const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [] };
+const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], notesEditor: null };
 const SUBMENU_DETAILS_SELECTOR = ".export-menu,.filter-control";
 const OPEN_SUBMENU_DETAILS_SELECTOR = ".export-menu[open],.filter-control[open]";
 function closeOpenSubmenus(except = null) {
@@ -49,6 +49,10 @@ function selectedIndex() {
   const metas = state.view?.trajectory_meta || [];
   const index = metas.findIndex(meta => meta.trial_key === key);
   return index >= 0 ? index : 0;
+}
+function trialIndexFor(trialKey) {
+  const metas = state.view?.trajectory_meta || [];
+  return metas.findIndex(meta => meta.trial_key === trialKey);
 }
 function trajectoryFor(trialKey) {
   const metas = state.view?.trajectory_meta || [];
@@ -90,6 +94,26 @@ function renderComparison() {
 }
 function notesFor(trialKey) {
   return (state.view?.annotations?.notes || []).filter(note => note.trial_key === trialKey);
+}
+function cellNoteFor(trialKey) {
+  return notesFor(trialKey).find(note => note.source === "cell" && note.label === "notes.md") || null;
+}
+function analysisFor(trialKey) {
+  return (state.view?.annotations?.analysis || []).find(item => item.trial_key === trialKey) || null;
+}
+function activeServeSources() {
+  return (Array.isArray(state.serveSources) ? state.serveSources : []).filter(source => source?.active !== false);
+}
+function sourceForTrialKey(trialKey) {
+  if (!serveMode()) return null;
+  const index = trialIndexFor(trialKey);
+  if (index < 0) return null;
+  return activeServeSources()[index] || null;
+}
+function editableNotesSource(trialKey) {
+  const source = sourceForTrialKey(trialKey);
+  if (!source || source.refreshable === false || source.snapshot) return null;
+  return source;
 }
 function notesPlainText(notes) {
   return notes.map(note => String(note.markdown || "").trim()).filter(Boolean).join("\\n\\n");
@@ -508,7 +532,8 @@ function reportSubset(rows) {
   if (original.annotations) {
     subset.annotations = {
       ...original.annotations,
-      notes: (original.annotations.notes || []).filter(note => selectedKeys.has(note.trial_key))
+      notes: (original.annotations.notes || []).filter(note => selectedKeys.has(note.trial_key)),
+      analysis: (original.annotations.analysis || []).filter(item => selectedKeys.has(item.trial_key))
     };
   }
   return subset;
@@ -580,9 +605,9 @@ function renderTrajectoryNode(step, index, trialKey, timingModel) {
   const selected = state.selectedStep?.trialKey === trialKey && String(state.selectedStep?.stepId) === stepId;
   const stepDuration = overviewStepMeta(timingModel?.meta, rawStepId).duration_ms;
   const ratio = timingRatio(stepDuration, timingModel?.maxStepDurationMs);
-  const classes = ["trajectory-node", selected ? "selected-node" : "", timeGradientClass(ratio)].filter(Boolean).join(" ");
+  const classes = ["trajectory-node", selected ? "selected-node" : "", trajectoryDurationHeatClass(ratio)].filter(Boolean).join(" ");
   const label = stepTitle(step, index, stepDuration, ratio);
-  return `<button class="${esc(classes)}" type="button" data-trial-key="${esc(trialKey)}" data-step-id="${esc(stepId)}"${timeGradientStyle(ratio)} title="${esc(label)}" aria-label="${esc(label)}"><span class="trajectory-node-letter">${esc(roleLetter(step?.source))}</span></button>`;
+  return `<button class="${esc(classes)}" type="button" data-trial-key="${esc(trialKey)}" data-step-id="${esc(stepId)}" title="${esc(label)}" aria-label="${esc(label)}"><span class="trajectory-node-letter">${esc(roleLetter(step?.source))}</span></button>`;
 }
 function roleLetter(source) {
   const role = lower(source);
@@ -660,6 +685,7 @@ function renderTrace() {
       [t("cost", "Cost"), fmtCost(metrics.total_cost_usd)]
     ])}
     ${renderSelectedNotes(trial.trial_key)}
+    ${renderSelectedAnalysis(trial.trial_key)}
     ${renderSelectedEvidence(trajectory, trial)}
     ${renderTimelineDiagnostics(trajectory, trial)}
     ${renderStepsHeader(trajectory)}
@@ -733,6 +759,26 @@ function bindGlobalControls() {
     if (target?.closest?.("#step-drawer") || target?.closest?.("[data-source-manager]") || target?.closest?.("[data-step-id]") || target?.closest?.("[data-timeline-step-id]") || target?.closest?.("[data-timeline-chart]")) return;
     state.selectedStep = null;
     renderComparisonPanels();
+  });
+  document.addEventListener("click", event => {
+    if (!serveMode()) return;
+    const editButton = event.target?.closest?.("[data-notes-edit]");
+    if (editButton) {
+      event.preventDefault();
+      beginNotesEdit(editButton.dataset.trialKey || selectedKey());
+      return;
+    }
+    const cancelButton = event.target?.closest?.("[data-notes-cancel]");
+    if (cancelButton) {
+      event.preventDefault();
+      cancelNotesEdit();
+      return;
+    }
+    const saveButton = event.target?.closest?.("[data-notes-save]");
+    if (saveButton) {
+      event.preventDefault();
+      saveSelectedNotes(saveButton);
+    }
   });
   window.addEventListener("resize", () => {
     if (state.timelineChart) state.timelineChart.resize();
@@ -1092,14 +1138,14 @@ async function serveApi(path, options = {}) {
   }
   return payload;
 }
-function applyServeMutationPayload(payload) {
+function applyServeMutationPayload(payload, options = {}) {
   hideServeNotice();
   if (Array.isArray(payload?.sources)) {
     state.serveSources = payload.sources;
     renderServeSources();
   }
   if (payload?.report) {
-    state.selectedTrial = null;
+    state.selectedTrial = options.preserveTrial || null;
     state.selectedStep = null;
     state.rowSelection.clear();
     render(payload.report);
@@ -1165,6 +1211,11 @@ function timeGradientStyle(ratio) {
   return ` style="--time-pct: ${esc((ratio * 100).toFixed(1))}%"`;
 }
 function timeGradientClass(ratio) { return ratio === null || ratio === undefined ? "" : "time-gradient"; }
+function trajectoryDurationHeatClass(ratio) {
+  if (ratio === null || ratio === undefined) return "";
+  const level = Math.max(1, Math.min(10, Math.ceil(ratio * 10)));
+  return `duration-heat-${level}`;
+}
 function timeTitle(label, value, ratio, basis) {
   const text = `${label} ${fmtMs(value)}`;
   return ratio === null || ratio === undefined ? text : `${text}; ${Math.round(ratio * 100)}% of ${basis}`;
@@ -1179,8 +1230,84 @@ function tokenTotal(metrics) {
 }
 function renderSelectedNotes(trialKey) {
   const notes = notesFor(trialKey);
+  const editor = renderNotesEditor(trialKey);
+  const action = renderNotesAction(trialKey);
   const body = notes.length ? `<div class="note-list">${notes.map(renderManualNote).join("")}</div>` : `<p class="copy">${esc(t("no_notes", "No notes."))}</p>`;
-  return `<section class="selected-extra"><h3>${esc(t("notes", "Notes"))}</h3>${body}</section>`;
+  return `<section class="selected-extra selected-notes">
+    <div class="selected-extra-head"><h3>${esc(t("notes", "Notes"))}</h3>${action}</div>
+    ${editor}
+    ${body}
+  </section>`;
+}
+function renderNotesAction(trialKey) {
+  const source = editableNotesSource(trialKey);
+  if (!source || state.notesEditor?.trialKey === trialKey) return "";
+  const cellNote = cellNoteFor(trialKey);
+  const label = cellNote ? t("edit_notes", "Edit notes") : t("add_notes", "Add notes");
+  return `<button class="step-toggle-button notes-edit-button" type="button" data-notes-edit data-trial-key="${esc(trialKey)}">${esc(label)}</button>`;
+}
+function renderNotesEditor(trialKey) {
+  if (!serveMode() || state.notesEditor?.trialKey !== trialKey) return "";
+  const markdown = state.notesEditor.markdown ?? "";
+  const error = state.notesEditor.error ? `<p class="copy danger">${esc(state.notesEditor.error)}</p>` : "";
+  const disabled = state.notesEditor.saving ? " disabled" : "";
+  return `<article class="notes-editor-panel" data-notes-editor-panel>
+    <textarea data-notes-editor data-trial-key="${esc(trialKey)}" rows="8">${esc(markdown)}</textarea>
+    ${error}
+    <div class="notes-editor-actions">
+      <button class="step-toggle-button primary" type="button" data-notes-save data-trial-key="${esc(trialKey)}"${disabled}>${esc(t("save_notes", "Save notes"))}</button>
+      <button class="step-toggle-button" type="button" data-notes-cancel${disabled}>${esc(t("cancel", "Cancel"))}</button>
+    </div>
+  </article>`;
+}
+function beginNotesEdit(trialKey) {
+  if (!trialKey || !editableNotesSource(trialKey)) return;
+  const note = cellNoteFor(trialKey);
+  state.notesEditor = { trialKey, markdown: note?.markdown || "", error: "", saving: false };
+  renderTrace();
+}
+function cancelNotesEdit() {
+  state.notesEditor = null;
+  renderTrace();
+}
+async function saveSelectedNotes(button) {
+  const trialKey = button?.dataset?.trialKey || selectedKey();
+  const source = editableNotesSource(trialKey);
+  const panel = button?.closest?.("[data-notes-editor-panel]");
+  const textarea = panel?.querySelector?.("[data-notes-editor]");
+  if (!source?.source_key || !textarea) return;
+  const markdown = textarea.value || "";
+  state.notesEditor = { trialKey, markdown, error: "", saving: true };
+  renderTrace();
+  try {
+    const payload = await serveApi(`/api/sources/${encodeURIComponent(source.source_key)}/notes`, {
+      method: "POST",
+      body: { markdown }
+    });
+    state.notesEditor = null;
+    applyServeMutationPayload(payload, { preserveTrial: trialKey });
+  } catch (error) {
+    const message = `${t("notes_save_failed", "Save notes failed")}: ${error.message || String(error)}`;
+    state.notesEditor = { trialKey, markdown, error: message, saving: false };
+    setServeStatus(message, true);
+    renderTrace();
+  }
+}
+function renderSelectedAnalysis(trialKey) {
+  const analysis = analysisFor(trialKey);
+  if (!analysis) return "";
+  const summary = analysis.summary ? `<pre>${esc(analysis.summary)}</pre>` : "";
+  const markdown = analysis.md_report ? `<div class="note-body analysis-md">${renderMarkdown(analysis.md_report)}</div>` : "";
+  const paths = renderAnalysisPaths(analysis);
+  return `<section class="selected-extra selected-analysis"><h3>${esc(t("analysis", "Analysis"))}</h3><article class="selected-evidence-card analysis-card"><div class="note-meta"><span class="chip">${esc(analysis.status || "cached")}</span><strong>${esc(t("cached_analysis", "Cached analysis"))}</strong></div>${summary}${markdown}${paths}</article></section>`;
+}
+function renderAnalysisPaths(analysis) {
+  const paths = analysis.relative_paths || {};
+  const rows = [];
+  if (paths.json) rows.push(["JSON", paths.json]);
+  if (paths.md) rows.push(["Markdown", paths.md]);
+  if (!rows.length && analysis.relative_path) rows.push(["Source", analysis.relative_path]);
+  return rows.length ? `<div class="analysis-source-list">${rows.map(([label, path]) => `<p class="copy analysis-path"><span class="analysis-source-label">${esc(label)}</span><code>${esc(path)}</code></p>`).join("")}</div>` : "";
 }
 function renderSelectedEvidence(trajectory, meta) {
   const blocks = [renderSelectedUsage(trajectory), renderSelectedWarnings(meta), renderSelectedSource(meta)].filter(Boolean);
@@ -1967,10 +2094,14 @@ function bindStepToggle() {
   refresh();
 }
 function renderManualNote(row) {
-  return `<article class="manual-note"><div class="note-body">${renderMarkdown(row.markdown || "")}</div></article>`;
+  const sourcePath = row?.source_ref?.relative_path;
+  const meta = row?.label || sourcePath
+    ? `<div class="note-meta"><strong>${esc(row?.label || t("notes", "Notes"))}</strong>${sourcePath ? `<code>${esc(sourcePath)}</code>` : ""}</div>`
+    : "";
+  return `<article class="manual-note">${meta}<div class="note-body">${renderMarkdown(row.markdown || "")}</div></article>`;
 }
 function renderMarkdown(markdown) {
-  const lines = String(markdown ?? "").split(/\\r?\\n/);
+  const lines = String(markdown ?? "").split(/\r?\n/);
   const out = [];
   let paragraph = [];
   let list = [];
@@ -1990,7 +2121,7 @@ function renderMarkdown(markdown) {
   }
   function flushCode() {
     if (code.length) {
-      out.push(`<pre class="note-code">${esc(code.join("\\n"))}</pre>`);
+      out.push(`<pre class="note-code">${esc(code.join("\n"))}</pre>`);
       code = [];
     }
   }
@@ -2015,14 +2146,14 @@ function renderMarkdown(markdown) {
       flushList();
       continue;
     }
-    const heading = line.match(/^#{1,4}\\s+(.+)$/);
+    const heading = line.match(/^#{1,4}\s+(.+)$/);
     if (heading) {
       flushParagraph();
       flushList();
       out.push(`<h4>${inlineMarkdown(heading[1])}</h4>`);
       continue;
     }
-    const bullet = line.match(/^[-*]\\s+(.+)$/);
+    const bullet = line.match(/^[-*]\s+(.+)$/);
     if (bullet) {
       flushParagraph();
       list.push(bullet[1]);
