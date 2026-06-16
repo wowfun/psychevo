@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-06-16
+
+- Fixed subagent/Agent lifecycle handling: durable child sessions and lineage are
+  created earlier, failed spawn rows stay non-openable, and live/projection rows
+  now reconcile without transient duplicate/interrupted placeholders.
+- Kept Workbench/TUI `Agent` handoff behavior stable by binding running results
+  to child sessions, preserving completed rows, and routing task labels/turn
+  updates with stable identity.
+- Added dedicated thread-lineage guidance for Side-chat/subagent navigation and
+  parent-scoped tab behavior.
+
+## 2026-06-15
+
+- Added shared thread-lineage rules for Side chat and child-agent tabs, with
+  parent-scoped side tabs, inline `/btw` side prompts, and open-actions to child
+  session tabs.
+- Fixed subagent routing so parent/child Thinking and tool rows stay isolated and
+  completed Agent details preserve prompts while remaining openable after live or
+  reload updates.
+- Tightened timing UI by suppressing sub-second tool elapsed noise and aligning
+  Workbench/TUI acceptance of failed/interrupted terminal facts.
+- Enriched `peval-py` report workflows with workspace `analysis.json`,
+  `analysis.md`, and `notes.md` refresh/edit support.
+
 ## 2026-06-14
 
 - Added durable Gateway activity and session-browser infrastructure with
@@ -111,7 +135,7 @@
 
 - Reworked GUI/TUI session history around a shared global session model:
   Workbench lists sessions across projects with project grouping and persistent
-  pin/unpin controls, Gateway/TUI hide internal child/side sessions instead of
+  pin/unpin controls, Gateway/TUI hide internal child/side threads instead of
   partitioning by source, and cross-project resume switches the active scope to
   the session's stored workdir.
 
@@ -134,8 +158,8 @@
   New shows the detached draft immediately without creating a persisted runtime
   session.
 - Added `peval-py` structured input manifests and improved multi-session HTML
-  reports with Leaderboard filters, metric shading, Trajectory Overview rows,
-  and a reserved Step details drawer.
+  reports with Leaderboard filters, metric shading, lighter ten-level
+  duration-shaded Trajectory Overview rows, and a reserved Step details drawer.
 
 ## 2026-06-04
 
@@ -423,7 +447,7 @@
 
 ### Added
 
-- Added fullscreen TUI `/btw` side conversations with hidden temporary side
+- Added fullscreen TUI `/btw` side chats with hidden temporary side
   sessions, `/side` compatibility input, and `/refresh` cleanup.
 - Added runtime context compaction with checkpoints, TUI
   `/compact [instructions]`, automatic compaction, and a `pevo run` overflow
