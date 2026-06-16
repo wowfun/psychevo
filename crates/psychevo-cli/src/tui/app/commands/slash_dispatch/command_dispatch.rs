@@ -92,7 +92,7 @@ impl TuiApp {
                     result.version,
                     self.state_runtime.delete_sessions_for_workdir_with_source(
                         &self.workdir,
-                        TUI_SIDE_SESSION_SOURCE,
+                        TUI_SIDE_CONVERSATION_SESSION_SOURCE,
                     )?
                 );
                 Ok(())

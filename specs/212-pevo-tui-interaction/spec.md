@@ -29,7 +29,7 @@ Rendering of the resulting transcript rows and panels is defined by
 - fullscreen mouse routing, wheel routing, app-native selection, and clipboard
   behavior
 - local user shell escapes and their interaction with active foreground turns
-- `/agents`, `@agent`, `/fork`, selected-main-agent, and child-session
+- `/agents`, `@agent`, `/fork`, selected-main-agent, and child-thread
   navigation controls from the TUI
 - undo/redo command interactions and interruption priority
 - transparent permission approval prompts, queued approval routing, and
@@ -54,7 +54,7 @@ Out of scope:
   command feedback, bottom panes, model/session commands, file completion, and
   local command behavior.
 - [Agent Controls](agent-interaction.md) defines `/agents`, `@agent`, `/fork`,
-  selected-main-agent, child-session navigation, and Agent row controls.
+  selected-main-agent, child-thread navigation, and Agent row controls.
 - [Testing](testing.md) defines interaction acceptance coverage.
 
 ## Permission Approval Interaction

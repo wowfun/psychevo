@@ -131,7 +131,7 @@ message text, tool arguments, or provider request payloads.
   history entries into history rows
 - fixed composer/status-line rendering, including context usage, path/branch
   display, session usage/cache/cost observability, running elapsed projection,
-  and child-session status-line behavior
+  and child-thread status-line behavior
 - active editable-surface terminal cursor anchoring for IME candidate windows
   in fullscreen terminals
 - bounded passive redraw cadence for running-state motion, while preserving
@@ -157,7 +157,7 @@ Out of scope:
 - [Layout](layout.md) defines the fullscreen layout, transcript/composer/status
   line, and sidebar rendering rules.
 - [Agent Rows](agent-rows.md) defines foreground subagent row rendering and
-  child-session transcript projection.
+  child-thread transcript projection.
 - [Evidence Projection](evidence-projection.md) defines transcript/event to
   ledger evidence mapping, active tool rows, folding, and metadata projection.
 - [Terminal Rendering](terminal-rendering.md) defines terminal-adaptive palette,

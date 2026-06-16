@@ -197,11 +197,12 @@ remain hidden in the primary transcript during replay.
 Tool evidence shows elapsed execution duration on the right side of the tool
 title row. Active Thinking rows also show a right-side elapsed value while
 reasoning is streaming, but completed Thinking rows do not synthesize a
-duration from turn metadata. Active tools refresh elapsed from the local start
-instant while the turn is live; completed live rows freeze the larger of the
+duration from turn metadata. Tool rows hide right-side elapsed labels for
+sub-second work and show compact elapsed labels only after the duration reaches
+at least one second. Active tools refresh elapsed from the local start instant
+while the turn is live; completed live rows freeze the larger of the
 runtime-supplied `elapsed_ms` and the active ledger duration since the first
-concrete tool signal, so a provider-side pending period does not collapse to
-`0s` when local execution is instant. Completed
+concrete tool signal. Completed
 rows must not continue increasing on later redraws. TUI history reload restores
 completed tool duration from the tool-result message metadata when available
 and does not recompute old completed rows from the current wall clock. Narrow

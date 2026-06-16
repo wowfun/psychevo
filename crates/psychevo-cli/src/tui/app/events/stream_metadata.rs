@@ -52,6 +52,7 @@ impl TuiApp {
             TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
         ) && !yielded_exec_running
         {
+            let background_agent_handoff = background_running_agent_result(tool, &value);
             if tool == "clarify" {
                 return false;
             }
@@ -59,44 +60,106 @@ impl TuiApp {
                 remove_visible_write_stdin_row(ui, tool_call_id);
                 return false;
             }
-            let idx = ui.tool_rows.get(&key).copied().unwrap_or_else(|| {
-                let mut row = TranscriptRow::with_title(
-                    evidence_kind_for_value(tool, &value),
-                    active_tool_title(tool, &value),
-                    if block.status == TranscriptBlockStatus::Pending {
-                        "preparing"
-                    } else {
-                        "running"
-                    },
-                );
-                row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
-                row.tool_name = Some(tool.to_string());
-                row.tool_started = Some(tool_started_instant(&value));
-                let idx = ui.insert_evidence_row(row);
-                ui.tool_rows.insert(key.clone(), idx);
-                idx
-            });
+            let idx = gateway_block_row_index(ui, &block.id)
+                .or_else(|| ui.tool_rows.get(&key).copied())
+                .unwrap_or_else(|| {
+                    let mut row = TranscriptRow::with_title(
+                        evidence_kind_for_value(tool, &value),
+                        active_tool_title(tool, &value),
+                        if block.status == TranscriptBlockStatus::Pending {
+                            "preparing"
+                        } else {
+                            "running"
+                        },
+                    );
+                    row.tool_call_id =
+                        (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+                    row.tool_name = Some(tool.to_string());
+                    row.tool_started = Some(tool_started_instant(&value));
+                    let idx = ui.insert_evidence_row(row);
+                    ui.tool_rows.insert(key.clone(), idx);
+                    idx
+                });
+            record_gateway_block_row(ui, &block.id, idx);
+            ui.tool_rows.insert(key.clone(), idx);
             ui.remove_turn_meta();
+            let existing_agent_handoff = tool == "Agent"
+                && value.get("type").and_then(Value::as_str) == Some("agent_session_start")
+                && ui.transcript.get(idx).is_some_and(|row| {
+                    row.agent_target.is_some()
+                        && row.tool_started.is_none()
+                        && !row.interrupted
+                        && !row.failed
+                });
+            let agent_handoff_update = background_agent_handoff || existing_agent_handoff;
+            let existing_handoff_text = ui
+                .transcript
+                .get(idx)
+                .map(|row| (row.text.clone(), row.full_text.clone()));
             let row = &mut ui.transcript[idx];
             row.kind = evidence_kind_for_value(tool, &value);
             row.tool_name = Some(tool.to_string());
-            row.title = active_tool_title(tool, &value);
-            row.text = if block.status == TranscriptBlockStatus::Pending {
+            row.title = if tool == "Agent" {
+                block
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|title| !title.is_empty())
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| tool_title_for_update(tool, &value, &row.title))
+            } else if background_running_agent_result(tool, &value) {
+                tool_title_for_update(tool, &value, &row.title)
+            } else {
+                active_tool_title(tool, &value)
+            };
+            let (handoff_text, handoff_full_text) = if background_agent_handoff {
+                let (collapsed, full) = tool_output_text(&value);
+                (
+                    if collapsed.is_empty() {
+                        format_tool_summary(&value)
+                    } else {
+                        collapsed
+                    },
+                    full,
+                )
+            } else if agent_handoff_update {
+                existing_handoff_text.unwrap_or_else(|| ("Started in background".to_string(), None))
+            } else {
+                (String::new(), None)
+            };
+            row.text = if agent_handoff_update {
+                handoff_text
+            } else if block.status == TranscriptBlockStatus::Pending {
                 "preparing".to_string()
             } else if tool == "Agent" {
                 agent_child_status_text("Running", 0, None)
             } else {
                 "running".to_string()
             };
+            if agent_handoff_update {
+                row.full_text = handoff_full_text;
+            }
             row.failed = false;
             row.interrupted = false;
             row.user_shell = user_shell;
             row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
-            if row.tool_started.is_none() {
-                row.tool_started = Some(tool_started_instant(&value));
+            if tool == "Agent"
+                && let Some(agent_target) = agent_target_from_tool_event(&value)
+            {
+                row.agent_target = Some(agent_target);
             }
-            row.tool_elapsed = None;
+            if agent_handoff_update {
+                row.tool_elapsed =
+                    completed_live_tool_elapsed(row, Some(&value)).or(row.tool_elapsed);
+                row.tool_started = None;
+            } else if row.tool_started.is_none() {
+                row.tool_started = Some(tool_started_instant(&value));
+                row.tool_elapsed = None;
+            }
             tag_gateway_transcript_row(ui, idx, entry_meta, block);
+            if tool == "Agent" {
+                ui.remove_duplicate_agent_placeholders_for_tool_value(idx, &value);
+            }
             return true;
         }
 
@@ -240,16 +303,19 @@ impl TuiApp {
             ui.turn_interrupted = true;
         }
 
-        let idx = ui.tool_rows.get(&key).copied().unwrap_or_else(|| {
-            let mut row = TranscriptRow::with_title(
-                evidence_kind_for_value(tool, &value),
-                tool_title(tool, &value),
-                String::new(),
-            );
-            row.tool_name = Some(tool.to_string());
-            row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
-            ui.insert_evidence_row(row)
-        });
+        let idx = gateway_block_row_index(ui, &block.id)
+            .or_else(|| ui.tool_rows.get(&key).copied())
+            .unwrap_or_else(|| {
+                let mut row = TranscriptRow::with_title(
+                    evidence_kind_for_value(tool, &value),
+                    tool_title(tool, &value),
+                    String::new(),
+                );
+                row.tool_name = Some(tool.to_string());
+                row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
+                ui.insert_evidence_row(row)
+            });
+        record_gateway_block_row(ui, &block.id, idx);
         ui.tool_rows.insert(key, idx);
         let row = &mut ui.transcript[idx];
         row.kind = evidence_kind_for_value(tool, &value);
@@ -262,7 +328,9 @@ impl TuiApp {
         row.tool_started = None;
         row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
         if tool == "Agent" {
-            row.agent_target = agent_target_from_tool_event(&value);
+            if let Some(agent_target) = agent_target_from_tool_event(&value) {
+                row.agent_target = Some(agent_target);
+            }
             if let Some(summary) = value
                 .get("result")
                 .and_then(|result| result.get("child_session"))
@@ -292,7 +360,12 @@ impl TuiApp {
         if is_write_like_tool(tool) {
             ui.remove_orphan_provisional_tool_intents(tool, Some(idx));
         }
-        if block.status != TranscriptBlockStatus::Running {
+        if tool == "Agent" {
+            ui.remove_duplicate_agent_placeholders_for_tool_value(idx, &value);
+        }
+        if block.status != TranscriptBlockStatus::Running
+            && !background_running_agent_result(tool, &value)
+        {
             ui.tool_rows.remove(&tool_id_key(tool_call_id));
         }
         false

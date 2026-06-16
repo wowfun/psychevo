@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 729
 expression: combined
 ---
 fixture=active_visible_write_preamble
@@ -10,7 +11,7 @@ size=120x24
 
 Now I have all the data needed. Let me write the complete report.
 
-⠋ write                                                                                                              0s
+⠋ write
 
 
 
@@ -36,7 +37,7 @@ mock/model  high  ⠋ 0s · Esc  ~/work · main
 [default]
 [default]Now I have all the data needed. Let me write the complete report.
 [default]
-[cyan]⠋ [default]write                                                                                                              [dim]0s[default]
+[cyan]⠋ [default]write
 [default]
 [default]
 [default]

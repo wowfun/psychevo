@@ -616,6 +616,65 @@ pub(crate) fn visible_agent_notifications_keep_one_clickable_parent_status_row()
     assert!(ui.transcript[0].text.contains("translated text"));
 }
 
+#[test]
+pub(crate) fn history_agent_edge_reconcile_does_not_make_failed_rows_openable() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut failed_zh =
+        TranscriptRow::with_title(TranscriptKind::Ran, "translate(zh-to-en)", "Failed");
+    failed_zh.tool_name = Some("Agent".to_string());
+    failed_zh.failed = true;
+    let mut failed_en =
+        TranscriptRow::with_title(TranscriptKind::Ran, "translate(en-to-zh)", "Failed");
+    failed_en.tool_name = Some("Agent".to_string());
+    failed_en.failed = true;
+    let mut success_zh =
+        TranscriptRow::with_title(TranscriptKind::Ran, "translate(zh-to-en)", "Started");
+    success_zh.tool_name = Some("Agent".to_string());
+    let mut success_en =
+        TranscriptRow::with_title(TranscriptKind::Ran, "translate(en-to-zh)", "Started");
+    success_en.tool_name = Some("Agent".to_string());
+    ui.transcript = vec![failed_zh, failed_en, success_zh, success_en];
+    let edges = vec![
+        psychevo_runtime::AgentEdgeRecord {
+            parent_session_id: "parent".to_string(),
+            child_session_id: "child-zh".to_string(),
+            status: psychevo_runtime::AgentEdgeStatus::Closed,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+            metadata: Some(serde_json::json!({
+                "agent": {
+                    "id": "agent-zh",
+                    "name": "translate",
+                    "task_name": "zh-to-en"
+                }
+            })),
+        },
+        psychevo_runtime::AgentEdgeRecord {
+            parent_session_id: "parent".to_string(),
+            child_session_id: "child-en".to_string(),
+            status: psychevo_runtime::AgentEdgeStatus::Closed,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+            metadata: Some(serde_json::json!({
+                "agent": {
+                    "id": "agent-en",
+                    "name": "translate",
+                    "task_name": "en-to-zh"
+                }
+            })),
+        },
+    ];
+
+    ui.reconcile_history_agent_rows(&edges, None);
+
+    assert!(ui.transcript[0].agent_target.is_none());
+    assert!(ui.transcript[1].agent_target.is_none());
+    assert_eq!(ui.transcript[2].agent_target.as_deref(), Some("child-zh"));
+    assert_eq!(ui.transcript[3].agent_target.as_deref(), Some("child-en"));
+}
+
 #[tokio::test]
 pub(crate) async fn foreground_agent_tool_result_is_single_claude_style_inspection_row() {
     let temp = tempdir().expect("temp");
@@ -784,4 +843,76 @@ pub(crate) fn agent_session_start_reuses_partial_agent_placeholder_row() {
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 120, 12);
     let text = buffer_text(&buffer);
     assert!(text.contains("Open"), "{text}");
+}
+
+#[test]
+pub(crate) fn running_agent_tool_row_keeps_original_prompt_detail() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_name": "Agent",
+            "tool_call_id": "agent-1",
+            "args": {
+                "agent_type": "translate",
+                "task_name": "Translate user message to Chinese",
+                "prompt": "Translate the following message to Chinese: hello"
+            }
+        }),
+        false,
+    );
+
+    assert_eq!(ui.transcript.len(), 1);
+    let row = &ui.transcript[0];
+    assert_eq!(row.tool_name.as_deref(), Some("Agent"));
+    assert_eq!(row.text, "Running (0 tool uses)");
+    let full = row.full_text.as_deref().expect("running agent detail");
+    assert!(full.contains("Prompt:\nTranslate the following message to Chinese: hello"));
+}
+
+#[test]
+pub(crate) fn completed_agent_tool_row_uses_cached_prompt_when_result_omits_task() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_name": "Agent",
+            "tool_call_id": "agent-1",
+            "args": {
+                "agent_type": "translate",
+                "task_name": "Translate user message to Chinese",
+                "prompt": "Translate the following message to Chinese: hello"
+            }
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_name": "Agent",
+            "tool_call_id": "agent-1",
+            "outcome": "normal",
+            "elapsed_ms": 1000,
+            "result": {
+                "agent_name": "translate",
+                "status": "completed",
+                "child_session_id": "child-thread",
+                "summary": "你好"
+            }
+        }),
+        false,
+    );
+
+    let row = &ui.transcript[0];
+    assert_eq!(row.tool_name.as_deref(), Some("Agent"));
+    assert_eq!(row.agent_target.as_deref(), Some("child-thread"));
+    let full = row.full_text.as_deref().expect("completed agent detail");
+    assert!(full.contains("Prompt:\nTranslate the following message to Chinese: hello"));
+    assert!(full.contains("Response:\n你好"));
 }

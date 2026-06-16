@@ -71,6 +71,9 @@ validation.
   tool-result relationship exists.
 - Display-only `/diff` or command feedback does not change transcript history,
   model context, export content, or usage statistics.
+- Subsession creation controls are hidden for draft/no-session states while
+  explicit commands return bounded guidance, and opened side/child threads
+  render ordinary transcript projection for their own session ids.
 
 ## Validation Boundaries
 
@@ -79,5 +82,8 @@ validation.
   line buffers.
 - Surface-specific visual tests may prove rendered behavior, but they should
   not redefine transcript fact ownership.
+- Subsession tests should assert session ids, parent/child routing, and
+  display-only navigation effects rather than client-specific tab DOM or
+  terminal row storage.
 - Snapshot tests should avoid brittle full-prompt or full-provider-payload
   comparisons unless the tested surface owns that exact text.

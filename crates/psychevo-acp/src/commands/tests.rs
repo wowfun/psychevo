@@ -78,6 +78,32 @@ mod tests {
     }
 
     #[test]
+    fn acp_does_not_advertise_side_conversation_commands() {
+        let available = available_slash_commands_for_surface(
+            acp_command_capabilities(),
+            false,
+            &[],
+            ACP_COMMAND_ADVERTISEMENT_LIMIT,
+        );
+        assert!(!available.commands.iter().any(|command| command.name == "btw"));
+
+        let SlashCommandParse::Known(invocation) = parse_slash_command_line("/btw explain") else {
+            panic!("expected /btw to parse");
+        };
+        let effect = slash_invocation_effect(
+            &invocation,
+            acp_command_capabilities(),
+            SlashCommandSurface::Acp,
+            false,
+        )
+        .expect("unsupported command guidance");
+        assert!(matches!(
+            effect,
+            SlashCommandEffect::Unsupported(message) if message.contains("side chat")
+        ));
+    }
+
+    #[test]
     fn acp_export_parses_last_provider_response_include() {
         let parsed = parse_artifact_args(
             "out.json -f json -i last-provider-response",

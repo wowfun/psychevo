@@ -79,6 +79,9 @@ Required ACP/runtime wiring coverage:
 - Command advertisements use the shared command catalog and ACP capability
   filter, hide TUI-only commands, and are emitted after the session id is
   usable by the client.
+- `/btw` is not advertised in ACP command availability; typed `/btw` returns
+  bounded unsupported-command guidance without creating a child session or
+  invoking the model.
 - `/diff` is advertised for ACP sessions, is accepted while an agent turn is
   active, emits a synthetic tool-call update with ACP `ToolCallContent::Diff`,
   stores summary and truncation metadata only in raw tool output, sends no

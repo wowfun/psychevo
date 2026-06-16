@@ -1,42 +1,42 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-pub(crate) const BTW_NO_SESSION_MESSAGE: &str = "'/btw' is unavailable until the current conversation has started. Send a message first, then try /btw again.";
-pub(crate) const BTW_ALREADY_OPEN_MESSAGE: &str =
-    "A /btw side conversation is already open. Press Ctrl+C to return before starting another.";
-pub(crate) const BTW_RETURNED_MESSAGE: &str = "returned from /btw side conversation";
+pub(crate) const SIDE_CONVERSATION_NO_SESSION_MESSAGE: &str = "'/btw' is unavailable until the current conversation has started. Send a message first, then try /btw again.";
+pub(crate) const SIDE_CONVERSATION_ALREADY_OPEN_MESSAGE: &str =
+    "A /btw side chat is already open. Press Ctrl+C to return before starting another.";
+pub(crate) const SIDE_CONVERSATION_RETURNED_MESSAGE: &str = "returned from /btw side chat";
 pub(crate) const RELOAD_CONTEXT_DEPRECATED_MESSAGE: &str =
     "/reload-context is hidden in the TUI; use /refresh";
 
 impl TuiApp {
-    pub(crate) fn in_btw_side(&self) -> bool {
-        self.btw_side.is_some()
+    pub(crate) fn in_side_conversation(&self) -> bool {
+        self.side_conversation.is_some()
     }
 
-    pub(crate) fn start_btw_side_conversation(
+    pub(crate) fn start_side_conversation(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         initial_prompt: Option<String>,
     ) -> Result<()> {
-        if self.btw_side.is_some() {
-            ui.set_ephemeral_error(BTW_ALREADY_OPEN_MESSAGE);
+        if self.side_conversation.is_some() {
+            ui.set_ephemeral_error(SIDE_CONVERSATION_ALREADY_OPEN_MESSAGE);
             return Ok(());
         }
         let Some(parent_session) = self.current_session.clone() else {
-            ui.set_ephemeral_error(BTW_NO_SESSION_MESSAGE);
+            ui.set_ephemeral_error(SIDE_CONVERSATION_NO_SESSION_MESSAGE);
             return Ok(());
         };
 
-        let (provider, model) = self.side_session_provider_model()?;
+        let (provider, model) = self.side_conversation_provider_model()?;
         let store = self.state_runtime.store();
-        let side_session =
+        let side_thread_id =
             store.create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
                 parent_session_id: &parent_session,
                 workdir: &self.workdir,
-                source: TUI_SIDE_SESSION_SOURCE,
+                source: TUI_SIDE_CONVERSATION_SESSION_SOURCE,
                 model: &model,
                 provider: &provider,
                 metadata: Some(serde_json::json!({
-                    BTW_SIDE_METADATA_KEY: {
+                    SIDE_CONVERSATION_METADATA_KEY: {
                         "ephemeral": true,
                         "parent_session_id": parent_session.clone(),
                     },
@@ -48,7 +48,7 @@ impl TuiApp {
                 })),
                 max_context_messages: self.run_options(String::new()).max_context_messages,
                 inherited_message_metadata: serde_json::json!({
-                    BTW_INHERITED_METADATA_KEY: {
+                    SIDE_INHERITED_METADATA_KEY: {
                         "hidden": true,
                         "parent_session_id": parent_session.clone(),
                     }
@@ -56,7 +56,7 @@ impl TuiApp {
                 boundary_text: side_conversation_boundary_prompt(),
             })?;
 
-        let side_state = BtwSideState {
+        let side_state = SideConversationState {
             parent_session: parent_session.clone(),
             parent_session_title: self.current_session_title.clone(),
             parent_model: self.current_model.clone(),
@@ -65,19 +65,19 @@ impl TuiApp {
             parent_permission_mode: self.current_permission_mode,
             parent_agent: self.current_agent.clone(),
             parent_agent_explicit_default: self.current_agent_explicit_default,
-            side_session: side_session.clone(),
+            side_thread_id: side_thread_id.clone(),
         };
 
         self.detach_running_for_session_switch(ui, None);
-        self.btw_side = Some(side_state);
-        self.current_session = Some(side_session.clone());
+        self.side_conversation = Some(side_state);
+        self.current_session = Some(side_thread_id.clone());
         self.reset_live_agent_reload_poll();
-        self.current_session_title = Some(format!("Side {}", short_session(&side_session)));
+        self.current_session_title = Some(format!("Side {}", short_session(&side_thread_id)));
         self.clear_new_session_draft();
         ui.bottom_panel = None;
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
-        ui.set_ephemeral_status("side conversation; Ctrl+C returns");
+        ui.set_ephemeral_status("side chat; Ctrl+C returns");
         ui.refresh_sidebar(self);
 
         if let Some(prompt) = initial_prompt {
@@ -86,11 +86,11 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn close_btw_side_conversation(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
-        let Some(side) = self.btw_side.take() else {
+    pub(crate) fn close_side_conversation(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        let Some(side) = self.side_conversation.take() else {
             return Ok(());
         };
-        let side_session = side.side_session.clone();
+        let side_thread_id = side.side_thread_id.clone();
         self.current_session = Some(side.parent_session.clone());
         self.reset_live_agent_reload_poll();
         self.current_session_title = side.parent_session_title;
@@ -108,39 +108,40 @@ impl TuiApp {
         ui.clear_transcript();
         self.load_current_session_history(ui)?;
         self.replay_session_live_event_backlog(ui, &side.parent_session);
-        ui.session_live_event_backlog.remove(&side_session);
-        ui.agent_child_event_backlog.remove(&side_session);
-        ui.set_ephemeral_status(BTW_RETURNED_MESSAGE);
+        ui.session_live_event_backlog.remove(&side_thread_id);
+        ui.agent_child_event_backlog.remove(&side_thread_id);
+        ui.set_ephemeral_status(SIDE_CONVERSATION_RETURNED_MESSAGE);
         ui.refresh_sidebar(self);
 
-        match self.state_runtime.delete_session(&side_session) {
+        match self.state_runtime.delete_session(&side_thread_id) {
             Ok(()) => {}
-            Err(err) => {
-                ui.set_ephemeral_error(format!("failed to delete /btw side session: {err}"))
-            }
+            Err(err) => ui.set_ephemeral_error(format!("failed to delete /btw side chat: {err}")),
         }
         Ok(())
     }
 
-    pub(crate) fn handle_btw_ctrl_c(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
-        if !self.in_btw_side() {
+    pub(crate) fn handle_side_conversation_ctrl_c(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
+        if !self.in_side_conversation() {
             return Ok(false);
         }
         if self.request_current_session_interrupt(ui) {
             return Ok(true);
         }
-        self.close_btw_side_conversation(ui)?;
+        self.close_side_conversation(ui)?;
         Ok(true)
     }
 
     pub(crate) fn side_command_rejection(&self, command: &SlashCommand) -> Option<&'static str> {
-        if !self.in_btw_side() || side_command_allowed(command) {
+        if !self.in_side_conversation() || side_command_allowed(command) {
             return None;
         }
-        Some("command is unavailable inside a /btw side conversation; press Ctrl+C to return")
+        Some("command is unavailable inside a /btw side chat; press Ctrl+C to return")
     }
 
-    pub(crate) fn side_session_provider_model(&self) -> Result<(String, String)> {
+    pub(crate) fn side_conversation_provider_model(&self) -> Result<(String, String)> {
         if let Some(model) = selected_configured_model(&self.run_options(String::new()))
             .ok()
             .flatten()
@@ -186,7 +187,10 @@ impl TuiApp {
         let workdir = self.workdir.clone();
         let task = tokio::spawn(async move {
             state
-                .delete_sessions_for_workdir_with_source(&workdir, TUI_SIDE_SESSION_SOURCE)
+                .delete_sessions_for_workdir_with_source(
+                    &workdir,
+                    TUI_SIDE_CONVERSATION_SESSION_SOURCE,
+                )
                 .map_err(|err| err.to_string())
         });
         self.side_cleanup_task = Some(SideCleanupTask { task });
@@ -213,8 +217,8 @@ impl TuiApp {
         Ok(true)
     }
 
-    pub(crate) fn btw_parent_status_label(&self, ui: &FullscreenUi<'_>) -> Option<String> {
-        let side = self.btw_side.as_ref()?;
+    pub(crate) fn side_parent_status_label(&self, ui: &FullscreenUi<'_>) -> Option<String> {
+        let side = self.side_conversation.as_ref()?;
         let parent = side.parent_session.as_str();
         if ui
             .session_live_event_backlog

@@ -536,7 +536,7 @@ pub(crate) fn render_status(
         spans.push(Span::styled("transcript", theme.accent_style()));
         spans.push(Span::styled(" · Esc", theme.dim_style()));
     }
-    if let Some(label) = app.btw_parent_status_label(ui) {
+    if let Some(label) = app.side_parent_status_label(ui) {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(label, theme.accent_style()));
     }

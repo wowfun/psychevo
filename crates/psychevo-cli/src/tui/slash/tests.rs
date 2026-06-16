@@ -591,8 +591,8 @@ pub(crate) mod tests {
         assert!(help.contains("Ctrl+B - toggle sidebar"));
         assert!(help.contains("Ctrl+O - copy latest answer as Markdown"));
         assert!(help.contains("/copy - copy latest answer as Markdown"));
-        assert!(help.contains("/refresh - reload context and clean side sessions"));
-        assert!(help.contains("/btw [prompt] - open a side conversation"));
+        assert!(help.contains("/refresh - reload context and clean side chats"));
+        assert!(help.contains("/btw [prompt] - open a side chat"));
         assert!(!help.contains("/reload-context"));
         assert!(!help.contains("/side"));
         assert!(help.contains("/usage - local usage and cost (aliases: /stats)"));

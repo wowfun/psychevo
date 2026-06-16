@@ -40,7 +40,7 @@ pub(crate) struct TuiApp {
     pub(crate) clipboard_result_rx: std::sync::mpsc::Receiver<Result<(), String>>,
     pub(crate) clipboard_copies_in_flight: usize,
     pub(crate) slash_config: EffectiveSlashConfig,
-    pub(crate) btw_side: Option<BtwSideState>,
+    pub(crate) side_conversation: Option<SideConversationState>,
     pub(crate) last_live_agent_reload_check: Option<Instant>,
     pub(crate) last_gateway_live_event_seq: i64,
     pub(crate) session_browser_limits: BTreeMap<String, usize>,
@@ -49,7 +49,7 @@ pub(crate) struct TuiApp {
     pub(crate) diff_task: Option<DiffTask>,
 }
 
-pub(crate) struct BtwSideState {
+pub(crate) struct SideConversationState {
     pub(crate) parent_session: String,
     pub(crate) parent_session_title: Option<String>,
     pub(crate) parent_model: Option<String>,
@@ -58,7 +58,7 @@ pub(crate) struct BtwSideState {
     pub(crate) parent_permission_mode: PermissionMode,
     pub(crate) parent_agent: Option<String>,
     pub(crate) parent_agent_explicit_default: bool,
-    pub(crate) side_session: String,
+    pub(crate) side_thread_id: String,
 }
 
 pub(crate) struct SideCleanupTask {

@@ -38,7 +38,7 @@ pub(crate) fn user_display_from_message(
     message: &Value,
     metadata: Option<&Value>,
 ) -> Option<UserPromptDisplay> {
-    if btw_inherited_message(metadata) {
+    if side_inherited_message(metadata) {
         return None;
     }
     if agent_notification_present(metadata) {
@@ -145,7 +145,7 @@ pub(crate) fn agent_notification_projection(
 }
 
 pub(crate) fn user_text_from_message(message: &Value, metadata: Option<&Value>) -> Option<String> {
-    if btw_inherited_message(metadata) {
+    if side_inherited_message(metadata) {
         return None;
     }
     if let Some(display) = user_shell_display_from_message(message, metadata) {
@@ -154,12 +154,8 @@ pub(crate) fn user_text_from_message(message: &Value, metadata: Option<&Value>) 
     user_display_from_message(message, metadata).map(|display| display.text)
 }
 
-pub(crate) fn btw_inherited_message(metadata: Option<&Value>) -> bool {
-    metadata
-        .and_then(|metadata| metadata.get(BTW_INHERITED_METADATA_KEY))
-        .and_then(|value| value.get("hidden"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+pub(crate) fn side_inherited_message(metadata: Option<&Value>) -> bool {
+    side_inherited_metadata_hidden(metadata)
 }
 
 pub(crate) fn legacy_user_text_from_message(message: &Value) -> Option<String> {
@@ -192,7 +188,7 @@ pub(crate) fn visible_tui_message_count(messages: &[TuiMessageSummary]) -> Resul
                         || user_display_from_message(&message, summary.metadata.as_ref()).is_some(),
                 ),
                 "assistant" => usize::from(
-                    !btw_inherited_message(summary.metadata.as_ref())
+                    !side_inherited_message(summary.metadata.as_ref())
                         && assistant_text_from_message(&message).is_some(),
                 ),
                 _ => 0,

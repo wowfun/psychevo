@@ -548,10 +548,15 @@ pub(crate) fn agent_session_start_title(value: &Value) -> Option<String> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())?;
-    let detail = value
-        .get("agent_description")
+    let task_name = value
+        .get("task_name")
         .and_then(Value::as_str)
-        .or_else(|| value.get("task_name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter(|task_name| !generated_agent_task_name(agent, task_name));
+    let detail = task_name
+        .or_else(|| value.get("agent_description").and_then(Value::as_str))
+        .or_else(|| value.get("task").and_then(Value::as_str))
         .map(str::trim)
         .filter(|value| !value.is_empty());
     Some(agent_title(agent, detail))
@@ -573,6 +578,14 @@ pub(crate) fn agent_title_name(title: &str) -> &str {
         .trim()
 }
 
+pub(crate) fn agent_title_detail(title: &str) -> Option<&str> {
+    title
+        .split_once('(')
+        .and_then(|(_, detail)| detail.strip_suffix(')').or(Some(detail)))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
 pub(crate) fn agent_placeholder_title_matches(row: &TranscriptRow, agent_name: &str) -> bool {
     let title_name = agent_title_name(&row.title);
     title_name == agent_name || matches!(title_name, "agent" | "Agent")
@@ -591,12 +604,19 @@ pub(crate) fn agent_name_from<'a>(args: &'a Value, result: &'a Value) -> &'a str
 }
 
 pub(crate) fn agent_detail_from<'a>(args: &'a Value, result: &'a Value) -> Option<&'a str> {
-    result
-        .get("agent_description")
+    let agent = agent_name_from(args, result);
+    let task_name = result
+        .get("task_name")
         .and_then(Value::as_str)
-        .or_else(|| args.get("description").and_then(Value::as_str))
-        .or_else(|| result.get("task_name").and_then(Value::as_str))
         .or_else(|| args.get("task_name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter(|task_name| !generated_agent_task_name(agent, task_name));
+    task_name
+        .or_else(|| result.get("agent_description").and_then(Value::as_str))
+        .or_else(|| args.get("description").and_then(Value::as_str))
+        .or_else(|| result.get("task").and_then(Value::as_str))
+        .or_else(|| args.get("task").and_then(Value::as_str))
         .map(str::trim)
         .filter(|value| !value.is_empty())
 }
@@ -608,11 +628,24 @@ pub(crate) fn agent_title(agent: &str, detail: Option<&str>) -> String {
     }
 }
 
+fn generated_agent_task_name(agent: &str, task_name: &str) -> bool {
+    let Some(suffix) = task_name
+        .strip_prefix(agent)
+        .and_then(|rest| rest.strip_prefix('-'))
+    else {
+        return false;
+    };
+    suffix.len() >= 8 && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
 pub(crate) fn matching_agent_edge<'a>(
     row: &TranscriptRow,
     edges: &'a [AgentEdgeRecord],
     used_edges: &std::collections::BTreeSet<usize>,
 ) -> Option<(usize, &'a AgentEdgeRecord)> {
+    if row.failed {
+        return None;
+    }
     let row_tool_call_id = row.tool_call_id.as_deref();
     if let Some(match_by_id) = edges.iter().enumerate().find(|(index, edge)| {
         !used_edges.contains(index)
@@ -622,18 +655,12 @@ pub(crate) fn matching_agent_edge<'a>(
     }
 
     let row_name = agent_title_name(&row.title);
-    if let Some(match_by_name) = edges.iter().enumerate().find(|(index, edge)| {
+    if let Some(match_by_task) = edges.iter().enumerate().find(|(index, edge)| {
         !used_edges.contains(index)
             && agent_edge_agent_name(edge).is_some_and(|name| name == row_name)
+            && agent_row_task_matches(row, edge)
     }) {
-        return Some(match_by_name);
-    }
-
-    if matches!(row_name, "agent" | "Agent") {
-        return edges
-            .iter()
-            .enumerate()
-            .find(|(index, _)| !used_edges.contains(index));
+        return Some(match_by_task);
     }
 
     None
@@ -662,7 +689,25 @@ pub(crate) fn agent_edge_title(
 
 pub(crate) fn agent_edge_metadata_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
     agent_edge_agent_string(edge, "id").is_some_and(|value| value == target)
-        || agent_edge_agent_string(edge, "task_name").is_some_and(|value| value == target)
+        || agent_edge_agent_string(edge, "parent_tool_call_id").is_some_and(|value| value == target)
+}
+
+pub(crate) fn agent_edge_task_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
+    agent_edge_agent_string(edge, "task_name").is_some_and(|value| value == target)
+        || agent_edge_agent_string(edge, "task").is_some_and(|value| value == target)
+}
+
+fn agent_row_task_matches(row: &TranscriptRow, edge: &AgentEdgeRecord) -> bool {
+    agent_title_detail(&row.title).is_some_and(|detail| agent_edge_task_matches(edge, detail))
+        || agent_row_prompt_detail(row).is_some_and(|detail| agent_edge_task_matches(edge, detail))
+}
+
+fn agent_row_prompt_detail(row: &TranscriptRow) -> Option<&str> {
+    row.full_text
+        .as_deref()?
+        .strip_prefix("Prompt:\n")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 pub(crate) fn agent_edge_agent_name(edge: &AgentEdgeRecord) -> Option<&str> {
@@ -726,11 +771,7 @@ pub(crate) fn agent_tool_output_text(value: &Value) -> Option<(String, Option<St
             )
         };
 
-    let prompt = result
-        .get("task")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    let prompt = agent_tool_prompt(value);
     let response = result
         .get("final_answer")
         .or_else(|| result.get("summary"))
@@ -757,6 +798,23 @@ pub(crate) fn agent_tool_output_text(value: &Value) -> Option<(String, Option<St
         .then(|| full_parts.join("\n\n"))
         .filter(|full| full != &preview);
     Some((preview, full))
+}
+
+pub(crate) fn running_agent_tool_full_text(value: &Value) -> Option<String> {
+    let prompt = agent_tool_prompt(value)?;
+    Some(format!("Prompt:\n{prompt}"))
+}
+
+fn agent_tool_prompt(value: &Value) -> Option<&str> {
+    let args = value.get("args").unwrap_or(&Value::Null);
+    let result = value.get("result").unwrap_or(&Value::Null);
+    args.get("prompt")
+        .or_else(|| args.get("task"))
+        .or_else(|| result.get("prompt"))
+        .or_else(|| result.get("task"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
 }
 
 pub(crate) fn pluralize(count: i64, singular: &str) -> String {
@@ -823,9 +881,21 @@ pub(crate) fn agent_target_from_tool_event(value: &Value) -> Option<String> {
         .get("session_id")
         .or_else(|| result.get("child_session_id"))
         .and_then(Value::as_str)
-        .or_else(|| result.get("id").and_then(Value::as_str))
-        .or_else(|| result.get("task_name").and_then(Value::as_str))
         .map(str::to_string)
+}
+
+pub(crate) fn background_running_agent_result(tool: &str, value: &Value) -> bool {
+    tool == "Agent"
+        && value
+            .get("result")
+            .and_then(|result| result.get("background"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        && value
+            .get("result")
+            .and_then(|result| result.get("status"))
+            .and_then(Value::as_str)
+            == Some("running")
 }
 
 pub(crate) fn exec_timeout_output_text(value: &Value) -> Option<String> {

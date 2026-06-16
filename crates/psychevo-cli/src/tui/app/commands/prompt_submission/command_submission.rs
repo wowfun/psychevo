@@ -132,7 +132,7 @@ impl TuiApp {
                 ui.push_command_result(command_echo, None, RELOAD_CONTEXT_DEPRECATED_MESSAGE, true);
             }
             SlashCommand::Btw(prompt) => {
-                self.start_btw_side_conversation(ui, prompt)?;
+                self.start_side_conversation(ui, prompt)?;
             }
             SlashCommand::Steer(message) => {
                 self.submit_explicit_fullscreen_steer(ui, message, command_echo)?;

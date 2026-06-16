@@ -152,7 +152,15 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
     tx.send(GatewayEvent::TurnCompleted {
         thread_id: Some("typed-session".to_string()),
         turn_id: "turn-1".to_string(),
-        outcome: Some("normal".to_string()),
+        turn: GatewayTurn {
+            id: "turn-1".to_string(),
+            thread_id: Some("typed-session".to_string()),
+            status: GatewayTurnStatus::Completed,
+            outcome: Some("normal".to_string()),
+            error: None,
+            started_at_ms: None,
+            completed_at_ms: Some(2),
+        },
         committed_entries: Vec::new(),
     })
     .expect("send turn complete");
@@ -702,6 +710,203 @@ pub(crate) fn typed_gateway_assistant_preamble_defaults_to_middle_fold_preview()
     assert!(row.text.contains("... 6 more lines"), "{}", row.text);
     assert!(row.text.contains("line 12"), "{}", row.text);
     assert!(!row.text.contains("line 8"), "{}", row.text);
+}
+
+#[test]
+pub(crate) fn typed_gateway_agent_session_start_makes_running_row_openable() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("parent-session".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("parent-session"),
+        TranscriptEntry {
+            id: "live:turn-1:assistant:0".to_string(),
+            thread_id: "parent-session".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            message_seq: None,
+            role: TranscriptEntryRole::Assistant,
+            status: TranscriptBlockStatus::Running,
+            source: "runtime.stream".to_string(),
+            blocks: vec![TranscriptBlock {
+                id: "live:turn-1:tool:call_agent_translate".to_string(),
+                kind: TranscriptBlockKind::Agent,
+                status: TranscriptBlockStatus::Running,
+                order: 0,
+                source: "runtime.stream".to_string(),
+                title: Some("translate(Translate user message to Chinese)".to_string()),
+                body: Some("Translate user message to Chinese".to_string()),
+                preview: Some("Translate user message to Chinese".to_string()),
+                detail: Some("Translate user message to Chinese".to_string()),
+                artifact_ids: Vec::new(),
+                metadata: Some(serde_json::json!({
+                    "projection": "tool",
+                    "tool_name": "Agent",
+                    "tool_call_id": "call_agent_translate",
+                    "type": "agent_session_start",
+                    "agent_name": "translate",
+                    "task_name": "Translate user message to Chinese",
+                    "child_session_id": "child-session",
+                    "result": {
+                        "child_session_id": "child-session",
+                        "session_id": "child-session",
+                        "status": "running"
+                    }
+                })),
+                result: None,
+                created_at_ms: 1,
+                updated_at_ms: 2,
+            }],
+            metadata: None,
+            usage: None,
+            accounting: None,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        },
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.tool_name.as_deref() == Some("Agent"))
+        .expect("agent row");
+    assert_eq!(row.agent_target.as_deref(), Some("child-session"));
+    assert_eq!(row.tool_call_id.as_deref(), Some("call_agent_translate"));
+    assert_eq!(row.text, "Running (0 tool uses)");
+}
+
+#[test]
+pub(crate) fn typed_gateway_background_agent_handoff_reuses_row_for_session_start() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("parent-session".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("parent-session"),
+        TranscriptEntry {
+            id: "live:turn-1:assistant:0".to_string(),
+            thread_id: "parent-session".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            message_seq: None,
+            role: TranscriptEntryRole::Assistant,
+            status: TranscriptBlockStatus::Running,
+            source: "runtime.stream".to_string(),
+            blocks: vec![TranscriptBlock {
+                id: "live:turn-1:tool:call_agent_translate".to_string(),
+                kind: TranscriptBlockKind::Agent,
+                status: TranscriptBlockStatus::Running,
+                order: 0,
+                source: "runtime.stream".to_string(),
+                title: Some("translate(translate-en-to-zh)".to_string()),
+                body: None,
+                preview: None,
+                detail: None,
+                artifact_ids: Vec::new(),
+                metadata: Some(serde_json::json!({
+                    "projection": "tool",
+                    "tool_name": "Agent",
+                    "tool_call_id": "call_agent_translate",
+                    "type": "tool_execution_end",
+                    "result": {
+                        "agent_name": "translate",
+                        "agent_description": "Detect the source language automatically.",
+                        "task_name": "translate-en-to-zh",
+                        "task": "Please translate this English text into Chinese.",
+                        "status": "running",
+                        "background": true,
+                        "session_id": "child-session",
+                        "child_session_id": "child-session"
+                    }
+                })),
+                result: None,
+                created_at_ms: 1,
+                updated_at_ms: 2,
+            }],
+            metadata: None,
+            usage: None,
+            accounting: None,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        },
+    );
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("parent-session"),
+        TranscriptEntry {
+            id: "live:turn-1:assistant:0".to_string(),
+            thread_id: "parent-session".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            message_seq: None,
+            role: TranscriptEntryRole::Assistant,
+            status: TranscriptBlockStatus::Running,
+            source: "runtime.stream".to_string(),
+            blocks: vec![TranscriptBlock {
+                id: "live:turn-1:tool:call_agent_translate".to_string(),
+                kind: TranscriptBlockKind::Agent,
+                status: TranscriptBlockStatus::Running,
+                order: 0,
+                source: "runtime.stream".to_string(),
+                title: Some("translate(translate-en-to-zh)".to_string()),
+                body: Some("translate-en-to-zh".to_string()),
+                preview: Some("translate-en-to-zh".to_string()),
+                detail: Some("translate-en-to-zh".to_string()),
+                artifact_ids: Vec::new(),
+                metadata: Some(serde_json::json!({
+                    "projection": "tool",
+                    "tool_name": "Agent",
+                    "tool_call_id": "call_agent_translate",
+                    "type": "agent_session_start",
+                    "agent_name": "translate",
+                    "agent_description": "Detect the source language automatically.",
+                    "task_name": "translate-en-to-zh",
+                    "child_session_id": "child-session",
+                    "result": {
+                        "child_session_id": "child-session",
+                        "session_id": "child-session",
+                        "status": "running"
+                    }
+                })),
+                result: None,
+                created_at_ms: 1,
+                updated_at_ms: 3,
+            }],
+            metadata: None,
+            usage: None,
+            accounting: None,
+            created_at_ms: 1,
+            updated_at_ms: 3,
+        },
+    );
+
+    let rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.tool_name.as_deref() == Some("Agent"))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1, "{:#?}", ui.transcript);
+    assert_eq!(rows[0].agent_target.as_deref(), Some("child-session"));
+    assert_eq!(
+        rows[0].tool_call_id.as_deref(),
+        Some("call_agent_translate")
+    );
+    assert_eq!(rows[0].title, "translate(translate-en-to-zh)");
+    assert!(rows[0].tool_started.is_none(), "{rows:#?}");
+    assert_eq!(rows[0].text, "Started in background");
+
+    ui.turn_outcome = Some(Outcome::Normal);
+    ui.finish_turn();
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.tool_name.as_deref() == Some("Agent"))
+        .expect("agent row");
+    assert!(!row.interrupted, "{row:#?}");
+    assert_eq!(row.text, "Started in background");
 }
 
 #[test]

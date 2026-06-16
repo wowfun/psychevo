@@ -551,7 +551,7 @@ impl<'a> FullscreenUi<'a> {
                 row.title = active_tool_title(tool, value);
                 if tool == "Agent" {
                     row.text = agent_child_status_text("Running", 0, None);
-                    row.full_text = None;
+                    row.full_text = running_agent_tool_full_text(value);
                     row.agent_child_tool_uses = 0;
                     row.agent_child_latest_tokens = None;
                     row.agent_child_live_text.clear();
@@ -568,6 +568,9 @@ impl<'a> FullscreenUi<'a> {
                 if let Some(id_key) = id_key {
                     self.tool_rows.insert(id_key, idx);
                 }
+                if tool == "Agent" {
+                    self.remove_duplicate_agent_placeholders_for_tool_value(idx, value);
+                }
                 true
             }
             "tool_execution_end" => {
@@ -580,10 +583,16 @@ impl<'a> FullscreenUi<'a> {
                     .get("tool_call_id")
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                let clarify_value;
+                let cached_value;
                 let value = if tool == "clarify" {
-                    clarify_value = self.value_with_cached_clarify_args(value, tool_call_id);
-                    &clarify_value
+                    cached_value = self.value_with_cached_clarify_args(value, tool_call_id);
+                    &cached_value
+                } else if tool == "Agent"
+                    && value.get("args").is_none_or(Value::is_null)
+                    && let Some(args) = self.live_tool_args.get(tool_call_id).cloned()
+                {
+                    cached_value = value_with_args(value, args);
+                    &cached_value
                 } else {
                     value
                 };
@@ -673,6 +682,7 @@ impl<'a> FullscreenUi<'a> {
                     .tool_rows
                     .get(&tool_id_key(tool_call_id))
                     .copied()
+                    .or_else(|| self.matching_agent_placeholder_index(tool, value, tool_call_id))
                     .unwrap_or_else(|| {
                         let mut row = TranscriptRow::with_title(
                             evidence_kind_for_value(tool, value),
@@ -691,8 +701,11 @@ impl<'a> FullscreenUi<'a> {
                 row.user_shell = user_shell;
                 row.tool_elapsed = completed_live_tool_elapsed(row, Some(value));
                 row.tool_started = None;
+                row.tool_call_id = (!tool_call_id.is_empty()).then_some(tool_call_id.to_string());
                 if tool == "Agent" {
-                    row.agent_target = agent_target_from_tool_event(value);
+                    if let Some(agent_target) = agent_target_from_tool_event(value) {
+                        row.agent_target = Some(agent_target);
+                    }
                     if let Some(summary) = value
                         .get("result")
                         .and_then(|result| result.get("child_session"))
@@ -720,6 +733,12 @@ impl<'a> FullscreenUi<'a> {
                 }
                 if is_write_like_tool(tool) {
                     self.remove_orphan_provisional_tool_intents(tool, Some(idx));
+                }
+                if tool == "Agent" {
+                    self.remove_duplicate_agent_placeholders_for_tool_value(idx, value);
+                    if background_running_agent_result(tool, value) && !tool_call_id.is_empty() {
+                        self.tool_rows.insert(tool_id_key(tool_call_id), idx);
+                    }
                 }
                 if tool == "clarify" {
                     self.clarify_tool_args.remove(tool_call_id);
@@ -786,11 +805,18 @@ impl<'a> FullscreenUi<'a> {
             .filter(|id| !id.is_empty())
             .and_then(|id| self.tool_rows.get(&tool_id_key(id)).copied())
             .or_else(|| {
-                self.transcript.iter().position(|row| {
-                    row.tool_name.as_deref() == Some("Agent")
-                        && active_tool_row(row)
-                        && row.agent_target.is_none()
-                })
+                let tool_call_id = value
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                self.completed_agent_invocation_index(value, Some(tool_call_id))
+            })
+            .or_else(|| {
+                let tool_call_id = value
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                self.matching_agent_placeholder_index("Agent", value, tool_call_id)
             });
         let Some(index) = index else {
             return;
@@ -865,4 +891,12 @@ impl<'a> FullscreenUi<'a> {
             self.remove_provisional_tool_intent(&tool);
         }
     }
+}
+
+fn value_with_args(value: &Value, args: Value) -> Value {
+    let mut merged = value.clone();
+    if let Some(object) = merged.as_object_mut() {
+        object.insert("args".to_string(), args);
+    }
+    merged
 }

@@ -5,7 +5,9 @@ psychevo_self_edit: deny
 
 # 212. pevo TUI Interaction Agent Controls
 
-Define `/agents`, `@agent`, `/fork`, selected-main-agent, child-session navigation, and Agent row controls.
+Define `/agents`, `@agent`, `/fork`, selected-main-agent, child-thread navigation, and Agent row controls.
+Shared child-thread display and navigation semantics are defined by
+[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md).
 
 ## Agent Interaction
 
@@ -53,18 +55,20 @@ effective main agent; selecting `Default main agent` restores the child
 session's own agent identity. The label is just the agent name, without `main`
 or `Agent` prefixes.
 
-Opening an agent enters the original child session and preserves its identity
-and policy. The active composer follows the displayed session. Returning to the
-parent/root session uses explicit TUI navigation; child completions still notify
-the original parent while the edge remains open. Pressing `Esc` in an active
-running child session, or in its parent/main session while that child is still
-running, requests interrupt for the still-running child work, even when the
-parent turn has been detached from the main running slot for inspection.
-Parent navigation is available through `Alt+Left` and the mnemonic `Alt+P`.
+Opening an agent follows the shared child-thread behavior in
+[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md). In TUI, opening
+enters that child thread in the foreground and the active composer follows the
+displayed session. Returning to the parent/root session uses explicit TUI
+navigation; child completions still notify the original parent while the edge
+remains open. Pressing `Esc` in an active running child thread, or in its
+parent/main session while that child is still running, requests interrupt for
+the still-running child work, even when the parent turn has been detached from
+the main running slot for inspection. Parent navigation is available through
+`Alt+Left` and the mnemonic `Alt+P`.
 
 Transcript row clicks follow the shared evidence rule: clicking an Agent row
 body toggles details, and only clicking the visible right-side `Open` title
-action enters the child session. If the title action overlaps the row title
+action enters the child thread. If the title action overlaps the row title
 line's general row hit area, `Open` wins only inside that visible action region;
 clicks elsewhere on the row still toggle details. In transcript focus, `Space`
 toggles details while `Enter` or `O` opens an Agent row.

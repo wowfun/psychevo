@@ -93,7 +93,7 @@ Output kinds are:
 - structured display artifact
 
 Surface capabilities are descriptive gates, not permissions. They include
-picker, clipboard, renderer toggle, process exit, side conversation, image
+picker, clipboard, renderer toggle, process exit, Side chat, image
 attachment, active-turn control, queue, session switch, session revert, local
 artifact write, config write, policy write, skill-state write, and structured
 diff display. A surface advertises a command only when it can satisfy the

@@ -31,10 +31,10 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
         .expect("btw");
 
     let side = app
-        .btw_side
+        .side_conversation
         .as_ref()
         .expect("side state")
-        .side_session
+        .side_thread_id
         .clone();
     assert_eq!(app.current_session.as_deref(), Some(side.as_str()));
     assert!(ui.transcript.is_empty());
@@ -52,9 +52,7 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
         row.kind == TranscriptKind::Command
             && row.title == "/refresh"
             && row.failed
-            && row
-                .text
-                .contains("unavailable inside a /btw side conversation")
+            && row.text.contains("unavailable inside a /btw side chat")
     }));
 
     app.handle_fullscreen_command(
@@ -67,9 +65,7 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
         row.kind == TranscriptKind::Command
             && row.title == "/compact focus current task"
             && row.failed
-            && row
-                .text
-                .contains("unavailable inside a /btw side conversation")
+            && row.text.contains("unavailable inside a /btw side chat")
     }));
 
     app.handle_fullscreen_key(
@@ -80,7 +76,7 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     .expect("ctrl-c");
 
     assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
-    assert!(app.btw_side.is_none());
+    assert!(app.side_conversation.is_none());
     assert!(
         SqliteStore::open(&app.db_path)
             .expect("store")
@@ -118,7 +114,7 @@ pub(crate) async fn fullscreen_btw_detaches_running_parent() {
         Some(parent.as_str())
     );
     assert!(
-        app.btw_parent_status_label(&ui)
+        app.side_parent_status_label(&ui)
             .is_some_and(|label| label.contains("main running"))
     );
 
@@ -128,7 +124,7 @@ pub(crate) async fn fullscreen_btw_detaches_running_parent() {
 }
 
 #[tokio::test]
-pub(crate) async fn fullscreen_refresh_cleans_orphan_side_sessions() {
+pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
@@ -139,10 +135,10 @@ pub(crate) async fn fullscreen_refresh_cleans_orphan_side_sessions() {
         .create_child_session_with_metadata(
             &parent,
             &app.workdir,
-            TUI_SIDE_SESSION_SOURCE,
+            TUI_SIDE_CONVERSATION_SESSION_SOURCE,
             "mock-model",
             "mock",
-            Some(serde_json::json!({BTW_SIDE_METADATA_KEY: {"ephemeral": true}})),
+            Some(serde_json::json!({SIDE_CONVERSATION_METADATA_KEY: {"ephemeral": true}})),
         )
         .expect("side");
     app.current_session = Some(parent);

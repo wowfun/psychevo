@@ -556,6 +556,62 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
 }
 
 #[tokio::test]
+pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .expect("parent session");
+    let child = store
+        .create_child_session_with_metadata(
+            &parent,
+            &app.workdir,
+            "agent",
+            "mock-model",
+            "mock",
+            None,
+        )
+        .expect("child session");
+    store
+        .upsert_agent_edge(
+            &parent,
+            &child,
+            psychevo_runtime::AgentEdgeStatus::Open,
+            None,
+        )
+        .expect("agent edge");
+    app.current_session = Some(parent.clone());
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Status,
+        "translate(Translate user message to Chinese)",
+        "Running (0 tool uses)",
+    );
+    row.tool_name = Some("Agent".to_string());
+    row.agent_target = Some(child.clone());
+    row.full_text = Some("Prompt:\ntranslate text".to_string());
+    ui.transcript.push(row);
+    draw_fullscreen_for_test(&app, &mut ui, 100, 14);
+
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+    )
+    .await
+    .expect("focus transcript");
+
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE),
+    )
+    .await
+    .expect("open selected agent");
+
+    assert_eq!(app.current_session.as_deref(), Some(child.as_str()));
+}
+
+#[tokio::test]
 pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);

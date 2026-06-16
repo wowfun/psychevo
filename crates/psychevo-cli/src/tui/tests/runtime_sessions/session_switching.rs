@@ -323,7 +323,7 @@ pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
     let side = store
         .create_session_with_metadata(
             &app.workdir,
-            TUI_SIDE_SESSION_SOURCE,
+            TUI_SIDE_CONVERSATION_SESSION_SOURCE,
             "mock-model",
             "mock",
             None,

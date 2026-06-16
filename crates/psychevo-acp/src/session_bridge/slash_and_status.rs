@@ -292,6 +292,11 @@ impl PsychevoAcpAgent {
                     self.write_artifact_text(session, SessionArtifactKind::Share, args.as_deref())?;
                 Ok(send_slash_text(cx, session_id, text))
             }
+            SlashCommandEffect::Btw { .. } => Ok(send_slash_text(
+                cx,
+                session_id,
+                "/btw is not available in ACP.",
+            )),
             SlashCommandEffect::SandboxShow => Ok(send_slash_text(
                 cx,
                 session_id,

@@ -106,7 +106,7 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
         slash_config: EffectiveSlashConfig::default(),
-        btw_side: None,
+        side_conversation: None,
         last_live_agent_reload_check: None,
         last_gateway_live_event_seq: 0,
         session_browser_limits: BTreeMap::new(),

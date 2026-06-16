@@ -231,7 +231,7 @@ impl TuiApp {
         if !ui.mark_gateway_live_event_applied(record.seq) {
             return Ok(false);
         }
-        Ok(self.apply_foreign_gateway_live_event(ui, &session_id, event)?)
+        self.apply_foreign_gateway_live_event(ui, &session_id, event)
     }
 
     fn gateway_live_event_session_id(

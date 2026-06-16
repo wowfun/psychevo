@@ -16,7 +16,7 @@ impl TuiApp {
         }
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
-            && self.handle_btw_ctrl_c(ui)?
+            && self.handle_side_conversation_ctrl_c(ui)?
         {
             return Ok(false);
         }
@@ -68,7 +68,20 @@ impl TuiApp {
                 KeyCode::Up => ui.move_selection(-1),
                 KeyCode::Down => ui.move_selection(1),
                 KeyCode::Enter => {
-                    if let Some(target) = ui.selected_agent_target() {
+                    let selected_visible =
+                        ui.selected_target.is_some_and(|target| ui.target_visible(target));
+                    if !selected_visible {
+                        ui.ensure_agent_open_selection();
+                    } else {
+                        ui.ensure_selection();
+                    }
+                    let agent_target = if selected_visible {
+                        ui.selected_agent_target()
+                    } else {
+                        ui.selected_agent_target()
+                            .or_else(|| ui.visible_agent_target())
+                    };
+                    if let Some(target) = agent_target {
                         self.open_agent_target_session(ui, &target)?;
                     } else {
                         ui.toggle_selected();
@@ -83,7 +96,12 @@ impl TuiApp {
                     }
                 }
                 KeyCode::Char('o') | KeyCode::Char('O') => {
-                    if let Some(target) = ui.selected_agent_target() {
+                    if !ui.selected_target.is_some_and(|target| ui.target_visible(target)) {
+                        ui.ensure_agent_open_selection();
+                    } else {
+                        ui.ensure_selection();
+                    }
+                    if let Some(target) = ui.selected_agent_target().or_else(|| ui.visible_agent_target()) {
                         self.open_agent_target_session(ui, &target)?;
                     }
                 }
@@ -274,7 +292,9 @@ impl TuiApp {
             }
             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 ui.focus = FocusMode::Transcript;
-                ui.ensure_selection();
+                ui.selected_target = None;
+                ui.selected_row = None;
+                ui.ensure_agent_open_selection();
                 ui.push_status("transcript review");
             }
             KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {

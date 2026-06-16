@@ -186,7 +186,7 @@ fn sse_tool_read_call(call_id: &str) -> String {
 
 fn sse_tool_agent_call(call_id: &str, agent: &str, prompt: &str) -> String {
     let args = serde_json::json!({
-        "name": agent,
+        "agent_type": agent,
         "prompt": prompt,
     })
     .to_string();

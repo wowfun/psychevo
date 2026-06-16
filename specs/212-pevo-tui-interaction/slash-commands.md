@@ -54,7 +54,7 @@ The first TUI supports:
 Slash command discovery is backed by the shared runtime command catalog,
 parser, and UI-independent execution effects defined by
 [026 Commands](../026-commands/spec.md). The TUI supplies terminal capabilities
-such as picker, clipboard, renderer toggles, process exit, side conversation,
+such as picker, clipboard, renderer toggles, process exit, Side chat,
 and image attachment, then projects shared command effects into panes,
 transcript command rows, composer state, queues, and approvals. The slash menu
 stays a flat list with at most 8 rows and does not show group headers. Built-in
@@ -268,12 +268,12 @@ call providers.
 
 `/refresh` is the TUI-visible refresh entrypoint. It rebuilds the current
 session prompt prefix using the existing reload-context behavior and schedules a
-background cleanup of orphaned hidden `/btw` side sessions for the current
+background cleanup of orphaned hidden `/btw` side chats for the current
 workdir. Fullscreen TUI rejects `/refresh` as a whole while the active thread is
 running, writes one command transcript row for the context reload and scheduled
 cleanup, and reports cleanup completion through transient status text with the
 deleted side-session count. `/refresh` is disabled inside `/btw` side
-conversations. `/reload-context` is no longer exposed through TUI help, menu,
+chats. `/reload-context` is no longer exposed through TUI help, menu,
 or common command discovery; direct TUI input of `/reload-context` must produce
 bounded feedback telling users to use `/refresh`. Non-TUI session
 reload-context APIs remain available.
@@ -286,34 +286,27 @@ does not interrupt the turn. Completion reports before/after token estimates
 and a folded display-only summary row that is not a durable session message.
 Scripted TUI prints bounded compaction feedback.
 
-`/btw [prompt]` opens a temporary side conversation for local side work. `/btw`
-opens an empty side conversation; `/btw <prompt>` opens it and immediately
-submits `<prompt>` as the first side prompt. `/side` is a hidden compatibility
-alias with identical behavior and does not appear as a separate help or menu
-row. A side conversation is implemented as a hidden temporary child session that
-inherits a startup snapshot of the parent conversation and inserts hidden
-boundary instructions marking inherited history as reference-only. Later parent
-output is not merged into the side context. The side session inherits the
-current model, reasoning, mode, permissions, selected agent, skills, and tool
-surface at creation time. Tools remain available under the current permission
-policy, and explicit workspace mutations requested inside the side conversation
-are real workspace changes; deleting the side session does not revert them.
-Side-local model, reasoning, and permission changes do not affect the parent
-after return.
+`/btw [prompt]` follows the shared `Side chat` behavior in
+[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md). `/btw` opens an
+empty side chat; `/btw <prompt>` opens it and immediately submits
+`<prompt>` as the first side prompt. `/side` is a hidden compatibility alias
+with identical behavior and does not appear as a separate help or menu row. TUI
+shows `/btw` in discovery only after the current conversation has a concrete
+session id; direct draft/no-session usage returns bounded guidance.
 
-While the user is inside a side conversation, the status area identifies it as a
-side conversation and shows parent status such as running, needs input, needs
+While the user is inside a side chat, the status area identifies it as a
+side chat and shows parent status such as running, needs input, needs
 approval, failed, interrupted, closed, or finished. If the parent turn is
 running when `/btw` starts, fullscreen TUI detaches it into the existing
-auxiliary-running path so it continues while the side conversation is active.
-`Ctrl+C` inside an idle side conversation returns to the parent, deletes the
-hidden side session and messages, reloads the parent transcript, replays any
+auxiliary-running path so it continues while the side chat is active.
+`Ctrl+C` inside an idle side chat returns to the parent, deletes the
+temporary side thread and messages, reloads the parent transcript, replays any
 buffered parent live events, and shows only transient feedback. `Ctrl+C` during
 a running side turn interrupts that side turn first; a later `Ctrl+C` returns
-to the parent. Side conversations are not workspace sandboxes: only the
-temporary session transcript is deleted.
+to the parent. Side chats are not workspace sandboxes: only the
+temporary side-thread transcript is deleted.
 
-Side conversations allow only a limited slash-command set:
+TUI side chats allow only a limited slash-command set:
 `/help`, `/status`, `/context`, `/model`, `/variant`, `/mode`, `/permissions`,
 `/sandbox`, `/show-thinking`, `/show-raw`, `/copy`, `/export`, `/share`,
 `/quit`, `/exit`, and `/q`. Nested `/btw` or `/side`, `/refresh`, session

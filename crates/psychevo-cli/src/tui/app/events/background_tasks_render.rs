@@ -89,7 +89,7 @@ impl TuiApp {
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
-        if self.in_btw_side()
+        if self.in_side_conversation()
             || self.current_session.is_none()
             || ui.running.is_some()
             || self.compaction_task.is_some()

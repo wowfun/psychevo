@@ -437,7 +437,15 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
         GatewayEvent::TurnCompleted {
             thread_id: Some(session_id.clone()),
             turn_id: "turn-web".to_string(),
-            outcome: Some("normal".to_string()),
+            turn: GatewayTurn {
+                id: "turn-web".to_string(),
+                thread_id: Some(session_id.clone()),
+                status: GatewayTurnStatus::Completed,
+                outcome: Some("normal".to_string()),
+                error: None,
+                started_at_ms: None,
+                completed_at_ms: Some(1),
+            },
             committed_entries: vec![gateway_answer_entry(&session_id, "turn-web", 2, "done")],
         },
     );

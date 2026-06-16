@@ -1,4 +1,5 @@
 pub(crate) use super::*;
+pub(crate) use psychevo_gateway::{GatewayTurn, GatewayTurnStatus};
 pub(crate) use psychevo_runtime::{ContextCategory, ContextScope, ContextTokenizer, ContextTotal};
 pub(crate) use ratatui::backend::{Backend, TestBackend};
 pub(crate) use ratatui::layout::Position;

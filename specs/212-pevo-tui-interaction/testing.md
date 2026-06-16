@@ -106,11 +106,12 @@ Required interaction coverage:
 - `/refresh` command interaction: TUI-visible replacement for
   `/reload-context`, prompt-prefix reload result, background orphan side-session
   cleanup status, whole-command rejection while the active thread is running,
-  rejection inside side conversations, and `/reload-context` direct-input
+  rejection inside side chats, and `/reload-context` direct-input
   feedback pointing to `/refresh` while remaining absent from help and menu
   discovery.
-- `/btw` side conversation interaction: parsing for `/btw`, `/btw <prompt>`,
-  and hidden `/side <prompt>`; help/menu visibility for `/btw` only; hidden
+- `/btw` Side chat interaction: parsing for `/btw`, `/btw <prompt>`,
+  and hidden `/side <prompt>`; help/menu visibility for `/btw` only after a
+  real current session exists; bounded draft/no-session guidance; hidden
   temporary side-session creation; inherited snapshot plus boundary
   instructions; auto-submission of the initial prompt; parent running detachment
   without cancellation; parent live-event buffering and replay on return;

@@ -259,7 +259,7 @@ resolve at execution time. Help output reports hidden dynamic counts when a cap
 omits entries.
 
 ACP does not advertise commands whose useful behavior depends on a TUI-only
-panel, local clipboard, process exit, renderer toggle, side conversation, or
+panel, local clipboard, process exit, renderer toggle, Side chat, or
 client-native image-attachment composer state. If those known commands are
 typed, ACP returns bounded guidance such as using the ACP client's native image
 attachment flow or using the TUI/CLI for local clipboard/display commands.

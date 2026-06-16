@@ -54,16 +54,23 @@ impl TuiApp {
                 false
             }
             GatewayEvent::TurnCompleted {
-                outcome,
+                turn,
                 turn_id,
                 committed_entries,
                 ..
             } => {
-                if let Some(outcome) = outcome.as_deref().and_then(outcome_from_str) {
+                if let Some(outcome) = turn.outcome.as_deref().and_then(outcome_from_str) {
                     ui.turn_outcome = Some(outcome);
                     if ui.interrupt_requested && outcome == Outcome::Aborted {
                         ui.turn_interrupted = true;
                     }
+                } else if turn.status == GatewayTurnStatus::Interrupted {
+                    ui.turn_outcome = Some(Outcome::Aborted);
+                    if ui.interrupt_requested {
+                        ui.turn_interrupted = true;
+                    }
+                } else if turn.status == GatewayTurnStatus::Failed {
+                    ui.turn_outcome = Some(Outcome::Failed);
                 }
                 self.apply_committed_turn_entries(ui, owner_session, &turn_id, committed_entries);
                 ui.update_turn_meta(self.debug, true, true, true);

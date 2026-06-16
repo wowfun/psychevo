@@ -19,8 +19,8 @@ pub(crate) use crossterm::terminal::{
 pub(crate) use psychevo_ai::Outcome;
 pub(crate) use psychevo_gateway::{
     Gateway, GatewayActivity, GatewayEvent, GatewayEventSink, GatewaySource, GatewayThreadSelector,
-    SendTurnRequest, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
-    TranscriptEntryRole,
+    GatewayTurnStatus, SendTurnRequest, TranscriptBlock, TranscriptBlockKind,
+    TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
 };
 pub(crate) use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentEntrypoint, AgentSource,
@@ -33,10 +33,11 @@ pub(crate) use psychevo_runtime::{
     PendingInputId, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
     ReloadContextOptions, RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
-    SESSION_MAIN_AGENT_METADATA_KEY, SessionArtifactKind, SessionExportFormat,
-    SessionExportOptions, SessionExportWriteResult, SessionSummary, SessionUndoOptions,
-    SessionUsageOptions, SessionUsageSummary, SkillBundle, SkillCatalog, SkillDiscoveryOptions,
-    SkillTarget, SqliteStore, StateRuntime, StatsOptions, TUI_DISPLAY_METADATA_KEY, TerminalReason,
+    SESSION_MAIN_AGENT_METADATA_KEY, SIDE_CONVERSATION_METADATA_KEY, SIDE_INHERITED_METADATA_KEY,
+    SessionArtifactKind, SessionExportFormat, SessionExportOptions, SessionExportWriteResult,
+    SessionSummary, SessionUndoOptions, SessionUsageOptions, SessionUsageSummary, SkillBundle,
+    SkillCatalog, SkillDiscoveryOptions, SkillTarget, SqliteStore, StateRuntime, StatsOptions,
+    TUI_DISPLAY_METADATA_KEY, TUI_SIDE_CONVERSATION_SESSION_SOURCE, TerminalReason,
     ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, TuiMessageSummary,
     USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, WorkspaceDiff,
     agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot, canonicalize_workdir,
@@ -54,8 +55,8 @@ pub(crate) use psychevo_runtime::{
     selected_configured_model, session_base_agent_name_from_metadata, session_usage_summary,
     set_agent_spawn_paused, set_default_model_with_reasoning, set_local_toolset_enabled,
     set_skill_config_value, set_skill_enabled, side_conversation_boundary_prompt,
-    spawn_agent_background, stop_agent_id_with_grace, toolsets_value, undo_session, usage_stats,
-    view_skill_value, write_session_export,
+    side_inherited_metadata_hidden, spawn_agent_background, stop_agent_id_with_grace,
+    toolsets_value, undo_session, usage_stats, view_skill_value, write_session_export,
 };
 pub(crate) use ratatui::Frame;
 pub(crate) use ratatui::Terminal;
@@ -92,11 +93,8 @@ pub(crate) use crate::env::{
     resolve_psychevo_home, resolve_state_db,
 };
 
-pub(crate) const TUI_SIDE_SESSION_SOURCE: &str = "tui-side";
 pub(crate) const TUI_CONTINUE_SESSION_SOURCES: &[&str] = &["run", "tui"];
-pub(crate) const TUI_INTERNAL_SESSION_SOURCES: &[&str] = &[TUI_SIDE_SESSION_SOURCE];
-pub(crate) const BTW_SIDE_METADATA_KEY: &str = "btw_side";
-pub(crate) const BTW_INHERITED_METADATA_KEY: &str = "btw_inherited";
+pub(crate) const TUI_INTERNAL_SESSION_SOURCES: &[&str] = &[TUI_SIDE_CONVERSATION_SESSION_SOURCE];
 pub(crate) const USER_SHELL_HELP: &str = "shell mode: type !<command> to run a local shell command";
 pub(crate) const FILE_POPUP_MAX_ROWS: usize = 8;
 
@@ -200,7 +198,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
         slash_config,
-        btw_side: None,
+        side_conversation: None,
         last_live_agent_reload_check: None,
         last_gateway_live_event_seq,
         session_browser_limits: BTreeMap::new(),

@@ -49,7 +49,7 @@ impl<'a> FullscreenUi<'a> {
         suppress_terminal_meta: bool,
         active_tool_call_ids: Option<&BTreeSet<String>>,
     ) {
-        if btw_inherited_message(metadata) {
+        if side_inherited_message(metadata) {
             return;
         }
         match message
@@ -175,6 +175,14 @@ impl<'a> FullscreenUi<'a> {
         }
         let mut row =
             TranscriptRow::with_title(evidence_kind(&call.name), call.active_title, "preparing");
+        let tool_value = serde_json::json!({
+            "tool_name": call.name.clone(),
+            "args": call.args.clone(),
+            "result": {}
+        });
+        if call.name == "Agent" {
+            row.full_text = running_agent_tool_full_text(&tool_value);
+        }
         row.tool_call_id = Some(call.id.clone());
         row.tool_name = Some(call.name.clone());
         row.tool_started = Some(history_tool_started_instant(message));
@@ -198,6 +206,14 @@ impl<'a> FullscreenUi<'a> {
             "interrupted",
         );
         row.tool_call_id = Some(call.id);
+        let tool_value = serde_json::json!({
+            "tool_name": call.name.clone(),
+            "args": call.args.clone(),
+            "result": {}
+        });
+        if call.name == "Agent" {
+            row.full_text = running_agent_tool_full_text(&tool_value);
+        }
         row.tool_name = Some(call.name);
         row.tool_elapsed = metadata_elapsed_duration(metadata);
         row.interrupted = true;
