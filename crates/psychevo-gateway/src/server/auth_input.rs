@@ -100,6 +100,35 @@ fn selector_from_thread_or_default(
     Ok(state.selector(&scope.source))
 }
 
+fn selector_from_interaction_context(
+    state: &WebState,
+    auth: &AuthContext,
+    thread_id: Option<String>,
+    source_key: Option<String>,
+    activity_id: Option<String>,
+) -> psychevo_runtime::Result<GatewayThreadSelector> {
+    if let Some(thread_id) = thread_id {
+        authorize_thread(state, auth, &thread_id)?;
+        return Ok(GatewayThreadSelector::thread_id(thread_id));
+    }
+    if let Some(source_key) = source_key.filter(|value| !value.trim().is_empty()) {
+        return Ok(GatewayThreadSelector::source(wire::SourceKey(source_key)));
+    }
+    if let Some(activity_id) = activity_id.filter(|value| !value.trim().is_empty())
+        && let Some(activity) = state.inner.state.store().gateway_activity(&activity_id)?
+    {
+        if let Some(thread_id) = activity.thread_id {
+            authorize_thread(state, auth, &thread_id)?;
+            return Ok(GatewayThreadSelector::thread_id(thread_id));
+        }
+        if let Some(source_key) = activity.source_key {
+            return Ok(GatewayThreadSelector::source(wire::SourceKey(source_key)));
+        }
+    }
+    let scope = default_resolved_scope(state, auth)?;
+    Ok(state.selector(&scope.source))
+}
+
 fn source_from_input(
     input: Option<wire::GatewaySourceInput>,
     workdir: &Path,

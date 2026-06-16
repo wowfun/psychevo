@@ -294,7 +294,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
 pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentSpawnResult> {
     let workdir = canonical_workdir(&options.workdir)?;
     if options.prompt.trim().is_empty() {
-        return Err(Error::Message("Agent prompt is empty".to_string()));
+        return Err(Error::Message("agent message is empty".to_string()));
     }
     let run_options = RunOptions {
         state: options.state.clone(),

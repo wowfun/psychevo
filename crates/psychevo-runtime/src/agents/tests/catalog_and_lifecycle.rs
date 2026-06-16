@@ -10,7 +10,7 @@ pub(crate) async fn agent_name_allowlist_filters_prompt_catalog_and_spawn() {
         r#"---
 name: coordinator
 description: Coordinate selected agents
-tools: Agent(worker, researcher)
+tools: spawn_agent(worker, researcher)
 ---
 Coordinate.
 "#,
@@ -27,7 +27,7 @@ Coordinate.
     };
 
     let tools = apply_agent_tool_policy(
-        vec![test_tool("Agent"), test_tool("list_agents")],
+        vec![test_tool("spawn_agent"), test_tool("list_agents")],
         Some(&coordinator),
         RunMode::Default,
     );
@@ -81,11 +81,10 @@ Coordinate.
             spawn_depth_remaining: None,
             external_delegate: None,
         },
-        AgentToolArgs {
+        SpawnAgentArgs {
             agent_type: Some("explore-extra".to_string()),
-            name: None,
-            prompt: "explore".to_string(),
-            task_name: None,
+            message: "explore".to_string(),
+            task_name: "test_task".to_string(),
             background: None,
             model: None,
             fork_context: false,
@@ -434,56 +433,15 @@ pub(crate) fn duplicate_agents_are_available_as_shadowed_definitions() {
 }
 
 #[test]
-pub(crate) fn agent_tool_name_is_hidden_task_name_fallback_only() {
-    let args = AgentToolArgs {
-        agent_type: None,
-        name: Some("translate".to_string()),
-        prompt: "translate this".to_string(),
-        task_name: None,
-        background: None,
-        model: None,
-        fork_context: false,
-        fork_turns: None,
-        max_turns: None,
-        max_spawn_depth: None,
-    };
-    assert_eq!(
-        resolve_agent_tool_name(&args, &[]).expect("default agent"),
-        "general"
-    );
-    assert_eq!(agent_tool_task_name(&args), Some("translate"));
-
-    let args = AgentToolArgs {
-        agent_type: Some("general".to_string()),
-        name: Some("translate".to_string()),
-        prompt: "translate this".to_string(),
-        task_name: None,
-        background: None,
-        model: None,
-        fork_context: false,
-        fork_turns: None,
-        max_turns: None,
-        max_spawn_depth: None,
-    };
-    assert_eq!(
-        resolve_agent_tool_name(&args, &[]).expect("agent_type wins"),
-        "general"
-    );
-    assert_eq!(agent_tool_task_name(&args), Some("translate"));
-
-    let args = AgentToolArgs {
-        agent_type: Some("general".to_string()),
-        name: Some("ignored-name".to_string()),
-        prompt: "translate this".to_string(),
-        task_name: Some("explicit-task".to_string()),
-        background: None,
-        model: None,
-        fork_context: false,
-        fork_turns: None,
-        max_turns: None,
-        max_spawn_depth: None,
-    };
-    assert_eq!(agent_tool_task_name(&args), Some("explicit-task"));
+pub(crate) fn spawn_agent_task_name_validation_is_strict() {
+    for invalid in ["", "root", ".", "..", "zh-to-en", "中译英", "two words"] {
+        let err = validate_task_name(invalid).expect_err("invalid task name");
+        assert!(
+            err.to_string()
+                .contains("task_name must use lowercase letters, digits, and underscores")
+        );
+    }
+    validate_task_name("translate_zh_to_en").expect("valid task name");
 }
 
 #[test]
@@ -506,7 +464,7 @@ pub(crate) fn agent_tool_schema_omits_name_argument() {
             diagnostics: Vec::new(),
         },
     );
-    let schema = AgentTool::new(context).parameters();
+    let schema = SpawnAgentTool::new(context).parameters();
     assert!(schema.pointer("/properties/name").is_none());
     assert!(schema.pointer("/properties/agent_type").is_some());
     assert!(schema.pointer("/properties/task_name").is_some());
@@ -514,11 +472,10 @@ pub(crate) fn agent_tool_schema_omits_name_argument() {
 
 #[test]
 pub(crate) fn required_agent_mention_supplies_omitted_agent_type() {
-    let args = AgentToolArgs {
+    let args = SpawnAgentArgs {
         agent_type: None,
-        name: None,
-        prompt: "translate this".to_string(),
-        task_name: None,
+        message: "translate this".to_string(),
+        task_name: "test_task".to_string(),
         background: None,
         model: None,
         fork_context: false,
@@ -614,7 +571,7 @@ pub(crate) fn stop_agent_with_grace_marks_live_run_interrupted() {
             AgentRunState {
                 record: AgentRunRecord {
                     id: id.clone(),
-                    task_name: Some("test-stop".to_string()),
+                    task_name: Some("worker_task".to_string()),
                     agent_name: "general".to_string(),
                     task: "stop gracefully".to_string(),
                     parent_session_id: "parent".to_string(),

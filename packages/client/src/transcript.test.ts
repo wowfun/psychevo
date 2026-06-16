@@ -173,13 +173,13 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
               title: "Agent",
               status: "running",
               metadata: {
-                tool_name: "Agent",
+                tool_name: "spawn_agent",
                 tool_call_id: "call-agent",
                 result: {
                   agent_name: "translate",
-                  child_session_id: "child-thread",
-                  parent_session_id: "thread-1",
-                  task_name: "zh-to-en"
+                  child_thread_id: "child-thread",
+                  parent_thread_id: "thread-1",
+                  task_name: "zh_to_en"
                 }
               }
             })
@@ -207,26 +207,27 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
               status: "completed",
               title: "Agent",
               metadata: {
-                tool_name: "Agent",
+                tool_name: "spawn_agent",
                 tool_call_id: "call-agent",
                 args: {
                   agent_type: "translate",
-                  task_name: "zh-to-en"
+                  task_name: "zh_to_en",
+                  message: "Translate the greeting to English."
                 },
                 result: {
                   agent_name: "translate",
-                  task_name: "zh-to-en"
+                  task_name: "zh_to_en"
                 }
               },
               result: {
                 resultMessageSeq: 3,
                 status: "completed",
-                content: "{\"agent_name\":\"translate\",\"task_name\":\"zh-to-en\"}",
+                content: "{\"agent_name\":\"translate\",\"task_name\":\"zh_to_en\"}",
                 isError: false,
                 metadata: {
                   result: {
                     agent_name: "translate",
-                    task_name: "zh-to-en"
+                    task_name: "zh_to_en"
                   }
                 },
                 createdAtMs: 3,
@@ -240,9 +241,228 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
 
     expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:2"]);
     const agentBlock = next.entries[0]?.blocks[0];
-    expect((agentBlock?.metadata as Record<string, unknown>)?.["child_session_id"]).toBe("child-thread");
-    expect(((agentBlock?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_session_id"]).toBe("child-thread");
-    expect(((agentBlock?.result?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_session_id"]).toBe("child-thread");
+    expect((agentBlock?.metadata as Record<string, unknown>)?.["child_thread_id"]).toBe("child-thread");
+    expect(((agentBlock?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_thread_id"]).toBe("child-thread");
+    expect(((agentBlock?.result?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_thread_id"]).toBe("child-thread");
+  });
+
+  it("preserves a live Agent child target when a later live frame omits it", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:0",
+          source: "runtime.stream",
+          messageSeq: null,
+          blocks: [
+            block({
+              id: "live:turn-1:tool:call-agent",
+              kind: "agent",
+              title: "Agent",
+              status: "running",
+              metadata: {
+                projection: "tool",
+                tool_name: "spawn_agent",
+                tool_call_id: "call-agent",
+                result: {
+                  agent_name: "translate",
+                  task_name: "zh_to_en",
+                  child_thread_id: "child-thread"
+                }
+              }
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = applyLiveTranscriptEvent(current, {
+      type: "entryUpdated",
+      turnId: "turn-1",
+      entry: entry({
+        id: "live:turn-1:assistant:0",
+        source: "runtime.stream",
+        messageSeq: null,
+        blocks: [
+          block({
+            id: "live:turn-1:tool:call-agent",
+            kind: "agent",
+            title: "Agent",
+            status: "pending",
+            metadata: {
+              projection: "tool",
+              tool_name: "spawn_agent",
+              tool_call_id: "call-agent",
+              args: {
+                agent_type: "translate",
+                task_name: "zh_to_en",
+                message: "Translate the greeting to English."
+              }
+            }
+          })
+        ]
+      })
+    });
+
+    const agentBlock = next.entries[0]?.blocks[0];
+    expect(((agentBlock?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_thread_id"]).toBe("child-thread");
+  });
+
+  it("upserts and resolves pending permission requests from live events", () => {
+    const requested = applyLiveTranscriptEvent(detachedSnapshot(), {
+      type: "permissionRequested",
+      requestId: "permission-draft",
+      toolName: "exec_command",
+      summary: "inline Python could not be reduced",
+      reason: "requires approval",
+      matchedRule: "exec:python3 -c",
+      suggestedRule: null,
+      allowAlways: true,
+      timeoutSecs: 300,
+      turnId: "turn-draft",
+      activityId: "activity-draft",
+      sourceKey: "web:draft"
+    });
+
+    expect(requested.pendingPermissions).toEqual([
+      {
+        requestId: "permission-draft",
+        toolName: "exec_command",
+        summary: "inline Python could not be reduced",
+        reason: "requires approval",
+        matchedRule: "exec:python3 -c",
+        allowAlways: true,
+        timeoutSecs: 300,
+        turnId: "turn-draft",
+        activityId: "activity-draft",
+        sourceKey: "web:draft"
+      }
+    ]);
+
+    const resolved = applyLiveTranscriptEvent(requested, {
+      type: "permissionResolved",
+      requestId: "permission-draft",
+      decision: "allowAlways"
+    });
+
+    expect(resolved.pendingPermissions).toEqual([]);
+  });
+
+  it("upserts pending clarify requests and clears same-turn pending requests on completion", () => {
+    const draftRunning = {
+      ...detachedSnapshot(),
+      activity: {
+        running: true,
+        activeTurnId: "turn-draft",
+        queuedTurns: 0
+      }
+    };
+    const withClarify = applyLiveTranscriptEvent(draftRunning, {
+      type: "clarifyRequested",
+      requestId: "clarify-draft",
+      raw: { questions: [{ question: "Which path?", options: [{ label: "A" }, { label: "B" }] }] },
+      turnId: "turn-draft",
+      activityId: "activity-draft",
+      sourceKey: "web:draft"
+    });
+    const withBoth = applyLiveTranscriptEvent(withClarify, {
+      type: "permissionRequested",
+      requestId: "permission-draft",
+      toolName: "exec_command",
+      summary: "needs approval",
+      reason: "requires approval",
+      matchedRule: null,
+      suggestedRule: null,
+      allowAlways: false,
+      timeoutSecs: 300,
+      turnId: "turn-draft",
+      activityId: "activity-draft",
+      sourceKey: "web:draft"
+    });
+
+    expect(withBoth.pendingClarifies[0]).toMatchObject({
+      requestId: "clarify-draft",
+      activityId: "activity-draft",
+      sourceKey: "web:draft"
+    });
+    expect(withBoth.pendingPermissions[0]?.requestId).toBe("permission-draft");
+
+    const completed = applyLiveTranscriptEvent(withBoth, {
+      type: "turnCompleted",
+      threadId: "thread-draft",
+      turnId: "turn-draft",
+      turn: completedTurn("turn-draft", "thread-draft"),
+      committedEntries: []
+    });
+
+    expect(completed.pendingClarifies).toEqual([]);
+    expect(completed.pendingPermissions).toEqual([]);
+  });
+
+  it("does not treat spawn_agent args as a live overlay identity", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:0",
+          source: "runtime.stream",
+          messageSeq: null,
+          blocks: [
+            block({
+              id: "live:turn-1:tool:spawn_agent@0:0:0",
+              kind: "agent",
+              title: "Agent",
+              status: "pending",
+              metadata: {
+                projection: "tool",
+                tool_name: "spawn_agent",
+                args: {
+                  agent_type: "translate",
+                  task_name: "zh_to_en",
+                  message: "Translate the greeting to English."
+                }
+              }
+            })
+          ]
+        })
+      ]
+    };
+    const incoming = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "message:2",
+          source: "runtime.message",
+          messageSeq: 2,
+          status: "completed",
+          blocks: [
+            block({
+              id: "message:2:agent",
+              kind: "agent",
+              source: "runtime.message",
+              status: "completed",
+              title: "Agent",
+              metadata: {
+                projection: "tool",
+                tool_name: "spawn_agent",
+                args: {
+                  agent_type: "translate",
+                  task_name: "zh_to_en",
+                  message: "Translate the greeting to English."
+                }
+              }
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(current, incoming);
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "message:2",
+      "live:turn-1:assistant:0"
+    ]);
   });
 });
 

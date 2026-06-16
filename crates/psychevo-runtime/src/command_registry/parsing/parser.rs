@@ -485,7 +485,7 @@ pub fn normalize_dynamic_skill_name(name: &str) -> String {
 
 pub fn fork_prompt_marker(prompt: &str) -> String {
     format!(
-        "Use the Agent tool with agent_type=\"general\", fork_context=true, and background=true for this task:\n\n{}",
+        "Use the spawn_agent tool with agent_type=\"general\", fork_context=true, background=true, a lowercase underscore task_name, and this message:\n\n{}",
         prompt.trim()
     )
 }

@@ -267,10 +267,29 @@ export const serverNotificationGatewayEventSchema = {
         },
         {
           "properties": {
+            "activity_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "allowAlways": {
               "type": "boolean"
             },
+            "lease_expires_at_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "matchedRule": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_id": {
               "type": [
                 "string",
                 "null"
@@ -282,6 +301,12 @@ export const serverNotificationGatewayEventSchema = {
             "requestId": {
               "type": "string"
             },
+            "source_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "suggestedRule": {
               "type": [
                 "string",
@@ -291,6 +316,12 @@ export const serverNotificationGatewayEventSchema = {
             "summary": {
               "type": "string"
             },
+            "thread_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "timeoutSecs": {
               "format": "uint64",
               "minimum": 0.0,
@@ -298,6 +329,12 @@ export const serverNotificationGatewayEventSchema = {
             },
             "toolName": {
               "type": "string"
+            },
+            "turn_id": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "enum": [
@@ -341,9 +378,46 @@ export const serverNotificationGatewayEventSchema = {
         },
         {
           "properties": {
+            "activity_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lease_expires_at_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "owner_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "raw": true,
             "requestId": {
               "type": "string"
+            },
+            "source_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "thread_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "turn_id": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "enum": [

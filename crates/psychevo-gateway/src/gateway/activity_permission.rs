@@ -134,6 +134,12 @@ impl ApprovalHandler for GatewayApprovalHandler {
                 suggested_rule: request.suggested_rule.clone(),
                 allow_always: request.allow_always,
                 timeout_secs: request.timeout_secs,
+                thread_id: None,
+                turn_id: None,
+                activity_id: None,
+                source_key: None,
+                owner_id: None,
+                lease_expires_at_ms: None,
             });
             let decision = timeout(Duration::from_secs(timeout_secs), receiver)
                 .await

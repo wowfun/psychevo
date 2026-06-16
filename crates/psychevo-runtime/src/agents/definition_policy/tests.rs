@@ -63,13 +63,13 @@ impl ToolBinding for HookedTool {
     }
 }
 
-impl ToolBinding for AgentTool {
+impl ToolBinding for SpawnAgentTool {
     fn name(&self) -> &str {
-        "Agent"
+        "spawn_agent"
     }
 
     fn description(&self) -> &str {
-        "Spawn a focused child agent. Named agents start with fresh context by default; set fork_context true to include the parent context snapshot."
+        "Spawn a focused child agent thread. Provide a canonical task_name and a complete message for the child agent."
     }
 
     fn parameters(&self) -> Value {
@@ -80,13 +80,14 @@ impl ToolBinding for AgentTool {
                     "type": "string",
                     "description": "Agent definition name to run. Defaults to general when omitted and no @agent mention requires a specific target."
                 },
-                "prompt": {
-                    "type": "string",
-                    "description": "Complete task instructions for the child agent."
-                },
                 "task_name": {
                     "type": "string",
-                    "description": "Optional durable task label used later by wait/send/close/resume control tools; does not select the agent definition."
+                    "pattern": "^[a-z0-9_]+$",
+                    "description": "Required canonical task key using lowercase ASCII letters, digits, and underscores only."
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Complete task instructions for the child agent."
                 },
                 "background": {
                     "type": "boolean",
@@ -116,7 +117,7 @@ impl ToolBinding for AgentTool {
                     "description": "Additional descendant spawn levels this child may create. 0 makes it a leaf; values above the runtime cap are rejected."
                 }
             },
-            "required": ["prompt"],
+            "required": ["task_name", "message"],
             "additionalProperties": false
         })
     }
@@ -133,10 +134,10 @@ impl ToolBinding for AgentTool {
     ) -> BoxFuture<'static, ToolOutput> {
         let context = self.context.clone();
         Box::pin(async move {
-            let parsed: AgentToolArgs = match serde_json::from_value(args) {
+            let parsed: SpawnAgentArgs = match serde_json::from_value(args) {
                 Ok(args) => args,
                 Err(err) => {
-                    return ToolOutput::error(format!("invalid Agent arguments: {err}"));
+                    return ToolOutput::error(format!("invalid spawn_agent arguments: {err}"));
                 }
             };
             match spawn_subagent(context, parsed, tool_call_id, abort).await {

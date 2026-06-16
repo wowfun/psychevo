@@ -54,7 +54,7 @@ only when the caller has explicitly enabled interactive clarify support.
 Fullscreen TUI enables it in this slice. Headless runtime callers and `pevo run`
 do not expose it by default.
 
-Agent tool policy may allow or deny `clarify`, but policy cannot override the
+Agent invocation policy may allow or deny `clarify`, but policy cannot override the
 hard constraints: root session only and interactive support enabled. Subagents
 must not receive `clarify`.
 

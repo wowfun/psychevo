@@ -140,7 +140,7 @@ pub(crate) fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
 
     assert!(value.get("agent_id").is_none());
     assert_eq!(value["agent_name"], "worker");
-    assert_eq!(value["task"], "First line with spacing");
+    assert_eq!(value["task_name"], default_task_name("worker", &id));
     assert_eq!(value["status"], "completed");
     assert_eq!(value["exit_reason"], "normal");
     assert_eq!(value["summary"], "mailbox final");
@@ -180,11 +180,10 @@ pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
             parent,
             catalog,
         ),
-        AgentToolArgs {
+        SpawnAgentArgs {
             agent_type: Some("worker".to_string()),
-            name: None,
-            prompt: "Summarize this task.\nDo not echo metadata.".to_string(),
-            task_name: None,
+                        message: "Summarize this task.\nDo not echo metadata.".to_string(),
+            task_name: "test_task".to_string(),
             background: Some(false),
             model: None,
             fork_context: false,
@@ -204,7 +203,7 @@ pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
         serde_json::from_str(output.model_content.as_deref().expect("model content"))
             .expect("model json");
     assert_eq!(model_value["agent_name"], "worker");
-    assert_eq!(model_value["task"], "Summarize this task.");
+    assert_eq!(model_value["task_name"], "test_task");
     assert_eq!(model_value["status"], "completed");
     assert_eq!(model_value["summary"], "child final");
     assert!(model_value.get("agent_id").is_none());
@@ -238,11 +237,10 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
             parent.clone(),
             catalog,
         ),
-        AgentToolArgs {
+        SpawnAgentArgs {
             agent_type: Some("worker".to_string()),
-            name: Some("hidden-name-label".to_string()),
-            prompt: "Summarize this task.".to_string(),
-            task_name: Some("explicit-task".to_string()),
+                        message: "Summarize this task.".to_string(),
+            task_name: "explicit_task".to_string(),
             background: Some(true),
             model: None,
             fork_context: false,
@@ -258,7 +256,7 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
 
     assert_eq!(output.json["status"], "running");
     assert_eq!(output.json["background"], true);
-    assert_eq!(output.json["task_name"], "explicit-task");
+    assert_eq!(output.json["task_name"], "explicit_task");
     let child_session = output.json["child_session_id"]
         .as_str()
         .expect("child session id");
@@ -271,13 +269,13 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
     assert_eq!(edge.child_session_id, child_session);
     let metadata = edge.metadata.as_ref().expect("edge metadata");
     assert_eq!(metadata["agent"]["id"], output.json["id"]);
-    assert_eq!(metadata["agent"]["task_name"], "explicit-task");
+    assert_eq!(metadata["agent"]["task_name"], "explicit_task");
 
     let model_value: Value =
         serde_json::from_str(output.model_content.as_deref().expect("model content"))
             .expect("model json");
     assert_eq!(model_value["agent_name"], "worker");
-    assert_eq!(model_value["task"], "explicit-task");
+    assert_eq!(model_value["task_name"], "explicit_task");
     assert_eq!(model_value["status"], "running");
     assert!(model_value.get("child_session_id").is_none());
     assert!(model_value.get("session_id").is_none());
@@ -309,11 +307,10 @@ pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
             parent,
             catalog,
         ),
-        AgentToolArgs {
+        SpawnAgentArgs {
             agent_type: Some("worker".to_string()),
-            name: None,
-            prompt: "Summarize this task.".to_string(),
-            task_name: None,
+                        message: "Summarize this task.".to_string(),
+            task_name: "test_task".to_string(),
             background: Some(false),
             model: None,
             fork_context: false,
@@ -355,11 +352,10 @@ pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
     let (abort_tx, rx) = watch::channel(false);
     let task = tokio::spawn(spawn_subagent(
         test_agent_tool_context(&tmp, provider, store.clone(), db_path, parent, catalog),
-        AgentToolArgs {
+        SpawnAgentArgs {
             agent_type: Some("worker".to_string()),
-            name: None,
-            prompt: "Wait until interrupted.".to_string(),
-            task_name: None,
+                        message: "Wait until interrupted.".to_string(),
+            task_name: "test_task".to_string(),
             background: Some(false),
             model: None,
             fork_context: false,
@@ -418,11 +414,10 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
     let (_tx, rx) = watch::channel(false);
     let output = spawn_subagent(
         context,
-        AgentToolArgs {
+        SpawnAgentArgs {
             agent_type: Some("opencode".to_string()),
-            name: None,
-            prompt: "List your tools.".to_string(),
-            task_name: None,
+                        message: "List your tools.".to_string(),
+            task_name: "test_task".to_string(),
             background: Some(false),
             model: None,
             fork_context: false,
@@ -488,11 +483,10 @@ pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
     let (abort_tx, rx) = watch::channel(false);
     let task = tokio::spawn(spawn_subagent(
         context,
-        AgentToolArgs {
+        SpawnAgentArgs {
             agent_type: Some("opencode".to_string()),
-            name: None,
-            prompt: "Wait until interrupted.".to_string(),
-            task_name: None,
+                        message: "Wait until interrupted.".to_string(),
+            task_name: "test_task".to_string(),
             background: Some(false),
             model: None,
             fork_context: false,
@@ -547,11 +541,10 @@ pub(crate) async fn backend_backed_agent_tool_without_delegate_returns_unavailab
             parent,
             catalog,
         ),
-        AgentToolArgs {
+        SpawnAgentArgs {
             agent_type: Some("opencode".to_string()),
-            name: None,
-            prompt: "List your tools.".to_string(),
-            task_name: None,
+                        message: "List your tools.".to_string(),
+            task_name: "test_task".to_string(),
             background: Some(false),
             model: None,
             fork_context: false,

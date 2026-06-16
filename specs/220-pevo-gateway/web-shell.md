@@ -125,7 +125,7 @@ the self-delegation mention or switch back to native runtime for ACP-as-tool
 delegation.
 `turn/interrupt` is a thread/source-scoped active-turn control, not only a
 top-level model-request abort. When a native turn is awaiting a foreground
-Agent tool child invocation, interrupting the parent thread must abort that
+`spawn_agent` child invocation, interrupting the parent thread must abort that
 child invocation and settle the parent turn promptly. Persisted child-agent
 edges must close when the child completes, fails, or is interrupted, so
 Workbench Status and session reloads do not continue to show stale running
@@ -229,6 +229,19 @@ foreign approvals visible while pruning stale, completed, interrupted, expired,
 or wrong-thread requests before snapshot serialization. If `permission/respond`
 returns `accepted: false`, Workbench must show a composer-scoped transient error
 and refresh the snapshot instead of making the approval buttons appear inert.
+Permission and clarify live request events must also update Workbench's current
+snapshot immediately. Workbench may then issue a targeted `thread/read` for the
+request's thread or activity context, but it must not depend on source-default
+`thread/resume` while a draft/source-started turn is still unbound to its
+materialized session.
+Workbench renders permission requests with once, session, deny, and only the
+supported persistent option. It displays the request summary/reason/rule details
+as decision context and submits responses using the request's thread/activity
+context before falling back to the visible snapshot thread.
+Workbench renders clarify requests from their structured question/options
+payload instead of raw JSON. It supports the protocol's normal options,
+Other/freeform answers, submit, and cancel paths, and routes responses with the
+same pending-request context precedence as permission responses.
 For peer turns, Gateway also maps Workbench's submitted `model` and
 `reasoningEffort` controls to ACP v2 session config options before
 `session/prompt` when the peer offers compatible `model` and `effort` select

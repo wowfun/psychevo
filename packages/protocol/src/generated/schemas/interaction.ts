@@ -21,10 +21,19 @@ export const interactionSchemas = {
         "null"
       ]
     },
+    "allowAlways": {
+      "type": "boolean"
+    },
     "leaseExpiresAtMs": {
       "format": "int64",
       "type": [
         "integer",
+        "null"
+      ]
+    },
+    "matchedRule": {
+      "type": [
+        "string",
         "null"
       ]
     },
@@ -40,11 +49,31 @@ export const interactionSchemas = {
     "requestId": {
       "type": "string"
     },
+    "sourceKey": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "suggestedRule": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
     "threadId": {
       "type": [
         "string",
         "null"
       ]
+    },
+    "timeoutSecs": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "toolName": {
       "type": "string"
@@ -57,8 +86,11 @@ export const interactionSchemas = {
     }
   },
   "required": [
+    "allowAlways",
     "reason",
     "requestId",
+    "summary",
+    "timeoutSecs",
     "toolName"
   ],
   "title": "PendingPermissionView",
@@ -67,9 +99,46 @@ export const interactionSchemas = {
   PendingClarifyView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "activityId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "leaseExpiresAtMs": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "ownerId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "raw": true,
     "requestId": {
       "type": "string"
+    },
+    "sourceKey": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "turnId": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -93,11 +162,25 @@ export const interactionSchemas = {
     }
   },
   "properties": {
+    "activityId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "decision": {
       "$ref": "#/definitions/PermissionDecision"
     },
     "requestId": {
       "type": "string"
+    },
+    "sourceKey": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "threadId": {
       "default": null,
@@ -117,6 +200,13 @@ export const interactionSchemas = {
   ClarifyRespondParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "activityId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "answers": {
       "default": null,
       "items": {
@@ -139,6 +229,13 @@ export const interactionSchemas = {
     },
     "requestId": {
       "type": "string"
+    },
+    "sourceKey": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "threadId": {
       "default": null,

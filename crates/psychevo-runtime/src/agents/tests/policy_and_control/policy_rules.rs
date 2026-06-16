@@ -14,7 +14,7 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
             AgentRunState {
                 record: AgentRunRecord {
                     id: id.clone(),
-                    task_name: Some(default_task_name("worker", &id)),
+                    task_name: Some("worker_task".to_string()),
                     agent_name: "worker".to_string(),
                     task: "List task\nraw prompt detail".to_string(),
                     parent_session_id: parent.clone(),
@@ -58,7 +58,7 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
         .iter()
         .find(|agent| agent["agent_id"] == id)
         .expect("compact agent");
-    assert_eq!(agent["task"], "List task");
+    assert_eq!(agent["task_name"], "worker_task");
     assert_eq!(agent["status"], "running");
     assert!(agent.get("child_session_id").is_none());
     assert!(agent.get("effective_max_spawn_depth").is_none());
@@ -76,7 +76,10 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
 
 #[test]
 pub(crate) fn control_targets_resolve_by_model_visible_task_or_report_ambiguity() {
-    let task = format!("duplicate task {}", Uuid::now_v7());
+    let task = format!(
+        "duplicate_task_{}",
+        Uuid::now_v7().to_string().replace('-', "_")
+    );
     let id_one = format!("target-one-{}", Uuid::now_v7());
     let id_two = format!("target-two-{}", Uuid::now_v7());
     {
@@ -87,8 +90,8 @@ pub(crate) fn control_targets_resolve_by_model_visible_task_or_report_ambiguity(
                 AgentRunState {
                     record: AgentRunRecord {
                         id: id.clone(),
-                        task_name: Some(default_task_name("worker", id)),
-                        agent_name: "worker".to_string(),
+                        task_name: Some(task.clone()),
+                    agent_name: "worker".to_string(),
                         task: task.clone(),
                         parent_session_id: "parent".to_string(),
                         child_session_id: Some(format!("child-{id}")),
@@ -207,7 +210,7 @@ pub(crate) fn empty_tools_array_is_explicit_empty_allowlist() {
         "read",
         "write",
         "exec_command",
-        "Agent",
+        "spawn_agent",
         "list_skills",
         "view_skill",
     ] {
@@ -357,7 +360,7 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
     };
     let tools = apply_agent_tool_policy(
         vec![
-            test_tool("Agent"),
+            test_tool("spawn_agent"),
             test_tool("list_skills"),
             test_tool("view_skill"),
         ],

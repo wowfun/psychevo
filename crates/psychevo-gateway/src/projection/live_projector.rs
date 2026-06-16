@@ -8,6 +8,7 @@ impl GatewayLiveProjector {
             entries: BTreeMap::new(),
             tool_owners: BTreeMap::new(),
             tool_aliases: BTreeMap::new(),
+            tool_positions: BTreeMap::new(),
             tool_args: BTreeMap::new(),
             exec_sessions: BTreeMap::new(),
             child_projectors: BTreeMap::new(),
@@ -152,7 +153,8 @@ impl GatewayLiveProjector {
         value: &Value,
     ) -> Option<GatewayEvent> {
         let child_session_id = value
-            .get("child_session_id")
+            .get("child_thread_id")
+            .or_else(|| value.get("child_session_id"))
             .or_else(|| value.get("session_id"))
             .and_then(Value::as_str)
             .map(str::trim)
@@ -163,7 +165,8 @@ impl GatewayLiveProjector {
             .map(str::trim)
             .filter(|tool_call_id| !tool_call_id.is_empty())
             .unwrap_or(child_session_id);
-        let (tool_call_id, segment) = self.agent_start_target(raw_tool_call_id, value);
+        let tool_call_id = self.strict_agent_tool_call_id(turn_id, raw_tool_call_id, value);
+        let segment = self.tool_owner_segment(&tool_call_id);
         let mut metadata = agent_session_start_metadata(value, &tool_call_id, child_session_id);
         if metadata.get("args").is_none_or(Value::is_null)
             && let Some(args) = self.tool_args.get(&tool_call_id)
@@ -177,7 +180,7 @@ impl GatewayLiveProjector {
             turn_id,
             segment,
             tool_call_id: &tool_call_id,
-            tool_name: "Agent",
+            tool_name: "spawn_agent",
             status: TranscriptBlockStatus::Running,
             body,
             metadata,
@@ -187,82 +190,20 @@ impl GatewayLiveProjector {
         Some(self.emit_entry_event(turn_id, segment, false, false))
     }
 
-    fn agent_start_target(&mut self, raw_tool_call_id: &str, value: &Value) -> (String, usize) {
-        if let Some(canonical) = self.tool_aliases.get(raw_tool_call_id)
-            && let Some(segment) = self.tool_owners.get(canonical).copied()
-        {
-            return (canonical.clone(), segment);
-        }
-        if let Some(segment) = self.tool_owners.get(raw_tool_call_id).copied() {
-            return (raw_tool_call_id.to_string(), segment);
-        }
-        let candidates = self.matching_open_agent_candidates(raw_tool_call_id, value);
-        if candidates.len() == 1 {
-            let (canonical, segment) = candidates[0].clone();
-            if canonical != raw_tool_call_id {
-                self.tool_aliases
-                    .insert(raw_tool_call_id.to_string(), canonical.clone());
-                self.tool_owners
-                    .insert(raw_tool_call_id.to_string(), segment);
-            }
-            return (canonical, segment);
-        }
-        let segment = self.tool_owner_segment(raw_tool_call_id);
-        (raw_tool_call_id.to_string(), segment)
-    }
-
-    fn matching_open_agent_candidates(
-        &self,
-        raw_tool_call_id: &str,
-        value: &Value,
-    ) -> Vec<(String, usize)> {
-        let agent_name = value
-            .get("agent_name")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|agent_name| !agent_name.is_empty());
-        let mut candidates = Vec::new();
-        for (segment, state) in &self.entries {
-            for block in state.blocks.values() {
-                if !matches!(
-                    block.status,
-                    TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
-                ) {
-                    continue;
-                }
-                let Some(metadata) = block.metadata.as_ref() else {
-                    continue;
-                };
-                if metadata.get("tool_name").and_then(Value::as_str) != Some("Agent") {
-                    continue;
-                }
-                if agent_child_session_id(metadata).is_some() {
-                    continue;
-                }
-                let Some(candidate_id) = metadata.get("tool_call_id").and_then(Value::as_str)
-                else {
-                    continue;
-                };
-                if candidate_id == raw_tool_call_id
-                    || agent_name.is_some_and(|name| agent_metadata_name_matches(metadata, name))
-                {
-                    candidates.push((candidate_id.to_string(), *segment));
-                }
-            }
-        }
-        candidates
-    }
-
     fn project_tool_event(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
         let tool_name = tool_name_from_value(value);
-        let raw_tool_call_id = tool_call_id_from_value(value, tool_name);
+        let raw_tool_call_id = self.raw_tool_call_id_for_event(tool_name, value);
         let args = tool_args_from_value(value);
         if !raw_tool_call_id.is_empty()
             && let Some(args) = args.clone()
         {
-            self.tool_args.insert(raw_tool_call_id.to_string(), args);
+            self.tool_args.insert(raw_tool_call_id.clone(), args);
         }
-        let tool_call_id = self.canonical_tool_call_id(raw_tool_call_id, tool_name, args.as_ref());
+        let tool_call_id = if tool_name == "spawn_agent" {
+            self.strict_agent_tool_call_id(turn_id, &raw_tool_call_id, value)
+        } else {
+            self.canonical_tool_call_id(&raw_tool_call_id, tool_name, args.as_ref())
+        };
         if tool_call_id != raw_tool_call_id
             && let Some(args) = args.clone()
         {
@@ -673,8 +614,15 @@ impl GatewayLiveProjector {
                 ))
             }
             Some("tool_call" | "tool_calls" | "tool_use") => {
-                let (tool_call_id, tool_name, metadata) =
+                let (raw_tool_call_id, tool_name, mut metadata) =
                     tool_message_block_metadata(content_block, index)?;
+                let tool_call_id = self.register_tool_content_identity(
+                    turn_id,
+                    segment,
+                    &raw_tool_call_id,
+                    &tool_name,
+                    &mut metadata,
+                );
                 if let Some(args) = metadata.get("args").cloned() {
                     self.tool_args.insert(tool_call_id.clone(), args);
                 }
@@ -794,7 +742,7 @@ impl GatewayLiveProjector {
         {
             set_metadata_field(&mut metadata, "args", args.clone());
         }
-        if tool_name == "Agent" {
+        if tool_name == "spawn_agent" {
             self.enrich_agent_metadata_from_existing(turn_id, segment, tool_call_id, &mut metadata);
             enrich_agent_metadata_from_fields(&mut metadata);
         }
@@ -833,10 +781,15 @@ impl GatewayLiveProjector {
         copy_agent_metadata_field_if_missing(metadata, existing, "agent_id");
         copy_agent_metadata_field_if_missing(metadata, existing, "agent_name");
         copy_agent_metadata_field_if_missing(metadata, existing, "agent_description");
+        copy_agent_metadata_field_if_missing(metadata, existing, "agent_type");
+        copy_agent_metadata_field_if_missing(metadata, existing, "agent_path");
         copy_agent_metadata_field_if_missing(metadata, existing, "task_name");
+        copy_agent_metadata_field_if_missing(metadata, existing, "message");
         copy_agent_metadata_field_if_missing(metadata, existing, "task");
         copy_agent_metadata_field_if_missing(metadata, existing, "prompt");
+        copy_agent_metadata_field_if_missing(metadata, existing, "parent_thread_id");
         copy_agent_metadata_field_if_missing(metadata, existing, "parent_session_id");
+        copy_agent_metadata_field_if_missing(metadata, existing, "child_thread_id");
         copy_agent_metadata_field_if_missing(metadata, existing, "child_session_id");
         copy_agent_metadata_field_if_missing(metadata, existing, "session_id");
         if metadata.get("args").is_none_or(Value::is_null)
@@ -880,6 +833,132 @@ impl GatewayLiveProjector {
         self.tool_owners
             .insert(raw_tool_call_id.to_string(), segment);
         canonical
+    }
+
+    fn raw_tool_call_id_for_event(&self, tool_name: &str, value: &Value) -> String {
+        if tool_name != "spawn_agent" {
+            return tool_call_id_from_value(value, tool_name).to_string();
+        }
+        if let Some(tool_call_id) = value
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|tool_call_id| !tool_call_id.is_empty())
+        {
+            return tool_call_id.to_string();
+        }
+        tool_position_key(self.assistant_segment, value)
+            .map(|position_key| format!("{tool_name}@{position_key}"))
+            .unwrap_or_else(|| {
+                format!(
+                    "{tool_name}@event:{}",
+                    self.stream_seq.saturating_add(1)
+                )
+            })
+    }
+
+    fn register_tool_content_identity(
+        &mut self,
+        turn_id: &str,
+        segment: usize,
+        raw_tool_call_id: &str,
+        tool_name: &str,
+        metadata: &mut Value,
+    ) -> String {
+        if tool_name != "spawn_agent" {
+            self.tool_owners
+                .insert(raw_tool_call_id.to_string(), segment);
+            return raw_tool_call_id.to_string();
+        }
+        let tool_call_id =
+            self.strict_agent_tool_call_id_for_segment(turn_id, segment, raw_tool_call_id, metadata);
+        set_metadata_field(metadata, "tool_call_id", json!(tool_call_id.clone()));
+        self.tool_owners.insert(tool_call_id.clone(), segment);
+        tool_call_id
+    }
+
+    fn strict_agent_tool_call_id(
+        &mut self,
+        turn_id: &str,
+        raw_tool_call_id: &str,
+        value: &Value,
+    ) -> String {
+        let segment = self
+            .tool_owners
+            .get(raw_tool_call_id)
+            .copied()
+            .unwrap_or(self.assistant_segment);
+        self.strict_agent_tool_call_id_for_segment(turn_id, segment, raw_tool_call_id, value)
+    }
+
+    fn strict_agent_tool_call_id_for_segment(
+        &mut self,
+        turn_id: &str,
+        segment: usize,
+        raw_tool_call_id: &str,
+        value: &Value,
+    ) -> String {
+        if raw_tool_call_id.trim().is_empty() {
+            return raw_tool_call_id.to_string();
+        }
+        if let Some(canonical) = self.tool_aliases.get(raw_tool_call_id) {
+            return canonical.clone();
+        }
+        if self.tool_owners.contains_key(raw_tool_call_id) {
+            return raw_tool_call_id.to_string();
+        }
+        let Some(position_key) = tool_position_key(segment, value) else {
+            return raw_tool_call_id.to_string();
+        };
+        let Some(existing) = self.tool_positions.get(&position_key).cloned() else {
+            self.tool_positions
+                .insert(position_key, raw_tool_call_id.to_string());
+            return raw_tool_call_id.to_string();
+        };
+        if existing != raw_tool_call_id {
+            self.migrate_tool_identity(turn_id, segment, &existing, raw_tool_call_id);
+            self.tool_aliases
+                .insert(existing.clone(), raw_tool_call_id.to_string());
+            self.tool_positions
+                .insert(position_key, raw_tool_call_id.to_string());
+        }
+        raw_tool_call_id.to_string()
+    }
+
+    fn migrate_tool_identity(
+        &mut self,
+        turn_id: &str,
+        segment: usize,
+        old_tool_call_id: &str,
+        new_tool_call_id: &str,
+    ) {
+        if old_tool_call_id == new_tool_call_id {
+            return;
+        }
+        if let Some(owner) = self.tool_owners.remove(old_tool_call_id) {
+            self.tool_owners.insert(new_tool_call_id.to_string(), owner);
+        }
+        if let Some(args) = self.tool_args.remove(old_tool_call_id) {
+            self.tool_args.entry(new_tool_call_id.to_string()).or_insert(args);
+        }
+        let old_block_id = live_tool_block_id(turn_id, old_tool_call_id);
+        let new_block_id = live_tool_block_id(turn_id, new_tool_call_id);
+        let Some(state) = self.entries.get_mut(&segment) else {
+            return;
+        };
+        let Some(mut old_block) = state.blocks.remove(&old_block_id) else {
+            return;
+        };
+        old_block.id = new_block_id.clone();
+        if let Some(metadata) = old_block.metadata.as_mut() {
+            set_metadata_field(metadata, "tool_call_id", json!(new_tool_call_id));
+        }
+        let block = state
+            .blocks
+            .get(&new_block_id)
+            .map(|existing| merge_live_block(existing, old_block.clone()))
+            .unwrap_or(old_block);
+        state.blocks.insert(new_block_id, block);
     }
 
     fn matching_open_tool_candidates(&self, tool_name: &str, args: &Value) -> Vec<(String, usize)> {
@@ -1083,6 +1162,7 @@ impl GatewayLiveProjector {
         self.entries.clear();
         self.tool_owners.clear();
         self.tool_aliases.clear();
+        self.tool_positions.clear();
         self.tool_args.clear();
         self.exec_sessions.clear();
     }
@@ -1187,12 +1267,14 @@ fn agent_session_start_metadata(
 ) -> Value {
     let mut metadata = json!({
         "projection": "tool",
-        "tool_name": "Agent",
+        "tool_name": "spawn_agent",
         "tool_call_id": tool_call_id,
         "type": "agent_session_start",
         "outcome": "normal",
+        "child_thread_id": child_session_id,
         "child_session_id": child_session_id,
     });
+    set_metadata_result_field(&mut metadata, "child_thread_id", json!(child_session_id));
     set_metadata_result_field(&mut metadata, "child_session_id", json!(child_session_id));
     set_metadata_result_field(&mut metadata, "session_id", json!(child_session_id));
     set_metadata_result_field(&mut metadata, "status", json!("running"));
@@ -1200,8 +1282,13 @@ fn agent_session_start_metadata(
         "agent_id",
         "agent_name",
         "agent_description",
+        "agent_type",
+        "agent_path",
         "task_name",
+        "message",
+        "parent_thread_id",
         "parent_session_id",
+        "child_thread_id",
         "session_id",
         "background",
         "status",
@@ -1216,6 +1303,16 @@ fn agent_session_start_metadata(
 
 fn enrich_agent_metadata_from_fields(metadata: &mut Value) {
     if let Some(child_session_id) = agent_child_session_id(metadata).map(ToString::to_string) {
+        set_metadata_field(
+            metadata,
+            "child_thread_id",
+            json!(child_session_id.clone()),
+        );
+        set_metadata_result_field(
+            metadata,
+            "child_thread_id",
+            json!(child_session_id.clone()),
+        );
         set_metadata_field(
             metadata,
             "child_session_id",
@@ -1234,32 +1331,43 @@ fn enrich_agent_metadata_from_fields(metadata: &mut Value) {
         .map(ToString::to_string)
     {
         set_metadata_field(metadata, "agent_name", json!(agent_name.clone()));
-        set_metadata_result_field(metadata, "agent_name", json!(agent_name));
+        set_metadata_field(metadata, "agent_type", json!(agent_name.clone()));
+        set_metadata_result_field(metadata, "agent_name", json!(agent_name.clone()));
+        set_metadata_result_field(metadata, "agent_type", json!(agent_name));
     }
     if let Some(task_name) = agent_metadata_string(metadata, "task_name").map(ToString::to_string) {
         set_metadata_field(metadata, "task_name", json!(task_name.clone()));
         set_metadata_result_field(metadata, "task_name", json!(task_name));
     }
-    if let Some(task) = agent_metadata_string(metadata, "task")
+    if let Some(task) = agent_metadata_string(metadata, "message")
+        .or_else(|| agent_metadata_string(metadata, "task"))
         .or_else(|| agent_metadata_string(metadata, "prompt"))
         .map(ToString::to_string)
     {
+        set_metadata_field(metadata, "message", json!(task.clone()));
+        set_metadata_result_field(metadata, "message", json!(task.clone()));
         set_metadata_field(metadata, "task", json!(task.clone()));
         set_metadata_result_field(metadata, "task", json!(task));
     } else if let Some(prompt) = metadata
         .get("args")
-        .and_then(|args| args.get("prompt"))
+        .and_then(|args| args.get("message").or_else(|| args.get("prompt")))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|prompt| !prompt.is_empty())
         .map(ToString::to_string)
     {
+        set_metadata_field(metadata, "message", json!(prompt.clone()));
+        set_metadata_result_field(metadata, "message", json!(prompt.clone()));
         set_metadata_field(metadata, "task", json!(prompt.clone()));
         set_metadata_result_field(metadata, "task", json!(prompt));
     }
     if let Some(parent_session_id) =
-        agent_metadata_string(metadata, "parent_session_id").map(ToString::to_string)
+        agent_metadata_string(metadata, "parent_thread_id")
+            .or_else(|| agent_metadata_string(metadata, "parent_session_id"))
+            .map(ToString::to_string)
     {
+        set_metadata_field(metadata, "parent_thread_id", json!(parent_session_id.clone()));
+        set_metadata_result_field(metadata, "parent_thread_id", json!(parent_session_id.clone()));
         set_metadata_result_field(metadata, "parent_session_id", json!(parent_session_id));
     }
 }
@@ -1286,7 +1394,8 @@ fn copy_agent_metadata_field_if_missing(target: &mut Value, source: &Value, key:
 }
 
 fn agent_child_session_id(metadata: &Value) -> Option<&str> {
-    agent_metadata_string(metadata, "child_session_id")
+    agent_metadata_string(metadata, "child_thread_id")
+        .or_else(|| agent_metadata_string(metadata, "child_session_id"))
         .or_else(|| agent_metadata_string(metadata, "session_id"))
 }
 
@@ -1312,12 +1421,6 @@ fn agent_metadata_string<'a>(metadata: &'a Value, key: &str) -> Option<&'a str> 
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
         })
-}
-
-fn agent_metadata_name_matches(metadata: &Value, agent_name: &str) -> bool {
-    agent_metadata_string(metadata, "agent_name").is_some_and(|value| value == agent_name)
-        || agent_metadata_string(metadata, "agent_type").is_some_and(|value| value == agent_name)
-        || agent_metadata_string(metadata, "name").is_some_and(|value| value == agent_name)
 }
 
 fn agent_task_summary(metadata: &Value) -> Option<String> {

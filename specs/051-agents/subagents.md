@@ -48,26 +48,39 @@ them.
 
 ## Model-Visible Entry Point
 
-The `Agent` tool is the primary model-visible spawn entrypoint. Its only
-required field is `prompt`. `agent_type` is the canonical agent definition name.
-`task_name` is the durable task label for this run. The model-visible schema
-does not expose `name`. If an old or malformed caller still supplies `name`,
-runtime treats it only as a hidden task-label fallback: when `task_name` is
-present, `name` is ignored; when `task_name` is absent, `name` is used as
-`task_name`. `name` never selects the agent definition.
-When no agent name is supplied, runtime defaults to `general`. When an explicit
-agent name is supplied and no matching definition exists, runtime fails the
-tool call and does not create a child thread. `task_name` never changes
-definition selection. The tool also accepts a background flag, optional model
-override, optional fork behavior, optional max-turn override, and optional
-`max_spawn_depth` override.
+`spawn_agent` is the only model-visible spawn entrypoint. It creates an Agent
+invocation and, on successful spawn, a child agent thread. Its required fields
+are `task_name`, the canonical machine key for this invocation, and `message`,
+the initial task prompt/message for the child agent.
+
+`agent_type` is optional and selects the agent definition/role. When omitted,
+runtime defaults to the configured default agent definition, normally
+`general`, unless an explicit `@agent-name` mention requires a specific
+definition. `task_name` never selects the agent definition.
+
+`task_name` must contain only lowercase ASCII letters, digits, and underscores.
+It must not be empty and must not be `root`, `.`, or `..`. Values containing
+non-ASCII characters, spaces, hyphens, slashes, or other punctuation are
+invalid. Runtime rejects invalid names with a clear error such as
+`task_name must use lowercase letters, digits, and underscores`. Runtime must
+not silently sanitize, lowercase, transliterate, or otherwise rewrite
+model-supplied `task_name` values.
+
+The model-visible schema does not expose `name` and unknown fields fail
+argument validation. A caller that sends `name`, `prompt`, or any other
+non-schema field receives a tool-argument error and no child thread is created.
+
+The tool also accepts a background flag, optional model override, optional fork
+behavior, optional max-turn override, and optional `max_spawn_depth` override.
+`fork_turns` accepts `none`, `all`, or a positive integer string and defaults
+to `all` when fork context is enabled.
 
 An explicit `@agent-name` mention in the parent prompt must resolve to the same
 definition name in the Agent invocation. Runtime may inject the single required
 agent name when the model omits `agent_type`; it must not silently fall back to
 `general` for that required delegation.
 
-`Agent` is a tool declaration and does not authorize execution by itself.
+`spawn_agent` is a tool declaration and does not authorize execution by itself.
 Runtime still applies the active mode ceiling, selected-agent policy, parent
 invocation safety policy, scoped MCP availability, and resource boundaries.
 
@@ -83,7 +96,7 @@ receives only the compact projection unless a control handle is explicitly
 needed. The common summary projection contains:
 
 - `agent_name`
-- `task`
+- `task_name`
 - `status`
 - `exit_reason`
 - `summary`
@@ -96,9 +109,9 @@ needed. The common summary projection contains:
 are available for the direct child thread. Unavailable fields are omitted
 rather than serialized as `null`. Failed runs use `status`, `exit_reason`, and
 an `error` field when an error string is available; they do not expose a
-separate `error_kind`. `task` is the explicit `task_name` when supplied;
-otherwise it is the first non-empty prompt line with whitespace collapsed and a
-maximum length of 80 characters. Summary text is not hard-truncated.
+separate `error_kind`. `task_name` is the canonical key supplied to
+`spawn_agent`; human-readable task or result text is carried only in prompt,
+summary, or display metadata. Summary text is not hard-truncated.
 
 The full structured tool output remains available to runtime-owned system
 surfaces such as `ToolExecutionEnd` stream events, TUI rows, durable child
@@ -107,21 +120,40 @@ metadata. Tool result messages persisted for future model context may store a
 smaller model-visible content string than the full structured event payload.
 
 Background subagents return a handle immediately, but only after runtime has
-created the child session, written the parent/child edge, and attached the
-`child_session_id` to the runtime-owned tool-result metadata. The model-visible
-summary remains compact; interactive surfaces use the richer metadata to open
-the child thread. Completion records final summary and status, then writes one
-parent mailbox event. Runtime must not persist that completion as a normal
-parent `user` message. The mailbox payload uses structured inter-agent
-communication content containing a `subagent_notification` whose content is the
-compact summary projection. The notification does not include `agent_id`; the
-full mailbox record and metadata retain identity, child-thread, outcome, and
-operational details for system inspection.
+created or reserved the child thread identity, created the durable backing
+session when local storage is available, written the parent/child edge, and
+attached the child identity to runtime-owned tool-result/display metadata. The
+model-visible summary remains compact; interactive surfaces use richer
+metadata to open the child thread. Completion records final summary and status,
+then writes one parent mailbox event. Runtime must not persist that completion
+as a normal parent `user` message. The mailbox payload uses structured
+inter-agent communication content containing a `subagent_notification` whose
+content is the compact summary projection. The notification does not include
+`agent_id`; the full mailbox record and metadata retain identity,
+child-thread, outcome, and operational details for system inspection.
+
+Runtime/display metadata for every successful Agent invocation contains one
+canonical `AgentInvocation` record:
+
+- `tool_call_id`: parent tool invocation identity.
+- `parent_thread_id`: parent thread identity.
+- `child_thread_id`: child agent thread identity.
+- `task_name`: canonical machine key.
+- `agent_path`: canonical path such as `/root/translate_zh_to_en`.
+- `agent_type`: resolved agent definition/role.
+- `message`: original task message.
+- `status`: `pending`, `running`, `completed`, `failed`, `interrupted`, or
+  `closed`.
+- `result_summary`, `error`, `tokens`, and `child_tool_call_count` when known.
+
+Storage implementations may keep `parent_session_id` and `child_session_id` as
+backing-record fields. Display and navigation APIs use `parent_thread_id` and
+`child_thread_id`.
 
 Interactive clients may also start a background subagent directly from a
 selected definition. That run uses fresh child context by default, records the
-same durable parent/child edge as model-triggered `Agent` tool calls, and writes
-a short parent-session observation row so the child transcript remains
+same durable parent/child edge as model-triggered `spawn_agent` tool calls, and
+writes a short parent-session observation row so the child transcript remains
 discoverable after it leaves the live running view.
 
 Control tools use first-class agent naming rather than subagent-specific names:
@@ -139,16 +171,15 @@ mailbox history for subsequent requests.
 `list_agents`, `send_message`, `close_agent`, and `resume_agent` expose compact
 model-visible status objects. These control-related outputs include `agent_id`
 because the model may need a durable target handle. Control targets resolve by
-`agent_id` or by the model-visible `task` label. If a task label matches
-multiple agents, runtime returns an ambiguity error asking the caller to use
-`agent_id`.
+`agent_id` or by canonical `task_name`. If a task name matches multiple agents,
+runtime returns an ambiguity error asking the caller to use `agent_id`.
 
 `close_agent` closes the target's control edge, requests shutdown for running
 work, recursively closes open descendants, and returns the previous status.
 `send_message` can automatically resume a closed or completed agent in the
 background and continue it as a new turn. Runtime also exposes a
 pause-new-spawns state for interactive control surfaces.
-Pausing blocks future `Agent` spawn requests while leaving already running
+Pausing blocks future `spawn_agent` requests while leaving already running
 children alone. Resuming allows new spawn requests again. Stop subtree uses the
 same cooperative-then-force semantics as stopping a single child, applied to
 the target and all live descendants.
@@ -168,13 +199,14 @@ close the edge.
 
 Parent result observations must not redefine core execution semantics. The
 child invocation still emits its own agent lifecycle under
-[002 Agent Execution](../002-agent-execution/spec.md). Foreground `Agent` tool
-calls return the child handle and concise result through the normal tool result,
-and runtime also emits a local `agent_session_start` stream event once the child
-thread exists so interactive clients can open the child while it is running.
-That start event enriches the already-visible foreground `Agent` tool
-invocation with child identity; it is not a separate parent transcript fact and
-must not cause a second parent Agent row for the same child run.
+[002 Agent Execution](../002-agent-execution/spec.md). Foreground
+`spawn_agent` calls return the child handle and concise result through the
+normal tool result, and runtime also emits a local `agent_session_start` stream
+event once the child thread exists so interactive clients can open the child
+while it is running.
+That start event enriches the already-visible `spawn_agent` invocation with
+child identity; it is not a separate parent transcript fact and must not cause a
+second parent Agent block for the same child run.
 While the child run is active, child-thread stream events are emitted with an
 explicit child-thread scope so interactive clients can route them to the child
 transcript when it is active, or summarize them inside the parent Agent row when
@@ -182,9 +214,9 @@ the parent transcript remains active. Clients may retain a bounded live-event
 backlog per child thread so opening a running child can immediately show work
 that started before inspection. The foreground tool row is still the only
 parent-transcript inspection affordance for that invocation.
-The canonical `Agent` argument for selecting a definition is `agent_type`.
-Required-agent mention accounting must use `agent_type`; it must not treat
-`name` as an alias or infer child identity from a task label.
+The canonical `spawn_agent` argument for selecting a definition is
+`agent_type`. Required-agent mention accounting must use `agent_type`; it must
+not treat `name` as an alias or infer child identity from a task label.
 Completion observations are mailbox events, not human prompts. TUI may render
 agent start, wait, close, and completion status as tool/event rows, but those
 rows must not create a second model-visible copy of the child final answer.

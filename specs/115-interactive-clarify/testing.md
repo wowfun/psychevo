@@ -42,7 +42,7 @@ Automation vocabulary and generic validation boundaries follow
 Required runtime coverage:
 
 - Tool schema and declaration snapshot shape for Plan and Default surfaces.
-- Agent tool policy allow/deny behavior without overriding root-session and
+- Agent invocation policy allow/deny behavior without overriding root-session and
   interactive-support constraints.
 - Argument validation for empty questions, empty options, too few or too many
   questions, and too few or too many options.

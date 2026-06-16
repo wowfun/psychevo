@@ -229,8 +229,8 @@ pub(crate) fn parses_named_agent_tool_restrictions_and_permission_mode() {
 name: planner
 description: Plan with a specific delegate
 model: inherit
-tools: "Read, Agent(review, explore)"
-disallowedTools: "Agent(explore)"
+tools: "Read, spawn_agent(review, explore)"
+disallowedTools: "spawn_agent(explore)"
 permissionMode: plan
 initialPrompt: "draft a plan"
 ---
@@ -256,7 +256,7 @@ Plan the work.
     );
     assert!(agent.tool_policy.denied_agents.contains("explore"));
     assert!(agent_allows_tool("read", Some(&agent), RunMode::Default));
-    assert!(agent_allows_tool("Agent", Some(&agent), RunMode::Default));
+    assert!(agent_allows_tool("spawn_agent", Some(&agent), RunMode::Default));
     assert!(!agent_allows_tool(
         "exec_command",
         Some(&agent),

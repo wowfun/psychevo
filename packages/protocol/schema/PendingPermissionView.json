@@ -7,10 +7,19 @@
         "null"
       ]
     },
+    "allowAlways": {
+      "type": "boolean"
+    },
     "leaseExpiresAtMs": {
       "format": "int64",
       "type": [
         "integer",
+        "null"
+      ]
+    },
+    "matchedRule": {
+      "type": [
+        "string",
         "null"
       ]
     },
@@ -26,11 +35,31 @@
     "requestId": {
       "type": "string"
     },
+    "sourceKey": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "suggestedRule": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
     "threadId": {
       "type": [
         "string",
         "null"
       ]
+    },
+    "timeoutSecs": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "toolName": {
       "type": "string"
@@ -43,8 +72,11 @@
     }
   },
   "required": [
+    "allowAlways",
     "reason",
     "requestId",
+    "summary",
+    "timeoutSecs",
     "toolName"
   ],
   "title": "PendingPermissionView",

@@ -134,8 +134,8 @@
                 Message::Assistant {
                     content: vec![tool_call(
                         "call_agent",
-                        "Agent",
-                        json!({"agent_name": "Planck", "task": "Inspect"}),
+                        "spawn_agent",
+                        json!({"agent_type": "Planck", "task_name": "inspect", "message": "Inspect"}),
                     )],
                     timestamp_ms: 10,
                     finish_reason: Some("tool_calls".to_string()),
@@ -148,7 +148,7 @@
                 2,
                 Message::ToolResult {
                     tool_call_id: "call_agent".to_string(),
-                    tool_name: "Agent".to_string(),
+                    tool_name: "spawn_agent".to_string(),
                     content: serde_json::to_string(&json!({
                         "agent_name": "Planck",
                         "child_session_id": "child-thread",
@@ -179,11 +179,11 @@
                 Message::Assistant {
                     content: vec![tool_call(
                         "call_agent",
-                        "Agent",
+                        "spawn_agent",
                         json!({
                             "agent_type": "translate",
-                            "task_name": "Translate user message to Chinese",
-                            "prompt": "Translate the following message to Chinese: hello"
+                            "task_name": "translate_user_message_to_chinese",
+                            "message": "Translate the following message to Chinese: hello"
                         }),
                     )],
                     timestamp_ms: 10,
@@ -197,7 +197,7 @@
                 2,
                 Message::ToolResult {
                     tool_call_id: "call_agent".to_string(),
-                    tool_name: "Agent".to_string(),
+                    tool_name: "spawn_agent".to_string(),
                     content: serde_json::to_string(&json!({
                         "agent_name": "translate",
                         "child_session_id": "child-thread",
@@ -234,11 +234,11 @@
                 Message::Assistant {
                     content: vec![tool_call(
                         "call_agent_zh",
-                        "Agent",
+                        "spawn_agent",
                         json!({
                             "agent_type": "translate",
-                            "task_name": "zh-to-en",
-                            "prompt": "Translate 你好 to English"
+                            "task_name": "zh_to_en",
+                            "message": "Translate 你好 to English"
                         }),
                     )],
                     timestamp_ms: 10,
@@ -252,7 +252,7 @@
                 2,
                 Message::ToolResult {
                     tool_call_id: "call_agent_zh".to_string(),
-                    tool_name: "Agent".to_string(),
+                    tool_name: "spawn_agent".to_string(),
                     content: serde_json::to_string(&json!({
                         "agent_id": "agent-run-1",
                         "agent_name": "translate",
@@ -309,11 +309,11 @@
                 Message::Assistant {
                     content: vec![tool_call(
                         "call_agent_bad",
-                        "Agent",
+                        "spawn_agent",
                         json!({
                             "agent_type": "translate",
-                            "task_name": "zh-to-en",
-                            "prompt": "Translate 你好 to English"
+                            "task_name": "zh_to_en",
+                            "message": "Translate 你好 to English"
                         }),
                     )],
                     timestamp_ms: 10,
@@ -327,7 +327,7 @@
                 2,
                 Message::ToolResult {
                     tool_call_id: "call_agent_bad".to_string(),
-                    tool_name: "Agent".to_string(),
+                    tool_name: "spawn_agent".to_string(),
                     content: serde_json::to_string(&json!({
                         "error": "unknown agent"
                     }))

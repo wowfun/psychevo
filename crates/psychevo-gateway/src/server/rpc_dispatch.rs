@@ -204,9 +204,10 @@ async fn spawn_gateway_live_event_relay(state: WebState, out_tx: mpsc::Unbounded
                 continue;
             };
             let context = state.pending_context_for_live_event(&record);
-            state.record_event_with_context(&event, context);
+            state.record_event_with_context(&event, context.clone());
+            let display_event = state.event_with_pending_context(event, &context);
             if out_tx
-                .send(rpc_notification("gateway/event", json!(event)))
+                .send(rpc_notification("gateway/event", json!(display_event)))
                 .is_err()
             {
                 return;
@@ -509,11 +510,12 @@ async fn handle_rpc(
             let review_workdir = scope.workdir.clone();
             let event_tx = out_tx.clone();
             let event_sink: GatewayEventSink = Arc::new(move |event| {
-                let context =
-                    event_state.pending_context_for_selector(&event_selector, event_thread_id.as_deref());
-                event_state.record_event_with_context(&event, context);
+                let context = event_state
+                    .pending_context_for_selector(&event_selector, event_thread_id.as_deref());
+                event_state.record_event_with_context(&event, context.clone());
                 event_state.record_review_event(&event, &review_workdir);
-                let _ = event_tx.send(rpc_notification("gateway/event", json!(event)));
+                let display_event = event_state.event_with_pending_context(event, &context);
+                let _ = event_tx.send(rpc_notification("gateway/event", json!(display_event)));
             });
             let gateway = state.inner.gateway.clone();
             let bind_source = workdir_source(&scope.workdir);
@@ -699,11 +701,14 @@ async fn handle_rpc(
         }
         "permission/respond" => {
             let params = request.required_params::<wire::PermissionRespondParams>()?;
-            if let Some(thread_id) = &params.thread_id {
-                authorize_thread(&state, &auth, thread_id)?;
-            }
             let decision = permission_decision(params.decision);
-            let selector = selector_from_thread_or_default(&state, &auth, params.thread_id)?;
+            let selector = selector_from_interaction_context(
+                &state,
+                &auth,
+                params.thread_id,
+                params.source_key,
+                params.activity_id,
+            )?;
             let accepted =
                 state
                     .inner
@@ -716,9 +721,6 @@ async fn handle_rpc(
         }
         "clarify/respond" => {
             let params = request.required_params::<wire::ClarifyRespondParams>()?;
-            if let Some(thread_id) = &params.thread_id {
-                authorize_thread(&state, &auth, thread_id)?;
-            }
             let result = if params.cancel.unwrap_or(false) {
                 ClarifyResult::Cancelled
             } else {
@@ -731,7 +733,13 @@ async fn handle_rpc(
                         .collect(),
                 })
             };
-            let selector = selector_from_thread_or_default(&state, &auth, params.thread_id)?;
+            let selector = selector_from_interaction_context(
+                &state,
+                &auth,
+                params.thread_id,
+                params.source_key,
+                params.activity_id,
+            )?;
             let accepted = state
                 .inner
                 .gateway
@@ -879,10 +887,11 @@ async fn handle_rpc(
             let event_state = state.clone();
             let event_tx = out_tx.clone();
             let event_sink: GatewayEventSink = Arc::new(move |event| {
-                let context =
-                    event_state.pending_context_for_selector(&event_selector, event_thread_id.as_deref());
-                event_state.record_event_with_context(&event, context);
-                let _ = event_tx.send(rpc_notification("gateway/event", json!(event)));
+                let context = event_state
+                    .pending_context_for_selector(&event_selector, event_thread_id.as_deref());
+                event_state.record_event_with_context(&event, context.clone());
+                let display_event = event_state.event_with_pending_context(event, &context);
+                let _ = event_tx.send(rpc_notification("gateway/event", json!(display_event)));
             });
             let context = user_shell_context_options(&state, &scope, thread_id.clone());
             let gateway = state.inner.gateway.clone();

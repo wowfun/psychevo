@@ -36,7 +36,7 @@ export type GatewayImageInput = { "kind": "localPath", path: string, } | { "kind
 
 export type GatewaySelectedSkill = { name: string, path: string, };
 
-export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, turn: GatewayTurn, committedEntries: Array<TranscriptEntry>, } | { "type": "entryDelta", turnId: string, entryId: string | null, blockId: string | null, delta: string, } | { "type": "entryStarted", turnId: string, entry: TranscriptEntry, } | { "type": "entryUpdated", turnId: string, entry: TranscriptEntry, } | { "type": "entryCompleted", turnId: string, entry: TranscriptEntry, } | { "type": "permissionRequested", requestId: string, toolName: string, summary: string, reason: string, matchedRule: string | null, suggestedRule: string | null, allowAlways: boolean, timeoutSecs: number, } | { "type": "permissionResolved", requestId: string, decision: PermissionDecision, } | { "type": "clarifyRequested", requestId: string, raw: unknown, } | { "type": "clarifyResolved", requestId: string, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, } | { "type": "activityChanged", threadId: string | null, activity: GatewayActivityView, } | { "type": "titleChanged", threadId: string, title: string | null, displayTitle: string | null, };
+export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, turn: GatewayTurn, committedEntries: Array<TranscriptEntry>, } | { "type": "entryDelta", turnId: string, entryId: string | null, blockId: string | null, delta: string, } | { "type": "entryStarted", turnId: string, entry: TranscriptEntry, } | { "type": "entryUpdated", turnId: string, entry: TranscriptEntry, } | { "type": "entryCompleted", turnId: string, entry: TranscriptEntry, } | { "type": "permissionRequested", requestId: string, toolName: string, summary: string, reason: string, matchedRule: string | null, suggestedRule: string | null, allowAlways: boolean, timeoutSecs: number, threadId?: string, turnId?: string, activityId?: string, sourceKey?: string, ownerId?: string, leaseExpiresAtMs?: number, } | { "type": "permissionResolved", requestId: string, decision: PermissionDecision, } | { "type": "clarifyRequested", requestId: string, raw: unknown, threadId?: string, turnId?: string, activityId?: string, sourceKey?: string, ownerId?: string, leaseExpiresAtMs?: number, } | { "type": "clarifyResolved", requestId: string, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, } | { "type": "activityChanged", threadId: string | null, activity: GatewayActivityView, } | { "type": "titleChanged", threadId: string, title: string | null, displayTitle: string | null, };
 
 export type PermissionDecision = "allowOnce" | "allowSession" | "allowAlways" | "deny";
 
@@ -54,9 +54,9 @@ export type TranscriptEntry = { id: string, threadId: string, turnId: string | n
 
 export type GatewayActivityView = { running: boolean, activeTurnId: string | null, queuedTurns: number, startedAtMs?: number, updatedAtMs?: number, ownerId?: string, ownerSurface?: string, leaseExpiresAtMs?: number, takeoverState?: string, };
 
-export type PendingPermissionView = { requestId: string, toolName: string, reason: string, threadId?: string, turnId?: string, activityId?: string, ownerId?: string, leaseExpiresAtMs?: number, };
+export type PendingPermissionView = { requestId: string, toolName: string, summary: string, reason: string, matchedRule?: string, suggestedRule?: string, allowAlways: boolean, timeoutSecs: number, threadId?: string, turnId?: string, activityId?: string, sourceKey?: string, ownerId?: string, leaseExpiresAtMs?: number, };
 
-export type PendingClarifyView = { requestId: string, raw: unknown, };
+export type PendingClarifyView = { requestId: string, raw: unknown, threadId?: string, turnId?: string, activityId?: string, sourceKey?: string, ownerId?: string, leaseExpiresAtMs?: number, };
 
 export type ThreadSnapshot = { source: GatewaySource, scope: GatewayRequestScope, thread: GatewayThread | null, entries: Array<TranscriptEntry>, activity: GatewayActivityView, pendingPermissions: Array<PendingPermissionView>, pendingClarifies: Array<PendingClarifyView>, };
 
@@ -228,9 +228,9 @@ export type ShellResultPayload = { thread: GatewayThread, command: string, outco
 
 export type ShellErrorPayload = { message: string, threadId: string | null, };
 
-export type PermissionRespondParams = { threadId: string | null, requestId: string, decision: PermissionDecision, };
+export type PermissionRespondParams = { threadId: string | null, sourceKey: string | null, activityId: string | null, requestId: string, decision: PermissionDecision, };
 
-export type ClarifyRespondParams = { threadId: string | null, requestId: string, answers: Array<Array<string>> | null, cancel: boolean | null, };
+export type ClarifyRespondParams = { threadId: string | null, sourceKey: string | null, activityId: string | null, requestId: string, answers: Array<Array<string>> | null, cancel: boolean | null, };
 
 export type InteractionRespondResult = { accepted: boolean, };
 

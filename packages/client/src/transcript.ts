@@ -2,6 +2,8 @@ import {
   sideInheritedMetadataHidden,
   type GatewayEvent,
   type GatewayThread,
+  type PendingClarifyView,
+  type PendingPermissionView,
   type ThreadSnapshot,
   type TranscriptBlock,
   type TranscriptEntry
@@ -81,6 +83,14 @@ export function applyLiveTranscriptEvent(
         ...snapshot,
         thread: threadForTurn(snapshot, terminalThreadId),
         entries,
+        pendingPermissions: removePendingInteractionsForTurn(
+          snapshot.pendingPermissions,
+          event.turnId
+        ),
+        pendingClarifies: removePendingInteractionsForTurn(
+          snapshot.pendingClarifies,
+          event.turnId
+        ),
         activity: snapshot.activity.activeTurnId === event.turnId
           ? {
               ...snapshot.activity,
@@ -90,6 +100,36 @@ export function applyLiveTranscriptEvent(
           : snapshot.activity
       };
     }
+    case "permissionRequested":
+      return {
+        ...snapshot,
+        pendingPermissions: upsertPendingInteraction(
+          snapshot.pendingPermissions,
+          pendingPermissionFromEvent(event)
+        )
+      };
+    case "permissionResolved":
+      return {
+        ...snapshot,
+        pendingPermissions: snapshot.pendingPermissions.filter((request) =>
+          request.requestId !== event.requestId
+        )
+      };
+    case "clarifyRequested":
+      return {
+        ...snapshot,
+        pendingClarifies: upsertPendingInteraction(
+          snapshot.pendingClarifies,
+          pendingClarifyFromEvent(event)
+        )
+      };
+    case "clarifyResolved":
+      return {
+        ...snapshot,
+        pendingClarifies: snapshot.pendingClarifies.filter((request) =>
+          request.requestId !== event.requestId
+        )
+      };
     case "activityChanged":
       return {
         ...snapshot,
@@ -225,11 +265,85 @@ function eventThreadIdForEvent(event: GatewayEvent): string | null {
       return event.entry.threadId || null;
     case "activityChanged":
       return event.threadId || null;
+    case "permissionRequested":
+    case "clarifyRequested":
+      return event.threadId || null;
     case "titleChanged":
       return event.threadId || null;
     default:
       return null;
   }
+}
+
+type PermissionRequestedEvent = Extract<GatewayEvent, { type: "permissionRequested" }>;
+type ClarifyRequestedEvent = Extract<GatewayEvent, { type: "clarifyRequested" }>;
+
+function pendingPermissionFromEvent(event: PermissionRequestedEvent): PendingPermissionView {
+  const request: PendingPermissionView = {
+    requestId: event.requestId,
+    toolName: event.toolName,
+    summary: event.summary,
+    reason: event.reason,
+    allowAlways: event.allowAlways,
+    timeoutSecs: event.timeoutSecs
+  };
+  if (event.matchedRule) {
+    request.matchedRule = event.matchedRule;
+  }
+  if (event.suggestedRule) {
+    request.suggestedRule = event.suggestedRule;
+  }
+  assignPendingContext(request, event);
+  return request;
+}
+
+function pendingClarifyFromEvent(event: ClarifyRequestedEvent): PendingClarifyView {
+  const request: PendingClarifyView = {
+    requestId: event.requestId,
+    raw: event.raw
+  };
+  assignPendingContext(request, event);
+  return request;
+}
+
+function assignPendingContext(
+  request: PendingPermissionView | PendingClarifyView,
+  event: PermissionRequestedEvent | ClarifyRequestedEvent
+) {
+  if (event.threadId) {
+    request.threadId = event.threadId;
+  }
+  if (event.turnId) {
+    request.turnId = event.turnId;
+  }
+  if (event.activityId) {
+    request.activityId = event.activityId;
+  }
+  if (event.sourceKey) {
+    request.sourceKey = event.sourceKey;
+  }
+  if (event.ownerId) {
+    request.ownerId = event.ownerId;
+  }
+  if (event.leaseExpiresAtMs !== undefined) {
+    request.leaseExpiresAtMs = event.leaseExpiresAtMs;
+  }
+}
+
+function upsertPendingInteraction<T extends { requestId: string }>(
+  requests: T[],
+  request: T
+): T[] {
+  const next = requests.filter((candidate) => candidate.requestId !== request.requestId);
+  next.push(request);
+  return next;
+}
+
+function removePendingInteractionsForTurn<T extends { turnId?: string }>(
+  requests: T[],
+  turnId: string
+): T[] {
+  return requests.filter((request) => request.turnId !== turnId);
 }
 
 function detachedSnapshotCanAcceptThreadedEvent(snapshot: ThreadSnapshot, event: GatewayEvent): boolean {
@@ -467,7 +581,7 @@ function mergeBlock(current: TranscriptBlock, next: TranscriptBlock): Transcript
     order: current.order || next.order,
     createdAtMs: current.createdAtMs || next.createdAtMs,
     artifactIds: nextArtifactIds.length > 0 ? nextArtifactIds : currentArtifactIds,
-    metadata: mergeMetadata(current.metadata, next.metadata),
+    metadata: mergeBlockMetadata(current, next),
     result: next.result ?? current.result
   };
 }
@@ -523,17 +637,21 @@ function toolBlockSignatures(block: TranscriptBlock): string[] {
   if (toolCallId) {
     signatures.push(`${toolName}:id:${toolCallId}`);
   }
-  const childSessionId = stringValue(metadata.child_session_id)
+  const childSessionId = stringValue(metadata.child_thread_id)
+    ?? stringValue(metadata.childThreadId)
+    ?? stringValue(metadata.child_session_id)
     ?? stringValue(metadata.childSessionId)
+    ?? stringValue(recordForValue(metadata.result).child_thread_id)
+    ?? stringValue(recordForValue(metadata.result).childThreadId)
     ?? stringValue(recordForValue(metadata.result).child_session_id)
     ?? stringValue(recordForValue(metadata.result).childSessionId)
     ?? stringValue(recordForValue(metadata.result).session_id)
     ?? stringValue(recordForValue(metadata.result).sessionId);
-  if ((toolName === "Agent" || toolName === "agent") && childSessionId) {
+  if (toolName === "spawn_agent" && childSessionId) {
     signatures.push(`${toolName}:child:${childSessionId}`);
   }
   const args = metadata.args ?? metadata.arguments ?? null;
-  if (args !== null) {
+  if (toolName !== "spawn_agent" && args !== null) {
     signatures.push(`${toolName}:args:${JSON.stringify(args)}`);
   }
   return signatures;
@@ -609,6 +727,8 @@ function agentChildTargetFromBlock(block: TranscriptBlock): AgentChildTarget | n
     blockBody
   ];
   const childSessionId = firstStringField(records, [
+    "child_thread_id",
+    "childThreadId",
     "child_session_id",
     "childSessionId",
     "session_id",
@@ -620,8 +740,8 @@ function agentChildTargetFromBlock(block: TranscriptBlock): AgentChildTarget | n
   return {
     agentName: firstStringField(records, ["agent_name", "agentName", "name"]),
     childSessionId,
-    parentSessionId: firstStringField(records, ["parent_session_id", "parentSessionId"]),
-    task: firstStringField(records, ["task", "prompt"]),
+    parentSessionId: firstStringField(records, ["parent_thread_id", "parentThreadId", "parent_session_id", "parentSessionId"]),
+    task: firstStringField(records, ["message", "task", "prompt"]),
     taskName: firstStringField(records, ["task_name", "taskName"])
   };
 }
@@ -656,8 +776,10 @@ function resultMetadataWithAgentTarget(metadata: unknown, target: AgentChildTarg
 
 function addAgentTargetFields(record: Record<string, unknown>, target: AgentChildTarget) {
   setStringIfMissing(record, "child_session_id", target.childSessionId);
+  setStringIfMissing(record, "child_thread_id", target.childSessionId);
   setStringIfMissing(record, "session_id", target.childSessionId);
   setStringIfMissing(record, "parent_session_id", target.parentSessionId);
+  setStringIfMissing(record, "parent_thread_id", target.parentSessionId);
   setStringIfMissing(record, "agent_name", target.agentName);
   setStringIfMissing(record, "task_name", target.taskName);
   setStringIfMissing(record, "task", target.task);
@@ -870,6 +992,84 @@ function mergeMetadata(left: unknown, right: unknown): unknown {
   return right ?? left ?? null;
 }
 
+function mergeBlockMetadata(current: TranscriptBlock, next: TranscriptBlock): unknown {
+  if (isSpawnAgentBlock(current) || isSpawnAgentBlock(next)) {
+    return mergeAgentMetadata(current.metadata, next.metadata);
+  }
+  return mergeMetadata(current.metadata, next.metadata);
+}
+
+function isSpawnAgentBlock(block: TranscriptBlock): boolean {
+  const metadata = recordForValue(block.metadata);
+  return stringValue(metadata.tool_name) === "spawn_agent";
+}
+
+function mergeAgentMetadata(left: unknown, right: unknown): unknown {
+  if (!isRecord(left) || !isRecord(right)) {
+    return right ?? left ?? null;
+  }
+  const merged: Record<string, unknown> = { ...right };
+  for (const key of [
+    "projection",
+    "tool_name",
+    "tool_call_id",
+    "parent_thread_id",
+    "parent_session_id",
+    "child_thread_id",
+    "child_session_id",
+    "session_id",
+    "agent_id",
+    "agent_name",
+    "agent_type",
+    "agent_path",
+    "task_name",
+    "message",
+    "task",
+    "prompt",
+    "args",
+    "arguments"
+  ]) {
+    copyFieldIfMissing(merged, left, key);
+  }
+  const leftResult = recordForValue(left.result);
+  if (Object.keys(leftResult).length > 0) {
+    const result = { ...recordForValue(merged.result) };
+    for (const key of [
+      "parent_thread_id",
+      "parent_session_id",
+      "child_thread_id",
+      "child_session_id",
+      "session_id",
+      "agent_id",
+      "agent_name",
+      "agent_type",
+      "agent_path",
+      "task_name",
+      "message",
+      "task",
+      "prompt"
+    ]) {
+      copyFieldIfMissing(result, leftResult, key);
+    }
+    merged.result = result;
+  }
+  return merged;
+}
+
+function copyFieldIfMissing(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string
+) {
+  if (target[key] !== undefined && target[key] !== null) {
+    return;
+  }
+  const value = source[key];
+  if (value !== undefined && value !== null) {
+    target[key] = value;
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -974,7 +1174,7 @@ function mergeLiveToolBlockIntoMessageBlock(
     preview: liveBlock.preview ?? current.preview,
     detail: liveBlock.detail ?? current.detail,
     artifactIds: liveArtifactIds.length > 0 ? liveArtifactIds : currentArtifactIds,
-    metadata: mergeMetadata(current.metadata, liveBlock.metadata),
+    metadata: mergeBlockMetadata(current, liveBlock),
     result: liveBlock.result ?? current.result,
     updatedAtMs: Math.max(current.updatedAtMs, liveBlock.updatedAtMs)
   };

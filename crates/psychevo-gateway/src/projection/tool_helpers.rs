@@ -44,7 +44,7 @@ fn live_tool_title(tool_name: &str, metadata: &Value) -> String {
     {
         return format!("exec_command {command}");
     }
-    if tool_name == "Agent"
+    if tool_name == "spawn_agent"
         && let Some(title) = live_agent_tool_title(metadata)
     {
         return title;
@@ -60,6 +60,7 @@ fn live_agent_tool_title(metadata: &Value) -> Option<String> {
         .filter(|task_name| !generated_agent_task_name(agent, task_name));
     let detail = task_name
         .or_else(|| agent_metadata_string(metadata, "agent_description"))
+        .or_else(|| agent_metadata_string(metadata, "message"))
         .or_else(|| agent_metadata_string(metadata, "task"))
         .or_else(|| agent_metadata_string(metadata, "prompt"));
     Some(match detail {
@@ -71,7 +72,7 @@ fn live_agent_tool_title(metadata: &Value) -> Option<String> {
 fn generated_agent_task_name(agent: &str, task_name: &str) -> bool {
     let Some(suffix) = task_name
         .strip_prefix(agent)
-        .and_then(|rest| rest.strip_prefix('-'))
+        .and_then(|rest| rest.strip_prefix('_'))
     else {
         return false;
     };
@@ -213,12 +214,17 @@ fn tool_value_metadata(value: &Value) -> Value {
             object.insert(key.to_string(), field.clone());
         }
     }
-    if let Some(args) = value.get("args").cloned().or_else(|| {
-        value
-            .get("arguments_json")
-            .and_then(Value::as_str)
-            .and_then(|raw| serde_json::from_str(raw).ok())
-    }) {
+    if let Some(args) = value
+        .get("args")
+        .or_else(|| value.get("arguments"))
+        .cloned()
+        .or_else(|| {
+            value
+                .get("arguments_json")
+                .and_then(Value::as_str)
+                .and_then(|raw| serde_json::from_str(raw).ok())
+        })
+    {
         object.insert("args".to_string(), args);
     }
     if !object.contains_key("outcome") {
@@ -242,12 +248,16 @@ fn tool_call_id_from_value<'a>(value: &'a Value, fallback: &'a str) -> &'a str {
 }
 
 fn tool_args_from_value(value: &Value) -> Option<Value> {
-    value.get("args").cloned().or_else(|| {
-        value
-            .get("arguments_json")
-            .and_then(Value::as_str)
-            .and_then(|raw| serde_json::from_str(raw).ok())
-    })
+    value
+        .get("args")
+        .or_else(|| value.get("arguments"))
+        .cloned()
+        .or_else(|| {
+            value
+                .get("arguments_json")
+                .and_then(Value::as_str)
+                .and_then(|raw| serde_json::from_str(raw).ok())
+        })
 }
 
 fn exec_session_id_from_args_value(value: &Value) -> Option<u64> {
@@ -284,12 +294,8 @@ fn tool_event_failed(value: &Value) -> bool {
 }
 
 fn background_running_agent_result_value(tool_name: &str, value: &Value) -> bool {
-    tool_name == "Agent"
-        && value
-            .get("result")
-            .and_then(|result| result.get("background"))
-            .and_then(Value::as_bool)
-            == Some(true)
+    tool_name == "spawn_agent"
+        && value.get("type").and_then(Value::as_str) != Some("agent_session_start")
         && value
             .get("result")
             .and_then(|result| result.get("status"))
@@ -395,7 +401,7 @@ fn tool_kind(tool_name: &str) -> TranscriptBlockKind {
         "web_fetch" | "web_search" => TranscriptBlockKind::Web,
         "mcp" | "mcp_call" => TranscriptBlockKind::Mcp,
         "clarify" => TranscriptBlockKind::Clarify,
-        "Agent" | "agent" => TranscriptBlockKind::Agent,
+        "spawn_agent" => TranscriptBlockKind::Agent,
         _ => TranscriptBlockKind::ToolCall,
     }
 }

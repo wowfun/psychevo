@@ -15,11 +15,25 @@ export const clientRequestPermissionRespondSchema = {
     },
     "PermissionRespondParams": {
       "properties": {
+        "activityId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "decision": {
           "$ref": "#/definitions/PermissionDecision"
         },
         "requestId": {
           "type": "string"
+        },
+        "sourceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "threadId": {
           "default": null,

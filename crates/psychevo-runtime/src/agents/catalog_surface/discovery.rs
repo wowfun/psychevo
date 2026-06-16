@@ -511,7 +511,7 @@ pub(crate) fn agent_catalog_for_prompt(
     selected_agent: Option<&AgentDefinition>,
     tools: &[Arc<dyn ToolBinding>],
 ) -> Vec<AgentDefinition> {
-    if !tools.iter().any(|tool| tool.name() == "Agent") {
+    if !tools.iter().any(|tool| tool.name() == "spawn_agent") {
         return Vec::new();
     }
     agent_catalog_for_selected_policy(catalog, selected_agent)
@@ -582,7 +582,7 @@ pub(crate) fn run_agent_hook_event(
 pub(crate) fn agent_tools(context: AgentToolContext) -> Vec<Arc<dyn ToolBinding>> {
     let mut tools = Vec::<Arc<dyn ToolBinding>>::new();
     if context.spawn_depth_remaining != Some(0) {
-        tools.push(Arc::new(AgentTool::new(context.clone())));
+        tools.push(Arc::new(SpawnAgentTool::new(context.clone())));
     }
     tools.push(Arc::new(ListAgentsTool::new(context.clone())));
     tools.push(Arc::new(WaitAgentTool::new(context.clone())));

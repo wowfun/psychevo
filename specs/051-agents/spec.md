@@ -131,14 +131,15 @@ the child exits. Completed, failed, or interrupted foreground and background
 child invocations must not leave durable `agent_edges` rows in an open state.
 
 When a child invocation targets an agent definition with `backend.ref` and a
-`subagent` entrypoint, runtime treats the `Agent` tool call as an external
-delegation boundary instead of synthesizing a native child loop. Runtime owns
-target validation, effective catalog visibility, unsupported background/fork
-checks, and the model-visible `Agent` tool result shape. The concrete peer
-transport is injected as an optional runtime-to-Gateway delegate because
-Gateway owns ACP client sessions and peer observation. If that delegate is not
-available, the `Agent` tool must return a structured unavailable result rather
-than falling back to a native child thread that only has the peer's name.
+`subagent` entrypoint, runtime treats the `spawn_agent` tool call as an
+external delegation boundary instead of synthesizing a native child loop.
+Runtime owns target validation, effective catalog visibility, unsupported
+background/fork checks, and the model-visible `spawn_agent` tool result shape.
+The concrete peer transport is injected as an optional runtime-to-Gateway
+delegate because Gateway owns ACP client sessions and peer observation. If that
+delegate is not available, the `spawn_agent` tool must return a structured
+unavailable result rather than falling back to a native child thread that only
+has the peer's name.
 Ordinary local Markdown/built-in agents continue to use the existing native
 child-thread path.
 
@@ -173,7 +174,7 @@ fallback to `system` for models that do not support `developer`.
 
 ## Tool Policy
 
-Agent tool policy is an invocation-scoped constraint, not direct execution
+Agent invocation policy is an invocation-scoped constraint, not direct execution
 authority. Runtime computes effective tools as the intersection of:
 
 - runtime-available tools

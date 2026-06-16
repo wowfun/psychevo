@@ -2,14 +2,12 @@
 pub(crate) use super::*;
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct AgentToolArgs {
+#[serde(deny_unknown_fields)]
+pub(crate) struct SpawnAgentArgs {
     #[serde(default)]
     pub(crate) agent_type: Option<String>,
-    #[serde(default)]
-    pub(crate) name: Option<String>,
-    pub(crate) prompt: String,
-    #[serde(default)]
-    pub(crate) task_name: Option<String>,
+    pub(crate) task_name: String,
+    pub(crate) message: String,
     #[serde(default)]
     pub(crate) background: Option<bool>,
     #[serde(default)]
@@ -26,13 +24,14 @@ pub(crate) struct AgentToolArgs {
 
 pub(crate) async fn spawn_subagent(
     context: AgentToolContext,
-    args: AgentToolArgs,
+    args: SpawnAgentArgs,
     tool_call_id: String,
     abort: AbortSignal,
 ) -> Result<ToolOutput> {
-    if args.prompt.trim().is_empty() {
-        return Err(Error::Message("Agent prompt is empty".to_string()));
+    if args.message.trim().is_empty() {
+        return Err(Error::Message("spawn_agent message is empty".to_string()));
     }
+    validate_task_name(&args.task_name)?;
     if agent_spawn_paused() {
         return Err(Error::Config("agent spawning is paused".to_string()));
     }
@@ -73,9 +72,7 @@ pub(crate) async fn spawn_subagent(
         return spawn_external_subagent(context, args, tool_call_id, abort, agent).await;
     }
     let id = Uuid::now_v7().to_string();
-    let task_name = agent_tool_task_name(&args)
-        .map(sanitize_task_name)
-        .unwrap_or_else(|| default_task_name(&agent.name, &id));
+    let task_name = args.task_name.trim().to_string();
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, args.max_spawn_depth);
     let background =
         args.fork_context || agent.background.unwrap_or(false) || args.background.unwrap_or(false);
@@ -90,7 +87,7 @@ pub(crate) async fn spawn_subagent(
             agent: &agent,
             id: &id,
             task_name: &task_name,
-            prompt: &args.prompt,
+            prompt: &args.message,
             model_override: args.model.as_deref(),
             role,
             background,
@@ -112,7 +109,7 @@ pub(crate) async fn spawn_subagent(
         id: id.clone(),
         task_name: Some(task_name.clone()),
         agent_name: agent.name.clone(),
-        task: args.prompt.clone(),
+        task: args.message.clone(),
         parent_session_id: context.parent_session_id.clone(),
         child_session_id: precreated_child_session.clone(),
         role,
@@ -144,6 +141,7 @@ pub(crate) async fn spawn_subagent(
     let response_task_name = task_name.clone();
     let response_store = context.state.store().clone();
     let response_child_session_id = precreated_child_session.clone();
+    let response_tool_call_id = tool_call_id.clone();
     let parent_abort_bridge = if background {
         None
     } else {
@@ -156,7 +154,7 @@ pub(crate) async fn spawn_subagent(
         id: id.clone(),
         context,
         agent,
-        prompt: args.prompt,
+        prompt: args.message,
         task_name,
         model_override: args.model,
         fork_context: args.fork_context,
@@ -178,13 +176,19 @@ pub(crate) async fn spawn_subagent(
         });
         let system_value = json!({
             "id": id,
-            "agent_name": response_agent_name,
+            "agent_name": response_agent_name.clone(),
             "agent_description": response_agent_description,
+            "agent_type": response_agent_name,
+            "agent_path": agent_path(&response_task_name),
             "task_name": response_task_name,
+            "message": response_record.task.clone(),
             "task": response_record.task.clone(),
+            "tool_call_id": response_tool_call_id,
+            "parent_thread_id": response_record.parent_session_id.clone(),
             "status": "running",
             "background": true,
             "session_id": response_child_session_id,
+            "child_thread_id": response_record.child_session_id.clone(),
             "child_session_id": response_record.child_session_id.clone(),
             "effective_max_spawn_depth": spawn_depth_remaining
         });
@@ -208,13 +212,18 @@ pub(crate) async fn spawn_subagent(
             .map(|summary| agent_child_session_summary_value(&response_store, &summary));
         let system_value = json!({
             "id": record.id,
-            "agent_name": record.agent_name,
+            "agent_name": record.agent_name.clone(),
             "agent_description": response_agent_description,
+            "agent_type": record.agent_name,
+            "agent_path": record.task_name.as_deref().map(agent_path),
             "task_name": record.task_name,
+            "message": record.task.clone(),
             "task": record.task,
+            "parent_thread_id": record.parent_session_id,
             "status": record.status.as_str(),
             "background": false,
             "session_id": response_child_session_id,
+            "child_thread_id": record.child_session_id.clone(),
             "child_session_id": record.child_session_id,
             "outcome": record.outcome,
             "final_answer": record.final_answer,
@@ -247,7 +256,7 @@ fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result
     let context = input.context;
     let agent = input.agent;
     let child_model = child_model_from(context, agent, input.model_override);
-    let metadata = child_agent_metadata(ChildAgentMetadataInput {
+    let mut metadata = child_agent_metadata(ChildAgentMetadataInput {
         id: input.id,
         task_name: input.task_name,
         agent,
@@ -268,6 +277,7 @@ fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result
         &context.model_provider,
         Some(metadata.clone()),
     )?;
+    attach_child_thread_metadata(&mut metadata, &child_session);
     context.state.store().upsert_agent_edge(
         &context.parent_session_id,
         &child_session,
@@ -275,6 +285,29 @@ fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result
         Some(metadata),
     )?;
     Ok(child_session)
+}
+
+fn attach_child_thread_metadata(metadata: &mut Value, child_session: &str) {
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            "child_thread_id".to_string(),
+            Value::String(child_session.to_string()),
+        );
+        object.insert(
+            "child_session_id".to_string(),
+            Value::String(child_session.to_string()),
+        );
+        if let Some(agent) = object.get_mut("agent").and_then(Value::as_object_mut) {
+            agent.insert(
+                "child_thread_id".to_string(),
+                Value::String(child_session.to_string()),
+            );
+            agent.insert(
+                "child_session_id".to_string(),
+                Value::String(child_session.to_string()),
+            );
+        }
+    }
 }
 
 fn spawn_parent_abort_bridge(
@@ -289,7 +322,7 @@ fn spawn_parent_abort_bridge(
 
 async fn spawn_external_subagent(
     context: AgentToolContext,
-    args: AgentToolArgs,
+    args: SpawnAgentArgs,
     tool_call_id: String,
     abort: AbortSignal,
     agent: AgentDefinition,
@@ -323,17 +356,15 @@ async fn spawn_external_subagent(
     };
 
     let id = Uuid::now_v7().to_string();
-    let task_name = agent_tool_task_name(&args)
-        .map(sanitize_task_name)
-        .unwrap_or_else(|| default_task_name(&agent.name, &id));
+    let task_name = args.task_name.trim().to_string();
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, args.max_spawn_depth);
-    let metadata = child_agent_metadata(ChildAgentMetadataInput {
+    let mut metadata = child_agent_metadata(ChildAgentMetadataInput {
         id: &id,
         task_name: &task_name,
         agent: &agent,
         parent_session_id: &context.parent_session_id,
         role: AgentInvocationRole::Subagent,
-        task: &args.prompt,
+        task: &args.message,
         background: false,
         fork_context: false,
         spawn_depth_remaining,
@@ -348,6 +379,7 @@ async fn spawn_external_subagent(
         &format!("acp:{}", backend.name),
         Some(metadata.clone()),
     )?;
+    attach_child_thread_metadata(&mut metadata, &child_session);
     context.state.store().upsert_agent_edge(
         &context.parent_session_id,
         &child_session,
@@ -359,7 +391,7 @@ async fn spawn_external_subagent(
         id: id.clone(),
         task_name: Some(task_name.clone()),
         agent_name: agent.name.clone(),
-        task: args.prompt.clone(),
+        task: args.message.clone(),
         parent_session_id: context.parent_session_id.clone(),
         child_session_id: Some(child_session.clone()),
         role: AgentInvocationRole::Subagent,
@@ -388,7 +420,7 @@ async fn spawn_external_subagent(
         agent: &agent,
         id: &id,
         task_name: &task_name,
-        task: &args.prompt,
+        task: &args.message,
         tool_call_id: &tool_call_id,
         child_session_id: &child_session,
         spawn_depth_remaining,
@@ -401,7 +433,7 @@ async fn spawn_external_subagent(
         agent_name: agent.name.clone(),
         agent_description: agent.description.clone(),
         backend_ref: backend.name.clone(),
-        prompt: args.prompt.clone(),
+        prompt: args.message.clone(),
         task_name,
         model: args.model.clone(),
         runtime_options: BTreeMap::new(),
@@ -431,7 +463,7 @@ async fn spawn_external_subagent(
                         id: id.clone(),
                         task_name: None,
                         agent_name: agent.name.clone(),
-                        task: args.prompt.clone(),
+                        task: args.message.clone(),
                         parent_session_id: context.parent_session_id.clone(),
                         child_session_id: Some(child_session.clone()),
                         role: AgentInvocationRole::Subagent,
@@ -466,13 +498,18 @@ async fn spawn_external_subagent(
     let response_child_session_id = record.child_session_id.clone();
     let system_value = json!({
         "id": record.id,
-        "agent_name": record.agent_name,
+        "agent_name": record.agent_name.clone(),
         "agent_description": agent.description,
+        "agent_type": record.agent_name,
+        "agent_path": record.task_name.as_deref().map(agent_path),
         "task_name": record.task_name,
+        "message": record.task.clone(),
         "task": record.task,
+        "parent_thread_id": record.parent_session_id,
         "status": record.status.as_str(),
         "background": false,
         "session_id": response_child_session_id,
+        "child_thread_id": record.child_session_id.clone(),
         "child_session_id": record.child_session_id,
         "outcome": record.outcome,
         "final_answer": record.final_answer,
@@ -487,7 +524,7 @@ async fn spawn_external_subagent(
 }
 
 pub(crate) fn resolve_agent_tool_name(
-    args: &AgentToolArgs,
+    args: &SpawnAgentArgs,
     required_agent_names: &[String],
 ) -> Result<String> {
     let agent_type = normalized_optional_name(args.agent_type.as_deref());
@@ -498,23 +535,10 @@ pub(crate) fn resolve_agent_tool_name(
         [single] => Ok(single.clone()),
         [] => Ok("general".to_string()),
         many => Err(Error::Config(format!(
-            "Agent call must set agent_type when the user mentioned multiple agents: {}",
+            "spawn_agent call must set agent_type when the user mentioned multiple agents: {}",
             many.join(", ")
         ))),
     }
-}
-
-pub(crate) fn agent_tool_task_name(args: &AgentToolArgs) -> Option<&str> {
-    args.task_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            args.name
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-        })
 }
 
 pub(crate) fn normalized_optional_name(value: Option<&str>) -> Option<String> {
@@ -522,6 +546,25 @@ pub(crate) fn normalized_optional_name(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+pub(crate) fn validate_task_name(value: &str) -> Result<()> {
+    let value = value.trim();
+    if value.is_empty() || matches!(value, "root" | "." | "..") {
+        return Err(Error::Message(
+            "task_name must use lowercase letters, digits, and underscores".to_string(),
+        ));
+    }
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+    {
+        Ok(())
+    } else {
+        Err(Error::Message(
+            "task_name must use lowercase letters, digits, and underscores".to_string(),
+        ))
+    }
 }
 
 pub(crate) fn child_spawn_depth_remaining(
@@ -554,7 +597,7 @@ pub(crate) fn spawn_child_agent_background(
     prompt: String,
 ) -> Result<AgentRunRecord> {
     if prompt.trim().is_empty() {
-        return Err(Error::Message("Agent prompt is empty".to_string()));
+        return Err(Error::Message("agent message is empty".to_string()));
     }
     let id = Uuid::now_v7().to_string();
     let task_name = default_task_name(&agent.name, &id);

@@ -533,6 +533,10 @@ pub struct ShellErrorPayload {
 pub struct PermissionRespondParams {
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub source_key: Option<String>,
+    #[serde(default)]
+    pub activity_id: Option<String>,
     pub request_id: String,
     pub decision: PermissionDecision,
 }
@@ -542,6 +546,10 @@ pub struct PermissionRespondParams {
 pub struct ClarifyRespondParams {
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub source_key: Option<String>,
+    #[serde(default)]
+    pub activity_id: Option<String>,
     pub request_id: String,
     #[serde(default)]
     pub answers: Option<Vec<Vec<String>>>,

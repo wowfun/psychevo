@@ -370,7 +370,18 @@ impl WebState {
             GatewayEvent::PermissionRequested {
                 request_id,
                 tool_name,
+                summary,
                 reason,
+                matched_rule,
+                suggested_rule,
+                allow_always,
+                timeout_secs,
+                thread_id,
+                turn_id,
+                activity_id,
+                source_key,
+                owner_id,
+                lease_expires_at_ms,
                 ..
             } => {
                 self.inner
@@ -382,12 +393,19 @@ impl WebState {
                         PendingPermissionView {
                             request_id: request_id.clone(),
                             tool_name: tool_name.clone(),
+                            summary: summary.clone(),
                             reason: reason.clone(),
-                            thread_id: context.thread_id,
-                            turn_id: context.turn_id,
-                            activity_id: context.activity_id,
-                            owner_id: context.owner_id,
-                            lease_expires_at_ms: context.lease_expires_at_ms,
+                            matched_rule: matched_rule.clone(),
+                            suggested_rule: suggested_rule.clone(),
+                            allow_always: *allow_always,
+                            timeout_secs: *timeout_secs,
+                            thread_id: thread_id.clone().or(context.thread_id),
+                            turn_id: turn_id.clone().or(context.turn_id),
+                            activity_id: activity_id.clone().or(context.activity_id),
+                            source_key: source_key.clone().or(context.source_key),
+                            owner_id: owner_id.clone().or(context.owner_id),
+                            lease_expires_at_ms: lease_expires_at_ms
+                                .or(context.lease_expires_at_ms),
                         },
                     );
             }
@@ -403,7 +421,16 @@ impl WebState {
             } => {
                 self.remove_pending_permissions_for_completed_turn(thread_id.as_deref(), turn_id);
             }
-            GatewayEvent::ClarifyRequested { request_id, raw } => {
+            GatewayEvent::ClarifyRequested {
+                request_id,
+                raw,
+                thread_id,
+                turn_id,
+                activity_id,
+                source_key,
+                owner_id,
+                lease_expires_at_ms,
+            } => {
                 self.inner
                     .pending_clarifies
                     .lock()
@@ -413,6 +440,13 @@ impl WebState {
                         PendingClarifyView {
                             request_id: request_id.clone(),
                             raw: raw.clone(),
+                            thread_id: thread_id.clone().or(context.thread_id),
+                            turn_id: turn_id.clone().or(context.turn_id),
+                            activity_id: activity_id.clone().or(context.activity_id),
+                            source_key: source_key.clone().or(context.source_key),
+                            owner_id: owner_id.clone().or(context.owner_id),
+                            lease_expires_at_ms: lease_expires_at_ms
+                                .or(context.lease_expires_at_ms),
                         },
                     );
             }
@@ -435,6 +469,7 @@ impl WebState {
             thread_id: record.thread_id.clone(),
             turn_id: record.turn_id.clone(),
             activity_id: record.activity_id.clone(),
+            source_key: None,
             owner_id: record.owner_id.clone(),
             lease_expires_at_ms: None,
         };
@@ -450,6 +485,9 @@ impl WebState {
             if context.owner_id.is_none() {
                 context.owner_id = Some(activity.owner_id);
             }
+            if context.source_key.is_none() {
+                context.source_key = activity.source_key;
+            }
             context.lease_expires_at_ms = Some(activity.lease_expires_at_ms);
         }
         context
@@ -461,14 +499,79 @@ impl WebState {
         thread_id: Option<&str>,
     ) -> PendingInteractionContext {
         let activity = self.inner.gateway.activity_for_selector(selector.clone());
+        let source_key = match selector {
+            GatewayThreadSelector::Source { source_key } => Some(source_key.0.clone()),
+            GatewayThreadSelector::ThreadId { .. } => None,
+        };
         PendingInteractionContext {
             thread_id: thread_id.map(str::to_string),
             turn_id: activity.active_turn_id.clone(),
             activity_id: activity.active_turn_id,
+            source_key,
             owner_id: activity
                 .owner_id
                 .or_else(|| Some(self.inner.gateway.owner_id().to_string())),
             lease_expires_at_ms: activity.lease_expires_at_ms,
+        }
+    }
+
+    fn event_with_pending_context(
+        &self,
+        event: GatewayEvent,
+        context: &PendingInteractionContext,
+    ) -> GatewayEvent {
+        match event {
+            GatewayEvent::PermissionRequested {
+                request_id,
+                tool_name,
+                summary,
+                reason,
+                matched_rule,
+                suggested_rule,
+                allow_always,
+                timeout_secs,
+                thread_id,
+                turn_id,
+                activity_id,
+                source_key,
+                owner_id,
+                lease_expires_at_ms,
+            } => GatewayEvent::PermissionRequested {
+                request_id,
+                tool_name,
+                summary,
+                reason,
+                matched_rule,
+                suggested_rule,
+                allow_always,
+                timeout_secs,
+                thread_id: thread_id.or_else(|| context.thread_id.clone()),
+                turn_id: turn_id.or_else(|| context.turn_id.clone()),
+                activity_id: activity_id.or_else(|| context.activity_id.clone()),
+                source_key: source_key.or_else(|| context.source_key.clone()),
+                owner_id: owner_id.or_else(|| context.owner_id.clone()),
+                lease_expires_at_ms: lease_expires_at_ms.or(context.lease_expires_at_ms),
+            },
+            GatewayEvent::ClarifyRequested {
+                request_id,
+                raw,
+                thread_id,
+                turn_id,
+                activity_id,
+                source_key,
+                owner_id,
+                lease_expires_at_ms,
+            } => GatewayEvent::ClarifyRequested {
+                request_id,
+                raw,
+                thread_id: thread_id.or_else(|| context.thread_id.clone()),
+                turn_id: turn_id.or_else(|| context.turn_id.clone()),
+                activity_id: activity_id.or_else(|| context.activity_id.clone()),
+                source_key: source_key.or_else(|| context.source_key.clone()),
+                owner_id: owner_id.or_else(|| context.owner_id.clone()),
+                lease_expires_at_ms: lease_expires_at_ms.or(context.lease_expires_at_ms),
+            },
+            event => event,
         }
     }
 
@@ -524,13 +627,22 @@ impl WebState {
 struct PendingPermissionView {
     request_id: String,
     tool_name: String,
+    summary: String,
     reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    matched_rule: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggested_rule: Option<String>,
+    allow_always: bool,
+    timeout_secs: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     thread_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     turn_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     activity_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     owner_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -542,6 +654,7 @@ struct PendingInteractionContext {
     thread_id: Option<String>,
     turn_id: Option<String>,
     activity_id: Option<String>,
+    source_key: Option<String>,
     owner_id: Option<String>,
     lease_expires_at_ms: Option<i64>,
 }
@@ -551,4 +664,16 @@ struct PendingInteractionContext {
 struct PendingClarifyView {
     request_id: String,
     raw: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    activity_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lease_expires_at_ms: Option<i64>,
 }

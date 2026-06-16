@@ -501,7 +501,7 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
             metadata.insert("source".to_string(), json!(source));
         }
         metadata.insert("result".to_string(), result_value);
-        if tool_name == "Agent" || tool_name == "agent" {
+        if tool_name == "spawn_agent" {
             enrich_committed_agent_metadata(&mut metadata);
         }
         block.metadata = Some(Value::Object(metadata.clone()));
@@ -642,9 +642,12 @@ fn enrich_committed_agent_metadata(metadata: &mut serde_json::Map<String, Value>
     for key in [
         "agent_name",
         "agent_type",
-        "name",
+        "agent_path",
         "task_name",
+        "message",
+        "parent_thread_id",
         "parent_session_id",
+        "child_thread_id",
         "child_session_id",
         "session_id",
     ] {
@@ -654,14 +657,32 @@ fn enrich_committed_agent_metadata(metadata: &mut serde_json::Map<String, Value>
             result.insert(key.to_string(), value.clone());
         }
     }
-    if result.get("task").is_none()
+    if result.get("message").is_none()
         && let Some(prompt) = args
-            .get("prompt")
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty())
+    {
+        result.insert("message".to_string(), json!(prompt));
+    }
+    if result.get("task").is_none()
+        && let Some(prompt) = result
+            .get("message")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|prompt| !prompt.is_empty())
     {
         result.insert("task".to_string(), json!(prompt));
+    }
+    if result.get("child_thread_id").is_none()
+        && let Some(child_session_id) = result
+            .get("child_session_id")
+            .or_else(|| result.get("session_id"))
+            .filter(|value| !value.is_null())
+            .cloned()
+    {
+        result.insert("child_thread_id".to_string(), child_session_id);
     }
     if result.get("child_session_id").is_none()
         && let Some(session_id) = result
@@ -678,6 +699,14 @@ fn enrich_committed_agent_metadata(metadata: &mut serde_json::Map<String, Value>
             .cloned()
     {
         result.insert("session_id".to_string(), child_session_id);
+    }
+    if result.get("parent_thread_id").is_none()
+        && let Some(parent_session_id) = result
+            .get("parent_session_id")
+            .filter(|value| !value.is_null())
+            .cloned()
+    {
+        result.insert("parent_thread_id".to_string(), parent_session_id);
     }
 }
 
@@ -729,8 +758,9 @@ fn matching_agent_edge_for_block<'a>(
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let task_prompt = result
-        .get("task")
-        .or_else(|| args.get("prompt"))
+        .get("message")
+        .or_else(|| result.get("task"))
+        .or_else(|| args.get("message"))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
@@ -752,12 +782,20 @@ fn enrich_agent_metadata_from_edge(
 ) {
     let result = ensure_json_object_field(metadata, "result");
     result.insert(
+        "child_thread_id".to_string(),
+        Value::String(edge.child_session_id.clone()),
+    );
+    result.insert(
         "child_session_id".to_string(),
         Value::String(edge.child_session_id.clone()),
     );
     result.insert(
         "session_id".to_string(),
         Value::String(edge.child_session_id.clone()),
+    );
+    result.insert(
+        "parent_thread_id".to_string(),
+        Value::String(edge.parent_session_id.clone()),
     );
     result.insert(
         "parent_session_id".to_string(),
@@ -768,7 +806,14 @@ fn enrich_agent_metadata_from_edge(
     {
         result.insert("agent_id".to_string(), Value::String(value.to_string()));
     }
-    for key in ["name", "task_name", "task"] {
+    for key in [
+        "name",
+        "agent_type",
+        "agent_path",
+        "task_name",
+        "message",
+        "task",
+    ] {
         if let Some(value) = agent_edge_string(edge, key) {
             let result_key = if key == "name" { "agent_name" } else { key };
             result
@@ -783,7 +828,8 @@ fn agent_result_child_session_id(metadata: &serde_json::Map<String, Value>) -> O
         .get("result")
         .and_then(|result| {
             result
-                .get("child_session_id")
+                .get("child_thread_id")
+                .or_else(|| result.get("child_session_id"))
                 .or_else(|| result.get("session_id"))
         })
         .and_then(Value::as_str)
@@ -845,7 +891,7 @@ fn tool_block_kind(tool_name: &str) -> TranscriptBlockKind {
         "web_fetch" | "web_search" => TranscriptBlockKind::Web,
         "mcp" | "mcp_call" => TranscriptBlockKind::Mcp,
         "clarify" => TranscriptBlockKind::Clarify,
-        "Agent" | "agent" => TranscriptBlockKind::Agent,
+        "spawn_agent" => TranscriptBlockKind::Agent,
         _ => TranscriptBlockKind::ToolCall,
     }
 }

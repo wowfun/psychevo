@@ -145,6 +145,26 @@ parent thread id. The parent Agent entry may still be updated by parent-owned
 Agent lifecycle/tool events, but scoped child transcript entries remain child
 thread entries so clients can route or retain them without leaking them into
 the parent transcript.
+Gateway is the shared display projector for Agent invocation blocks exposed to
+GUI and TUI clients. `spawn_agent` begin/end events, `agent_session_start`,
+committed history, and durable parent/child edges upsert one
+`AgentInvocationBlock` by `tool_call_id`; Gateway must enrich the block with
+`child_thread_id` before clients replace live state with committed snapshots.
+Clients must not reconstruct Agent row identity or open targets from display
+labels, task summaries, prompts, result text, or agent definition names.
+During live streaming, a `spawn_agent` block may be created from partial
+tool-call content before its arguments are complete. That provisional block may
+only be upgraded by the same `tool_call_id`, or by the same assistant-segment
+stream position (`content_index` plus `call_index`) when a provider first emits
+an empty or generated id and later resolves the real id. Gateway must not alias
+one `spawn_agent` event to another block by tool name, agent name, task label,
+prompt, result summary, or child-thread metadata. A later execution event with
+an unknown id creates an independent provisional/diagnostic block instead of
+stealing an existing Agent block.
+Live block metadata for Agent invocations is typed state, not a generic shallow
+JSON merge. A later partial tool-call frame may refresh the display preview,
+but it must not overwrite an already-bound invocation identity, child-thread
+target, terminal status, or result metadata from another `tool_call_id`.
 
 Live Gateway events are also relayed across Gateway processes. The owner stores
 presentation-only live events with a monotonic sequence and short retention.
@@ -200,6 +220,16 @@ Gateway owns the caller-facing interaction request semantics for permissions
 and clarify/user-input requests. Runtime permission decisions remain
 authoritative; Gateway only provides a request/response rendezvous.
 
+Gateway interaction projections must carry enough context for clients to render
+and answer the request without guessing from the currently visible source. A
+pending request may include its materialized thread id, active turn id, durable
+activity id, source key, owner id, lease expiry, and request-specific display
+details. Permission requests expose the summary, reason, matched/suggested rule,
+timeout, and whether persistent approval is offered. Clarify requests expose the
+structured raw request plus the same routing context. Missing context is allowed
+only for legacy or in-process-only requests; clients must prefer request context
+over the current snapshot thread when submitting a response.
+
 Permission responses use the existing runtime decision vocabulary:
 `allow_once`, `allow_session`, `allow_always`, and `deny`.
 Permission response routing must tolerate source-started turns that materialize
@@ -212,6 +242,9 @@ Clarify responses must be explicitly associated with a request id. Natural
 language adapters may implement a source-aware resolver that converts the next
 non-command message into a `submit_clarify` call, but Gateway treats that
 as explicit request resolution rather than a new turn.
+Clarify response routing follows the same context precedence as permission
+responses so source-started draft turns do not hang when the source binding is
+not yet committed to the materialized thread.
 
 ## Local Transport Facade
 
@@ -298,6 +331,10 @@ recover the current Gateway-owned snapshot after WebSocket reconnection. The
 snapshot is a transport projection of the current thread transcript, active turn
 id, queued turn count, and pending permission/clarify requests. It is not
 durable evidence.
+For source-started turns whose concrete thread id materializes before source
+binding is committed, Gateway must make pending interaction requests recoverable
+through the materialized thread/activity context instead of requiring clients to
+rediscover them via source-default `thread/resume`.
 
 For Web and future shell clients, the persistent source key is derived from the
 canonical workdir rather than from a browser tab or device profile. Multiple

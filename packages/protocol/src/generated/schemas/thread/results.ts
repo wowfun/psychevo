@@ -207,19 +207,6 @@ export const threadResultSchemas = {
     },
     "PendingClarifyView": {
       "properties": {
-        "raw": true,
-        "requestId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "raw",
-        "requestId"
-      ],
-      "type": "object"
-    },
-    "PendingPermissionView": {
-      "properties": {
         "activityId": {
           "type": [
             "string",
@@ -239,10 +226,84 @@ export const threadResultSchemas = {
             "null"
           ]
         },
+        "raw": true,
+        "requestId": {
+          "type": "string"
+        },
+        "sourceKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "raw",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "PendingPermissionView": {
+      "properties": {
+        "activityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "allowAlways": {
+          "type": "boolean"
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "matchedRule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "reason": {
           "type": "string"
         },
         "requestId": {
+          "type": "string"
+        },
+        "sourceKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suggestedRule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
           "type": "string"
         },
         "threadId": {
@@ -250,6 +311,11 @@ export const threadResultSchemas = {
             "string",
             "null"
           ]
+        },
+        "timeoutSecs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "toolName": {
           "type": "string"
@@ -262,8 +328,11 @@ export const threadResultSchemas = {
         }
       },
       "required": [
+        "allowAlways",
         "reason",
         "requestId",
+        "summary",
+        "timeoutSecs",
         "toolName"
       ],
       "type": "object"

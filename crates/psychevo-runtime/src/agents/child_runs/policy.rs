@@ -336,10 +336,15 @@ pub(crate) fn emit_agent_session_start(child: &ChildRun, child_session_id: &str)
         "agent_id": child.id.clone(),
         "agent_name": child.agent.name.clone(),
         "agent_description": child.agent.description.clone(),
+        "agent_type": child.agent.name.clone(),
+        "agent_path": agent_path(&child.task_name),
         "task_name": child.task_name.clone(),
+        "message": child.prompt.clone(),
         "task": child.prompt.clone(),
         "parent_session_id": child.context.parent_session_id.clone(),
+        "parent_thread_id": child.context.parent_session_id.clone(),
         "child_session_id": child_session_id,
+        "child_thread_id": child_session_id,
         "background": child.background,
         "role": invocation_role_str(child.role),
         "effective_max_spawn_depth": child.spawn_depth_remaining,
@@ -367,10 +372,15 @@ fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
         "agent_id": event.id,
         "agent_name": event.agent.name.clone(),
         "agent_description": event.agent.description.clone(),
+        "agent_type": event.agent.name.clone(),
+        "agent_path": agent_path(event.task_name),
         "task_name": event.task_name,
+        "message": event.task,
         "task": event.task,
         "parent_session_id": event.context.parent_session_id.clone(),
+        "parent_thread_id": event.context.parent_session_id.clone(),
         "child_session_id": event.child_session_id,
+        "child_thread_id": event.child_session_id,
         "background": false,
         "role": invocation_role_str(AgentInvocationRole::Subagent),
         "backend_ref": event.agent.backend.as_ref().map(|backend| backend.name.clone()),
@@ -416,6 +426,10 @@ pub(crate) fn invocation_role_str(role: AgentInvocationRole) -> &'static str {
     }
 }
 
+pub(crate) fn agent_path(task_name: &str) -> String {
+    format!("/root/{task_name}")
+}
+
 pub(crate) fn sanitize_task_name(value: &str) -> String {
     let mut out = String::new();
     for ch in value.chars() {
@@ -423,13 +437,13 @@ pub(crate) fn sanitize_task_name(value: &str) -> String {
             out.push(ch);
         } else if ch.is_ascii_uppercase() {
             out.push(ch.to_ascii_lowercase());
-        } else if ch.is_whitespace() && !out.ends_with('-') {
-            out.push('-');
+        } else if (ch.is_whitespace() || ch == '-') && !out.ends_with('_') {
+            out.push('_');
         }
     }
-    let out = out.trim_matches(['-', '_']).to_string();
+    let out = out.trim_matches('_').to_string();
     if out.is_empty() {
-        "agent-task".to_string()
+        "agent_task".to_string()
     } else {
         out
     }
@@ -437,7 +451,7 @@ pub(crate) fn sanitize_task_name(value: &str) -> String {
 
 pub(crate) fn default_task_name(agent_name: &str, id: &str) -> String {
     let suffix = id.split('-').next().unwrap_or(id);
-    sanitize_task_name(&format!("{agent_name}-{suffix}"))
+    sanitize_task_name(&format!("{agent_name}_{suffix}"))
 }
 
 pub(crate) const AGENT_NOTIFICATION_METADATA_KEY: &str = "agent_notification";
@@ -514,10 +528,14 @@ pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value 
             "id": input.id,
             "task_name": input.task_name,
             "name": input.agent.name.clone(),
+            "agent_type": input.agent.name.clone(),
+            "agent_path": agent_path(input.task_name),
             "source": input.agent.source.as_str(),
             "path": input.agent.file_path.clone(),
             "parent_session_id": input.parent_session_id,
+            "parent_thread_id": input.parent_session_id,
             "role": invocation_role_str(input.role),
+            "message": input.task,
             "task": input.task,
             "background": input.background,
             "fork_context": input.fork_context,

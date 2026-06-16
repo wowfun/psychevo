@@ -305,7 +305,7 @@ pub(crate) fn known_tool_policy_name(name: &str) -> bool {
             | "edit"
             | "write"
             | "clarify"
-            | "Agent"
+            | "spawn_agent"
             | "Skill"
             | "list_agents"
             | "wait_agent"
@@ -337,10 +337,10 @@ pub(crate) fn parse_tool_entries(value: Option<&Value>, mode: ToolEntryMode) -> 
     for item in parse_tool_vec(value) {
         let (tool, agents) = parse_tool_entry(&item);
         let canonical = normalize_tool_name(tool);
-        if !(mode == ToolEntryMode::Deny && canonical == "Agent" && !agents.is_empty()) {
+        if !(mode == ToolEntryMode::Deny && canonical == "spawn_agent" && !agents.is_empty()) {
             parsed.tools.insert(canonical.clone());
         }
-        if canonical == "Agent" {
+        if canonical == "spawn_agent" {
             parsed.agents.extend(agents);
         }
     }
@@ -488,7 +488,7 @@ pub(crate) fn normalize_tool_name(raw: String) -> String {
         "Edit" | "edit" => "edit".to_string(),
         "Write" | "write" => "write".to_string(),
         "Clarify" | "clarify" => "clarify".to_string(),
-        "Agent" | "agent" | "Task" | "task" => "Agent".to_string(),
+        "spawn_agent" => "spawn_agent".to_string(),
         "Skill" | "skill" => "Skill".to_string(),
         other => other.to_string(),
     }
@@ -536,7 +536,7 @@ pub(crate) fn agent_allows_tool(
 pub(crate) fn tool_policy_names(name: &str, canonical: &str) -> Vec<String> {
     let mut names = Vec::from([canonical.to_string(), name.to_string()]);
     if agent_control_tool_name(name) {
-        names.push("Agent".to_string());
+        names.push("spawn_agent".to_string());
     }
     if skill_read_tool_name(name) {
         names.push("Skill".to_string());
@@ -557,7 +557,7 @@ pub(crate) fn plan_mode_tool_allowed(name: &str) -> bool {
             | "view_skill"
             | "skill_hub"
             | "skill_config"
-            | "Agent"
+            | "spawn_agent"
             | "list_agents"
             | "wait_agent"
             | "send_message"
@@ -581,7 +581,12 @@ pub(crate) fn mcp_tool_server(name: &str) -> Option<&str> {
 pub(crate) fn agent_control_tool_name(name: &str) -> bool {
     matches!(
         name,
-        "Agent" | "list_agents" | "wait_agent" | "send_message" | "close_agent" | "resume_agent"
+        "spawn_agent"
+            | "list_agents"
+            | "wait_agent"
+            | "send_message"
+            | "close_agent"
+            | "resume_agent"
     )
 }
 
@@ -590,11 +595,11 @@ pub(crate) fn skill_read_tool_name(name: &str) -> bool {
 }
 
 pub(crate) fn agent_policy_allows_agent_catalog(agent: &AgentDefinition) -> bool {
-    if agent.tool_policy.denied.contains("Agent") {
+    if agent.tool_policy.denied.contains("spawn_agent") {
         return false;
     }
     match &agent.tool_policy.allowed {
-        Some(allowed) => allowed.contains("Agent"),
+        Some(allowed) => allowed.contains("spawn_agent"),
         None => true,
     }
 }
@@ -781,11 +786,11 @@ pub(crate) fn built_in_agent(
     }
 }
 
-pub(crate) struct AgentTool {
+pub(crate) struct SpawnAgentTool {
     pub(crate) context: AgentToolContext,
 }
 
-impl AgentTool {
+impl SpawnAgentTool {
     pub(crate) fn new(context: AgentToolContext) -> Self {
         Self { context }
     }

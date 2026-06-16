@@ -1,9 +1,46 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "activityId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "leaseExpiresAtMs": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "ownerId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "raw": true,
     "requestId": {
       "type": "string"
+    },
+    "sourceKey": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "turnId": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

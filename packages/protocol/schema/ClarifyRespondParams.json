@@ -1,6 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "activityId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "answers": {
       "default": null,
       "items": {
@@ -23,6 +30,13 @@
     },
     "requestId": {
       "type": "string"
+    },
+    "sourceKey": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "threadId": {
       "default": null,

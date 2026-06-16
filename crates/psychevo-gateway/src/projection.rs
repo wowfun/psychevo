@@ -18,6 +18,7 @@ pub struct GatewayLiveProjector {
     entries: BTreeMap<usize, LiveEntryState>,
     tool_owners: BTreeMap<String, usize>,
     tool_aliases: BTreeMap<String, String>,
+    tool_positions: BTreeMap<String, String>,
     tool_args: BTreeMap<String, Value>,
     exec_sessions: BTreeMap<u64, LiveExecState>,
     child_projectors: BTreeMap<String, GatewayLiveProjector>,

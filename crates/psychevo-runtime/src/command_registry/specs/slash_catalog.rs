@@ -489,7 +489,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/fork <prompt>",
         summary: "delegate a forked agent",
         help_detail: Some(
-            "Submits a request for the main agent to call the Agent tool with fork_context=true in the background.",
+            "Submits a request for the main agent to call spawn_agent with fork_context=true in the background.",
         ),
         surface: TUI_SLASH,
         group: COMMANDS,

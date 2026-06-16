@@ -559,7 +559,15 @@ pub(crate) fn subagent_summary_value(
         "agent_name".to_string(),
         Value::from(record.agent_name.clone()),
     );
-    object.insert("task".to_string(), Value::from(record_task_label(record)));
+    object.insert(
+        "task_name".to_string(),
+        Value::from(
+            record
+                .task_name
+                .clone()
+                .unwrap_or_else(|| record_task_label(record)),
+        ),
+    );
     object.insert("status".to_string(), Value::from(record.status.as_str()));
     if let Some(exit_reason) = record_exit_reason(record) {
         object.insert("exit_reason".to_string(), Value::from(exit_reason));

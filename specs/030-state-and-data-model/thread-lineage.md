@@ -47,12 +47,13 @@ mechanical renames of `session_id`, `parent_session_id`, or `child_session_id`
 when those names refer to durable session records rather than thread
 navigation.
 
-A subsession is the shared caller-facing category for a child thread opened
-inside another thread's interaction context. Side chats and subagent child
-threads are both subsessions. The term describes parent-scoped inspection and
-navigation, not a separate durable storage object. When a subsession has a
-backing session record, that session remains the durable body of work; parent
-rows, tabs, badges, and buttons are projections over lineage metadata.
+A child thread view is a child thread opened inside another thread's
+interaction context. Side conversations and subagent threads share this
+navigation model, but they keep their domain names because they differ in
+creation, lifetime, and ownership. The view describes parent-scoped inspection
+and navigation, not a separate durable storage object. When a child thread view
+has a backing session record, that session remains the durable body of work;
+parent rows, tabs, badges, and buttons are projections over lineage metadata.
 
 ## Lineage
 
@@ -70,7 +71,7 @@ must remain relatable to the thread lineage. Storage-specific edge tables may
 record coordination state, but they do not replace the child thread's own
 session as the durable body of work.
 
-Lineage metadata is the shared fact source for subsession identity. Surfaces
+Lineage metadata is the shared fact source for child thread identity. Surfaces
 must not infer a child thread from display labels alone. For subagent threads,
 the durable parent-to-child agent edge and child session metadata provide the
 open target. For side threads, the side-thread session metadata records the

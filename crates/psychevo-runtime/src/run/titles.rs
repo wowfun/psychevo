@@ -14,13 +14,12 @@ pub(crate) fn called_agent_names(
             let AssistantBlock::ToolCall(call) = block else {
                 continue;
             };
-            if call.name != "Agent" {
+            if call.name != "spawn_agent" {
                 continue;
             }
             let agent_type = call
                 .arguments
                 .get("agent_type")
-                .or_else(|| call.arguments.get("name"))
                 .and_then(serde_json::Value::as_str)
                 .map(str::trim)
                 .filter(|value| !value.is_empty())

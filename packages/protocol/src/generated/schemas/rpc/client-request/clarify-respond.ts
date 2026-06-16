@@ -6,6 +6,13 @@ export const clientRequestClarifyRespondSchema = {
   "definitions": {
     "ClarifyRespondParams": {
       "properties": {
+        "activityId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "answers": {
           "default": null,
           "items": {
@@ -28,6 +35,13 @@ export const clientRequestClarifyRespondSchema = {
         },
         "requestId": {
           "type": "string"
+        },
+        "sourceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "threadId": {
           "default": null,

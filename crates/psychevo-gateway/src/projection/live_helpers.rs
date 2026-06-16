@@ -88,6 +88,7 @@ impl LiveEntryState {
 }
 
 fn merge_live_block(existing: &TranscriptBlock, next: TranscriptBlock) -> TranscriptBlock {
+    let metadata = merge_live_block_metadata(existing, &next);
     TranscriptBlock {
         id: existing.id.clone(),
         kind: next.kind,
@@ -107,7 +108,7 @@ fn merge_live_block(existing: &TranscriptBlock, next: TranscriptBlock) -> Transc
         } else {
             next.artifact_ids
         },
-        metadata: merge_json_metadata(existing.metadata.clone(), next.metadata),
+        metadata,
         result: next.result.or_else(|| existing.result.clone()),
         created_at_ms: existing.created_at_ms,
         updated_at_ms: next.updated_at_ms,
@@ -136,6 +137,107 @@ fn merge_json_metadata(left: Option<Value>, right: Option<Value>) -> Option<Valu
         (_, Some(right)) => Some(right),
         (Some(left), None) => Some(left),
         (None, None) => None,
+    }
+}
+
+fn merge_live_block_metadata(
+    existing: &TranscriptBlock,
+    next: &TranscriptBlock,
+) -> Option<Value> {
+    if block_is_spawn_agent(existing) || block_is_spawn_agent(next) {
+        return merge_agent_block_metadata(existing.metadata.clone(), next.metadata.clone());
+    }
+    merge_json_metadata(existing.metadata.clone(), next.metadata.clone())
+}
+
+fn block_is_spawn_agent(block: &TranscriptBlock) -> bool {
+    block
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("tool_name"))
+        .and_then(Value::as_str)
+        == Some("spawn_agent")
+}
+
+fn merge_agent_block_metadata(left: Option<Value>, right: Option<Value>) -> Option<Value> {
+    match (left, right) {
+        (Some(Value::Object(left)), Some(Value::Object(mut right))) => {
+            for key in [
+                "projection",
+                "tool_name",
+                "tool_call_id",
+                "parent_thread_id",
+                "parent_session_id",
+                "child_thread_id",
+                "child_session_id",
+                "session_id",
+                "agent_id",
+                "agent_name",
+                "agent_type",
+                "agent_path",
+                "task_name",
+                "message",
+                "task",
+                "prompt",
+                "args",
+                "arguments",
+            ] {
+                copy_json_field_if_missing(&mut right, &left, key);
+            }
+            merge_agent_result_identity(&left, &mut right);
+            Some(Value::Object(right))
+        }
+        (_, Some(right)) => Some(right),
+        (Some(left), None) => Some(left),
+        (None, None) => None,
+    }
+}
+
+fn merge_agent_result_identity(
+    left: &serde_json::Map<String, Value>,
+    right: &mut serde_json::Map<String, Value>,
+) {
+    let Some(Value::Object(left_result)) = left.get("result") else {
+        return;
+    };
+    let right_result = right
+        .entry("result".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !right_result.is_object() {
+        *right_result = Value::Object(serde_json::Map::new());
+    }
+    let Some(right_result) = right_result.as_object_mut() else {
+        return;
+    };
+    for key in [
+        "parent_thread_id",
+        "parent_session_id",
+        "child_thread_id",
+        "child_session_id",
+        "session_id",
+        "agent_id",
+        "agent_name",
+        "agent_type",
+        "agent_path",
+        "task_name",
+        "message",
+        "task",
+        "prompt",
+    ] {
+        copy_json_field_if_missing(right_result, left_result, key);
+    }
+}
+
+fn copy_json_field_if_missing(
+    target: &mut serde_json::Map<String, Value>,
+    source: &serde_json::Map<String, Value>,
+    key: &str,
+) {
+    if target.get(key).is_some_and(|value| !value.is_null()) {
+        return;
+    }
+    if let Some(value) = source.get(key).filter(|value| !value.is_null()) {
+        target.insert(key.to_string(), value.clone());
     }
 }
 
@@ -211,6 +313,15 @@ fn live_text_block_id(turn_id: &str, segment: usize, index: usize) -> String {
 
 fn live_tool_block_id(turn_id: &str, tool_call_id: &str) -> String {
     format!("live:{turn_id}:tool:{tool_call_id}")
+}
+
+fn tool_position_key(segment: usize, value: &Value) -> Option<String> {
+    let content_index = value
+        .get("content_index")
+        .or_else(|| value.get("content_array_index"))
+        .and_then(Value::as_i64)?;
+    let call_index = value.get("call_index").and_then(Value::as_i64)?;
+    Some(format!("{segment}:{content_index}:{call_index}"))
 }
 
 fn content_block_order(block: &Value, _index: usize, fallback: i64) -> i64 {

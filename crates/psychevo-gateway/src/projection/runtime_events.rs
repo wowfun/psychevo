@@ -12,6 +12,12 @@ pub fn gateway_event_from_run_stream(
         RunStreamEvent::ClarifyRequest(request) => GatewayEvent::ClarifyRequested {
             request_id: request.call_id.clone(),
             raw: serde_json::to_value(request).unwrap_or(Value::Null),
+            thread_id: None,
+            turn_id: None,
+            activity_id: None,
+            source_key: None,
+            owner_id: None,
+            lease_expires_at_ms: None,
         },
         RunStreamEvent::ClarifyResolved(resolved) => GatewayEvent::ClarifyResolved {
             request_id: resolved.call_id.clone(),
@@ -299,6 +305,12 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
                     .get("timeout_secs")
                     .and_then(Value::as_u64)
                     .unwrap_or(0),
+                thread_id: None,
+                turn_id: None,
+                activity_id: None,
+                source_key: None,
+                owner_id: None,
+                lease_expires_at_ms: None,
             }
         }
         _ => return None,
