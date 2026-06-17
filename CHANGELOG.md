@@ -7,7 +7,17 @@
   `210` narrowed to TUI-specific state, rendering, interaction, and validation.
 - Added Workbench inline diff rendering for successful text-editing tool rows,
   backed by a shared parsed-diff component model and existing Review diff
-  styling tokens.
+  styling tokens, with default-open transcript rows showing the rendered diff
+  directly instead of edit metadata sections.
+- Matched Workbench `read` tool evidence to TUI-style rendering, showing
+  `read <path>` rows with file-content-only expanded detail and full-width
+  title clipping.
+- Fixed Workbench running-session resume so `thread/read`/`thread/resume`
+  snapshots retain active tool rows, appended command output, and composer
+  elapsed timers after switching away and back.
+- Added explicit cost-status accounting, Reasonix-style cache-read hit percent,
+  all-history `usage/read` summaries, and a Workbench Settings Usage page with
+  total/7-day/30-day token, cache, cost, and yearly activity heatmap views.
 
 ## 2026-06-16
 
