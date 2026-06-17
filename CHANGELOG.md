@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-06-17
+
+- Reorganized UI specs around shared `022` UI foundation, `240` Web/Workbench,
+  `250` display model, `260` rendering, and `270` interaction ownership, with
+  `210` narrowed to TUI-specific state, rendering, interaction, and validation.
+- Added Workbench inline diff rendering for successful text-editing tool rows,
+  backed by a shared parsed-diff component model and existing Review diff
+  styling tokens.
+
 ## 2026-06-16
 
 - Reworked Agent delegation to `spawn_agent` (`task_name`/`message`/optional
