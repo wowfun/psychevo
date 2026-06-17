@@ -56,7 +56,8 @@ Manual real-provider validation is opt-in only.
   into ordinary always-open transcript content.
 - Completed successful `edit`, `write`, or `apply_patch` rows with parseable
   Git patch `result.diff` show `Edited ... (+A -D)`, default-open parsed diff
-  detail, and no bulky edit input fields in normal detail.
+  detail, and no ordinary Input/Result metadata or `Diff` label above the
+  rendered diff.
 - Malformed diff text, failed update tools, running update tools, and `write`
   results without diff preserve existing raw/structured rendering behavior.
 - Display-only command feedback and artifacts remain outside ordinary

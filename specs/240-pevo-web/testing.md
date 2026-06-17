@@ -65,7 +65,8 @@ must not print tokens or secrets.
   empty assistant updates after tool rows, and stale completion popovers after
   prompt submission.
 - Inline transcript diff fixtures cover desktop and narrow viewports, including
-  single-gutter rows, clipped long lines, and malformed-diff fallback.
+  direct rendered-diff detail without Input/Change metadata, single-gutter
+  rows, clipped long lines, and malformed-diff fallback.
 
 ## Validation Boundaries
 

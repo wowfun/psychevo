@@ -47,6 +47,11 @@ observations, or message-derived tool-result relationships. Reasoning or
 assistant prose that describes intended work must not create active `read`,
 `write`, `exec_command`, Agent, or similar rows.
 
+Successful file-read evidence renders the invocation title and file content
+without surfacing read-result metadata as ordinary transcript detail.
+When no separate summary is present, the invocation title uses the row's
+available title width before applying renderer-specific truncation.
+
 Display-only command output and observational artifacts, including `/diff`,
 command feedback, previews, and debug panels, must not become model-visible
 history, exports, usage/cost accounting, or ordinary transcript projection.

@@ -144,6 +144,11 @@ When `thread/read` or explicit `thread/resume` targets a session whose
 persisted messages into non-empty `TranscriptEntry[]` whenever those messages
 contain visible user or assistant content. A history selection must not return a
 normal empty transcript snapshot for such a session.
+If the selected session is still running, the returned snapshot must also replay
+retained live transcript evidence for that session as a transient overlay. This
+keeps active tool rows running and preserves output appended while Workbench was
+showing another session; the overlay must not create additional persisted
+messages.
 
 `thread/start` is a new-source operation, not a session-creation operation. It
 clears the current source binding and returns an empty source snapshot with
@@ -293,6 +298,33 @@ and `usage.available` is false.
 status/detail surfaces should prefer `observability/read` so context-window,
 token, cache, and cost displays stay consistent across resume and session
 switches.
+
+`usage/read` returns a display-only historical usage projection for Settings >
+Usage. It reads the local state database selected by the running Gateway and
+defaults to all persisted history across workdirs. It does not use the active
+Workbench request scope as a filter, does not contact providers or public model
+catalogs, and must not return prompt text, message bodies, tool arguments,
+provider payloads, or trace records. The result includes:
+
+- a generated timestamp
+- summaries for all history, the last 30 days, and the last 7 days
+- token totals for context input, billable input/output, reasoning, cache read,
+  cache write, and provider-reported total tokens
+- cost totals derived only from persisted accounting columns, with status
+  counts and explicit unknown/free/estimated separation
+- a cache-read percent defined as `cache_read / (cache_read + billable_input)`
+  when the denominator is nonzero
+- a local-calendar daily activity series for the last 365 days, suitable for a
+  token activity heatmap
+
+The Workbench Settings Usage page renders these summaries independently from
+the right Status inspector. It uses compact summary bands for all time, last 30
+days, and last 7 days, then a one-year daily token activity heatmap. Heatmap
+cells are based on persisted message timestamps in the Gateway host's local
+calendar. Empty days remain visible with stable dimensions; days with unknown
+cost still contribute token activity while their cost is counted as unknown.
+The page must label costs as local estimates rather than bills and must expose
+unknown pricing counts when present.
 
 Creating a new Web thread or selecting an existing history thread rebinds the
 current Web source without archiving the previously selected thread. Only an

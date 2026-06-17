@@ -441,6 +441,14 @@ clients must not invent durable records from deltas alone. A subsequent
 `thread/read` or `thread/resume` snapshot remains authoritative and may replace
 live ids with message-derived entry ids.
 
+When `thread/read` or explicit `thread/resume` targets a non-stale running
+thread, the snapshot must include the durable `GatewayActivityView` timestamps
+and a display-only replay of retained live transcript observations for that
+thread. The replay overlays `entryStarted`, `entryUpdated`, and
+`entryCompleted` evidence on top of persisted entries without creating durable
+messages, so switching away from and back to a running session preserves active
+tool rows, spinners, elapsed timers, and incremental tool output.
+
 Gateway must project reasoning as typed live entries, not anonymous deltas.
 Reasoning streams use a stable entry id for the current assistant segment, such
 as `live:{turn}:reasoning:{segment}`. The first reasoning delta in that segment

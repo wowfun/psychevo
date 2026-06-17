@@ -101,7 +101,8 @@ Configuration may define:
 - optional model `limit` object with `context`, `input`, and `output` token
   limits
 - optional model `cost` object with USD-per-million-token `input`, `output`,
-  `cache_read`, `cache_write`, and optional `context_over_200k` tier
+  `cache_read`, `cache_write`, optional USD-per-request `request`, and
+  optional `context_over_200k` tier
 - optional model capability overrides using `reasoning`, `tool_call`,
   `temperature`, `attachment`, `structured_output`, `interleaved`, and
   `modalities.input`/`modalities.output`
@@ -257,13 +258,14 @@ not support an enabled request field may reject the live invocation.
 Model metadata is resolved as advisory local metadata for status surfaces,
 request shaping, cost estimation, and future context-budget decisions. Runtime
 keeps a typed core view plus the raw public registry model JSON for future
-fields. Resolution order is:
+fields. Resolution order is highest-precedence first:
 
-1. built-in metadata fallback table for known model families
-2. cache-first `models.dev` public registry lookup
-3. metadata present in an explicitly fetched provider `/models` response
-4. explicit per-model metadata from TOML configuration
-5. unknown as `None`
+1. explicit per-model metadata from TOML configuration
+2. metadata present in a cached, explicitly fetched provider `/models` response
+3. cache-first `models.dev` public registry lookup
+4. official provider pricing/context snapshots bundled with the release
+5. built-in metadata fallback table for known model families
+6. unknown as `None`
 
 The `models.dev` cache is stored under `$PSYCHEVO_HOME/models_dev_cache.json`.
 It is a pruned cache of user-relevant models, not a full public registry mirror.
@@ -285,18 +287,43 @@ configured base URL to a registry provider `api` URL. This keeps user-defined
 provider ids such as `xiaomi-token-plan` stable while still resolving
 `xiaomi-token-plan-cn` metadata.
 
+Provider `/models` metadata is local only after an explicit user-triggered
+catalog fetch. Runtime provider resolution, `pevo run`, `pevo stats`, and GUI
+stats reads must not contact provider `/models` endpoints. When a catalog fetch
+returns pricing metadata, Psychevo stores a bounded provider-model cache under
+`$PSYCHEVO_HOME` keyed by provider, base URL, and model id. That cache is an
+advisory metadata source; credentials, request payloads, and provider response
+bodies unrelated to model metadata are not stored.
+
+Provider catalog pricing parsers accept the local `cost` object described above
+and common provider-style `pricing` objects. `pricing.prompt` and
+`pricing.completion` map to input and output token prices. Cache-read aliases
+include `pricing.cache_read`, `pricing.cached_prompt`, and
+`pricing.input_cache_read`. Cache-write aliases include `pricing.cache_write`,
+`pricing.cache_creation`, and `pricing.input_cache_write`. `pricing.request`
+maps to a per-request price when present. Provider-style `pricing` token values
+are interpreted as USD per token and converted to USD per one million tokens;
+the TOML `cost` object remains USD per one million tokens.
+
 Unknown capabilities are permissive. Only an explicit `false` capability may
 degrade a request projection. For example, runtime suppresses
 `reasoning_effort` when resolved model metadata says `reasoning = false`, and
 may suppress unsupported tool or attachment request fields rather than failing
 startup. Unknown or absent capability data must not block a run.
 
-Cost values are interpreted as USD per one million tokens. Estimated local
-cost uses normalized provider usage, subtracts cache read/write tokens from
-billable input, subtracts reasoning tokens from billable output, charges
-reasoning tokens at the output rate, and applies `context_over_200k` when
-billable input plus cache read exceeds 200,000 tokens. Missing pricing remains
-unknown; known zero pricing is a valid free model cost.
+Cost values are interpreted as USD per one million tokens unless a field is
+explicitly documented as per-request. Estimated local cost uses normalized
+provider usage, subtracts cache read/write tokens from billable input,
+subtracts reasoning tokens from billable output, charges reasoning tokens at
+the output rate, and applies `context_over_200k` when billable input plus cache
+read exceeds 200,000 tokens. A missing nonzero-required bucket price makes the
+message cost `unknown`; missing cache-read pricing must not be silently treated
+as free when cache-read tokens are present. An explicit `0.0` price is valid and
+means free for that bucket. Local cost status values are `estimated`, `free`,
+`included`, and `unknown`; `actual` is reserved until Psychevo imports real
+provider billing records. Cost summaries must keep unknown, free, and estimated
+messages distinguishable and must label all local estimates as non-billing
+figures.
 
 `qwen` is a built-in alias for a Chat-compatible endpoint in this slice.
 Browser-based portal OAuth is explicitly deferred.

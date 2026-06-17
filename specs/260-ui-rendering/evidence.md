@@ -36,20 +36,30 @@ summary, and detail fields without hardcoding every tool name. That metadata
 must not enter provider-facing tool declarations, system prompts, or
 model-visible tool results.
 
+Successful core `read` rows render with the invocation title `read <path>` and
+no trailing result summary. Their expanded transcript detail is the file
+content itself; read-result metadata such as `path`, `file_size`,
+`output_bytes`, pagination fields, `hint`, and `similar_files` stays out of the
+ordinary row. Failed or missing reads still show the error reason in the tool
+detail.
+
 Completed successful update-category tools may render a richer diff view when
 their model-visible result contains a parseable Git patch field such as
 `result.diff`. The row title uses the edited-path summary, for example
 `Edited <path> (+A -D)` for one file or `Edited N files (+A -D)` for multiple
 files. These rows default open so the change is visible without an additional
-click, while still keeping a collapsed summary available. The parsed diff is a
-display-only view over the original result: malformed diffs, failed tools,
+click, while still keeping a collapsed summary available. The expanded content
+for this path is the rendered diff itself; ordinary Input/Result metadata and
+section labels such as `Diff` stay out of the transcript row. The parsed diff is
+a display-only view over the original result: malformed diffs, failed tools,
 running tools, or update tools without a diff use the ordinary raw/structured
 detail path.
 
-When a rendered diff is available, bulky edit input fields such as
-`old_string`, `new_string`, `patch`, and `content` are omitted from normal
-Input/Result detail. The model-visible tool result remains unchanged and raw
-diagnostic payloads remain limited to explicit debug surfaces.
+When a rendered diff is available, edit input fields such as `old_string`,
+`new_string`, `patch`, and `content` and result metadata such as `status` remain
+out of normal transcript detail. The model-visible tool result remains
+unchanged and raw diagnostic payloads remain limited to explicit debug
+surfaces.
 
 ## Active And Completed Tool Rows
 

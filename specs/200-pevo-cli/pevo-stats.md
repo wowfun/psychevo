@@ -34,8 +34,12 @@ The report includes:
 - top tool-result counts by tool name
 - top sessions by estimated cost and token count
 
-Unknown pricing is reported separately from known zero-cost messages. Cost is a
-local estimate derived from persisted accounting columns and is not a bill.
+Unknown pricing is reported separately from known zero-cost and included
+messages. Cost is a local estimate derived from persisted accounting columns
+and is not a bill. Persisted `estimated_cost_nanodollars = NULL` is unknown
+unless paired with an explicit included-cost status; `0` is a known zero-cost
+estimate. JSON output includes cost-status counts so downstream GUI and report
+surfaces do not infer unknown pricing from `pricing_source` alone.
 
 ## Related Topics
 

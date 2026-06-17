@@ -254,6 +254,9 @@ The first implementation slice stores these message columns:
 - `estimated_cost_nanodollars` integer nullable
 - `pricing_source` text nullable
 - `pricing_tier` text nullable
+- `cost_status` text nullable
+- `pricing_missing_reason` text nullable
+- `pricing_version` text nullable
 
 `message_json` is the authoritative retained message material. The other
 message columns are relationship, query, and summary aids. Reasoning is stored
@@ -270,7 +273,13 @@ serialized into sanitized transcript messages.
 Dedicated accounting columns store structured token and local estimated-cost
 facts derived from `usage_json` and resolved model pricing. They are summary
 aids for stats and UI projection, not billing records. `NULL` estimated cost
-means pricing was unknown; `0` means pricing was known and free.
+means pricing was unknown unless `cost_status` explicitly says the request was
+included. `0` means pricing was known and free. `cost_status` is one of
+`estimated`, `free`, `included`, or `unknown`; aggregate views may add `mixed`
+when a window contains both priced and unknown messages. `pricing_source`,
+`pricing_tier`, `pricing_missing_reason`, and `pricing_version` describe the
+local price metadata used to produce the estimate and must not be interpreted as
+provider billing records.
 
 Message ordering is authoritative by `(session_id, session_seq)`, not by
 timestamp. The first implementation enforces `UNIQUE(session_id, session_seq)`.
@@ -330,7 +339,7 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 14`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 21`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)` every 50 successful writes.
 
@@ -341,6 +350,13 @@ concern, not the default high-level runtime contract. The fullscreen TUI must
 avoid idle high-frequency database polling; live agent reload checks are
 rate-limited to at most once every 250 ms while preserving immediate checks
 after session switches.
+
+The version 21 slice adds structured cost status, pricing missing-reason, and
+pricing version columns for local accounting projections. Because the product
+is pre-release, version 21 is the supported cutover boundary for current
+development state; older development databases may be reset instead of carried
+through compatibility migrations when the shape would preserve misleading
+accounting semantics.
 
 The version 11 slice creates `session_compactions` for completed context
 compaction checkpoints. The checkpoints affect runtime context projection but

@@ -70,7 +70,9 @@ an independent turn-status slot in the composer footer, under the prompt input
 and between the left and right control groups while the turn is running. If a
 foreign running activity lacks a usable start timestamp, the shell falls back to
 the local time at which it first observed that activity as running so the
-composer still presents an active-turn timer. Running Thinking and tool rows
+composer still presents an active-turn timer. Snapshot parsing must preserve
+`GatewayActivityView.startedAtMs`; the local fallback is only for genuinely
+missing timestamps. Running Thinking and tool rows
 derive elapsed time from transcript block timestamps, render the spinner in the
 ordinary expand/collapse arrow position, and render the elapsed timer on the
 right side once the elapsed duration reaches 1 second. Tool rows with elapsed
@@ -386,8 +388,10 @@ semantics.
 Workbench transcript evidence renders successful update-tool diffs inline when
 the tool result contains a strict-parseable Git patch. The collapsed evidence
 title summarizes edited paths and addition/deletion counts, and the completed
-row defaults open with a compact single-gutter diff. Review tabs reuse the same
-parsed diff model for full workspace previews, but keep their dual-gutter
+row defaults open with only the compact single-gutter diff in its expanded
+content. Workbench does not show ordinary Input/Change metadata or a `Diff`
+section label above the rendered diff. Review tabs reuse the same parsed diff
+model for full workspace previews, but keep their dual-gutter
 Review presentation and right-workspace layout.
 
 Transcript components must render message-derived entries in canonical order

@@ -98,7 +98,9 @@ appears above the preview. Code highlighting uses the Workbench-local
 `.hljs-*` colors, not a stock theme stylesheet.
 Transcript inline diffs use the same diff tokens but a denser single-gutter
 layout that stays inside the evidence row, scrolls internally for wide lines,
-and does not open the right workspace or create nested cards.
+and does not open the right workspace or create nested cards. The default-open
+transcript presentation starts directly with the rendered diff, without an
+extra `Diff` label or structured edit metadata above it.
 Files tabs support bounded manual text editing in Workbench/Web. A text file
 preview exposes an explicit Edit action. Edit mode uses a plain textarea with
 line numbers, current line/column, Tab indentation, wrap toggle, find, go to

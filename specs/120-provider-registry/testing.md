@@ -35,12 +35,14 @@ For this topic, the default gate is the broad deterministic validation path.
   metadata precedence, `models.dev` cache lookup, base-url inference for
   user-defined providers, config metadata overrides, and Xiaomi's
   `XIAOMI_API_KEY`.
-- Model catalog tests cover limit/capability/cost metadata parsed from provider
-  `/models` responses and `models.dev` cache enrichment without requiring live
-  provider credentials.
+- Model catalog tests cover limit/capability/cost metadata parsed from cached
+  provider `/models` responses, provider-style `pricing` aliases,
+  config-over-provider-cache precedence, `models.dev` cache enrichment, and
+  official snapshot fallback without requiring live provider credentials.
 - Cost-accounting tests cover billable input/output subtraction, cache read and
-  write tokens, reasoning-as-output pricing, unknown pricing, known free
-  pricing, and `context_over_200k` tier selection.
+  write tokens, reasoning-as-output pricing, unknown pricing for missing
+  nonzero-required bucket prices, known free pricing from explicit zero prices,
+  aggregate status separation, and `context_over_200k` tier selection.
 - Runtime tests cover live session metadata, persisted messages, context
   pruning, text-only mock provider completion, and mock provider tool-call
   completion.
