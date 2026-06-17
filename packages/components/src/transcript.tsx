@@ -8,6 +8,7 @@ import {
   type TranscriptBlock,
   type TranscriptEntry
 } from "@psychevo/protocol";
+import { diffDisplayPath, diffLineStats, type ParsedDiffFile } from "./diff";
 import { asRecord, stringValue } from "./shared";
 import { evidenceDisplay, type EvidenceDisplay, type ToolDetailSection } from "./toolEvidence";
 
@@ -240,16 +241,18 @@ function TranscriptBlockView({
   onCopyText: CopyTextHandler;
   onOpenAgentSession: OpenAgentSessionHandler;
 }) {
-  const [open, setOpen] = useState(defaultReasoningOpen(block));
-  const [copied, setCopied] = useState(false);
   const text = transcriptBlockText(block);
+  const display = evidenceDisplay(block, text);
+  const shouldDefaultOpen = defaultBlockOpen(block, display);
+  const [open, setOpen] = useState(shouldDefaultOpen);
+  const [copied, setCopied] = useState(false);
   const status = statusLabel(block);
   const artifactIds = transcriptArtifactIds(block);
   useEffect(() => {
-    if (defaultReasoningOpen(block)) {
+    if (shouldDefaultOpen) {
       setOpen(true);
     }
-  }, [block]);
+  }, [block.id, shouldDefaultOpen]);
 
   if (block.kind === "text" && entry.role === "user") {
     return (
@@ -328,7 +331,6 @@ function TranscriptBlockView({
       </article>
     );
   }
-  const display = evidenceDisplay(block, text);
   const agentSession = agentSessionFromBlock(block, display);
   const canOpenAgentSession = Boolean(agentSession && onOpenAgentSession);
   const runningTool = isRunningToolActivityBlock(block);
@@ -467,6 +469,14 @@ function ToolDetail({ display }: { display: EvidenceDisplay }) {
 
 function ToolDetailSectionView({ section }: { section: ToolDetailSection }) {
   const toneClass = section.tone && section.tone !== "default" ? ` is-${section.tone}` : "";
+  if (section.kind === "diff") {
+    return (
+      <section className={`pevo-toolSection is-diff${toneClass}`}>
+        <h4>{section.title}</h4>
+        <InlineDiff files={section.files} />
+      </section>
+    );
+  }
   if (section.kind === "kv") {
     return (
       <section className={`pevo-toolSection is-kv${toneClass}`}>
@@ -488,6 +498,76 @@ function ToolDetailSectionView({ section }: { section: ToolDetailSection }) {
       <pre>{section.text}</pre>
     </section>
   );
+}
+
+function InlineDiff({ files }: { files: ParsedDiffFile[] }) {
+  return (
+    <div className="pevo-inlineDiff" aria-label="Inline diff">
+      {files.map((file, fileIndex) => {
+        const stats = diffLineStats(file);
+        const metaRows = inlineDiffMetaRows(file);
+        return (
+          <article className="pevo-inlineDiffFile" key={`${file.path}:${fileIndex}`}>
+            <header>
+              <span className="pevo-inlineDiffPath" title={diffDisplayPath(file)}>
+                {diffDisplayPath(file)}
+              </span>
+              <span className="pevo-inlineDiffStats" aria-label={`${stats.additions} additions, ${stats.deletions} deletions`}>
+                <span className="pevo-inlineDiffAdd">+{stats.additions}</span>
+                <span className="pevo-inlineDiffDelete">-{stats.deletions}</span>
+              </span>
+            </header>
+            {metaRows.length > 0 && (
+              <div className="pevo-inlineDiffMetaRows">
+                {metaRows.map((row, index) => <div key={`${row}:${index}`}>{row}</div>)}
+              </div>
+            )}
+            {file.hunks.length === 0 ? (
+              <p className="pevo-inlineDiffEmpty">No line diff available.</p>
+            ) : (
+              file.hunks.map((hunk, hunkIndex) => (
+                <section className="pevo-inlineDiffHunk" key={`${hunk.header}:${hunkIndex}`}>
+                  <div className="pevo-inlineDiffHunkHeader">{hunk.header}</div>
+                  <div className="pevo-inlineDiffLines">
+                    {hunk.lines.map((line, lineIndex) => {
+                      const lineNumber = line.newNumber ?? line.oldNumber ?? "";
+                      return (
+                        <div className={`pevo-inlineDiffLine is-${line.kind}`} key={`${line.oldNumber}:${line.newNumber}:${lineIndex}`}>
+                          <span className="pevo-inlineDiffNumber">{lineNumber}</span>
+                          <span className="pevo-inlineDiffMarker">{line.marker}</span>
+                          <code>{line.text || " "}</code>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))
+            )}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function inlineDiffMetaRows(file: ParsedDiffFile): string[] {
+  return file.headers.flatMap((line) => {
+    if (
+      line.startsWith("diff --git ") ||
+      line.startsWith("index ") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ ")
+    ) {
+      return [];
+    }
+    if (line.startsWith("rename from ")) {
+      return [`renamed from ${line.slice("rename from ".length)}`];
+    }
+    if (line.startsWith("rename to ")) {
+      return [`renamed to ${line.slice("rename to ".length)}`];
+    }
+    return line.trim() ? [line] : [];
+  });
 }
 
 function MessageMeta({
@@ -626,7 +706,10 @@ function isRunningActivityBlock(block: TranscriptBlock): boolean {
   return block.status === "running" && (block.kind === "reasoning" || isRunningToolActivityBlock(block));
 }
 
-function defaultReasoningOpen(block: TranscriptBlock): boolean {
+function defaultBlockOpen(block: TranscriptBlock, display: EvidenceDisplay): boolean {
+  if (display.defaultOpen) {
+    return true;
+  }
   return block.kind === "reasoning" && block.status === "running";
 }
 

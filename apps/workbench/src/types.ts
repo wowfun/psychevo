@@ -181,24 +181,3 @@ export type WorkspaceFileTreeItem = {
   depth: number;
   status?: string | null;
 };
-
-export type ParsedDiffLineKind = "add" | "delete" | "context" | "meta";
-
-export type ParsedDiffLine = {
-  kind: ParsedDiffLineKind;
-  marker: string;
-  newNumber: number | null;
-  oldNumber: number | null;
-  text: string;
-};
-
-export type ParsedDiffHunk = {
-  header: string;
-  lines: ParsedDiffLine[];
-};
-
-export type ParsedDiffFile = {
-  headers: string[];
-  hunks: ParsedDiffHunk[];
-  path: string;
-};

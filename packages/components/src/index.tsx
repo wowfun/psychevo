@@ -2,6 +2,8 @@ export { Composer } from "./composer";
 export type { ComposerAttachmentView, ComposerDraftPatch, ComposerProps } from "./composer";
 export { DismissibleDetails } from "./dismissibleDetails";
 export type { DismissibleDetailsControls, DismissibleDetailsProps } from "./dismissibleDetails";
+export { diffDisplayPath, diffFilesStats, diffLineStats, parseStrictGitPatchDiff, parseUnifiedDiff } from "./diff";
+export type { DiffLineStats, DiffParseMode, ParsedDiffFile, ParsedDiffHunk, ParsedDiffLine, ParsedDiffLineKind } from "./diff";
 export { HistoryPanel } from "./history";
 export type { HistoryBrowserWorkspace, HistoryDraftSession, HistoryPanelProps } from "./history";
 export { StatusPanel } from "./status";

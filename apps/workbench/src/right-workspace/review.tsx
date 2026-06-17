@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { Check, FolderTree, GitPullRequest, RefreshCw, RotateCcw } from "lucide-react";
+import { diffLineStats, parseUnifiedDiff } from "@psychevo/components";
 import type { ContextReadResult, ThreadSnapshot, WorkspaceChangesResult, WorkspaceDiffResult } from "@psychevo/protocol";
 import { SessionObservability } from "./usage";
 import { WorkspaceFileTree, absoluteWorkspacePath, changedFileTreeItems, normalizedWorkspacePath } from "./tree";
-import type { ParsedDiffFile, ParsedDiffHunk } from "../types";
 
 export function ReviewPanel({
   activity,
@@ -236,22 +236,6 @@ function DiffPreview({ diff, root }: { diff: WorkspaceDiffResult | null; root: s
   );
 }
 
-function diffLineStats(file: ParsedDiffFile): { additions: number; deletions: number } {
-  let additions = 0;
-  let deletions = 0;
-  for (const hunk of file.hunks) {
-    for (const line of hunk.lines) {
-      if (line.kind === "add") {
-        additions += 1;
-      }
-      if (line.kind === "delete") {
-        deletions += 1;
-      }
-    }
-  }
-  return { additions, deletions };
-}
-
 function diffStatusToken(status: string | null): { className: string; label: string; title: string } {
   switch (status) {
     case "added":
@@ -266,116 +250,6 @@ function diffStatusToken(status: string | null): { className: string; label: str
     default:
       return { className: "is-modified", label: "M↓", title: status ?? "Modified" };
   }
-}
-
-function parseUnifiedDiff(text: string): ParsedDiffFile[] {
-  const trimmed = text.replace(/\r\n/g, "\n").replace(/\n$/, "");
-  if (!trimmed.trim()) {
-    return [];
-  }
-  const lines = trimmed.split("\n");
-  const files: ParsedDiffFile[] = [];
-  let currentFile: ParsedDiffFile | null = null;
-  let currentHunk: ParsedDiffHunk | null = null;
-  let oldLineNumber = 0;
-  let newLineNumber = 0;
-
-  function ensureFile(path = "Diff"): ParsedDiffFile {
-    if (currentFile) {
-      return currentFile;
-    }
-    currentFile = { headers: [], hunks: [], path };
-    files.push(currentFile);
-    return currentFile;
-  }
-
-  for (const line of lines) {
-    if (line.startsWith("diff --git ")) {
-      currentFile = { headers: [line], hunks: [], path: diffPathFromGitHeader(line) };
-      currentHunk = null;
-      files.push(currentFile);
-      continue;
-    }
-    const file = ensureFile();
-    if (line.startsWith("--- ") || line.startsWith("+++ ")) {
-      file.headers.push(line);
-      if (line.startsWith("+++ ")) {
-        const path = cleanDiffPath(line.slice(4).trim());
-        if (path && path !== "/dev/null") {
-          file.path = path;
-        }
-      }
-      continue;
-    }
-    if (line.startsWith("@@ ")) {
-      const range = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-      oldLineNumber = range?.[1] ? Number(range[1]) : 0;
-      newLineNumber = range?.[2] ? Number(range[2]) : 0;
-      currentHunk = { header: line, lines: [] };
-      file.hunks.push(currentHunk);
-      continue;
-    }
-    if (!currentHunk) {
-      file.headers.push(line);
-      continue;
-    }
-    if (line.startsWith("+")) {
-      currentHunk.lines.push({
-        kind: "add",
-        marker: "+",
-        newNumber: newLineNumber,
-        oldNumber: null,
-        text: line.slice(1)
-      });
-      newLineNumber += 1;
-      continue;
-    }
-    if (line.startsWith("-")) {
-      currentHunk.lines.push({
-        kind: "delete",
-        marker: "-",
-        newNumber: null,
-        oldNumber: oldLineNumber,
-        text: line.slice(1)
-      });
-      oldLineNumber += 1;
-      continue;
-    }
-    if (line.startsWith(" ")) {
-      currentHunk.lines.push({
-        kind: "context",
-        marker: "",
-        newNumber: newLineNumber,
-        oldNumber: oldLineNumber,
-        text: line.slice(1)
-      });
-      oldLineNumber += 1;
-      newLineNumber += 1;
-      continue;
-    }
-    currentHunk.lines.push({
-      kind: "meta",
-      marker: "",
-      newNumber: null,
-      oldNumber: null,
-      text: line
-    });
-  }
-
-  return files;
-}
-
-function diffPathFromGitHeader(line: string): string {
-  const [, left, right] = /^diff --git\s+(.+?)\s+(.+)$/.exec(line) ?? [];
-  return cleanDiffPath(right ?? left ?? "Diff") || "Diff";
-}
-
-function cleanDiffPath(path: string): string {
-  const unquoted = path.replace(/^"|"$/g, "");
-  if (unquoted === "/dev/null") {
-    return unquoted;
-  }
-  return unquoted.replace(/^[ab]\//, "");
 }
 
 function shortSessionId(id: string): string {

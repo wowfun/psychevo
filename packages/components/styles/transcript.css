@@ -441,6 +441,148 @@
   border-color: color-mix(in oklch, var(--pevo-code-ink), transparent 86%);
 }
 
+.pevo-inlineDiff {
+  display: grid;
+  max-width: 100%;
+  max-height: min(460px, 58vh);
+  overflow: auto;
+  color: var(--pevo-diff-ink);
+  background: var(--pevo-diff-bg);
+  border: 1px solid var(--pevo-diff-border);
+  border-radius: var(--pevo-radius-sm);
+  font-family: var(--pevo-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.pevo-inlineDiffFile {
+  display: grid;
+  min-width: max-content;
+}
+
+.pevo-inlineDiffFile + .pevo-inlineDiffFile {
+  border-top: 1px solid var(--pevo-diff-border);
+}
+
+.pevo-inlineDiffFile > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 5px 9px;
+  background: var(--pevo-diff-header-bg);
+  border-bottom: 1px solid var(--pevo-diff-border);
+}
+
+.pevo-inlineDiffPath {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-diff-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-inlineDiffStats {
+  display: inline-flex;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.pevo-inlineDiffAdd {
+  color: var(--pevo-diff-add);
+}
+
+.pevo-inlineDiffDelete {
+  color: var(--pevo-diff-delete);
+}
+
+.pevo-inlineDiffMetaRows,
+.pevo-inlineDiffEmpty {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 9px;
+  color: var(--pevo-diff-muted);
+  background: var(--pevo-diff-meta-bg);
+}
+
+.pevo-inlineDiffHunk + .pevo-inlineDiffHunk {
+  border-top: 1px solid var(--pevo-diff-border);
+}
+
+.pevo-inlineDiffHunkHeader {
+  position: sticky;
+  top: 27px;
+  z-index: 1;
+  padding: 4px 9px;
+  color: var(--pevo-diff-muted);
+  background: var(--pevo-diff-hunk-bg);
+  border-bottom: 1px solid var(--pevo-diff-border);
+  white-space: pre;
+}
+
+.pevo-inlineDiffLines {
+  display: grid;
+}
+
+.pevo-inlineDiffLine {
+  display: grid;
+  grid-template-columns: 46px 18px minmax(0, 1fr);
+  min-height: 20px;
+}
+
+.pevo-inlineDiffNumber,
+.pevo-inlineDiffMarker {
+  display: grid;
+  align-items: center;
+  justify-content: end;
+  padding: 0 6px;
+  color: var(--pevo-diff-muted);
+  user-select: none;
+  border-right: 1px solid var(--pevo-diff-border);
+}
+
+.pevo-inlineDiffMarker {
+  justify-content: center;
+  padding: 0;
+  border-right: 0;
+}
+
+.pevo-inlineDiffLine code {
+  min-width: 0;
+  padding: 1px 10px 1px 6px;
+  color: var(--pevo-diff-ink);
+  background: transparent;
+  white-space: pre;
+}
+
+.pevo-inlineDiffLine.is-add {
+  background: var(--pevo-diff-add-bg);
+}
+
+.pevo-inlineDiffLine.is-add .pevo-inlineDiffMarker,
+.pevo-inlineDiffLine.is-add .pevo-inlineDiffNumber {
+  color: var(--pevo-diff-add);
+}
+
+.pevo-inlineDiffLine.is-delete {
+  background: var(--pevo-diff-delete-bg);
+}
+
+.pevo-inlineDiffLine.is-delete .pevo-inlineDiffMarker,
+.pevo-inlineDiffLine.is-delete .pevo-inlineDiffNumber {
+  color: var(--pevo-diff-delete);
+}
+
+.pevo-inlineDiffLine.is-meta {
+  color: var(--pevo-diff-muted);
+  background: var(--pevo-diff-meta-bg);
+}
+
 .pevo-toolSection.is-error h4,
 .pevo-toolSection.is-error dt,
 .pevo-toolSection.is-error dd {

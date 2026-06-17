@@ -185,29 +185,80 @@ test.describe("Workbench composer visual contract", () => {
               <em>running</em>
             </button>
           </article>
+          <article class="pevo-evidence is-completed is-tool-update" data-testid="inline-diff-row">
+            <button class="pevo-evidenceLine is-singleTitle" aria-expanded="true" type="button">
+              <svg width="15" height="15" aria-hidden="true"></svg>
+              <code>Edited primes.py (+1 -1)</code>
+            </button>
+            <div class="pevo-toolDetail">
+              <section class="pevo-toolSection is-diff">
+                <h4>Diff</h4>
+                <div class="pevo-inlineDiff" aria-label="Inline diff">
+                  <article class="pevo-inlineDiffFile">
+                    <header>
+                      <span class="pevo-inlineDiffPath" title="primes.py">primes.py</span>
+                      <span class="pevo-inlineDiffStats" aria-label="1 additions, 1 deletions">
+                        <span class="pevo-inlineDiffAdd">+1</span>
+                        <span class="pevo-inlineDiffDelete">-1</span>
+                      </span>
+                    </header>
+                    <section class="pevo-inlineDiffHunk">
+                      <div class="pevo-inlineDiffHunkHeader">@@ -1,3 +1,3 @@</div>
+                      <div class="pevo-inlineDiffLines">
+                        <div class="pevo-inlineDiffLine is-context">
+                          <span class="pevo-inlineDiffNumber">1</span>
+                          <span class="pevo-inlineDiffMarker"></span>
+                          <code>def is_prime(n):</code>
+                        </div>
+                        <div class="pevo-inlineDiffLine is-delete">
+                          <span class="pevo-inlineDiffNumber">2</span>
+                          <span class="pevo-inlineDiffMarker">-</span>
+                          <code>    return False</code>
+                        </div>
+                        <div class="pevo-inlineDiffLine is-add">
+                          <span class="pevo-inlineDiffNumber">2</span>
+                          <span class="pevo-inlineDiffMarker">+</span>
+                          <code>    return n &gt; 1 and all(n % factor for factor in range(2, int(n ** 0.5) + 1))</code>
+                        </div>
+                      </div>
+                    </section>
+                  </article>
+                </div>
+              </section>
+            </div>
+          </article>
         `;
       });
 
       const userFrame = page.getByTestId("user-frame");
       const assistantFrame = page.getByTestId("assistant-frame");
       const thinkingRow = page.getByTestId("thinking-row");
+      const inlineDiffRow = page.getByTestId("inline-diff-row");
       const userBubble = userFrame.locator(".pevo-message.is-user");
       const thinkingHeader = thinkingRow.locator(".pevo-reasoningHeader");
-      const [threadBox, userBox, assistantBox, thinkingBox] = await Promise.all([
+      const [threadBox, userBox, assistantBox, thinkingBox, inlineDiffBox] = await Promise.all([
         threadItems.boundingBox(),
         userFrame.boundingBox(),
         assistantFrame.boundingBox(),
-        thinkingRow.boundingBox()
+        thinkingRow.boundingBox(),
+        inlineDiffRow.boundingBox()
       ]);
 
       expect(threadBox).not.toBeNull();
       expect(userBox).not.toBeNull();
       expect(assistantBox).not.toBeNull();
       expect(thinkingBox).not.toBeNull();
+      expect(inlineDiffBox).not.toBeNull();
       expect(assistantBox!.width).toBeLessThanOrEqual(762);
       expect(userBox!.x).toBeGreaterThan(assistantBox!.x);
       expect(userBox!.x + userBox!.width).toBeLessThanOrEqual(assistantBox!.x + 842);
       expect(Math.abs(thinkingBox!.x - assistantBox!.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(inlineDiffBox!.x - assistantBox!.x)).toBeLessThanOrEqual(1);
+      expect(inlineDiffBox!.width).toBeLessThanOrEqual(threadBox!.width);
+      await expect(inlineDiffRow.locator('[aria-label="Inline diff"]')).toBeVisible();
+      await expect(inlineDiffRow.locator(".pevo-inlineDiffLine")).toHaveCount(3);
+      await expect(inlineDiffRow.locator(".diffLineNumber")).toHaveCount(0);
+      await expectTextFits(inlineDiffRow.locator(".pevo-evidenceLine code"));
 
       if (!isMobile) {
         expect(assistantBox!.x - threadBox!.x).toBeGreaterThan(16);
@@ -273,6 +324,16 @@ async function expectTextNotClipped(locator: Locator) {
   expect(result.overflow).not.toBe("hidden");
   expect(result.clippedX).toBe(false);
   expect(result.clippedY).toBe(false);
+}
+
+async function expectTextFits(locator: Locator) {
+  const result = await locator.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    text: element.textContent?.trim() ?? ""
+  }));
+  expect(result.text.length).toBeGreaterThan(0);
+  expect(result.scrollWidth).toBeLessThanOrEqual(result.clientWidth + 1);
 }
 
 async function expectElementInsideViewport(page: Page, locator: Locator) {

@@ -1,4 +1,5 @@
 import type { TranscriptBlock } from "@psychevo/protocol";
+import { diffDisplayPath, diffFilesStats, parseStrictGitPatchDiff, type ParsedDiffFile } from "./diff";
 import { asRecord, compactText, stringValue } from "./shared";
 
 type ToolDisplayCategory = "explore" | "run" | "update" | "status";
@@ -21,6 +22,12 @@ export type ToolDetailSection =
       tone?: "default" | "error" | "muted";
     }
   | {
+      files: ParsedDiffFile[];
+      kind: "diff";
+      title: string;
+      tone?: "default" | "error" | "muted";
+    }
+  | {
       code?: boolean;
       kind: "text";
       text: string;
@@ -35,6 +42,7 @@ export type ToolDetailRow = {
 
 export type EvidenceDisplay = {
   category: ToolDisplayCategory;
+  defaultOpen: boolean;
   sections: ToolDetailSection[];
   singleTitle: boolean;
   summary: string | null;
@@ -69,6 +77,7 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
     const invocation = block.kind === "shell" ? execCommandInvocation(title, title, undefined, block.preview ?? "") : null;
     return {
       category: "run",
+      defaultOpen: false,
       sections: detail ? [{ code: block.kind === "shell", kind: "text", text: detail, title: "Detail" }] : [],
       singleTitle: Boolean(invocation),
       summary: invocation ? null : summary,
@@ -82,14 +91,16 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
   const spec = toolDisplaySpec(toolName, metadata);
   const explicitTitle = explicitToolTitle(toolName, title, metadata);
   const invocation = explicitTitle ? null : execCommandInvocation(toolName, title, args, block.preview ?? "");
-  const displayTitle = explicitTitle ?? invocation ?? toolTitle(toolName, title, spec, args, result);
-  const summary = invocation || explicitTitle ? null : toolSummary(spec, result, args);
-  const sections = toolSections(toolName, spec, args, result, metadata, block);
+  const inlineDiff = inlineDiffDisplay(spec, result, block);
+  const displayTitle = inlineDiff?.title ?? explicitTitle ?? invocation ?? toolTitle(toolName, title, spec, args, result);
+  const summary = inlineDiff || invocation || explicitTitle ? null : toolSummary(spec, result, args);
+  const sections = toolSections(toolName, spec, args, result, metadata, block, inlineDiff);
 
   return {
     category: spec.category,
+    defaultOpen: Boolean(inlineDiff),
     sections,
-    singleTitle: Boolean(invocation),
+    singleTitle: Boolean(inlineDiff || invocation),
     summary,
     title: displayTitle
   };
@@ -344,7 +355,8 @@ function toolSections(
   args: unknown,
   result: unknown,
   metadata: Record<string, unknown>,
-  block: TranscriptBlock
+  block: TranscriptBlock,
+  inlineDiff: InlineDiffDisplay | null
 ): ToolDetailSection[] {
   if (toolName === "exec_command") {
     return execCommandSections(args, result, metadata, block);
@@ -353,16 +365,21 @@ function toolSections(
     return writeStdinSections(args, result, metadata);
   }
   const sections: ToolDetailSection[] = [];
-  const inputs = visibleRows(args, "input");
+  const hiddenKeys = inlineDiff ? DIFF_RENDERED_DETAIL_KEYS : EMPTY_KEYS;
+  const inputs = visibleRows(args, "input", hiddenKeys);
   if (inputs.length > 0) {
     sections.push({ kind: "kv", rows: inputs, title: "Input" });
   }
-  const resultRows = visibleRows(result, "result");
+  const resultRows = visibleRows(result, "result", hiddenKeys);
   if (resultRows.length > 0) {
     sections.push({ kind: "kv", rows: resultRows, title: resultTitle(toolName) });
   }
-  const bodySections = bodyTextSections(spec, result, toolName);
-  sections.push(...bodySections);
+  if (inlineDiff) {
+    sections.push({ files: inlineDiff.files, kind: "diff", title: "Diff" });
+  } else {
+    const bodySections = bodyTextSections(spec, result, toolName);
+    sections.push(...bodySections);
+  }
   const outcome = stringValue(metadata.outcome);
   if (outcome && outcome !== "normal") {
     sections.push({ kind: "kv", rows: [{ label: "outcome", value: outcome }], title: "Status", tone: "error" });
@@ -371,6 +388,44 @@ function toolSections(
     sections.push({ kind: "kv", rows: [{ label: "status", value: "error" }], title: "Status", tone: "error" });
   }
   return sections;
+}
+
+type InlineDiffDisplay = {
+  files: ParsedDiffFile[];
+  title: string;
+};
+
+const EMPTY_KEYS = new Set<string>();
+const DIFF_RENDERED_DETAIL_KEYS = new Set(["content", "diff", "new_string", "old_string", "patch"]);
+
+function inlineDiffDisplay(spec: ToolDisplaySpec, result: unknown, block: TranscriptBlock): InlineDiffDisplay | null {
+  if (spec.category !== "update" || block.status !== "completed" || block.result?.isError) {
+    return null;
+  }
+  const resultRecord = asRecord(result);
+  const diffText = stringValue(resultRecord.diff);
+  if (!diffText) {
+    return null;
+  }
+  const files = parseStrictGitPatchDiff(diffText);
+  if (files.length === 0) {
+    return null;
+  }
+  return {
+    files,
+    title: editedDiffTitle(files)
+  };
+}
+
+function editedDiffTitle(files: ParsedDiffFile[]): string {
+  const stats = diffFilesStats(files);
+  const suffix = `(+${stats.additions} -${stats.deletions})`;
+  const onlyFile = files[0] ?? null;
+  if (files.length === 1 && onlyFile) {
+    const path = diffDisplayPath(onlyFile);
+    return compactText(`Edited ${path} ${suffix}`, 180);
+  }
+  return compactText(`Edited ${files.length} files ${suffix}`, 180);
 }
 
 function execCommandSections(
@@ -501,10 +556,10 @@ function sectionTitleForKey(key: string): string {
   }
 }
 
-function visibleRows(value: unknown, source: "input" | "result"): ToolDetailRow[] {
+function visibleRows(value: unknown, source: "input" | "result", hiddenKeys = EMPTY_KEYS): ToolDetailRow[] {
   const record = asRecord(value);
   return Object.entries(record).flatMap(([key, field]) => {
-    if (INTERNAL_KEYS.has(key) || BODY_KEYS.has(key) || field === null || field === undefined) {
+    if (INTERNAL_KEYS.has(key) || BODY_KEYS.has(key) || hiddenKeys.has(key) || field === null || field === undefined) {
       return [];
     }
     if (source === "input" && (key === "session_id" || key === "yield_time_ms")) {
