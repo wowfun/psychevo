@@ -192,7 +192,6 @@ test.describe("Workbench composer visual contract", () => {
             </button>
             <div class="pevo-toolDetail">
               <section class="pevo-toolSection is-diff">
-                <h4>Diff</h4>
                 <div class="pevo-inlineDiff" aria-label="Inline diff">
                   <article class="pevo-inlineDiffFile">
                     <header>
@@ -258,6 +257,8 @@ test.describe("Workbench composer visual contract", () => {
       await expect(inlineDiffRow.locator('[aria-label="Inline diff"]')).toBeVisible();
       await expect(inlineDiffRow.locator(".pevo-inlineDiffLine")).toHaveCount(3);
       await expect(inlineDiffRow.locator(".diffLineNumber")).toHaveCount(0);
+      await expect(inlineDiffRow.locator(".pevo-toolSection h4")).toHaveCount(0);
+      await expect(inlineDiffRow.locator(".pevo-toolSection.is-kv")).toHaveCount(0);
       await expectTextFits(inlineDiffRow.locator(".pevo-evidenceLine code"));
 
       if (!isMobile) {

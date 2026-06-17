@@ -472,7 +472,6 @@ function ToolDetailSectionView({ section }: { section: ToolDetailSection }) {
   if (section.kind === "diff") {
     return (
       <section className={`pevo-toolSection is-diff${toneClass}`}>
-        <h4>{section.title}</h4>
         <InlineDiff files={section.files} />
       </section>
     );
@@ -494,7 +493,7 @@ function ToolDetailSectionView({ section }: { section: ToolDetailSection }) {
   }
   return (
     <section className={`pevo-toolSection is-text${section.code ? " is-code" : ""}${toneClass}`}>
-      <h4>{section.title}</h4>
+      {section.title.trim() ? <h4>{section.title}</h4> : null}
       <pre>{section.text}</pre>
     </section>
   );

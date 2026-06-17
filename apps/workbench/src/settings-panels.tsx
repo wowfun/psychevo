@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from "react";
 import {
+  Activity,
   Archive,
   ArrowLeft,
+  BarChart3,
   Bot,
   Bug,
   Edit3,
@@ -23,6 +25,7 @@ import type {
   BackendCommandJson,
   BackendDraft,
   SettingsSection,
+  WorkbenchUsageStats,
   WorkbenchBackend,
   WorkbenchBackendDoctor
 } from "./types";
@@ -47,6 +50,7 @@ export const EMPTY_BACKEND_DRAFT: BackendDraft = {
 };
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string }> = [
   { id: "appearance", label: "Appearance", description: "Theme" },
+  { id: "usage", label: "Usage", description: "Tokens and cost" },
   { id: "debug", label: "Debug", description: "Developer diagnostics" },
   { id: "agents", label: "Agents", description: "Profile ACP backends" },
   { id: "archived", label: "Archived sessions", description: "Restore or delete" }
@@ -60,6 +64,9 @@ export function SettingsPage({
   debugEnabled,
   disabled,
   section,
+  usageStats,
+  usageStatsError,
+  usageStatsLoading,
   onAppearanceChange,
   onCancelBackendEdit,
   onChangeBackendDraft,
@@ -73,6 +80,7 @@ export function SettingsPage({
   onRestoreArchivedSession,
   onSaveBackendDraft,
   onSectionChange,
+  onRefreshUsageStats,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
   workdir
@@ -85,6 +93,9 @@ export function SettingsPage({
   debugEnabled: boolean;
   disabled: boolean;
   section: SettingsSection;
+  usageStats: WorkbenchUsageStats | null;
+  usageStatsError: string | null;
+  usageStatsLoading: boolean;
   onAppearanceChange(value: Appearance): void;
   onCancelBackendEdit(): void;
   onChangeBackendDraft(draft: BackendDraft): void;
@@ -98,6 +109,7 @@ export function SettingsPage({
   onRestoreArchivedSession(threadId: string): void;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSectionChange(value: SettingsSection): void;
+  onRefreshUsageStats(): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   workdir: string;
@@ -181,6 +193,9 @@ export function SettingsPage({
             debugEnabled={debugEnabled}
             disabled={disabled}
             section={section}
+            usageStats={usageStats}
+            usageStatsError={usageStatsError}
+            usageStatsLoading={usageStatsLoading}
             onAppearanceChange={onAppearanceChange}
             onCancelBackendEdit={onCancelBackendEdit}
             onChangeBackendDraft={onChangeBackendDraft}
@@ -192,6 +207,7 @@ export function SettingsPage({
             onNewBackend={onNewBackend}
             onRestoreArchivedSession={onRestoreArchivedSession}
             onSaveBackendDraft={onSaveBackendDraft}
+            onRefreshUsageStats={onRefreshUsageStats}
             onSetBackendEnabled={onSetBackendEnabled}
             onSetBackendEntrypoints={onSetBackendEntrypoints}
             workdir={workdir}
@@ -211,6 +227,9 @@ function SettingsSectionPanel({
   debugEnabled,
   disabled,
   section,
+  usageStats,
+  usageStatsError,
+  usageStatsLoading,
   onAppearanceChange,
   onCancelBackendEdit,
   onChangeBackendDraft,
@@ -220,6 +239,7 @@ function SettingsSectionPanel({
   onDoctorBackend,
   onEditBackend,
   onNewBackend,
+  onRefreshUsageStats,
   onRestoreArchivedSession,
   onSaveBackendDraft,
   onSetBackendEnabled,
@@ -234,6 +254,9 @@ function SettingsSectionPanel({
   debugEnabled: boolean;
   disabled: boolean;
   section: SettingsSection;
+  usageStats: WorkbenchUsageStats | null;
+  usageStatsError: string | null;
+  usageStatsLoading: boolean;
   onAppearanceChange(value: Appearance): void;
   onCancelBackendEdit(): void;
   onChangeBackendDraft(draft: BackendDraft): void;
@@ -243,6 +266,7 @@ function SettingsSectionPanel({
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
   onNewBackend(): void;
+  onRefreshUsageStats(): void;
   onRestoreArchivedSession(threadId: string): void;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
@@ -264,6 +288,15 @@ function SettingsSectionPanel({
             </div>
           </SettingsOptionRow>
         </div>
+      );
+    case "usage":
+      return (
+        <UsageSettingsPanel
+          loading={usageStatsLoading}
+          stats={usageStats}
+          error={usageStatsError}
+          onRefresh={onRefreshUsageStats}
+        />
       );
     case "archived":
       return (
@@ -327,6 +360,196 @@ function SettingsOptionRow({
   );
 }
 
+function UsageSettingsPanel({
+  error,
+  loading,
+  stats,
+  onRefresh
+}: {
+  error: string | null;
+  loading: boolean;
+  stats: WorkbenchUsageStats | null;
+  onRefresh(): void;
+}) {
+  const windows = stats?.windows ?? [];
+  const primaryWindows = ["all", "30d", "7d"]
+    .map((id) => windows.find((window) => window.id === id))
+    .filter((window): window is WorkbenchUsageStats["windows"][number] => Boolean(window));
+  return (
+    <section className="usageSettingsPanel" aria-label="Usage">
+      <div className="usageSettingsToolbar">
+        <span>{stats ? `Updated ${formatShortDateTime(stats.generatedAtMs)}` : loading ? "Loading" : "No data"}</span>
+        <button aria-label="Refresh usage" disabled={loading} onClick={onRefresh} title="Refresh usage" type="button">
+          <RotateCcw size={13} />
+          <span>Refresh</span>
+        </button>
+      </div>
+      {error && <div className="usageSettingsError" role="alert">{error}</div>}
+      {primaryWindows.length > 0 ? (
+        <div className="usageWindowGrid">
+          {primaryWindows.map((window) => <UsageWindowCard key={window.id} window={window} />)}
+        </div>
+      ) : (
+        <div className="usageSettingsEmpty">{loading ? "Loading usage" : "No usage recorded"}</div>
+      )}
+      {stats && <UsageActivityHeatmap activity={stats.activity} />}
+    </section>
+  );
+}
+
+function UsageWindowCard({ window }: { window: WorkbenchUsageStats["windows"][number] }) {
+  const inputTokens = window.billableInputTokens + window.cacheReadTokens + window.cacheWriteTokens;
+  return (
+    <section className="usageWindowCard" aria-label={window.label}>
+      <header>
+        <span>{window.label}</span>
+        <strong>{formatCompactNumber(window.reportedTotalTokens)}</strong>
+      </header>
+      <div className="usageWindowMetrics">
+        <div>
+          <span>Cost</span>
+          <strong>{formatUsageCost(window)}</strong>
+        </div>
+        <div>
+          <span>Cache read</span>
+          <strong>{formatPercent(window.cacheReadPercent)}</strong>
+        </div>
+        <div>
+          <span>Sessions</span>
+          <strong>{formatCompactNumber(window.sessionCount)}</strong>
+        </div>
+      </div>
+      <dl className="usageBreakdown">
+        <div><dt>Input</dt><dd>{formatCompactNumber(inputTokens)}</dd></div>
+        <div><dt>Output</dt><dd>{formatCompactNumber(window.billableOutputTokens)}</dd></div>
+        <div><dt>Reasoning</dt><dd>{formatCompactNumber(window.reasoningTokens)}</dd></div>
+        <div><dt>Cache write</dt><dd>{formatCompactNumber(window.cacheWriteTokens)}</dd></div>
+        {window.unknownPricingCount > 0 && (
+          <div><dt>Unknown pricing</dt><dd>{formatCompactNumber(window.unknownPricingCount)}</dd></div>
+        )}
+      </dl>
+    </section>
+  );
+}
+
+function UsageActivityHeatmap({ activity }: { activity: WorkbenchUsageStats["activity"] }) {
+  const days = activity.days;
+  const maxTokens = Math.max(1, ...days.map((day) => day.reportedTotalTokens));
+  const startPadding = days[0] ? new Date(`${days[0].date}T00:00:00`).getDay() : 0;
+  const cells: Array<null | WorkbenchUsageStats["activity"]["days"][number]> = [
+    ...Array.from({ length: startPadding }, () => null),
+    ...days
+  ];
+  const weekCount = Math.max(1, Math.ceil(cells.length / 7));
+  const monthLabels = heatmapMonthLabels(cells, weekCount);
+  return (
+    <section className="usageHeatmapPanel" aria-label="Token activity">
+      <header>
+        <span><BarChart3 size={14} /> Token activity</span>
+        <small>{activity.startDate} to {activity.endDate}</small>
+      </header>
+      <div className="usageHeatmapScroller">
+        <div
+          className="usageHeatmapMonths"
+          style={{ gridTemplateColumns: `repeat(${weekCount}, 11px)` }}
+        >
+          {monthLabels.map((label) => (
+            <span key={`${label.month}-${label.week}`} style={{ gridColumn: `${label.week + 1} / span ${label.span}` }}>
+              {label.month}
+            </span>
+          ))}
+        </div>
+        <div className="usageHeatmapBody">
+          <div className="usageHeatmapWeekdays" aria-hidden>
+            <span>Sun</span>
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+          </div>
+          <div
+            className="usageHeatmapGrid"
+            style={{ gridTemplateColumns: `repeat(${weekCount}, 11px)` }}
+          >
+            {cells.map((day, index) => {
+              const level = day ? heatmapLevel(day.reportedTotalTokens, maxTokens) : 0;
+              return (
+                <span
+                  aria-label={day ? `${day.date}: ${day.reportedTotalTokens} tokens` : undefined}
+                  className={day ? "usageHeatmapCell" : "usageHeatmapCell is-empty"}
+                  data-level={level}
+                  key={day?.date ?? `pad-${index}`}
+                  title={day ? `${day.date}: ${formatCompactNumber(day.reportedTotalTokens)} tokens` : undefined}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function heatmapLevel(tokens: number, maxTokens: number): number {
+  if (tokens <= 0) {
+    return 0;
+  }
+  return Math.max(1, Math.min(4, Math.ceil((tokens / maxTokens) * 4)));
+}
+
+function heatmapMonthLabels(
+  cells: Array<null | WorkbenchUsageStats["activity"]["days"][number]>,
+  weekCount: number
+): Array<{ month: string; span: number; week: number }> {
+  const labels: Array<{ month: string; span: number; week: number }> = [];
+  let lastMonth = "";
+  for (let index = 0; index < cells.length; index += 1) {
+    const day = cells[index];
+    if (!day) {
+      continue;
+    }
+    const date = new Date(`${day.date}T00:00:00`);
+    const month = date.toLocaleString(undefined, { month: "short" });
+    const week = Math.floor(index / 7);
+    if (month !== lastMonth) {
+      labels.push({ month, span: 1, week });
+      lastMonth = month;
+    }
+  }
+  return labels;
+}
+
+function formatUsageCost(window: WorkbenchUsageStats["windows"][number]): string {
+  if (window.costStatus === "unknown" && window.estimatedCostNanodollars === 0) {
+    return "Unknown";
+  }
+  const value = formatNanodollars(window.estimatedCostNanodollars);
+  return window.unknownPricingCount > 0 ? `${value} + unknown` : value;
+}
+
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact" }).format(value);
+}
+
+function formatPercent(value: number | null): string {
+  return value === null ? "-" : `${Math.round(value)}%`;
+}
+
+function formatNanodollars(value: number): string {
+  return `$${(value / 1_000_000_000).toFixed(6)}`;
+}
+
+function formatShortDateTime(value: number): string {
+  return new Date(value).toLocaleString(undefined, {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short"
+  });
+}
+
 function ArchivedSessionsPanel({
   disabled,
   sessions,
@@ -374,6 +597,8 @@ function settingsSectionIcon(section: SettingsSection, size: number): ReactNode 
   switch (section) {
     case "appearance":
       return <Sun size={size} />;
+    case "usage":
+      return <Activity size={size} />;
     case "archived":
       return <Archive size={size} />;
     case "debug":

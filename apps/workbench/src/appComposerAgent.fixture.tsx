@@ -47,6 +47,7 @@ const gatewayMock = vi.hoisted(() => {
     commandList: [] as Array<Record<string, unknown>>,
     endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" } as { wsUrl: string; baseUrl: string } | null,
     observabilityRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    usageRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     permissionRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     clarifyRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     openDownloadLog: [] as string[],
@@ -445,10 +446,20 @@ vi.mock("@psychevo/client", async () => {
             cacheWriteTokens: hasThread ? 10 : 0,
             reportedTotalTokens: hasThread ? 250 : 0,
             estimatedCostNanodollars: hasThread ? 10_000_000 : 0,
+            costStatus: hasThread ? "estimated" : "unknown",
+            estimatedPricingCount: hasThread ? 1 : 0,
+            freePricingCount: 0,
+            includedPricingCount: 0,
             unknownPricingCount: 0,
             cacheReadPercent: hasThread ? 40 : null
           }
         };
+      }
+      if (method === "usage/read") {
+        if (gatewayMock.usageRead) {
+          return gatewayMock.usageRead(params);
+        }
+        return usageReadResult();
       }
       if (method === "completion/list") {
         return gatewayMock.completionResult;
@@ -587,6 +598,7 @@ afterEach(() => {
   gatewayMock.commandList = [];
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.observabilityRead = null;
+  gatewayMock.usageRead = null;
   gatewayMock.permissionRespond = () => ({ accepted: true });
   gatewayMock.clarifyRespond = () => ({ accepted: true });
   gatewayMock.openDownloadLog.length = 0;
@@ -725,8 +737,69 @@ export function observabilityResult(threadId: string | null, peer = false): Reco
       cacheWriteTokens: hasThread ? 10 : 0,
       reportedTotalTokens: hasThread ? (peer ? 8_000 : 250) : 0,
       estimatedCostNanodollars: hasThread ? (peer ? 0 : 10_000_000) : 0,
+      costStatus: hasThread ? (peer ? "free" : "estimated") : "unknown",
+      estimatedPricingCount: hasThread && !peer ? 1 : 0,
+      freePricingCount: hasThread && peer ? 1 : 0,
+      includedPricingCount: 0,
       unknownPricingCount: 0,
       cacheReadPercent: hasThread ? (peer ? 50 : 40) : null
+    }
+  };
+}
+
+export function usageReadResult(): Record<string, unknown> {
+  const days = Array.from({ length: 365 }, (_, index) => {
+    const date = new Date(Date.UTC(2026, 0, 1 + index));
+    const tokens = index % 8 === 0 ? 0 : 100 + (index % 17) * 50;
+    return {
+      date: date.toISOString().slice(0, 10),
+      sessionCount: tokens > 0 ? 1 : 0,
+      messageCount: tokens > 0 ? 2 : 0,
+      reportedTotalTokens: tokens,
+      contextInputTokens: Math.round(tokens * 0.7),
+      cacheReadTokens: Math.round(tokens * 0.25),
+      cacheWriteTokens: Math.round(tokens * 0.05),
+      estimatedCostNanodollars: tokens * 1000,
+      costStatus: tokens > 0 ? "estimated" : "unknown",
+      estimatedPricingCount: tokens > 0 ? 1 : 0,
+      freePricingCount: 0,
+      includedPricingCount: 0,
+      unknownPricingCount: 0
+    };
+  });
+  const window = (id: string, label: string, reportedTotalTokens: number, cacheReadPercent: number) => ({
+    id,
+    label,
+    sinceMs: id === "all" ? null : 1_767_225_600_000,
+    sessionCount: id === "all" ? 8 : 3,
+    messageCount: id === "all" ? 42 : 12,
+    assistantMessageCount: id === "all" ? 20 : 6,
+    contextInputTokens: Math.round(reportedTotalTokens * 0.7),
+    billableInputTokens: Math.round(reportedTotalTokens * 0.45),
+    billableOutputTokens: Math.round(reportedTotalTokens * 0.25),
+    reasoningTokens: Math.round(reportedTotalTokens * 0.04),
+    cacheReadTokens: Math.round(reportedTotalTokens * 0.25),
+    cacheWriteTokens: Math.round(reportedTotalTokens * 0.02),
+    reportedTotalTokens,
+    estimatedCostNanodollars: reportedTotalTokens * 1000,
+    costStatus: "estimated",
+    estimatedPricingCount: 6,
+    freePricingCount: 0,
+    includedPricingCount: 0,
+    unknownPricingCount: id === "all" ? 1 : 0,
+    cacheReadPercent
+  });
+  return {
+    generatedAtMs: 1_798_650_000_000,
+    windows: [
+      window("all", "All time", 125_000, 35),
+      window("30d", "Last 30 days", 38_000, 42),
+      window("7d", "Last 7 days", 9_200, 47)
+    ],
+    activity: {
+      startDate: days[0]?.date ?? "",
+      endDate: days.at(-1)?.date ?? "",
+      days
     }
   };
 }

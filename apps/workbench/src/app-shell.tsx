@@ -10,7 +10,8 @@ import type {
   MainView,
   SettingsSection,
   WorkbenchBackend,
-  WorkbenchBackendDoctor
+  WorkbenchBackendDoctor,
+  WorkbenchUsageStats
 } from "./types";
 
 export function LeftUtilityRail({
@@ -167,11 +168,15 @@ export function MainSurface({
   onNewBackend,
   onOpenSession,
   onRestoreArchivedSession,
+  onRefreshUsageStats,
   onSaveBackendDraft,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
   onSettingsSectionChange,
   settingsSection,
+  usageStats,
+  usageStatsError,
+  usageStatsLoading,
   sessions,
   transcript,
   workdir
@@ -197,11 +202,15 @@ export function MainSurface({
   onNewBackend(): void;
   onOpenSession(threadId: string): void;
   onRestoreArchivedSession(threadId: string): void;
+  onRefreshUsageStats(): void;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   onSettingsSectionChange(value: SettingsSection): void;
   settingsSection: SettingsSection;
+  usageStats: WorkbenchUsageStats | null;
+  usageStatsError: string | null;
+  usageStatsLoading: boolean;
   sessions: SessionSummary[];
   transcript: ReactNode;
   workdir: string;
@@ -220,6 +229,9 @@ export function MainSurface({
         debugEnabled={debugEnabled}
         disabled={disabled}
         section={settingsSection}
+        usageStats={usageStats}
+        usageStatsError={usageStatsError}
+        usageStatsLoading={usageStatsLoading}
         onAppearanceChange={onAppearanceChange}
         onCancelBackendEdit={onCancelBackendEdit}
         onChangeBackendDraft={onChangeBackendDraft}
@@ -230,6 +242,7 @@ export function MainSurface({
         onEditBackend={onEditBackend}
         onNewBackend={onNewBackend}
         onOpenTranscript={() => onMainViewChange("transcript")}
+        onRefreshUsageStats={onRefreshUsageStats}
         onRestoreArchivedSession={onRestoreArchivedSession}
         onSaveBackendDraft={onSaveBackendDraft}
         onSectionChange={onSettingsSectionChange}

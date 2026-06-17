@@ -596,6 +596,10 @@ describe("component fallback rendering", () => {
           cacheWriteTokens: 10,
           reportedTotalTokens: 250,
           estimatedCostNanodollars: 10_000_000,
+          costStatus: "estimated",
+          estimatedPricingCount: 1,
+          freePricingCount: 0,
+          includedPricingCount: 0,
           unknownPricingCount: 0,
           cacheReadPercent: 40
         }}

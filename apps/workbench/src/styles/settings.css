@@ -345,6 +345,253 @@
   margin: 0;
 }
 
+.usageSettingsPanel {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  color: var(--pevo-ink);
+}
+
+.usageSettingsToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+}
+
+.usageSettingsToolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.usageSettingsToolbar button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.usageSettingsError,
+.usageSettingsEmpty {
+  min-width: 0;
+  padding: 8px 0;
+  color: var(--pevo-muted);
+  font-size: 0.82rem;
+}
+
+.usageSettingsError {
+  color: var(--pevo-danger);
+}
+
+.usageWindowGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.usageWindowCard {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 40%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.usageWindowCard header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.usageWindowCard header span {
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageWindowCard header strong {
+  color: var(--pevo-ink);
+  font-size: 1.12rem;
+  font-weight: 700;
+}
+
+.usageWindowMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.usageWindowMetrics div,
+.usageBreakdown div {
+  min-width: 0;
+}
+
+.usageWindowMetrics span,
+.usageBreakdown dt {
+  display: block;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageWindowMetrics strong,
+.usageBreakdown dd {
+  display: block;
+  margin: 0;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageBreakdown {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  min-width: 0;
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 44%);
+}
+
+.usageHeatmapPanel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.usageHeatmapPanel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.usageHeatmapPanel > header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--pevo-ink);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.usageHeatmapPanel > header small {
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageHeatmapScroller {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-gutter: stable;
+}
+
+.usageHeatmapMonths {
+  display: grid;
+  grid-template-rows: 12px;
+  gap: 3px;
+  min-width: max-content;
+  padding-left: 30px;
+  color: var(--pevo-muted);
+  font-size: 0.68rem;
+}
+
+.usageHeatmapMonths span {
+  grid-row: 1;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.usageHeatmapBody {
+  display: grid;
+  grid-template-columns: 24px minmax(0, max-content);
+  gap: 6px;
+  min-width: max-content;
+}
+
+.usageHeatmapWeekdays {
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+  color: var(--pevo-muted);
+  font-size: 0.58rem;
+  line-height: 11px;
+}
+
+.usageHeatmapGrid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+  min-width: max-content;
+}
+
+.usageHeatmapCell {
+  display: block;
+  width: 11px;
+  height: 11px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-border) 20%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 56%);
+  border-radius: 2px;
+}
+
+.usageHeatmapCell[data-level="1"] {
+  background: color-mix(in oklch, #2ea56f, var(--pevo-panel) 76%);
+}
+
+.usageHeatmapCell[data-level="2"] {
+  background: color-mix(in oklch, #2ea56f, var(--pevo-panel) 56%);
+}
+
+.usageHeatmapCell[data-level="3"] {
+  background: color-mix(in oklch, #2ea56f, var(--pevo-panel) 34%);
+}
+
+.usageHeatmapCell[data-level="4"] {
+  background: #2ea56f;
+}
+
+.usageHeatmapCell.is-empty {
+  visibility: hidden;
+}
+
 .appShell[data-main-view="settings"] {
   padding: 4px;
 }
@@ -474,6 +721,10 @@
   .settingsRow {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
+  }
+
+  .usageWindowGrid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .agentBackendRow {

@@ -7,6 +7,7 @@ import type {
   TerminalOutputPayload,
   ThreadTraceResult,
   ThreadBrowserCursor,
+  UsageReadResult,
   WorkspaceDiffResult,
   WorkspaceFileReadResult
 } from "@psychevo/protocol";
@@ -101,7 +102,8 @@ export type RightWorkspaceTab = {
 };
 
 export type MainView = "transcript" | "search" | "settings";
-export type SettingsSection = "appearance" | "debug" | "agents" | "archived";
+export type SettingsSection = "appearance" | "usage" | "debug" | "agents" | "archived";
+export type WorkbenchUsageStats = UsageReadResult;
 export type Appearance = "dark" | "light";
 export type CommandOverlay = "commands";
 export type CommandTrigger = "composer" | "commandsPanel" | "commandOverlay";

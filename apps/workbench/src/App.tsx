@@ -37,6 +37,7 @@ import {
   TerminalOutputPayloadSchema,
   ThreadBrowserResultSchema,
   ThreadTraceResultSchema,
+  UsageReadResultSchema,
   WorkspaceChangeMutationResultSchema,
   WorkspaceChangesResultSchema,
   WorkspaceDiffResultSchema,
@@ -56,6 +57,7 @@ import {
   type SettingsReadResult,
   type ThreadSnapshot,
   type ThreadTraceResult,
+  type UsageReadResult,
   type WorkspaceChangesResult,
   type WorkspaceDiffResult,
   type WorkspaceFileReadResult,
@@ -274,6 +276,9 @@ export function App() {
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangesResult | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextReadResult | null>(null);
   const [observability, setObservability] = useState<ObservabilityReadResult | null>(null);
+  const [usageStats, setUsageStats] = useState<UsageReadResult | null>(null);
+  const [usageStatsLoading, setUsageStatsLoading] = useState(false);
+  const [usageStatsError, setUsageStatsError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [composerDraftPatch, setComposerDraftPatch] = useState<{ id: number; text: string } | null>(null);
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
@@ -496,6 +501,31 @@ export function App() {
       setLoadingOlderWorkdir(null);
     }
   }
+
+  async function refreshUsageStats(nextClient: GatewayClient | null = client) {
+    if (!nextClient) {
+      return;
+    }
+    setUsageStatsLoading(true);
+    setUsageStatsError(null);
+    try {
+      const result = UsageReadResultSchema.parse(
+        await nextClient.request("usage/read", { activityDays: 365 })
+      );
+      setUsageStats(result);
+    } catch (error) {
+      setUsageStatsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUsageStatsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!client || mainView !== "settings" || settingsSection !== "usage") {
+      return;
+    }
+    void refreshUsageStats(client);
+  }, [client, mainView, settingsSection]);
 
   useWorkbenchEffects({
     activeRightTabKind: activeRightTab?.kind ?? null,
@@ -934,6 +964,7 @@ export function App() {
     setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
     setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel, setSelectedRuntimeMode, setSelectedRuntimeRef,
     setSelectedVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, settings, settingsSection,
+    usageStats, usageStatsError, usageStatsLoading, refreshUsageStats,
     clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
     togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateMainView, viewEpochRef, workMode,
     workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles

@@ -72,6 +72,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     refreshAgentSurface,
     refreshHistory,
     refreshSnapshot,
+    refreshUsageStats,
     refreshWorkspaceSurface,
     rejectWorkspaceChange,
     restoreArchivedSession,
@@ -137,6 +138,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
     transcriptEntries,
     updateBackendDraftFields,
     updateMainView,
+    usageStats,
+    usageStatsError,
+    usageStatsLoading,
     workMode,
     workspaceChanges,
     workspaceDialogOpen,
@@ -328,6 +332,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
               mainView={mainView}
               sessions={sessions}
               settingsSection={settingsSection}
+              usageStats={usageStats}
+              usageStatsError={usageStatsError}
+              usageStatsLoading={usageStatsLoading}
               workdir={activeWorkbenchWorkdir}
               loadThreadSearchText={loadThreadSearchText}
               onAppearanceChange={setAppearance}
@@ -354,6 +361,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               })}
               onSettingsSectionChange={setSettingsSection}
               onSaveBackendDraft={(draft) => void runAction(async () => saveBackendDraft(draft))}
+              onRefreshUsageStats={() => void runAction(async () => refreshUsageStats())}
               transcript={(
                 <TranscriptPanel
                   activity={activity}

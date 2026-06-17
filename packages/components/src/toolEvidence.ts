@@ -95,12 +95,13 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
   const displayTitle = inlineDiff?.title ?? explicitTitle ?? invocation ?? toolTitle(toolName, title, spec, args, result);
   const summary = inlineDiff || invocation || explicitTitle ? null : toolSummary(spec, result, args);
   const sections = toolSections(toolName, spec, args, result, metadata, block, inlineDiff);
+  const singleTitle = Boolean(inlineDiff || invocation || (toolName === "read" && !summary));
 
   return {
     category: spec.category,
     defaultOpen: Boolean(inlineDiff),
     sections,
-    singleTitle: Boolean(inlineDiff || invocation),
+    singleTitle,
     summary,
     title: displayTitle
   };
@@ -127,17 +128,20 @@ function explicitToolTitle(toolName: string, title: string, metadata: Record<str
 }
 
 function toolDisplaySpec(toolName: string, metadata: Record<string, unknown>): ToolDisplaySpec {
-  const fromMetadata = displaySpecFromValue(metadata.display);
-  if (fromMetadata) {
-    return fromMetadata;
-  }
   if (toolName === "read") {
     return {
       ...genericDisplaySpec(),
-      bodyKeys: ["content", "output", "error"],
+      bodyKeys: ["content"],
       bodyPolicy: "body",
-      category: "explore"
+      category: "explore",
+      summaryKeys: [],
+      titleArgKeys: ["path"],
+      titleResultKeys: ["path"]
     };
+  }
+  const fromMetadata = displaySpecFromValue(metadata.display);
+  if (fromMetadata) {
+    return fromMetadata;
   }
   if (toolName === "exec_command" || toolName === "write_stdin") {
     return {
@@ -364,22 +368,23 @@ function toolSections(
   if (toolName === "write_stdin") {
     return writeStdinSections(args, result, metadata);
   }
+  if (inlineDiff) {
+    return [{ files: inlineDiff.files, kind: "diff", title: "Diff" }];
+  }
+  if (toolName === "read") {
+    return readSections(result, block);
+  }
   const sections: ToolDetailSection[] = [];
-  const hiddenKeys = inlineDiff ? DIFF_RENDERED_DETAIL_KEYS : EMPTY_KEYS;
-  const inputs = visibleRows(args, "input", hiddenKeys);
+  const inputs = visibleRows(args, "input", EMPTY_KEYS);
   if (inputs.length > 0) {
     sections.push({ kind: "kv", rows: inputs, title: "Input" });
   }
-  const resultRows = visibleRows(result, "result", hiddenKeys);
+  const resultRows = visibleRows(result, "result", EMPTY_KEYS);
   if (resultRows.length > 0) {
     sections.push({ kind: "kv", rows: resultRows, title: resultTitle(toolName) });
   }
-  if (inlineDiff) {
-    sections.push({ files: inlineDiff.files, kind: "diff", title: "Diff" });
-  } else {
-    const bodySections = bodyTextSections(spec, result, toolName);
-    sections.push(...bodySections);
-  }
+  const bodySections = bodyTextSections(spec, result, toolName);
+  sections.push(...bodySections);
   const outcome = stringValue(metadata.outcome);
   if (outcome && outcome !== "normal") {
     sections.push({ kind: "kv", rows: [{ label: "outcome", value: outcome }], title: "Status", tone: "error" });
@@ -396,7 +401,6 @@ type InlineDiffDisplay = {
 };
 
 const EMPTY_KEYS = new Set<string>();
-const DIFF_RENDERED_DETAIL_KEYS = new Set(["content", "diff", "new_string", "old_string", "patch"]);
 
 function inlineDiffDisplay(spec: ToolDisplaySpec, result: unknown, block: TranscriptBlock): InlineDiffDisplay | null {
   if (spec.category !== "update" || block.status !== "completed" || block.result?.isError) {
@@ -501,6 +505,37 @@ function writeStdinSections(args: unknown, result: unknown, metadata: Record<str
     sections.push({ kind: "kv", rows, title: "Status" });
   }
   return sections;
+}
+
+function readSections(result: unknown, block: TranscriptBlock): ToolDetailSection[] {
+  const resultRecord = asRecord(result);
+  if (Object.prototype.hasOwnProperty.call(resultRecord, "content")) {
+    const text = readContentText(resultRecord.content);
+    if (text !== null) {
+      return [{ code: true, kind: "text", text, title: "" }];
+    }
+  }
+  const error = stringValue(resultRecord.error);
+  if (error) {
+    return [{ kind: "text", text: error, title: "Error", tone: "error" }];
+  }
+  if (block.result?.isError) {
+    const fallback = textFromValue(result);
+    return fallback
+      ? [{ kind: "text", text: fallback, title: "Error", tone: "error" }]
+      : [{ kind: "kv", rows: [{ label: "status", value: "error" }], title: "Status", tone: "error" }];
+  }
+  return [];
+}
+
+function readContentText(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return textFromValue(value);
 }
 
 function bodyTextSections(spec: ToolDisplaySpec, result: unknown, toolName: string): ToolDetailSection[] {

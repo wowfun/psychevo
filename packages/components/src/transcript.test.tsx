@@ -100,7 +100,13 @@ describe("TranscriptPanel inline diff evidence", () => {
     expect(screen.getByText("return n > 1")).toBeTruthy();
     expect(container.querySelectorAll(".pevo-inlineDiffNumber").length).toBeGreaterThan(0);
     expect(container.querySelectorAll(".diffLineNumber")).toHaveLength(0);
+    expect(container.querySelectorAll(".pevo-toolSection h4")).toHaveLength(0);
     expect(screen.queryByText(/diff --git/)).toBeNull();
+    expect(screen.queryByText("Input")).toBeNull();
+    expect(screen.queryByText("Change")).toBeNull();
+    expect(screen.queryByText("Diff")).toBeNull();
+    expect(screen.queryByText("path")).toBeNull();
+    expect(screen.queryByText("status")).toBeNull();
     expect(screen.queryByText("old_string")).toBeNull();
     expect(screen.queryByText("new_string")).toBeNull();
   });
@@ -150,5 +156,116 @@ describe("TranscriptPanel inline diff evidence", () => {
     expect(screen.queryByLabelText("Inline diff")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /edit primes.py/ }));
     expect(screen.getByText("not a git patch")).toBeTruthy();
+  });
+});
+
+describe("TranscriptPanel read evidence", () => {
+  it("renders successful reads as a title plus file content only", () => {
+    const readPath = "/home/kevin/Projects/psychevo/.agents/skills/x-daily/config/users.json";
+    const fileContent = [
+      "{",
+      "  \"users\": [",
+      "    {",
+      "      \"id\": \"daily\",",
+      "      \"enabled\": true",
+      "    }",
+      "  ]",
+      "}",
+      ""
+    ].join("\n");
+    const block = transcriptBlock({
+      id: "block-read",
+      kind: "file",
+      title: "read",
+      metadata: {
+        projection: "tool",
+        tool_name: "read",
+        tool_call_id: "call-read",
+        args: { path: readPath }
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "completed",
+        content: JSON.stringify({
+          path: readPath,
+          content: fileContent,
+          total_lines: 8,
+          file_size: 703,
+          truncated: false,
+          similar_files: ["/home/kevin/Projects/psychevo/.agents/skills/x-daily/config/users.example.json"],
+          shown_start_line: 1,
+          shown_end_line: 8,
+          output_lines: 8,
+          output_bytes: 703,
+          first_line_exceeds_limit: false
+        }),
+        isError: false,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    const { container } = render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
+
+    const row = screen.getByRole("button", { name: `read ${readPath}` });
+    expect(row).toBeTruthy();
+    expect(row.classList.contains("is-singleTitle")).toBe(true);
+    expect(screen.queryByText(/output bytes/)).toBeNull();
+
+    fireEvent.click(row);
+
+    const pre = container.querySelector(".pevo-toolDetail pre");
+    expect(pre).toBeTruthy();
+    expect(pre?.textContent).toBe(fileContent);
+    expect(container.querySelectorAll(".pevo-toolDetail h4")).toHaveLength(0);
+    expect(screen.queryByText("Input")).toBeNull();
+    expect(screen.queryByText("Result")).toBeNull();
+    expect(screen.queryByText("Content")).toBeNull();
+    expect(screen.queryByText("path")).toBeNull();
+    expect(screen.queryByText("file size")).toBeNull();
+    expect(screen.queryByText("output bytes")).toBeNull();
+    expect(screen.queryByText("shown start line")).toBeNull();
+    expect(screen.queryByText("shown end line")).toBeNull();
+    expect(screen.queryByText("similar files")).toBeNull();
+  });
+
+  it("keeps failed reads informative without generic metadata sections", () => {
+    const readPath = "/home/kevin/Projects/psychevo/missing.json";
+    const block = transcriptBlock({
+      id: "block-read-error",
+      kind: "file",
+      title: "read",
+      metadata: {
+        projection: "tool",
+        tool_name: "read",
+        tool_call_id: "call-read-error",
+        args: { path: readPath }
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "failed",
+        content: JSON.stringify({
+          path: readPath,
+          error: "No such file or directory",
+          similar_files: ["/home/kevin/Projects/psychevo/example.json"]
+        }),
+        isError: true,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
+
+    const row = screen.getByRole("button", { name: `read ${readPath}` });
+    fireEvent.click(row);
+
+    expect(screen.getByText("No such file or directory")).toBeTruthy();
+    expect(screen.queryByText("Input")).toBeNull();
+    expect(screen.queryByText("Result")).toBeNull();
+    expect(screen.queryByText("similar files")).toBeNull();
+    expect(screen.queryByText("path")).toBeNull();
   });
 });

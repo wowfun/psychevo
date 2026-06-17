@@ -39,6 +39,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(settingsRegion).getByRole("button", { name: "Appearance" }).getAttribute("aria-current")).toBe("page");
     expect(within(settingsRegion).getByRole("heading", { name: "Appearance" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Archived sessions" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Usage" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Debug" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Agents" })).toBeTruthy();
     for (const removed of ["General", "Session", "Session history", "Commands", "Integrations", "Diagnostics"]) {
@@ -53,6 +54,25 @@ describe("Workbench settings and backend controls", () => {
 
     fireEvent.click(backButton);
     expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
+  });
+
+  it("loads all-history usage summaries in Settings", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Usage" }));
+
+    const usagePanel = await within(settingsRegion).findByRole("region", { name: "Usage" });
+    expect(await within(usagePanel).findByText("All time")).toBeTruthy();
+    expect(within(usagePanel).getByText("Last 30 days")).toBeTruthy();
+    expect(within(usagePanel).getByText("Last 7 days")).toBeTruthy();
+    expect(within(usagePanel).getByText("Token activity")).toBeTruthy();
+    expect(within(usagePanel).getByRole("button", { name: "Refresh usage" })).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => (
+      entry.method === "usage/read"
+      && (entry.params as { activityDays?: number }).activityDays === 365
+    ))).toBe(true);
   });
 
   it("switches Settings sections while keeping session controls in the composer", async () => {
