@@ -116,5 +116,7 @@ transcript message.
   defines the storage shape for checkpoints.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines provider
   and model configuration resolution.
-- [212 pevo TUI Interaction Slash Commands](../212-pevo-tui-interaction/slash-commands.md)
-  defines slash-command interaction behavior.
+- [270 UI Interaction](../270-ui-interaction/spec.md) defines shared
+  slash-command interaction behavior.
+- [210 pevo TUI Interaction](../210-pevo-tui/interaction.md) defines the
+  fullscreen terminal projection of that behavior.

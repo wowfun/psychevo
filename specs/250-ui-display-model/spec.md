@@ -1,9 +1,9 @@
 ---
-name: 213. pevo Display Model
+name: 250. UI Display Model
 psychevo_self_edit: deny
 ---
 
-# 213. pevo Display Model
+# 250. UI Display Model
 
 Define Psychevo's shared transcript projection contract. Transcript fact
 ownership is defined by
@@ -93,7 +93,8 @@ Model-visible tool results may contain material that also benefits from richer
 UI projection. Runtime may parse stable tool-result fields, such as an
 `edit.diff` Git patch block, inside the message-derived tool result projection
 for rendering. The parsed projection is a UI view; it must not replace or
-mutate the model-visible tool result.
+mutate the model-visible tool result. Parse failures keep the original
+tool-result text available to the UI and must not change transcript semantics.
 
 Tool-call blocks merge call metadata with later tool-result message metadata.
 Projection must preserve stable call identity fields, including arguments,
@@ -230,5 +231,8 @@ but must not require TUI-specific layout fields.
 
 - [026 Commands](../026-commands/spec.md)
 - [030 Transcript State](../030-state-and-data-model/transcript-state.md)
-- [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md)
+- [260 UI Rendering](../260-ui-rendering/spec.md)
+- [270 UI Interaction](../270-ui-interaction/spec.md)
+- [210 pevo TUI Rendering](../210-pevo-tui/rendering.md)
+- [240 pevo Web](../240-pevo-web/spec.md)
 - [214 pevo Diff Command](../214-pevo-diff-command/spec.md)

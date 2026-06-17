@@ -281,5 +281,5 @@ diagnostics and do not fail closed in the first implementation slice.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines the built-in coding
   capability that may be specialized by a selected agent.
 - [200 pevo CLI](../200-pevo-cli/spec.md) owns command spelling.
-- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) owns
+- [210 pevo TUI Interaction](../210-pevo-tui/interaction.md) owns
   interactive projection.

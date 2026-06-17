@@ -5,18 +5,21 @@ psychevo_self_edit: deny
 
 # 220. pevo Gateway
 
-Define the concrete `pevo gateway` product surface and managed Web Shell
-behavior.
+Define the concrete `pevo gateway` product surface for managed local Gateway
+lifecycle, browser launch bootstrap, and Web asset mounting.
 
 ## Scope
 
 - `pevo gateway open/start/status/stop/restart` lifecycle behavior
 - managed local server state and browser launch bootstrap
-- Web Shell layout, panels, source binding, and reconnection behavior
-- browser/PWA first-slice behavior
+- static Web Shell asset mounting and launch authorization
+- relationship between managed `pevo gateway`, `pevo web`, and foreground
+  `pevo serve`
 
 Out of scope:
 
+- concrete Web Shell, Workbench layout, browser host, and frontend package
+  behavior; these belong to [240 pevo Web](../240-pevo-web/spec.md)
 - public LAN, relay, TLS, account, or hosted service behavior
 - native desktop or mobile shell packaging
 - provider secret storage in the browser, and arbitrary host-file editing
@@ -109,67 +112,34 @@ cookie are not authorized Web Shell launches. They should return a local
 launch-required diagnostic page with the recovery command, rather than mounting
 the Workbench SPA and letting it fail later with a generic WebSocket error.
 
-## Web Shell
+## Web Asset Mounting
 
-The concrete Web Shell behavior is specified in [Web Shell](web-shell.md). The
-`spec.md` entrypoint keeps the product boundary and lifecycle contract, while
-the attachment owns the longer app behavior details for Workbench, runtime
-controls, settings, files, status, commands, and browser host interactions.
-
-## Workbench Layout
-
-Workbench layout, navigation, inspector, file review, terminal, settings, and
-responsive shell behavior are specified in [Workbench Layout](workbench-layout.md).
-The split keeps the concrete UI surface maintainable without changing the
-Gateway lifecycle or transport contract.
+Managed mode mounts the Web Shell assets defined by
+[240 pevo Web](../240-pevo-web/spec.md), but this topic owns only lifecycle,
+launch, authorization, and static-asset serving concerns. The concrete
+Workbench product surface, browser host behavior, source binding, panels,
+commands, settings, files, and browser validation belong to `240`.
 
 The Web/Gateway implementation follows the architecture large-file limit from
 [001 Architecture](../001-architecture/spec.md). `server.rs` should remain a
 thin router/facade over modules for managed binding, launch/auth/static assets,
 RPC dispatch, scope/session/source resolution, settings/observability,
-downloads, and JSON-RPC helpers. Workbench app entrypoints should likewise be
-composition roots over state, session, command, composer, runtime, settings,
-and right-workspace modules rather than owning those domains inline.
+downloads, and JSON-RPC helpers.
 
 ## Validation
 
-Browser validation uses Playwright against the built Workbench served by
-`pevo gateway open --no-browser --print-url`, with isolated config, SQLite
-state, and workdir by default. It covers desktop and narrow viewport layout,
-Gateway connection, source/thread startup, history management, composer
-submission, permission/clarify surfaces, and download flows.
-
-Live model validation is explicit opt-in. When enabled, Playwright uses the
-configured live provider/model in an isolated workdir and must not print
-tokens or secrets.
-
-Live skill validation is a separate opt-in Playwright path. The reusable
-`live-skill` spec runs a configured skill prompt, samples the browser every
-three seconds, writes screenshots as test artifacts, and compares rendered DOM
-order against the isolated SQLite message-derived transcript. It waits for the
-accessible Transcript region and `Ask Psychevo...` composer before submitting,
-not legacy status-only chrome. Each screenshot sample prints its sample number,
-label, and artifact path to stdout so long live runs expose visible progress.
-The sampled transcript rows also print their nonvisual entry id, block id, block
-kind, turn id, status, and visible text so a failed screenshot can be tied back
-to Gateway projection shape. It must fail immediately if the Workbench render
-error boundary is visible, and must fail on stale running reasoning rows that
-duplicate committed reasoning, non-monotonic committed row order in the DOM,
-tool result JSON in collapsed headers, or evidence header overflow. It must also
-fail when an empty assistant update appears after a tool row or when a stale
-completion popover remains visible after prompt submission. The default prompt
-is `$x-daily`; callers may override the workdir, prompt, interval, timeout, and
-model through environment variables.
+Managed Gateway validation is specified in [Testing](testing.md). Browser and
+Workbench validation belongs to [240 pevo Web Testing](../240-pevo-web/testing.md).
 
 ## Attachments
 
-- [Web Shell](web-shell.md)
-- [Workbench Layout](workbench-layout.md)
-- [Testing](testing.md) defines managed Gateway and Workbench validation expectations.
+- [Testing](testing.md) defines managed Gateway validation expectations.
 
 ## Related Topics
 
 - [021 Gateway](../021-gateway/spec.md) defines source/thread/turn transport behavior.
-- [022 UI](../022-ui/spec.md) defines shared frontend package boundaries.
+- [022 UI](../022-ui/spec.md) defines shared UI foundation.
+- [240 pevo Web](../240-pevo-web/spec.md) defines concrete Web Shell and
+  Workbench behavior.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the `pevo` command product surface.
 - [221 pevo Serve](../221-pevo-serve/spec.md) defines the headless API server.

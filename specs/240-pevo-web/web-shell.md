@@ -398,7 +398,7 @@ lives in Settings > Agents. If a hidden command is typed explicitly,
 optional alternate action. Unknown slash-looking input returns `known=false`
 with a `passThroughPrompt` host action.
 `/btw` is a shared `Side chat` command defined by
-[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md). Web/Desktop
+[250 Thread Navigation](../250-ui-display-model/thread-navigation.md). Web/Desktop
 discovery and completion expose it only when the current Workbench surface has
 a concrete session id. Executing `/btw` returns a host action that opens a
 temporary `Side chat` tab and never adds a command transcript row to the

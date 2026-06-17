@@ -16,8 +16,9 @@ Define the concrete `pevo serve` headless local API server.
 
 Out of scope:
 
-- Web Shell lifecycle and browser launch behavior, owned by
-  [220 pevo Gateway](../220-pevo-gateway/spec.md)
+- managed Web launch behavior, owned by
+  [220 pevo Gateway](../220-pevo-gateway/spec.md), and concrete Web Shell
+  behavior, owned by [240 pevo Web](../240-pevo-web/spec.md)
 - public LAN, relay, TLS, account, or hosted service behavior
 - installer service or OS login-item daemon behavior
 
@@ -71,4 +72,5 @@ filter.
 
 - [021 Gateway](../021-gateway/spec.md) defines the transport-neutral Gateway.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the CLI surface.
-- [220 pevo Gateway](../220-pevo-gateway/spec.md) defines managed Web Shell lifecycle.
+- [220 pevo Gateway](../220-pevo-gateway/spec.md) defines managed Web launch
+  lifecycle.

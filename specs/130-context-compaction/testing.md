@@ -115,5 +115,7 @@ Broad deterministic validation:
   defines checkpoint storage.
 - [120 Provider Registry Testing](../120-provider-registry/testing.md) covers
   provider and compression configuration resolution.
-- [212 pevo TUI Interaction Testing](../212-pevo-tui-interaction/testing.md)
-  covers shared slash-command behavior.
+- [270 UI Interaction Testing](../270-ui-interaction/testing.md) covers shared
+  slash-command behavior.
+- [210 pevo TUI Testing](../210-pevo-tui/testing.md) covers the fullscreen
+  terminal projection.

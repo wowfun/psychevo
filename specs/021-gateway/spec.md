@@ -252,8 +252,9 @@ Gateway may expose a local transport facade for reconnectable Web, Desktop,
 shell, and API clients. The first facade is local-only: it binds loopback by
 default and does not create a public LAN listener, relay, TLS endpoint, or
 installer service. The foreground headless process is owned by
-[221 pevo Serve](../221-pevo-serve/spec.md). The managed Web Shell lifecycle is
-owned by [220 pevo Gateway](../220-pevo-gateway/spec.md).
+[221 pevo Serve](../221-pevo-serve/spec.md). Managed Web launch lifecycle is
+owned by [220 pevo Gateway](../220-pevo-gateway/spec.md), while concrete Web
+Shell behavior is owned by [240 pevo Web](../240-pevo-web/spec.md).
 
 The WebSocket facade uses strict JSON-RPC 2.0 with singular resource method
 names. Every request, response, and notification contains
@@ -415,7 +416,7 @@ execution delegation.
 ## Events And Transcript Entries
 
 Gateway projects runtime observations into the Psychevo transcript entry model
-defined by [213 pevo Display Model](../213-pevo-display-model/spec.md). The
+defined by [250 UI Display Model](../250-ui-display-model/spec.md). The
 model uses a Psychevo-owned thread/turn/entry contract and omits backend-specific
 fields unless they are required for Psychevo semantics.
 

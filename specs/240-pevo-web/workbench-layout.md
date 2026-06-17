@@ -41,7 +41,7 @@ any tab is open, the tab strip includes a `+` menu for creating more tabs of
 those types. Browser is not exposed in this slice.
 
 Workbench follows the shared thread-navigation display contract in
-[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md). `Side
+[250 Thread Navigation](../250-ui-display-model/thread-navigation.md). `Side
 chat` tabs are temporary side chats equivalent to submitting
 `/btw` from the GUI. Agent blocks that identify a child thread open that child
 thread in a right-workspace child tab rather than copying its content into the

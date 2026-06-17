@@ -200,5 +200,5 @@ surface; v1 does not add new RPC request fields.
   model-visible tools whose write and shell behavior this topic constrains.
 - [200 pevo CLI](../200-pevo-cli/spec.md) owns CLI invocation flags and slash
   command projection.
-- [220 pevo Gateway](../220-pevo-gateway/spec.md) owns Gateway command and
+- [240 pevo Web](../240-pevo-web/spec.md) owns Workbench command and
   `shell/start` projection.

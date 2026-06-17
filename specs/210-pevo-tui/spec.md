@@ -43,10 +43,10 @@ stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
   active-turn queueing, steering, interrupt, permission, clarify, and typed
   timeline projection
 
-Rendering-specific rules live in [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md).
+Rendering-specific rules live in [Rendering](rendering.md).
 Input, slash-command, popup, panel, and selection rules live in
-[212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md). This topic
-keeps the parent command contract and cross-cutting TUI state/session behavior.
+[Interaction](interaction.md). This topic keeps the parent command contract
+and cross-cutting TUI state/session behavior.
 
 Out of scope:
 
@@ -161,15 +161,18 @@ request text.
   behavior.
 - [State and Models](state-and-models.md) defines TUI-local state, model
   selection, catalog fetching, variants, and runtime modes.
+- [Rendering](rendering.md) defines terminal-specific layout and rendering
+  projection.
+- [Interaction](interaction.md) defines terminal-specific key handling, slash
+  panes, popups, and local selection behavior.
 - [Testing](testing.md) defines deterministic acceptance coverage and validation expectations.
 
 ## Related Topics
 
-- [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md) defines ledger
-  layout, evidence projection, rendering rules, and visual diagnostics.
-- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines key
-  handling, slash commands, file completion, user shell escapes, panels, and
-  local text selection.
+- [Rendering](rendering.md) defines ledger layout, evidence projection,
+  rendering rules, and visual diagnostics.
+- [Interaction](interaction.md) defines key handling, slash commands, file
+  completion, user shell escapes, panels, and local text selection.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the product CLI surface.
 - [026 Commands](../026-commands/spec.md) defines shared command contract
   conventions.

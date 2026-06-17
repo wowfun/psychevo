@@ -107,7 +107,7 @@ remains outside broad validation and must not require live provider credentials.
 - [115 Interactive Clarify Tool](spec.md) defines the functional contract.
 - [210 pevo TUI Testing](../210-pevo-tui/testing.md) covers parent TUI/runtime
   integration.
-- [211 pevo TUI Rendering Testing](../211-pevo-tui-rendering/testing.md) owns
-  shared rendering and visual-regression rules.
-- [212 pevo TUI Interaction Testing](../212-pevo-tui-interaction/testing.md)
-  owns shared input and bottom-panel interaction coverage.
+- [260 UI Rendering Testing](../260-ui-rendering/testing.md) owns shared
+  rendering rules.
+- [270 UI Interaction Testing](../270-ui-interaction/testing.md) owns shared
+  input and bottom-panel interaction coverage.

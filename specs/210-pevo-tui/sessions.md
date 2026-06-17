@@ -192,5 +192,5 @@ with bounded pane feedback instead of interrupting the turn.
 
 ## Related Topics
 
-- [210 pevo TUI](spec.md) is the parent topic.
-- [210 pevo TUI Testing](testing.md) defines deterministic acceptance coverage.
+- [Spec](spec.md) is the parent topic.
+- [Testing](testing.md) defines deterministic acceptance coverage.

@@ -162,13 +162,14 @@ loopback by default, requires an explicit token from `PSYCHEVO_SERVE_TOKEN` or
 Web Shell in the public command surface. Its concrete API behavior is owned by
 [221 pevo Serve](../221-pevo-serve/spec.md).
 
-`pevo gateway` owns managed local Web Shell lifecycle. With no subcommand it is
+`pevo gateway` owns managed local Web launch lifecycle. With no subcommand it is
 equivalent to `pevo gateway open`. `open`, `start`, `status`, `stop`, and
 `restart` emit one JSON object to stdout. Managed state lives under
 `$PSYCHEVO_HOME/gateway/`, uses an owner-only generated token, and may start
-`pevo serve` with internal flags to mount built Workbench assets. The concrete
-managed Web Shell behavior is owned by
-[220 pevo Gateway](../220-pevo-gateway/spec.md).
+`pevo serve` with internal flags to mount built Workbench assets. Managed
+launch behavior is owned by [220 pevo Gateway](../220-pevo-gateway/spec.md);
+the concrete Web Shell and Workbench behavior is owned by
+[240 pevo Web](../240-pevo-web/spec.md).
 
 `pevo doctor` owns local deterministic diagnostics. By default it checks local
 paths, config readability, SQLite path selection, configured model/auth status,

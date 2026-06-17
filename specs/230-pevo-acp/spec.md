@@ -125,7 +125,7 @@ locally before invoking the model-backed runtime path.
 
 ACP does not advertise the shared `Side chat` command capability.
 `/btw` remains a TUI/Workbench `Side chat` affordance defined by
-[213 Thread Navigation](../213-pevo-display-model/thread-navigation.md);
+[250 Thread Navigation](../250-ui-display-model/thread-navigation.md);
 when an ACP prompt explicitly uses the known command, ACP returns bounded
 unsupported-command guidance and must not create a child thread or pass the
 command through to the model.

@@ -5,32 +5,34 @@ psychevo_self_edit: deny
 
 # 075. Design System
 
-Define Psychevo's shared visual and interaction system. This topic is the
-source of truth for TUI surface language; implementation-specific TUI rendering
-lives in [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md), and
-interaction behavior lives in
-[212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md).
+Define Psychevo's shared visual and interaction language. This topic owns the
+high-level Adaptive Workbench direction; concrete transcript rendering,
+interaction mechanics, and product layout live in the UI and product specs that
+consume it.
 
 ## Scope
 
-- shared TUI visual language and surface hierarchy
-- compact glyph language, color roles, and adaptive terminal fallback
+- shared visual language and surface hierarchy
+- compact glyph/icon language, color roles, and adaptive host fallback
 - core transcript, prompt, composer, status line, sidebar, picker, and bottom
   panel surface treatment
 - evidence language for inline ledger rows, collapsed details, and active work
 - composer-first interaction baseline and default shortcut expectations
-- internal measurement-and-rendering contract for TUI components
+- semantic rendering architecture expectations
 - deterministic design-system validation expectations
 
 Out of scope:
 
-- concrete TUI command behavior, slash parsing, file completion, and selection
-  mechanics; these belong to [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md)
-- transcript layout, evidence projection, sidebar composition, and terminal
-  rendering implementation; these belong to
-  [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md)
-- durable session, model, and fullscreen command state; these belong to
+- semantic display-model ownership; this belongs to
+  [250 UI Display Model](../250-ui-display-model/spec.md)
+- concrete rendering and interaction invariants; these belong to
+  [260 UI Rendering](../260-ui-rendering/spec.md) and
+  [270 UI Interaction](../270-ui-interaction/spec.md)
+- concrete TUI command behavior, terminal rendering, keymaps, slash parsing,
+  file completion, and selection mechanics; these belong to
   [210 pevo TUI](../210-pevo-tui/spec.md)
+- concrete Web/Workbench layout and browser implementation; these belong to
+  [240 pevo Web](../240-pevo-web/spec.md)
 - runtime evidence semantics, storage formats, provider payloads, or public
   Rust APIs
 
@@ -157,20 +159,13 @@ The V1 keymap is fixed, but implementation should keep the key handling
 organized so a future keymap configuration and conflict-checking layer can be
 added without rewriting every component.
 
-## Engineering Contract
+## Engineering Direction
 
-TUI components use a small internal measurement-and-rendering contract:
-
-- `desired_height(width)` reports the rows needed for the current state.
-- `render(area, buf)` draws into the provided terminal area.
-- Components that own cursor state may report cursor position and style.
-
-This is an internal Rust TUI contract, not a public API. Shared list surfaces
-should build a display row model for measurement and rendering. Transcript
-rendering should flow from semantic rows to render blocks/view models and then
-to layout measurement cache. Do not make cached Ratatui `Line` or `Text`
-objects the primary architecture; prefer stable row ids, viewport-intersecting
-blocks, measured heights, and shared column measurements.
+Rendering should flow from semantic transcript/display facts to surface-native
+view models and then to concrete layout. Cached terminal lines, DOM fragments,
+or viewport-dependent wrapping are not durable UI facts. Concrete component
+measurement, layout caching, and host-specific rendering contracts belong to
+the product surface that implements them.
 
 Design-system tests are deterministic. They should verify visual roles,
 adaptive theme fallback, component layout, cache invalidation, and interaction
@@ -187,9 +182,14 @@ semantics without live providers, API keys, or terminal palette dependence.
   semantics that the TUI design makes inspectable.
 - [070 Experience](../070-experience/spec.md) defines cross-surface UX and DX
   expectations.
+- [022 UI](../022-ui/spec.md) defines shared UI ownership boundaries.
+- [250 UI Display Model](../250-ui-display-model/spec.md) defines semantic
+  transcript projection and display-only boundaries.
+- [260 UI Rendering](../260-ui-rendering/spec.md) defines cross-surface
+  rendering invariants.
+- [270 UI Interaction](../270-ui-interaction/spec.md) defines cross-surface
+  interaction semantics.
 - [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
-  terminal command and shared TUI state.
-- [211 pevo TUI Rendering](../211-pevo-tui-rendering/spec.md) defines concrete
-  transcript, status-line, sidebar, and terminal rendering behavior.
-- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines
-  concrete input handling, slash commands, and selection behavior.
+  terminal command and TUI-specific rendering/interaction behavior.
+- [240 pevo Web](../240-pevo-web/spec.md) defines concrete Web/Workbench
+  layout and browser behavior.

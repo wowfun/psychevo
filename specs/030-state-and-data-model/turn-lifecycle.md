@@ -77,7 +77,7 @@ must settle through terminal lifecycle semantics.
   ownership.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines
   durable storage boundaries.
-- [213 Thread Navigation](../213-pevo-display-model/thread-navigation.md) defines
+- [250 Thread Navigation](../250-ui-display-model/thread-navigation.md) defines
   child thread display behavior.
-- [220 pevo Gateway](../220-pevo-gateway/spec.md) defines the Workbench/Web
+- [240 pevo Web](../240-pevo-web/spec.md) defines the Workbench/Web
   projection.

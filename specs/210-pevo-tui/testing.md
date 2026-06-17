@@ -5,106 +5,38 @@ psychevo_self_edit: deny
 
 # 210. pevo TUI Testing
 
-Define deterministic acceptance coverage for the parent `pevo tui` topic:
-startup, state, session ownership, model/runtime integration, and cross-topic
-validation. Rendering-specific coverage lives in
-[211 pevo TUI Rendering Testing](../211-pevo-tui-rendering/testing.md).
-Interaction-specific coverage lives in
-[212 pevo TUI Interaction Testing](../212-pevo-tui-interaction/testing.md).
+Define acceptance expectations and validation scenarios for the concrete
+`pevo tui` terminal surface.
+
+## Long-Term Acceptance Contract
+
+- `pevo tui` starts the fullscreen terminal surface for interactive terminals
+  and keeps deterministic line-by-line behavior for non-terminal stdin/stdout.
+- TUI-local model, variant, mode, thinking visibility, raw transcript
+  visibility, sidebar visibility, and configured slash aliases/keybindings are
+  persisted and restored without changing CLI command spelling or provider
+  payloads.
+- Session selection, resume, switching, archive/delete, title, history reload,
+  running-session indicators, undo/redo-adjacent behavior, and cross-surface
+  Gateway activity remain consistent with shared session/display contracts.
+- Terminal rendering projects shared display-model entries through the TUI
+  ledger without persisting viewport-wrapped terminal lines as durable display
+  state.
+- TUI key handling remains recoverable: active local UI state clears before
+  interruption, and interruption wakes provider waits, shell waits, and pending
+  approval/clarify state.
+- TUI-specific slash menus, bottom panes, file/image/agent/skill popups,
+  approval panels, and `/diff` overlays project shared UI command results
+  without creating ordinary transcript content unless the shared contract says
+  a transcript turn is being submitted.
+- Deterministic terminal visual captures keep running-agent, clarification,
+  permission, and tool states observable without depending on real provider
+  latency.
+
+## Current Implementation Slice
 
 Automation vocabulary and generic validation boundaries follow
 [060 Automation](../060-automation/spec.md).
-
-## Scope
-
-- TUI-local state persistence and startup behavior
-- session selection, resume, archive/delete, title, and history ownership
-- model, variant, mode, context usage, and local accounting integration
-- scripted/non-terminal `pevo tui` behavior that is not purely rendering or
-  interaction-specific
-- runtime stream projection contracts that affect TUI state across rendering
-  and interaction boundaries
-
-Out of scope:
-
-- transcript, status-line, sidebar, Markdown, Agent-row, and visual-regression
-  rendering coverage; see
-  [211 testing](../211-pevo-tui-rendering/testing.md)
-- keymaps, slash commands, popups, panels, mouse routing, selection, clipboard,
-  user shell interaction, and agent controls; see
-  [212 testing](../212-pevo-tui-interaction/testing.md)
-
-## Deterministic Tests
-
-Required parent-topic coverage:
-
-- TUI state read/write, version tolerance, per-workdir model and variant
-  precedence, per-workdir mode persistence, global thinking persistence, global
-  raw transcript visibility persistence, global sidebar visibility persistence,
-  and recent-model bounding.
-- Default TUI session selection of the latest `run` or `tui` session by
-  canonical workdir, explicit `--session`, `--new`, and startup-history loading
-  for selected/latest sessions.
-- Session title persistence, `/rename <title>` effects on the current session,
-  automatic title generation with model success, deterministic first-prompt
-  fallback when title generation fails or returns an unusable title, selected
-  skill context in non-persisted title requests, and sidebar/session picker
-  refresh after detached post-`agent_end` title generation completes.
-- Session history loading and replacement without synthetic status rows,
-  preserving persisted folded reasoning as local Thinking evidence and
-  persisted elapsed time in turn metadata when available.
-- Running-session switching isolates stream projection: output from the
-  previous running session must not appear in the newly displayed session,
-  switching back replays that session's live buffered events, background
-  completion must not steal `current_session`, and `/new` must remain free of
-  stale running output.
-- `--new` and fullscreen `/new` session creation/clearing behavior, including
-  no transcript status row, reset of context usage state, pending images, and
-  stale terminal glyphs.
-- Non-terminal scripted input with prompt lines and slash commands, including
-  line-by-line handling and deterministic output for local state commands.
-- Runtime stream projection that never leaks folded reasoning into sanitized
-  message events while still delivering dedicated TUI thinking events.
-- Runtime metrics projection that can expose usage and allowlisted metadata to
-  TUI without putting them in sanitized transcript messages.
-- Runtime Plan mode toolset: exposes `read`, `exec_command`, `write_stdin`, and
-  fullscreen-interactive `clarify`; does not expose `write`, `edit`,
-  dedicated `list`, or dedicated `search`.
-- TUI tool evidence does not keep compatibility rendering for removed
-  `list` or `search` coding tools; unexpected records with those names follow
-  the generic unknown-tool rendering path.
-- Mode instruction is sent to providers for the current turn and is not
-  persisted in `messages`.
-- Local stats and accounting projection from persisted columns, including
-  unknown-priced messages and known free messages.
-- Context usage state sourced from the latest context snapshot or latest
-  provider input usage when a context limit is known, restored on resume and
-  session switching before first draw.
-- Agent runtime identity tests for `@agent-name` delegations resolving to that
-  definition name rather than `general`, `name` alias compatibility,
-  `name`/`agent_type` conflict errors, explicit unknown agent errors, and
-  omitted agent names defaulting to `general`.
-- Nested-agent runtime tests for effective `max_spawn_depth`: unset, `null`,
-  and `0` make a direct child a leaf; `1` allows one grandchild level and
-  decrements the remaining depth to `0`; pause-new-spawns rejects new `Agent`
-  calls without interrupting already running children.
-
-## Cross-Topic Acceptance
-
-Parent tests should assert invariants that span rendering and interaction
-without duplicating detailed coverage from 211 or 212:
-
-- Normal completion drains queued input FIFO; interrupted fullscreen turns
-  restore queued prompt and shell inputs to the composer instead of starting
-  the next queue item automatically.
-- Multi-tool turns that emit visible assistant text before and after tool calls
-  preserve each visible assistant message as a separate answer block; later
-  streaming updates must not replace earlier answer text from the same turn.
-- Cleanup after undo/redo, session switching, `/new`, and interrupted turns
-  must keep persisted session state, visible transcript state, and next provider
-  context aligned.
-
-## Validation
 
 Relevant narrow validation:
 
@@ -113,6 +45,51 @@ Relevant narrow validation:
 - `cargo test -p psychevo-runtime`
 - `cargo test -p psychevo-cli`
 
-Broad validation remains:
+Broad validation remains `scripts/validate.sh`. Documentation-only changes to
+this topic do not require code tests unless executable examples, generated
+artifacts, or validation instructions change.
 
-- `scripts/validate.sh`
+Manual real-provider validation is opt-in only.
+
+## Scenario Matrix
+
+- TUI state read/write, version tolerance, per-workdir model and variant
+  precedence, mode persistence, thinking/raw/sidebar visibility persistence,
+  configured alias/shortcut parsing, and startup rejection for invalid
+  keybinding configuration.
+- Default session selection, explicit `--session`, `--new`, startup-history
+  loading, session switching, live buffered event replay, background completion
+  isolation, and cross-surface running activity visibility.
+- Fullscreen ledger projection for prompt blocks, Thinking, tool/evidence,
+  Agent rows, assistant answers, compact metadata, context usage, status line,
+  sidebars, terminal Markdown, raw display, and non-terminal plain rendering.
+- Terminal palette fallback, adaptive prompt/composer surfaces, passive redraw
+  cadence, active elapsed labels, deterministic reduced-motion behavior, and
+  VHS capture of running/permission/clarify/tool states.
+- Composer behavior for submit, newline insertion, history recall, shell mode,
+  local selection, bracketed paste, file/image completion, transcript focus,
+  mouse routing, clipboard fallback, and contextual help.
+- Slash command parsing, registry-backed discovery, terminal menu navigation,
+  `/help`, `/status`, `/context`, `/usage`, `/diff`, `/model`, `/variant`,
+  `/mode`, `/permissions`, `/sandbox`, `/copy`, `/export`, `/share`,
+  `/image`, `/undo`, `/redo`, dynamic skill/bundle commands, and bounded
+  feedback for unsupported or invalid command states.
+- Pending steer/queue UI, normal queue FIFO drain, interrupted foreground turns
+  restoring queued prompt and shell inputs to the composer, and stale steer
+  rejection feedback.
+- TUI approval and clarify panels: FIFO request display, keyboard/mouse
+  resolution, supported option filtering, interruption cleanup, and bounded
+  stale-response feedback.
+- `/agents`, `@agent`, `/fork`, Agent row open/toggle behavior, child-thread
+  foreground entry, parent navigation, and selected-main-agent controls.
+
+## Validation Boundaries
+
+- Tests should compare semantic transcript/display facts and stable terminal
+  behavior, not viewport-private line buffers or provider payload shapes.
+- Rendering tests may use terminal snapshots and VHS captures, but should avoid
+  brittle full-screen snapshots when structured row facts are available.
+- TUI tests must use fake or test providers and isolated `PSYCHEVO_HOME`,
+  config, SQLite state, workdir, timers, sockets, and terminal fixtures.
+- Live provider failures must be reported separately from deterministic TUI
+  regressions.

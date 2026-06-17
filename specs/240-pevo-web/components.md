@@ -383,6 +383,13 @@ clarify, Agent, MCP tools, and generic extension tools. This projection is a UI
 rendering concern and does not change transcript ordering or tool execution
 semantics.
 
+Workbench transcript evidence renders successful update-tool diffs inline when
+the tool result contains a strict-parseable Git patch. The collapsed evidence
+title summarizes edited paths and addition/deletion counts, and the completed
+row defaults open with a compact single-gutter diff. Review tabs reuse the same
+parsed diff model for full workspace previews, but keep their dual-gutter
+Review presentation and right-workspace layout.
+
 Transcript components must render message-derived entries in canonical order
 even when an app store or reconnect path provides a temporarily shuffled array.
 Durable entries are ordered by `TranscriptEntry.messageSeq`; blocks inside an

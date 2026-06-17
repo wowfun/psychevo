@@ -257,5 +257,5 @@ or compatibility shim is required before the product is released.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the required
   coding-core toolset, which skill tools do not join.
 - [200 pevo CLI](../200-pevo-cli/spec.md) owns concrete command spelling.
-- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) owns
+- [210 pevo TUI Interaction](../210-pevo-tui/interaction.md) owns
   interactive slash projection.

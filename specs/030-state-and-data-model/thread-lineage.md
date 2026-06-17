@@ -25,7 +25,7 @@ Out of scope:
 - child-agent execution semantics, which belong to
   [051 Subagents](../051-agents/subagents.md)
 - surface-specific tab, row, keybinding, or layout behavior, which belongs to
-  [213 Thread Navigation](../213-pevo-display-model/thread-navigation.md) and
+  [250 Thread Navigation](../250-ui-display-model/thread-navigation.md) and
   surface specs
 
 ## Thread And Session Vocabulary
@@ -141,5 +141,5 @@ do not replace the child thread's transcript.
 - [030 Transcript State](transcript-state.md) defines ordinary transcript fact
   ownership.
 - [051 Subagents](../051-agents/subagents.md) defines child-agent execution.
-- [213 Thread Navigation](../213-pevo-display-model/thread-navigation.md) defines
+- [250 Thread Navigation](../250-ui-display-model/thread-navigation.md) defines
   shared display and navigation behavior for side and subagent threads.

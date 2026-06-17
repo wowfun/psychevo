@@ -227,7 +227,7 @@ GUI display-only feedback is scoped to the active session/workdir and must be
 cleared when that scope changes or when new user input is submitted.
 This boundary follows the transcript state and projection ownership defined by
 [030 Transcript State](../030-state-and-data-model/transcript-state.md) and
-[213 pevo Display Model](../213-pevo-display-model/spec.md).
+[250 UI Display Model](../250-ui-display-model/spec.md).
 
 Statuses are:
 
@@ -323,7 +323,7 @@ Concrete surfaces may wrap these messages in their normal error presentation.
   defaults.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product
   command line.
-- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines the
+- [210 pevo TUI Interaction](../210-pevo-tui/interaction.md) defines the
   fullscreen interactive slash command surface.
 - [027 ACP](../027-acp/spec.md) defines ACP slash-command projection.
 - [214 pevo Diff Command](../214-pevo-diff-command/spec.md) defines the

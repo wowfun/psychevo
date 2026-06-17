@@ -1,5 +1,5 @@
 ---
-name: 213. pevo Display Model Testing
+name: 250. UI Display Model Testing
 psychevo_self_edit: deny
 ---
 
@@ -32,7 +32,8 @@ transcript projection contract.
   become model-visible messages, session exports, usage/cost accounting, or
   ordinary transcript entries.
 - Parsed UI projections from stable tool-result fields, such as `edit.diff`,
-  do not replace or mutate the model-visible tool result.
+  do not replace or mutate the model-visible tool result, and parse failures
+  fall back to the original display text.
 
 ## Current Implementation Slice
 
@@ -71,6 +72,9 @@ validation.
   tool-result relationship exists.
 - Display-only `/diff` or command feedback does not change transcript history,
   model context, export content, or usage statistics.
+- Parsed diff projection from a tool result remains display-only: successful
+  parsing may add render metadata, while malformed diff content still exposes
+  the original result text and does not change transcript facts.
 - Child thread creation controls are hidden for draft/no-session states while
   explicit commands return bounded guidance, and opened side/child threads
   render ordinary transcript projection for their own session ids.

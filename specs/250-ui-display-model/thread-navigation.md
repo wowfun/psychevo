@@ -1,9 +1,9 @@
 ---
-name: 213. pevo Display Model Thread Navigation
+name: 250. UI Display Model Thread Navigation
 psychevo_self_edit: deny
 ---
 
-# 213. pevo Display Model Thread Navigation
+# 250. UI Display Model Thread Navigation
 
 Define shared display and navigation behavior for threads that are inspected
 from another active thread, including Side chat and subagent
@@ -182,11 +182,11 @@ threads in tabs or history views as ordinary threads.
 
 ## Related Topics
 
-- [213 pevo Display Model](spec.md) defines ordinary transcript projection.
+- [Spec](spec.md) defines ordinary transcript projection.
 - [030 Thread Lineage](../030-state-and-data-model/thread-lineage.md) defines
   shared parent, child, side, and subagent thread vocabulary.
 - [051 Subagents](../051-agents/subagents.md) defines child-agent execution.
-- [212 pevo TUI Interaction](../212-pevo-tui-interaction/spec.md) defines TUI
+- [210 pevo TUI Interaction](../210-pevo-tui/interaction.md) defines TUI
   projection-specific controls.
-- [220 pevo Gateway](../220-pevo-gateway/spec.md) defines Workbench/Web shell
+- [240 pevo Web](../240-pevo-web/spec.md) defines Workbench/Web shell
   projection-specific layout.

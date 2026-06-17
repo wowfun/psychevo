@@ -97,4 +97,4 @@ truncated states use the same structured placeholders as `/diff`.
 
 - [026 Commands](../026-commands/spec.md)
 - [027 ACP](../027-acp/spec.md)
-- [213 pevo Display Model](../213-pevo-display-model/spec.md)
+- [250 UI Display Model](../250-ui-display-model/spec.md)

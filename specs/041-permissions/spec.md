@@ -328,7 +328,7 @@ recent smart denial with `/approve once|session|always`.
   input tool that must not substitute for permission approval.
 - [200 pevo CLI](../200-pevo-cli/spec.md) owns concrete CLI permission flags
   and rule-management commands.
-- [212 TUI Interaction](../212-pevo-tui-interaction/spec.md) owns interactive
+- [210 TUI Interaction](../210-pevo-tui/interaction.md) owns interactive
   mode and permissions projection.
 - [027 ACP](../027-acp/spec.md) owns ACP permission-request projection for
   runtime asks.
