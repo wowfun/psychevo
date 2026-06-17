@@ -158,6 +158,10 @@ fn observability_read_value(
                 cache_write_tokens: summary.cache_write_tokens,
                 reported_total_tokens: summary.reported_total_tokens,
                 estimated_cost_nanodollars: summary.estimated_cost_nanodollars,
+                cost_status: summary.cost_status,
+                estimated_pricing_count: summary.estimated_pricing_count,
+                free_pricing_count: summary.free_pricing_count,
+                included_pricing_count: summary.included_pricing_count,
                 unknown_pricing_count: summary.unknown_pricing_count,
                 cache_read_percent: summary.cache_read_percent,
             };
@@ -207,10 +211,21 @@ fn apply_acp_peer_usage_to_summary(
             usage.context_input_tokens = used;
         }
     }
-    if usage.estimated_cost_nanodollars == 0
+    let has_persisted_pricing = usage.estimated_pricing_count
+        + usage.free_pricing_count
+        + usage.included_pricing_count
+        > 0;
+    if !has_persisted_pricing
         && let Some(cost) = acp_peer_usage_cost_nanodollars(peer_usage)
     {
         usage.estimated_cost_nanodollars = cost;
+        usage.cost_status = if cost == 0 {
+            "free".to_string()
+        } else {
+            "estimated".to_string()
+        };
+        usage.estimated_pricing_count = (cost > 0) as u64;
+        usage.free_pricing_count = (cost == 0) as u64;
     }
 }
 
@@ -267,9 +282,76 @@ fn usage_unavailable() -> wire::SessionUsageSummaryView {
         cache_write_tokens: 0,
         reported_total_tokens: 0,
         estimated_cost_nanodollars: 0,
+        cost_status: "unknown".to_string(),
+        estimated_pricing_count: 0,
+        free_pricing_count: 0,
+        included_pricing_count: 0,
         unknown_pricing_count: 0,
         cache_read_percent: None,
     }
+}
+
+fn usage_read_value(
+    state: &WebState,
+    params: wire::UsageReadParams,
+) -> psychevo_runtime::Result<Value> {
+    let result = usage_read(UsageReadOptions {
+        state: state.inner.state.clone(),
+        activity_days: params.activity_days.unwrap_or(365) as usize,
+    })?;
+    Ok(serde_json::to_value(wire::UsageReadResult {
+        generated_at_ms: result.generated_at_ms,
+        windows: result
+            .windows
+            .into_iter()
+            .map(|window| wire::UsageWindowSummaryView {
+                id: window.id,
+                label: window.label,
+                since_ms: window.since_ms,
+                session_count: window.session_count,
+                message_count: window.message_count,
+                assistant_message_count: window.assistant_message_count,
+                context_input_tokens: window.context_input_tokens,
+                billable_input_tokens: window.billable_input_tokens,
+                billable_output_tokens: window.billable_output_tokens,
+                reasoning_tokens: window.reasoning_tokens,
+                cache_read_tokens: window.cache_read_tokens,
+                cache_write_tokens: window.cache_write_tokens,
+                reported_total_tokens: window.reported_total_tokens,
+                estimated_cost_nanodollars: window.estimated_cost_nanodollars,
+                cost_status: window.cost_status,
+                estimated_pricing_count: window.estimated_pricing_count,
+                free_pricing_count: window.free_pricing_count,
+                included_pricing_count: window.included_pricing_count,
+                unknown_pricing_count: window.unknown_pricing_count,
+                cache_read_percent: window.cache_read_percent,
+            })
+            .collect(),
+        activity: wire::UsageActivityView {
+            start_date: result.activity.start_date,
+            end_date: result.activity.end_date,
+            days: result
+                .activity
+                .days
+                .into_iter()
+                .map(|day| wire::UsageActivityDayView {
+                    date: day.date,
+                    session_count: day.session_count,
+                    message_count: day.message_count,
+                    reported_total_tokens: day.reported_total_tokens,
+                    context_input_tokens: day.context_input_tokens,
+                    cache_read_tokens: day.cache_read_tokens,
+                    cache_write_tokens: day.cache_write_tokens,
+                    estimated_cost_nanodollars: day.estimated_cost_nanodollars,
+                    cost_status: day.cost_status,
+                    estimated_pricing_count: day.estimated_pricing_count,
+                    free_pricing_count: day.free_pricing_count,
+                    included_pricing_count: day.included_pricing_count,
+                    unknown_pricing_count: day.unknown_pricing_count,
+                })
+                .collect(),
+        },
+    })?)
 }
 
 fn settings_read_value(

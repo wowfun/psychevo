@@ -49,6 +49,43 @@ describe("parseThreadSnapshot", () => {
     expect(parsed.pendingClarifies).toEqual([]);
   });
 
+  it("preserves optional activity fields when applying defaults", () => {
+    const parsed = parseThreadSnapshot({
+      source: {
+        kind: "web",
+        rawId: "workdir:abc",
+        lifetime: "persistent",
+        rawIdentity: null,
+        visibleName: "psychevo"
+      },
+      thread: null,
+      entries: [],
+      activity: {
+        running: true,
+        activeTurnId: "turn-1",
+        queuedTurns: 0,
+        startedAtMs: 1_000,
+        updatedAtMs: 2_000,
+        ownerId: "gateway:owner",
+        ownerSurface: "web",
+        leaseExpiresAtMs: 30_000,
+        takeoverState: "requested"
+      }
+    });
+
+    expect(parsed.activity).toEqual({
+      running: true,
+      activeTurnId: "turn-1",
+      queuedTurns: 0,
+      startedAtMs: 1_000,
+      updatedAtMs: 2_000,
+      ownerId: "gateway:owner",
+      ownerSurface: "web",
+      leaseExpiresAtMs: 30_000,
+      takeoverState: "requested"
+    });
+  });
+
   it("preserves message-derived entries in a history snapshot", () => {
     const parsed = parseThreadSnapshot({
       source: {

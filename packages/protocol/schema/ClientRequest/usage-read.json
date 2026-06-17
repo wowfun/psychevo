@@ -1,0 +1,37 @@
+{
+  "$id": "ClientRequest/usage-read.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "UsageReadParams": {
+      "properties": {
+        "activityDays": {
+          "default": null,
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "usage/read"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/UsageReadParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest usage/read",
+  "type": "object"
+}

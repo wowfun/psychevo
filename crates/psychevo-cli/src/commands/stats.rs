@@ -61,6 +61,14 @@ pub(crate) fn print_human_report(report: &Value) {
         "Estimated cost: {}",
         format_nanodollars(int(totals, "estimated_cost_nanodollars"))
     );
+    let estimated = int(totals, "estimated_priced_messages");
+    let free = int(totals, "free_priced_messages");
+    let included = int(totals, "included_priced_messages");
+    if estimated + free + included > 0 {
+        println!(
+            "Priced assistant messages: {estimated} estimated  {free} free  {included} included"
+        );
+    }
     if int(totals, "unknown_priced_messages") > 0 {
         println!(
             "Unknown-priced assistant messages: {}",

@@ -1011,6 +1011,182 @@ fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() 
 }
 
 #[test]
+fn thread_snapshot_replays_running_exec_live_overlay() {
+    let (_temp, state) = web_state();
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let store = state.inner.state.store();
+    let session_id = store
+        .create_session_with_metadata(
+            &state.inner.workdir,
+            "web",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("session");
+    store
+        .append_message(
+            &session_id,
+            &RuntimeMessage::Assistant {
+                content: vec![psychevo_runtime::AssistantBlock::ToolCall(
+                    psychevo_runtime::ToolCallBlock {
+                        id: "call_exec".to_string(),
+                        name: "exec_command".to_string(),
+                        arguments: json!({"cmd": "python fetch.py"}),
+                        arguments_json: "{\"cmd\":\"python fetch.py\"}".to_string(),
+                        arguments_error: None,
+                        content_index: 0,
+                        call_index: 0,
+                    },
+                )],
+                timestamp_ms: 10,
+                finish_reason: Some("tool_calls".to_string()),
+                outcome: psychevo_runtime::Outcome::Normal,
+                model: Some("fake-model".to_string()),
+                provider: Some("fake-provider".to_string()),
+            },
+        )
+        .expect("append assistant tool call");
+    store
+        .append_message(
+            &session_id,
+            &RuntimeMessage::ToolResult {
+                tool_call_id: "call_exec".to_string(),
+                tool_name: "exec_command".to_string(),
+                content: "{\"session_id\":7,\"exit_code\":null,\"output\":\"first\\n\"}".to_string(),
+                is_error: false,
+                timestamp_ms: 20,
+            },
+        )
+        .expect("append yielded exec result");
+
+    let turn_id = "turn-running";
+    let activity = store
+        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+            activity_id: turn_id,
+            thread_id: Some(&session_id),
+            source_key: None,
+            turn_id: Some(turn_id),
+            kind: "turn",
+            owner_id: state.inner.gateway.owner_id(),
+            owner_surface: Some("web"),
+            lease_expires_at_ms: gateway_now_ms() + 30_000,
+            queued_turns: 0,
+            superseded_activity_id: None,
+            intent: None,
+        })
+        .expect("claim running activity");
+
+    append_exec_live_update(
+        &state,
+        &activity.activity_id,
+        &session_id,
+        turn_id,
+        "first\nsecond\n",
+    );
+    append_exec_live_update(
+        &state,
+        &activity.activity_id,
+        &session_id,
+        turn_id,
+        "first\nsecond\npoll\n",
+    );
+
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+    assert_eq!(
+        snapshot["activity"]["startedAtMs"],
+        json!(activity.started_at_ms),
+        "{snapshot:#}"
+    );
+    let entries = snapshot["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 1, "{snapshot:#}");
+    let exec_blocks = entries
+        .iter()
+        .flat_map(|entry| entry["blocks"].as_array().into_iter().flatten())
+        .filter(|block| block["metadata"]["tool_name"] == "exec_command")
+        .collect::<Vec<_>>();
+    assert_eq!(exec_blocks.len(), 1, "{snapshot:#}");
+    let exec = exec_blocks[0];
+    assert_eq!(exec["status"], "running");
+    assert_eq!(exec["metadata"]["result"]["output"], "first\nsecond\npoll\n");
+    assert_eq!(exec["metadata"]["result"]["session_id"], 7);
+}
+
+fn append_exec_live_update(
+    state: &WebState,
+    activity_id: &str,
+    session_id: &str,
+    turn_id: &str,
+    output: &str,
+) {
+    let entry = TranscriptEntry {
+        id: format!("live:{turn_id}:assistant:0"),
+        thread_id: session_id.to_string(),
+        turn_id: Some(turn_id.to_string()),
+        message_seq: None,
+        role: TranscriptEntryRole::Assistant,
+        status: TranscriptBlockStatus::Running,
+        source: "runtime.stream".to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("live:{turn_id}:tool:call_exec"),
+            kind: TranscriptBlockKind::Shell,
+            status: TranscriptBlockStatus::Running,
+            order: 0,
+            source: "runtime.stream".to_string(),
+            title: Some("exec_command python fetch.py".to_string()),
+            body: Some(json!({
+                "session_id": 7,
+                "exit_code": null,
+                "output": output,
+            }).to_string()),
+            preview: Some(output.to_string()),
+            detail: Some(json!({
+                "session_id": 7,
+                "exit_code": null,
+                "output": output,
+            }).to_string()),
+            artifact_ids: Vec::new(),
+            metadata: Some(json!({
+                "projection": "tool",
+                "tool_name": "exec_command",
+                "tool_call_id": "call_exec",
+                "args": {"cmd": "python fetch.py"},
+                "result": {
+                    "session_id": 7,
+                    "exit_code": null,
+                    "output": output,
+                },
+            })),
+            result: None,
+            created_at_ms: 30,
+            updated_at_ms: 40,
+        }],
+        metadata: Some(json!({"streamSeq": 1, "liveOrder": 0})),
+        usage: None,
+        accounting: None,
+        created_at_ms: 30,
+        updated_at_ms: 40,
+    };
+    let event = GatewayEvent::EntryUpdated {
+        turn_id: turn_id.to_string(),
+        entry,
+    };
+    let event_value = serde_json::to_value(event).expect("event value");
+    state
+        .inner
+        .state
+        .store()
+        .append_gateway_live_event(
+            Some(activity_id),
+            Some(state.inner.gateway.owner_id()),
+            Some(session_id),
+            Some(turn_id),
+            &event_value,
+        )
+        .expect("append live event");
+}
+
+#[test]
 fn bind_source_to_thread_keeps_previous_history_active() {
     let (_temp, state) = web_state();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");

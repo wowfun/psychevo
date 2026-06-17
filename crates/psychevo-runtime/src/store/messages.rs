@@ -132,7 +132,8 @@ impl SqliteStore {
                    context_input_tokens, billable_input_tokens, billable_output_tokens,
                    reasoning_tokens, cache_read_tokens, cache_write_tokens,
                    reported_total_tokens, estimated_cost_nanodollars,
-                   pricing_source, pricing_tier
+                   pricing_source, pricing_tier, cost_status,
+                   pricing_missing_reason, pricing_version
             FROM messages
             WHERE session_id = ?1 AND session_seq < ?2
             ORDER BY session_seq ASC
@@ -291,10 +292,11 @@ impl SqliteStore {
                     context_input_tokens, billable_input_tokens, billable_output_tokens,
                     reasoning_tokens, cache_read_tokens, cache_write_tokens,
                     reported_total_tokens, estimated_cost_nanodollars,
-                    pricing_source, pricing_tier
+                    pricing_source, pricing_tier, cost_status,
+                    pricing_missing_reason, pricing_version
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+                    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
                 )
                 "#,
                 params![
@@ -349,7 +351,16 @@ impl SqliteStore {
                         .and_then(|value| value.pricing_source.clone()),
                     accounting
                         .as_ref()
-                        .and_then(|value| value.pricing_tier.clone())
+                        .and_then(|value| value.pricing_tier.clone()),
+                    accounting.as_ref().and_then(|value| value
+                        .cost_status
+                        .map(|status| status.as_str().to_string())),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.pricing_missing_reason.clone()),
+                    accounting
+                        .as_ref()
+                        .and_then(|value| value.pricing_version.clone())
                 ],
             )?;
             insert_context_evidence_rows(conn, session_id, seq, now, &context_evidence)?;
@@ -398,6 +409,11 @@ pub(crate) fn accounting_json_from_row(
         estimated_cost_nanodollars: row.get(offset + 7)?,
         pricing_source: row.get(offset + 8)?,
         pricing_tier: row.get(offset + 9)?,
+        cost_status: row
+            .get::<_, Option<String>>(offset + 10)?
+            .and_then(|value| CostStatus::from_str(&value)),
+        pricing_missing_reason: row.get(offset + 11)?,
+        pricing_version: row.get(offset + 12)?,
     };
     let value = accounting.public_json();
     Ok((value.as_object().is_some_and(|object| !object.is_empty())).then_some(value))

@@ -323,16 +323,55 @@ pub(crate) fn parse_metadata_limits(value: &Value) -> ModelLimits {
 }
 
 pub(crate) fn parse_metadata_cost(value: &Value) -> Option<ModelCost> {
-    let cost = value.get("cost")?.as_object()?;
+    let cost = value
+        .get("cost")
+        .and_then(Value::as_object)
+        .or_else(|| value.get("pricing").and_then(Value::as_object))?;
+    let provider_pricing = value.get("pricing").and_then(Value::as_object).is_some()
+        && value.get("cost").and_then(Value::as_object).is_none();
     Some(ModelCost {
-        input: f64_from_keys(cost, &["input"]),
-        output: f64_from_keys(cost, &["output"]),
-        cache_read: f64_from_keys(cost, &["cache_read"]),
-        cache_write: f64_from_keys(cost, &["cache_write"]),
+        input: pricing_value(
+            cost,
+            if provider_pricing {
+                &["input", "prompt"]
+            } else {
+                &["input"]
+            },
+            provider_pricing,
+        ),
+        output: pricing_value(
+            cost,
+            if provider_pricing {
+                &["output", "completion"]
+            } else {
+                &["output"]
+            },
+            provider_pricing,
+        ),
+        cache_read: pricing_value(
+            cost,
+            if provider_pricing {
+                &["cache_read", "cached_prompt", "input_cache_read"]
+            } else {
+                &["cache_read"]
+            },
+            provider_pricing,
+        ),
+        cache_write: pricing_value(
+            cost,
+            if provider_pricing {
+                &["cache_write", "cache_creation", "input_cache_write"]
+            } else {
+                &["cache_write"]
+            },
+            provider_pricing,
+        ),
+        request: f64_from_keys(cost, &["request"]),
         context_over_200k: cost
             .get("context_over_200k")
             .and_then(parse_metadata_cost_tier),
         source: None,
+        version: string_from_keys(value, &["pricing_version", "version"]),
     })
 }
 
@@ -343,6 +382,19 @@ pub(crate) fn parse_metadata_cost_tier(value: &Value) -> Option<ModelCostTier> {
         output: f64_from_keys(object, &["output"]),
         cache_read: f64_from_keys(object, &["cache_read"]),
         cache_write: f64_from_keys(object, &["cache_write"]),
+    })
+}
+
+pub(crate) fn pricing_value(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+    per_token: bool,
+) -> Option<f64> {
+    let value = f64_from_keys(object, keys)?;
+    Some(if per_token {
+        value * 1_000_000.0
+    } else {
+        value
     })
 }
 
@@ -406,6 +458,14 @@ pub(crate) fn f64_from_keys(object: &serde_json::Map<String, Value>, keys: &[&st
             .and_then(Value::as_f64)
             .filter(|value| value.is_finite() && *value >= 0.0)
     })
+}
+
+pub(crate) fn string_from_keys(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 pub(crate) fn bool_from_keys(value: &Value, keys: &[&str]) -> Option<bool> {

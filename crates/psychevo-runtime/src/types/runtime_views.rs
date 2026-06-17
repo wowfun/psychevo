@@ -95,8 +95,10 @@ pub struct ModelCost {
     pub output: Option<f64>,
     pub cache_read: Option<f64>,
     pub cache_write: Option<f64>,
+    pub request: Option<f64>,
     pub context_over_200k: Option<ModelCostTier>,
     pub source: Option<String>,
+    pub version: Option<String>,
 }
 
 impl ModelCost {
@@ -114,11 +116,17 @@ impl ModelCost {
         if let Some(value) = self.cache_write {
             object.insert("cache_write".to_string(), Value::from(value));
         }
+        if let Some(value) = self.request {
+            object.insert("request".to_string(), Value::from(value));
+        }
         if let Some(tier) = &self.context_over_200k {
             object.insert("context_over_200k".to_string(), tier.public_json());
         }
         if let Some(source) = &self.source {
             object.insert("source".to_string(), Value::String(source.clone()));
+        }
+        if let Some(version) = &self.version {
+            object.insert("version".to_string(), Value::String(version.clone()));
         }
         Value::Object(object)
     }
@@ -218,6 +226,36 @@ impl ModelCapabilities {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostStatus {
+    Estimated,
+    Free,
+    Included,
+    Unknown,
+}
+
+impl CostStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Estimated => "estimated",
+            Self::Free => "free",
+            Self::Included => "included",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "estimated" => Some(Self::Estimated),
+            "free" => Some(Self::Free),
+            "included" => Some(Self::Included),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageAccounting {
     pub context_input_tokens: Option<u64>,
@@ -230,6 +268,9 @@ pub struct MessageAccounting {
     pub estimated_cost_nanodollars: Option<i64>,
     pub pricing_source: Option<String>,
     pub pricing_tier: Option<String>,
+    pub cost_status: Option<CostStatus>,
+    pub pricing_missing_reason: Option<String>,
+    pub pricing_version: Option<String>,
 }
 
 impl MessageAccounting {
@@ -264,6 +305,21 @@ impl MessageAccounting {
         }
         if let Some(value) = &self.pricing_tier {
             object.insert("pricing_tier".to_string(), Value::String(value.clone()));
+        }
+        if let Some(value) = self.cost_status {
+            object.insert(
+                "cost_status".to_string(),
+                Value::String(value.as_str().to_string()),
+            );
+        }
+        if let Some(value) = &self.pricing_missing_reason {
+            object.insert(
+                "pricing_missing_reason".to_string(),
+                Value::String(value.clone()),
+            );
+        }
+        if let Some(value) = &self.pricing_version {
+            object.insert("pricing_version".to_string(), Value::String(value.clone()));
         }
         Value::Object(object)
     }

@@ -6,9 +6,6 @@
       "minimum": 0.0,
       "type": "integer"
     },
-    "available": {
-      "type": "boolean"
-    },
     "billableInputTokens": {
       "format": "uint64",
       "minimum": 0.0,
@@ -59,29 +56,21 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "id": {
+      "type": "string"
+    },
     "includedPricingCount": {
       "format": "uint64",
       "minimum": 0.0,
       "type": "integer"
     },
+    "label": {
+      "type": "string"
+    },
     "messageCount": {
       "format": "uint64",
       "minimum": 0.0,
       "type": "integer"
-    },
-    "model": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "provider": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
     },
     "reasoningTokens": {
       "format": "uint64",
@@ -93,10 +82,16 @@
       "minimum": 0.0,
       "type": "integer"
     },
-    "sessionId": {
+    "sessionCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "sinceMs": {
       "default": null,
+      "format": "int64",
       "type": [
-        "string",
+        "integer",
         "null"
       ]
     },
@@ -108,7 +103,6 @@
   },
   "required": [
     "assistantMessageCount",
-    "available",
     "billableInputTokens",
     "billableOutputTokens",
     "cacheReadTokens",
@@ -118,12 +112,15 @@
     "estimatedCostNanodollars",
     "estimatedPricingCount",
     "freePricingCount",
+    "id",
     "includedPricingCount",
+    "label",
     "messageCount",
     "reasoningTokens",
     "reportedTotalTokens",
+    "sessionCount",
     "unknownPricingCount"
   ],
-  "title": "SessionUsageSummaryView",
+  "title": "UsageWindowSummaryView",
   "type": "object"
 }

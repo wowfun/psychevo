@@ -70,6 +70,8 @@ import {
   type TurnStartResult,
   type TurnSteerParams,
   type TurnTakeoverResult,
+  type UsageReadParams,
+  type UsageReadResult,
   type WorkspaceChangeFileParams,
   type WorkspaceChangeMutationResult,
   type WorkspaceChangesParams,
@@ -112,6 +114,7 @@ export interface GatewayRequestParams {
   "completion/list": CompletionListParams;
   "context/read": ContextReadParams;
   "observability/read": ObservabilityReadParams;
+  "usage/read": UsageReadParams;
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
   "runtime/options": RuntimeOptionsParams;
@@ -163,6 +166,7 @@ export interface GatewayRequestResults {
   "completion/list": CompletionListResult;
   "context/read": ContextReadResult;
   "observability/read": ObservabilityReadResult;
+  "usage/read": UsageReadResult;
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
   "runtime/options": RuntimeOptionsResult;
@@ -352,6 +356,7 @@ function defaultScopeFromSource(value: unknown): GatewayRequestScope {
 function withActivityDefaults(value: unknown): Record<string, unknown> {
   const activity = asRecord(value) ?? {};
   return {
+    ...activity,
     running: activity.running === true,
     activeTurnId: typeof activity.activeTurnId === "string" ? activity.activeTurnId : null,
     queuedTurns: Number.isFinite(activity.queuedTurns) ? activity.queuedTurns : 0

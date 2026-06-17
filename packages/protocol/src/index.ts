@@ -30,6 +30,7 @@ import type {
   ThreadTraceResult,
   ThreadSnapshot,
   TurnResultPayload,
+  UsageReadResult,
   WorkspaceCreateResult,
   WorkspaceChangeMutationResult,
   WorkspaceChangesResult,
@@ -99,6 +100,8 @@ export const ContextReadResultSchema =
   schema<ContextReadResult>("ContextReadResult");
 export const ObservabilityReadResultSchema =
   schema<ObservabilityReadResult>("ObservabilityReadResult");
+export const UsageReadResultSchema =
+  schema<UsageReadResult>("UsageReadResult");
 
 export const RpcResponseSchema: RuntimeSchema<JsonRpcSuccess | JsonRpcErrorResponse> = {
   parse(value) {

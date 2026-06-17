@@ -694,6 +694,10 @@ async fn handle_rpc(
             };
             observability_read_value(&state, &scope, thread_id.as_deref())
         }
+        "usage/read" => {
+            let params = request.required_params::<wire::UsageReadParams>()?;
+            usage_read_value(&state, params)
+        }
         "source/reset" => {
             let params = request.required_params::<wire::SourceResetParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;

@@ -11,16 +11,20 @@ fn thread_snapshot(
         },
         source_key: Some(scope.source.source_key()),
     });
-    let entries = match thread_id {
-        Some(thread_id) => state.inner.gateway.thread_transcript(thread_id)?,
-        None => Vec::new(),
-    };
     let selector = thread_id
         .map(GatewayThreadSelector::thread_id)
         .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
     let pending_permissions = prune_pending_permissions(state, &selector, thread_id)?;
     let pending_clarifies = prune_pending_clarifies(state, &selector, thread_id)?;
     let activity = state.activity(&scope.source, thread_id);
+    let entries = match thread_id {
+        Some(thread_id) => {
+            let mut entries = state.inner.gateway.thread_transcript(thread_id)?;
+            replay_running_live_transcript_overlay(state, thread_id, &activity, &mut entries)?;
+            entries
+        }
+        None => Vec::new(),
+    };
     Ok(json!({
         "source": scope.source,
         "scope": scope.to_wire_scope(),
@@ -30,6 +34,304 @@ fn thread_snapshot(
         "pendingPermissions": pending_permissions,
         "pendingClarifies": pending_clarifies,
     }))
+}
+
+fn replay_running_live_transcript_overlay(
+    state: &WebState,
+    thread_id: &str,
+    activity: &GatewayActivity,
+    entries: &mut Vec<TranscriptEntry>,
+) -> psychevo_runtime::Result<()> {
+    if !activity.running {
+        return Ok(());
+    }
+    let Some(active_turn_id) = activity.active_turn_id.as_deref() else {
+        return Ok(());
+    };
+
+    let mut after_seq = 0;
+    loop {
+        let records = state
+            .inner
+            .state
+            .store()
+            .list_gateway_live_events_after(after_seq, 500)?;
+        if records.is_empty() {
+            break;
+        }
+        for record in &records {
+            after_seq = after_seq.max(record.seq);
+        }
+        for record in records {
+            if record
+                .thread_id
+                .as_deref()
+                .is_some_and(|record_thread_id| record_thread_id != thread_id)
+            {
+                continue;
+            }
+            if record
+                .turn_id
+                .as_deref()
+                .is_some_and(|record_turn_id| record_turn_id != active_turn_id)
+            {
+                continue;
+            }
+            let Ok(event) = serde_json::from_value::<GatewayEvent>(record.event) else {
+                continue;
+            };
+            apply_live_transcript_overlay(entries, thread_id, active_turn_id, event);
+        }
+    }
+    Ok(())
+}
+
+fn apply_live_transcript_overlay(
+    entries: &mut Vec<TranscriptEntry>,
+    thread_id: &str,
+    active_turn_id: &str,
+    event: GatewayEvent,
+) {
+    let (turn_id, mut entry) = match event {
+        GatewayEvent::EntryStarted { turn_id, entry }
+        | GatewayEvent::EntryUpdated { turn_id, entry }
+        | GatewayEvent::EntryCompleted { turn_id, entry } => (turn_id, entry),
+        _ => return,
+    };
+    if turn_id != active_turn_id || entry.turn_id.as_deref() != Some(active_turn_id) {
+        return;
+    }
+    if !entry.thread_id.is_empty() && entry.thread_id != thread_id {
+        return;
+    }
+    if entry.thread_id.is_empty() {
+        entry.thread_id = thread_id.to_string();
+    }
+    if transcript_entry_hidden(&entry) {
+        entries.retain(|candidate| candidate.id != entry.id);
+        return;
+    }
+
+    let live_entry = entry.clone();
+    let mut remaining_blocks = Vec::new();
+    for block in std::mem::take(&mut entry.blocks) {
+        if !anchor_live_tool_block(entries, &live_entry, &block) {
+            remaining_blocks.push(block);
+        }
+    }
+    entry.blocks = remaining_blocks;
+    if !entry_has_visible_overlay(&entry) {
+        entries.retain(|candidate| candidate.id != entry.id);
+        return;
+    }
+    if let Some(existing) = entries.iter_mut().find(|candidate| candidate.id == entry.id) {
+        *existing = entry;
+    } else {
+        entries.push(entry);
+    }
+}
+
+fn anchor_live_tool_block(
+    entries: &mut [TranscriptEntry],
+    live_entry: &TranscriptEntry,
+    live_block: &TranscriptBlock,
+) -> bool {
+    let live_signatures = tool_block_signatures(live_block);
+    if live_signatures.is_empty() {
+        return false;
+    }
+    for entry in entries {
+        if entry.source != "runtime.message" || entry.message_seq.is_none() {
+            continue;
+        }
+        for block in &mut entry.blocks {
+            let block_signatures = tool_block_signatures(block);
+            if block_signatures
+                .iter()
+                .any(|signature| live_signatures.contains(signature))
+            {
+                merge_live_tool_block(block, live_block);
+                entry.status = entry_status_for_blocks(&entry.blocks, entry.status);
+                entry.updated_at_ms = entry.updated_at_ms.max(live_entry.updated_at_ms);
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn merge_live_tool_block(current: &mut TranscriptBlock, live: &TranscriptBlock) {
+    current.status = live.status;
+    if live.title.is_some() {
+        current.title = live.title.clone();
+    }
+    if live.body.is_some() {
+        current.body = live.body.clone();
+    }
+    if live.preview.is_some() {
+        current.preview = live.preview.clone();
+    }
+    if live.detail.is_some() {
+        current.detail = live.detail.clone();
+    }
+    if !live.artifact_ids.is_empty() {
+        current.artifact_ids = live.artifact_ids.clone();
+    }
+    current.metadata = merge_metadata_values(current.metadata.take(), live.metadata.clone());
+    if live.result.is_some() {
+        current.result = live.result.clone();
+    }
+    current.updated_at_ms = current.updated_at_ms.max(live.updated_at_ms);
+}
+
+fn merge_metadata_values(left: Option<Value>, right: Option<Value>) -> Option<Value> {
+    match (left, right) {
+        (Some(Value::Object(mut left)), Some(Value::Object(right))) => {
+            for (key, value) in right {
+                left.insert(key, value);
+            }
+            Some(Value::Object(left))
+        }
+        (_, Some(right)) => Some(right),
+        (Some(left), None) => Some(left),
+        (None, None) => None,
+    }
+}
+
+fn entry_status_for_blocks(
+    blocks: &[TranscriptBlock],
+    fallback: TranscriptBlockStatus,
+) -> TranscriptBlockStatus {
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Failed)
+    {
+        return TranscriptBlockStatus::Failed;
+    }
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Cancelled)
+    {
+        return TranscriptBlockStatus::Cancelled;
+    }
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::NeedsInput)
+    {
+        return TranscriptBlockStatus::NeedsInput;
+    }
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Running)
+    {
+        return TranscriptBlockStatus::Running;
+    }
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Pending)
+    {
+        return TranscriptBlockStatus::Pending;
+    }
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Completed)
+    {
+        return TranscriptBlockStatus::Completed;
+    }
+    fallback
+}
+
+fn entry_has_visible_overlay(entry: &TranscriptEntry) -> bool {
+    entry
+        .blocks
+        .iter()
+        .any(|block| !block_hidden(block) && block_has_visible_overlay(block))
+}
+
+fn block_has_visible_overlay(block: &TranscriptBlock) -> bool {
+    !tool_block_signatures(block).is_empty()
+        || block
+            .body
+            .as_deref()
+            .or(block.detail.as_deref())
+            .or(block.preview.as_deref())
+            .is_some_and(|text| !text.trim().is_empty())
+}
+
+fn transcript_entry_hidden(entry: &TranscriptEntry) -> bool {
+    entry
+        .metadata
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|metadata| metadata.get("hidden"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn block_hidden(block: &TranscriptBlock) -> bool {
+    block
+        .metadata
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|metadata| metadata.get("hidden"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn tool_block_signatures(block: &TranscriptBlock) -> Vec<String> {
+    if matches!(
+        block.kind,
+        TranscriptBlockKind::Text | TranscriptBlockKind::Reasoning
+    ) {
+        return Vec::new();
+    }
+    let Some(tool_name) = tool_block_name(block) else {
+        return Vec::new();
+    };
+    let metadata = block.metadata.as_ref().and_then(Value::as_object);
+    let mut signatures = Vec::new();
+    if let Some(tool_call_id) = metadata
+        .and_then(|metadata| metadata.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|tool_call_id| !tool_call_id.is_empty())
+    {
+        signatures.push(format!("{tool_name}:id:{tool_call_id}"));
+    }
+    if tool_name != "spawn_agent" {
+        let args = metadata.and_then(|metadata| {
+            metadata
+                .get("args")
+                .filter(|value| !value.is_null())
+                .or_else(|| metadata.get("arguments").filter(|value| !value.is_null()))
+        });
+        if let Some(args) = args
+            && let Ok(args_json) = serde_json::to_string(args)
+        {
+            signatures.push(format!("{tool_name}:args:{args_json}"));
+        }
+    }
+    signatures
+}
+
+fn tool_block_name(block: &TranscriptBlock) -> Option<String> {
+    block
+        .metadata
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|metadata| metadata.get("tool_name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|tool_name| !tool_name.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            block
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .map(ToString::to_string)
+        })
 }
 
 fn prune_pending_permissions(

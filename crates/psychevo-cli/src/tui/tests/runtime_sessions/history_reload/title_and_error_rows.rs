@@ -395,10 +395,10 @@ pub(crate) fn fullscreen_loads_current_session_history() {
                 usage_json, metadata_json, context_input_tokens, billable_input_tokens,
                 billable_output_tokens, reasoning_tokens, cache_read_tokens,
                 cache_write_tokens, reported_total_tokens, estimated_cost_nanodollars,
-                pricing_source
+                pricing_source, cost_status
             ) VALUES (
                 ?1, 2, 'assistant', 2500, ?2, 'hi', ?3, ?4,
-                9, 7, 3, 1, 2, 1, 12, 10000000, 'test'
+                9, 7, 3, 1, 2, 1, 12, 10000000, 'test', 'estimated'
             )
             "#,
         rusqlite::params![

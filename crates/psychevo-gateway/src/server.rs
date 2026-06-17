@@ -35,14 +35,15 @@ use psychevo_runtime::{
     SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
     SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
     SessionSummary, SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions,
-    SkillDiscoveryOptions, StateRuntime, UserContentBlock, UserShellContextOptions,
-    WEB_SIDE_CONVERSATION_SESSION_SOURCE, agent_spawn_paused, agent_status_records,
-    canonicalize_workdir, configured_models, context_snapshot, discover_agents, discover_skills,
-    format_context_total_value, format_context_total_value_parts, list_skill_bundles,
-    load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
-    main_agent_metadata, redo_session, remove_config_value, render_session_export,
-    resolve_agent_definition, selected_configured_model, session_usage_summary, set_config_value,
-    side_conversation_boundary_prompt, undo_session, valid_agent_name,
+    SkillDiscoveryOptions, StateRuntime, UsageReadOptions, UserContentBlock,
+    UserShellContextOptions, WEB_SIDE_CONVERSATION_SESSION_SOURCE, agent_spawn_paused,
+    agent_status_records, canonicalize_workdir, configured_models, context_snapshot,
+    discover_agents, discover_skills, format_context_total_value, format_context_total_value_parts,
+    list_skill_bundles, load_agent_backend_configs, main_agent_default_metadata,
+    main_agent_from_session_metadata, main_agent_metadata, redo_session, remove_config_value,
+    render_session_export, resolve_agent_definition, selected_configured_model,
+    session_usage_summary, set_config_value, side_conversation_boundary_prompt, undo_session,
+    usage_read, valid_agent_name,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -54,7 +55,8 @@ use crate::{
     ACP_PEER_METADATA_KEY, BackendKind, Gateway, GatewayActivity, GatewayBackendInfo, GatewayEvent,
     GatewayEventSink, GatewayInputPart, GatewayShellResult, GatewaySource, GatewaySourceLifetime,
     GatewayThread, GatewayThreadSelector, GatewayTurnResult, PermissionDecision, SendShellRequest,
-    SourceKey, TranscriptEntry, TranscriptEntryRole, gateway_now_ms,
+    SourceKey, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole, gateway_now_ms,
 };
 #[cfg(test)]
 use crate::{GatewayTurn, GatewayTurnError, GatewayTurnStatus};

@@ -496,6 +496,8 @@ pub enum ClientRequest {
     ContextRead(ContextReadParams),
     #[serde(rename = "observability/read")]
     ObservabilityRead(ObservabilityReadParams),
+    #[serde(rename = "usage/read")]
+    UsageRead(UsageReadParams),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

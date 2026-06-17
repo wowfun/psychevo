@@ -729,8 +729,73 @@ pub struct SessionUsageSummary {
     pub cache_write_tokens: u64,
     pub reported_total_tokens: u64,
     pub estimated_cost_nanodollars: i64,
+    pub cost_status: String,
+    pub estimated_pricing_count: u64,
+    pub free_pricing_count: u64,
+    pub included_pricing_count: u64,
     pub unknown_pricing_count: u64,
     pub cache_read_percent: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UsageReadOptions {
+    pub state: StateRuntime,
+    pub activity_days: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageReadResult {
+    pub generated_at_ms: i64,
+    pub windows: Vec<UsageWindowSummary>,
+    pub activity: UsageActivity,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageWindowSummary {
+    pub id: String,
+    pub label: String,
+    pub since_ms: Option<i64>,
+    pub session_count: u64,
+    pub message_count: u64,
+    pub assistant_message_count: u64,
+    pub context_input_tokens: u64,
+    pub billable_input_tokens: u64,
+    pub billable_output_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub reported_total_tokens: u64,
+    pub estimated_cost_nanodollars: i64,
+    pub cost_status: String,
+    pub estimated_pricing_count: u64,
+    pub free_pricing_count: u64,
+    pub included_pricing_count: u64,
+    pub unknown_pricing_count: u64,
+    pub cache_read_percent: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageActivity {
+    pub start_date: String,
+    pub end_date: String,
+    pub days: Vec<UsageActivityDay>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageActivityDay {
+    pub date: String,
+    pub session_count: u64,
+    pub message_count: u64,
+    pub reported_total_tokens: u64,
+    pub context_input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub estimated_cost_nanodollars: i64,
+    pub cost_status: String,
+    pub estimated_pricing_count: u64,
+    pub free_pricing_count: u64,
+    pub included_pricing_count: u64,
+    pub unknown_pricing_count: u64,
 }
 
 #[derive(Debug, Clone)]

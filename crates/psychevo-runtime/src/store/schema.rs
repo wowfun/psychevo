@@ -75,6 +75,9 @@ impl SqliteStore {
                 estimated_cost_nanodollars INTEGER,
                 pricing_source TEXT,
                 pricing_tier TEXT,
+                cost_status TEXT,
+                pricing_missing_reason TEXT,
+                pricing_version TEXT,
                 UNIQUE(session_id, session_seq)
             );
 

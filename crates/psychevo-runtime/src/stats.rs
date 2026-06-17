@@ -1,10 +1,13 @@
 use psychevo_agent_core::{Message, now_ms};
-use rusqlite::{Connection, params_from_iter, types::Value as SqlValue};
+use rusqlite::{Connection, params, params_from_iter, types::Value as SqlValue};
 use serde_json::{Value, json};
 
 use crate::error::Result;
 use crate::paths::canonical_workdir;
-use crate::types::{SessionUsageOptions, SessionUsageSummary, StatsOptions};
+use crate::types::{
+    SessionUsageOptions, SessionUsageSummary, StatsOptions, UsageActivity, UsageActivityDay,
+    UsageReadOptions, UsageReadResult, UsageWindowSummary,
+};
 
 pub fn usage_stats(options: StatsOptions) -> Result<Value> {
     let workdir = canonical_workdir(&options.workdir)?;
@@ -65,19 +68,16 @@ pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsag
         }
         let accounting = message.accounting.as_ref();
         let usage = message.usage.as_ref();
-        totals.context_input_tokens += usage_u64(
+        let context_input_tokens = usage_u64(
             accounting,
             usage,
             "context_input_tokens",
             &["input_tokens", "prompt_tokens", "context_input_tokens"],
         )
         .unwrap_or(0);
-        totals.billable_input_tokens += json_u64(accounting, "billable_input_tokens").unwrap_or(0);
-        totals.billable_output_tokens +=
-            json_u64(accounting, "billable_output_tokens").unwrap_or(0);
-        totals.reasoning_tokens +=
+        let reasoning_tokens =
             usage_u64(accounting, usage, "reasoning_tokens", &["reasoning_tokens"]).unwrap_or(0);
-        totals.cache_read_tokens += usage_u64(
+        let cache_read_tokens = usage_u64(
             accounting,
             usage,
             "cache_read_tokens",
@@ -89,13 +89,32 @@ pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsag
             ],
         )
         .unwrap_or(0);
-        totals.cache_write_tokens += usage_u64(
+        let cache_write_tokens = usage_u64(
             accounting,
             usage,
             "cache_write_tokens",
             &["cache_write_tokens", "cache_creation_input_tokens"],
         )
         .unwrap_or(0);
+        let output_tokens = usage_u64(
+            accounting,
+            usage,
+            "billable_output_tokens",
+            &["output_tokens", "completion_tokens"],
+        )
+        .unwrap_or(0);
+        totals.context_input_tokens += context_input_tokens;
+        totals.billable_input_tokens += json_u64(accounting, "billable_input_tokens")
+            .unwrap_or_else(|| {
+                context_input_tokens
+                    .saturating_sub(cache_read_tokens)
+                    .saturating_sub(cache_write_tokens)
+            });
+        totals.billable_output_tokens += json_u64(accounting, "billable_output_tokens")
+            .unwrap_or_else(|| output_tokens.saturating_sub(reasoning_tokens));
+        totals.reasoning_tokens += reasoning_tokens;
+        totals.cache_read_tokens += cache_read_tokens;
+        totals.cache_write_tokens += cache_write_tokens;
         let reported_total = usage_u64(
             accounting,
             usage,
@@ -104,20 +123,13 @@ pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsag
         )
         .unwrap_or(0);
         totals.reported_total_tokens += reported_total;
-        totals.estimated_cost_nanodollars +=
-            json_i64(accounting, "estimated_cost_nanodollars").unwrap_or(0);
-        if is_assistant
-            && reported_total > 0
-            && accounting
-                .and_then(|value| value.get("pricing_source"))
-                .map(Value::is_null)
-                .unwrap_or(true)
-        {
-            totals.unknown_pricing_count += 1;
+        totals.add_cost_status(accounting, is_assistant, reported_total);
+        if let Some(cost) = json_i64(accounting, "estimated_cost_nanodollars") {
+            totals.estimated_cost_nanodollars += cost;
         }
     }
-    let cache_read_percent = (totals.context_input_tokens > 0)
-        .then(|| totals.cache_read_tokens as f64 * 100.0 / totals.context_input_tokens as f64);
+    let cache_read_percent =
+        cache_read_percent(totals.cache_read_tokens, totals.billable_input_tokens);
     Ok(SessionUsageSummary {
         session_id: summary.id,
         provider,
@@ -132,8 +144,42 @@ pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsag
         cache_write_tokens: totals.cache_write_tokens,
         reported_total_tokens: totals.reported_total_tokens,
         estimated_cost_nanodollars: totals.estimated_cost_nanodollars,
+        cost_status: totals.cost_status(),
+        estimated_pricing_count: totals.estimated_pricing_count,
+        free_pricing_count: totals.free_pricing_count,
+        included_pricing_count: totals.included_pricing_count,
         unknown_pricing_count: totals.unknown_pricing_count,
         cache_read_percent,
+    })
+}
+
+pub fn usage_read(options: UsageReadOptions) -> Result<UsageReadResult> {
+    let generated_at_ms = now_ms();
+    let activity_days = options.activity_days.clamp(1, 366);
+    let window_specs = [
+        ("all", "All time", None),
+        (
+            "30d",
+            "Last 30 days",
+            Some(generated_at_ms.saturating_sub(30 * 86_400_000)),
+        ),
+        (
+            "7d",
+            "Last 7 days",
+            Some(generated_at_ms.saturating_sub(7 * 86_400_000)),
+        ),
+    ];
+    options.state.store().with_conn(|conn| {
+        let mut windows = Vec::new();
+        for (id, label, since_ms) in window_specs {
+            windows.push(usage_window_summary(conn, id, label, since_ms)?);
+        }
+        let activity = usage_activity(conn, generated_at_ms, activity_days)?;
+        Ok(UsageReadResult {
+            generated_at_ms,
+            windows,
+            activity,
+        })
     })
 }
 
@@ -149,7 +195,286 @@ struct SessionUsageTotals {
     cache_write_tokens: u64,
     reported_total_tokens: u64,
     estimated_cost_nanodollars: i64,
+    estimated_pricing_count: u64,
+    free_pricing_count: u64,
+    included_pricing_count: u64,
     unknown_pricing_count: u64,
+}
+
+impl SessionUsageTotals {
+    fn add_cost_status(
+        &mut self,
+        accounting: Option<&Value>,
+        is_assistant: bool,
+        reported_total_tokens: u64,
+    ) {
+        if !is_assistant || reported_total_tokens == 0 {
+            return;
+        }
+        match cost_status_from_accounting(accounting).as_str() {
+            "estimated" => self.estimated_pricing_count += 1,
+            "free" => self.free_pricing_count += 1,
+            "included" => self.included_pricing_count += 1,
+            _ => self.unknown_pricing_count += 1,
+        }
+    }
+
+    fn cost_status(&self) -> String {
+        aggregate_cost_status(
+            self.estimated_pricing_count,
+            self.free_pricing_count,
+            self.included_pricing_count,
+            self.unknown_pricing_count,
+        )
+    }
+}
+
+fn cost_status_from_accounting(accounting: Option<&Value>) -> String {
+    if let Some(status) = accounting
+        .and_then(|value| value.get("cost_status"))
+        .and_then(Value::as_str)
+    {
+        return match status {
+            "estimated" | "free" | "included" | "unknown" => status.to_string(),
+            _ => "unknown".to_string(),
+        };
+    }
+    match json_i64(accounting, "estimated_cost_nanodollars") {
+        Some(0) => "free".to_string(),
+        Some(_) => "estimated".to_string(),
+        None => "unknown".to_string(),
+    }
+}
+
+fn aggregate_cost_status(
+    estimated_count: u64,
+    free_count: u64,
+    included_count: u64,
+    unknown_count: u64,
+) -> String {
+    let known_count = estimated_count + free_count + included_count;
+    if unknown_count > 0 && known_count > 0 {
+        "mixed".to_string()
+    } else if unknown_count > 0 {
+        "unknown".to_string()
+    } else if estimated_count > 0 {
+        "estimated".to_string()
+    } else if included_count > 0 {
+        "included".to_string()
+    } else if free_count > 0 {
+        "free".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn cache_read_percent(cache_read_tokens: u64, billable_input_tokens: u64) -> Option<f64> {
+    let denominator = cache_read_tokens + billable_input_tokens;
+    (denominator > 0).then(|| cache_read_tokens as f64 * 100.0 / denominator as f64)
+}
+
+fn usage_window_summary(
+    conn: &Connection,
+    id: &str,
+    label: &str,
+    since_ms: Option<i64>,
+) -> Result<UsageWindowSummary> {
+    let where_clause = if since_ms.is_some() {
+        "WHERE m.timestamp_ms >= ?1"
+    } else {
+        "WHERE 1 = 1"
+    };
+    let mut stmt = conn.prepare(&format!(
+        r#"
+        SELECT
+            COUNT(DISTINCT m.session_id),
+            COUNT(m.id),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(m.context_input_tokens), 0),
+            COALESCE(SUM(m.billable_input_tokens), 0),
+            COALESCE(SUM(m.billable_output_tokens), 0),
+            COALESCE(SUM(m.reasoning_tokens), 0),
+            COALESCE(SUM(m.cache_read_tokens), 0),
+            COALESCE(SUM(m.cache_write_tokens), 0),
+            COALESCE(SUM(m.reported_total_tokens), 0),
+            COALESCE(SUM(m.estimated_cost_nanodollars), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                      AND m.reported_total_tokens IS NOT NULL
+                      AND {cost_status_sql} = 'estimated' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                      AND m.reported_total_tokens IS NOT NULL
+                      AND {cost_status_sql} = 'free' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                      AND m.reported_total_tokens IS NOT NULL
+                      AND {cost_status_sql} = 'included' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                      AND m.reported_total_tokens IS NOT NULL
+                      AND {cost_status_sql} = 'unknown' THEN 1 ELSE 0 END), 0)
+        FROM messages m
+        {where_clause}
+        "#,
+        cost_status_sql = cost_status_sql(),
+    ))?;
+    let params = since_ms
+        .map(|value| vec![SqlValue::Integer(value)])
+        .unwrap_or_default();
+    stmt.query_row(params_from_iter(params.iter()), |row| {
+        let cache_read_tokens = row_u64(row, 7)?;
+        let billable_input_tokens = row_u64(row, 4)?;
+        let estimated_pricing_count = row_u64(row, 11)?;
+        let free_pricing_count = row_u64(row, 12)?;
+        let included_pricing_count = row_u64(row, 13)?;
+        let unknown_pricing_count = row_u64(row, 14)?;
+        Ok(UsageWindowSummary {
+            id: id.to_string(),
+            label: label.to_string(),
+            since_ms,
+            session_count: row_u64(row, 0)?,
+            message_count: row_u64(row, 1)?,
+            assistant_message_count: row_u64(row, 2)?,
+            context_input_tokens: row_u64(row, 3)?,
+            billable_input_tokens,
+            billable_output_tokens: row_u64(row, 5)?,
+            reasoning_tokens: row_u64(row, 6)?,
+            cache_read_tokens,
+            cache_write_tokens: row_u64(row, 8)?,
+            reported_total_tokens: row_u64(row, 9)?,
+            estimated_cost_nanodollars: row.get(10)?,
+            cost_status: aggregate_cost_status(
+                estimated_pricing_count,
+                free_pricing_count,
+                included_pricing_count,
+                unknown_pricing_count,
+            ),
+            estimated_pricing_count,
+            free_pricing_count,
+            included_pricing_count,
+            unknown_pricing_count,
+            cache_read_percent: cache_read_percent(cache_read_tokens, billable_input_tokens),
+        })
+    })
+    .map_err(Into::into)
+}
+
+fn usage_activity(
+    conn: &Connection,
+    generated_at_ms: i64,
+    activity_days: usize,
+) -> Result<UsageActivity> {
+    let start_modifier = format!("-{} day", activity_days.saturating_sub(1));
+    let mut stmt = conn.prepare(&format!(
+        r#"
+        WITH RECURSIVE days(day) AS (
+            SELECT date(?1 / 1000, 'unixepoch', 'localtime', ?2)
+            UNION ALL
+            SELECT date(day, '+1 day') FROM days
+            WHERE day < date(?1 / 1000, 'unixepoch', 'localtime')
+        ),
+        daily AS (
+            SELECT
+                date(m.timestamp_ms / 1000, 'unixepoch', 'localtime') AS day,
+                COUNT(DISTINCT m.session_id) AS session_count,
+                COUNT(m.id) AS message_count,
+                COALESCE(SUM(m.reported_total_tokens), 0) AS reported_total_tokens,
+                COALESCE(SUM(m.context_input_tokens), 0) AS context_input_tokens,
+                COALESCE(SUM(m.cache_read_tokens), 0) AS cache_read_tokens,
+                COALESCE(SUM(m.cache_write_tokens), 0) AS cache_write_tokens,
+                COALESCE(SUM(m.estimated_cost_nanodollars), 0) AS estimated_cost_nanodollars,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                          AND m.reported_total_tokens IS NOT NULL
+                          AND {cost_status_sql} = 'estimated' THEN 1 ELSE 0 END), 0)
+                    AS estimated_pricing_count,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                          AND m.reported_total_tokens IS NOT NULL
+                          AND {cost_status_sql} = 'free' THEN 1 ELSE 0 END), 0)
+                    AS free_pricing_count,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                          AND m.reported_total_tokens IS NOT NULL
+                          AND {cost_status_sql} = 'included' THEN 1 ELSE 0 END), 0)
+                    AS included_pricing_count,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                          AND m.reported_total_tokens IS NOT NULL
+                          AND {cost_status_sql} = 'unknown' THEN 1 ELSE 0 END), 0)
+                    AS unknown_pricing_count
+            FROM messages m
+            WHERE date(m.timestamp_ms / 1000, 'unixepoch', 'localtime')
+                BETWEEN date(?1 / 1000, 'unixepoch', 'localtime', ?2)
+                    AND date(?1 / 1000, 'unixepoch', 'localtime')
+            GROUP BY day
+        )
+        SELECT
+            days.day,
+            COALESCE(daily.session_count, 0),
+            COALESCE(daily.message_count, 0),
+            COALESCE(daily.reported_total_tokens, 0),
+            COALESCE(daily.context_input_tokens, 0),
+            COALESCE(daily.cache_read_tokens, 0),
+            COALESCE(daily.cache_write_tokens, 0),
+            COALESCE(daily.estimated_cost_nanodollars, 0),
+            COALESCE(daily.estimated_pricing_count, 0),
+            COALESCE(daily.free_pricing_count, 0),
+            COALESCE(daily.included_pricing_count, 0),
+            COALESCE(daily.unknown_pricing_count, 0)
+        FROM days
+        LEFT JOIN daily ON daily.day = days.day
+        ORDER BY days.day ASC
+        "#,
+        cost_status_sql = cost_status_sql(),
+    ))?;
+    let rows = stmt.query_map(params![generated_at_ms, start_modifier], |row| {
+        let estimated_pricing_count = row_u64(row, 8)?;
+        let free_pricing_count = row_u64(row, 9)?;
+        let included_pricing_count = row_u64(row, 10)?;
+        let unknown_pricing_count = row_u64(row, 11)?;
+        Ok(UsageActivityDay {
+            date: row.get(0)?,
+            session_count: row_u64(row, 1)?,
+            message_count: row_u64(row, 2)?,
+            reported_total_tokens: row_u64(row, 3)?,
+            context_input_tokens: row_u64(row, 4)?,
+            cache_read_tokens: row_u64(row, 5)?,
+            cache_write_tokens: row_u64(row, 6)?,
+            estimated_cost_nanodollars: row.get(7)?,
+            cost_status: aggregate_cost_status(
+                estimated_pricing_count,
+                free_pricing_count,
+                included_pricing_count,
+                unknown_pricing_count,
+            ),
+            estimated_pricing_count,
+            free_pricing_count,
+            included_pricing_count,
+            unknown_pricing_count,
+        })
+    })?;
+    let mut days = Vec::new();
+    for row in rows {
+        days.push(row?);
+    }
+    let start_date = days.first().map(|day| day.date.clone()).unwrap_or_default();
+    let end_date = days.last().map(|day| day.date.clone()).unwrap_or_default();
+    Ok(UsageActivity {
+        start_date,
+        end_date,
+        days,
+    })
+}
+
+fn cost_status_sql() -> &'static str {
+    r#"
+    COALESCE(
+        m.cost_status,
+        CASE
+            WHEN m.estimated_cost_nanodollars IS NULL THEN 'unknown'
+            WHEN m.estimated_cost_nanodollars = 0 THEN 'free'
+            ELSE 'estimated'
+        END
+    )
+    "#
+}
+
+fn row_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
+    row.get::<_, i64>(index).map(|value| value.max(0) as u64)
 }
 
 fn usage_u64(
@@ -196,12 +521,22 @@ pub(crate) fn totals(conn: &Connection, scope: &StatsScope) -> Result<Value> {
             COALESCE(SUM(m.estimated_cost_nanodollars), 0),
             COALESCE(SUM(CASE WHEN m.role = 'assistant'
                       AND m.reported_total_tokens IS NOT NULL
-                      AND m.pricing_source IS NULL THEN 1 ELSE 0 END), 0)
+                      AND {cost_status_sql} = 'estimated' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                      AND m.reported_total_tokens IS NOT NULL
+                      AND {cost_status_sql} = 'free' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                      AND m.reported_total_tokens IS NOT NULL
+                      AND {cost_status_sql} = 'included' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant'
+                      AND m.reported_total_tokens IS NOT NULL
+                      AND {cost_status_sql} = 'unknown' THEN 1 ELSE 0 END), 0)
         FROM sessions s
         LEFT JOIN messages m ON m.session_id = s.id
         {}
         "#,
-        scope_where_clause(scope)
+        scope_where_clause(scope),
+        cost_status_sql = cost_status_sql(),
     ))?;
     let params = scope_params(scope);
     let values = stmt.query_row(params_from_iter(params.iter()), |row| {
@@ -216,7 +551,10 @@ pub(crate) fn totals(conn: &Connection, scope: &StatsScope) -> Result<Value> {
             "cache_write_tokens": row.get::<_, i64>(7)?,
             "reported_total_tokens": row.get::<_, i64>(8)?,
             "estimated_cost_nanodollars": row.get::<_, i64>(9)?,
-            "unknown_priced_messages": row.get::<_, i64>(10)?,
+            "estimated_priced_messages": row.get::<_, i64>(10)?,
+            "free_priced_messages": row.get::<_, i64>(11)?,
+            "included_priced_messages": row.get::<_, i64>(12)?,
+            "unknown_priced_messages": row.get::<_, i64>(13)?,
         }))
     })?;
     Ok(values)

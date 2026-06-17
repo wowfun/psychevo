@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "UsageActivityDayView": {
+      "properties": {
+        "cacheReadTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cacheWriteTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "contextInputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "costStatus": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "estimatedCostNanodollars": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "estimatedPricingCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "freePricingCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "includedPricingCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "messageCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "reportedTotalTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sessionCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "unknownPricingCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cacheReadTokens",
+        "cacheWriteTokens",
+        "contextInputTokens",
+        "costStatus",
+        "date",
+        "estimatedCostNanodollars",
+        "estimatedPricingCount",
+        "freePricingCount",
+        "includedPricingCount",
+        "messageCount",
+        "reportedTotalTokens",
+        "sessionCount",
+        "unknownPricingCount"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "days": {
+      "items": {
+        "$ref": "#/definitions/UsageActivityDayView"
+      },
+      "type": "array"
+    },
+    "endDate": {
+      "type": "string"
+    },
+    "startDate": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "days",
+    "endDate",
+    "startDate"
+  ],
+  "title": "UsageActivityView",
+  "type": "object"
+}

@@ -519,10 +519,10 @@ pub(crate) fn usage_panel_groups_persisted_stats_rows() {
             content_text, model, provider, context_input_tokens,
             billable_input_tokens, billable_output_tokens, reasoning_tokens,
             cache_read_tokens, cache_write_tokens, reported_total_tokens,
-            estimated_cost_nanodollars, pricing_source
+            estimated_cost_nanodollars, pricing_source, cost_status
         ) VALUES (
             ?1, 1, 'assistant', 1, ?2,
-            'done', 'model', 'mock', 321, 200, 80, 21, 20, 7, 321, NULL, NULL
+            'done', 'model', 'mock', 321, 200, 80, 21, 20, 7, 321, NULL, NULL, 'unknown'
         )
         "#,
         rusqlite::params![

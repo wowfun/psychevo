@@ -1,32 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
-    "assistantMessageCount": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
-    "available": {
-      "type": "boolean"
-    },
-    "billableInputTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
-    "billableOutputTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
-    "cacheReadPercent": {
-      "default": null,
-      "format": "double",
-      "type": [
-        "number",
-        "null"
-      ]
-    },
     "cacheReadTokens": {
       "format": "uint64",
       "minimum": 0.0,
@@ -43,6 +17,9 @@
       "type": "integer"
     },
     "costStatus": {
+      "type": "string"
+    },
+    "date": {
       "type": "string"
     },
     "estimatedCostNanodollars": {
@@ -69,36 +46,15 @@
       "minimum": 0.0,
       "type": "integer"
     },
-    "model": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "provider": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "reasoningTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
     "reportedTotalTokens": {
       "format": "uint64",
       "minimum": 0.0,
       "type": "integer"
     },
-    "sessionId": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
+    "sessionCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "unknownPricingCount": {
       "format": "uint64",
@@ -107,23 +63,20 @@
     }
   },
   "required": [
-    "assistantMessageCount",
-    "available",
-    "billableInputTokens",
-    "billableOutputTokens",
     "cacheReadTokens",
     "cacheWriteTokens",
     "contextInputTokens",
     "costStatus",
+    "date",
     "estimatedCostNanodollars",
     "estimatedPricingCount",
     "freePricingCount",
     "includedPricingCount",
     "messageCount",
-    "reasoningTokens",
     "reportedTotalTokens",
+    "sessionCount",
     "unknownPricingCount"
   ],
-  "title": "SessionUsageSummaryView",
+  "title": "UsageActivityDayView",
   "type": "object"
 }

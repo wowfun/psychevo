@@ -238,11 +238,13 @@ pub(crate) fn parse_model_cost(value: &Value) -> Result<ModelCost> {
         output: optional_f64_field(object, "output")?,
         cache_read: optional_f64_field(object, "cache_read")?,
         cache_write: optional_f64_field(object, "cache_write")?,
+        request: optional_f64_field(object, "request")?,
         context_over_200k: object
             .get("context_over_200k")
             .map(parse_model_cost_tier)
             .transpose()?,
         source: Some("config".to_string()),
+        version: None,
     })
 }
 

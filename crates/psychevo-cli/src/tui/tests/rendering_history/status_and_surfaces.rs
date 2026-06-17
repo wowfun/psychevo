@@ -314,6 +314,10 @@ pub(crate) fn bottom_status_session_observability_degrades_with_width() {
         cache_write_tokens: 0,
         reported_total_tokens: 2_500,
         estimated_cost_nanodollars: 10_000_000,
+        cost_status: "estimated".to_string(),
+        estimated_pricing_count: 1,
+        free_pricing_count: 0,
+        included_pricing_count: 0,
         unknown_pricing_count: 0,
         cache_read_percent: Some(50.0),
     });

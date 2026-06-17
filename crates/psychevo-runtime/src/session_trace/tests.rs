@@ -169,6 +169,9 @@ mod tests {
             estimated_cost_nanodollars: None,
             pricing_source: Some("test".to_string()),
             pricing_tier: Some("standard".to_string()),
+            cost_status: Some(crate::types::CostStatus::Unknown),
+            pricing_missing_reason: Some("missing_output_price".to_string()),
+            pricing_version: None,
         };
         let drafts = trace_drafts_from_agent_event(
             &AgentEvent::MessageEnd {

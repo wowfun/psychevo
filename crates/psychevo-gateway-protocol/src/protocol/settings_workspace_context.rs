@@ -334,6 +334,10 @@ pub struct SessionUsageSummaryView {
     pub cache_write_tokens: u64,
     pub reported_total_tokens: u64,
     pub estimated_cost_nanodollars: i64,
+    pub cost_status: String,
+    pub estimated_pricing_count: u64,
+    pub free_pricing_count: u64,
+    pub included_pricing_count: u64,
     pub unknown_pricing_count: u64,
     #[serde(default)]
     pub cache_read_percent: Option<f64>,
@@ -344,4 +348,72 @@ pub struct SessionUsageSummaryView {
 pub struct ObservabilityReadResult {
     pub context: ContextReadResult,
     pub usage: SessionUsageSummaryView,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageReadParams {
+    #[serde(default)]
+    pub activity_days: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageWindowSummaryView {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub since_ms: Option<i64>,
+    pub session_count: u64,
+    pub message_count: u64,
+    pub assistant_message_count: u64,
+    pub context_input_tokens: u64,
+    pub billable_input_tokens: u64,
+    pub billable_output_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub reported_total_tokens: u64,
+    pub estimated_cost_nanodollars: i64,
+    pub cost_status: String,
+    pub estimated_pricing_count: u64,
+    pub free_pricing_count: u64,
+    pub included_pricing_count: u64,
+    pub unknown_pricing_count: u64,
+    #[serde(default)]
+    pub cache_read_percent: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageActivityDayView {
+    pub date: String,
+    pub session_count: u64,
+    pub message_count: u64,
+    pub reported_total_tokens: u64,
+    pub context_input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub estimated_cost_nanodollars: i64,
+    pub cost_status: String,
+    pub estimated_pricing_count: u64,
+    pub free_pricing_count: u64,
+    pub included_pricing_count: u64,
+    pub unknown_pricing_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageActivityView {
+    pub start_date: String,
+    pub end_date: String,
+    pub days: Vec<UsageActivityDayView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageReadResult {
+    pub generated_at_ms: i64,
+    pub windows: Vec<UsageWindowSummaryView>,
+    pub activity: UsageActivityView,
 }

@@ -337,8 +337,26 @@ export const threadSessionSchemas = {
       "minimum": 0.0,
       "type": "integer"
     },
+    "costStatus": {
+      "type": "string"
+    },
     "estimatedCostNanodollars": {
       "format": "int64",
+      "type": "integer"
+    },
+    "estimatedPricingCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "freePricingCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "includedPricingCount": {
+      "format": "uint64",
+      "minimum": 0.0,
       "type": "integer"
     },
     "messageCount": {
@@ -391,7 +409,11 @@ export const threadSessionSchemas = {
     "cacheReadTokens",
     "cacheWriteTokens",
     "contextInputTokens",
+    "costStatus",
     "estimatedCostNanodollars",
+    "estimatedPricingCount",
+    "freePricingCount",
+    "includedPricingCount",
     "messageCount",
     "reasoningTokens",
     "reportedTotalTokens",

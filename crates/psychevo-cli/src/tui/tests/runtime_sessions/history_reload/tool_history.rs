@@ -63,6 +63,10 @@ pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
         cache_write_tokens: 0,
         reported_total_tokens: 11,
         estimated_cost_nanodollars: 10_000_000,
+        cost_status: "estimated".to_string(),
+        estimated_pricing_count: 1,
+        free_pricing_count: 0,
+        included_pricing_count: 0,
         unknown_pricing_count: 0,
         cache_read_percent: Some(22.0),
     });

@@ -189,6 +189,9 @@ pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
                 estimated_cost_nanodollars: Some(42),
                 pricing_source: Some("test".to_string()),
                 pricing_tier: Some("standard".to_string()),
+                cost_status: Some(crate::types::CostStatus::Estimated),
+                pricing_missing_reason: None,
+                pricing_version: None,
             }),
         )
         .expect("append");
@@ -245,6 +248,9 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
                 estimated_cost_nanodollars: Some(42),
                 pricing_source: Some("test".to_string()),
                 pricing_tier: None,
+                cost_status: Some(crate::types::CostStatus::Estimated),
+                pricing_missing_reason: None,
+                pricing_version: None,
             }),
         )
         .expect("append accounting");
@@ -296,8 +302,8 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
     assert_eq!(summary.message_count, 3);
     assert_eq!(summary.assistant_message_count, 3);
     assert_eq!(summary.context_input_tokens, 170);
-    assert_eq!(summary.billable_input_tokens, 100);
-    assert_eq!(summary.billable_output_tokens, 25);
+    assert_eq!(summary.billable_input_tokens, 125);
+    assert_eq!(summary.billable_output_tokens, 33);
     assert_eq!(summary.reasoning_tokens, 7);
     assert_eq!(summary.cache_read_tokens, 35);
     assert_eq!(summary.cache_write_tokens, 10);
@@ -308,7 +314,7 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
         summary
             .cache_read_percent
             .map(|value| (value * 10.0).round() / 10.0),
-        Some(20.6)
+        Some(21.9)
     );
 }
 
@@ -355,6 +361,9 @@ pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
                     estimated_cost_nanodollars: None,
                     pricing_source: Some("test".to_string()),
                     pricing_tier: None,
+                    cost_status: Some(crate::types::CostStatus::Unknown),
+                    pricing_missing_reason: Some("missing_output_price".to_string()),
+                    pricing_version: None,
                 }),
             )
             .expect("append");
@@ -386,6 +395,93 @@ pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
 }
 
 #[test]
+pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .expect("session");
+    let now = psychevo_agent_core::now_ms();
+    for (timestamp_ms, total, cache_read, billable_input) in [
+        (now, 100_u64, 20_u64, 80_u64),
+        (
+            now.saturating_sub(40 * 86_400_000),
+            200_u64,
+            40_u64,
+            160_u64,
+        ),
+    ] {
+        store
+            .append_message_with_metrics_and_accounting(
+                &session_id,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "answer".to_string(),
+                    }],
+                    timestamp_ms,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+                None,
+                None,
+                Some(MessageAccounting {
+                    context_input_tokens: Some(total),
+                    billable_input_tokens: Some(billable_input),
+                    billable_output_tokens: Some(10),
+                    reasoning_tokens: None,
+                    cache_read_tokens: Some(cache_read),
+                    cache_write_tokens: None,
+                    reported_total_tokens: Some(total),
+                    estimated_cost_nanodollars: Some(total as i64),
+                    pricing_source: Some("test".to_string()),
+                    pricing_tier: Some("standard".to_string()),
+                    cost_status: Some(crate::types::CostStatus::Estimated),
+                    pricing_missing_reason: None,
+                    pricing_version: None,
+                }),
+            )
+            .expect("append");
+    }
+
+    let result = usage_read(UsageReadOptions {
+        state: StateRuntime::open(&db).expect("state runtime"),
+        activity_days: 365,
+    })
+    .expect("usage read");
+    let all = result
+        .windows
+        .iter()
+        .find(|window| window.id == "all")
+        .unwrap();
+    let last_30 = result
+        .windows
+        .iter()
+        .find(|window| window.id == "30d")
+        .unwrap();
+    let last_7 = result
+        .windows
+        .iter()
+        .find(|window| window.id == "7d")
+        .unwrap();
+    assert_eq!(all.reported_total_tokens, 300);
+    assert_eq!(last_30.reported_total_tokens, 100);
+    assert_eq!(last_7.reported_total_tokens, 100);
+    assert_eq!(last_7.cache_read_percent, Some(20.0));
+    assert_eq!(result.activity.days.len(), 365);
+    assert!(
+        result
+            .activity
+            .days
+            .iter()
+            .any(|day| day.reported_total_tokens == 100)
+    );
+}
+
+#[test]
 pub(crate) fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
     let metadata = ModelMetadata {
         cost: Some(ModelCost {
@@ -393,6 +489,7 @@ pub(crate) fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
             output: Some(2.0),
             cache_read: Some(0.1),
             cache_write: Some(0.2),
+            request: None,
             context_over_200k: Some(ModelCostTier {
                 input: Some(3.0),
                 output: Some(4.0),
@@ -400,6 +497,7 @@ pub(crate) fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
                 cache_write: Some(0.4),
             }),
             source: Some("test-pricing".to_string()),
+            version: None,
         }),
         ..Default::default()
     };
@@ -425,6 +523,42 @@ pub(crate) fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
     assert_eq!(
         accounting.estimated_cost_nanodollars,
         Some(250_000 * 3_000 + 25 * 4_000 + 5 * 4_000 + 10 * 300 + 10 * 400)
+    );
+}
+
+#[test]
+pub(crate) fn accounting_marks_missing_cache_pricing_unknown() {
+    let metadata = ModelMetadata {
+        cost: Some(ModelCost {
+            input: Some(1.0),
+            output: Some(2.0),
+            cache_read: None,
+            cache_write: None,
+            request: None,
+            context_over_200k: None,
+            source: Some("test-pricing".to_string()),
+            version: None,
+        }),
+        ..Default::default()
+    };
+    let accounting = crate::accounting::account_usage(
+        Some(&json!({
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "total_tokens": 110,
+            "cached_tokens": 25
+        })),
+        &metadata,
+    )
+    .expect("accounting");
+    assert_eq!(
+        accounting.cost_status,
+        Some(crate::types::CostStatus::Unknown)
+    );
+    assert_eq!(accounting.estimated_cost_nanodollars, None);
+    assert_eq!(
+        accounting.pricing_missing_reason.as_deref(),
+        Some("missing_cache_read_price")
     );
 }
 

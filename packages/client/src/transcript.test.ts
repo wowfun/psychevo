@@ -467,6 +467,69 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
 });
 
 describe("reconcileThreadSnapshot", () => {
+  it("adopts a switched-back running snapshot with live tool output and start time", () => {
+    const current = {
+      ...threadSnapshot(),
+      thread: {
+        id: "thread-2",
+        backend: {
+          kind: "psychevo" as const,
+          nativeId: "thread-2"
+        },
+        sourceKey: "web:test"
+      },
+      entries: []
+    };
+    const incoming = {
+      ...threadSnapshot(),
+      activity: {
+        running: true,
+        activeTurnId: "turn-1",
+        queuedTurns: 0,
+        startedAtMs: 1_000
+      },
+      entries: [
+        entry({
+          id: "message:2",
+          threadId: "thread-1",
+          turnId: "message:2",
+          messageSeq: 2,
+          source: "runtime.message",
+          status: "running",
+          blocks: [
+            block({
+              id: "message:2:tool",
+              kind: "shell",
+              title: "exec_command python fetch.py",
+              status: "running",
+              body: "{\"session_id\":7,\"exit_code\":null,\"output\":\"first\\nsecond\\npoll\\n\"}",
+              detail: "{\"session_id\":7,\"exit_code\":null,\"output\":\"first\\nsecond\\npoll\\n\"}",
+              metadata: {
+                projection: "tool",
+                tool_name: "exec_command",
+                tool_call_id: "call_exec",
+                result: {
+                  session_id: 7,
+                  exit_code: null,
+                  output: "first\nsecond\npoll\n"
+                }
+              }
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(current, incoming);
+
+    expect(next.activity.startedAtMs).toBe(1_000);
+    expect(next.entries).toHaveLength(1);
+    expect(next.entries[0]?.blocks[0]?.status).toBe("running");
+    expect(next.entries[0]?.blocks[0]?.metadata).toMatchObject({
+      result: { output: "first\nsecond\npoll\n" }
+    });
+  });
+
   it("keeps older live overlays before newer durable messages by timeline", () => {
     const current = {
       ...threadSnapshot(),

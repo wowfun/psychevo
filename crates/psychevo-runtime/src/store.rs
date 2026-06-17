@@ -19,12 +19,12 @@ pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::messages::{sanitize_message_for_output, sanitize_message_for_tui_history};
 pub(crate) use crate::run::normalize_session_title;
 pub(crate) use crate::types::{
-    MessageAccounting, SanitizedMessageSummary, SessionExportMessageSummary, SessionSummary,
-    TuiMessageSummary,
+    CostStatus, MessageAccounting, SanitizedMessageSummary, SessionExportMessageSummary,
+    SessionSummary, TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 20;
-pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 18;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 21;
+pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 21;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";

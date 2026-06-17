@@ -47,6 +47,7 @@ import { clientRequestWorkspaceChangeAcceptSchema } from './rpc/client-request/w
 import { clientRequestWorkspaceChangeRejectSchema } from './rpc/client-request/workspace-change-reject';
 import { clientRequestContextReadSchema } from './rpc/client-request/context-read';
 import { clientRequestObservabilityReadSchema } from './rpc/client-request/observability-read';
+import { clientRequestUsageReadSchema } from './rpc/client-request/usage-read';
 import { serverNotificationGatewayEventSchema } from './rpc/server-notification/gateway-event';
 import { serverNotificationTurnResultSchema } from './rpc/server-notification/turn-result';
 import { serverNotificationTurnErrorSchema } from './rpc/server-notification/turn-error';
@@ -387,6 +388,9 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ClientRequest/observability-read.json"
+    },
+    {
+      "$ref": "ClientRequest/usage-read.json"
     }
   ],
   "title": "ClientRequest"
@@ -468,6 +472,7 @@ export const rpcSchemaRefs = [
   clientRequestWorkspaceChangeRejectSchema,
   clientRequestContextReadSchema,
   clientRequestObservabilityReadSchema,
+  clientRequestUsageReadSchema,
   serverNotificationGatewayEventSchema,
   serverNotificationTurnResultSchema,
   serverNotificationTurnErrorSchema,

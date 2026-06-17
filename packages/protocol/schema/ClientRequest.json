@@ -141,6 +141,9 @@
     },
     {
       "$ref": "ClientRequest/observability-read.json"
+    },
+    {
+      "$ref": "ClientRequest/usage-read.json"
     }
   ],
   "title": "ClientRequest"
