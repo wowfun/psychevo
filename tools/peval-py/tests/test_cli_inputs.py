@@ -3,6 +3,36 @@ from __future__ import annotations
 from peval_py_test_support import *
 
 
+def write_cli_cached_analysis(
+    root: Path,
+    *,
+    eval_slug: str = "default",
+    agent_id: str = "agent-a",
+    session_id: str = "common_session",
+    cell_key: str = "peval-py-analysis",
+    summary: str = "Root-selected cached analysis.",
+) -> Path:
+    path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"summary": summary}), encoding="utf-8")
+    return path
+
+
+def write_cli_cached_markdown(
+    root: Path,
+    *,
+    eval_slug: str = "default",
+    agent_id: str = "agent-a",
+    session_id: str = "common_session",
+    cell_key: str = "peval-py-analysis",
+    markdown: str = "## Root selected analysis\n\nCached markdown body.",
+) -> Path:
+    path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown, encoding="utf-8")
+    return path
+
+
 class PevalPyCliInputTests(unittest.TestCase):
     def test_cli_uses_custom_path_adapter_and_rejects_db_when_path_only(self) -> None:
         from peval_py.cli import main
@@ -785,6 +815,162 @@ default_db_path = "state.db"
                     self.assertNotEqual(result, 0)
                     self.assertIn(message, stderr.getvalue())
 
+    def test_cli_root_option_loads_workspace_config_for_view_export_and_list(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            outside = root / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            db_path = workspace / "state.db"
+            create_messages_db(db_path)
+            (workspace / "peval-py.toml").write_text(
+                """
+[adapters.psychevo]
+default_db_path = "state.db"
+""",
+                encoding="utf-8",
+            )
+
+            view_out = root / "root-view.json"
+            export_out = root / "root-trajectory.json"
+            with contextlib.chdir(outside):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-r",
+                        str(workspace),
+                        "-d",
+                        "@psychevo",
+                        "-s",
+                        "db-a",
+                        "-f",
+                        "json",
+                        "-o",
+                        str(view_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+                result = main(
+                    [
+                        "export",
+                        "tr",
+                        "-r",
+                        str(workspace),
+                        "-d",
+                        "@psychevo",
+                        "-s",
+                        "db-a",
+                        "-o",
+                        str(export_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    result = main(
+                        [
+                            "view",
+                            "tr",
+                            "-r",
+                            str(workspace),
+                            "-d",
+                            "@psychevo",
+                            "--list",
+                        ]
+                    )
+                self.assertEqual(result, 0)
+
+            view_payload = json.loads(view_out.read_text(encoding="utf-8"))
+            self.assertEqual(view_payload["trajectory"][0]["session_id"], "db-a")
+            self.assertEqual(view_payload["trajectory_meta"][0]["adapter"], "psychevo")
+            export_payload = json.loads(export_out.read_text(encoding="utf-8"))
+            self.assertEqual(export_payload["session_id"], "db-a")
+            self.assertEqual(export_payload["agent"]["name"], "psychevo")
+            self.assertIn("db-a", stdout.getvalue())
+            self.assertIn("DB A", stdout.getvalue())
+
+    def test_cli_root_option_reads_cached_analysis_from_workspace(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            outside = root / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            (workspace / "peval-py.toml").write_text(
+                'analysis_eval_slug = "default"\n',
+                encoding="utf-8",
+            )
+            analysis_path = write_cli_cached_analysis(workspace)
+            markdown_path = write_cli_cached_markdown(workspace)
+            out_path = root / "report.json"
+
+            with contextlib.chdir(outside):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-r",
+                        str(workspace),
+                        "-a",
+                        "opencode",
+                        "-p",
+                        str(FIXTURES / "common_session.jsonl"),
+                        "--agent-name",
+                        "agent-a",
+                        "-f",
+                        "json",
+                        "-o",
+                        str(out_path),
+                    ]
+                )
+            self.assertEqual(result, 0)
+
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            analysis = payload["annotations"]["analysis"][0]
+            self.assertEqual(analysis["summary"], "Root-selected cached analysis.")
+            self.assertIn("Cached markdown body.", analysis["md_report"])
+            self.assertEqual(
+                analysis["relative_paths"],
+                {
+                    "json": analysis_path.relative_to(workspace).as_posix(),
+                    "md": markdown_path.relative_to(workspace).as_posix(),
+                },
+            )
+
+    def test_cli_root_option_requires_initialized_workspace(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            missing = root / "missing"
+            for command in ("view", "export"):
+                with self.subTest(command=command):
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        result = main(
+                            [
+                                command,
+                                "tr",
+                                "-r",
+                                str(missing),
+                                "-p",
+                                str(FIXTURES / "common_session.jsonl"),
+                            ]
+                        )
+                    self.assertNotEqual(result, 0)
+                    self.assertIn(
+                        "is not an initialized peval-py workspace",
+                        stderr.getvalue(),
+                    )
+                    self.assertIn("peval-py init -r", stderr.getvalue())
 
     def test_cli_input_table_csv_expands_sessions_and_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

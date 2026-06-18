@@ -361,6 +361,19 @@ Use `--json` for machine-readable output. `serve` uses an explicit `--root`,
 only a shared root-override name and does not make `serve` require a Rust
 `peval` workspace.
 
+`view tr` and `export tr` also accept `-r, --root DIR` when you want to load an
+existing peval-py workspace config from outside that directory. The root must
+already contain `peval-py.toml`; use `peval-py init -r DIR` to create it first.
+For `view tr`, the selected root also enables read-only cached analysis
+overlays from that workspace. For `export tr`, the selected root supplies
+config and adapter defaults such as `-d @adapter`, but the output remains a
+single ATIF trajectory without report annotations.
+
+```bash
+peval-py view tr -r .local/peval-py -d @opencode --list
+peval-py export tr -r .local/peval-py -d @opencode -s <session-id> -o
+```
+
 The static HTML report remains the canonical offline report. `peval-py serve`
 uses the same report body instead of a separate dashboard layout: Report Notes,
 Leaderboard, Trajectory Overview, and the selected Trial trajectory keep the
@@ -421,9 +434,10 @@ so each can be archived, deleted, or refreshed on its own.
 
 ## Cached Analysis And Cell Notes
 
-When a peval-py workspace root is known, `view tr` and `serve` refresh can read
-cached peval cell analysis without modifying the source trajectory. The lookup
-is read-only and uses:
+When a peval-py workspace root is selected with `view tr -r <workspace>`,
+discovered from the current directory, or used by `serve` refresh, peval-py can
+read cached peval cell analysis without modifying the source trajectory. The
+lookup is read-only and uses:
 
 ```text
 <workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json
@@ -505,6 +519,9 @@ detail section also remains English.
 - `-d, --db PATH`: read an adapter-owned SQLite database. Repeat it with
   `view tr` for cross-DB comparison. Use `-d @adapter` to expand that
   adapter's configured `default_db_path`.
+- `-r, --root DIR`: for `view tr` and `export tr`, load an existing peval-py
+  workspace's `peval-py.toml` from `DIR`. It does not initialize or mutate the
+  workspace; run `peval-py init -r DIR` first if needed.
 - `-s, --session-id ID`: select a DB session. With one DB, bare `-s ID`
   remains valid and repeatable. Use `-s #N` for list indexes; with multiple
   DBs, use `-s dN=ID` or `-s dN=#M`.

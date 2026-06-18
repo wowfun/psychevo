@@ -82,7 +82,7 @@ def ensure_workspace_root(root: Path) -> Path:
     if not config_path.is_file():
         raise ValueError(
             f"{resolved} is not an initialized peval-py workspace; "
-            f"run `peval-py init --root {resolved}`"
+            f"run `peval-py init -r {resolved}`"
         )
     try:
         tomllib.loads(config_path.read_text(encoding="utf-8"))

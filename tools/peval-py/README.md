@@ -77,6 +77,18 @@ Adapter TOML tables may set `default_db_path`; relative values resolve from
 the TOML file that defines them. Use `-d @adapter` to expand that configured
 DB path and bind the DB input to the same adapter.
 
+Use `-r, --root DIR` with `view tr` or `export tr` when you want to load an
+existing peval-py workspace's `peval-py.toml` from outside the workspace. This
+selects workspace config such as locale, `analysis_eval_slug`, adapter
+defaults, and `default_db_path`; it does not initialize or modify the
+workspace. Run `peval-py init -r DIR` first when the workspace does not yet
+contain `peval-py.toml`.
+
+```bash
+peval-py view tr -r .local/peval-py -d @opencode --list
+peval-py export tr -r .local/peval-py -d @opencode -s <session-id> -o
+```
+
 Use `-i, --input-table PATH` when the inputs are easier to maintain as a CSV,
 JSON, or `.xlsx` manifest. Each table row becomes one session in the same
 report. Direct `-p/--path` and `-d/--db` inputs are loaded first, then table
@@ -95,8 +107,9 @@ fields show active agent/tool work time. Long retained-session idle gaps are
 kept separately as `wall_duration_ms`. The Leaderboard and `serve` Source
 Manager also show Last Turn End from `trajectory_meta.finished_at_ms`.
 
-When a peval-py workspace root is available, reports also try to read cached
-peval cell analysis from
+When a peval-py workspace root is selected with `view tr -r <workspace>` or
+discovered from the current directory, reports also try to read cached peval
+cell analysis from
 `runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json`
 and `analysis.md`. The default slug is `default`; matching summaries and
 Markdown reports appear in the selected Trial Analysis section and in JSON

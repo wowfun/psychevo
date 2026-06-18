@@ -342,6 +342,18 @@ peval-py serve --root .local/peval-py
 `peval-py.toml`；这个环境变量只是复用 root override 名称，不代表依赖 Rust
 `peval` workspace。
 
+当需要从目录外加载已有 peval-py workspace 配置时，`view tr` 和 `export tr` 也接受
+`-r, --root DIR`。该 root 必须已经包含 `peval-py.toml`；如果还没有，请先运行
+`peval-py init -r DIR`。对 `view tr` 来说，选中的 root 还会启用该 workspace 中的
+只读 cached analysis overlay。对 `export tr` 来说，选中的 root 只提供配置和
+adapter defaults，例如 `-d @adapter`；输出仍然是单个 ATIF trajectory，不包含
+report annotations。
+
+```bash
+peval-py view tr -r .local/peval-py -d @opencode --list
+peval-py export tr -r .local/peval-py -d @opencode -s <session-id> -o
+```
+
 静态 HTML 报告仍然是规范的离线报告。`peval-py serve` 复用同一套报告主体，
 而不是另做一个 dashboard：Report Notes、Leaderboard、Trajectory Overview 和
 选中 Trial trajectory 会保持静态报告中的顺序和样式。
@@ -390,8 +402,9 @@ session 都可以单独 archive、delete 或 refresh。
 
 ## Cached Analysis 与 Cell Notes
 
-当 peval-py 能确定 workspace root 时，`view tr` 和 `serve` refresh 会只读地尝试
-读取 peval cell 的 cached analysis，不会修改原始 trajectory。读取路径为：
+当通过 `view tr -r <workspace>` 选择 workspace root、从当前目录向上发现
+workspace，或由 `serve` refresh 使用 workspace 时，peval-py 会只读地尝试读取
+peval cell 的 cached analysis，不会修改原始 trajectory。读取路径为：
 
 ```text
 <workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json
@@ -467,6 +480,9 @@ Trial Steps 明细区也保留英文。
 - `-d, --db PATH`：读取 adapter 拥有的 SQLite database。配合 `view tr` 可以重复
   传入，用于跨 DB 对比。`-d @adapter` 会展开该 adapter 配置的
   `default_db_path`。
+- `-r, --root DIR`：用于 `view tr` 和 `export tr`，从 `DIR` 加载已有 peval-py
+  workspace 的 `peval-py.toml`。它不会初始化或修改 workspace；需要时先运行
+  `peval-py init -r DIR`。
 - `-s, --session-id ID`：选择 DB session。只有一个 DB 时，裸 `-s ID` 仍然有效并
   且可以重复。使用 `-s #N` 按列表序号选择；多个 DB 时使用 `-s dN=ID` 或
   `-s dN=#M`。

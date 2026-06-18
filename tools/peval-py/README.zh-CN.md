@@ -72,6 +72,16 @@ Nuitka 也是一种选择，适合想做 compiled-Python 构建并且本机有 C
 adapter TOML 表可以设置 `default_db_path`；相对路径按定义该值的 TOML 文件解析。
 使用 `-d @adapter` 可以展开这个默认 DB 路径，并把该 DB 输入绑定到同一个 adapter。
 
+当需要从 workspace 外读取已有 peval-py workspace 的 `peval-py.toml` 时，可以在
+`view tr` 或 `export tr` 中使用 `-r, --root DIR`。这会选择 workspace 配置，例如
+locale、`analysis_eval_slug`、adapter defaults 和 `default_db_path`；不会初始化或
+修改 workspace。如果该目录还没有 `peval-py.toml`，请先运行 `peval-py init -r DIR`。
+
+```bash
+peval-py view tr -r .local/peval-py -d @opencode --list
+peval-py export tr -r .local/peval-py -d @opencode -s <session-id> -o
+```
+
 当输入更适合放在 CSV、JSON 或 `.xlsx` 清单中维护时，使用
 `-i, --input-table PATH`。表格每一行都会展开成同一份报告中的一个 session。
 直接传入的 `-p/--path` 和 `-d/--db` 会先加载，然后按文件顺序追加表格行。
@@ -88,8 +98,9 @@ agent/tool work time。已保留 session 中较长的空闲间隔会单独保存
 `wall_duration_ms` 字段中。Leaderboard 和 `serve` Source Manager 也会显示来自
 `trajectory_meta.finished_at_ms` 的 Last Turn End。
 
-当 peval-py 能确定 workspace root 时，报告还会尝试读取 peval cell cached
-analysis：`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json`
+当通过 `view tr -r <workspace>` 选择 workspace root，或从当前目录向上发现
+workspace 时，报告还会尝试读取 peval cell cached analysis：
+`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json`
 和 `analysis.md`。默认 slug 是 `default`；匹配到的 summary 和 Markdown report 会
 显示在 selected Trial 的 Analysis section，并写入 JSON `annotations.analysis[]`。
 

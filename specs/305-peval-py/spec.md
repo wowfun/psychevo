@@ -20,6 +20,8 @@ same command tree.
   Python-owned state layer
 - read-only peval cell cached analysis and manual cell notes enrichment, plus
   explicit serve editing of cell-local `notes.md`
+- a bundled `peval-py` agent skill that guides offline session diagnostics,
+  report/export workflows, and peval-py-recognized analysis artifacts
 - config-selected English and Simplified Chinese HTML report UI localization
 - translated canonical docs under `docs/i18n/<locale>/...`
 - localized tool README files beside their original README files
@@ -55,6 +57,61 @@ Python-owned files required by `peval-py serve`: `<workspace>/peval-py.toml`
 and `peval_py_*` tables inside `<workspace>/state.db`. `serve` startup must not
 depend on unrelated Rust peval workspace files such as `peval.toml`, `runs/`,
 `datasets/`, `scripts/`, eval templates, or `$PSYCHEVO_HOME/peval-config.toml`.
+
+## Agent Skill
+
+The repo-distributed `skills/peval-py` package teaches agents how to use
+`peval-py` for retained session inspection, report rendering, ATIF export, DB
+session listing, local serving, and analysis artifact construction. It is an
+instruction package only: it must not add a new CLI command, execute agents,
+run live providers, mutate source databases, or install itself into
+`.agents/skills`, `.psychevo/skills`, or a global skill directory. Because the
+skill supports multiple agent surfaces, it must not include agent-specific
+`agents/openai.yaml` metadata.
+
+Analysis artifacts are independent from report rendering. The skill must not
+imply that every use requires both `analysis.json` / `analysis.md` and a
+generated report. It should guide agents to output one analysis artifact by
+default, or both only when their contents are complementary. When the user
+wants analysis artifacts to be recognized by peval-py reports or `serve`, the
+preferred path is:
+
+```text
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.md
+```
+
+`Cached analysis` is the peval/peval-py report concept for analysis loaded
+from a workspace; the skill must not require every analysis artifact to be
+cached or placed under `runs/...`. `analysis.json` is the fixed-format,
+machine-readable analysis artifact. It must be a top-level JSON object with at
+least `summary`, because current peval-py report generation reads that field
+into `annotations.analysis[].summary`. Additional structured fields may
+describe status, findings, evidence references, metrics, and recommendations.
+
+`analysis.md` is the free-form analysis artifact readable by humans and
+agents. Its format and content are intentionally unconstrained by the skill.
+Current peval-py report generation reads this file into
+`annotations.analysis[].md_report` and renders it in the selected Trial
+Analysis section. When both `analysis.json` and `analysis.md` are written, they
+should complement each other instead of duplicating the same analysis.
+
+The skill must direct agents to derive `<session-id>` from a rendered peval-py
+report instead of guessing when writing to the preferred recognized path.
+`<analysis_eval_slug>` defaults to `default` unless top-level
+`analysis_eval_slug` in `peval-py.toml` says otherwise. `<agent-id>` is the
+input `--agent-name` when supplied; otherwise it is the effective adapter id.
+`<cell_key>` defaults to `peval-py-analysis` only when no existing analysis
+cell matches. If exactly one cell under the session directory contains
+`analysis.json` or `analysis.md`, update that cell. If multiple cells match,
+stop and ask for resolution because peval-py intentionally omits ambiguous
+workspace analysis.
+
+When the workspace is known, the skill should pass `-r <workspace>` to
+`view tr` validation commands so peval-py loads that workspace's config and
+cached analysis overlays without requiring a directory change. Running from the
+workspace root or a descendant remains valid through current-directory
+discovery when `-r/--root` is omitted.
 
 ## Inputs
 
@@ -107,6 +164,7 @@ argument.
 Common trajectory flags use both long and short forms:
 
 - `-c, --config PATH`
+- `-r, --root DIR`
 - `-a, --adapter ADAPTER`
 - `-i, --input-table PATH`
 - `-o, --output [PATH]`
@@ -120,6 +178,21 @@ Common trajectory flags use both long and short forms:
 - `--list-interactive, -li` for `view trajectory` with exactly one `-d/--db`
   input, which prints DB sessions, prompts for a comma/range selection, and then
   renders the selected sessions
+
+`view trajectory` and `export trajectory` accept `-r, --root DIR` to select an
+existing peval-py workspace root for config discovery. The selected root is
+used to load top-level config such as `locale`, `analysis_eval_slug`, adapter
+defaults, and adapter `default_db_path` values. `view trajectory --list` and
+`--list-interactive` inherit that same root-selected config behavior for DB
+listing and selection. Rendered `view trajectory` reports also use the root for
+read-only cached `analysis.json` / `analysis.md` overlays. `export trajectory`
+uses the root-selected config and adapter defaults but still writes only one
+ATIF trajectory object and does not include report annotations. Passing
+`-r/--root` to `view` or `export` must not initialize,
+repair, or mutate the workspace. If `<root>/peval-py.toml` is missing or
+invalid, the command fails clearly and tells the user to run
+`peval-py init -r <root>`. Existing current-directory discovery remains valid
+when `-r/--root` is omitted.
 
 `init` accepts `-r, --root DIR` and `--json`. Without `--root`, it initializes
 the current directory. It creates `<workspace>/peval-py.toml` when missing and

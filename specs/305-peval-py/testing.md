@@ -16,6 +16,8 @@ Define deterministic validation for the `peval-py` Python CLI.
 - session-comparison view behavior and CLI notes
 - saved-workspace `serve` state and local HTTP behavior
 - minimal peval-py serve state initialization from `peval-py init`
+- bundled `skills/peval-py` package shape and fixture-backed recognition of
+  its peval-py-recognized analysis artifact contract
 
 Out of scope:
 
@@ -368,6 +370,13 @@ Coverage must verify:
 - CLI smoke commands cover `view trajectory`, `export trajectory`, the `tr`
   scenario alias, localized HTML output from `[defaults].locale = "zh-CN"`, and
   short flags including `-p`, `-a`, `-i`, `-n`, and `-o`.
+- CLI input tests cover `view trajectory -r DIR` and
+  `export trajectory -r DIR` loading an existing peval-py workspace config from
+  outside the workspace, including adapter `default_db_path` expansion through
+  `-d @adapter`; `view trajectory -r DIR` recognizing cached
+  `analysis.json` / `analysis.md`; `view trajectory --list -r DIR -d @adapter`
+  using the root-selected config; and `view/export trajectory -r DIR` failing
+  clearly when `DIR` is missing or does not contain `peval-py.toml`.
 - init tests verify `peval-py init` creates only `<workspace>/peval-py.toml` and
   migrated `<workspace>/state.db`, preserves existing valid `peval-py.toml`
   state DB paths, rejects invalid peval-py TOML, and does not create
@@ -396,8 +405,34 @@ Coverage must verify:
   tool README translation exists beside `tools/peval-py/README.md`, English
   docs link to their Chinese counterparts, Chinese docs link to translated
   pages when available, and spec links still target canonical specs.
+- the repo-distributed `skills/peval-py` package validates as a skill package,
+  omits agent-specific `agents/openai.yaml`, documents the distinction between
+  reports, exports, `serve`, and `analysis.json` / `analysis.md` artifacts,
+  defines `analysis.json` as the fixed-format machine-readable artifact,
+  defines `analysis.md` as a free-form human/agent-readable artifact, directs
+  agents to output one analysis artifact by default or complementary artifacts
+  when both are useful,
+  and directs agents to use `view tr -r <workspace>` or discovered
+  current-directory workspace config when verifying `annotations.analysis[]`.
+- the skill helper script under `skills/peval-py/scripts/` validates with
+  `compileall`, uses argparse subcommands, and replaces embedded Python
+  snippets for report subject extraction and analysis-recognition checks.
+- a fixture-backed smoke creates a temporary peval-py workspace, writes
+  `runs/default/agent-a/common_session/peval-py-analysis/analysis.json` with a
+  top-level `summary`, writes sibling `analysis.md`, runs `view tr` with
+  `-r <workspace>` against `tools/peval-py/tests/fixtures/common_session.jsonl`
+  with `-a opencode --agent-name agent-a -f json`, and verifies the generated
+  report contains both `annotations.analysis[0].summary` and
+  `annotations.analysis[0].md_report`.
 
 ## Validation
+
+Skill package validation:
+
+```sh
+python /home/kevin/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/peval-py
+python -m compileall skills/peval-py/scripts
+```
 
 The primary validation command is:
 

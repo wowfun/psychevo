@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from peval_py.config import apply_overrides, config_for_adapter, load_config
 from peval_py.html import render_html
@@ -35,8 +36,9 @@ def main(argv: list[str] | None = None) -> int:
 
             run_init_command(args)
             return 0
+        workspace_root = validated_workspace_root(args)
         config = apply_overrides(
-            load_config(args.config, workspace_root=getattr(args, "root", None)),
+            load_config(args.config, workspace_root=workspace_root),
             args,
         )
         adapter_assignments = parse_adapter_assignments(
@@ -132,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_shared_args(view_trajectory)
+    add_root_arg(view_trajectory)
     view_trajectory.add_argument(
         "-f",
         "--format",
@@ -172,6 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_shared_args(export_trajectory)
+    add_root_arg(export_trajectory)
 
     serve = verbs.add_parser(
         "serve",
@@ -203,6 +207,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def validated_workspace_root(args: argparse.Namespace) -> str | None:
+    root = getattr(args, "root", None)
+    if root and getattr(args, "command", None) in {"view", "export"}:
+        from peval_py.state import ensure_workspace_root
+
+        return str(ensure_workspace_root(Path(root).expanduser()))
+    return root
+
+
+def add_root_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-r",
+        "--root",
+        metavar="DIR",
+        help=(
+            "existing peval-py workspace root for config discovery; "
+            "run peval-py init -r DIR first"
+        ),
+    )
 
 
 def add_shared_args(
