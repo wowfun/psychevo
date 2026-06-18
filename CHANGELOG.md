@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-18
+
+- Improved `peval-py serve` session comparison UX with Leaderboard Session
+  Alias and Last Turn End columns, sortable Source Manager timing, and live
+  workspace analysis/notes overlays for saved snapshots when source refresh
+  fails.
+
 ## 2026-06-17
 
 - Reorganized UI specs around shared `022` UI foundation, `240` Web/Workbench,

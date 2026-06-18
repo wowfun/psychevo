@@ -316,6 +316,7 @@ def comparison_row(item: dict[str, Any]) -> dict[str, Any]:
         "adapter": meta.get("adapter"),
         "model": trajectory.get("agent", {}).get("model_name"),
         "status": meta.get("status"),
+        "finished_at_ms": meta.get("finished_at_ms"),
         "duration_ms": meta.get("duration_ms"),
         "wall_duration_ms": trial_wall_duration_ms(meta),
         "turns": metrics.get("total_turns"),

@@ -141,11 +141,12 @@ function sourceIdentityFor(row) {
 function sourceDisplayFor(row) {
   return sourceAliasFor(row) || sourceIdentityFor(row);
 }
-function renderSourceLabel(row) {
+function sessionAliasValue(row) {
+  return sourceAliasFor(row) || "-";
+}
+function renderSessionAliasCell(row) {
   const alias = sourceAliasFor(row);
-  const identity = sourceIdentityFor(row);
-  if (!alias) return esc(identity);
-  return `<span class="source-label-stack"><strong>${esc(alias)}</strong><span>${esc(identity)}</span></span>`;
+  return alias ? esc(alias) : `<span class="muted">-</span>`;
 }
 function renderComparisonPanels(options = {}) {
   const rows = leaderboardRows();
@@ -166,10 +167,12 @@ function selectionColumn() {
 }
 function leaderboardColumns() {
   return [
-    { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => sourceDisplayFor(row), html: row => renderSourceLabel(row), cellTitle: row => sourceIdentityFor(row) },
+    { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => sourceIdentityFor(row), cellTitle: row => row.trial_key || sourceIdentityFor(row) },
+    { key: "source_alias", label: t("session_alias", "Session Alias"), width: "140px", value: row => sessionAliasValue(row), html: row => renderSessionAliasCell(row), cellTitle: row => sourceAliasFor(row) },
     { key: "agent", label: t("agent", "Agent"), width: "120px", filterable: true, value: row => agentNameFor(row) },
     { key: "model", label: t("model", "Model"), width: "150px", filterable: true, value: row => row.model || "-" },
     { key: "status", label: t("result", "Result"), width: "104px", filterable: true, value: row => row.status || "-", filterLabel: value => statusLabel(value), html: row => `<span class="stamp ${lower(row.status || "passed")}">${esc(statusLabel(row.status))}</span>` },
+    { key: "finished_at_ms", label: t("last_turn_end", "Last Turn End"), width: "156px", type: "number", numeric: true, sortable: true, value: row => row.finished_at_ms, format: fmtDate },
     { key: "duration_ms", label: t("duration", "Active Duration"), width: "124px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.duration_ms, format: fmtMs },
     { key: "turns", label: t("turns", "Turns"), width: "82px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.turns, format: fmtNum },
     { key: "total_tool_calls", label: t("tool_calls", "Tool Calls"), width: "106px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.total_tool_calls, format: value => hasMetricValue(value) ? fmtNum(value) : "-" },
@@ -950,20 +953,73 @@ function renderServeSources() {
   }
   const list = document.querySelector("[data-source-list]");
   if (list) {
-    list.innerHTML = sources.length ? sources.map(renderServeSourceRow).join("") : `<li class="source-row empty">${esc(t("serve_no_sources", "No sources loaded"))}</li>`;
+    if (!sources.length) {
+      list.innerHTML = `<li class="source-row empty">${esc(t("serve_no_sources", "No sources loaded"))}</li>`;
+      return;
+    }
+    const rows = sourceRows();
+    list.innerHTML = `<li class="source-table-item">${renderDataTable({
+      tableId: "sources",
+      columns: sourceColumns(),
+      rows,
+      tableClass: "source-table",
+      shellClass: "source-table-shell",
+      rowClass: source => `source-table-row ${source?.active === false ? "archived" : ""}`,
+      rowAttrs: source => `data-source-row data-source-key="${esc(source?.source_key || "")}"`,
+      rowTitle: source => source?.source_key || source?.label || ""
+    })}</li>`;
+    bindDataTableControls(list, "sources", () => renderServeSources());
   }
 }
-function renderServeSourceRow(source) {
-  const key = source?.source_key || "";
+function sourceColumns() {
+  return [
+    { key: "label", label: t("source", "Source"), width: "220px", value: source => sourceDisplayLabel(source), html: renderServeSourceLabel, cellTitle: source => source?.label || "" },
+    { key: "last_turn_finished_at_ms", label: t("last_turn_end", "Last Turn End"), width: "156px", type: "number", numeric: true, sortable: true, value: source => source?.last_turn_finished_at_ms, format: fmtDate },
+    { key: "status", label: t("status", "status"), width: "170px", value: source => sourceStatusText(source), html: renderServeSourceStatus },
+    { key: "alias", label: t("serve_source_alias", "Alias"), width: "240px", value: source => String(source?.source_alias || "").trim() || "-", html: renderServeSourceAliasEdit },
+    { key: "actions", label: t("more", "More"), width: "210px", value: () => "", html: renderServeSourceActions }
+  ];
+}
+function sourceRows() {
+  return applyDataTableControls("sources", Array.isArray(state.serveSources) ? state.serveSources : [], sourceColumns());
+}
+function sourceDisplayLabel(source) {
+  const label = source?.label || source?.source_key || "source";
+  const alias = String(source?.source_alias || "").trim();
+  return alias || label;
+}
+function sourceStatusText(source) {
   const active = source?.active !== false;
-  const snapshot = Boolean(source?.snapshot);
-  const refreshable = source?.refreshable !== false && !snapshot;
-  const status = source?.last_status || "-";
   const stateLabel = active ? t("serve_active", "active") : t("serve_archived", "archived");
+  return `${source?.kind || "source"} / ${source?.adapter || "-"} / ${source?.last_status || "-"} / ${stateLabel}`;
+}
+function renderServeSourceLabel(source) {
+  const key = source?.source_key || "";
   const label = source?.label || key || "source";
   const alias = String(source?.source_alias || "").trim();
   const displayLabel = alias || label;
   const origin = alias ? `<span class="source-origin">${esc(label)}</span>` : "";
+  const session = source?.trial_session_id || source?.session_id || "";
+  const sessionLine = session ? `<span>${esc(t("session", "Session"))}: <code>${esc(session)}</code></span>` : "";
+  return `<span class="source-label-stack"><strong>${esc(displayLabel)}</strong>${origin}${sessionLine}</span>`;
+}
+function renderServeSourceStatus(source) {
+  return `<span class="source-status-text">${esc(sourceStatusText(source))}</span>`;
+}
+function renderServeSourceAliasEdit(source) {
+  const key = source?.source_key || "";
+  const alias = String(source?.source_alias || "").trim();
+  return `<label class="source-alias-edit">
+    <span>${esc(t("serve_source_alias", "Alias"))}</span>
+    <input data-source-alias-input data-source-key="${esc(key)}" value="${esc(alias)}" autocomplete="off">
+    <button type="button" data-source-alias-save data-source-key="${esc(key)}">${esc(t("serve_save_alias", "Save alias"))}</button>
+  </label>`;
+}
+function renderServeSourceActions(source) {
+  const key = source?.source_key || "";
+  const active = source?.active !== false;
+  const snapshot = Boolean(source?.snapshot);
+  const refreshable = source?.refreshable !== false && !snapshot;
   const refreshButton = refreshable && key
     ? `<button type="button" data-source-action="refresh" data-source-key="${esc(key)}">${esc(t("serve_refresh", "Refresh"))}</button>`
     : `<span>${esc(t("serve_snapshot", "snapshot"))}</span>`;
@@ -971,19 +1027,7 @@ function renderServeSourceRow(source) {
   const archiveLabel = active ? t("serve_archive", "Archive") : t("serve_activate", "Activate");
   const archiveButton = key ? `<button type="button" data-source-action="${archiveAction}" data-source-key="${esc(key)}">${esc(archiveLabel)}</button>` : "";
   const deleteButton = key ? `<button type="button" data-source-action="delete" data-source-key="${esc(key)}">${esc(t("serve_delete", "Delete"))}</button>` : "";
-  return `<li class="source-row ${active ? "" : "archived"}">
-    <div class="source-row-main">
-      <strong>${esc(displayLabel)}</strong>
-      ${origin}
-      <span>${esc(source?.kind || "source")} / ${esc(source?.adapter || "-")} / ${esc(status)} / ${esc(stateLabel)}</span>
-      <label class="source-alias-edit">
-        <span>${esc(t("serve_source_alias", "Alias"))}</span>
-        <input data-source-alias-input data-source-key="${esc(key)}" value="${esc(alias)}" autocomplete="off">
-        <button type="button" data-source-alias-save data-source-key="${esc(key)}">${esc(t("serve_save_alias", "Save alias"))}</button>
-      </label>
-    </div>
-    <div class="source-row-actions">${refreshButton}${archiveButton}${deleteButton}</div>
-  </li>`;
+  return `<div class="source-row-actions">${refreshButton}${archiveButton}${deleteButton}</div>`;
 }
 async function submitServeSourceForm(form) {
   if (form?.dataset?.sourceKind === "db") applyDefaultDbToForm(form);
@@ -1167,7 +1211,7 @@ async function mutateServeSource(sourceKey, action) {
 async function saveSourceAlias(button) {
   const sourceKey = button?.dataset?.sourceKey;
   if (!sourceKey) return;
-  const row = button.closest(".source-row");
+  const row = button.closest("[data-source-row]");
   const input = row?.querySelector?.("[data-source-alias-input]");
   const alias = String(input?.value || "").trim();
   try {

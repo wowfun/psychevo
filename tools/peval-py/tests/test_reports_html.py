@@ -589,6 +589,7 @@ class PevalPyReportHtmlTests(unittest.TestCase):
                     input_label="common_session.jsonl",
                     input_path=str(FIXTURES / "common_session.jsonl"),
                     session_hint="common_session",
+                    source_alias="Readable source",
                 ),
                 ReportSession(
                     conversion=second,
@@ -599,6 +600,13 @@ class PevalPyReportHtmlTests(unittest.TestCase):
             ],
             config,
             [],
+        )
+        entries = report["comparison"]["leaderboard"]["entries"]
+        self.assertEqual(entries[0]["session_id"], "common_session")
+        self.assertEqual(entries[0]["source_alias"], "Readable source")
+        self.assertEqual(
+            entries[0]["finished_at_ms"],
+            report["trajectory_meta"][0]["finished_at_ms"],
         )
 
         static_html = render_html(report)
@@ -672,6 +680,13 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("function renderTrace()", serve_html)
         self.assertIn("function renderStepDrawer()", serve_html)
         self.assertIn("function displayLeaderboardColumns()", serve_html)
+        self.assertIn('t("session_alias", "Session Alias")', serve_html)
+        self.assertIn('t("last_turn_end", "Last Turn End")', serve_html)
+        self.assertIn('key: "finished_at_ms"', serve_html)
+        self.assertIn("function sourceColumns()", serve_html)
+        self.assertIn("last_turn_finished_at_ms", serve_html)
+        self.assertIn("source-table", serve_html)
+        self.assertIn('bindDataTableControls(list, "sources"', serve_html)
         self.assertIn("serveMode() ? [selectionColumn(), ...leaderboardColumns()] : leaderboardColumns()", serve_html)
         self.assertIn("data-select-visible", serve_html)
         self.assertIn("data-row-select", serve_html)

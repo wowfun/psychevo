@@ -80,11 +80,13 @@ adapter TOML 表可以设置 `default_db_path`；相对路径按定义该值的 
 
 使用 `--source-alias N=TEXT`，或 input table 的 `alias`/`label`/`source_alias`
 列，可以给来源添加仅用于显示的名称。Alias 只提升报告可读性，不改变 session id、
-trial key、source identity 或 Evidence/Input Source 路径。
+trial key、source identity 或 Evidence/Input Source 路径。在 Leaderboard 中，
+canonical Session 列保持不变，别名显示在独立的 Session Alias 列。
 
 在对比报告中，Leaderboard 的 Duration 列和 JSON `duration_ms` 字段表示 active
 agent/tool work time。已保留 session 中较长的空闲间隔会单独保存在
-`wall_duration_ms` 字段中。
+`wall_duration_ms` 字段中。Leaderboard 和 `serve` Source Manager 也会显示来自
+`trajectory_meta.finished_at_ms` 的 Last Turn End。
 
 当 peval-py 能确定 workspace root 时，报告还会尝试读取 peval cell cached
 analysis：`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json`
@@ -95,12 +97,15 @@ analysis：`runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysi
 `runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md`。这些内容会写入
 JSON `annotations.notes[]`，并排在 CLI/table notes 前面。在 `peval-py serve` 中，
 可刷新的 source 可以编辑或添加这个 cell-local `notes.md`；snapshot 上传来源保持只读。
+Serve 展示已保存 snapshot 时，会在 active report 组合阶段叠加当前 workspace 里的
+`analysis.json`、`analysis.md` 和 `notes.md`；因此 reload 或 Refresh 即使遇到原始
+source DB/file 无法成功刷新，也能显示 notes/analysis 的更新。
 
 `peval-py serve` 保持静态报告继续使用 CDN，但在 serve 页面中会优先从
 `<workspace>/.cache/echarts/6.0.0/echarts.min.js` 提供 ECharts，本地脚本失败时
 回退到固定 CDN URL。Source Manager 会暴露配置好的默认 DB path、source alias 编辑，
-并提供 English/简体中文选择器；语言选择会把顶层 `locale` 持久化到
-`peval-py.toml`。
+Last Turn End 排序，并提供 English/简体中文选择器；语言选择会把顶层 `locale`
+持久化到 `peval-py.toml`。
 
 CSV 示例：
 

@@ -212,6 +212,94 @@ class PevalPyServeStateTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_active_report_overlays_current_annotations_without_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source = root / "common_session.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source)
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            store = open_workspace_state(str(root))
+            try:
+                loaded = load_serve_inputs(
+                    serve_args(path=[str(source)]),
+                    parse_adapter_assignments(["opencode"], config.adapter),
+                    config,
+                )
+                keys = store.import_loaded_sources(loaded, config)
+                self.assertNotIn("annotations", store.active_report())
+
+                stored_report = json.loads(
+                    store.conn.execute(
+                        "SELECT report_json FROM peval_py_trials WHERE source_key = ?",
+                        (keys[0],),
+                    ).fetchone()[0]
+                )
+                stored_report["annotations"] = {
+                    "report_notes": [],
+                    "notes": [
+                        {
+                            "trial_key": stored_report["trajectory_meta"][0]["trial_key"],
+                            "source": "cli",
+                            "label": "CLI note 1",
+                            "markdown": "Stored CLI note.",
+                        }
+                    ],
+                }
+                store.conn.execute(
+                    "UPDATE peval_py_trials SET report_json = ? WHERE source_key = ?",
+                    (json.dumps(stored_report), keys[0]),
+                )
+                store.conn.execute(
+                    """
+                    UPDATE peval_py_sources
+                    SET last_status = 'error', last_error = 'source session vanished'
+                    WHERE source_key = ?
+                    """,
+                    (keys[0],),
+                )
+                store.conn.commit()
+
+                write_cached_markdown(
+                    root,
+                    agent_id="opencode",
+                    session_id="common_session",
+                    markdown="Live overlay analysis.",
+                )
+                write_cached_note(
+                    root,
+                    agent_id="opencode",
+                    session_id="common_session",
+                    markdown="Live overlay note.",
+                )
+
+                active_report = store.active_report(config)
+                annotations = active_report["annotations"]
+                self.assertEqual(
+                    annotations["analysis"][0]["md_report"],
+                    "Live overlay analysis.",
+                )
+                self.assertEqual(
+                    [item["markdown"] for item in annotations["notes"]],
+                    ["Live overlay note.", "Stored CLI note."],
+                )
+                self.assertEqual(store.source_payload()[0]["last_status"], "error")
+
+                store.set_source_alias(keys[0], "Readable source")
+                payload = store.source_payload()[0]
+                self.assertEqual(payload["source_alias"], "Readable source")
+                self.assertEqual(payload["trial_key"], "session:t001")
+                self.assertEqual(payload["trial_session_id"], "common_session")
+                self.assertEqual(
+                    payload["last_turn_finished_at_ms"],
+                    active_report["trajectory_meta"][0]["finished_at_ms"],
+                )
+                self.assertEqual(
+                    store.active_report(config)["trajectory"][0]["session_id"],
+                    "common_session",
+                )
+            finally:
+                store.close()
+
     def test_report_json_upload_is_non_refreshable_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = peval_py_workspace(Path(tmp))

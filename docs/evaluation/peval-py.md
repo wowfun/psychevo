@@ -337,10 +337,11 @@ the same display style as `peval view`.
 
 Use `--source-alias N=TEXT` to assign a display-only alias to the one-based
 expanded input session. Input tables can use any of `alias`, `label`, or
-`source_alias` columns for the same value. Aliases improve Leaderboard and
-source-list readability but do not change `trajectory.session_id`, `trial_key`,
-`source_key`, `data_ref.relative_path`, or the original Evidence/Input Source
-path.
+`source_alias` columns for the same value. Aliases improve source-list,
+Trajectory Overview, and selected-Trial readability, and appear in the
+Leaderboard's separate Session Alias column. They do not change the canonical
+Session column, `trajectory.session_id`, `trial_key`, `source_key`,
+`data_ref.relative_path`, or the original Evidence/Input Source path.
 
 ## Serve UI Layout
 
@@ -393,8 +394,9 @@ while inputs and menus keep solid readable surfaces.
 Source Manager exposes configured adapter default DB paths in DB forms. Choose
 an adapter with a default DB path to inspect or import without retyping the
 path. Source add/upload forms also accept an alias, and each saved source row
-has an alias editor. The alias is stored separately from the source identity
-and can be cleared.
+has an alias editor. Source rows include sortable Last Turn End derived from
+the stored Trial's `trajectory_meta.finished_at_ms`. The alias is stored
+separately from the source identity and can be cleared.
 
 In the Leaderboard, web UI mode may add row checkboxes for export selection and
 one `Export` menu with Table, JSON Report, and HTML Report choices. Row clicks
@@ -439,9 +441,12 @@ or ambiguous cell matches are silently ignored.
 The JSON report stores matching analysis under `annotations.analysis[]` with
 compatible `relative_path`, optional top-level JSON `summary`, optional Markdown
 `md_report`, and per-format `relative_paths`. The HTML selected Trial area
-shows an Analysis section only when cached analysis exists. `serve` persists
-the enriched report snapshot during refresh, so changes to `analysis.json` or
-`analysis.md` need Refresh before the browser view updates.
+shows an Analysis section only when cached analysis exists. In `serve`, the
+active report composition overlays current workspace-side analysis and cell
+notes on top of stored source snapshots, so reload or explicit Refresh can show
+changes to `analysis.json`, `analysis.md`, or `notes.md` even if the original
+source DB/file no longer refreshes successfully. The persisted trajectory
+snapshot remains the last successful source conversion.
 
 peval-py also reads peval cell manual notes from the same task tree:
 

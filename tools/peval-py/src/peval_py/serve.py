@@ -132,7 +132,7 @@ def make_handler(
                 if path == "/":
                     self.write_html(
                         render_serve_html(
-                            store.active_report(),
+                            store.active_report(runtime.config),
                             locale=runtime.config.locale,
                             sources=store.source_payload(),
                             adapter_defaults=runtime.config.adapter_default_db_paths,
@@ -143,7 +143,7 @@ def make_handler(
                     self.write_js(cached_echarts_asset(store))
                     return
                 if path == "/api/report":
-                    self.write_json(store.active_report())
+                    self.write_json(store.active_report(runtime.config))
                     return
                 if path == "/api/sources":
                     self.write_json({"sources": store.source_payload()})
@@ -169,7 +169,7 @@ def make_handler(
                     return
                 if path == "/api/sources":
                     add_source_payload(store, runtime.config, payload)
-                    self.write_json(mutation_payload(store))
+                    self.write_json(mutation_payload(store, runtime.config))
                     return
                 if path == "/api/upload":
                     filename = required_string(payload, "filename")
@@ -185,11 +185,11 @@ def make_handler(
                     if upload_alias is not None:
                         for source_key in keys:
                             store.set_source_alias(source_key, upload_alias)
-                    self.write_json(mutation_payload(store))
+                    self.write_json(mutation_payload(store, runtime.config))
                     return
                 if path == "/api/refresh":
                     store.refresh_sources(source_keys_payload(payload), runtime.config)
-                    self.write_json(mutation_payload(store))
+                    self.write_json(mutation_payload(store, runtime.config))
                     return
 
                 source_action = source_action_path(path)
@@ -213,7 +213,7 @@ def make_handler(
                         )
                     else:
                         raise HttpError(404, "unknown source action")
-                    self.write_json(mutation_payload(store))
+                    self.write_json(mutation_payload(store, runtime.config))
                     return
 
                 raise HttpError(404, "not found")
@@ -318,10 +318,10 @@ def download_echarts_asset() -> bytes:
         return response.read()
 
 
-def mutation_payload(store: ServeStateStore) -> dict[str, Any]:
+def mutation_payload(store: ServeStateStore, config: ToolConfig) -> dict[str, Any]:
     return {
         "sources": store.source_payload(),
-        "report": store.active_report(),
+        "report": store.active_report(config),
     }
 
 

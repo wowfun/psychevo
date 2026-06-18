@@ -87,11 +87,13 @@ as CSV when you want the standard-library-only path.
 Use `--source-alias N=TEXT` or input-table `alias`/`label`/`source_alias`
 columns to add display-only source names. Aliases improve report readability
 without changing session ids, trial keys, source identity, or Evidence/Input
-Source paths.
+Source paths. In the Leaderboard, the canonical Session column stays unchanged
+and aliases appear in the separate Session Alias column.
 
 In comparison reports, the Leaderboard Duration column and JSON `duration_ms`
 fields show active agent/tool work time. Long retained-session idle gaps are
-kept separately as `wall_duration_ms`.
+kept separately as `wall_duration_ms`. The Leaderboard and `serve` Source
+Manager also show Last Turn End from `trajectory_meta.finished_at_ms`.
 
 When a peval-py workspace root is available, reports also try to read cached
 peval cell analysis from
@@ -105,12 +107,17 @@ The same task tree can also provide manual Trial notes at
 These appear in JSON `annotations.notes[]` before CLI/table notes. In
 `peval-py serve`, refreshable sources can edit or add that cell-local
 `notes.md`; snapshot uploads remain read-only.
+When serving saved snapshots, current workspace-side `analysis.json`,
+`analysis.md`, and `notes.md` are overlaid when the active report is composed,
+so reload or Refresh can show note/analysis changes even if the original source
+DB or file no longer refreshes successfully.
 
 `peval-py serve` keeps static reports CDN-based, but serves ECharts local-first
 from `<workspace>/.cache/echarts/6.0.0/echarts.min.js` and falls back to the
 fixed CDN URL if the local script fails. Its Source Manager exposes configured
-default DB paths, alias editing, and an English/Simplified Chinese selector
-that persists top-level `locale` in `peval-py.toml`.
+default DB paths, alias editing, Last Turn End sorting, and an
+English/Simplified Chinese selector that persists top-level `locale` in
+`peval-py.toml`.
 
 CSV example:
 

@@ -1504,6 +1504,30 @@ pre {
   list-style:none;
   overflow:auto;
 }
+.source-table-item {
+  min-width:0;
+  list-style:none;
+}
+.source-table-shell {
+  margin:0;
+}
+.source-table {
+  min-width:760px;
+}
+.source-table th,.source-table td {
+  vertical-align:middle;
+}
+.source-table-row.archived {
+  opacity:.68;
+}
+.source-table .source-alias-edit {
+  margin-top:0;
+}
+.source-status-text {
+  color:var(--muted);
+  font:700 12px/1.35 var(--mono);
+  overflow-wrap:anywhere;
+}
 .source-row {
   min-width:0;
   display:grid;

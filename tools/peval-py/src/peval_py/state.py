@@ -6,11 +6,12 @@ import os
 import sqlite3
 import time
 import tomllib
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from peval_py.analysis import save_cell_note
+from peval_py.analysis import cached_analysis_report, cached_note_report, save_cell_note
 from peval_py.atif import convert_atif_trajectory, is_atif_trajectory
 from peval_py.config import ToolConfig, config_for_adapter
 from peval_py.inputs import AdapterAssignments, LoadedInputs, LoadedSession, load_inputs
@@ -498,10 +499,11 @@ class ServeStateStore:
         self.conn.commit()
         return keys
 
-    def active_report(self) -> dict[str, Any]:
+    def active_report(self, config: ToolConfig | None = None) -> dict[str, Any]:
         rows = self.conn.execute(
             """
-            SELECT s.source_alias, t.trajectory_json, t.meta_json, t.report_json
+            SELECT s.*, t.trial_key AS stored_trial_key,
+                   t.trajectory_json, t.meta_json, t.report_json
             FROM peval_py_sources s
             JOIN peval_py_trials t ON t.source_key = s.source_key
             WHERE s.active = 1
@@ -517,7 +519,10 @@ class ServeStateStore:
                 for row in rows
             ]
         )
-        reports = [json.loads(row["report_json"]) for row in rows]
+        reports = [
+            source_report_with_current_annotations(dict(row), trajectory, meta, config)
+            for row, trajectory, meta in zip(rows, trajectories, metas, strict=True)
+        ]
         return build_report_from_snapshots(
             trajectories,
             metas,
@@ -547,15 +552,27 @@ class ServeStateStore:
         return [dict(row) for row in self.conn.execute(sql, params).fetchall()]
 
     def source_payload(self) -> list[dict[str, Any]]:
-        return [
-            {
-                **row,
-                "refreshable": bool(row["refreshable"]),
-                "active": bool(row["active"]),
-                "snapshot": bool(row["snapshot"]),
-            }
-            for row in self.source_rows(active_only=False)
-        ]
+        rows = self.conn.execute(
+            """
+            SELECT s.*, t.trial_key AS stored_trial_key,
+                   t.session_id AS trial_session_id, t.meta_json AS meta_json
+            FROM peval_py_sources s
+            LEFT JOIN peval_py_trials t ON t.source_key = s.source_key
+            ORDER BY s.created_at_ms ASC, s.source_key ASC
+            """
+        ).fetchall()
+        payload: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            meta = parsed_object(item.pop("meta_json", None))
+            item["refreshable"] = bool(item["refreshable"])
+            item["active"] = bool(item["active"])
+            item["snapshot"] = bool(item["snapshot"])
+            item["trial_key"] = optional_str(item.pop("stored_trial_key", None))
+            item["trial_session_id"] = optional_str(item.get("trial_session_id"))
+            item["last_turn_finished_at_ms"] = optional_int(meta.get("finished_at_ms"))
+            payload.append(item)
+        return payload
 
     def set_source_active(self, source_key: str, active: bool) -> None:
         cursor = self.conn.execute(
@@ -759,6 +776,94 @@ def meta_with_source_alias(meta: dict[str, Any], alias: Any) -> dict[str, Any]:
         copy.pop("source_alias", None)
         return copy
     return meta
+
+
+def source_report_with_current_annotations(
+    source: dict[str, Any],
+    trajectory: dict[str, Any],
+    meta: dict[str, Any],
+    config: ToolConfig | None,
+) -> dict[str, Any]:
+    report = parsed_object(source.get("report_json"))
+    if config is None or not bool(source.get("refreshable")) or bool(source.get("snapshot")):
+        return report
+
+    trial_key = str(meta.get("trial_key") or "")
+    session_id = optional_str(trajectory.get("session_id")) or source.get("session_id")
+    agent_id = annotation_agent_id(source, trajectory)
+    current_note = cached_note_report(
+        workspace_root=config.workspace_root,
+        eval_slug=config.analysis_eval_slug,
+        agent_id=agent_id,
+        session_id=session_id,
+        trial_key=trial_key,
+    )
+    current_analysis = cached_analysis_report(
+        workspace_root=config.workspace_root,
+        eval_slug=config.analysis_eval_slug,
+        agent_id=agent_id,
+        session_id=session_id,
+        trial_key=trial_key,
+    )
+    annotations = parsed_object(report.get("annotations"))
+    stored_non_cell_notes = [
+        deepcopy(item)
+        for item in annotations.get("notes") or []
+        if not is_cell_note(item)
+    ]
+    notes: list[dict[str, Any]] = []
+    if current_note is not None:
+        notes.append(current_note)
+    notes.extend(stored_non_cell_notes)
+
+    next_annotations: dict[str, Any] = {
+        "report_notes": deepcopy(annotations.get("report_notes") or []),
+        "notes": notes,
+    }
+    if current_analysis is not None:
+        next_annotations["analysis"] = [current_analysis]
+
+    if (
+        next_annotations["report_notes"]
+        or next_annotations["notes"]
+        or next_annotations.get("analysis")
+    ):
+        report = deepcopy(report)
+        report["annotations"] = next_annotations
+    else:
+        report = deepcopy(report)
+        report.pop("annotations", None)
+    return report
+
+
+def annotation_agent_id(source: dict[str, Any], trajectory: dict[str, Any]) -> str | None:
+    agent = trajectory.get("agent")
+    trajectory_agent = agent.get("name") if isinstance(agent, dict) else None
+    return (
+        optional_str(source.get("agent_name"))
+        or optional_str(trajectory_agent)
+        or optional_str(source.get("adapter"))
+    )
+
+
+def is_cell_note(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("source") == "cell"
+        and value.get("label") == "notes.md"
+    )
+
+
+def parsed_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def optional_str(value: Any) -> str | None:

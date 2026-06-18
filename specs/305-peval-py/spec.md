@@ -514,9 +514,11 @@ Overview, then the selected Trial trajectory. The comparison panels render one
 primary section title without a duplicate eyebrow label. `Leaderboard` is a
 preserved report UI term and remains English in localized reports.
 `peval-py` treats each input session as one Trial. Multi-session HTML no longer
-renders a separate Visible Heatmap panel. The Leaderboard shows source alias
-when present, otherwise session, plus agent, model, result, active duration,
-turns, tools, tokens, cost, and notes. The
+renders a separate Visible Heatmap panel. The Leaderboard shows the canonical
+session id, a separate Session Alias column that displays `source_alias` or
+`-`, agent, model, result, Last Turn End, active duration, turns, tools, tokens,
+cost, and notes. Last Turn End is the Trial's `trajectory_meta.finished_at_ms`;
+missing values render as `-` and sort after present values. The
 Agent column uses the trajectory agent name and falls back to the adapter id
 when the trajectory does not provide an agent name. The Session, Agent, Model,
 and Result columns provide multi-value filters whose values are collected from
@@ -556,8 +558,11 @@ paths and do not upload file contents. The DB Inspect action still inspects
 	  Failed source imports show a transient error containing the concrete server
 	  message and must not persist the failed source or show it in the source list.
 	  Source aliases can be edited from the source list and affect only display in
-	  the source list, Leaderboard, Trajectory Overview, and selected Trial summary;
-	  Evidence/Input Source continues to show the original path.
+	  the source list, the Leaderboard Session Alias column, Trajectory Overview,
+	  and selected Trial summary; Evidence/Input Source continues to show the
+	  original path. Source Manager rows also expose the latest stored Trial's
+	  Last Turn End using `trajectory_meta.finished_at_ms`, without requiring a
+	  source refresh.
 	  It does not add a persistent left sidebar or reduce the report body width.
   Serve-only controls use the same color, radius, typography, and panel tokens as
   static reports but sit at a lower visual priority than report content.
@@ -566,9 +571,14 @@ paths and do not upload file contents. The DB Inspect action still inspects
   uploads, and menu surfaces remain solid enough to read.
 
 `serve` does not refresh sources on startup unless source flags were supplied on
-that invocation. The page opens from the latest canonical snapshots and marks
-sources with their latest status. Refresh is explicit from the source manager or
-through source flags on the `serve` command.
+that invocation. The page opens from the latest canonical trajectory snapshots
+and marks sources with their latest status. When composing the active served
+report, `serve` re-reads current workspace-side cell `analysis.json`,
+`analysis.md`, and `notes.md` for each active refreshable source and overlays
+those annotations on the stored snapshot without mutating the stored trajectory
+or requiring the original source file/DB session to refresh successfully.
+Refresh is explicit from the source manager or through source flags on the
+`serve` command.
 
 In serve UI mode, the selected Trial Notes section shows `Edit notes` when the
 selected Trial maps to a refreshable source with an existing cell-local note and
@@ -819,7 +829,9 @@ field, optional `md_report` from `analysis.md`, and optional `relative_paths`
 with `json` and `md` entries. `relative_path` is retained for compatibility and
 points to JSON when present, otherwise Markdown. Absolute paths are not exposed,
 ATIF trajectory data is not changed, and peval-py never executes analysis agents
-or writes analysis cache.
+or writes analysis cache. In `serve`, the active report composition path
+refreshes only this workspace-side annotation overlay; the persisted trajectory
+snapshot remains the last successful source conversion.
 
 ## Redaction
 

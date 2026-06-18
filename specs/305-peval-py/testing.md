@@ -176,6 +176,13 @@ Coverage must verify:
   ambiguous note cells.
 - report snapshot aggregation preserves and remaps both cached analysis and
   cell-local notes when serve composes active source snapshots.
+- serve active report composition overlays current workspace-side cached
+  analysis and cell-local notes for refreshable sources even when the stored
+  source's latest refresh status is `error`, while preserving CLI/table notes
+  from the stored snapshot.
+- serve source payloads include stored Trial identity and
+  `last_turn_finished_at_ms` from `trajectory_meta.finished_at_ms` without a
+  state schema migration, and source aliases remain display-only.
 - comparison JSON contains one canonical `leaderboard.entries` row list, omits
   legacy duplicate `session_heatmap.rows` and `session_table.rows`, and does not
   emit benchmark, task, task-set, task-family, matrix task-axis, row `selected`,
@@ -251,8 +258,10 @@ Coverage must verify:
 - Multi-session HTML does not render the old Visible Heatmap panel, metric
   controls, visible-grid, or session-axis layout.
 - Leaderboard renders Agent from the trajectory agent name with adapter fallback,
-  and active duration, tokens, Tool Calls, and Turns cells show per-column
-  metric intensity classes while Cost remains unshaded.
+  shows canonical Session separately from Session Alias, exposes sortable Last
+  Turn End from `trajectory_meta.finished_at_ms`, and active duration, tokens,
+  Tool Calls, and Turns cells show per-column metric intensity classes while
+  Cost remains unshaded.
 - Leaderboard exposes multi-value filters for Session, Agent, Model, and Result;
   filter options come from the complete row set, values within a column are
   OR-ed, filtered columns are AND-ed, metric shading uses filtered visible rows,
