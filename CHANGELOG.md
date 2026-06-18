@@ -2,10 +2,13 @@
 
 ## 2026-06-18
 
-- Improved `peval-py serve` session comparison UX with Leaderboard Session
-  Alias and Last Turn End columns, sortable Source Manager timing, and live
-  workspace analysis/notes overlays for saved snapshots when source refresh
-  fails.
+- Added a neutral macOS-style Workbench `Light` appearance, renamed existing warm
+  light palette to `Warm`, and migrated legacy light-mode preferences.
+- Increased shared Workbench font scale across dark/light/warm for sidebar chrome,
+  status, composer controls, settings, and empty states.
+- Improved `peval-py` serve/CLI/insights behavior: added offline `peval-py`
+  trajectory analysis skill support, cached `analysis` overlays for snapshots, and
+  `-r/--root` for `view/export tr`.
 
 ## 2026-06-17
 
