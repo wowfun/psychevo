@@ -32,6 +32,11 @@ Settings and Status surfaces follow the same rule: setting rows, status metric
 groups, context usage, and changed-file lists are list-like content on the
 ordinary pane background. They should not render permanent row cards, heavy
 outer panel borders, or filled containers just to separate adjacent controls.
+Workbench typography uses a readable app-shell scale across `dark`, `light`,
+and `warm`: the base UI text is `15px`, primary chrome labels sit just below
+that, session rows stay smaller than workspace labels, and small metadata never
+falls below the shared extra-small token except for compact badges. Theme
+switching must not change font size, line height, or row density.
 
 Desktop uses a persistent left history/workdir pane, center
 transcript/composer, and a resizable right workspace. On Web startup, Workbench
@@ -188,11 +193,12 @@ composer, mobile Workbench panel tabs, and right inspector are hidden. The
 internal Settings navigation lists app-level settings directly in the left
 column: `Appearance`, `Debug`, `Agents`, and bottom-aligned
 `Archived sessions`. The right side renders only the selected item.
-`Appearance` owns the light/dark Workbench preference, `Debug` owns the local
-developer-diagnostics switch, `Agents` owns embedded Profile-level ACP backend
-management, and `Archived sessions` directly displays archived sessions with
-restore/delete actions. Outside Settings, the Workbench left sidebar always
-shows active sessions; archived sessions are not a sidebar filter state.
+`Appearance` owns the dark/light/warm Workbench preference, `Debug` owns the
+local developer-diagnostics switch, `Agents` owns embedded Profile-level ACP
+backend management, and `Archived sessions` directly displays archived
+sessions with restore/delete actions. Outside Settings, the Workbench left
+sidebar always shows active sessions; archived sessions are not a sidebar
+filter state.
 Session-scoped controls such as Agent,
 Model, Variant, and Permission mode do not appear in Settings; the
 current-session agent can only be chosen through the composer agent selector.
@@ -227,19 +233,24 @@ or Model once the context label/status already identifies the active provider
 usage source.
 
 Appearance is a frontend/host preference, not a provider or secret setting.
-In light appearance, Workbench uses a warm reading-paper palette rather than a
-cool blue or icy gray shell. The canvas is ivory, panels are warm paper,
-borders are taupe, primary text is warm charcoal, and selected controls,
-status accents, and active UI state use low-chroma amber/taupe tokens so they
-read as quiet application chrome instead of a saturated brand color.
+Workbench supports `dark`, `light`, and `warm` appearances. `light` is the
+neutral daytime shell: a white main canvas, pale gray sidebar, soft gray
+dividers, dark neutral text, and low-contrast selected rows that read like
+macOS application chrome. `warm` is the reading-paper palette formerly exposed
+as `light`: the canvas is ivory, panels are warm paper, borders are taupe,
+primary text is warm charcoal, and selected controls, status accents, and
+active UI state use low-chroma amber/taupe tokens so they read as quiet
+application chrome instead of a saturated brand color.
 The bottom Settings utility entry is a location marker, not a primary action;
 when Settings is active it uses the ordinary sidebar selected surface instead
 of an accent fill.
 Workbench defaults to the dark ledger appearance, and Settings provides a
-light/dark appearance toggle. The choice may be persisted by the host storage
-adapter and applied before ordinary panel rendering when available. Theme
-switching must preserve the same layout, density, button background rules, and
-status/diff preview behavior.
+dark/light/warm appearance control. The choice may be persisted by the host
+storage adapter and applied before ordinary panel rendering when available.
+Legacy stored `light` preferences from before the three-palette split migrate
+to `warm` so existing users keep the original warm palette. Theme switching
+must preserve the same layout, density, shared Workbench font scale, button
+background rules, and status/diff preview behavior.
 In dark appearance, primary shell labels such as `New Session`, `Search`,
 `Pinned`, `Sessions`, `Settings`, and transcript state labels such
 as `Thinking` must use readable foreground tokens rather than the faintest

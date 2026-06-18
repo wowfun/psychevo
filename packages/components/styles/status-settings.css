@@ -9,7 +9,7 @@
   min-width: 0;
   margin: 0;
   color: var(--pevo-muted);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
   overflow-wrap: anywhere;
   word-break: break-all;
 }
@@ -25,12 +25,12 @@
 
 .pevo-contextSummary strong {
   color: var(--pevo-ink);
-  font-size: 0.84rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .pevo-contextSummary small {
   color: var(--pevo-muted);
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .pevo-promptTokenStack {
@@ -85,7 +85,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -94,7 +94,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--pevo-ink);
-  font-size: 0.8rem;
+  font-size: var(--pevo-font-size-small);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -112,7 +112,7 @@
   min-height: 26px;
   padding: 2px 0;
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   letter-spacing: 0.02em;
   list-style: none;
   text-transform: uppercase;
@@ -170,12 +170,12 @@
 .pevo-promptTokenCategorySummary small,
 .pevo-promptTokenCategoryDetails dt {
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .pevo-promptTokenCategorySummary strong {
   color: var(--pevo-ink);
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .pevo-promptTokenCategorySummary strong,
@@ -199,7 +199,7 @@
   margin: 0;
   color: var(--pevo-ink);
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   text-align: right;
 }
 
@@ -230,12 +230,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .pevo-changedFiles span {
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .pevo-settings div {
@@ -244,7 +244,7 @@
 
 .pevo-settings dt {
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   text-transform: uppercase;
 }
 
@@ -263,12 +263,12 @@
 
 .pevo-stack h3 {
   margin: 0;
-  font-size: 0.84rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .pevo-stack p {
   margin: 0;
-  font-size: 0.86rem;
+  font-size: var(--pevo-font-size-session);
 }
 
 .pevo-request {

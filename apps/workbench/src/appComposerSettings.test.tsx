@@ -42,6 +42,9 @@ describe("Workbench settings and backend controls", () => {
     expect(within(settingsRegion).getByRole("button", { name: "Usage" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Debug" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Agents" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Dark" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Light" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Warm" })).toBeTruthy();
     for (const removed of ["General", "Session", "Session history", "Commands", "Integrations", "Diagnostics"]) {
       expect(within(settingsRegion).queryByRole("button", { name: removed })).toBeNull();
     }

@@ -49,7 +49,7 @@
   overflow: hidden;
   margin: 2px 0 0;
   color: var(--pevo-muted);
-  font-size: 0.74rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;

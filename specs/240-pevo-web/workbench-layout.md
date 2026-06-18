@@ -66,12 +66,13 @@ for narrow responsive layouts. Review and Files use the same locally filterable
 tree component with folder expand/collapse and selected row state. Preview and
 tree regions are immersive right-workspace panes with subtle split dividers
 instead of framed card backgrounds. Markdown previews reuse the shared
-transcript Markdown renderer with raw HTML escaped and light/dark theme-adapted
-code blocks. Code previews use a Workbench-local `highlight.js` core
+transcript Markdown renderer with raw HTML escaped and appearance-adapted code
+blocks. Code previews use a Workbench-local `highlight.js` core
 integration with app-token colors. The Files header does not repeat the project
 path; the selected file absolute path is shown above the preview. Diff previews
-use theme-adapted surfaces so light appearance does not retain dark diff
-panels. Diff file headers are compact UI identifiers, not raw Git metadata:
+use theme-adapted surfaces so light and warm appearances do not retain dark
+diff panels. Diff file headers are compact UI identifiers, not raw Git
+metadata:
 they show status marker, workspace-relative path, and addition/deletion counts,
 while absolute paths are reserved for tooltip text when the active workdir is
 available. Unsupported preview formats and Gateway binary/unreadable file
@@ -144,18 +145,21 @@ control sits at the top of the Settings left navigation, followed by a settings
 search field, and the current project/workdir path is not repeated there. The
 internal left navigation lists `Appearance`, `Debug`, and `Agents` directly,
 with `Archived sessions` pinned to the bottom.
-`Appearance` includes a local appearance control with `dark` and `light`
-choices, `Archived sessions` directly lists archived sessions for restore/delete
-workflows, and `Debug` owns the local Debug switch. The ordinary Workbench left
-sidebar remains an active-session list and must not switch to archived sessions.
-The default is the dark ledger appearance. The setting is a Workbench host
-preference and does not require Gateway to persist provider/runtime
-configuration. The light palette is a warm reading-paper treatment with ivory
+`Appearance` includes a local appearance control with `dark`, `light`, and
+`warm` choices, `Archived sessions` directly lists archived sessions for
+restore/delete workflows, and `Debug` owns the local Debug switch. The ordinary
+Workbench left sidebar remains an active-session list and must not switch to
+archived sessions. The default is the dark ledger appearance. The setting is a
+Workbench host preference and does not require Gateway to persist
+provider/runtime configuration. `light` is the neutral daytime shell with white
+canvas, pale gray sidebar, soft gray dividers, and low-contrast selected rows.
+`warm` is the reading-paper palette formerly exposed as light, with ivory
 canvas, warm paper panels, taupe borders, warm charcoal text, and low-chroma
-amber/taupe active states rather than cool blue chrome. The dark palette keeps
-the near-black ledger structure, removes cold blue sidebar bias, and uses
-higher-luminance primary, muted, and navigation text so Gateway-rendered
-status/settings data remains readable under both appearances. The `Agents`
+amber/taupe active states. The dark palette keeps the near-black ledger
+structure, removes cold blue sidebar bias, and uses higher-luminance primary,
+muted, and navigation text so Gateway-rendered status/settings data remains
+readable under all appearances. All three appearances share the same Workbench
+font scale and row density. The `Agents`
 section shows only configurable Profile-level ACP backend registrations and
 diagnostics; it does not list the read-only effective agent catalog or
 Project-level backend definitions because those are not configurable from the

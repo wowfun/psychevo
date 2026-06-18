@@ -8,7 +8,7 @@
   overflow: auto;
   color: var(--pevo-diff-ink);
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.74rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.42;
 }
 
@@ -70,7 +70,7 @@
   align-items: center;
   min-width: 2.1em;
   color: var(--pevo-diff-add);
-  font-size: 0.82rem;
+  font-size: var(--pevo-font-size-small);
   font-weight: 700;
   letter-spacing: 0;
 }

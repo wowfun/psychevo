@@ -163,7 +163,7 @@
   height: 20px;
   margin: 0;
   color: var(--pevo-faint);
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
   white-space: nowrap;
   opacity: 0;
   pointer-events: auto;
@@ -258,7 +258,7 @@
   color: var(--pevo-muted-strong);
   background: transparent;
   border: 0;
-  font-size: 0.86rem;
+  font-size: var(--pevo-font-size-session);
   text-align: left;
   cursor: pointer;
 }
@@ -348,7 +348,7 @@
   background: var(--pevo-panel-muted);
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1;
   cursor: pointer;
 }
@@ -383,7 +383,7 @@
 .pevo-toolSection h4 {
   margin: 0;
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   font-weight: 650;
   line-height: 1.2;
   text-transform: uppercase;
@@ -406,7 +406,7 @@
 .pevo-toolSection dd {
   margin: 0;
   min-width: 0;
-  font-size: 0.82rem;
+  font-size: var(--pevo-font-size-small);
   line-height: 1.45;
 }
 
@@ -430,7 +430,7 @@
   border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
   border-radius: var(--pevo-radius-sm);
   font-family: var(--pevo-mono);
-  font-size: 0.82rem;
+  font-size: var(--pevo-font-size-small);
   line-height: 1.5;
   white-space: pre-wrap;
 }
@@ -451,7 +451,7 @@
   border: 1px solid var(--pevo-diff-border);
   border-radius: var(--pevo-radius-sm);
   font-family: var(--pevo-mono);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.45;
 }
 
@@ -692,5 +692,5 @@
   color: var(--pevo-brass);
   background: var(--pevo-brass-soft);
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
 }

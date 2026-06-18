@@ -10,7 +10,7 @@
 .previewPane > header span {
   display: block;
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   text-transform: uppercase;
 }
 
@@ -35,7 +35,7 @@
   color: var(--pevo-code-ink);
   background: var(--pevo-code-bg);
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -98,13 +98,13 @@
   gap: 8px;
   padding: 8px 8px 0;
   color: var(--pevo-ink);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .debugSectionHeader span,
 .debugNotice {
   color: var(--pevo-muted);
-  font-size: 0.74rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .debugNotice {
@@ -166,21 +166,21 @@
 .fileTree small {
   min-width: 0;
   color: var(--pevo-muted);
-  font-size: 0.68rem;
+  font-size: var(--pevo-font-size-xsmall);
   white-space: nowrap;
 }
 
 .fileTree p {
   margin: 8px;
   color: var(--pevo-muted);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .filesPanel footer {
   padding: 7px 10px;
   color: var(--pevo-muted);
   border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .debugList details {
@@ -200,10 +200,10 @@
 
 .debugList code {
   color: var(--pevo-ink);
-  font-size: 0.75rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .debugList span {
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
 }

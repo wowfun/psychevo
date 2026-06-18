@@ -9,7 +9,7 @@
   border: 0;
   border-radius: 0;
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.45;
   white-space: pre;
 }

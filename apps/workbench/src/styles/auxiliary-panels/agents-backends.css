@@ -27,7 +27,7 @@
   border-radius: var(--pevo-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -44,7 +44,7 @@
   justify-content: space-between;
   gap: 10px;
   color: var(--pevo-muted);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
   font-weight: 650;
   text-transform: uppercase;
 }
@@ -68,14 +68,14 @@
   border-radius: var(--pevo-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
   font-weight: 650;
   text-transform: none;
 }
 
 .agentSurfacePanel header b {
   color: var(--pevo-ink);
-  font-size: 0.8rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .agentSurfaceList {
@@ -86,7 +86,7 @@
 .agentSurfaceList p {
   margin: 0;
   color: var(--pevo-muted);
-  font-size: 0.84rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .agentSurfaceRow {
@@ -115,14 +115,14 @@
 
 .agentSurfaceRow strong {
   color: var(--pevo-ink);
-  font-size: 0.86rem;
+  font-size: var(--pevo-font-size-session);
   font-weight: 650;
 }
 
 .agentSurfaceRow span,
 .agentSurfaceRow small {
   color: var(--pevo-muted);
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .agentBackendRow {
@@ -161,7 +161,7 @@
   gap: 6px;
   min-height: 22px;
   color: var(--pevo-muted);
-  font-size: 0.74rem;
+  font-size: var(--pevo-font-size-xsmall);
   cursor: pointer;
 }
 
@@ -226,7 +226,7 @@
 .backendEntrypointControls label {
   gap: 4px;
   color: var(--pevo-muted);
-  font-size: 0.74rem;
+  font-size: var(--pevo-font-size-xsmall);
   cursor: pointer;
 }
 
@@ -294,7 +294,7 @@
 .backendEditor h4 {
   margin: 0;
   color: var(--pevo-ink);
-  font-size: 0.88rem;
+  font-size: var(--pevo-font-size-session);
   line-height: 1.2;
 }
 
@@ -310,14 +310,14 @@
   margin-top: 4px;
   overflow-wrap: anywhere;
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.35;
 }
 
 .backendFieldError {
   display: block;
   color: var(--pevo-danger);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.35;
 }
 
@@ -339,7 +339,7 @@
   gap: 5px;
   min-width: 0;
   color: var(--pevo-muted);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
   font-weight: 650;
 }
 
@@ -355,7 +355,7 @@
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .backendEditor input:not([type="checkbox"]) {
@@ -442,7 +442,7 @@
 
 .backendDialogChecks legend {
   padding: 0 4px;
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-xsmall);
   font-weight: 650;
 }
 
@@ -461,7 +461,7 @@
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

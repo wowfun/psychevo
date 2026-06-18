@@ -306,7 +306,7 @@ test.describe("pevo Web Workbench", () => {
     const server = await startPevoWeb({ live: false });
     try {
       await page.goto(server.url);
-      for (const appearance of ["dark", "light"] as const) {
+      for (const appearance of ["dark", "light", "warm"] as const) {
         await page.evaluate((value) => {
           localStorage.setItem("psychevo.workbench.v0.prefs", JSON.stringify({ appearance: value, debug: false }));
         }, appearance);

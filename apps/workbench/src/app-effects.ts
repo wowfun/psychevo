@@ -31,6 +31,7 @@ import {
 } from "./session-utils";
 import {
   PINNED_SESSIONS_KEY,
+  PREFS_APPEARANCE_VERSION,
   PREFS_KEY,
   readPinnedSessionIdsFromStorage
 } from "./storage";
@@ -272,6 +273,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     document.documentElement.dataset.pevoAppearance = params.appearance;
     params.host?.storage.setJson<WorkbenchPrefs>(PREFS_KEY, {
       appearance: params.appearance,
+      appearanceVersion: PREFS_APPEARANCE_VERSION,
       debug: params.debugEnabled,
       rightWidthPx: params.rightWidthPx
     });

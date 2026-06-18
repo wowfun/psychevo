@@ -284,7 +284,7 @@
   overflow: hidden;
   margin: 0;
   color: var(--pevo-ink);
-  font-size: 0.92rem;
+  font-size: var(--pevo-font-size-chrome);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -294,7 +294,7 @@
 .terminalPanel p {
   margin: 2px 0 0;
   color: var(--pevo-muted);
-  font-size: 0.8rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .rightWorkspaceSessionId {
@@ -309,5 +309,5 @@
 .reviewStatusRows,
 .rightSectionLabel {
   color: var(--pevo-muted);
-  font-size: 0.74rem;
+  font-size: var(--pevo-font-size-xsmall);
 }

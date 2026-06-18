@@ -10,7 +10,7 @@
   color: var(--pevo-muted);
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-xs);
-  font-size: 0.7rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .terminalState.is-running {
@@ -41,7 +41,7 @@
   background: color-mix(in oklch, var(--pevo-panel), transparent 8%);
   border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
   border-radius: var(--pevo-radius-xs);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   box-shadow: var(--pevo-shadow-popover);
   pointer-events: none;
 }

@@ -104,7 +104,7 @@ export type RightWorkspaceTab = {
 export type MainView = "transcript" | "search" | "settings";
 export type SettingsSection = "appearance" | "usage" | "debug" | "agents" | "archived";
 export type WorkbenchUsageStats = UsageReadResult;
-export type Appearance = "dark" | "light";
+export type Appearance = "dark" | "light" | "warm";
 export type CommandOverlay = "commands";
 export type CommandTrigger = "composer" | "commandsPanel" | "commandOverlay";
 
@@ -161,6 +161,7 @@ export type SearchResult = {
 
 export type WorkbenchPrefs = {
   appearance: Appearance;
+  appearanceVersion: 1;
   debug: boolean;
   rightWidthPx: number;
 };

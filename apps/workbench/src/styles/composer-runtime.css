@@ -66,7 +66,7 @@
   gap: 6px;
   color: var(--pevo-muted);
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .agentRuntimeSelector {
@@ -75,7 +75,7 @@
   align-items: center;
   min-width: 0;
   color: var(--pevo-muted);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .agentRuntimeButton {
@@ -134,7 +134,7 @@
 .agentRuntimeGroupLabel,
 .agentRuntimeHint {
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.25;
 }
 

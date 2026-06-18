@@ -71,13 +71,13 @@
 }
 
 .searchResults strong {
-  font-size: 0.84rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .searchResults span,
 .searchResults small {
   color: var(--pevo-muted);
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .searchResults small {

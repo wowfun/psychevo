@@ -133,7 +133,7 @@
   min-width: 48px;
   color: var(--pevo-muted);
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   text-align: center;
 }
 
@@ -153,7 +153,7 @@
 .fileEditorBody textarea {
   margin: 0;
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-xsmall);
   line-height: 1.48;
 }
 
@@ -194,7 +194,7 @@
   min-width: 0;
   padding: 7px 0 0;
   color: var(--pevo-muted);
-  font-size: 0.74rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .fileEditorNotice span {

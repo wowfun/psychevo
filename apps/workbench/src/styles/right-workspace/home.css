@@ -84,7 +84,7 @@
 .filePreview p {
   margin: 6px 4px;
   color: var(--pevo-muted);
-  font-size: 0.78rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .reviewStatusRows {

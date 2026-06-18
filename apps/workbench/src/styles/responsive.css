@@ -223,7 +223,7 @@
   }
 
   .composerSubmitControls {
-    font-size: 0.72rem;
+    font-size: var(--pevo-font-size-xsmall);
   }
 
   .composerSubmitControls .statusSelect[data-status="model"] select {
@@ -239,7 +239,7 @@
 
   .composerStatusLine {
     gap: 5px;
-    font-size: 0.72rem;
+    font-size: var(--pevo-font-size-xsmall);
   }
 
   .statusSelect[data-status="permission-mode"] select {

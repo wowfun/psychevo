@@ -8,6 +8,7 @@ import {
   Bug,
   Edit3,
   Moon,
+  Palette,
   PlugZap,
   Plus,
   RotateCcw,
@@ -277,13 +278,16 @@ function SettingsSectionPanel({
     case "appearance":
       return (
         <div className="settingsRows">
-          <SettingsOptionRow title="Theme" description="Dark or light Workbench appearance.">
+          <SettingsOptionRow title="Theme" description="Dark, neutral light, or warm paper Workbench appearance.">
             <div className="segmentedControl">
               <button className={appearance === "dark" ? "is-selected" : ""} onClick={() => onAppearanceChange("dark")} type="button">
                 <Moon size={15} /> Dark
               </button>
               <button className={appearance === "light" ? "is-selected" : ""} onClick={() => onAppearanceChange("light")} type="button">
                 <Sun size={15} /> Light
+              </button>
+              <button className={appearance === "warm" ? "is-selected" : ""} onClick={() => onAppearanceChange("warm")} type="button">
+                <Palette size={15} /> Warm
               </button>
             </div>
           </SettingsOptionRow>

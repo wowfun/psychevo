@@ -164,6 +164,14 @@ function terminalTheme(appearance: Appearance): ITheme {
   if (appearance === "light") {
     return {
       background: "transparent",
+      foreground: "#1f2023",
+      cursor: "#1f2023",
+      selectionBackground: "#dedfe3"
+    };
+  }
+  if (appearance === "warm") {
+    return {
+      background: "transparent",
       foreground: "#2d261f",
       cursor: "#2d261f",
       selectionBackground: "#eadfce"

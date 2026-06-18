@@ -14,7 +14,7 @@
 
 .reviewChanges.is-empty {
   color: var(--pevo-muted);
-  font-size: 0.76rem;
+  font-size: var(--pevo-font-size-small);
 }
 
 .reviewChanges.is-empty p {
@@ -37,7 +37,7 @@
 .reviewChangeGroup > header {
   grid-template-columns: minmax(0, 1fr) auto;
   color: var(--pevo-muted);
-  font-size: 0.72rem;
+  font-size: var(--pevo-font-size-xsmall);
   text-transform: uppercase;
 }
 
@@ -78,7 +78,7 @@
 .reviewChangePath small,
 .reviewChangeState {
   color: var(--pevo-muted);
-  font-size: 0.7rem;
+  font-size: var(--pevo-font-size-xsmall);
 }
 
 .reviewChangeState {
@@ -111,7 +111,7 @@
   overflow: hidden;
   margin-top: -2px;
   color: var(--pevo-muted);
-  font-size: 0.7rem;
+  font-size: var(--pevo-font-size-xsmall);
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
