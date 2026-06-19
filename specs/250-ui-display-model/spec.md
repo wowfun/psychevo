@@ -66,18 +66,20 @@ observations; covered prompt, reasoning, assistant text, and tool blocks must
 not remain as a second copy merely because another block in the same live entry
 is still running. Full snapshot replacement is reserved for reload, resume,
 rewind, and session switching.
-When live observations cross a process boundary, the owning Gateway may persist
-the typed live event as a short-lived delivery buffer. That buffer does not
-change transcript fact ownership: committed runtime `messages` are still the
-only ordinary durable transcript source, and live entries must still be
-discarded or reconciled when committed entries arrive.
-Workbench and TUI both consume that buffer for sessions they display. A
-foreign live event is applied only when its thread identity matches the visible
-session or an explicitly tracked running session; otherwise it is ignored or
-left for that session's later replay. Replaying retained live events must use
-the same block, turn, and message identity reconciliation as ordinary streaming
-events so a history-derived tool row is refreshed in place instead of duplicated
-or marked interrupted while a valid foreign owner is still running.
+When live observations cross a process boundary, the owning Gateway may retain
+low-frequency boundary events and coalesced latest-entry snapshots as a
+short-lived delivery buffer. That buffer does not change transcript fact
+ownership: committed runtime `messages` are still the only ordinary durable
+transcript source, and live entries must still be discarded or reconciled when
+committed entries arrive.
+Workbench and TUI both consume retained boundary events and latest-entry
+snapshots for sessions they display. A foreign live observation is applied only
+when its thread identity matches the visible session or an explicitly tracked
+running session; otherwise it is ignored or left for that session's later
+replay. Replaying retained observations must use the same block, turn, and
+message identity reconciliation as ordinary streaming events so a
+history-derived tool row is refreshed in place instead of duplicated or marked
+interrupted while a valid foreign owner is still running.
 After such a snapshot is loaded, later live updates for an already
 message-derived block use the message-derived entry as the display anchor.
 Covered live text/reasoning blocks are dropped; covered live tool updates may

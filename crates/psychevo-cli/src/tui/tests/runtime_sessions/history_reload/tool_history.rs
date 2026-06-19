@@ -759,16 +759,41 @@ fn claim_foreign_gateway_activity(
 }
 
 fn append_foreign_gateway_event(store: &SqliteStore, session_id: &str, event: GatewayEvent) {
-    let event = serde_json::to_value(event).expect("gateway event value");
-    store
-        .append_gateway_live_event(
-            Some("activity-web"),
-            Some("gateway:web:test"),
-            Some(session_id),
-            Some("turn-web"),
-            &event,
-        )
-        .expect("append gateway live event");
+    match &event {
+        GatewayEvent::EntryStarted { turn_id, entry }
+        | GatewayEvent::EntryUpdated { turn_id, entry }
+        | GatewayEvent::EntryCompleted { turn_id, entry } => {
+            let event_kind = match event {
+                GatewayEvent::EntryStarted { .. } => "entryStarted",
+                GatewayEvent::EntryUpdated { .. } => "entryUpdated",
+                GatewayEvent::EntryCompleted { .. } => "entryCompleted",
+                _ => unreachable!(),
+            };
+            store
+                .upsert_gateway_live_snapshot(psychevo_runtime::GatewayLiveSnapshotInput {
+                    snapshot_key: &format!("activity-web:{turn_id}:{}", entry.id),
+                    activity_id: Some("activity-web"),
+                    owner_id: Some("gateway:web:test"),
+                    thread_id: Some(session_id),
+                    turn_id: Some(turn_id),
+                    event_kind,
+                    event: serde_json::to_value(&event).expect("gateway event value"),
+                })
+                .expect("upsert gateway live snapshot");
+        }
+        _ => {
+            let event = serde_json::to_value(event).expect("gateway event value");
+            store
+                .append_gateway_live_event(
+                    Some("activity-web"),
+                    Some("gateway:web:test"),
+                    Some(session_id),
+                    Some("turn-web"),
+                    &event,
+                )
+                .expect("append gateway live event");
+        }
+    }
 }
 
 fn gateway_tool_entry(

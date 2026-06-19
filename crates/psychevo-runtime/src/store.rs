@@ -23,7 +23,7 @@ pub(crate) use crate::types::{
     SessionSummary, TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 21;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 22;
 pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 21;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
@@ -154,6 +154,31 @@ pub struct GatewayLiveEventRecord {
     pub turn_id: Option<String>,
     pub event: Value,
     pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayLiveSnapshotInput<'a> {
+    pub snapshot_key: &'a str,
+    pub activity_id: Option<&'a str>,
+    pub owner_id: Option<&'a str>,
+    pub thread_id: Option<&'a str>,
+    pub turn_id: Option<&'a str>,
+    pub event_kind: &'a str,
+    pub event: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayLiveSnapshotRecord {
+    pub snapshot_key: String,
+    pub activity_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub event_kind: String,
+    pub event: Value,
+    pub revision: i64,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,6 +1,7 @@
 const GATEWAY_ACTIVITY_LEASE_MS: i64 = 30_000;
 const GATEWAY_ACTIVITY_HEARTBEAT_MS: i64 = 5_000;
 const GATEWAY_CONTROL_POLL_MS: u64 = 500;
+const GATEWAY_LIVE_SNAPSHOT_FLUSH_MS: i64 = 250;
 
 #[derive(Clone, Debug)]
 struct DurableGatewayActivity {
@@ -8,6 +9,7 @@ struct DurableGatewayActivity {
     owner_id: String,
     generation: i64,
     turn_id: Option<String>,
+    kind: String,
 }
 
 struct DurableGatewayActivityClaim<'a> {
@@ -46,6 +48,7 @@ impl Gateway {
             owner_id: record.owner_id,
             generation: record.generation,
             turn_id: record.turn_id,
+            kind: record.kind,
         })
     }
 
@@ -129,7 +132,15 @@ impl Gateway {
                 gateway_now_ms() + GATEWAY_ACTIVITY_LEASE_MS,
             );
         }
-        if let Ok(event_value) = serde_json::to_value(event) {
+
+        if matches!(event, GatewayEvent::TurnCompleted { .. }) {
+            self.flush_gateway_live_snapshots_for_activity(&activity.activity_id);
+        }
+
+        let Ok(event_value) = serde_json::to_value(event) else {
+            return;
+        };
+        if should_append_gateway_live_event(activity, event) {
             let _ = self.state.store().append_gateway_live_event(
                 Some(&activity.activity_id),
                 Some(&activity.owner_id),
@@ -137,7 +148,124 @@ impl Gateway {
                 gateway_event_turn_id(event).or(default_turn_id).or(activity.turn_id.as_deref()),
                 &event_value,
             );
+        } else if let Some((event_kind, entry)) = gateway_live_snapshot_entry(event) {
+            self.retain_gateway_live_snapshot(
+                activity,
+                event_kind,
+                gateway_event_turn_id(event).or(default_turn_id).or(activity.turn_id.as_deref()),
+                entry,
+                event_value,
+            );
         }
+    }
+
+    fn retain_gateway_live_snapshot(
+        &self,
+        activity: &DurableGatewayActivity,
+        event_kind: &'static str,
+        turn_id: Option<&str>,
+        entry: &TranscriptEntry,
+        event: Value,
+    ) {
+        let Some(turn_id) = turn_id else {
+            return;
+        };
+        if entry.id.trim().is_empty() || entry.thread_id.trim().is_empty() {
+            return;
+        }
+        let snapshot_key = format!("{}:{turn_id}:{}", activity.activity_id, entry.id);
+        let now = gateway_now_ms();
+        let snapshot = {
+            let mut pending = self
+                .live_snapshots
+                .lock()
+                .expect("gateway live snapshot map poisoned");
+            let snapshot = pending
+                .entry(snapshot_key.clone())
+                .or_insert_with(|| PendingGatewayLiveSnapshot {
+                    snapshot_key: snapshot_key.clone(),
+                    activity_id: Some(activity.activity_id.clone()),
+                    owner_id: Some(activity.owner_id.clone()),
+                    thread_id: Some(entry.thread_id.clone()),
+                    turn_id: Some(turn_id.to_string()),
+                    event_kind: event_kind.to_string(),
+                    event: Value::Null,
+                    last_flush_ms: 0,
+                    dirty: false,
+                });
+            snapshot.activity_id = Some(activity.activity_id.clone());
+            snapshot.owner_id = Some(activity.owner_id.clone());
+            snapshot.thread_id = Some(entry.thread_id.clone());
+            snapshot.turn_id = Some(turn_id.to_string());
+            snapshot.event_kind = event_kind.to_string();
+            snapshot.event = event;
+            snapshot.dirty = true;
+            if snapshot.last_flush_ms == 0
+                || now.saturating_sub(snapshot.last_flush_ms) >= GATEWAY_LIVE_SNAPSHOT_FLUSH_MS
+            {
+                snapshot.last_flush_ms = now;
+                snapshot.dirty = false;
+                Some(snapshot.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.flush_gateway_live_snapshot(&snapshot);
+        }
+    }
+
+    fn flush_gateway_live_snapshots_for_activity(&self, activity_id: &str) {
+        let now = gateway_now_ms();
+        let snapshots = {
+            let mut pending = self
+                .live_snapshots
+                .lock()
+                .expect("gateway live snapshot map poisoned");
+            pending
+                .values_mut()
+                .filter(|snapshot| {
+                    snapshot.activity_id.as_deref() == Some(activity_id) && snapshot.dirty
+                })
+                .map(|snapshot| {
+                    snapshot.last_flush_ms = now;
+                    snapshot.dirty = false;
+                    snapshot.clone()
+                })
+                .collect::<Vec<_>>()
+        };
+        for snapshot in snapshots {
+            self.flush_gateway_live_snapshot(&snapshot);
+        }
+    }
+
+    fn flush_gateway_live_snapshot(&self, snapshot: &PendingGatewayLiveSnapshot) {
+        let _ = self
+            .state
+            .store()
+            .upsert_gateway_live_snapshot(GatewayLiveSnapshotInput {
+                snapshot_key: &snapshot.snapshot_key,
+                activity_id: snapshot.activity_id.as_deref(),
+                owner_id: snapshot.owner_id.as_deref(),
+                thread_id: snapshot.thread_id.as_deref(),
+                turn_id: snapshot.turn_id.as_deref(),
+                event_kind: &snapshot.event_kind,
+                event: snapshot.event.clone(),
+            });
+    }
+
+    fn clear_gateway_live_snapshots_for_activity(&self, activity_id: &str) {
+        {
+            let mut pending = self
+                .live_snapshots
+                .lock()
+                .expect("gateway live snapshot map poisoned");
+            pending.retain(|_, snapshot| snapshot.activity_id.as_deref() != Some(activity_id));
+        }
+        let _ = self
+            .state
+            .store()
+            .delete_gateway_live_snapshots_for_activity(activity_id);
     }
 
     fn finish_durable_gateway_activity(
@@ -152,6 +280,7 @@ impl Gateway {
                 activity.generation,
                 status,
             );
+            self.clear_gateway_live_snapshots_for_activity(&activity.activity_id);
         }
     }
 
@@ -476,6 +605,41 @@ fn gateway_event_turn_id(event: &GatewayEvent) -> Option<&str> {
         | GatewayEvent::EntryUpdated { turn_id, .. }
         | GatewayEvent::EntryCompleted { turn_id, .. }
         | GatewayEvent::EntryDelta { turn_id, .. } => Some(turn_id.as_str()),
+        _ => None,
+    }
+}
+
+fn should_append_gateway_live_event(activity: &DurableGatewayActivity, event: &GatewayEvent) -> bool {
+    if let GatewayEvent::TurnCompleted {
+        committed_entries, ..
+    } = event
+        && activity.kind == "turn"
+        && committed_entries.is_empty()
+    {
+        return false;
+    }
+    matches!(
+        event,
+        GatewayEvent::TurnStarted { .. }
+            | GatewayEvent::TurnQueued { .. }
+            | GatewayEvent::TurnCompleted { .. }
+            | GatewayEvent::PermissionRequested { .. }
+            | GatewayEvent::PermissionResolved { .. }
+            | GatewayEvent::ClarifyRequested { .. }
+            | GatewayEvent::ClarifyResolved { .. }
+            | GatewayEvent::Warning { .. }
+            | GatewayEvent::ActivityChanged { .. }
+            | GatewayEvent::TitleChanged { .. }
+    )
+}
+
+fn gateway_live_snapshot_entry(
+    event: &GatewayEvent,
+) -> Option<(&'static str, &TranscriptEntry)> {
+    match event {
+        GatewayEvent::EntryStarted { entry, .. } => Some(("entryStarted", entry)),
+        GatewayEvent::EntryUpdated { entry, .. } => Some(("entryUpdated", entry)),
+        GatewayEvent::EntryCompleted { entry, .. } => Some(("entryCompleted", entry)),
         _ => None,
     }
 }

@@ -16,6 +16,12 @@ loaded_session = None
 def send(value):
     print(json.dumps(value), flush=True)
 
+def update(session_id, update):
+    send({"jsonrpc": "2.0", "method": "session/update", "params": {
+        "sessionId": session_id,
+        "update": update
+    }})
+
 for line in sys.stdin:
     if not line.strip():
         continue
@@ -29,6 +35,10 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-1"}})
     elif method == "session/load":
         loaded_session = params.get("sessionId")
+        update(loaded_session, {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "old answer from loaded history"}
+        })
         send({"jsonrpc": "2.0", "id": mid, "result": {}})
     elif method == "session/prompt":
         session_id = params.get("sessionId") or "native-1"
@@ -147,6 +157,7 @@ Peer instructions.
             .expect("second peer turn");
         assert_eq!(second.result.session_id, first.result.session_id);
         assert!(second.result.final_answer.contains("loaded:native-1"));
+        assert!(!second.result.final_answer.contains("old answer from loaded history"));
     }
     #[tokio::test]
     async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_session() {

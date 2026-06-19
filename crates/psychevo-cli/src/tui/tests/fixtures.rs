@@ -109,6 +109,7 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         side_conversation: None,
         last_live_agent_reload_check: None,
         last_gateway_live_event_seq: 0,
+        gateway_live_snapshot_revisions: BTreeMap::new(),
         session_browser_limits: BTreeMap::new(),
         side_cleanup_task: None,
         compaction_task: None,

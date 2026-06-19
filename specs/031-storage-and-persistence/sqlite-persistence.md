@@ -34,6 +34,7 @@ The default first-slice SQLite shape contains:
 - `gateway_source_bindings`
 - `gateway_activities`
 - `gateway_live_events`
+- `gateway_live_snapshots`
 - `gateway_control_commands`
 - `gateway_turn_terminals`
 
@@ -127,10 +128,17 @@ claim for a running turn or shell command. Required semantics include:
 - queued-turn count for status projection
 - optional intent metadata for local recovery/debug projection
 
-`gateway_live_events` stores a bounded retained live-event relay buffer for
+`gateway_live_events` stores a bounded retained boundary-event relay buffer for
 foreign-surface replay. It is an observation buffer, not the transcript source
-of truth. Consumers must reconcile events against durable message and terminal
-facts and may discard stale events after bounded retention.
+of truth. High-frequency transcript updates such as entry deltas and repeated
+entry updates are not retained in this append buffer.
+
+`gateway_live_snapshots` stores coalesced latest live transcript observations
+for foreign-surface replay while an activity is running. A row is keyed by the
+running activity, turn, and transcript entry identity, and is updated in place
+with a revision counter. Consumers must reconcile snapshots against durable
+message and terminal facts and may discard stale snapshots after bounded
+retention or activity completion.
 
 `gateway_control_commands` stores cross-process control requests for activities
 owned by another Gateway process. It is a command mailbox for interrupt,
@@ -339,7 +347,7 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 21`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 22`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)` every 50 successful writes.
 
@@ -351,9 +359,13 @@ avoid idle high-frequency database polling; live agent reload checks are
 rate-limited to at most once every 250 ms while preserving immediate checks
 after session switches.
 
+The version 22 slice adds `gateway_live_snapshots` for coalesced live transcript
+observation replay and clears retained live relay buffers when migrating from
+earlier supported development databases.
+
 The version 21 slice adds structured cost status, pricing missing-reason, and
 pricing version columns for local accounting projections. Because the product
-is pre-release, version 21 is the supported cutover boundary for current
+is pre-release, version 21 remains the supported cutover boundary for current
 development state; older development databases may be reset instead of carried
 through compatibility migrations when the shape would preserve misleading
 accounting semantics.

@@ -186,6 +186,7 @@ impl TuiApp {
                 )?;
             }
         }
+        changed |= self.replay_foreign_gateway_live_snapshots_for_session(ui, session_id)?;
         Ok(changed)
     }
 
@@ -202,7 +203,88 @@ impl TuiApp {
             self.last_gateway_live_event_seq = self.last_gateway_live_event_seq.max(record.seq);
             changed |= self.apply_foreign_gateway_live_event_record(ui, record, None)?;
         }
+        changed |= self.drain_foreign_gateway_live_snapshots(ui)?;
         Ok(changed)
+    }
+
+    fn replay_foreign_gateway_live_snapshots_for_session(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        session_id: &str,
+    ) -> Result<bool> {
+        let snapshots = self
+            .state_runtime
+            .store()
+            .list_gateway_live_snapshots_for_thread(session_id, None, 1000)?;
+        let mut changed = false;
+        for snapshot in snapshots {
+            changed |= self.apply_foreign_gateway_live_snapshot_record(
+                ui,
+                snapshot,
+                Some(session_id),
+            )?;
+        }
+        Ok(changed)
+    }
+
+    fn drain_foreign_gateway_live_snapshots(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
+        let snapshots = self
+            .state_runtime
+            .store()
+            .list_gateway_live_snapshots(1000)?;
+        let mut changed = false;
+        for snapshot in snapshots {
+            changed |= self.apply_foreign_gateway_live_snapshot_record(ui, snapshot, None)?;
+        }
+        Ok(changed)
+    }
+
+    fn apply_foreign_gateway_live_snapshot_record(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        snapshot: GatewayLiveSnapshotRecord,
+        expected_session: Option<&str>,
+    ) -> Result<bool> {
+        if snapshot.owner_id.as_deref() == Some(self.gateway.owner_id()) {
+            return Ok(false);
+        }
+        if self
+            .gateway_live_snapshot_revisions
+            .get(&snapshot.snapshot_key)
+            .is_some_and(|revision| *revision >= snapshot.revision)
+        {
+            return Ok(false);
+        }
+        if let Some(activity_id) = snapshot.activity_id.as_deref() {
+            let Some(activity) = self.state_runtime.store().gateway_activity(activity_id)? else {
+                return Ok(false);
+            };
+            if !matches!(activity.status.as_str(), "running" | "queued")
+                || activity.lease_expires_at_ms < wall_now_ms()
+            {
+                return Ok(false);
+            }
+        }
+        let event = match serde_json::from_value::<GatewayEvent>(snapshot.event.clone()) {
+            Ok(event) => event,
+            Err(_) => return Ok(false),
+        };
+        let Some(session_id) = self.gateway_live_snapshot_session_id(&snapshot, &event)? else {
+            return Ok(false);
+        };
+        if expected_session.is_some_and(|expected| expected != session_id) {
+            return Ok(false);
+        }
+        if expected_session.is_none() && self.current_session.as_deref() != Some(session_id.as_str())
+        {
+            return Ok(false);
+        }
+        self.gateway_live_snapshot_revisions
+            .insert(snapshot.snapshot_key, snapshot.revision);
+        self.apply_foreign_gateway_live_event(ui, &session_id, event)
     }
 
     fn apply_foreign_gateway_live_event_record(
@@ -237,6 +319,27 @@ impl TuiApp {
     fn gateway_live_event_session_id(
         &self,
         record: &GatewayLiveEventRecord,
+        event: &GatewayEvent,
+    ) -> Result<Option<String>> {
+        if let Some(thread_id) = record.thread_id.as_ref().filter(|value| !value.is_empty()) {
+            return Ok(Some(thread_id.clone()));
+        }
+        if let Some(thread_id) = gateway_event_session_id(event) {
+            return Ok(Some(thread_id.to_string()));
+        }
+        let Some(activity_id) = record.activity_id.as_deref() else {
+            return Ok(None);
+        };
+        Ok(self
+            .state_runtime
+            .store()
+            .gateway_activity(activity_id)?
+            .and_then(|activity| activity.thread_id))
+    }
+
+    fn gateway_live_snapshot_session_id(
+        &self,
+        record: &GatewayLiveSnapshotRecord,
         event: &GatewayEvent,
     ) -> Result<Option<String>> {
         if let Some(thread_id) = record.thread_id.as_ref().filter(|value| !value.is_empty()) {

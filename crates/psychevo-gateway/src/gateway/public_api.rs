@@ -11,6 +11,7 @@ impl Gateway {
             active_aliases: Arc::new(Mutex::new(HashMap::new())),
             process_bindings: Arc::new(Mutex::new(HashMap::new())),
             source_generations: Arc::new(Mutex::new(HashMap::new())),
+            live_snapshots: Arc::new(Mutex::new(HashMap::new())),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             owner_id: Arc::new(format!("gateway:{}:{}", std::process::id(), Uuid::now_v7())),
         }

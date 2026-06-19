@@ -186,6 +186,58 @@ fn gateway_live_events_are_ordered_and_control_commands_track_status() {
 }
 
 #[test]
+fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
+    let temp = tempdir().expect("tempdir");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let session_id = store.create_session(temp.path()).expect("session");
+
+    let first_revision = store
+        .upsert_gateway_live_snapshot(GatewayLiveSnapshotInput {
+            snapshot_key: "activity-1:turn-1:entry-1",
+            activity_id: Some("activity-1"),
+            owner_id: Some("owner-a"),
+            thread_id: Some(&session_id),
+            turn_id: Some("turn-1"),
+            event_kind: "entryUpdated",
+            event: json!({"type": "entryUpdated", "value": "first"}),
+        })
+        .expect("first snapshot");
+    let second_revision = store
+        .upsert_gateway_live_snapshot(GatewayLiveSnapshotInput {
+            snapshot_key: "activity-1:turn-1:entry-1",
+            activity_id: Some("activity-1"),
+            owner_id: Some("owner-a"),
+            thread_id: Some(&session_id),
+            turn_id: Some("turn-1"),
+            event_kind: "entryUpdated",
+            event: json!({"type": "entryUpdated", "value": "second"}),
+        })
+        .expect("second snapshot");
+
+    assert_eq!(first_revision, 1);
+    assert_eq!(second_revision, 2);
+    let snapshots = store
+        .list_gateway_live_snapshots_for_thread(&session_id, Some("turn-1"), 10)
+        .expect("snapshots");
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].revision, 2);
+    assert_eq!(snapshots[0].event["value"], "second");
+
+    assert_eq!(
+        store
+            .delete_gateway_live_snapshots_for_activity("activity-1")
+            .expect("delete snapshots"),
+        1
+    );
+    assert!(
+        store
+            .list_gateway_live_snapshots(10)
+            .expect("no snapshots")
+            .is_empty()
+    );
+}
+
+#[test]
 fn gateway_turn_terminals_round_trip_and_order_by_thread() {
     let temp = tempdir().expect("tempdir");
     let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");

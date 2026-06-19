@@ -1171,19 +1171,20 @@ fn append_exec_live_update(
         turn_id: turn_id.to_string(),
         entry,
     };
-    let event_value = serde_json::to_value(event).expect("event value");
     state
         .inner
         .state
         .store()
-        .append_gateway_live_event(
-            Some(activity_id),
-            Some(state.inner.gateway.owner_id()),
-            Some(session_id),
-            Some(turn_id),
-            &event_value,
-        )
-        .expect("append live event");
+        .upsert_gateway_live_snapshot(psychevo_runtime::GatewayLiveSnapshotInput {
+            snapshot_key: &format!("{activity_id}:{turn_id}:live-tool"),
+            activity_id: Some(activity_id),
+            owner_id: Some(state.inner.gateway.owner_id()),
+            thread_id: Some(session_id),
+            turn_id: Some(turn_id),
+            event_kind: "entryUpdated",
+            event: serde_json::to_value(event).expect("event value"),
+        })
+        .expect("upsert live snapshot");
 }
 
 #[test]

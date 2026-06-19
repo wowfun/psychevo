@@ -166,17 +166,20 @@ JSON merge. A later partial tool-call frame may refresh the display preview,
 but it must not overwrite an already-bound invocation identity, child-thread
 target, terminal status, or result metadata from another `tool_call_id`.
 
-Live Gateway events are also relayed across Gateway processes. The owner stores
-presentation-only live events with a monotonic sequence and short retention.
-Other Gateway servers may watch or poll those events and re-emit ordinary
+Live Gateway observations are also relayed across Gateway processes. The owner
+stores low-frequency boundary observations with a monotonic sequence and short
+retention, and stores high-frequency transcript presentation as coalesced
+latest-entry snapshots keyed by activity, turn, and entry identity. Other
+Gateway servers may watch or poll both retained sources and re-emit ordinary
 `gateway/event` notifications to their clients. Committed runtime messages
-remain the durable transcript source of truth; live event storage is only a
-cross-process delivery buffer and may be compacted after completion.
-Local interactive surfaces such as TUI may also poll this buffer directly when
-they share the same state database. They must filter events by thread/activity
-identity, skip events owned by their own Gateway process, and use durable
-activity leases to decide whether an unfinished history tool call is still live
-or should be rendered as an interrupted orphan.
+remain the durable transcript source of truth; retained live storage is only a
+cross-process delivery buffer and may be discarded after completion.
+Local interactive surfaces such as TUI may also poll retained boundary events
+and latest-entry snapshots directly when they share the same state database.
+They must filter events by thread/activity identity, skip observations owned by
+their own Gateway process, and use durable activity leases to decide whether an
+unfinished history tool call is still live or should be rendered as an
+interrupted orphan.
 
 Assistant messages whose runtime finish reason is `tool_calls`, or whose
 content includes tool-call blocks, are tool-call preambles rather than final

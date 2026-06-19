@@ -49,7 +49,7 @@ pub(crate) fn sqlite_schema_v21_rejects_unknown_state_database() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v21_stores_gateway_coordination_without_runtime_debug() {
+pub(crate) fn sqlite_schema_v22_stores_gateway_coordination_without_runtime_debug() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
@@ -71,7 +71,7 @@ pub(crate) fn sqlite_schema_v21_stores_gateway_coordination_without_runtime_debu
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 21);
+    assert_eq!(user_version, 22);
     assert!(sqlite_columns(&conn, "timeline_items").is_empty());
     assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
     assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());
@@ -91,6 +91,11 @@ pub(crate) fn sqlite_schema_v21_stores_gateway_coordination_without_runtime_debu
         sqlite_columns(&conn, "gateway_turn_terminals")
             .iter()
             .any(|name| name == "completed_at_ms")
+    );
+    assert!(
+        sqlite_columns(&conn, "gateway_live_snapshots")
+            .iter()
+            .any(|name| name == "revision")
     );
 }
 

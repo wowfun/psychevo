@@ -49,39 +49,16 @@ fn replay_running_live_transcript_overlay(
         return Ok(());
     };
 
-    let mut after_seq = 0;
-    loop {
-        let records = state
-            .inner
-            .state
-            .store()
-            .list_gateway_live_events_after(after_seq, 500)?;
-        if records.is_empty() {
-            break;
-        }
-        for record in &records {
-            after_seq = after_seq.max(record.seq);
-        }
-        for record in records {
-            if record
-                .thread_id
-                .as_deref()
-                .is_some_and(|record_thread_id| record_thread_id != thread_id)
-            {
-                continue;
-            }
-            if record
-                .turn_id
-                .as_deref()
-                .is_some_and(|record_turn_id| record_turn_id != active_turn_id)
-            {
-                continue;
-            }
-            let Ok(event) = serde_json::from_value::<GatewayEvent>(record.event) else {
-                continue;
-            };
-            apply_live_transcript_overlay(entries, thread_id, active_turn_id, event);
-        }
+    let snapshots = state
+        .inner
+        .state
+        .store()
+        .list_gateway_live_snapshots_for_thread(thread_id, Some(active_turn_id), 1000)?;
+    for snapshot in snapshots {
+        let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event) else {
+            continue;
+        };
+        apply_live_transcript_overlay(entries, thread_id, active_turn_id, event);
     }
     Ok(())
 }

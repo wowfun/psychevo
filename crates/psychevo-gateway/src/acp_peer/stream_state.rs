@@ -1,10 +1,10 @@
 struct AcpTurnOutput {
     native_session_id: String,
     final_answer: String,
-    reasoning_text: String,
     final_content: Vec<Value>,
+    content_slots: Vec<AcpPeerContentSlot>,
     session_title: Option<String>,
-    tools: Vec<Value>,
+    tools: BTreeMap<String, Value>,
     usage_update: Option<Value>,
     events: Vec<Value>,
 }
@@ -12,28 +12,34 @@ struct AcpTurnOutput {
 impl AcpTurnOutput {
     fn persisted_assistant_content(&self) -> Vec<AssistantBlock> {
         let mut content = Vec::new();
-        if !self.reasoning_text.trim().is_empty() {
-            content.push(AssistantBlock::Reasoning {
-                text: self.reasoning_text.clone(),
-                provider_evidence: None,
-            });
-        }
-        if !self.final_answer.trim().is_empty() {
-            content.push(AssistantBlock::Text {
-                text: self.final_answer.clone(),
-            });
-        }
-        for tool in &self.tools {
-            let call_index = content
-                .iter()
-                .filter(|block| matches!(block, AssistantBlock::ToolCall(_)))
-                .count();
-            let content_index = content.len();
-            content.push(AssistantBlock::ToolCall(acp_tool_call_block(
-                tool,
-                content_index,
-                call_index,
-            )));
+        for slot in &self.content_slots {
+            match slot {
+                AcpPeerContentSlot::Reasoning { text } if !text.trim().is_empty() => {
+                    content.push(AssistantBlock::Reasoning {
+                        text: text.clone(),
+                        provider_evidence: None,
+                    });
+                }
+                AcpPeerContentSlot::Text { text } if !text.trim().is_empty() => {
+                    content.push(AssistantBlock::Text { text: text.clone() });
+                }
+                AcpPeerContentSlot::Tool { tool_call_id } => {
+                    let Some(tool) = self.tools.get(tool_call_id) else {
+                        continue;
+                    };
+                    let call_index = content
+                        .iter()
+                        .filter(|block| matches!(block, AssistantBlock::ToolCall(_)))
+                        .count();
+                    let content_index = content.len();
+                    content.push(AssistantBlock::ToolCall(acp_tool_call_block(
+                        tool,
+                        content_index,
+                        call_index,
+                    )));
+                }
+                _ => {}
+            }
         }
         content
     }
@@ -43,8 +49,12 @@ impl AcpTurnOutput {
     }
 
     fn persisted_tool_result_messages(&self) -> Vec<Message> {
-        self.tools
+        self.content_slots
             .iter()
+            .filter_map(|slot| match slot {
+                AcpPeerContentSlot::Tool { tool_call_id } => self.tools.get(tool_call_id),
+                _ => None,
+            })
             .filter_map(|tool| {
                 let status = tool
                     .get("status")
@@ -77,12 +87,21 @@ struct AcpPeerToolState {
     started: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum AcpPeerContentSlot {
+    Reasoning { text: String },
+    Text { text: String },
+    Tool { tool_call_id: String },
+}
+
 struct AcpPeerStreamState {
     stream: Option<RunStreamSink>,
     local_session_id: String,
     final_answer: String,
     reasoning_text: String,
     reasoning_open: bool,
+    content_slots: Vec<AcpPeerContentSlot>,
+    tool_slots: BTreeMap<String, usize>,
     session_title: Option<String>,
     tools: BTreeMap<String, AcpPeerToolState>,
     usage_update: Option<Value>,
@@ -97,6 +116,8 @@ impl AcpPeerStreamState {
             final_answer: String::new(),
             reasoning_text: String::new(),
             reasoning_open: false,
+            content_slots: Vec::new(),
+            tool_slots: BTreeMap::new(),
             session_title: None,
             tools: BTreeMap::new(),
             usage_update: None,
@@ -196,6 +217,7 @@ impl AcpPeerStreamState {
             return;
         }
         self.final_answer.push_str(&text);
+        self.append_text_slot(text);
         emit_runtime_event(
             &self.stream,
             json!({
@@ -222,6 +244,7 @@ impl AcpPeerStreamState {
         }
         self.reasoning_text.push_str(&text);
         self.reasoning_open = true;
+        self.append_reasoning_slot(text.clone());
         if let Some(stream) = &self.stream {
             stream(RunStreamEvent::ReasoningDelta { text });
         }
@@ -229,6 +252,7 @@ impl AcpPeerStreamState {
 
     fn handle_tool_call(&mut self, update_value: Value) {
         let tool_call_id = acp_tool_call_id(&update_value);
+        self.ensure_tool_slot(&tool_call_id);
         let runtime_event = acp_tool_runtime_event(&self.local_session_id, &update_value, false);
         let started = acp_tool_started_after_event(&runtime_event);
         self.tools.insert(
@@ -243,6 +267,7 @@ impl AcpPeerStreamState {
 
     fn handle_tool_call_update(&mut self, update_value: Value) {
         let tool_call_id = acp_tool_call_id(&update_value);
+        self.ensure_tool_slot(&tool_call_id);
         let previous = self.tools.get(&tool_call_id).cloned();
         let merged = match previous.as_ref() {
             Some(previous) => acp_merge_tool_update(&previous.value, &update_value),
@@ -259,6 +284,33 @@ impl AcpPeerStreamState {
             },
         );
         emit_runtime_event(&self.stream, runtime_event);
+    }
+
+    fn append_text_slot(&mut self, text: String) {
+        match self.content_slots.last_mut() {
+            Some(AcpPeerContentSlot::Text { text: existing }) => existing.push_str(&text),
+            _ => self.content_slots.push(AcpPeerContentSlot::Text { text }),
+        }
+    }
+
+    fn append_reasoning_slot(&mut self, text: String) {
+        match self.content_slots.last_mut() {
+            Some(AcpPeerContentSlot::Reasoning { text: existing }) => existing.push_str(&text),
+            _ => self
+                .content_slots
+                .push(AcpPeerContentSlot::Reasoning { text }),
+        }
+    }
+
+    fn ensure_tool_slot(&mut self, tool_call_id: &str) {
+        if self.tool_slots.contains_key(tool_call_id) {
+            return;
+        }
+        let slot_index = self.content_slots.len();
+        self.content_slots.push(AcpPeerContentSlot::Tool {
+            tool_call_id: tool_call_id.to_string(),
+        });
+        self.tool_slots.insert(tool_call_id.to_string(), slot_index);
     }
 
     fn handle_plan(&mut self, update_value: Value) {
@@ -310,19 +362,24 @@ impl AcpPeerStreamState {
 
     fn final_message_content(&self) -> Vec<Value> {
         let mut content = Vec::new();
-        if !self.reasoning_text.trim().is_empty() {
-            content.push(json!({
-                "type": "reasoning",
-                "text": self.reasoning_text.clone(),
-                "content_index": content.len(),
-            }));
-        }
-        if !self.final_answer.trim().is_empty() {
-            content.push(json!({
-                "type": "text",
-                "text": self.final_answer.clone(),
-                "content_index": content.len(),
-            }));
+        for slot in &self.content_slots {
+            match slot {
+                AcpPeerContentSlot::Reasoning { text } if !text.trim().is_empty() => {
+                    content.push(json!({
+                        "type": "reasoning",
+                        "text": text,
+                        "content_index": content.len(),
+                    }));
+                }
+                AcpPeerContentSlot::Text { text } if !text.trim().is_empty() => {
+                    content.push(json!({
+                        "type": "text",
+                        "text": text,
+                        "content_index": content.len(),
+                    }));
+                }
+                _ => {}
+            }
         }
         content
     }

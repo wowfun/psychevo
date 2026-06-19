@@ -596,14 +596,13 @@ impl BottomSelectionPanel {
                         }
                     }
                 }
-                BottomSelectionValue::Model { model, .. } => {
+                BottomSelectionValue::Model { model, .. }
                     if row.search_text.to_lowercase().contains(query)
-                        || row.label.to_lowercase().contains(query)
-                    {
-                        include.insert(index, ());
-                        if let Some(provider_index) = provider_rows.get(&model.provider) {
-                            include.insert(*provider_index, ());
-                        }
+                        || row.label.to_lowercase().contains(query) =>
+                {
+                    include.insert(index, ());
+                    if let Some(provider_index) = provider_rows.get(&model.provider) {
+                        include.insert(*provider_index, ());
                     }
                 }
                 _ => {}

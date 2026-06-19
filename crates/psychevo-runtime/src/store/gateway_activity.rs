@@ -337,6 +337,116 @@ impl SqliteStore {
         })
     }
 
+    pub fn upsert_gateway_live_snapshot(&self, input: GatewayLiveSnapshotInput<'_>) -> Result<i64> {
+        let now = now_ms();
+        let event_json = serde_json::to_string(&input.event)?;
+        self.write_retry(|conn| {
+            conn.execute(
+                r#"
+                INSERT INTO gateway_live_snapshots (
+                    snapshot_key, activity_id, owner_id, thread_id, turn_id,
+                    event_kind, event_json, revision, created_at_ms, updated_at_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8)
+                ON CONFLICT(snapshot_key) DO UPDATE SET
+                    activity_id = excluded.activity_id,
+                    owner_id = excluded.owner_id,
+                    thread_id = excluded.thread_id,
+                    turn_id = excluded.turn_id,
+                    event_kind = excluded.event_kind,
+                    event_json = excluded.event_json,
+                    revision = gateway_live_snapshots.revision + 1,
+                    updated_at_ms = excluded.updated_at_ms
+                "#,
+                params![
+                    input.snapshot_key,
+                    input.activity_id,
+                    input.owner_id,
+                    input.thread_id,
+                    input.turn_id,
+                    input.event_kind,
+                    event_json,
+                    now,
+                ],
+            )?;
+            conn.query_row(
+                "SELECT revision FROM gateway_live_snapshots WHERE snapshot_key = ?1",
+                params![input.snapshot_key],
+                |row| row.get(0),
+            )
+        })
+    }
+
+    pub fn list_gateway_live_snapshots(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<GatewayLiveSnapshotRecord>> {
+        let limit = limit.clamp(1, 1000) as i64;
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT snapshot_key, activity_id, owner_id, thread_id, turn_id,
+                   event_kind, event_json, revision, created_at_ms, updated_at_ms
+            FROM gateway_live_snapshots
+            ORDER BY updated_at_ms ASC, snapshot_key ASC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit], gateway_live_snapshot_from_row)?;
+        let mut snapshots = Vec::new();
+        for row in rows {
+            snapshots.push(row?);
+        }
+        Ok(snapshots)
+    }
+
+    pub fn list_gateway_live_snapshots_for_thread(
+        &self,
+        thread_id: &str,
+        turn_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<GatewayLiveSnapshotRecord>> {
+        let limit = limit.clamp(1, 1000) as i64;
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT snapshot_key, activity_id, owner_id, thread_id, turn_id,
+                   event_kind, event_json, revision, created_at_ms, updated_at_ms
+            FROM gateway_live_snapshots
+            WHERE thread_id = ?1
+              AND (?2 IS NULL OR turn_id = ?2)
+            ORDER BY updated_at_ms ASC, snapshot_key ASC
+            LIMIT ?3
+            "#,
+        )?;
+        let rows = stmt.query_map(
+            params![thread_id, turn_id, limit],
+            gateway_live_snapshot_from_row,
+        )?;
+        let mut snapshots = Vec::new();
+        for row in rows {
+            snapshots.push(row?);
+        }
+        Ok(snapshots)
+    }
+
+    pub fn delete_gateway_live_snapshots_for_activity(&self, activity_id: &str) -> Result<usize> {
+        self.write_retry(|conn| {
+            conn.execute(
+                "DELETE FROM gateway_live_snapshots WHERE activity_id = ?1",
+                params![activity_id],
+            )
+        })
+    }
+
+    pub fn cleanup_gateway_live_snapshots_before(&self, before_ms: i64) -> Result<usize> {
+        self.write_retry(|conn| {
+            conn.execute(
+                "DELETE FROM gateway_live_snapshots WHERE updated_at_ms < ?1",
+                params![before_ms],
+            )
+        })
+    }
+
     pub fn enqueue_gateway_control_command(
         &self,
         input: GatewayControlCommandInput<'_>,
@@ -555,6 +665,27 @@ fn gateway_live_event_from_row(
         turn_id: row.get(4)?,
         event,
         created_at_ms: row.get(6)?,
+    })
+}
+
+fn gateway_live_snapshot_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<GatewayLiveSnapshotRecord> {
+    let event_json: String = row.get(6)?;
+    let event = serde_json::from_str(&event_json).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(err))
+    })?;
+    Ok(GatewayLiveSnapshotRecord {
+        snapshot_key: row.get(0)?,
+        activity_id: row.get(1)?,
+        owner_id: row.get(2)?,
+        thread_id: row.get(3)?,
+        turn_id: row.get(4)?,
+        event_kind: row.get(5)?,
+        event,
+        revision: row.get(7)?,
+        created_at_ms: row.get(8)?,
+        updated_at_ms: row.get(9)?,
     })
 }
 

@@ -199,6 +199,19 @@ impl SqliteStore {
                 created_at_ms INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS gateway_live_snapshots (
+                snapshot_key TEXT PRIMARY KEY,
+                activity_id TEXT,
+                owner_id TEXT,
+                thread_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+                turn_id TEXT,
+                event_kind TEXT NOT NULL,
+                event_json TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS gateway_control_commands (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 activity_id TEXT NOT NULL,
@@ -246,6 +259,12 @@ impl SqliteStore {
                 ON gateway_live_events(seq);
             CREATE INDEX IF NOT EXISTS idx_gateway_live_events_thread
                 ON gateway_live_events(thread_id, seq);
+            CREATE INDEX IF NOT EXISTS idx_gateway_live_snapshots_thread
+                ON gateway_live_snapshots(thread_id, turn_id, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_gateway_live_snapshots_activity
+                ON gateway_live_snapshots(activity_id, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_gateway_live_snapshots_owner
+                ON gateway_live_snapshots(owner_id, updated_at_ms);
             CREATE INDEX IF NOT EXISTS idx_gateway_control_commands_owner
                 ON gateway_control_commands(owner_id, status, id);
             CREATE INDEX IF NOT EXISTS idx_gateway_turn_terminals_thread
@@ -265,6 +284,15 @@ impl SqliteStore {
         }
         if !sqlite_column_exists(&conn, "gateway_live_events", "owner_id")? {
             conn.execute_batch("ALTER TABLE gateway_live_events ADD COLUMN owner_id TEXT;")?;
+        }
+        if (1..SQLITE_SCHEMA_VERSION).contains(&user_version) {
+            conn.execute_batch(
+                r#"
+                DELETE FROM gateway_live_events;
+                DELETE FROM gateway_live_snapshots;
+                DELETE FROM sqlite_sequence WHERE name = 'gateway_live_events';
+                "#,
+            )?;
         }
         conn.pragma_update(None, "user_version", SQLITE_SCHEMA_VERSION)?;
         Ok(Self {

@@ -104,6 +104,7 @@ for line in sys.stdin:
         update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-v2", "status": "completed", "content": [
             {"type": "content", "content": {"type": "text", "text": "v2 done\n"}}
         ], "rawOutput": {"output": "v2 done\n"}})
+        update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-1", "content": {"type": "text", "text": " after tool"}})
         send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
     else:
         send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
@@ -179,7 +180,7 @@ tools: [read]
 
         assert_eq!(
             result.result.final_answer,
-            "v2 hello test/second-model high world"
+            "v2 hello test/second-model high world after tool"
         );
         assert!(
             result.result.events.iter().all(|event| {
@@ -283,7 +284,10 @@ tools: [read]
         assert!(
             blocks.iter().any(|block| {
                 block.kind == TranscriptBlockKind::Text
-                    && block.body.as_deref() == Some("v2 hello test/second-model high world")
+                    && block
+                        .body
+                        .as_deref()
+                        .is_some_and(|body| body.ends_with(" after tool"))
             }),
             "v2 message chunks should render as incremental assistant text"
         );
@@ -326,6 +330,30 @@ tools: [read]
             .expect("session metadata")
             .expect("metadata");
         assert_eq!(metadata["peer_agent"]["usageUpdate"]["used"], 42);
+
+        let messages = harness
+            .state
+            .store()
+            .load_messages(&result.result.session_id)
+            .expect("messages");
+        let assistant_content = messages
+            .iter()
+            .find_map(|message| match message {
+                psychevo_runtime::Message::Assistant { content, .. } => Some(content),
+                _ => None,
+            })
+            .expect("assistant message");
+        assert!(matches!(
+            assistant_content.as_slice(),
+            [
+                psychevo_runtime::AssistantBlock::Reasoning { text, .. },
+                psychevo_runtime::AssistantBlock::Text { text: before_tool },
+                psychevo_runtime::AssistantBlock::ToolCall(_),
+                psychevo_runtime::AssistantBlock::Text { text: after_tool },
+            ] if text == "v2 think stream"
+                && before_tool == "v2 hello test/second-model high world"
+                && after_tool == " after tool"
+        ));
     }
 
     #[tokio::test]

@@ -182,6 +182,7 @@ async fn spawn_gateway_live_event_relay(state: WebState, out_tx: mpsc::Unbounded
         .store()
         .latest_gateway_live_event_seq()
         .unwrap_or_default();
+    let mut snapshot_revisions: HashMap<String, i64> = HashMap::new();
     let mut last_cleanup_ms = gateway_now_ms();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     loop {
@@ -214,12 +215,54 @@ async fn spawn_gateway_live_event_relay(state: WebState, out_tx: mpsc::Unbounded
             }
         }
         let now = gateway_now_ms();
+        let snapshots = match state.inner.state.store().list_gateway_live_snapshots(1000) {
+            Ok(snapshots) => snapshots,
+            Err(_) => continue,
+        };
+        for snapshot in snapshots {
+            if snapshot.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
+                continue;
+            }
+            if snapshot_revisions
+                .get(&snapshot.snapshot_key)
+                .is_some_and(|revision| *revision >= snapshot.revision)
+            {
+                continue;
+            }
+            if let Some(activity_id) = snapshot.activity_id.as_deref() {
+                let Ok(Some(activity)) = state.inner.state.store().gateway_activity(activity_id)
+                else {
+                    continue;
+                };
+                if !matches!(activity.status.as_str(), "running" | "queued")
+                    || activity.lease_expires_at_ms < now
+                {
+                    continue;
+                }
+            }
+            let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event.clone()) else {
+                continue;
+            };
+            snapshot_revisions.insert(snapshot.snapshot_key, snapshot.revision);
+            state.record_event_with_context(&event, PendingInteractionContext::default());
+            if out_tx
+                .send(rpc_notification("gateway/event", json!(event)))
+                .is_err()
+            {
+                return;
+            }
+        }
         if now.saturating_sub(last_cleanup_ms) > 60_000 {
             let _ = state
                 .inner
                 .state
                 .store()
                 .cleanup_gateway_live_events_before(now - 10 * 60_000);
+            let _ = state
+                .inner
+                .state
+                .store()
+                .cleanup_gateway_live_snapshots_before(now - 10 * 60_000);
             last_cleanup_ms = now;
         }
     }
