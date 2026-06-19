@@ -661,6 +661,10 @@ fn stop_managed(paths: &ManagedPaths) -> Result<bool> {
     Ok(stopped)
 }
 
+pub(crate) fn stop_managed_for_home(home: &Path) -> Result<bool> {
+    stop_managed(&managed_paths(home))
+}
+
 fn read_state(paths: &ManagedPaths) -> Result<Option<ManagedServerState>> {
     if !paths.server_json.exists() {
         return Ok(None);

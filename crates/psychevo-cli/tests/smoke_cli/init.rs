@@ -152,6 +152,22 @@ pub(crate) fn cli_default_command_rejects_non_tty_without_consuming_stdin() {
 }
 
 #[test]
+pub(crate) fn cli_setup_rejects_non_tty_without_prompting() {
+    let temp = tempdir().expect("temp");
+    let output = pevo_cmd(temp.path())
+        .arg("setup")
+        .output()
+        .expect("pevo setup");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("pevo setup is interactive and requires a terminal"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("pevo auth setup"), "{stderr}");
+}
+
+#[test]
 pub(crate) fn cli_doctor_json_reports_local_web_asset_status() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
@@ -253,6 +269,95 @@ pub(crate) fn cli_web_opens_current_workdir_with_json_output() {
     );
 }
 
+#[test]
+pub(crate) fn cli_init_reset_state_stops_managed_gateway_before_recreating_state() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let workdir = temp.path().join("work");
+    let dist = temp.path().join("dist");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    std::fs::create_dir_all(&dist).expect("dist");
+    std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
+
+    let init = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .arg("init")
+        .output()
+        .expect("pevo init");
+    assert!(
+        init.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let first_web = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .env("PSYCHEVO_WEB_DIST", &dist)
+        .current_dir(&workdir)
+        .args(["web", "--no-browser", "--print-url"])
+        .output()
+        .expect("pevo web");
+    assert!(
+        first_web.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first_web.stderr)
+    );
+    let first: Value = serde_json::from_slice(&first_web.stdout).expect("first web json");
+    let first_pid = first["pid"].as_u64().expect("first pid");
+    let gateway_dir = psychevo_home.join("gateway");
+    assert!(gateway_dir.join("server.json").exists());
+    assert!(gateway_dir.join("token").exists());
+
+    let reset = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .args(["init", "--reset-state"])
+        .output()
+        .expect("pevo init reset");
+    assert!(
+        reset.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&reset.stderr)
+    );
+    assert!(psychevo_home.join("state.db").exists());
+    assert!(!gateway_dir.join("server.json").exists());
+    assert!(!gateway_dir.join("token").exists());
+
+    let backup_root = psychevo_home.join("backups");
+    let backups = std::fs::read_dir(&backup_root)
+        .expect("backups")
+        .collect::<std::io::Result<Vec<_>>>()
+        .expect("backup entries");
+    assert_eq!(backups.len(), 1);
+    assert!(backups[0].path().join("state.db").exists());
+
+    let second_web = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .env("PSYCHEVO_WEB_DIST", &dist)
+        .current_dir(&workdir)
+        .args(["web", "--no-browser", "--print-url"])
+        .output()
+        .expect("pevo web after reset");
+    let stop = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .current_dir(&workdir)
+        .args(["gateway", "stop"])
+        .output()
+        .expect("pevo gateway stop");
+    assert!(
+        stop.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(
+        second_web.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second_web.stderr)
+    );
+    let second: Value = serde_json::from_slice(&second_web.stdout).expect("second web json");
+    let second_pid = second["pid"].as_u64().expect("second pid");
+    assert_ne!(first_pid, second_pid);
+}
+
 pub(crate) fn assert_help_contains(test_home: &Path, args: &[&str], expected: &[&str]) {
     let output = pevo_cmd(test_home).args(args).output().expect("pevo help");
     assert!(
@@ -303,7 +408,7 @@ pub(crate) fn cli_init_creates_home_tree_and_is_idempotent() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 21);
+    assert_eq!(user_version, 22);
 
     std::fs::write(home.join("config.toml"), "custom config").expect("custom config");
     std::fs::write(home.join(".env"), "CUSTOM=1\n").expect("custom env");
@@ -373,5 +478,5 @@ pub(crate) fn cli_init_reset_state_backs_up_existing_sqlite_files() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 21);
+    assert_eq!(user_version, 22);
 }

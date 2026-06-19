@@ -43,10 +43,12 @@ directories are created.
 `state.db` is initialized by opening it through the default SQLite store. The
 command does not write session sidecar files.
 
-When `--reset-state` is supplied, existing `state.db`, `state.db-wal`, and
-`state.db-shm` files are moved into a timestamped backup directory under
-`backups/` before a fresh state database is created. The command still must not
-overwrite existing `config.toml` or `.env` files.
+When `--reset-state` is supplied, the command first stops the current profile's
+managed Gateway/Web server, if one is recorded, so no reused background process
+continues serving the previous SQLite connection. Existing `state.db`,
+`state.db-wal`, and `state.db-shm` files are then moved into a timestamped
+backup directory under `backups/` before a fresh state database is created. The
+command still must not overwrite existing `config.toml` or `.env` files.
 
 ## Starter Config
 

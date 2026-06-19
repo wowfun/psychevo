@@ -49,7 +49,9 @@ The directory is owner-only. `server.json` must not contain the token.
 `$PSYCHEVO_HOME` is the resolved active profile home from
 [057 Profiles](../057-profiles/spec.md). One managed Gateway server belongs to
 one active profile; lifecycle commands do not start, stop, or reuse managed
-servers from other profiles.
+servers from other profiles. Resetting that profile's state with
+`pevo init --reset-state` stops the profile-local managed server before the
+SQLite state files are backed up and recreated.
 
 `open` and `start` reuse the same server implementation as `pevo serve`.
 Managed mode passes internal flags to mount Web Shell assets, generated token

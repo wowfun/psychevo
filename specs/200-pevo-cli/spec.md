@@ -60,6 +60,11 @@ Named profiles additionally contain `profile.toml` when created through
 `sessions/` directory is not used for JSON or JSONL transcript sidecars in this
 slice.
 
+`pevo init --reset-state` resets this profile-local SQLite state and stops the
+current profile's managed Gateway/Web server before backing up the old state
+files, so a later `pevo web` launch cannot reuse a background process still
+holding the previous database connection.
+
 `PSYCHEVO_DB` may point at `:memory:` or a SQLite path. `~` expands, and
 relative paths resolve relative to the process cwd. When unset, `pevo run` uses
 `$PSYCHEVO_HOME/state.db`.
@@ -184,6 +189,21 @@ provider config, read or reference an API key without printing it, check or
 install Web UI assets from a source checkout, and finish with a doctor summary.
 In non-terminal stdin/stdout it exits without prompting and points users to
 `pevo init`, `pevo auth setup`, and `pevo doctor`.
+
+The provider/model portion of `pevo setup` prompts in this order: provider,
+base URL, API-key environment variable, API key, and model. The provider prompt
+offers numbered built-in choices for DeepSeek, Z.AI, and Xiaomi Token Plan plus
+a custom OpenAI-compatible provider. Z.AI defaults to the general OpenAI-
+compatible endpoint while offering its Coding Plan endpoint as a base URL
+shortcut. Xiaomi Token Plan prompts for the official CN, SGP, or AMS OpenAI-
+compatible regional URL, defaulting to CN, and persists the canonical
+`xiaomi-token-plan` provider id. Setup shows the recommended API-key environment
+variable name and uses it by default; users edit the env var name only after
+explicitly choosing to change it, and raw API keys are accepted only through the
+following hidden API-key prompt. After credentials are captured or referenced,
+setup attempts one provider `/models` fetch; on success users may select a
+numbered fetched model or choose the custom model-id row, and on failure or an
+empty catalog setup falls back to custom model-id entry.
 
 `pevo acp` runs the ACP stdio server. It is equivalent to the
 `psychevo-acp` binary and delegates behavior to the ACP crate instead of

@@ -8,6 +8,7 @@ use anyhow::{Result, anyhow};
 use psychevo_runtime::SqliteStore;
 
 use crate::args::InitArgs;
+use crate::commands::gateway::stop_managed_for_home;
 use crate::env::{inherited_env, resolve_psychevo_home};
 use crate::profiles::protect_env_file;
 
@@ -54,6 +55,7 @@ pub(crate) fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     }
     protect_env_file(&env_file)?;
     if args.reset_state {
+        let _ = stop_managed_for_home(&home)?;
         backup_state_files(&home, &state)?;
     }
     SqliteStore::open(&state)?;
