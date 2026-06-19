@@ -533,7 +533,7 @@
             )
             .expect("session");
         let snapshot_root = state.inner.home.join("snapshots");
-        let before_first = track_snapshot(&snapshot_root, &session_id, &state.inner.workdir);
+        let before_first = track_snapshot(&snapshot_root, &state.inner.workdir);
         state
             .inner
             .state
@@ -551,7 +551,7 @@
             .store()
             .append_message(&session_id, &runtime_assistant_message("first answer", 2))
             .expect("first assistant");
-        let before_second = track_snapshot(&snapshot_root, &session_id, &state.inner.workdir);
+        let before_second = track_snapshot(&snapshot_root, &state.inner.workdir);
         state
             .inner
             .state

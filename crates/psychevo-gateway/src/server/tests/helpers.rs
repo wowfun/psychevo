@@ -33,8 +33,9 @@
         }
     }
 
-    fn track_snapshot(root: &Path, session_id: &str, workdir: &Path) -> String {
-        let git_dir = root.join("sessions").join(session_id);
+    fn track_snapshot(root: &Path, workdir: &Path) -> String {
+        let workspace_id = psychevo_runtime::workspace_snapshot_id(workdir).expect("workspace id");
+        let git_dir = root.join("workspaces").join(workspace_id);
         std::fs::create_dir_all(&git_dir).expect("snapshot git dir");
         if !git_dir.join("HEAD").exists() {
             let init = std::process::Command::new("git")

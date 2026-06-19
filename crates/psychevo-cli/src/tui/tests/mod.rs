@@ -133,8 +133,13 @@ pub(crate) fn insert_tui_message_with_metadata(
     .expect("insert tui message");
 }
 
-pub(crate) fn test_track_snapshot(app: &TuiApp, session_id: &str) -> String {
-    let git_dir = app.home.join("snapshots").join("sessions").join(session_id);
+pub(crate) fn test_track_snapshot(app: &TuiApp, _session_id: &str) -> String {
+    let workspace_id = psychevo_runtime::workspace_snapshot_id(&app.workdir).expect("workspace id");
+    let git_dir = app
+        .home
+        .join("snapshots")
+        .join("workspaces")
+        .join(workspace_id);
     fs::create_dir_all(&git_dir).expect("snapshot dir");
     if !git_dir.join("HEAD").exists() {
         assert!(

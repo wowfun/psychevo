@@ -78,7 +78,7 @@ pub use context_usage::{
     format_context_total_value_parts, normalize_context_bar_width,
 };
 pub use error::{Error, Result};
-pub use paths::canonicalize_workdir;
+pub use paths::{canonicalize_workdir, workspace_snapshot_id};
 pub use prompt_image::{
     extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,
     prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path,
@@ -123,9 +123,10 @@ pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{
     ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
-    GatewayControlCommandRecord, GatewayLiveEventRecord, GatewaySourceBindingInput,
-    GatewaySourceBindingRecord, GatewayTurnTerminalInput, GatewayTurnTerminalRecord,
-    SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord, SqliteStore,
+    GatewayControlCommandRecord, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
+    GatewayLiveSnapshotRecord, GatewaySourceBindingInput, GatewaySourceBindingRecord,
+    GatewayTurnTerminalInput, GatewayTurnTerminalRecord, SessionCompactionInput,
+    SessionCompactionRecord, SessionMessageRecord, SqliteStore,
 };
 pub use thread_lineage::{
     SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,

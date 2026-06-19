@@ -565,31 +565,11 @@ impl TuiApp {
         }
         let view = panel.session_view.unwrap_or(SessionListView::Active);
         panel.delete_confirm = None;
-        let snapshot_dir = self
-            .home
-            .join("snapshots")
-            .join("sessions")
-            .join(&session_id);
         self.state_runtime.delete_session(&session_id)?;
-        let cleanup_notice = if snapshot_dir.exists() {
-            fs::remove_dir_all(&snapshot_dir).err().map(|err| {
-                format!(
-                    "session deleted; snapshot cleanup failed: {}",
-                    truncate_chars(&err.to_string(), 120)
-                )
-            })
-        } else {
-            None
-        };
         if self.current_session.as_deref() == Some(session_id.as_str()) {
             self.clear_current_session_after_management(ui);
         }
-        self.rebuild_session_panel(
-            ui,
-            view,
-            None,
-            Some(cleanup_notice.as_deref().unwrap_or("session deleted")),
-        )?;
+        self.rebuild_session_panel(ui, view, None, Some("session deleted"))?;
         Ok(())
     }
 

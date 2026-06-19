@@ -23,15 +23,13 @@ pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
     let session_id = store
         .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
         .expect("session");
-    let snapshots = SnapshotStore::new(
-        temp.path().join("snapshots"),
-        session_id.clone(),
-        workdir.clone(),
-    );
+    let snapshots = SnapshotStore::new(temp.path().join("snapshots"), workdir.clone());
     let before_first = snapshots
         .track()
         .expect("track first")
         .expect("first snapshot");
+    assert!(snapshots.git_dir().expect("git dir").join("HEAD").exists());
+    assert!(!temp.path().join("snapshots").join("sessions").exists());
     store
         .append_message_with_undo_snapshot(
             &session_id,
@@ -138,11 +136,7 @@ pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
     let session_id = store
         .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
         .expect("session");
-    let snapshots = SnapshotStore::new(
-        temp.path().join("snapshots"),
-        session_id.clone(),
-        workdir.clone(),
-    );
+    let snapshots = SnapshotStore::new(temp.path().join("snapshots"), workdir.clone());
     let before_first = snapshots
         .track()
         .expect("track first")

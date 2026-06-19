@@ -196,7 +196,7 @@ pub(crate) async fn run_live_internal(
     )
     .await?;
     let prompt_snapshot = options.snapshot_root.as_ref().and_then(|root| {
-        SnapshotStore::new(root.clone(), session_id.clone(), workdir.clone())
+        SnapshotStore::new(root.clone(), workdir.clone())
             .track()
             .ok()
             .flatten()

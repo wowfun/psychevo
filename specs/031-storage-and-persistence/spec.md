@@ -18,6 +18,7 @@ Define Psychevo's storage and persistence boundary for durable semantic facts.
 - representation evolution boundary
 - first-slice SQLite persistence attachment
 - session observability trace sidecar attachment
+- workspace snapshot cache attachment
 
 Out of scope:
 - JSONL, SQLite, tables, files, indexes, storage engines, migrations, FTS, search, query languages, pagination, or sorting except where an attachment explicitly defines an implementation slice
@@ -60,7 +61,11 @@ A persistence outcome is the observable success or failure of a persistence atte
 
 This spec does not require runtime to fail closed, retry, block, abort an agent invocation, mark an agent invocation as failed, or use ACID transactions when persistence fails. Outcome presentation and execution impact belong to runtime and interface behavior outside this spec unless another spec defines a stricter rule.
 
-The baseline is final-fact persistence. Implementations may persist intermediate updates, streaming progress, or implementation records, but this spec does not require event-by-event persistence.
+The baseline is final-fact persistence. Implementations may persist
+intermediate updates, streaming progress, or implementation records, but this
+spec does not require event-by-event persistence. Presentation-only live
+transport buffers must be bounded and may coalesce high-frequency deltas into
+latest-state records instead of retaining every update.
 Generic runtime debug observations are not part of the baseline persistence
 boundary. Persisting raw runtime/provider payloads or hidden event diagnostics
 requires a separate domain-specific sidecar spec with explicit retention and
@@ -97,6 +102,7 @@ This spec does not define version fields, migration algorithms, compatibility ma
 
 - [SQLite Persistence](sqlite-persistence.md) defines the default first implementation slice contract for SQLite-backed session and message persistence.
 - [Session Observability Trace Sidecar](session-observability-trace.md) defines the append-only JSONL sidecar for redacted typed runtime observability events.
+- [Workspace Snapshot Cache](workspace-snapshot-cache.md) defines the local temporary Git snapshot cache used for undo/redo restoration.
 
 ## Related Topics
 
