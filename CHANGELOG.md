@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-06-20
+
+- Reworked undo/redo Git snapshots to use canonical workspace-level stores with
+  stable hashed workspace ids and hourly best-effort `git gc --prune=7.days`
+  cleanup, avoiding one snapshot directory per session.
+- Added Workbench model-resolution status and guarded model turns on resolved
+  provider-qualified models, with reasoning-effort controls aligned to TUI
+  `default` semantics.
+
+## 2026-06-19
+
+- Improved setup, install, and local validation flows, including provider/model
+  onboarding, native/tooling preflights, repo-local dev-home guidance, and
+  quieter deterministic validation output.
+- Upgraded frontend workspace tooling to `pnpm@11.8.0` with current Workbench,
+  protocol, Vite, Vitest, TypeScript, and React package versions.
+- Reworked ACP/Gateway live retention around coalesced snapshots while
+  preserving peer turn ordering and avoiding stale resume-history updates.
+- Refined Workbench profile/backend setup UX with safer defaults for ACP command
+  JSON, workspace CWD, and model/provider selection.
+- Made `pevo init --reset-state` stop the current profile's managed Web/Gateway
+  before recreating SQLite state so later Web launches cannot reuse old
+  session data through a stale background process.
+- Fixed Rust 1.96 Clippy compatibility across SSE parsing, agent sorting, TUI
+  model filtering, and ACP peer notification draining.
+
 ## 2026-06-18
 
 - Added a neutral macOS-style Workbench `Light` appearance, renamed existing warm
