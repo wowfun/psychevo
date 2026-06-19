@@ -11,6 +11,37 @@ pub(crate) fn install_script_path() -> PathBuf {
     install_workspace_root().join("scripts/install.sh")
 }
 
+#[cfg(unix)]
+fn write_fake_command(bin_dir: &Path, name: &str, body: &str) {
+    std::fs::create_dir_all(bin_dir).expect("fake bin");
+    let path = bin_dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("fake command");
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = std::fs::metadata(&path)
+            .expect("fake command metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).expect("chmod fake command");
+    }
+}
+
+#[cfg(unix)]
+fn install_preflight_command(bin_dir: &Path, home: &Path) -> Command {
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg(install_script_path())
+        .arg("--source")
+        .arg(install_workspace_root())
+        .arg("--no-init")
+        .env_clear()
+        .env("HOME", home)
+        .env("PATH", bin_dir)
+        .env("PEVO_INSTALL_UNAME", "Linux");
+    command
+}
+
 #[test]
 pub(crate) fn install_dry_run_uses_explicit_source_and_default_init() {
     let temp = tempdir().expect("temp");
@@ -189,6 +220,91 @@ pub(crate) fn install_dry_run_plans_clone_mode_and_no_init() {
         "{stdout}"
     );
     assert!(stdout.contains("init_command: (skipped)"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_preflight_reports_missing_native_compiler() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "cargo", "exit 0");
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .arg("--no-web")
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("native C compiler/linker is required"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("cc, gcc, or clang") || stderr.contains("build-essential"),
+        "{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_preflight_reports_missing_node_for_default_web_install() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "cargo", "exit 0");
+    write_fake_command(&bin, "cc", "exit 0");
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Node.js is required to build Web UI assets"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("--no-web"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_preflight_reports_missing_pnpm_for_default_web_install() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "cargo", "exit 0");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "exit 0");
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("pnpm is required to build Web UI assets"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("--no-web"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_no_web_bypasses_node_and_pnpm_preflight() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "cargo", "printf 'fake cargo reached\\n' >&2\nexit 42");
+    write_fake_command(&bin, "cc", "exit 0");
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .arg("--no-web")
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("fake cargo reached"), "{stderr}");
+    assert!(
+        !stderr.contains("Node.js is required") && !stderr.contains("pnpm is required"),
+        "{stderr}"
+    );
 }
 
 #[test]

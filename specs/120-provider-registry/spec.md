@@ -44,6 +44,7 @@ The built-in provider ids and aliases are:
 - `deepseek`
 - `dashscope`, with aliases `alibaba`, `qwen`
 - `xiaomi`, with alias `mimo`
+- `xiaomi-token-plan`
 - `lmstudio`
 - `custom`
 

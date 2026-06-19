@@ -57,21 +57,7 @@ cleanup_and_exit() {
 }
 
 install_deps() {
-  require_command sudo
-  require_command apt-get
-
-  if ! command -v curl >/dev/null 2>&1 || ! command -v gpg >/dev/null 2>&1; then
-    sudo apt-get update
-    sudo apt-get install -y ca-certificates curl gpg
-  fi
-
-  sudo mkdir -p /etc/apt/keyrings
-  curl -fsSL https://repo.charm.sh/apt/gpg.key \
-    | sudo gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg
-  echo 'deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *' \
-    | sudo tee /etc/apt/sources.list.d/charm.list >/dev/null
-  sudo apt-get update
-  sudo apt-get install -y vhs ttyd ffmpeg
+  "$repo_root/scripts/install-dev-test-deps.sh" --install --only vhs
 }
 
 check_demo_deps() {

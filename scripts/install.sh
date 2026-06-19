@@ -177,6 +177,28 @@ manual_rust_hint() {
   fi
 }
 
+native_build_hint() {
+  case "$(uname_value)" in
+    Darwin*)
+      printf 'Install Xcode Command Line Tools with xcode-select --install, or install a C compiler toolchain, then rerun this script.'
+      ;;
+    Linux*)
+      if is_wsl; then
+        printf 'Install a Linux C compiler toolchain inside WSL, for example sudo apt install build-essential, then rerun this script.'
+      else
+        printf 'Install a C compiler toolchain, for example build-essential on Debian/Ubuntu or the equivalent for your distribution, then rerun this script.'
+      fi
+      ;;
+    *)
+      printf 'Install a native C compiler toolchain that provides cc, gcc, or clang, then rerun this script.'
+      ;;
+  esac
+}
+
+manual_web_hint() {
+  printf 'Install Node.js and pnpm, then rerun this script, or use --no-web to install only the CLI.'
+}
+
 install_rust_unix() {
   have_cmd curl || die "curl is required to install Rust with rustup. $(manual_rust_hint)"
   info "Installing Rust with rustup..."
@@ -228,14 +250,27 @@ ensure_cargo() {
   have_cmd cargo || die "cargo is still not available in this shell. $(manual_rust_hint)"
 }
 
-ensure_pnpm() {
+ensure_native_build_tools() {
+  if [ "$dry_run" -eq 1 ] || is_windows_shell; then
+    return 0
+  fi
+  if have_cmd cc || have_cmd gcc || have_cmd clang; then
+    return 0
+  fi
+  die "a native C compiler/linker is required to build pevo from source. $(native_build_hint)"
+}
+
+ensure_web_toolchain() {
   if [ "$install_web" -eq 0 ]; then
     return 0
+  fi
+  if ! have_cmd node; then
+    die "Node.js is required to build Web UI assets. $(manual_web_hint)"
   fi
   if have_cmd pnpm; then
     return 0
   fi
-  die "pnpm is required to build Web UI assets. Install pnpm and rerun this script, or use --no-web to install only the CLI."
+  die "pnpm is required to build Web UI assets. $(manual_web_hint)"
 }
 
 resolve_pevo_bin() {
@@ -415,7 +450,8 @@ fi
 
 valid_source_dir "$source_dir" || die "not a Psychevo source checkout: $source_dir"
 ensure_cargo
-ensure_pnpm
+ensure_native_build_tools
+ensure_web_toolchain
 
 info "Installing pevo from $source_dir..."
 if ! cargo install --locked --path "$source_dir/crates/psychevo-cli" --force; then
@@ -486,8 +522,20 @@ cat <<EOF
 Try:
   pevo --help
   pevo
+EOF
+
+if [ "$install_web" -eq 1 ]; then
+  cat <<'EOF'
   pevo web
 EOF
+else
+  cat <<'EOF'
+
+Web UI assets were skipped. To add them later, install Node.js and pnpm,
+then rerun this installer from a Psychevo checkout without --no-web or run:
+  pevo setup
+EOF
+fi
 
 if [ "$install_peval" -eq 1 ]; then
   cat <<'EOF'

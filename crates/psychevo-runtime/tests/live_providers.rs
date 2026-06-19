@@ -5,6 +5,16 @@ use psychevo_runtime::{RunOptions, StateRuntime, run_live};
 use rusqlite::Connection;
 use tempfile::tempdir;
 
+const PRIMARY_XIAOMI_FAMILY_PROVIDER: &str = "xiaomi-token-plan";
+const PRIMARY_XIAOMI_FAMILY_MODEL: &str = "xiaomi-token-plan/mimo-v2.5-pro";
+
+fn live_model(provider: &str) -> &'static str {
+    match provider {
+        PRIMARY_XIAOMI_FAMILY_PROVIDER => PRIMARY_XIAOMI_FAMILY_MODEL,
+        other => panic!("missing live model for provider: {other}"),
+    }
+}
+
 pub(crate) fn live_config_available() -> bool {
     env::var_os("PSYCHEVO_CONFIG").is_some() || env::var_os("PSYCHEVO_HOME").is_some()
 }
@@ -42,7 +52,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         max_context_messages: None,
         config_path: None,
         project_context_override: None,
-        model: None,
+        model: Some(live_model(provider).to_string()),
         reasoning_effort: None,
         runtime_ref: None,
         runtime_session_id: None,
@@ -81,12 +91,6 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
 
 #[tokio::test]
 #[ignore = "live provider opt-in"]
-pub(crate) async fn live_deepseek_read_tool() {
-    run_live_read_tool("deepseek").await;
-}
-
-#[tokio::test]
-#[ignore = "live provider opt-in"]
-pub(crate) async fn live_xiaomi_read_tool() {
-    run_live_read_tool("xiaomi").await;
+pub(crate) async fn live_xiaomi_token_plan_read_tool() {
+    run_live_read_tool(PRIMARY_XIAOMI_FAMILY_PROVIDER).await;
 }

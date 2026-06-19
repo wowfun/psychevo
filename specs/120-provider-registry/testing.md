@@ -58,9 +58,20 @@ validation, for example:
 cargo test --workspace --all-targets -- --ignored live
 ```
 
-The first live suite covers DeepSeek and Xiaomi. It must require `PSYCHEVO_HOME`
-or explicit `PSYCHEVO_CONFIG` to point at isolated Psychevo configuration. The
-tests must not read third-party auth files or any other external auth store.
+The default live suite covers one provider: `xiaomi-token-plan` as the primary
+Xiaomi-family provider. It must require `PSYCHEVO_HOME` or explicit
+`PSYCHEVO_CONFIG` to point at isolated Psychevo configuration. The tests must
+not read third-party auth files or any other external auth store. Live harnesses
+should pass a provider-qualified model for the provider under test so a
+provider-qualified default model in the isolated home does not mask the requested
+provider. Additional providers may be validated only when explicitly selected by
+the caller.
+
+Live provider registry tests may use the repo-local development home defined by
+[060 Automation](../060-automation/spec.md), including
+`.local/.psychevo-dev/config.toml` through explicit `PSYCHEVO_CONFIG`. This is
+still live opt-in validation and must not read the user's normal home unless the
+caller explicitly points `PSYCHEVO_HOME` or `PSYCHEVO_CONFIG` there.
 
 Each live provider test creates an isolated temporary workdir fixture, asks the
 model to use the `read` tool, and asserts:
@@ -80,6 +91,9 @@ caller explicitly asks to validate live providers.
 - `.env` and process environment changes should stay isolated and be cleaned up.
 - Snapshots or golden files should not include volatile provider catalogs,
   generated prose, or real provider responses.
+- `pevo setup` tests should drive the wizard core with fake terminal input and
+  local fake `/models` providers instead of PTYs, real API keys, or live
+  provider endpoints.
 
 ## Related Topics
 

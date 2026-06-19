@@ -79,10 +79,11 @@ benchmarks through eval configs.
 
 ## Repo-Local Dev Home
 
-The repo-local peval development environment may use `.local/.psychevo-dev/` as
-an isolated `PSYCHEVO_HOME`. Its `peval-config.toml` may point the default
-workspace at `.local/evals-dev/` so local peval validation can omit `--root`
-while still avoiding the user's normal Psychevo home.
+The repo-local peval development environment may use the shared
+`.local/.psychevo-dev/` development home defined by
+[060 Automation](../060-automation/spec.md). Its `peval-config.toml` may point
+the default workspace at `.local/evals-dev/` so local peval validation can omit
+`--root` while still avoiding the user's normal Psychevo home.
 
 Commands and scripts that rely on this dev home must set `PSYCHEVO_HOME`
 explicitly. Live provider validation that uses `.local/.psychevo-dev/` remains

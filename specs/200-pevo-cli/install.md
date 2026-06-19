@@ -77,14 +77,21 @@ to install Rust:
 
 When `cargo` is missing in a non-interactive shell, or the guided installation
 cannot make `cargo` available in the current process, the script fails with a
-manual Rust installation hint.
+manual Rust installation hint. The documented `curl | sh` install path is
+non-interactive stdin, so it requires Rust/Cargo to already be available.
+
+Unix, macOS, and WSL source builds require a native C compiler/linker toolchain
+before `cargo install` runs. The script must fail early when no `cc`, `gcc`, or
+`clang` command is available, with a short platform-appropriate hint. The script
+must not install native compiler toolchains automatically.
 
 Web UI asset installation is enabled by default. When it is enabled, missing
-`pnpm` is a hard failure with a short hint to install pnpm or rerun with
-`--no-web`. The script does not install Node.js or pnpm automatically.
+`node` or `pnpm` is a hard failure with a short hint to install Node.js/pnpm or
+rerun with `--no-web`. The script does not install Node.js or pnpm
+automatically. The supported `pnpm` version follows the repository root
+`packageManager` declaration.
 
-The script must not install native compiler toolchains automatically. If
-`cargo install` fails under Windows Git Bash/MSYS/MINGW, the failure text must
+If `cargo install` fails under Windows Git Bash/MSYS/MINGW, the failure text must
 mention that Rust and native C/C++ build tools, such as Visual Studio Build
 Tools or a compatible MinGW setup, may be required.
 
@@ -117,6 +124,10 @@ setup remains an explicit user action through `peval init`, `--root`, or
 If Cargo's bin directory is not on `PATH`, the script prints an `export PATH=...`
 command and a short note that the user should add it to their shell profile. It
 must not edit profiles automatically.
+
+Final success guidance must only suggest `pevo web` when Web UI assets were
+installed. CLI-only installs should instead point users to rerun the install
+script without `--no-web` or use `pevo setup` after installing Node.js and pnpm.
 
 ## Related Topics
 

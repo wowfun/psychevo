@@ -21,8 +21,9 @@ scripts/validate.sh broad
 - `pevo init` creates `config.toml`, `.env`, `state.db`, `sessions/`, `logs/`,
   and `cache/` under an isolated `PSYCHEVO_HOME`.
 - Existing `config.toml` and `.env` are not overwritten.
-- `pevo init --reset-state` backs up `state.db`, `state.db-wal`, and
-  `state.db-shm` before creating a fresh v5 state database.
+- `pevo init --reset-state` stops the current profile's managed Gateway,
+  backs up `state.db`, `state.db-wal`, and `state.db-shm`, and creates a fresh
+  current-schema state database.
 - The starter config resolves DeepSeek with `reasoning_effort = medium`.
 - Success output lists paths and does not include credential values.
 - Re-running init is idempotent.
@@ -73,7 +74,7 @@ scripts/validate.sh broad
 - TOML `reasoning_effort` uses the same validation as CLI `--variant`.
 - `none` disables lower-level reasoning effort.
 - latest-session lookup filters by canonical workdir and `source = "run"`.
-- SQLite state uses `user_version = 14`; older unsupported state databases reject with an
+- SQLite state uses `user_version = 22`; older unsupported state databases reject with an
   explicit reset/cutover instruction.
 - Reasoning is preserved locally as folded assistant content, without entering
   default visible output or cross-provider replay.
@@ -147,6 +148,10 @@ scripts/validate.sh broad
   `--with-peval` planning. It also verifies Git Bash/MSYS/MINGW binary naming.
 - Dry-run output is deterministic and does not require `git`, `cargo`, network
   access, provider credentials, or global Psychevo state.
+- Install preflight coverage verifies missing native C compiler, missing
+  Node.js, missing `pnpm`, and `--no-web` bypass behavior without cloning,
+  installing, initializing, network access, provider credentials, or global
+  Psychevo state.
 
 ## Stats Coverage
 
@@ -177,9 +182,17 @@ Real provider tests remain live opt-in validation. They may use `PSYCHEVO_HOME`
 or explicit `PSYCHEVO_CONFIG`/`PSYCHEVO_DB` isolation, but they do not run in
 the default validation path.
 
-The repo-local live development environment uses `.local/.psychevo-dev/` as an
-isolated `PSYCHEVO_HOME`. Live validation scripts may use that home, but they
+Repo-local CLI and TUI live validation may use the shared repo-local
+development home defined by [060 Automation](../060-automation/spec.md).
+Scripts that use `.local/.psychevo-dev/` must still set `PSYCHEVO_HOME`
+explicitly, set `PSYCHEVO_CONFIG` when they rely on that directory's
+`config.toml`, and set `PSYCHEVO_DB` when the run needs isolated state. They
 must not copy credential files automatically.
+
+VHS terminal captures are projection evidence. Their tape waits should anchor on
+stable user-visible content from the exercised workflow instead of transient
+debug/status-line labels when structured state or durable session evidence is
+available separately.
 
 ## Related Topics
 

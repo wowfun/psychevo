@@ -148,6 +148,37 @@ reasoning_effort = "medium"
 }
 
 #[test]
+pub(crate) fn xiaomi_token_plan_builtin_resolves_default_url_and_env() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+model = "xiaomi-token-plan/mimo-v2.5-pro"
+"#,
+    )
+    .expect("config");
+    fs::write(
+        config_dir.join(".env"),
+        "XIAOMI_TOKEN_PLAN_API_KEY=token-plan-key\n",
+    )
+    .expect("env");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let loaded = load_run_config(&options, &workdir).expect("config");
+    let resolved = resolve_run_provider(&options, &loaded).expect("provider");
+    assert_eq!(resolved.provider, "xiaomi-token-plan");
+    assert_eq!(resolved.base_url, "https://token-plan-cn.xiaomimimo.com/v1");
+    assert_eq!(
+        resolved.api_key_env.as_deref(),
+        Some("XIAOMI_TOKEN_PLAN_API_KEY")
+    );
+    assert_eq!(resolved.model, "mimo-v2.5-pro");
+}
+
+#[test]
 pub(crate) fn selected_configured_model_reports_effective_reasoning_without_credentials() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);

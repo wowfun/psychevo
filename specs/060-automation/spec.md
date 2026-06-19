@@ -39,6 +39,9 @@ contract for the change.
 Broad validation is a wider deterministic gate for repository confidence. A
 topic may name a broad command, but this spec does not require a global command
 or decide which packages, crates, fixtures, or scripts are included.
+Broad validation entrypoints may hide successful command output when that keeps
+routine validation readable, but they must preserve the failing command, exit
+status, and captured output when a step fails.
 
 A snapshot or golden check compares a stable projection against an intentional
 baseline. The owning topic decides which projections are stable enough to
@@ -89,6 +92,36 @@ Failure evidence should preserve enough context to make the next action clear,
 but this spec does not define a universal diagnostic schema. Topic specs may
 define stricter machine-readable formats when a product or harness needs them.
 
+## Repo-Local Development Home
+
+The repository-local development home is `.local/.psychevo-dev/` under the repo
+root. It is an opt-in development and automation convention, not a product
+default profile and not a replacement for the user's normal `~/.psychevo`.
+
+This directory may be used for local development, tests, and validation across
+surfaces, including deterministic helper state, GUI/TUI visual artifacts, peval
+development workspaces, and explicit live opt-in provider validation. It may
+contain isolated `config.toml`, `.env`, SQLite state such as `state.db`, logs,
+sessions, snapshots, TUI/Web artifacts, and live-validation workdirs.
+
+Commands and scripts that rely on this home must set `PSYCHEVO_HOME`
+explicitly. When a fixed config file should be used, they should set
+`PSYCHEVO_CONFIG=.local/.psychevo-dev/config.toml`; when validation state should
+be isolated from the dev home's normal state, they should set `PSYCHEVO_DB`
+explicitly. Relative examples are relative to the repository root.
+
+Automation scripts should keep substantial structured-output parsing in
+repo-local helper programs rather than embedding long inline programs in shell
+heredocs. Shell entrypoints may still own orchestration, environment selection,
+and process wiring, while helper programs own reusable evidence parsing and
+assertions.
+
+Using this dev home does not make live validation deterministic. Provider,
+API-key, or live-service validation remains live opt-in and must not enter the
+default deterministic validation path. Scripts must not automatically copy
+credentials from the user's normal home or external auth stores into this
+directory; developers must prepare any live credentials explicitly.
+
 ## Validation Boundaries
 
 Default validation should avoid hidden dependencies on real user config,
@@ -127,6 +160,14 @@ Automation that mutates files, state, sessions, processes, terminals, or
 environment variables should keep those resources isolated and clean up after
 itself. If cleanup is impossible or intentionally skipped for diagnostics, the
 owning harness should make the artifact boundary explicit.
+
+Repo-local dev/test dependency helpers are automation support, not product
+installers. They should default to check-only behavior, print exact missing
+dependency remediation, and require an explicit install flag before changing
+host packages, browser caches, or other machine-level state. Product install
+scripts should remain focused on installing the product surface and should not
+silently absorb validation-only tools such as browser, terminal-capture, or
+database inspection dependencies.
 
 ## Related Topics
 

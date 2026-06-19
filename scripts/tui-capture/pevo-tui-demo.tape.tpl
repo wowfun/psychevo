@@ -157,7 +157,7 @@ Sleep 300 ms
 Screenshot "10-agent-tool-running.png"
 Ctrl+T
 Enter
-Wait+Screen /session:/
+Wait+Screen /Translate the VHS sentence to Chinese/
 Sleep 300 ms
 Screenshot "11-agent-session-running.png"
 Sleep 5600 ms
