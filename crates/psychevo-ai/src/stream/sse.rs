@@ -64,10 +64,7 @@ impl SseParser {
             return Ok(());
         }
 
-        loop {
-            let Some((line_end, consumed)) = next_sse_line(&self.buffer, finish) else {
-                break;
-            };
+        while let Some((line_end, consumed)) = next_sse_line(&self.buffer, finish) {
             let line = std::str::from_utf8(&self.buffer[..line_end])
                 .map_err(|err| Error::Provider(format!("SSE line is not UTF-8: {err}")))?
                 .to_string();

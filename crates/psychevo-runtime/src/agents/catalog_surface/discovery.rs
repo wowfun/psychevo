@@ -662,7 +662,7 @@ pub fn agent_status_records(
             records.push(state.record.clone());
         }
     }
-    records.sort_by(|left, right| right.started_at_ms.cmp(&left.started_at_ms));
+    records.sort_by_key(|record| std::cmp::Reverse(record.started_at_ms));
     records
 }
 

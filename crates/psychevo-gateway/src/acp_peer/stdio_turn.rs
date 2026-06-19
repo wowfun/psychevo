@@ -49,6 +49,24 @@ fn is_acp_peer_abort_error(err: &Error) -> bool {
     err.to_string().contains(ACP_PEER_ABORT_MESSAGE)
 }
 
+async fn drain_pending_acp_v2_notifications(
+    notification_rx: &mut mpsc::UnboundedReceiver<acp_v2::SessionNotification>,
+    _native_session_id: &str,
+) {
+    let drain_until = tokio::time::sleep(std::time::Duration::from_millis(50));
+    tokio::pin!(drain_until);
+    loop {
+        tokio::select! {
+            notification = notification_rx.next() => {
+                if notification.is_none() {
+                    break;
+                }
+            }
+            _ = &mut drain_until => break,
+        }
+    }
+}
+
 struct AcpProtocolAttemptError {
     fallback_safe: bool,
     error: Error,
@@ -352,6 +370,8 @@ async fn run_acp_stdio_turn_v2(
                     turn_prompt,
                 ))],
             );
+            let mut notification_rx = notification_rx;
+            drain_pending_acp_v2_notifications(&mut notification_rx, &native_session_id).await;
             let mut state = AcpPeerStreamState::new(turn_stream, turn_local_session_id);
             let mut notification_rx = notification_rx.fuse();
             let (done_tx, done_rx) =
@@ -405,20 +425,20 @@ async fn run_acp_stdio_turn_v2(
 
             state.finish();
             let final_answer = state.final_answer.clone();
-            let reasoning_text = state.reasoning_text.clone();
             let final_content = state.final_message_content();
+            let content_slots = state.content_slots.clone();
             let session_title = state.session_title.clone();
             let usage_update = state.usage_update.clone();
             let tools = state
                 .tools
-                .values()
-                .map(|state| state.value.clone())
+                .iter()
+                .map(|(tool_call_id, state)| (tool_call_id.clone(), state.value.clone()))
                 .collect();
             Ok(AcpTurnOutput {
                 native_session_id,
                 final_answer,
-                reasoning_text,
                 final_content,
+                content_slots,
                 session_title,
                 tools,
                 usage_update,
@@ -565,6 +585,18 @@ async fn run_acp_stdio_turn_v1(
                     .start_session()
                     .await?
             };
+            let drain_until = tokio::time::sleep(std::time::Duration::from_millis(50));
+            tokio::pin!(drain_until);
+            loop {
+                tokio::select! {
+                    update = session.read_update() => {
+                        if let SessionMessage::StopReason(_) = update? {
+                            break;
+                        }
+                    }
+                    _ = &mut drain_until => break,
+                }
+            }
             session.send_prompt(turn_prompt)?;
             let mut state = AcpPeerStreamState::new(turn_stream, turn_local_session_id);
             let abort = wait_for_optional_abort(turn_abort);
@@ -593,20 +625,20 @@ async fn run_acp_stdio_turn_v1(
             }
             state.finish();
             let final_answer = state.final_answer.clone();
-            let reasoning_text = state.reasoning_text.clone();
             let final_content = state.final_message_content();
+            let content_slots = state.content_slots.clone();
             let session_title = state.session_title.clone();
             let usage_update = state.usage_update.clone();
             let tools = state
                 .tools
-                .values()
-                .map(|state| state.value.clone())
+                .iter()
+                .map(|(tool_call_id, state)| (tool_call_id.clone(), state.value.clone()))
                 .collect();
             Ok(AcpTurnOutput {
                 native_session_id: session.session_id().to_string(),
                 final_answer,
-                reasoning_text,
                 final_content,
+                content_slots,
                 session_title,
                 tools,
                 usage_update,
