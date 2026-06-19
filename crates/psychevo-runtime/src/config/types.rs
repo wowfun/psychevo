@@ -162,6 +162,7 @@ pub(crate) const AUTO_PROVIDER_ORDER: &[&str] = &[
     "deepseek",
     "dashscope",
     "xiaomi",
+    "xiaomi-token-plan",
     "lmstudio",
     "custom",
 ];
@@ -225,6 +226,18 @@ pub(crate) const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
         base_url: Some("https://api.xiaomimimo.com/v1"),
         api_key_envs: &["XIAOMI_API_KEY"],
         base_url_env: Some("XIAOMI_BASE_URL"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "xiaomi-token-plan",
+        label: "Xiaomi Token Plan",
+        base_url: Some("https://token-plan-cn.xiaomimimo.com/v1"),
+        api_key_envs: &[
+            "XIAOMI_TOKEN_PLAN_API_KEY",
+            "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+            "XIAOMI_API_KEY",
+        ],
+        base_url_env: Some("XIAOMI_TOKEN_PLAN_BASE_URL"),
         allow_no_auth: false,
     },
     BuiltInProvider {

@@ -25,6 +25,8 @@ type ThreadPanelProps = {
   latestGatewayEvent: GatewayEventFeed | null;
   parentThreadId?: string | null;
   pendingPrompt?: string | null;
+  promptSubmitBlockReason?: string | undefined;
+  promptSubmitDisabled?: boolean | undefined;
   scope: GatewayRequestScope | null;
   threadId: string | null;
   title: string;
@@ -41,6 +43,8 @@ export function ThreadPanel({
   latestGatewayEvent,
   parentThreadId,
   pendingPrompt,
+  promptSubmitBlockReason,
+  promptSubmitDisabled = false,
   scope,
   threadId,
   title,
@@ -121,14 +125,22 @@ export function ThreadPanel({
     }
     consumedPendingPromptRef.current = prompt;
     onPendingPromptConsumed?.();
+    if (promptSubmitDisabled) {
+      setError(promptSubmitBlockReason ?? "Select a provider/model before starting a conversation.");
+      return;
+    }
     setSnapshot((current) => current ? normalizeSnapshot(appendOptimisticPrompt(current, prompt)) : current);
     void onSubmitThreadTurn(threadId, prompt, []).catch((submitError) => {
       setError(submitError instanceof Error ? submitError.message : String(submitError));
     });
-  }, [pendingPrompt, snapshot?.thread?.id, threadId]);
+  }, [onPendingPromptConsumed, onSubmitThreadTurn, pendingPrompt, promptSubmitBlockReason, promptSubmitDisabled, snapshot?.thread?.id, threadId]);
 
   async function submit(text: string, mentions: GatewayMention[]) {
     if (!threadId || !text.trim()) {
+      return;
+    }
+    if (promptSubmitDisabled) {
+      setError(promptSubmitBlockReason ?? "Select a provider/model before starting a conversation.");
       return;
     }
     setSnapshot((current) => current ? normalizeSnapshot(appendOptimisticPrompt(current, text.trim())) : current);
@@ -214,6 +226,8 @@ export function ThreadPanel({
           completionProvider={completionProvider}
           disabled={disabled || !threadId}
           mode="default"
+          promptSubmitBlockReason={promptSubmitBlockReason}
+          promptSubmitDisabled={promptSubmitDisabled}
           running={running}
           runningStartedAtMs={activity.startedAtMs ?? null}
           onInterrupt={() => void interrupt()}

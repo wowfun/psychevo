@@ -62,7 +62,9 @@ export function RightWorkspace({
   onRefreshTrace,
   onSaveFile,
   onShowHome,
-  onSubmitThreadTurn
+  onSubmitThreadTurn,
+  promptSubmitBlockReason,
+  promptSubmitDisabled
 }: {
   activeTabId: string | null;
   activity: ThreadSnapshot["activity"];
@@ -77,6 +79,8 @@ export function RightWorkspace({
   scope: GatewayRequestScope | null;
   sessionId: string | null;
   status: string;
+  promptSubmitBlockReason?: string | undefined;
+  promptSubmitDisabled?: boolean | undefined;
   usage: SessionUsageSummaryView | null;
   tabs: RightWorkspaceTab[];
   terminalEvents: TerminalNotificationEvent[];
@@ -188,6 +192,8 @@ export function RightWorkspace({
                 latestGatewayEvent={latestGatewayEvent}
                 parentThreadId={tab.parentThreadId ?? sessionId}
                 pendingPrompt={tab.pendingPrompt ?? null}
+                promptSubmitBlockReason={promptSubmitBlockReason}
+                promptSubmitDisabled={promptSubmitDisabled}
                 scope={scope}
                 threadId={tab.threadId ?? null}
                 title={tab.title}

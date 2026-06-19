@@ -377,20 +377,33 @@ fn workbench_controls_value(
 ) -> psychevo_runtime::Result<wire::WorkbenchControlsView> {
     let options = state.run_options(workdir.to_path_buf(), None);
     let agent = session_control_agent(state, thread_id)?;
-    let selected = selected_configured_model(&options).ok().flatten();
+    let selected = selected_configured_model(&options);
     let configured = configured_models(&options).unwrap_or_default();
+    let (model, model_status, model_error) = match selected {
+        Ok(Some(model)) => (
+            Some(format!("{}/{}", model.provider, model.model)),
+            wire::WorkbenchModelStatus::Resolved,
+            None,
+        ),
+        Ok(None) => (None, wire::WorkbenchModelStatus::Unconfigured, None),
+        Err(error) if model_resolution_unconfigured_error(&error.to_string()) => {
+            (None, wire::WorkbenchModelStatus::Unconfigured, None)
+        }
+        Err(error) => (
+            None,
+            wire::WorkbenchModelStatus::Error,
+            Some(error.to_string()),
+        ),
+    };
     Ok(wire::WorkbenchControlsView {
         permission_mode: PermissionMode::Default.as_str().to_string(),
         mode: RunMode::Default.as_str().to_string(),
         runtime_ref: "native".to_string(),
         agent,
-        model: selected
-            .as_ref()
-            .map(|model| format!("{}/{}", model.provider, model.model)),
-        variant: selected
-            .as_ref()
-            .and_then(|model| model.reasoning_effort.clone())
-            .or_else(|| Some("none".to_string())),
+        model,
+        model_status,
+        model_error,
+        variant: options.reasoning_effort.clone().or_else(|| Some("none".to_string())),
         permission_mode_options: ["default", "acceptEdits", "dontAsk", "bypassPermissions"]
             .into_iter()
             .map(str::to_string)
@@ -408,6 +421,11 @@ fn workbench_controls_value(
             .map(str::to_string)
             .collect(),
     })
+}
+
+fn model_resolution_unconfigured_error(message: &str) -> bool {
+    message.contains("auto provider could not find usable credentials and model")
+        || message.contains("Psychevo home is not initialized")
 }
 
 fn native_runtime_mode_option() -> wire::RuntimeConfigOptionView {

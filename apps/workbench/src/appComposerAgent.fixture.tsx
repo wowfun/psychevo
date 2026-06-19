@@ -60,6 +60,9 @@ const gatewayMock = vi.hoisted(() => {
     backendRecords: [] as Array<Record<string, unknown>>,
     scope,
     sessionSummaries: [] as Array<Record<string, unknown>>,
+    model: "xiaomi/xiaomi-token-high" as string | null,
+    modelError: null as string | null,
+    modelStatus: "resolved" as "resolved" | "unconfigured" | "error",
     settingsResult(agent: string | null) {
       return {
         workdir: scope.workdir,
@@ -74,7 +77,9 @@ const gatewayMock = vi.hoisted(() => {
           permissionMode: "default",
           mode: "default",
           agent,
-          model: "xiaomi/xiaomi-token-high",
+          model: gatewayMock.model,
+          modelStatus: gatewayMock.modelStatus,
+          modelError: gatewayMock.modelError,
           variant: "none",
           permissionModeOptions: ["default"],
           modeOptions: ["default", "plan"],
@@ -597,6 +602,9 @@ afterEach(() => {
   gatewayMock.completionResult = { items: [], replacement: null };
   gatewayMock.commandList = [];
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
+  gatewayMock.model = "xiaomi/xiaomi-token-high";
+  gatewayMock.modelError = null;
+  gatewayMock.modelStatus = "resolved";
   gatewayMock.observabilityRead = null;
   gatewayMock.usageRead = null;
   gatewayMock.permissionRespond = () => ({ accepted: true });

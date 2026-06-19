@@ -41,9 +41,11 @@ Browser tests use Playwright against the built Workbench served by
 `pevo gateway open --no-browser --print-url`, with isolated config, SQLite
 state, and workdir by default.
 
-Live model, live skill, and ACP peer validation are opt-in. They must use
-isolated `PSYCHEVO_CONFIG`, `PSYCHEVO_DB`, workdir, and test artifacts, and
-must not print tokens or secrets.
+Live model, live skill, and ACP peer validation are opt-in. They may use the
+repo-local development home defined by
+[060 Automation](../060-automation/spec.md), but must still set explicit
+`PSYCHEVO_CONFIG`, `PSYCHEVO_DB`, workdir, and test artifact paths when
+isolation is required. They must not print tokens or secrets.
 
 ## Scenario Matrix
 

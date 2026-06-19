@@ -192,6 +192,16 @@ even when they do not yet have a dedicated visible Workbench control.
 surfaces. Unsupported variants must not block supported message, thought, tool,
 and plan streaming from continuing.
 
+When a peer native session is loaded or resumed, ACP history notifications
+received before the new prompt is active are resume material, not live output
+for the new Psychevo turn. Gateway must drain or ignore those notifications
+before constructing the turn accumulator. The live accumulator is ordered by
+current-turn ACP update arrival: adjacent message/thought chunks may append to
+the current text slot, while tool-call updates refresh the matching tool slot
+by ACP tool-call id without moving it behind later text. The committed
+assistant content for the turn uses that observed slot order instead of
+grouping all reasoning, answer text, and tools by type.
+
 Markdown body instructions are delivered by first trying a supported ACP
 config/system-like option. If unavailable, the body is prepended to the first
 prompt in a new ACP session only. Generated agents have no body and therefore

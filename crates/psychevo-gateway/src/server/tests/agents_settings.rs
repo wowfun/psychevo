@@ -345,12 +345,96 @@ command = "cursor-agent"
         assert_eq!(result["controls"]["permissionMode"], "default");
         assert_eq!(result["controls"]["mode"], "default");
         assert_eq!(result["controls"]["agent"], Value::Null);
+        assert_eq!(result["controls"]["model"], Value::Null);
+        assert_eq!(result["controls"]["modelStatus"], "unconfigured", "{result:#}");
+        assert_eq!(result["controls"]["modelError"], Value::Null);
+        assert_eq!(result["controls"]["variant"], "none");
         assert!(
             result["controls"]["variantOptions"]
                 .as_array()
                 .expect("variant options")
                 .iter()
                 .any(|value| value.as_str() == Some("medium"))
+        );
+    }
+
+    #[tokio::test]
+    async fn settings_read_exposes_resolved_model_without_variant_override() {
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        std::fs::write(
+            state.inner.home.join("config.toml"),
+            r#"model = "deepseek/deepseek-chat"
+
+[provider.deepseek.models."deepseek-chat"]
+reasoning_effort = "medium"
+"#,
+        )
+        .expect("config");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "settings/read".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("settings/read");
+
+        assert_eq!(result["controls"]["model"], "deepseek/deepseek-chat");
+        assert_eq!(result["controls"]["modelStatus"], "resolved");
+        assert_eq!(result["controls"]["modelError"], Value::Null);
+        assert!(
+            result["controls"]["modelOptions"]
+                .as_array()
+                .expect("model options")
+                .iter()
+                .any(|value| value.as_str() == Some("deepseek/deepseek-chat"))
+        );
+        assert_eq!(result["controls"]["variant"], "none");
+    }
+
+    #[tokio::test]
+    async fn settings_read_reports_model_resolution_errors_without_failing() {
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        std::fs::write(
+            state.inner.home.join("config.toml"),
+            r#"model = { provider = "deepseek", id = "deepseek-chat", reasoning_effort = "turbo" }
+
+[provider.deepseek.models."deepseek-chat"]
+"#,
+        )
+        .expect("config");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "settings/read".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("settings/read");
+
+        assert_eq!(result["controls"]["model"], Value::Null);
+        assert_eq!(result["controls"]["modelStatus"], "error");
+        assert!(
+            result["controls"]["modelError"]
+                .as_str()
+                .is_some_and(|message| message.contains("reasoning_effort")),
+            "{result:#}"
         );
     }
 

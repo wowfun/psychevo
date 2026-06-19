@@ -153,6 +153,7 @@ export const gatewaySchemas = {
   SettingsUpdateParams: settingsSchemas.SettingsUpdateParams,
   SettingsReadResult: settingsSchemas.SettingsReadResult,
   WorkbenchProjectView: settingsSchemas.WorkbenchProjectView,
+  WorkbenchModelStatus: settingsSchemas.WorkbenchModelStatus,
   WorkbenchControlsView: settingsSchemas.WorkbenchControlsView,
   WorkspaceCreateParams: workspaceFileSchemas.WorkspaceCreateParams,
   WorkspaceCreateResult: workspaceFileSchemas.WorkspaceCreateResult,

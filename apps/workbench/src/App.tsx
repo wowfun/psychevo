@@ -419,6 +419,8 @@ export function App() {
     }, LIVE_EVENT_REFRESH_SETTLE_MS);
   }
   const controls = settings?.controls ?? null;
+  const modelReady = Boolean(selectedModel?.trim());
+  const modelTurnBlockReason = modelTurnBlockReasonForControls(controls);
 
   function updateMainView(value: MainView) {
     mainViewRef.current = value;
@@ -822,6 +824,8 @@ export function App() {
     snapshot,
     viewEpochRef,
     workMode,
+    modelReady,
+    modelTurnBlockReason,
     adoptSnapshotScope,
     beginExplicitViewSwitch,
     clearCommandTransientUi,
@@ -860,6 +864,15 @@ export function App() {
   async function submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]) {
     const trimmed = text.trim();
     if (!client || !trimmed) {
+      return;
+    }
+    if (!modelReady) {
+      setCommandFeedback({
+        accepted: false,
+        command: "model",
+        message: modelTurnBlockReason,
+        feedbackAnchor: "composer"
+      });
       return;
     }
     const submittedMentions = runtimeAcceptsAgentPersona
@@ -959,7 +972,7 @@ export function App() {
     restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runnableAgents, runAction,
     runCommandAlternateAction, running, runtimeAcceptsAgentPersona, runtimeBackends, runtimeModeOption,
     runtimeModeUnavailable, runtimeOptionsError, saveBackendDraft, saveFileFromEditor, selectedAgentName, selectedModel,
-    selectedRuntimeMode, selectedRuntimeRef, selectedVariant, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
+    selectedRuntimeMode, selectedRuntimeRef, selectedVariant, modelReady, modelTurnBlockReason, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
     setAttachments, setBackendDraft, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
     setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
     setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel, setSelectedRuntimeMode, setSelectedRuntimeRef,
@@ -969,4 +982,11 @@ export function App() {
     togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateMainView, viewEpochRef, workMode,
     workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;
+}
+
+function modelTurnBlockReasonForControls(controls: SettingsReadResult["controls"]): string {
+  if (controls?.modelStatus === "error" && controls.modelError?.trim()) {
+    return `Model unavailable: ${controls.modelError.trim()}`;
+  }
+  return "Select a provider/model before starting a conversation.";
 }

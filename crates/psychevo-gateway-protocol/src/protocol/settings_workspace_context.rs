@@ -51,6 +51,10 @@ pub struct WorkbenchControlsView {
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
+    pub model_status: WorkbenchModelStatus,
+    #[serde(default)]
+    pub model_error: Option<String>,
+    #[serde(default)]
     pub variant: Option<String>,
     #[serde(default)]
     pub permission_mode_options: Vec<String>,
@@ -60,6 +64,15 @@ pub struct WorkbenchControlsView {
     pub model_options: Vec<String>,
     #[serde(default)]
     pub variant_options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkbenchModelStatus {
+    Resolved,
+    #[default]
+    Unconfigured,
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

@@ -139,12 +139,27 @@ export const settingsSchemas = {
             "null"
           ]
         },
+        "modelError": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "modelOptions": {
           "default": [],
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "modelStatus": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WorkbenchModelStatus"
+            }
+          ],
+          "default": "unconfigured"
         },
         "permissionMode": {
           "type": "string"
@@ -180,6 +195,14 @@ export const settingsSchemas = {
         "permissionMode"
       ],
       "type": "object"
+    },
+    "WorkbenchModelStatus": {
+      "enum": [
+        "resolved",
+        "unconfigured",
+        "error"
+      ],
+      "type": "string"
     },
     "WorkbenchProjectView": {
       "properties": {
@@ -271,8 +294,28 @@ export const settingsSchemas = {
   "title": "WorkbenchProjectView",
   "type": "object"
 },
+  WorkbenchModelStatus: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "resolved",
+    "unconfigured",
+    "error"
+  ],
+  "title": "WorkbenchModelStatus",
+  "type": "string"
+},
   WorkbenchControlsView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkbenchModelStatus": {
+      "enum": [
+        "resolved",
+        "unconfigured",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
     "agent": {
       "default": null,
@@ -298,12 +341,27 @@ export const settingsSchemas = {
         "null"
       ]
     },
+    "modelError": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "modelOptions": {
       "default": [],
       "items": {
         "type": "string"
       },
       "type": "array"
+    },
+    "modelStatus": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/WorkbenchModelStatus"
+        }
+      ],
+      "default": "unconfigured"
     },
     "permissionMode": {
       "type": "string"

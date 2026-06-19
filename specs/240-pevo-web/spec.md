@@ -130,6 +130,11 @@ The concrete Web Shell behavior is specified in [Web Shell](web-shell.md). The
 attachment owns source binding, Workbench startup/reconnect behavior, runtime
 controls, settings, files, status, commands, browser host interactions, global
 session browsing, and live cross-surface session visibility.
+Workbench model controls are backed by explicit Gateway model resolution state:
+only a resolved provider-qualified `provider/model` is a usable model-turn
+target. Unconfigured or errored model resolution remains visible in the shell
+as an explicit selection/unavailable state and must block prompt-turn startup
+until the user chooses a concrete provider/model.
 
 ## Workbench Layout
 

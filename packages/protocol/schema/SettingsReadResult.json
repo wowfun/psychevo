@@ -27,12 +27,27 @@
             "null"
           ]
         },
+        "modelError": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "modelOptions": {
           "default": [],
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "modelStatus": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WorkbenchModelStatus"
+            }
+          ],
+          "default": "unconfigured"
         },
         "permissionMode": {
           "type": "string"
@@ -68,6 +83,14 @@
         "permissionMode"
       ],
       "type": "object"
+    },
+    "WorkbenchModelStatus": {
+      "enum": [
+        "resolved",
+        "unconfigured",
+        "error"
+      ],
+      "type": "string"
     },
     "WorkbenchProjectView": {
       "properties": {

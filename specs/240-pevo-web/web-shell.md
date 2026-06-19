@@ -76,10 +76,17 @@ definitions can remain selectable as current-session agents. Shadowed and
 invalid definitions remain visible only in the Agents panel diagnostics, not in
 the composer selector. `settings/read` returns the current session's selected
 main Agent in `controls.agent` when a `threadId` is supplied, or `null` for a
-draft/default session. `settings/update` accepts `agent: string | null` with a
-`threadId`, validates concrete Agents against the active catalog, and writes
-either concrete main-agent metadata or an explicit session default marker. It
-does not write project-local Agent defaults.
+draft/default session. It also returns model resolution state in
+`controls.modelStatus`: `resolved` includes a concrete provider-qualified
+`controls.model`, while `unconfigured` and `error` leave `controls.model` null
+and expose an explicit unavailable state to Workbench. Workbench must not start
+a model turn while model status is unresolved or no concrete `provider/model` is
+selected. `controls.variant` represents only the current Workbench reasoning
+effort override; the default/no-override state is not filled from the resolved
+model's configured default reasoning effort. `settings/update` accepts
+`agent: string | null` with a `threadId`, validates concrete Agents against the
+active catalog, and writes either concrete main-agent metadata or an explicit
+session default marker. It does not write project-local Agent defaults.
 The composer also exposes execution runtime separately from Agent persona,
 although compact GUI surfaces may present both controls through one grouped
 Agent popover. The default runtime is `native`; ACP backend runtimes are

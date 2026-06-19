@@ -504,6 +504,20 @@ describe("Workbench command routing", () => {
     });
   });
 
+  it("blocks unknown slash prompt passthrough when no concrete model is selected", async () => {
+    gatewayMock.model = null;
+    gatewayMock.modelStatus = "unconfigured";
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/tmp/output.txt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Select a provider/model before starting a conversation.")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
   it("submits dynamic slash payloads while displaying the original slash line", async () => {
     gatewayMock.commandExecute = (command: string) => ({
       accepted: true,
@@ -529,6 +543,29 @@ describe("Workbench command routing", () => {
       });
     });
     expect(gatewayMock.optimisticLog).toContain("/x-daily latest");
+  });
+
+  it("blocks dynamic slash prompt submission when no concrete model is selected", async () => {
+    gatewayMock.model = null;
+    gatewayMock.modelStatus = "unconfigured";
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "extension",
+      feedbackAnchor: "composer",
+      action: { type: "submitPrompt", text: "$x-daily latest", displayText: command }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/x-daily latest" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Select a provider/model before starting a conversation.")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+    expect(gatewayMock.optimisticLog).not.toContain("/x-daily latest");
   });
 
   it("submits queued slash payloads while displaying the original slash line", async () => {

@@ -244,7 +244,9 @@ export type SettingsReadResult = { workdir: string, project: WorkbenchProjectVie
 
 export type WorkbenchProjectView = { path: string, displayPath: string, branch: string | null, };
 
-export type WorkbenchControlsView = { permissionMode: string, mode: string, runtimeRef: string, agent: string | null, model: string | null, variant: string | null, permissionModeOptions: Array<string>, modeOptions: Array<string>, modelOptions: Array<string>, variantOptions: Array<string>, };
+export type WorkbenchModelStatus = "resolved" | "unconfigured" | "error";
+
+export type WorkbenchControlsView = { permissionMode: string, mode: string, runtimeRef: string, agent: string | null, model: string | null, modelStatus: WorkbenchModelStatus, modelError: string | null, variant: string | null, permissionModeOptions: Array<string>, modeOptions: Array<string>, modelOptions: Array<string>, variantOptions: Array<string>, };
 
 export type WorkspaceCreateParams = { name: string, };
 

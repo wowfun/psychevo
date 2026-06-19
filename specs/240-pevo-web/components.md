@@ -131,13 +131,21 @@ mode. Composer send and interrupt controls live in the same footer row as the
 `+`, Agent, and `Plan` controls, aligned to the row's right edge with a stable
 height so the composer does not gain an extra row when Plan is active. Model,
 Variant, and context-usage controls sit immediately to the left of that
-send/interrupt slot; the compact model indicator displays provider-qualified
-model values using the segment after the final `/`, retains the full value for
+send/interrupt slot; the model indicator displays the resolved
+provider-qualified `provider/model` value, retains that full value for
 submission, and leaves native selector options as full `provider/model` values.
-The compact model label must size from that short model segment while reserving
-space for the native selector affordance so selected characters are not covered,
-and the model label and context-usage popover must not clip their selected
-value, summary, or visible usage details at desktop or narrow Workbench widths.
+The model control must not display ambiguous placeholder text such as `model` or
+`Default model` as if it were the active model. If Gateway cannot resolve an
+actual provider and model, the control displays an explicit unavailable or
+selection-required state and prompt-turn submission is blocked until the user
+chooses a concrete `provider/model`. Variant controls reflect the current
+Workbench override state; an unselected/default variant must not be materialized
+from the resolved model's configured default reasoning effort and then submitted
+as a user override.
+The model label must reserve space for the native selector affordance so selected
+characters are not covered, and the model label and context-usage popover must
+not clip their selected value, summary, or visible usage details at desktop or
+narrow Workbench widths.
 Context and session observability controls are display-only chrome. Compact
 surfaces may show context percent, session tokens, cache-read percent, and
 estimated cost. The composer context popover remains compact and must not show
@@ -248,19 +256,21 @@ in Settings > Agents, so users can enable or disable configured backends without
 opening the editor. The row also exposes ordinary checkbox controls for the
 backend's `peer` and `subagent` entrypoints. The embedded backend editor does
 not duplicate the enabled or entrypoint controls.
-The create control is an icon-only add button that opens a generic empty ACP
-backend editor; users can configure OpenCode or any other ACP-compatible backend
-by filling the backend id, a single JSON command configuration, and capabilities.
-The command JSON input replaces separate Command, Args, and Env fields and uses
-an in-field placeholder such as `{"command":"opencode","args":["acp"],"env":{}}`.
+The create control is an icon-only add button that opens a generic ACP backend
+editor; users can configure OpenCode or any other ACP-compatible backend by
+filling the backend id, a single JSON command configuration, and capabilities.
+The command JSON input replaces separate Command, Args, and Env fields. New
+backend drafts prefill it with the generic OpenCode ACP template
+`{"command":"opencode","args":["acp"],"env":{}}`, which users can edit for any
+ACP-compatible backend.
 It writes through the existing `backend/write` `command`, `args`, and `env`
 fields after validation; no Workbench-specific wire shape is introduced. The
 editor treats Label and Description as optional metadata, so only backend ID and
 a JSON `command` string are required to save. The CWD field presents the default
-invocation workdir as an empty value with an `Invocation workdir` placeholder and a compact
-`Resolves to <path>` helper. Empty CWD and the internal `invocation` sentinel
-resolve to the active Gateway request scope workdir; relative CWD values resolve
-under that workdir, and absolute values resolve as entered.
+workspace as an empty value with a `Defaults to workspace` placeholder and no
+resolved-path helper. Empty CWD and the internal `invocation` sentinel resolve
+to the active Gateway request scope workdir; relative CWD values resolve under
+that workdir, and absolute values resolve as entered.
 
 Ordinary transcript components consume typed transcript entries/blocks and typed
 Gateway events. They must not display raw runtime event names such as

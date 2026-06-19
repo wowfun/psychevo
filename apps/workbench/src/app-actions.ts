@@ -81,6 +81,8 @@ type AppActionsParams = {
   detachedShellTokenRef: MutableRefObject<number>;
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
+  modelReady: boolean;
+  modelTurnBlockReason: string;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
   permissionMode: string;
   runtimeAcceptsAgentPersona: boolean;
@@ -204,6 +206,15 @@ export function createAppActions(params: AppActionsParams) {
       ...(text.trim() ? [{ type: "text" as const, text }] : []),
       ...params.attachments.map((attachment) => attachment.input)
     ];
+    if (!params.modelReady) {
+      params.setCommandFeedback({
+        accepted: false,
+        command: "model",
+        message: params.modelTurnBlockReason,
+        feedbackAnchor: "composer"
+      });
+      return;
+    }
     if (params.selectedRuntimeRef !== "native" && params.runtimeOptionsError) {
       params.setCommandFeedback({
         accepted: false,

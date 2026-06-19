@@ -59,6 +59,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     loadThreadSearchText,
     mainView,
     mobilePanel,
+    modelReady,
+    modelTurnBlockReason,
     openDiffPreview,
     openAgentSessionTab,
     openFilePreview,
@@ -440,6 +442,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
               )}
               mode={workMode}
               planModeAvailable={planModeAvailable}
+              promptSubmitBlockReason={modelTurnBlockReason}
+              promptSubmitDisabled={!modelReady}
               rightControls={(
                 <ComposerSubmitControls
                   context={contextUsage}
@@ -573,6 +577,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
               scope={activeScope ?? init?.scope ?? null}
               sessionId={snapshot.thread?.id ?? null}
               status={props.status}
+              promptSubmitBlockReason={modelTurnBlockReason}
+              promptSubmitDisabled={!modelReady}
               usage={sessionUsage}
               tabs={rightTabs}
               terminalEvents={terminalEvents}

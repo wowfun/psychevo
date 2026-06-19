@@ -11,6 +11,8 @@ export interface ComposerProps {
   leftControls?: ReactNode;
   mode?: string;
   planModeAvailable?: boolean;
+  promptSubmitBlockReason?: string | undefined;
+  promptSubmitDisabled?: boolean;
   requestPanel?: ReactNode;
   rightControls?: ReactNode;
   running: boolean;
@@ -45,6 +47,8 @@ export function Composer({
   leftControls,
   mode = "default",
   planModeAvailable = true,
+  promptSubmitBlockReason,
+  promptSubmitDisabled = false,
   requestPanel,
   rightControls,
   running,
@@ -78,6 +82,10 @@ export function Composer({
   const planMode = planModeAvailable && mode === "plan";
   const attachmentItems = attachments ?? [];
   const hasPromptPayload = Boolean(trimmed) || attachmentItems.length > 0;
+  const slashCommandCandidate = Boolean(trimmed)
+    && trimmed.startsWith("/")
+    && !trimmed.includes("\n")
+    && Boolean(onCommand);
   const showTurnModeControls = running && !shellMode && Boolean(trimmed);
   const effectiveRunningStartedAtMs = isPositiveTimestamp(runningStartedAtMs)
     ? Number(runningStartedAtMs)
@@ -172,7 +180,7 @@ export function Composer({
       updateMentions([]);
       return;
     }
-    if (attachmentItems.length === 0 && trimmed.startsWith("/") && !trimmed.includes("\n") && onCommand) {
+    if (attachmentItems.length === 0 && slashCommandCandidate && onCommand) {
       onCommand(trimmed);
       setDraft("");
       updateMentions([]);
@@ -180,6 +188,8 @@ export function Composer({
     }
     if (running && turnMode === "steer" && attachmentItems.length === 0) {
       onSteer(trimmed);
+    } else if (promptSubmitDisabled) {
+      return;
     } else {
       onSubmit(trimmed, activeMentionsForDraft(draft, mentionsRef.current));
     }
@@ -318,7 +328,8 @@ export function Composer({
     <button
       aria-label={shellMode ? "Run shell command" : "Send message"}
       className="pevo-primaryButton pevo-sendButton"
-      disabled={disabled || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload)}
+      disabled={disabled || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload || (promptSubmitDisabled && !slashCommandCandidate))}
+      title={!shellMode && promptSubmitDisabled && !slashCommandCandidate ? promptSubmitBlockReason : undefined}
       type="submit"
     >
       <ArrowUp size={17} aria-hidden />

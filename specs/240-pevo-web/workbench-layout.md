@@ -163,14 +163,15 @@ font scale and row density. The `Agents`
 section shows only configurable Profile-level ACP backend registrations and
 diagnostics; it does not list the read-only effective agent catalog or
 Project-level backend definitions because those are not configurable from the
-GUI. Its icon-only add control opens a generic empty ACP backend editor rather
-than an OpenCode-specific preset. Each listed Profile ACP backend exposes its
+GUI. Its icon-only add control opens a generic ACP backend editor with an
+editable OpenCode ACP command JSON template prefilled for new drafts, rather
+than an OpenCode-specific backend preset. Each listed Profile ACP backend exposes its
 enabled state as a row-level switch in Settings > Agents plus ordinary
 checkboxes for the `peer` and `subagent` entrypoints. The editor does not
 duplicate those row controls. The editor only requires ID and a valid command
 string inside its Command JSON input; Label and Description are optional
-metadata, and default CWD is shown as the invocation workdir with a
-resolved-path helper instead of the raw `invocation` sentinel.
+metadata, and default CWD is shown as an empty field with a `Defaults to
+workspace` placeholder instead of the raw `invocation` sentinel.
 Session-scoped Agent,
 Model, Variant, and Permission mode controls remain in the composer/status
 surfaces and are not duplicated in Settings. Enabling Debug adds a right-side

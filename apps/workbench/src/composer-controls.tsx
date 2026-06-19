@@ -304,13 +304,15 @@ export function ComposerSubmitControls({
       <StatusSelect
         label="Model"
         value={model ?? ""}
-        values={["", ...(controls?.modelOptions ?? [])]}
-        renderDisplayValue={compactModelLabel}
+        values={modelSelectValues(model, controls?.modelOptions ?? [])}
+        optionLabels={{ "": emptyModelOptionLabel(controls) }}
+        renderDisplayValue={(value) => modelDisplayValue(value, controls)}
         onChange={(value) => onModelChange(value || null)}
       />
       <StatusSelect
         label="Variant"
-        renderDisplayValue={(value) => value || "variant"}
+        optionLabels={{ none: "default" }}
+        renderDisplayValue={(value) => value === "none" ? "default" : value || "variant"}
         value={variant}
         values={controls?.variantOptions ?? ["none"]}
         onChange={onVariantChange}
@@ -433,12 +435,29 @@ function defaultStatusSelectValue(label: string, value: string): string {
   return value || label.toLowerCase();
 }
 
-function compactModelLabel(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "model";
+function modelSelectValues(model: string | null, options: string[]): string[] {
+  const values = ["", ...options];
+  const selected = model?.trim();
+  if (selected && !values.includes(selected)) {
+    values.splice(1, 0, selected);
   }
-  const slash = trimmed.lastIndexOf("/");
-  const label = slash >= 0 ? trimmed.slice(slash + 1).trim() : trimmed;
-  return label || trimmed;
+  return values;
+}
+
+function modelDisplayValue(
+  value: string,
+  controls: SettingsReadResult["controls"]
+): string {
+  const trimmed = value.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  return emptyModelOptionLabel(controls);
+}
+
+function emptyModelOptionLabel(controls: SettingsReadResult["controls"]): string {
+  if (controls?.modelStatus === "error") {
+    return "Model unavailable";
+  }
+  return "Select model";
 }

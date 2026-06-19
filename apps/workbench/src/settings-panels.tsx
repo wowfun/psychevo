@@ -33,7 +33,7 @@ import type {
 
 const BACKEND_ENTRYPOINTS = ["peer", "subagent"] as const;
 const BACKEND_CLIENT_CAPABILITIES = ["fs.read", "fs.write", "terminal"] as const;
-const BACKEND_COMMAND_JSON_PLACEHOLDER = `{
+const BACKEND_COMMAND_JSON_TEMPLATE = `{
   "command": "opencode",
   "args": ["acp"],
   "env": {}
@@ -43,7 +43,7 @@ export const EMPTY_BACKEND_DRAFT: BackendDraft = {
   enabled: true,
   label: "",
   description: "",
-  commandJsonText: "",
+  commandJsonText: BACKEND_COMMAND_JSON_TEMPLATE,
   cwd: "",
   entrypoints: ["peer", "subagent"],
   clientCapabilities: ["fs.read", "fs.write", "terminal"],
@@ -338,7 +338,6 @@ function SettingsSectionPanel({
           onSaveBackendDraft={onSaveBackendDraft}
           onSetBackendEnabled={onSetBackendEnabled}
           onSetBackendEntrypoints={onSetBackendEntrypoints}
-          workdir={workdir}
         />
       );
   }
@@ -626,7 +625,6 @@ function AgentsConfigPanel({
   onSaveBackendDraft,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
-  workdir
 }: {
   backendDraft: BackendDraft | null;
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
@@ -641,7 +639,6 @@ function AgentsConfigPanel({
   onSaveBackendDraft(draft: BackendDraft): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
-  workdir: string;
 }) {
   const profileBackends = backends.filter((backend) => backend.sourceTargets.includes("profile"));
   return (
@@ -658,7 +655,6 @@ function AgentsConfigPanel({
         <BackendEditorForm
           draft={backendDraft}
           disabled={disabled}
-          invocationWorkdir={workdir}
           onCancel={onCancelBackendEdit}
           onChange={onChangeBackendDraft}
           onSave={onSaveBackendDraft}
@@ -768,14 +764,12 @@ function BackendEntrypointControls({
 function BackendEditorForm({
   draft,
   disabled,
-  invocationWorkdir,
   onCancel,
   onChange,
   onSave
 }: {
   draft: BackendDraft;
   disabled: boolean;
-  invocationWorkdir: string;
   onCancel(): void;
   onChange(draft: BackendDraft): void;
   onSave(draft: BackendDraft): void;
@@ -783,7 +777,6 @@ function BackendEditorForm({
   const commandConfig = parseBackendCommandJson(draft.commandJsonText);
   const commandJsonError = draft.commandJsonText.trim() ? commandConfig.error : null;
   const canSave = Boolean(draft.id.trim() && commandConfig.command.trim() && !commandConfig.error);
-  const resolvedCwd = resolvedBackendCwd(draft.cwd, invocationWorkdir);
   function patch(patch: Partial<BackendDraft>) {
     onChange({ ...draft, ...patch });
   }
@@ -836,7 +829,6 @@ function BackendEditorForm({
             className="backendJsonInput"
             disabled={disabled}
             onChange={(event) => patch({ commandJsonText: event.currentTarget.value })}
-            placeholder={BACKEND_COMMAND_JSON_PLACEHOLDER}
             spellCheck={false}
             value={draft.commandJsonText}
           />
@@ -845,14 +837,12 @@ function BackendEditorForm({
         <label>
           <span>CWD</span>
           <input
-            aria-describedby="backend-cwd-resolution"
             aria-label="CWD"
             disabled={disabled}
             onChange={(event) => patch({ cwd: event.currentTarget.value })}
-            placeholder="Invocation workdir"
+            placeholder="Defaults to workspace"
             value={draft.cwd}
           />
-          <small className="backendFieldHint" id="backend-cwd-resolution">Resolves to {resolvedCwd}</small>
         </label>
         <fieldset className="backendDialogChecks">
           <legend>Client Capabilities</legend>
@@ -957,21 +947,6 @@ export function parseBackendCommandJson(value: string): BackendCommandJson & { e
   };
 }
 
-function resolvedBackendCwd(cwd: string, invocationWorkdir: string): string {
-  const value = cwd.trim();
-  const root = invocationWorkdir.trim() || ".";
-  if (!value || value === "invocation") {
-    return root;
-  }
-  if (isAbsoluteDisplayPath(value)) {
-    return value;
-  }
-  return `${root.replace(/\/+$/, "")}/${value.replace(/^\.\//, "")}`;
-}
-
-function isAbsoluteDisplayPath(value: string): boolean {
-  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
-}
 
 
 function shortSessionId(id: string): string {

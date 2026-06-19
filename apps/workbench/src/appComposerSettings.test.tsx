@@ -117,7 +117,7 @@ describe("Workbench settings and backend controls", () => {
     });
   });
 
-  it("renders provider-qualified model options while keeping a compact selected indicator", async () => {
+  it("renders provider-qualified model options in the selected indicator", async () => {
     render(<App />);
 
     const modelSelect = await screen.findByRole("combobox", { name: "Model" }) as HTMLSelectElement;
@@ -125,9 +125,41 @@ describe("Workbench settings and backend controls", () => {
     expect(modelSelect.title).toBe("xiaomi/xiaomi-token-high");
     expect(screen.getByRole("option", { name: "openai/gpt-4o" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "xiaomi/xiaomi-token-high" })).toBeTruthy();
-    expect(screen.queryByRole("option", { name: "xiaomi-token-high" })).toBeNull();
-    expect(screen.getByText("xiaomi-token-high")).toBeTruthy();
-    expect(modelSelect.closest(".statusSelect")?.getAttribute("style")).toContain("--pevo-status-select-value-width: 18ch");
+    expect(screen.getAllByText("xiaomi/xiaomi-token-high").length).toBeGreaterThan(0);
+    expect(screen.queryByText("xiaomi-token-high")).toBeNull();
+    expect(modelSelect.closest(".statusSelect")?.getAttribute("style")).toContain("--pevo-status-select-value-width: 25ch");
+    const variantSelect = screen.getByRole("combobox", { name: "Variant" }) as HTMLSelectElement;
+    expect(variantSelect.selectedOptions[0]?.textContent).toBe("default");
+    expect(screen.queryByText("medium")).toBeNull();
+  });
+
+  it("blocks prompt turns until a concrete provider-qualified model is selected", async () => {
+    gatewayMock.model = null;
+    gatewayMock.modelStatus = "unconfigured";
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Select model")).length).toBeGreaterThan(0);
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "hello" } });
+    const sendButton = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(true);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Model" }), { target: { value: "openai/gpt-4o" } });
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          input: [{ type: "text", text: "hello" }],
+          model: "openai/gpt-4o"
+        })
+      });
+    });
   });
 
   it("keeps ACP peer backends in Runtime instead of the composer Agent selector", async () => {
@@ -253,24 +285,30 @@ describe("Workbench settings and backend controls", () => {
     expect(within(form).queryByLabelText("Target")).toBeNull();
     expect((within(form).getByLabelText("ID") as HTMLInputElement).value).toBe("");
     const commandJson = within(form).getByLabelText("Command JSON") as HTMLTextAreaElement;
-    expect(commandJson.value).toBe("");
-    expect(commandJson.placeholder).toContain("\"command\": \"opencode\"");
-    expect(commandJson.placeholder).toContain("\"args\": [\"acp\"]");
+    expect(JSON.parse(commandJson.value)).toEqual({
+      command: "opencode",
+      args: ["acp"],
+      env: {}
+    });
+    expect(commandJson.placeholder).toBe("");
     expect(within(form).queryByLabelText("Command")).toBeNull();
     expect(within(form).queryByLabelText("Args")).toBeNull();
     expect(within(form).queryByLabelText("Env")).toBeNull();
-    expect((within(form).getByLabelText("CWD") as HTMLInputElement).value).toBe("");
+    const cwd = within(form).getByLabelText("CWD") as HTMLInputElement;
+    expect(cwd.value).toBe("");
+    expect(cwd.placeholder).toBe("Defaults to workspace");
     expect(within(form).getByLabelText("Label").closest("label")?.textContent).toContain("Optional");
     expect(within(form).getByLabelText("Description").closest("label")?.textContent).toContain("Optional");
-    expect(within(form).getByText(/Resolves to \/tmp\/project$/)).toBeTruthy();
+    expect(within(form).queryByText(/Resolves to/)).toBeNull();
     expect(within(form).queryByLabelText("Enabled")).toBeNull();
     expect(within(form).queryByText("Entrypoints")).toBeNull();
-    fireEvent.change(within(form).getByLabelText("CWD"), { target: { value: "agents" } });
-    expect(within(form).getByText(/Resolves to \/tmp\/project\/agents$/)).toBeTruthy();
-    fireEvent.change(within(form).getByLabelText("CWD"), { target: { value: "/opt/acp" } });
-    expect(within(form).getByText(/Resolves to \/opt\/acp$/)).toBeTruthy();
-    fireEvent.change(within(form).getByLabelText("CWD"), { target: { value: "" } });
+    fireEvent.change(cwd, { target: { value: "agents" } });
+    expect(within(form).queryByText(/Resolves to/)).toBeNull();
+    fireEvent.change(cwd, { target: { value: "/opt/acp" } });
+    expect(within(form).queryByText(/Resolves to/)).toBeNull();
+    fireEvent.change(cwd, { target: { value: "" } });
     fireEvent.change(within(form).getByLabelText("ID"), { target: { value: "local-acp" } });
+    expect((within(form).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.change(commandJson, { target: { value: "{" } });
     expect(within(form).getByText("Command JSON must be valid JSON.")).toBeTruthy();
     expect((within(form).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
