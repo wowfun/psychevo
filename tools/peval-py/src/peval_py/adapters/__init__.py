@@ -5,6 +5,7 @@ from importlib.metadata import EntryPoint, entry_points
 from typing import Any
 
 from peval_py.adapters.base import Adapter
+from peval_py.adapters.deepagents import DeepagentsAdapter
 from peval_py.adapters.hermes import HermesAdapter
 from peval_py.adapters.opencode import OpencodeAdapter
 from peval_py.adapters.psychevo import PsychevoAdapter
@@ -17,6 +18,7 @@ BUILTIN_ADAPTERS: dict[str, AdapterFactory] = {
     "psychevo": PsychevoAdapter,
     "opencode": OpencodeAdapter,
     "hermes": HermesAdapter,
+    "deepagents": DeepagentsAdapter,
 }
 
 
