@@ -1,6 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 665
+assertion_line: 730
 expression: combined
 ---
 fixture=model_bottom_panel
@@ -17,7 +17,7 @@ size=120x24
 
   Model   Models    Info
   Search
-  Add provider  configure global OpenAI-compatible provider
+  Add provider  add built-in or custom OpenAI-compatible provider
   All providers  not fetched
   mock  not fetched
   › ● mock/mock-model  mock  context 128,000  output 16,000  reasoning  tools  multi-modal  structured  $1.500/$2.500…
@@ -43,7 +43,7 @@ mock/mock-model  default  ~/work · main
 [default]
 [default]  [cyan]Model[default]  [cyan] Models [default]   Info
 [default]  [dim]Search [default]
-[default]  [cyan]Add provider[dim]  configure global OpenAI-compatible provider[default]
+[default]  [cyan]Add provider[dim]  add built-in or custom OpenAI-compatible provider[default]
 [default]  [cyan]All providers[dim]  not fetched[default]
 [default]  [cyan]mock[dim]  not fetched[default]
 [default]  [cyan]› ● mock/mock-model  mock  context 128,000  output 16,000  reasoning  tools  multi-modal  structured  $1.500/$2.500…[default]

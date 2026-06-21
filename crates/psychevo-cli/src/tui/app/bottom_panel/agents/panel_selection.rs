@@ -35,10 +35,22 @@ impl TuiApp {
                 {
                     return Ok(false);
                 }
-                if let Some(BottomPanel::Variants { models, .. }) = ui.bottom_panel.take() {
-                    ui.bottom_panel = Some(BottomPanel::Models(*models));
-                } else {
-                    ui.bottom_panel = None;
+                match ui.bottom_panel.take() {
+                    Some(BottomPanel::Variants { models, .. }) => {
+                        ui.bottom_panel = Some(BottomPanel::Models(*models));
+                    }
+                    Some(BottomPanel::ProviderPresets(_)) => {
+                        ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
+                            self.model_selection_panel()?,
+                        )));
+                    }
+                    Some(BottomPanel::ProviderBaseUrls(_)) => {
+                        ui.bottom_panel =
+                            Some(BottomPanel::ProviderPresets(self.provider_preset_panel()));
+                    }
+                    _ => {
+                        ui.bottom_panel = None;
+                    }
                 }
             }
             KeyCode::Enter => {
@@ -394,7 +406,8 @@ impl TuiApp {
                     .copied()
                     .unwrap_or(20)
                     .saturating_add(20);
-                self.session_browser_limits.insert(workdir.clone(), next_limit);
+                self.session_browser_limits
+                    .insert(workdir.clone(), next_limit);
                 self.rebuild_session_panel(
                     ui,
                     view,
@@ -455,8 +468,30 @@ impl TuiApp {
                     );
                 } else {
                     ui.bottom_panel =
-                        Some(BottomPanel::ProviderWizard(self.provider_wizard_panel()));
+                        Some(BottomPanel::ProviderPresets(self.provider_preset_panel()));
                 }
+            }
+            Some(BottomSelectionValue::ProviderPreset(preset)) => {
+                if preset == ProviderSetupPresetId::Custom {
+                    ui.bottom_panel =
+                        Some(BottomPanel::ProviderWizard(self.provider_wizard_panel()));
+                } else {
+                    let definition = provider_setup_preset(preset);
+                    if definition.base_urls.len() > 1 {
+                        ui.bottom_panel = Some(BottomPanel::ProviderBaseUrls(
+                            self.provider_base_url_panel(preset),
+                        ));
+                    } else {
+                        ui.bottom_panel = Some(BottomPanel::ProviderWizard(
+                            self.provider_wizard_panel_for_preset(preset, Some(0)),
+                        ));
+                    }
+                }
+            }
+            Some(BottomSelectionValue::ProviderBaseUrl { preset, index }) => {
+                ui.bottom_panel = Some(BottomPanel::ProviderWizard(
+                    self.provider_wizard_panel_for_preset(preset, index),
+                ));
             }
             Some(BottomSelectionValue::FetchAllModels) => {
                 self.start_model_catalog_fetch_all(ui)?;
@@ -535,5 +570,4 @@ impl TuiApp {
         }
         Ok(())
     }
-
 }

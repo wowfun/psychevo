@@ -534,6 +534,248 @@ api_key_env = "TEST_PROVIDER_KEY"
 }
 
 #[tokio::test]
+pub(crate) async fn model_add_provider_opens_builtin_preset_picker() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.env_map.insert(
+        "PSYCHEVO_HOME".to_string(),
+        app.home.to_string_lossy().to_string(),
+    );
+    fs::write(app.home.join("config.toml"), "\n").expect("config");
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
+        .await
+        .expect("model");
+    {
+        let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel else {
+            panic!("expected model panel");
+        };
+        panel.models.select_value_key("provider:add");
+    }
+    let selected = ui
+        .bottom_panel
+        .as_ref()
+        .and_then(BottomPanel::selected_value);
+    app.apply_bottom_panel_selection(&mut ui, selected)
+        .expect("add provider");
+
+    let Some(BottomPanel::ProviderPresets(panel)) = &ui.bottom_panel else {
+        panic!("expected provider preset panel");
+    };
+    assert_eq!(
+        panel
+            .rows
+            .iter()
+            .map(|row| row.label.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "DeepSeek",
+            "Z.AI / GLM",
+            "Xiaomi Token Plan",
+            "Custom OpenAI-compatible"
+        ]
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn model_add_provider_rejects_psychevo_config_override() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let config_path = temp.path().join("config.toml");
+    fs::write(&config_path, "\n").expect("config");
+    app.config_path = Some(config_path);
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
+        .await
+        .expect("model");
+    {
+        let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel else {
+            panic!("expected model panel");
+        };
+        panel.models.select_value_key("provider:add");
+    }
+    let selected = ui
+        .bottom_panel
+        .as_ref()
+        .and_then(BottomPanel::selected_value);
+    app.apply_bottom_panel_selection(&mut ui, selected)
+        .expect("add provider");
+
+    let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
+        panic!("expected model panel");
+    };
+    assert_eq!(
+        panel.models.notice.as_deref(),
+        Some("cannot add provider while PSYCHEVO_CONFIG is active")
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn model_add_builtin_deepseek_saves_fetches_and_hides_secret() {
+    let temp = tempdir().expect("temp");
+    let server = TuiCatalogServer::new(r#"{"data":[{"id":"remote-model"}]}"#);
+    let mut app = test_app(&temp);
+    app.env_map.insert(
+        "PSYCHEVO_HOME".to_string(),
+        app.home.to_string_lossy().to_string(),
+    );
+    fs::write(app.home.join("config.toml"), "\n").expect("config");
+    app.current_model = None;
+    app.selected_model = None;
+    let mut ui = FullscreenUi::new(&app);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
+        .await
+        .expect("model");
+    {
+        let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel else {
+            panic!("expected model panel");
+        };
+        panel.models.select_value_key("provider:add");
+    }
+    let selected = ui
+        .bottom_panel
+        .as_ref()
+        .and_then(BottomPanel::selected_value);
+    app.apply_bottom_panel_selection(&mut ui, selected)
+        .expect("add provider");
+    {
+        let Some(BottomPanel::ProviderPresets(panel)) = &mut ui.bottom_panel else {
+            panic!("expected preset panel");
+        };
+        panel.select_value_key("provider:preset:deepseek");
+    }
+    let selected = ui
+        .bottom_panel
+        .as_ref()
+        .and_then(BottomPanel::selected_value);
+    app.apply_bottom_panel_selection(&mut ui, selected)
+        .expect("select deepseek");
+
+    let Some(BottomPanel::ProviderWizard(panel)) = &mut ui.bottom_panel else {
+        panic!("expected provider wizard");
+    };
+    assert!(!panel.is_custom());
+    assert_eq!(panel.provider_id, "deepseek");
+    assert_eq!(panel.api_key_env, "DEEPSEEK_API_KEY");
+    panel.base_url = server.base_url.clone();
+    panel.api_key = "test-key".to_string();
+    app.refresh_provider_wizard_env_state(&mut ui);
+    app.save_provider_wizard(&mut ui).expect("save provider");
+    drain_catalog_until_idle(&mut app, &mut ui).await;
+
+    let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
+    assert!(config.contains("[provider.deepseek]"));
+    assert!(config.contains("label = \"DeepSeek\""));
+    assert!(config.contains(&format!("base_url = \"{}\"", server.base_url)));
+    assert!(config.contains("api_key_env = \"DEEPSEEK_API_KEY\""));
+    assert!(!config.contains("test-key"));
+    let env = fs::read_to_string(app.home.join(".env")).expect("env");
+    assert_eq!(env, "DEEPSEEK_API_KEY=test-key\n");
+    let request = server
+        .requests
+        .lock()
+        .expect("requests")
+        .first()
+        .cloned()
+        .expect("request");
+    assert!(request.starts_with("GET /v1/models HTTP/1.1"));
+    assert!(
+        request
+            .to_lowercase()
+            .contains("authorization: bearer test-key")
+    );
+    let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel else {
+        panic!("expected model panel");
+    };
+    assert_eq!(
+        panel.models.notice.as_deref(),
+        Some("provider saved; fetching models")
+    );
+    assert!(
+        panel
+            .models
+            .rows
+            .iter()
+            .any(|row| row.label == "deepseek/remote-model")
+    );
+}
+
+#[test]
+pub(crate) fn model_add_builtin_zai_and_xiaomi_offer_base_url_shortcuts() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+
+    let zai_default = app.provider_wizard_panel_for_preset(ProviderSetupPresetId::Zai, Some(0));
+    assert_eq!(zai_default.base_url, "https://api.z.ai/api/paas/v4");
+    let zai_coding = app.provider_wizard_panel_for_preset(ProviderSetupPresetId::Zai, Some(1));
+    assert_eq!(zai_coding.base_url, "https://api.z.ai/api/coding/paas/v4");
+
+    let xiaomi_default =
+        app.provider_wizard_panel_for_preset(ProviderSetupPresetId::XiaomiTokenPlan, None);
+    assert_eq!(
+        xiaomi_default.base_url,
+        "https://token-plan-cn.xiaomimimo.com/v1"
+    );
+    let xiaomi_sgp =
+        app.provider_wizard_panel_for_preset(ProviderSetupPresetId::XiaomiTokenPlan, Some(1));
+    assert_eq!(
+        xiaomi_sgp.base_url,
+        "https://token-plan-sgp.xiaomimimo.com/v1"
+    );
+    let xiaomi_ams =
+        app.provider_wizard_panel_for_preset(ProviderSetupPresetId::XiaomiTokenPlan, Some(2));
+    assert_eq!(
+        xiaomi_ams.base_url,
+        "https://token-plan-ams.xiaomimimo.com/v1"
+    );
+}
+
+#[test]
+pub(crate) fn model_add_builtin_xiaomi_writes_canonical_provider_options() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.env_map.insert(
+        "PSYCHEVO_HOME".to_string(),
+        app.home.to_string_lossy().to_string(),
+    );
+    fs::write(app.home.join("config.toml"), "\n").expect("config");
+    let mut panel =
+        app.provider_wizard_panel_for_preset(ProviderSetupPresetId::XiaomiTokenPlan, Some(1));
+    panel.api_key = "test-key".to_string();
+
+    let provider_id = app
+        .save_provider_wizard_panel(&panel)
+        .expect("save provider");
+
+    assert_eq!(provider_id, "xiaomi-token-plan");
+    let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
+    assert!(config.contains("[provider.xiaomi-token-plan]"));
+    assert!(config.contains("label = \"Xiaomi Token Plan\""));
+    assert!(config.contains("base_url = \"https://token-plan-sgp.xiaomimimo.com/v1\""));
+    assert!(config.contains("api_key_env = \"XIAOMI_TOKEN_PLAN_API_KEY\""));
+    assert!(!config.contains("test-key"));
+    let env = fs::read_to_string(app.home.join(".env")).expect("env");
+    assert_eq!(env, "XIAOMI_TOKEN_PLAN_API_KEY=test-key\n");
+}
+
+#[test]
+pub(crate) fn model_add_provider_reuses_existing_builtin_env_key() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    fs::write(app.home.join(".env"), "DEEPSEEK_API_KEY=existing\n").expect("env");
+
+    let panel = app.provider_wizard_panel_for_preset(ProviderSetupPresetId::DeepSeek, Some(0));
+
+    assert!(panel.api_key_env_present);
+    assert_eq!(panel.api_key_env, "DEEPSEEK_API_KEY");
+    assert!(!panel.active_fields().contains(&ProviderWizardField::ApiKey));
+    assert!(panel.api_key.is_empty());
+}
+
+#[tokio::test]
 pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_model() {
     let temp = tempdir().expect("temp");
     let server = TuiCatalogServer::new(r#"{"data":[{"id":"remote-model"}]}"#);
@@ -563,6 +805,19 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
     app.apply_bottom_panel_selection(&mut ui, selected)
         .expect("add provider");
 
+    {
+        let Some(BottomPanel::ProviderPresets(panel)) = &mut ui.bottom_panel else {
+            panic!("expected provider preset panel");
+        };
+        panel.select_value_key("provider:preset:custom");
+    }
+    let selected = ui
+        .bottom_panel
+        .as_ref()
+        .and_then(BottomPanel::selected_value);
+    app.apply_bottom_panel_selection(&mut ui, selected)
+        .expect("select custom provider");
+
     let Some(BottomPanel::ProviderWizard(panel)) = &mut ui.bottom_panel else {
         panic!("expected provider wizard");
     };
@@ -570,6 +825,8 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
     panel.provider_id = "xiaomi-token-plan-cn".to_string();
     panel.provider_id_touched = true;
     panel.base_url = server.base_url.clone();
+    panel.api_key_env = "XIAOMI_TOKEN_PLAN_CN_API_KEY".to_string();
+    panel.api_key_env_touched = true;
     panel.api_key = "test-key".to_string();
     app.refresh_provider_wizard_env_state(&mut ui);
     app.save_provider_wizard(&mut ui).expect("save provider");
@@ -658,6 +915,8 @@ pub(crate) async fn model_add_provider_wizard_generates_id_and_reports_validatio
     panel.provider_id = "mimo".to_string();
     panel.provider_id_touched = true;
     panel.base_url = "https://token-plan-cn.xiaomimimo.com/v1".to_string();
+    panel.api_key_env = "MIMO_API_KEY".to_string();
+    panel.api_key_env_touched = true;
     panel.api_key = "test-key".to_string();
 
     app.save_provider_wizard(&mut ui).expect("save provider");

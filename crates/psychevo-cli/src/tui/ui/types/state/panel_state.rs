@@ -216,6 +216,11 @@ pub(crate) enum BottomSelectionValue {
     AgentSpawningToggle,
     AgentDiagnostic(String),
     AddProvider,
+    ProviderPreset(ProviderSetupPresetId),
+    ProviderBaseUrl {
+        preset: ProviderSetupPresetId,
+        index: Option<usize>,
+    },
     FetchAllModels,
     FetchProvider(String),
     ProviderInfo(String),
@@ -259,6 +264,8 @@ pub(crate) enum BottomPanel {
     Models(ModelPanel),
     Stats(BottomSelectionPanel),
     Tools(BottomSelectionPanel),
+    ProviderPresets(BottomSelectionPanel),
+    ProviderBaseUrls(BottomSelectionPanel),
     ProviderWizard(ProviderWizardPanel),
     PermissionApproval(PermissionApprovalPanel),
     Clarify(ClarifyPanel),
@@ -298,11 +305,14 @@ pub(crate) enum ModelTab {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderWizardPanel {
+    pub(crate) preset: ProviderSetupPresetId,
     pub(crate) label: String,
     pub(crate) provider_id: String,
     pub(crate) base_url: String,
+    pub(crate) api_key_env: String,
     pub(crate) api_key: String,
     pub(crate) provider_id_touched: bool,
+    pub(crate) api_key_env_touched: bool,
     pub(crate) api_key_env_present: bool,
     pub(crate) active_field: ProviderWizardField,
     pub(crate) notice: Option<String>,

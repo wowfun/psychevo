@@ -16,10 +16,11 @@ impl TuiApp {
         let mut rows = Vec::new();
         rows.push(BottomSelectionRow {
             label: "Add provider".to_string(),
-            description: Some("configure global OpenAI-compatible provider".to_string()),
+            description: Some("add built-in or custom OpenAI-compatible provider".to_string()),
             detail: None,
             group: None,
-            search_text: "add provider custom openai compatible base url api key".to_string(),
+            search_text: "add provider built in custom openai compatible base url api key"
+                .to_string(),
             is_current: false,
             is_default: false,
             style: BottomRowStyle::Action,
@@ -140,6 +141,80 @@ impl TuiApp {
             .unwrap_or_else(|| "fetch:all".to_string());
         panel.select_value_key(&initial_key);
         Ok(panel)
+    }
+
+    pub(crate) fn provider_preset_panel(&self) -> BottomSelectionPanel {
+        let rows = provider_setup_presets()
+            .iter()
+            .map(|preset| {
+                let provider_id = preset.provider_id.unwrap_or("custom");
+                BottomSelectionRow {
+                    label: preset.label.to_string(),
+                    description: Some(provider_id.to_string()),
+                    detail: preset
+                        .base_urls
+                        .first()
+                        .map(|base_url| base_url.url.to_string()),
+                    group: None,
+                    search_text: format!(
+                        "{} {} {} add provider preset",
+                        preset.label, provider_id, preset.default_model
+                    ),
+                    is_current: false,
+                    is_default: false,
+                    style: BottomRowStyle::Action,
+                    footer: Some("Enter choose  Esc back  Type search".to_string()),
+                    value: BottomSelectionValue::ProviderPreset(preset.id),
+                }
+            })
+            .collect::<Vec<_>>();
+        BottomSelectionPanel::new("Add Provider", "", "No provider presets", rows)
+    }
+
+    pub(crate) fn provider_base_url_panel(
+        &self,
+        preset: ProviderSetupPresetId,
+    ) -> BottomSelectionPanel {
+        let definition = provider_setup_preset(preset);
+        let mut rows = definition
+            .base_urls
+            .iter()
+            .enumerate()
+            .map(|(index, base_url)| BottomSelectionRow {
+                label: base_url.label.to_string(),
+                description: Some(base_url.url.to_string()),
+                detail: None,
+                group: None,
+                search_text: format!("{} {} {}", definition.label, base_url.label, base_url.url),
+                is_current: false,
+                is_default: index == 0,
+                style: BottomRowStyle::Action,
+                footer: Some("Enter choose  Esc back  Type search".to_string()),
+                value: BottomSelectionValue::ProviderBaseUrl {
+                    preset,
+                    index: Some(index),
+                },
+            })
+            .collect::<Vec<_>>();
+        rows.push(BottomSelectionRow {
+            label: "Custom base URL".to_string(),
+            description: definition
+                .base_urls
+                .first()
+                .map(|base_url| base_url.url.to_string()),
+            detail: None,
+            group: None,
+            search_text: format!("{} custom base url", definition.label),
+            is_current: false,
+            is_default: false,
+            style: BottomRowStyle::Action,
+            footer: Some("Enter edit  Esc back  Type search".to_string()),
+            value: BottomSelectionValue::ProviderBaseUrl {
+                preset,
+                index: None,
+            },
+        });
+        BottomSelectionPanel::new("Base URL", "", "No base URLs", rows)
     }
 
     pub(crate) fn variant_panel(

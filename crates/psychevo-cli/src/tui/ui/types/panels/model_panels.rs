@@ -1,4 +1,3 @@
-
 impl BottomPanel {
     pub(crate) fn selection(&self) -> &BottomSelectionPanel {
         match self {
@@ -11,6 +10,8 @@ impl BottomPanel {
             },
             BottomPanel::AgentActions(panel) => panel,
             BottomPanel::Models(panel) => &panel.models,
+            BottomPanel::ProviderPresets(panel) => panel,
+            BottomPanel::ProviderBaseUrls(panel) => panel,
             BottomPanel::Help(_) => {
                 panic!("help panel does not expose a selection panel")
             }
@@ -41,6 +42,8 @@ impl BottomPanel {
             },
             BottomPanel::AgentActions(panel) => panel,
             BottomPanel::Models(panel) => &mut panel.models,
+            BottomPanel::ProviderPresets(panel) => panel,
+            BottomPanel::ProviderBaseUrls(panel) => panel,
             BottomPanel::Help(_) => {
                 panic!("help panel does not expose a selection panel")
             }
@@ -73,6 +76,8 @@ impl BottomPanel {
             | BottomPanel::AgentRunPrompt(_)
             | BottomPanel::AgentEditor(_)
             | BottomPanel::Models(_)
+            | BottomPanel::ProviderPresets(_)
+            | BottomPanel::ProviderBaseUrls(_)
             | BottomPanel::Stats(_)
             | BottomPanel::Tools(_)
             | BottomPanel::ProviderWizard(_)

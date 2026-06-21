@@ -91,5 +91,8 @@ Manual real-provider validation is opt-in only.
   brittle full-screen snapshots when structured row facts are available.
 - TUI tests must use fake or test providers and isolated `PSYCHEVO_HOME`,
   config, SQLite state, workdir, timers, sockets, and terminal fixtures.
+- TUI Add Provider tests should drive provider-preset, provider-wizard, and
+  model-catalog fetch behavior with fake local `/models` endpoints and must
+  assert that raw API keys are not rendered or written to TOML.
 - Live provider failures must be reported separately from deterministic TUI
   regressions.

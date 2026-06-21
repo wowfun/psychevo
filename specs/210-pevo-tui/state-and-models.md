@@ -36,7 +36,17 @@ Startup model and variant precedence is:
 
 Fullscreen `/model` opens an interactive model picker. It starts from local
 configured models and never fetches remote model catalogs until the user
-selects an explicit fetch row. Selecting a model then opens a variant picker.
+selects an explicit fetch row or completes the explicit Add Provider flow.
+The Add Provider row first opens a provider-preset picker with DeepSeek, Z.AI,
+Xiaomi Token Plan, and Custom OpenAI-compatible choices. Built-in presets reuse
+the same default base URLs, alternate base URL shortcuts, and recommended API
+key environment variables as `pevo setup`; custom providers keep editable
+label, provider id, base URL, API-key env var, and API-key inputs. API keys are
+masked in the TUI and written only to the global `.env`. Built-in provider
+saves upsert global provider options instead of creating a custom provider, so
+they can reuse canonical built-in ids. Completing Add Provider saves the global
+provider configuration and starts one explicit fetch for that provider.
+Selecting a model then opens a variant picker.
 Selecting `Config default` clears the per-workdir variant override and writes
 the selected model's configured `reasoning_effort` into the scoped default model
 object when that configured default is known. For fetched-only models with no

@@ -11,6 +11,7 @@ pub(crate) mod command_registry;
 pub(crate) mod commands;
 pub(crate) mod env;
 pub(crate) mod profiles;
+pub(crate) mod provider_setup;
 pub(crate) mod tui;
 
 use args::{Cli, Commands};

@@ -8,10 +8,9 @@ use anyhow::{Result, anyhow};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use psychevo_runtime::{
-    ModelCatalogEntry, custom_provider_api_key_env, fetch_model_catalog, model_catalog_providers,
-    remove_config_value, set_config_value, set_default_model, set_provider_api_key,
+    ModelCatalogEntry, fetch_model_catalog, model_catalog_providers, set_default_model,
+    set_provider_api_key,
 };
-use serde_json::json;
 
 use crate::args::{DoctorArgs, InitArgs, SetupArgs};
 use crate::commands::common::{base_run_options, scoped_config_dir};
@@ -21,6 +20,11 @@ use crate::commands::serve::{
     resolve_static_dir_diagnostic, source_checkout_roots, static_install_share_dir,
 };
 use crate::env::{inherited_env, resolve_psychevo_home};
+use crate::provider_setup::{
+    ProviderSetupBaseUrl, default_provider_setup_api_key_env, looks_like_api_key,
+    provider_setup_presets, upsert_provider_options, validate_api_key_env, validate_base_url,
+    validate_custom_setup_provider_id,
+};
 
 pub(crate) async fn run_setup_command(args: SetupArgs) -> Result<ExitCode> {
     if args.dry_run {
@@ -80,14 +84,8 @@ struct SetupProviderSelection {
     provider_id: String,
     label: String,
     default_model: String,
-    base_urls: Vec<BaseUrlChoice>,
+    base_urls: Vec<ProviderSetupBaseUrl>,
     api_key_env_candidates: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct BaseUrlChoice {
-    label: String,
-    url: String,
 }
 
 trait SetupIo {
@@ -141,7 +139,7 @@ async fn configure_provider_with_io<I: SetupIo>(
     let api_key = io.prompt_secret(&secret_prompt)?;
 
     let config_dir = scoped_config_dir(home, cwd, true)?;
-    save_setup_provider(
+    upsert_provider_options(
         &config_dir,
         &provider.provider_id,
         &provider.label,
@@ -166,99 +164,52 @@ async fn configure_provider_with_io<I: SetupIo>(
 }
 
 fn choose_provider<I: SetupIo>(io: &mut I) -> Result<SetupProviderSelection> {
-    let rows = [
-        ("DeepSeek", "deepseek"),
-        ("Z.AI / GLM", "zai"),
-        ("Xiaomi Token Plan", "xiaomi-token-plan"),
-        ("Custom OpenAI-compatible", "custom"),
-    ];
-    for (index, (label, id)) in rows.iter().enumerate() {
-        io.print_line(&format!("  {}. {} ({})", index + 1, label, id))?;
+    let rows = provider_setup_presets();
+    for (index, preset) in rows.iter().enumerate() {
+        let id = preset.provider_id.unwrap_or("custom");
+        io.print_line(&format!("  {}. {} ({})", index + 1, preset.label, id))?;
     }
     let choice = prompt_index(io, "provider", 1, rows.len())?;
-    match choice {
-        1 => Ok(SetupProviderSelection {
-            provider_id: "deepseek".to_string(),
-            label: "DeepSeek".to_string(),
-            default_model: "deepseek-chat".to_string(),
-            base_urls: vec![BaseUrlChoice {
-                label: "Default".to_string(),
-                url: "https://api.deepseek.com/v1".to_string(),
-            }],
-            api_key_env_candidates: vec!["DEEPSEEK_API_KEY".to_string()],
-        }),
-        2 => Ok(SetupProviderSelection {
-            provider_id: "zai".to_string(),
-            label: "Z.AI / GLM".to_string(),
-            default_model: "glm-5.2".to_string(),
-            base_urls: vec![
-                BaseUrlChoice {
-                    label: "General API".to_string(),
-                    url: "https://api.z.ai/api/paas/v4".to_string(),
-                },
-                BaseUrlChoice {
-                    label: "Coding Plan".to_string(),
-                    url: "https://api.z.ai/api/coding/paas/v4".to_string(),
-                },
-            ],
-            api_key_env_candidates: vec![
-                "GLM_API_KEY".to_string(),
-                "ZAI_API_KEY".to_string(),
-                "Z_AI_API_KEY".to_string(),
-            ],
-        }),
-        3 => Ok(SetupProviderSelection {
-            provider_id: "xiaomi-token-plan".to_string(),
-            label: "Xiaomi Token Plan".to_string(),
-            default_model: "mimo-v2.5-pro".to_string(),
-            base_urls: vec![
-                BaseUrlChoice {
-                    label: "China Cluster".to_string(),
-                    url: "https://token-plan-cn.xiaomimimo.com/v1".to_string(),
-                },
-                BaseUrlChoice {
-                    label: "Singapore Cluster".to_string(),
-                    url: "https://token-plan-sgp.xiaomimimo.com/v1".to_string(),
-                },
-                BaseUrlChoice {
-                    label: "Europe Cluster".to_string(),
-                    url: "https://token-plan-ams.xiaomimimo.com/v1".to_string(),
-                },
-            ],
-            api_key_env_candidates: vec![
-                "XIAOMI_TOKEN_PLAN_API_KEY".to_string(),
-                "XIAOMI_TOKEN_PLAN_CN_API_KEY".to_string(),
-                "XIAOMI_API_KEY".to_string(),
-            ],
-        }),
-        4 => {
-            let provider_id = loop {
-                let value = prompt_default_io(io, "provider id", "custom-provider")?;
-                match validate_custom_setup_provider_id(&value) {
-                    Ok(()) => break value,
-                    Err(err) => io.print_line(&format!("invalid provider id: {err}"))?,
-                }
-            };
-            Ok(SetupProviderSelection {
-                label: provider_id.clone(),
-                default_model: String::new(),
-                base_urls: vec![BaseUrlChoice {
-                    label: "Custom".to_string(),
-                    url: "http://127.0.0.1:1234/v1".to_string(),
-                }],
-                api_key_env_candidates: vec![custom_provider_api_key_env(&provider_id)],
-                provider_id,
-            })
-        }
-        _ => unreachable!("prompt_index validates range"),
+    let preset = rows[choice - 1];
+    if let Some(provider_id) = preset.provider_id {
+        return Ok(SetupProviderSelection {
+            provider_id: provider_id.to_string(),
+            label: preset.label.to_string(),
+            default_model: preset.default_model.to_string(),
+            base_urls: preset.base_urls.to_vec(),
+            api_key_env_candidates: preset
+                .api_key_env_candidates
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+        });
     }
+
+    let provider_id = loop {
+        let value = prompt_default_io(io, "provider id", "custom-provider")?;
+        match validate_custom_setup_provider_id(&value) {
+            Ok(()) => break value,
+            Err(err) => io.print_line(&format!("invalid provider id: {err}"))?,
+        }
+    };
+    Ok(SetupProviderSelection {
+        label: provider_id.clone(),
+        default_model: String::new(),
+        base_urls: preset.base_urls.to_vec(),
+        api_key_env_candidates: vec![default_provider_setup_api_key_env(
+            preset.api_key_env_candidates,
+            &std::collections::BTreeMap::new(),
+            &provider_id,
+        )],
+        provider_id,
+    })
 }
 
 fn choose_base_url<I: SetupIo>(io: &mut I, provider: &SetupProviderSelection) -> Result<String> {
     io.print_line("")?;
     io.print_line("Base URL")?;
     let value = if provider.base_urls.len() == 1 {
-        prompt_default_io(io, "base url", &provider.base_urls[0].url)?
+        prompt_default_io(io, "base url", provider.base_urls[0].url)?
     } else {
         for (index, choice) in provider.base_urls.iter().enumerate() {
             io.print_line(&format!(
@@ -272,13 +223,12 @@ fn choose_base_url<I: SetupIo>(io: &mut I, provider: &SetupProviderSelection) ->
         io.print_line(&format!("  {custom_index}. Custom"))?;
         let choice = prompt_index(io, "base URL choice", 1, custom_index)?;
         if choice == custom_index {
-            prompt_default_io(io, "base url", &provider.base_urls[0].url)?
+            prompt_default_io(io, "base url", provider.base_urls[0].url)?
         } else {
-            provider.base_urls[choice - 1].url.clone()
+            provider.base_urls[choice - 1].url.to_string()
         }
     };
-    validate_base_url(&value)?;
-    Ok(value.trim().trim_end_matches('/').to_string())
+    validate_base_url(&value)
 }
 
 fn prompt_api_key_env<I: SetupIo>(io: &mut I, default: &str) -> Result<String> {
@@ -299,10 +249,12 @@ fn prompt_api_key_env<I: SetupIo>(io: &mut I, default: &str) -> Result<String> {
                 )?;
                 break;
             }
-            if valid_env_name(&value) {
-                return Ok(value);
+            match validate_api_key_env(&value) {
+                Ok(value) => return Ok(value),
+                Err(_) => {
+                    io.print_line("env var name must be a valid environment variable name")?
+                }
             }
-            io.print_line("env var name must be a valid environment variable name")?;
         }
     }
 }
@@ -375,52 +327,16 @@ fn prompt_model_id<I: SetupIo>(io: &mut I, default_model: &str) -> Result<String
     }
 }
 
-fn save_setup_provider(
-    config_dir: &Path,
-    provider_id: &str,
-    label: &str,
-    base_url: &str,
-    api_key_env: &str,
-) -> Result<()> {
-    let config_dir = config_dir.to_path_buf();
-    set_config_value(
-        config_dir.clone(),
-        &format!("provider.{provider_id}.label"),
-        json!(label),
-    )?;
-    set_config_value(
-        config_dir.clone(),
-        &format!("provider.{provider_id}.options.base_url"),
-        json!(base_url),
-    )?;
-    set_config_value(
-        config_dir.clone(),
-        &format!("provider.{provider_id}.options.api_key_env"),
-        json!(api_key_env),
-    )?;
-    let _ = remove_config_value(
-        config_dir,
-        &format!("provider.{provider_id}.options.no_auth"),
-    )?;
-    Ok(())
-}
-
 fn default_api_key_env(
     provider: &SetupProviderSelection,
     env_map: &std::collections::BTreeMap<String, String>,
 ) -> String {
-    provider
+    let candidates = provider
         .api_key_env_candidates
         .iter()
-        .find(|candidate| {
-            env_map
-                .get(candidate.as_str())
-                .map(|value| !value.trim().is_empty())
-                .unwrap_or(false)
-        })
-        .cloned()
-        .or_else(|| provider.api_key_env_candidates.first().cloned())
-        .unwrap_or_else(|| custom_provider_api_key_env(&provider.provider_id))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    default_provider_setup_api_key_env(&candidates, env_map, &provider.provider_id)
 }
 
 fn prompt_index<I: SetupIo>(io: &mut I, label: &str, default: usize, max: usize) -> Result<usize> {
@@ -468,83 +384,6 @@ fn prompt_required_io<I: SetupIo>(io: &mut I, label: &str) -> Result<String> {
     }
 }
 
-fn validate_base_url(value: &str) -> Result<()> {
-    let value = value.trim();
-    if value.starts_with("http://") || value.starts_with("https://") {
-        Ok(())
-    } else {
-        Err(anyhow!("base url must start with http:// or https://"))
-    }
-}
-
-fn validate_custom_setup_provider_id(provider_id: &str) -> Result<()> {
-    if !valid_provider_id(provider_id) {
-        return Err(anyhow!(
-            "must use lowercase letters, numbers, hyphens, or underscores"
-        ));
-    }
-    let normalized = normalize_setup_provider_id(provider_id);
-    if normalized != provider_id || SETUP_BUILT_IN_PROVIDER_IDS.contains(&provider_id) {
-        return Err(anyhow!("collides with a built-in provider or alias"));
-    }
-    Ok(())
-}
-
-fn valid_provider_id(provider_id: &str) -> bool {
-    let mut chars = provider_id.chars();
-    matches!(chars.next(), Some('a'..='z' | '0'..='9'))
-        && chars.all(|ch| matches!(ch, 'a'..='z' | '0'..='9' | '-' | '_'))
-}
-
-fn normalize_setup_provider_id(provider: &str) -> String {
-    match provider.trim().to_lowercase().as_str() {
-        "z.ai" | "z-ai" | "glm" => "zai".to_string(),
-        "alibaba" | "qwen" => "dashscope".to_string(),
-        "mimo" => "xiaomi".to_string(),
-        "x-ai" | "x.ai" | "grok" => "xai".to_string(),
-        "lm-studio" | "lm_studio" => "lmstudio".to_string(),
-        other => other.to_string(),
-    }
-}
-
-fn valid_env_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some('A'..='Z' | 'a'..='z' | '_'))
-        && chars.all(|ch| matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_'))
-}
-
-fn looks_like_api_key(value: &str) -> bool {
-    let value = value.trim();
-    let lower = value.to_ascii_lowercase();
-    if ["sk-", "sk-proj-", "sk-live-", "sk-ant-", "sk-or-"]
-        .iter()
-        .any(|prefix| lower.starts_with(prefix))
-    {
-        return true;
-    }
-
-    let len = value.chars().count();
-    if len < 32 {
-        return false;
-    }
-    let token_like = value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '='));
-    if !token_like {
-        return false;
-    }
-    let all_upper_env_like = valid_env_name(value)
-        && value.contains('_')
-        && value
-            .chars()
-            .all(|ch| ch == '_' || ch.is_ascii_digit() || ch.is_ascii_uppercase());
-    if all_upper_env_like {
-        return false;
-    }
-    value.chars().any(|ch| ch.is_ascii_lowercase())
-        || value.chars().filter(|ch| ch.is_ascii_digit()).count() >= 6
-}
-
 fn truncate_setup_error(value: &str) -> String {
     let trimmed = value.trim().replace(['\r', '\n', '\t'], " ");
     if trimmed.chars().count() <= 160 {
@@ -555,19 +394,6 @@ fn truncate_setup_error(value: &str) -> String {
         out
     }
 }
-
-const SETUP_BUILT_IN_PROVIDER_IDS: &[&str] = &[
-    "openrouter",
-    "openai",
-    "xai",
-    "zai",
-    "deepseek",
-    "dashscope",
-    "xiaomi",
-    "xiaomi-token-plan",
-    "lmstudio",
-    "custom",
-];
 
 fn maybe_install_web_assets(
     env_map: &std::collections::BTreeMap<String, String>,

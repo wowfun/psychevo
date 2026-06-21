@@ -7,6 +7,11 @@ pub(crate) use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub(crate) use crate::provider_setup::{
+    ProviderSetupPresetId, default_provider_setup_api_key_env, is_loopback_base_url,
+    looks_like_api_key, provider_setup_preset, provider_setup_presets, upsert_provider_options,
+    validate_api_key_env, validate_base_url,
+};
 pub(crate) use anyhow::{Result, anyhow};
 pub(crate) use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event as CrosstermEvent, KeyCode, KeyEvent,
@@ -28,13 +33,13 @@ pub(crate) use psychevo_runtime::{
     ClarifyQuestion, ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason,
     ClarifyResponse, ClarifyResult, CompactSessionOptions, CompactionReason, CompactionResult,
     ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot,
-    CustomProviderInput, GatewayLiveEventRecord, GatewayLiveSnapshotRecord, ImageInput,
-    InstallOptions, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry,
-    ModelCatalogProvider, ModelMetadataCacheTarget, PendingInputId, PermissionApprovalDecision,
-    PermissionApprovalOutcome, PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay,
-    PromptDisplayMetadata, ReloadContextOptions, RunControlHandle, RunMode, RunOptions,
-    RunStreamEvent, RunStreamSink, SESSION_MAIN_AGENT_METADATA_KEY, SIDE_CONVERSATION_METADATA_KEY,
-    SIDE_INHERITED_METADATA_KEY, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
+    GatewayLiveEventRecord, GatewayLiveSnapshotRecord, ImageInput, InstallOptions, LoadedMainAgent,
+    MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget,
+    PendingInputId, PermissionApprovalDecision, PermissionApprovalOutcome,
+    PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
+    ReloadContextOptions, RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
+    SESSION_MAIN_AGENT_METADATA_KEY, SIDE_CONVERSATION_METADATA_KEY, SIDE_INHERITED_METADATA_KEY,
+    ScopedCustomProviderInput, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
     SessionExportWriteResult, SessionSummary, SessionUndoOptions, SessionUsageOptions,
     SessionUsageSummary, SkillBundle, SkillCatalog, SkillDiscoveryOptions, SkillTarget,
     SqliteStore, StateRuntime, StatsOptions, TUI_DISPLAY_METADATA_KEY,
@@ -43,7 +48,7 @@ pub(crate) use psychevo_runtime::{
     UserShellContextOptions, UserShellOptions, WorkspaceDiff, agent_spawn_paused,
     agent_status_value, auto_compaction_due_for_snapshot, canonicalize_workdir,
     collect_workspace_diff, compact_session, config_show_value, configured_models,
-    context_snapshot, create_global_custom_provider, custom_provider_api_key_env,
+    context_snapshot, create_scoped_custom_provider, custom_provider_api_key_env,
     default_session_export_filename, discover_agents, discover_skills, fetch_model_catalog,
     format_context_snapshot_text_with_options, format_context_total_value,
     format_context_total_value_parts, install_skill, list_skill_bundles,
@@ -55,9 +60,10 @@ pub(crate) use psychevo_runtime::{
     run_control, run_user_shell_command_streaming_controlled, scan_skill_path,
     selected_configured_model, session_base_agent_name_from_metadata, session_usage_summary,
     set_agent_spawn_paused, set_default_model_with_reasoning, set_local_toolset_enabled,
-    set_skill_config_value, set_skill_enabled, side_conversation_boundary_prompt,
-    side_inherited_metadata_hidden, spawn_agent_background, stop_agent_id_with_grace,
-    toolsets_value, undo_session, usage_stats, view_skill_value, write_session_export,
+    set_provider_api_key, set_skill_config_value, set_skill_enabled,
+    side_conversation_boundary_prompt, side_inherited_metadata_hidden, spawn_agent_background,
+    stop_agent_id_with_grace, toolsets_value, undo_session, usage_stats, view_skill_value,
+    write_session_export,
 };
 pub(crate) use ratatui::Frame;
 pub(crate) use ratatui::Terminal;

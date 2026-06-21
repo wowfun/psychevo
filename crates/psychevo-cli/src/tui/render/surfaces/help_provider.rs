@@ -240,40 +240,54 @@ pub(crate) fn render_provider_wizard_panel(
         width: area.width.saturating_sub(4),
         height: area.height.saturating_sub(2),
     };
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                "Add Provider",
-                theme.dim_style().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  OpenAI-compatible global provider", theme.dim_style()),
-        ]),
-        provider_wizard_field_line(panel, ProviderWizardField::Label, "Label", &panel.label),
-        provider_wizard_field_line(
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            "Add Provider",
+            theme.dim_style().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  OpenAI-compatible global provider", theme.dim_style()),
+    ])];
+    if panel.is_custom() {
+        lines.push(provider_wizard_field_line(
+            panel,
+            ProviderWizardField::Label,
+            "Label",
+            &panel.label,
+        ));
+        lines.push(provider_wizard_field_line(
             panel,
             ProviderWizardField::ProviderId,
             "Provider ID",
             &panel.provider_id,
-        ),
-        provider_wizard_field_line(
-            panel,
-            ProviderWizardField::BaseUrl,
-            "Base URL",
-            &panel.base_url,
-        ),
-    ];
-    let env_var = panel
-        .env_var()
-        .unwrap_or_else(|| "(generated after provider id)".to_string());
+        ));
+    } else {
+        lines.push(provider_wizard_readonly_line("Label", &panel.label));
+        lines.push(provider_wizard_readonly_line(
+            "Provider ID",
+            &panel.provider_id,
+        ));
+    }
+    lines.push(provider_wizard_field_line(
+        panel,
+        ProviderWizardField::BaseUrl,
+        "Base URL",
+        &panel.base_url,
+    ));
+    let env_var = panel.env_var().unwrap_or_default();
     let env_note = if panel.api_key_env_present {
         "existing key reused"
     } else {
         "new key variable"
     };
+    lines.push(provider_wizard_field_line(
+        panel,
+        ProviderWizardField::ApiKeyEnv,
+        "API key env",
+        &env_var,
+    ));
     lines.push(Line::from(vec![
-        Span::styled("  API key env ", theme.dim_style()),
-        Span::styled(env_var, Style::default()),
-        Span::styled(format!("  {env_note}"), theme.dim_style()),
+        Span::styled("  ", theme.dim_style()),
+        Span::styled(env_note, theme.dim_style()),
     ]));
     if !panel.api_key_env_present {
         lines.push(provider_wizard_field_line(
@@ -293,6 +307,15 @@ pub(crate) fn render_provider_wizard_panel(
     )));
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+pub(crate) fn provider_wizard_readonly_line(label: &str, value: &str) -> Line<'static> {
+    let theme = tui_theme();
+    Line::from(vec![
+        Span::styled("  ", theme.dim_style()),
+        Span::styled(format!("{label:<12}"), theme.dim_style()),
+        Span::styled(value.to_string(), Style::default()),
+    ])
 }
 
 pub(crate) fn provider_wizard_field_line(

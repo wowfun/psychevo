@@ -482,6 +482,7 @@ pub(crate) enum ProviderWizardField {
     Label,
     ProviderId,
     BaseUrl,
+    ApiKeyEnv,
     ApiKey,
 }
 
@@ -572,6 +573,10 @@ impl BottomSelectionPanel {
                     include.insert(index, ());
                 }
                 BottomSelectionValue::AddProvider => {
+                    include.insert(index, ());
+                }
+                BottomSelectionValue::ProviderPreset(_)
+                | BottomSelectionValue::ProviderBaseUrl { .. } => {
                     include.insert(index, ());
                 }
                 BottomSelectionValue::FetchAllModels => {
@@ -801,6 +806,18 @@ impl BottomSelectionValue {
                 format!("agent:diagnostic:{message}")
             }
             BottomSelectionValue::AddProvider => "provider:add".to_string(),
+            BottomSelectionValue::ProviderPreset(preset) => {
+                format!("provider:preset:{}", preset.key())
+            }
+            BottomSelectionValue::ProviderBaseUrl { preset, index } => {
+                format!(
+                    "provider:base-url:{}:{}",
+                    preset.key(),
+                    index
+                        .map(|index| index.to_string())
+                        .unwrap_or_else(|| "custom".to_string())
+                )
+            }
             BottomSelectionValue::FetchAllModels => "fetch:all".to_string(),
             BottomSelectionValue::FetchProvider(provider) => {
                 format!("fetch:provider:{provider}")
