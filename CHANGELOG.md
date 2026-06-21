@@ -1,7 +1,25 @@
 # Changelog
 
+## 2026-06-22
+
+- Fixed WeChat QR setup and reconnect end to end: direct iLink QR images, live
+  countdowns, immediate secret-free credential persistence, stale-session
+  cleanup, `qr_login_pending` grace, and duplicate-id upserts.
+- Started enabled, config-ready Channels from the managed Gateway so WeChat
+  iLink polling can run Gateway turns, reply to chat, and report secret-free
+  runner diagnostics in CLI, RPC, and Workbench.
+- Added a `peval-py` Deepagents adapter for converting session JSON.
+
+## 2026-06-21
+
+- Added Channels setup for WeChat, Telegram, Feishu, and Lark across
+  `pevo gateway setup`, profile TOML/env config, Gateway RPC/protocol,
+  Workbench Settings, docs, fail-closed allowlists, and first real adapters.
+
 ## 2026-06-20
 
+- Shared provider setup presets with the TUI `/model` Add Provider flow,
+  including fetched model selection for DeepSeek, Z.AI, and Xiaomi Token Plan.
 - Reworked undo/redo Git snapshots to use canonical workspace-level stores with
   stable hashed workspace ids and hourly best-effort `git gc --prune=7.days`
   cleanup, avoiding one snapshot directory per session.
