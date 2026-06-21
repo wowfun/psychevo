@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "expiresAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "intervalMs": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "qrImage": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "qrSvg": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "qrUrl": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "expiresAtMs",
+    "intervalMs",
+    "message",
+    "qrUrl",
+    "sessionId",
+    "status"
+  ],
+  "title": "ChannelWechatQrStartResult",
+  "type": "object"
+}

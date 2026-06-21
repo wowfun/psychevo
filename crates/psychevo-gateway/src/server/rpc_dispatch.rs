@@ -877,6 +877,48 @@ async fn handle_rpc(
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             delete_backend_config(&state, &scope, params)
         }
+        "channel/list" => {
+            let params = request.params::<wire::ChannelListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(channel_list_result_for_scope(
+                &state, &scope,
+            )?)?)
+        }
+        "channel/show" => {
+            let params = request.required_params::<wire::ChannelIdParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(channel_show_result(
+                &state, &scope, &params.id,
+            )?)?)
+        }
+        "channel/enable" => {
+            let params = request.required_params::<wire::ChannelEnableParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(channel_enable_result(
+                &state, &scope, params,
+            )?)?)
+        }
+        "channel/doctor" => {
+            let params = request.params::<wire::ChannelDoctorParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                channel_doctor_result_live(&state, &scope, params).await?,
+            )?)
+        }
+        "channel/wechat-qr/start" => {
+            let params = request.params::<wire::ChannelWechatQrStartParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                channel_wechat_qr_start_result(&state, &scope, params).await?,
+            )?)
+        }
+        "channel/wechat-qr/poll" => {
+            let params = request.required_params::<wire::ChannelWechatQrPollParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                channel_wechat_qr_poll_result(&state, &scope, params).await?,
+            )?)
+        }
         "command/list" => {
             let params = request.params::<wire::CommandListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;

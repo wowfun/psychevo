@@ -36,6 +36,7 @@ pub(crate) struct RunConfig {
     pub(crate) tools: ToolSelectionConfig,
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) agent_backends: BTreeMap<String, AgentBackendConfig>,
+    pub(crate) channels: ChannelsConfig,
 }
 
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.
@@ -84,3 +85,6 @@ pub use config_permissions::*;
 #[path = "config/toolsets.rs"]
 pub(crate) mod config_toolsets;
 pub use config_toolsets::*;
+#[path = "config/channels.rs"]
+pub(crate) mod config_channels;
+pub use config_channels::*;

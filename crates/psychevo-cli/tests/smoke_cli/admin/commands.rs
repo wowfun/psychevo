@@ -27,6 +27,36 @@ pub(crate) fn run_with_stdin(mut command: Command, input: &str) -> std::process:
     child.wait_with_output().expect("command output")
 }
 
+struct MockJsonServer {
+    base_url: String,
+    requests: Arc<Mutex<Vec<String>>>,
+}
+
+impl MockJsonServer {
+    fn start(responses: Vec<Value>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let base_url = format!("http://{}", listener.local_addr().expect("addr"));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_thread = Arc::clone(&requests);
+        thread::spawn(move || {
+            let mut responses = VecDeque::from(responses);
+            while let Some(body) = responses.pop_front() {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let request = read_http_request(&mut stream);
+                requests_for_thread.lock().expect("requests").push(request);
+                let body = body.to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).expect("response");
+            }
+        });
+        Self { base_url, requests }
+    }
+}
+
 #[test]
 pub(crate) fn cli_rejects_obsolete_plural_skills_command() {
     let temp = tempdir().expect("temp");
@@ -131,6 +161,147 @@ pub(crate) fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secr
             .contains("MOCK_GLOBAL_API_KEY=global-secret")
     );
     assert!(!String::from_utf8_lossy(&add_global.stdout).contains("global-secret"));
+}
+
+#[test]
+pub(crate) fn cli_gateway_setup_channels_are_secret_free_and_old_command_is_removed() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    init_skill_home(temp.path(), &psychevo_home);
+
+    let old = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["channel", "list"])
+        .output()
+        .expect("old channel command");
+    assert!(!old.status.success());
+
+    let mut setup_cmd = admin_cmd(temp.path(), &psychevo_home, &workdir);
+    setup_cmd.args([
+        "gateway",
+        "setup",
+        "--channel",
+        "telegram",
+        "--id",
+        "release",
+        "--label",
+        "Release Bot",
+        "--allow-user",
+        "12345",
+        "--enable",
+        "--credential-stdin",
+        "--json",
+    ]);
+    let setup = run_with_stdin(setup_cmd, "telegram-secret\n");
+    assert!(
+        setup.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&setup.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&setup.stdout).contains("telegram-secret"));
+    assert!(!String::from_utf8_lossy(&setup.stderr).contains("telegram-secret"));
+    let value: Value = serde_json::from_slice(&setup.stdout).expect("json");
+    assert_eq!(value["channel"]["id"], "release");
+    assert_eq!(value["channel"]["channel"], "telegram");
+    assert_eq!(value["channel"]["credential_env"], "TELEGRAM_BOT_TOKEN");
+    assert_eq!(value["channel"]["wrote_credential"], true);
+    assert_eq!(value["enabled"]["enabled"], true);
+    assert_eq!(value["summary"]["configured"], 1);
+    assert_eq!(value["summary"]["enabled"], 1);
+
+    let config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
+    assert!(config.contains("[[channels.connections]]"));
+    assert!(config.contains("channel = \"telegram\""));
+    assert!(!config.contains("platform = \"telegram\""));
+    assert!(config.contains("Release Bot"));
+    assert!(config.contains("TELEGRAM_BOT_TOKEN"));
+    assert!(!config.contains("telegram-secret"));
+    let env = std::fs::read_to_string(psychevo_home.join(".env")).expect("env");
+    assert!(env.contains("TELEGRAM_BOT_TOKEN=telegram-secret"));
+
+    let status = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args(["gateway", "status", "--json"])
+        .output()
+        .expect("gateway status");
+    assert!(
+        status.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let value: Value = serde_json::from_slice(&status.stdout).expect("json");
+    assert_eq!(value["channels"]["configured"], 1);
+    assert_eq!(value["channels"]["enabled"], 1);
+    assert_eq!(value["channels"]["ready"], 1);
+    assert_eq!(value["channels"]["blocked"], 0);
+    assert!(!String::from_utf8_lossy(&status.stdout).contains("telegram-secret"));
+}
+
+#[test]
+pub(crate) fn cli_gateway_setup_wechat_qr_writes_env_backed_config_without_leaking_secret() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let workdir = temp.path().join("work");
+    std::fs::create_dir_all(&workdir).expect("workdir");
+    init_skill_home(temp.path(), &psychevo_home);
+    let server = MockJsonServer::start(vec![
+        serde_json::json!({
+            "qrcode": "qr-token",
+            "qrcode_img_content": "https://qr.example/wechat"
+        }),
+        serde_json::json!({
+            "status": "confirmed",
+            "ilink_bot_id": "wx-account",
+            "bot_token": "wechat-secret",
+            "baseurl": "http://ilink.example",
+            "ilink_user_id": "wx-user"
+        }),
+    ]);
+
+    let setup = admin_cmd(temp.path(), &psychevo_home, &workdir)
+        .args([
+            "gateway",
+            "setup",
+            "--channel",
+            "wechat",
+            "--qr",
+            "--ilink-base-url",
+            &server.base_url,
+            "--enable",
+            "--json",
+        ])
+        .output()
+        .expect("wechat qr setup");
+    assert!(
+        setup.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&setup.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&setup.stdout).contains("wechat-secret"));
+    assert!(!String::from_utf8_lossy(&setup.stderr).contains("wechat-secret"));
+    let value: Value = serde_json::from_slice(&setup.stdout).expect("json");
+    assert_eq!(value["channel"]["channel"], "wechat");
+    assert_eq!(value["channel"]["credential_env"], "WECHAT_BOT_TOKEN");
+    assert_eq!(value["channel"]["account_env"], "WECHAT_ACCOUNT_ID");
+    assert_eq!(value["channel"]["base_url_env"], "WECHAT_ILINK_BASE_URL");
+    assert_eq!(value["enabled"]["enabled"], true);
+    assert_eq!(value["doctor"]["channels"][0]["runtime_status"], "ready");
+
+    let config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
+    assert!(config.contains("channel = \"wechat\""));
+    assert!(config.contains("credential_env = \"WECHAT_BOT_TOKEN\""));
+    assert!(config.contains("account_env = \"WECHAT_ACCOUNT_ID\""));
+    assert!(config.contains("base_url_env = \"WECHAT_ILINK_BASE_URL\""));
+    assert!(config.contains("allow_users = [\"wx-user\"]"));
+    assert!(!config.contains("wechat-secret"));
+    let env = std::fs::read_to_string(psychevo_home.join(".env")).expect("env");
+    assert!(env.contains("WECHAT_BOT_TOKEN=wechat-secret"));
+    assert!(env.contains("WECHAT_ACCOUNT_ID=wx-account"));
+    assert!(env.contains("WECHAT_ILINK_BASE_URL=http://ilink.example"));
+
+    let requests = server.requests.lock().expect("requests");
+    assert!(requests[0].starts_with("GET /ilink/bot/get_bot_qrcode?bot_type=3 HTTP/1.1"));
+    assert!(requests[1].starts_with("GET /ilink/bot/get_qrcode_status?qrcode=qr-token HTTP/1.1"));
 }
 
 #[test]

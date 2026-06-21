@@ -458,6 +458,18 @@ pub enum ClientRequest {
     BackendWrite(BackendWriteParams),
     #[serde(rename = "backend/delete")]
     BackendDelete(BackendDeleteParams),
+    #[serde(rename = "channel/list")]
+    ChannelList(ChannelListParams),
+    #[serde(rename = "channel/show")]
+    ChannelShow(ChannelIdParams),
+    #[serde(rename = "channel/enable")]
+    ChannelEnable(ChannelEnableParams),
+    #[serde(rename = "channel/doctor")]
+    ChannelDoctor(ChannelDoctorParams),
+    #[serde(rename = "channel/wechat-qr/start")]
+    ChannelWechatQrStart(ChannelWechatQrStartParams),
+    #[serde(rename = "channel/wechat-qr/poll")]
+    ChannelWechatQrPoll(ChannelWechatQrPollParams),
     #[serde(rename = "shell/start")]
     ShellStart(ShellStartParams),
     #[serde(rename = "terminal/start")]

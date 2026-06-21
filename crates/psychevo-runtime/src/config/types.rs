@@ -112,6 +112,143 @@ pub(crate) struct CustomToolsetConfig {
     pub(crate) includes: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ChannelsConfig {
+    pub(crate) connections: Vec<ChannelConnectionConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChannelConnectionConfig {
+    pub(crate) id: String,
+    pub(crate) platform: ChannelPlatform,
+    pub(crate) domain: Option<String>,
+    pub(crate) enabled: bool,
+    pub(crate) label: String,
+    pub(crate) transport: ChannelTransport,
+    pub(crate) workdir: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) permission_mode: Option<String>,
+    pub(crate) require_mention: bool,
+    pub(crate) credential_env: Option<String>,
+    pub(crate) app_id_env: Option<String>,
+    pub(crate) app_secret_env: Option<String>,
+    pub(crate) account_env: Option<String>,
+    pub(crate) base_url_env: Option<String>,
+    pub(crate) allow_users: Vec<String>,
+    pub(crate) allow_groups: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChannelPlatform {
+    Wechat,
+    Telegram,
+    Feishu,
+    Lark,
+}
+
+impl ChannelPlatform {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "wechat" => Some(Self::Wechat),
+            "telegram" => Some(Self::Telegram),
+            "feishu" => Some(Self::Feishu),
+            "lark" => Some(Self::Lark),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Wechat => "wechat",
+            Self::Telegram => "telegram",
+            Self::Feishu => "feishu",
+            Self::Lark => "lark",
+        }
+    }
+
+    pub(crate) fn default_domain(self) -> &'static str {
+        match self {
+            Self::Wechat => "wechat",
+            Self::Telegram => "telegram",
+            Self::Feishu => "feishu",
+            Self::Lark => "lark",
+        }
+    }
+
+    pub(crate) fn default_transport(self) -> ChannelTransport {
+        match self {
+            Self::Wechat | Self::Telegram => ChannelTransport::Polling,
+            Self::Feishu | Self::Lark => ChannelTransport::LongConnection,
+        }
+    }
+
+    pub(crate) fn default_label(self) -> &'static str {
+        match self {
+            Self::Wechat => "WeChat",
+            Self::Telegram => "Telegram",
+            Self::Feishu => "Feishu",
+            Self::Lark => "Lark",
+        }
+    }
+
+    pub(crate) fn default_credential_env(self) -> &'static str {
+        match self {
+            Self::Wechat => "WECHAT_BOT_TOKEN",
+            Self::Telegram => "TELEGRAM_BOT_TOKEN",
+            Self::Feishu => "FEISHU_APP_SECRET",
+            Self::Lark => "LARK_APP_SECRET",
+        }
+    }
+
+    pub(crate) fn default_app_id_env(self) -> Option<&'static str> {
+        match self {
+            Self::Feishu => Some("FEISHU_APP_ID"),
+            Self::Lark => Some("LARK_APP_ID"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn default_account_env(self) -> Option<&'static str> {
+        match self {
+            Self::Wechat => Some("WECHAT_ACCOUNT_ID"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn default_base_url_env(self) -> Option<&'static str> {
+        match self {
+            Self::Wechat => Some("WECHAT_ILINK_BASE_URL"),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChannelTransport {
+    Polling,
+    Webhook,
+    LongConnection,
+}
+
+impl ChannelTransport {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "polling" => Some(Self::Polling),
+            "webhook" => Some(Self::Webhook),
+            "long_connection" => Some(Self::LongConnection),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Polling => "polling",
+            Self::Webhook => "webhook",
+            Self::LongConnection => "long_connection",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct BuiltInProvider {
     pub(crate) id: &'static str,

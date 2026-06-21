@@ -85,14 +85,14 @@ pub(crate) fn read_secret_from_stdin(required: bool) -> Result<Option<String>> {
     }
     if io::stdin().is_terminal() {
         return Err(anyhow!(
-            "--api-key-stdin requires piped stdin; interactive secret input is unavailable here"
+            "stdin secret input requires piped stdin; interactive secret input is unavailable here"
         ));
     }
     let mut secret = String::new();
     io::stdin().read_to_string(&mut secret)?;
     let secret = secret.trim().to_string();
     if secret.is_empty() {
-        return Err(anyhow!("--api-key-stdin requires a non-empty stdin value"));
+        return Err(anyhow!("stdin secret input requires a non-empty value"));
     }
     Ok(Some(secret))
 }

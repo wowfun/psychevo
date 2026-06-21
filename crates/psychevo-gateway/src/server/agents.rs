@@ -375,7 +375,7 @@ fn ensure_profile_config_for_backend_write(
     Ok(())
 }
 
-fn active_profile_config_dir(state: &WebState, scope: &ResolvedScope) -> PathBuf {
+pub(super) fn active_profile_config_dir(state: &WebState, scope: &ResolvedScope) -> PathBuf {
     state
         .inner
         .inherited_env

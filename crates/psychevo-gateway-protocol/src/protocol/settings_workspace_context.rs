@@ -22,6 +22,8 @@ pub struct SettingsReadResult {
     pub workdir: String,
     #[serde(default)]
     pub project: Option<WorkbenchProjectView>,
+    #[serde(default)]
+    pub channels: ChannelListResult,
     #[ts(type = "Record<string, unknown>")]
     pub memory_resources: BTreeMap<String, Value>,
     #[ts(type = "Record<string, unknown>")]

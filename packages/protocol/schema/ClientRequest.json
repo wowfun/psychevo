@@ -86,6 +86,24 @@
       "$ref": "ClientRequest/backend-delete.json"
     },
     {
+      "$ref": "ClientRequest/channel-list.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-show.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-enable.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-doctor.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-wechat-qr-start.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-wechat-qr-poll.json"
+    },
+    {
       "$ref": "ClientRequest/shell-start.json"
     },
     {

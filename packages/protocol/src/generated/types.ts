@@ -176,6 +176,40 @@ export type BackendWriteResult = { written: boolean, changed: boolean, path: str
 
 export type BackendDeleteResult = { deleted: boolean, changed: boolean, id: string, path: string, target: BackendConfigTarget, };
 
+export type ChannelListParams = { scope: GatewayRequestScope | null, };
+
+export type ChannelIdParams = { id: string, scope: GatewayRequestScope | null, };
+
+export type ChannelEnableParams = { id: string, enabled: boolean, scope: GatewayRequestScope | null, };
+
+export type ChannelDoctorParams = { id: string | null, live: boolean | null, scope: GatewayRequestScope | null, };
+
+export type ChannelWechatQrStartParams = { id: string | null, label: string | null, ilinkBaseUrl: string | null, scope: GatewayRequestScope | null, };
+
+export type ChannelWechatQrStartResult = { sessionId: string, qrUrl: string, qrImage: string | null, qrSvg: string | null, status: string, message: string, intervalMs: number, expiresAtMs: number, };
+
+export type ChannelWechatQrPollParams = { sessionId: string, enable: boolean | null, scope: GatewayRequestScope | null, };
+
+export type ChannelWechatQrPollResult = { done: boolean, status: string, message: string, channel: ChannelConfigView | null, expiresAtMs: number | null, };
+
+export type ChannelCredentialView = { env: string | null, status: string, };
+
+export type ChannelAllowlistView = { users: Array<string>, groups: Array<string>, status: string, };
+
+export type ChannelConfigView = { id: string, channel: string, domain: string | null, enabled: boolean, label: string, transport: string, workdir: string | null, model: string | null, permissionMode: string | null, requireMention: boolean, credential: ChannelCredentialView, allowlist: ChannelAllowlistView, runtimeStatus: string, runner: ChannelRunnerView, };
+
+export type ChannelRunnerView = { state: string, reason: string | null, lastPollAtMs: number | null, lastHealthyPollAtMs: number | null, lastInboundAtMs: number | null, lastOutboundAtMs: number | null, lastIlinkErrcode: number | null, lastError: string | null, };
+
+export type ChannelListResult = { channels: Array<ChannelConfigView>, };
+
+export type ChannelEnableResult = { channel: ChannelConfigView, };
+
+export type ChannelDoctorCheck = { name: string, status: string, message: string, };
+
+export type ChannelDoctorChannelView = { id: string, channel: string, enabled: boolean, runtimeStatus: string, runner: ChannelRunnerView, checks: Array<ChannelDoctorCheck>, };
+
+export type ChannelDoctorResult = { live: boolean, channels: Array<ChannelDoctorChannelView>, };
+
 export type ShellStartParams = { scope: GatewayRequestScope, threadId: string | null, command: string, };
 
 export type ShellStartResult = { accepted: boolean, threadId: string | null, message: string | null, };
@@ -240,7 +274,7 @@ export type SettingsReadParams = { workdir: string | null, threadId: string | nu
 
 export type SettingsUpdateParams = { scope: GatewayRequestScope, threadId: string, agent: string | null, };
 
-export type SettingsReadResult = { workdir: string, project: WorkbenchProjectView | null, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, controls: WorkbenchControlsView | null, };
+export type SettingsReadResult = { workdir: string, project: WorkbenchProjectView | null, channels: ChannelListResult, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, controls: WorkbenchControlsView | null, };
 
 export type WorkbenchProjectView = { path: string, displayPath: string, branch: string | null, };
 
@@ -334,7 +368,7 @@ export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: Json
 
 export type JsonRpcError = { code: number, message: string, data: unknown | null, };
 
-export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/browser", "params": ThreadBrowserParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "turn/takeover", "params": TurnTakeoverParams } | { "method": "runtime/options", "params": RuntimeOptionsParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "agent/list", "params": AgentListParams } | { "method": "agent/read", "params": AgentReadParams } | { "method": "agent/write", "params": AgentWriteParams } | { "method": "agent/delete", "params": AgentDeleteParams } | { "method": "agent/status", "params": AgentStatusParams } | { "method": "backend/list", "params": BackendListParams } | { "method": "backend/doctor", "params": BackendDoctorParams } | { "method": "backend/write", "params": BackendWriteParams } | { "method": "backend/delete", "params": BackendDeleteParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/file/write", "params": WorkspaceFileWriteParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "workspace/changes", "params": WorkspaceChangesParams } | { "method": "workspace/change/accept", "params": WorkspaceChangeFileParams } | { "method": "workspace/change/reject", "params": WorkspaceChangeFileParams } | { "method": "context/read", "params": ContextReadParams } | { "method": "observability/read", "params": ObservabilityReadParams } | { "method": "usage/read", "params": UsageReadParams };
+export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/browser", "params": ThreadBrowserParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "turn/takeover", "params": TurnTakeoverParams } | { "method": "runtime/options", "params": RuntimeOptionsParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "agent/list", "params": AgentListParams } | { "method": "agent/read", "params": AgentReadParams } | { "method": "agent/write", "params": AgentWriteParams } | { "method": "agent/delete", "params": AgentDeleteParams } | { "method": "agent/status", "params": AgentStatusParams } | { "method": "backend/list", "params": BackendListParams } | { "method": "backend/doctor", "params": BackendDoctorParams } | { "method": "backend/write", "params": BackendWriteParams } | { "method": "backend/delete", "params": BackendDeleteParams } | { "method": "channel/list", "params": ChannelListParams } | { "method": "channel/show", "params": ChannelIdParams } | { "method": "channel/enable", "params": ChannelEnableParams } | { "method": "channel/doctor", "params": ChannelDoctorParams } | { "method": "channel/wechat-qr/start", "params": ChannelWechatQrStartParams } | { "method": "channel/wechat-qr/poll", "params": ChannelWechatQrPollParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/file/write", "params": WorkspaceFileWriteParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "workspace/changes", "params": WorkspaceChangesParams } | { "method": "workspace/change/accept", "params": WorkspaceChangeFileParams } | { "method": "workspace/change/reject", "params": WorkspaceChangeFileParams } | { "method": "context/read", "params": ContextReadParams } | { "method": "observability/read", "params": ObservabilityReadParams } | { "method": "usage/read", "params": UsageReadParams };
 
 export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload } | { "method": "shell/result", "params": ShellResultPayload } | { "method": "shell/error", "params": ShellErrorPayload } | { "method": "terminal/output", "params": TerminalOutputPayload } | { "method": "terminal/exited", "params": TerminalExitedPayload };
 

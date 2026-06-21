@@ -427,6 +427,9 @@ fn schema_group_module(name: &str) -> &'static str {
     if matches!(name, "BackendKind" | "GatewayBackendInfo") {
         return "gateway/backend/core";
     }
+    if name.starts_with("Channel") {
+        return "gateway/channels";
+    }
     if matches!(
         name,
         "GatewayRequestScope"
@@ -540,6 +543,7 @@ fn schema_group_const(module: &str) -> &'static str {
         "gateway/backend/config" => "gatewayBackendConfigSchemas",
         "gateway/backend/core" => "gatewayBackendCoreSchemas",
         "gateway/backend/doctor" => "gatewayBackendDoctorSchemas",
+        "gateway/channels" => "gatewayChannelSchemas",
         "gateway/core" => "gatewayCoreSchemas",
         "gateway/events" => "gatewayEventSchemas",
         "interaction" => "interactionSchemas",
@@ -575,6 +579,7 @@ fn schema_group_refs_const(module: &str) -> &'static str {
         "gateway/backend/config" => "gatewayBackendConfigSchemaRefs",
         "gateway/backend/core" => "gatewayBackendCoreSchemaRefs",
         "gateway/backend/doctor" => "gatewayBackendDoctorSchemaRefs",
+        "gateway/channels" => "gatewayChannelSchemaRefs",
         "gateway/core" => "gatewayCoreSchemaRefs",
         "gateway/events" => "gatewayEventSchemaRefs",
         "interaction" => "interactionSchemaRefs",
@@ -798,6 +803,23 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(BackendDoctorResult),
         exported_type!(BackendWriteResult),
         exported_type!(BackendDeleteResult),
+        exported_type!(ChannelListParams),
+        exported_type!(ChannelIdParams),
+        exported_type!(ChannelEnableParams),
+        exported_type!(ChannelDoctorParams),
+        exported_type!(ChannelWechatQrStartParams),
+        exported_type!(ChannelWechatQrStartResult),
+        exported_type!(ChannelWechatQrPollParams),
+        exported_type!(ChannelWechatQrPollResult),
+        exported_type!(ChannelCredentialView),
+        exported_type!(ChannelAllowlistView),
+        exported_type!(ChannelConfigView),
+        exported_type!(ChannelRunnerView),
+        exported_type!(ChannelListResult),
+        exported_type!(ChannelEnableResult),
+        exported_type!(ChannelDoctorCheck),
+        exported_type!(ChannelDoctorChannelView),
+        exported_type!(ChannelDoctorResult),
         exported_type!(ShellStartParams),
         exported_type!(ShellStartResult),
         exported_type!(TerminalStartParams),

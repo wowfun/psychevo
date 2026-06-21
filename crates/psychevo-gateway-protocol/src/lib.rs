@@ -11,6 +11,7 @@ use ts_rs::TS;
 include!("protocol/source.rs");
 include!("protocol/events_transcript.rs");
 include!("protocol/thread_command_turn.rs");
+include!("protocol/channels.rs");
 include!("protocol/settings_workspace_context.rs");
 include!("protocol/agents_backend_rpc.rs");
 include!("protocol/codegen.rs");

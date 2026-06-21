@@ -237,6 +237,8 @@ struct WebStateInner {
     review: WorkspaceReviewState,
     pending_permissions: Mutex<HashMap<String, PendingPermissionView>>,
     pending_clarifies: Mutex<HashMap<String, PendingClarifyView>>,
+    wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
+    channel_runtime: channel_runtime::ChannelRuntimeState,
 }
 
 #[derive(Debug, Clone)]
@@ -269,7 +271,8 @@ impl WebState {
     fn new(config: GatewayWebServerConfig) -> Self {
         let state = config.gateway.state().clone();
         let source = workdir_source(&config.workdir);
-        Self {
+        let channel_runtime = channel_runtime::ChannelRuntimeState::new(&config.home);
+        let web_state = Self {
             inner: Arc::new(WebStateInner {
                 gateway: config.gateway,
                 state,
@@ -286,8 +289,12 @@ impl WebState {
                 review: WorkspaceReviewState::default(),
                 pending_permissions: Mutex::new(HashMap::new()),
                 pending_clarifies: Mutex::new(HashMap::new()),
+                wechat_qr_sessions: Mutex::new(HashMap::new()),
+                channel_runtime,
             }),
-        }
+        };
+        channel_runtime::reconcile(web_state.clone());
+        web_state
     }
 
     fn auth_from_headers(&self, headers: &HeaderMap) -> Option<AuthContext> {

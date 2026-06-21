@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
@@ -7,23 +8,35 @@ use serde_json::json;
 
 use crate::{GatewaySource, GatewaySourceLifetime};
 
+#[path = "im_adapters.rs"]
+pub mod adapters;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImIdentity {
+    pub connection_id: Option<String>,
     pub platform: String,
+    pub domain: Option<String>,
     pub workspace_id: Option<String>,
+    pub chat_type: Option<String>,
     pub chat_id: String,
     pub thread_id: Option<String>,
     pub user_id: Option<String>,
+    pub operator_id: Option<String>,
+    pub reply_to: Option<String>,
 }
 
 impl ImIdentity {
     pub fn route_material(&self) -> String {
         [
+            self.connection_id.as_deref().unwrap_or(""),
             self.platform.as_str(),
+            self.domain.as_deref().unwrap_or(""),
             self.workspace_id.as_deref().unwrap_or(""),
+            self.chat_type.as_deref().unwrap_or(""),
             self.chat_id.as_str(),
             self.thread_id.as_deref().unwrap_or(""),
             self.user_id.as_deref().unwrap_or(""),
+            self.operator_id.as_deref().unwrap_or(""),
         ]
         .join("\n")
     }
@@ -50,6 +63,95 @@ pub trait ImAdapter: Send + Sync {
     fn send(&self, message: ImOutboundMessage) -> BoxFuture<'static, Result<()>>;
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChannelAllowlist {
+    pub users: BTreeSet<String>,
+    pub chats: BTreeSet<String>,
+}
+
+impl ChannelAllowlist {
+    pub fn new(
+        users: impl IntoIterator<Item = String>,
+        chats: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self {
+            users: users.into_iter().collect(),
+            chats: chats.into_iter().collect(),
+        }
+    }
+
+    pub fn allows(&self, identity: &ImIdentity) -> bool {
+        identity
+            .user_id
+            .as_ref()
+            .is_some_and(|user| self.users.contains(user))
+            || self.chats.contains(&identity.chat_id)
+    }
+}
+
+#[derive(Clone)]
+pub struct ChannelAdapterBinding {
+    pub connection_id: String,
+    pub allowlist: ChannelAllowlist,
+    adapter: Arc<dyn ImAdapter>,
+}
+
+impl ChannelAdapterBinding {
+    pub fn new(
+        connection_id: impl Into<String>,
+        adapter: Arc<dyn ImAdapter>,
+        allowlist: ChannelAllowlist,
+    ) -> Self {
+        Self {
+            connection_id: connection_id.into(),
+            adapter,
+            allowlist,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct ChannelGateway {
+    adapters: Vec<ChannelAdapterBinding>,
+}
+
+impl ChannelGateway {
+    pub fn new(adapters: Vec<ChannelAdapterBinding>) -> Self {
+        Self { adapters }
+    }
+
+    pub async fn poll_once(&self) -> Result<Vec<ImInboundMessage>> {
+        let mut accepted = Vec::new();
+        for binding in &self.adapters {
+            for mut message in binding.adapter.poll().await? {
+                match message.identity.connection_id.as_deref() {
+                    Some(connection_id) if connection_id != binding.connection_id => continue,
+                    Some(_) => {}
+                    None => message.identity.connection_id = Some(binding.connection_id.clone()),
+                }
+                if binding.allowlist.allows(&message.identity) {
+                    accepted.push(message);
+                }
+            }
+        }
+        Ok(accepted)
+    }
+
+    pub async fn send(&self, message: ImOutboundMessage) -> Result<()> {
+        let connection_id = message.identity.connection_id.as_deref().ok_or_else(|| {
+            Error::Message("IM outbound message is missing connection id".to_string())
+        })?;
+        let binding = self
+            .adapters
+            .iter()
+            .find(|binding| binding.connection_id == connection_id)
+            .ok_or_else(|| {
+                Error::Message(format!("unknown channel connection `{connection_id}`"))
+            })?;
+        binding.adapter.send(message).await
+    }
+}
+
 pub fn gateway_source_for_im(message: &ImInboundMessage) -> GatewaySource {
     let raw_id = stable_source_hash(&message.identity.route_material());
     GatewaySource {
@@ -57,11 +159,16 @@ pub fn gateway_source_for_im(message: &ImInboundMessage) -> GatewaySource {
         raw_id,
         lifetime: GatewaySourceLifetime::Persistent,
         raw_identity: Some(json!({
+            "connectionId": message.identity.connection_id,
             "platform": message.identity.platform,
+            "domain": message.identity.domain,
             "workspaceId": message.identity.workspace_id,
+            "chatType": message.identity.chat_type,
             "chatId": message.identity.chat_id,
             "threadId": message.identity.thread_id,
             "userId": message.identity.user_id,
+            "operatorId": message.identity.operator_id,
+            "replyTo": message.identity.reply_to,
             "messageId": message.message_id,
             "taskKey": message.task_key,
         })),
@@ -201,11 +308,16 @@ mod tests {
     fn inbound(chat_id: &str, user_id: &str, task_key: Option<&str>) -> ImInboundMessage {
         ImInboundMessage {
             identity: ImIdentity {
+                connection_id: None,
                 platform: "Fake Chat".to_string(),
+                domain: Some("fake".to_string()),
                 workspace_id: Some("team-raw".to_string()),
+                chat_type: Some("group".to_string()),
                 chat_id: chat_id.to_string(),
                 thread_id: Some("thread-raw".to_string()),
                 user_id: Some(user_id.to_string()),
+                operator_id: None,
+                reply_to: None,
             },
             message_id: "message-raw".to_string(),
             text: "hello".to_string(),
@@ -253,5 +365,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(adapter.sent().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn channel_gateway_filters_inbound_fail_closed_and_stamps_connection() {
+        let adapter = FakeImAdapter::new("telegram");
+        let allowed = inbound("chat", "allowed-user", None);
+        let denied = inbound("chat", "denied-user", None);
+        adapter.push(allowed.clone());
+        adapter.push(denied);
+        let gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+            "release",
+            Arc::new(adapter),
+            ChannelAllowlist::new(["allowed-user".to_string()], Vec::<String>::new()),
+        )]);
+
+        let messages = gateway.poll_once().await.unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(
+            messages[0].identity.connection_id.as_deref(),
+            Some("release")
+        );
+        assert_eq!(
+            messages[0].identity.user_id.as_deref(),
+            Some("allowed-user")
+        );
+        let source = gateway_source_for_im(&messages[0]);
+        assert!(!source.source_key().0.contains("allowed-user"));
+    }
+
+    #[tokio::test]
+    async fn channel_gateway_routes_outbound_by_connection() {
+        let release = FakeImAdapter::new("telegram");
+        let alerts = FakeImAdapter::new("lark");
+        let gateway = ChannelGateway::new(vec![
+            ChannelAdapterBinding::new(
+                "release",
+                Arc::new(release.clone()),
+                ChannelAllowlist::new(Vec::<String>::new(), ["chat".to_string()]),
+            ),
+            ChannelAdapterBinding::new(
+                "alerts",
+                Arc::new(alerts.clone()),
+                ChannelAllowlist::new(Vec::<String>::new(), ["chat".to_string()]),
+            ),
+        ]);
+        let mut message = inbound("chat", "user", None);
+        message.identity.connection_id = Some("alerts".to_string());
+
+        gateway
+            .send(ImOutboundMessage {
+                identity: message.identity,
+                thread_id: "thread".to_string(),
+                text: "done".to_string(),
+            })
+            .await
+            .unwrap();
+
+        assert!(release.sent().is_empty());
+        assert_eq!(alerts.sent().len(), 1);
     }
 }

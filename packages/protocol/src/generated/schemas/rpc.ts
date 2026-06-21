@@ -28,6 +28,12 @@ import { clientRequestBackendListSchema } from './rpc/client-request/backend-lis
 import { clientRequestBackendDoctorSchema } from './rpc/client-request/backend-doctor';
 import { clientRequestBackendWriteSchema } from './rpc/client-request/backend-write';
 import { clientRequestBackendDeleteSchema } from './rpc/client-request/backend-delete';
+import { clientRequestChannelListSchema } from './rpc/client-request/channel-list';
+import { clientRequestChannelShowSchema } from './rpc/client-request/channel-show';
+import { clientRequestChannelEnableSchema } from './rpc/client-request/channel-enable';
+import { clientRequestChannelDoctorSchema } from './rpc/client-request/channel-doctor';
+import { clientRequestChannelWechatQrStartSchema } from './rpc/client-request/channel-wechat-qr-start';
+import { clientRequestChannelWechatQrPollSchema } from './rpc/client-request/channel-wechat-qr-poll';
 import { clientRequestShellStartSchema } from './rpc/client-request/shell-start';
 import { clientRequestTerminalStartSchema } from './rpc/client-request/terminal-start';
 import { clientRequestTerminalWriteSchema } from './rpc/client-request/terminal-write';
@@ -333,6 +339,24 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/backend-delete.json"
     },
     {
+      "$ref": "ClientRequest/channel-list.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-show.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-enable.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-doctor.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-wechat-qr-start.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-wechat-qr-poll.json"
+    },
+    {
       "$ref": "ClientRequest/shell-start.json"
     },
     {
@@ -453,6 +477,12 @@ export const rpcSchemaRefs = [
   clientRequestBackendDoctorSchema,
   clientRequestBackendWriteSchema,
   clientRequestBackendDeleteSchema,
+  clientRequestChannelListSchema,
+  clientRequestChannelShowSchema,
+  clientRequestChannelEnableSchema,
+  clientRequestChannelDoctorSchema,
+  clientRequestChannelWechatQrStartSchema,
+  clientRequestChannelWechatQrPollSchema,
   clientRequestShellStartSchema,
   clientRequestTerminalStartSchema,
   clientRequestTerminalWriteSchema,

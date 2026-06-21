@@ -361,9 +361,11 @@ fn settings_read_value(
 ) -> psychevo_runtime::Result<Value> {
     let controls = workbench_controls_value(state, workdir, thread_id)?;
     let project = workbench_project_value(workdir);
+    let channels = channel_list_result_for_workdir(state, workdir).unwrap_or_default();
     Ok(json!({
         "workdir": workdir,
         "project": project,
+        "channels": channels,
         "memoryResources": {"mode": "status_only", "available": true},
         "secrets": {"frontendPersistence": "disabled"},
         "controls": controls

@@ -10,6 +10,7 @@ import { gatewayAgentRunSchemas } from './gateway/agents/runs';
 import { gatewayBackendConfigSchemas } from './gateway/backend/config';
 import { gatewayBackendCoreSchemas } from './gateway/backend/core';
 import { gatewayBackendDoctorSchemas } from './gateway/backend/doctor';
+import { gatewayChannelSchemas } from './gateway/channels';
 import { gatewayCoreSchemas } from './gateway/core';
 import { gatewayEventSchemas } from './gateway/events';
 import { interactionSchemas } from './interaction';
@@ -119,6 +120,23 @@ export const gatewaySchemas = {
   BackendDoctorResult: gatewayBackendDoctorSchemas.BackendDoctorResult,
   BackendWriteResult: gatewayBackendConfigSchemas.BackendWriteResult,
   BackendDeleteResult: gatewayBackendConfigSchemas.BackendDeleteResult,
+  ChannelListParams: gatewayChannelSchemas.ChannelListParams,
+  ChannelIdParams: gatewayChannelSchemas.ChannelIdParams,
+  ChannelEnableParams: gatewayChannelSchemas.ChannelEnableParams,
+  ChannelDoctorParams: gatewayChannelSchemas.ChannelDoctorParams,
+  ChannelWechatQrStartParams: gatewayChannelSchemas.ChannelWechatQrStartParams,
+  ChannelWechatQrStartResult: gatewayChannelSchemas.ChannelWechatQrStartResult,
+  ChannelWechatQrPollParams: gatewayChannelSchemas.ChannelWechatQrPollParams,
+  ChannelWechatQrPollResult: gatewayChannelSchemas.ChannelWechatQrPollResult,
+  ChannelCredentialView: gatewayChannelSchemas.ChannelCredentialView,
+  ChannelAllowlistView: gatewayChannelSchemas.ChannelAllowlistView,
+  ChannelConfigView: gatewayChannelSchemas.ChannelConfigView,
+  ChannelRunnerView: gatewayChannelSchemas.ChannelRunnerView,
+  ChannelListResult: gatewayChannelSchemas.ChannelListResult,
+  ChannelEnableResult: gatewayChannelSchemas.ChannelEnableResult,
+  ChannelDoctorCheck: gatewayChannelSchemas.ChannelDoctorCheck,
+  ChannelDoctorChannelView: gatewayChannelSchemas.ChannelDoctorChannelView,
+  ChannelDoctorResult: gatewayChannelSchemas.ChannelDoctorResult,
   ShellStartParams: shellSchemas.ShellStartParams,
   ShellStartResult: shellSchemas.ShellStartResult,
   TerminalStartParams: systemSchemas.TerminalStartParams,

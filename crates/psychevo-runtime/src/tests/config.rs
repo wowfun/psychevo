@@ -9,3 +9,7 @@ pub use providers::*;
 mod resolution;
 #[allow(unused_imports)]
 pub use resolution::*;
+#[path = "config/channels.rs"]
+mod channels;
+#[allow(unused_imports)]
+pub use channels::*;

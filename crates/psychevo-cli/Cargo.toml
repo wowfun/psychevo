@@ -20,6 +20,7 @@ psychevo-acp = { path = "../psychevo-acp" }
 psychevo-gateway = { path = "../psychevo-gateway" }
 psychevo-runtime = { path = "../psychevo-runtime" }
 pulldown-cmark.workspace = true
+qrcode.workspace = true
 ratatui.workspace = true
 ratatui-textarea.workspace = true
 regex-lite.workspace = true

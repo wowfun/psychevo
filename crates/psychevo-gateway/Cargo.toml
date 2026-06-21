@@ -9,11 +9,14 @@ license.workspace = true
 axum.workspace = true
 agent-client-protocol.workspace = true
 base64.workspace = true
+feishu-sdk.workspace = true
 futures.workspace = true
 http.workspace = true
 portable-pty.workspace = true
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
 psychevo-runtime = { path = "../psychevo-runtime" }
+qrcode.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

@@ -42,8 +42,8 @@ use psychevo_runtime::{
     list_skill_bundles, load_agent_backend_configs, main_agent_default_metadata,
     main_agent_from_session_metadata, main_agent_metadata, redo_session, remove_config_value,
     render_session_export, resolve_agent_definition, selected_configured_model,
-    session_usage_summary, set_config_value, side_conversation_boundary_prompt, undo_session,
-    usage_read, valid_agent_name,
+    session_usage_summary, set_channel_enabled, set_config_value,
+    side_conversation_boundary_prompt, undo_session, usage_read, valid_agent_name,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -62,6 +62,8 @@ use crate::{
 use crate::{GatewayTurn, GatewayTurnError, GatewayTurnStatus};
 
 mod agents;
+mod channel_runtime;
+mod channels;
 mod commands;
 mod completion;
 mod terminal;
@@ -71,6 +73,11 @@ use agents::{
     agent_list_result, agent_read_result, agent_status_result, backend_doctor_value,
     backend_values_for_scope, delete_backend_config, delete_project_agent_definition,
     write_backend_config, write_project_agent_definition,
+};
+use channels::{
+    channel_doctor_result_live, channel_enable_result, channel_list_result_for_scope,
+    channel_list_result_for_workdir, channel_show_result, channel_wechat_qr_poll_result,
+    channel_wechat_qr_start_result,
 };
 use commands::{
     command_completion_detail, command_execute_value, command_list_value,
