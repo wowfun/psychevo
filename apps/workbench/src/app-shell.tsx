@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { FolderPlus, Pin, Settings, X } from "lucide-react";
-import type { SessionSummary } from "@psychevo/protocol";
+import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, SessionSummary } from "@psychevo/protocol";
 import { SearchPage } from "./search";
 import { SettingsPage } from "./settings-panels";
 import { shortSessionId } from "./session-utils";
@@ -11,6 +11,8 @@ import type {
   SettingsSection,
   WorkbenchBackend,
   WorkbenchBackendDoctor,
+  WorkbenchChannel,
+  WorkbenchChannelDoctor,
   WorkbenchUsageStats
 } from "./types";
 
@@ -152,6 +154,8 @@ export function MainSurface({
   backendDraft,
   backendDoctor,
   backends,
+  channelDoctor,
+  channels,
   debugEnabled,
   disabled,
   loadThreadSearchText,
@@ -162,17 +166,22 @@ export function MainSurface({
   onDebugChange,
   onDeleteArchivedSession,
   onDeleteBackend,
+  onDoctorChannel,
+  onDoctorChannels,
   onDoctorBackend,
   onEditBackend,
   onMainViewChange,
   onNewBackend,
   onOpenSession,
+  onPollWechatQrSetup,
   onRestoreArchivedSession,
   onRefreshUsageStats,
   onSaveBackendDraft,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
+  onSetChannelEnabled,
   onSettingsSectionChange,
+  onStartWechatQrSetup,
   settingsSection,
   usageStats,
   usageStatsError,
@@ -186,6 +195,8 @@ export function MainSurface({
   backendDraft: BackendDraft | null;
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
+  channelDoctor: Record<string, WorkbenchChannelDoctor>;
+  channels: WorkbenchChannel[];
   debugEnabled: boolean;
   disabled: boolean;
   loadThreadSearchText(threadId: string): Promise<string>;
@@ -196,17 +207,22 @@ export function MainSurface({
   onDebugChange(value: boolean): void;
   onDeleteArchivedSession(threadId: string): void;
   onDeleteBackend(backend: WorkbenchBackend): void;
+  onDoctorChannel(channel: WorkbenchChannel): void;
+  onDoctorChannels(): void;
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
   onMainViewChange(value: MainView): void;
   onNewBackend(): void;
   onOpenSession(threadId: string): void;
+  onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRestoreArchivedSession(threadId: string): void;
   onRefreshUsageStats(): void;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
+  onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onSettingsSectionChange(value: SettingsSection): void;
+  onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
   settingsSection: SettingsSection;
   usageStats: WorkbenchUsageStats | null;
   usageStatsError: string | null;
@@ -226,6 +242,8 @@ export function MainSurface({
         backendDraft={backendDraft}
         backendDoctor={backendDoctor}
         backends={backends}
+        channelDoctor={channelDoctor}
+        channels={channels}
         debugEnabled={debugEnabled}
         disabled={disabled}
         section={settingsSection}
@@ -238,16 +256,21 @@ export function MainSurface({
         onDebugChange={onDebugChange}
         onDeleteArchivedSession={onDeleteArchivedSession}
         onDeleteBackend={onDeleteBackend}
+        onDoctorChannel={onDoctorChannel}
+        onDoctorChannels={onDoctorChannels}
         onDoctorBackend={onDoctorBackend}
         onEditBackend={onEditBackend}
         onNewBackend={onNewBackend}
         onOpenTranscript={() => onMainViewChange("transcript")}
+        onPollWechatQrSetup={onPollWechatQrSetup}
         onRefreshUsageStats={onRefreshUsageStats}
         onRestoreArchivedSession={onRestoreArchivedSession}
         onSaveBackendDraft={onSaveBackendDraft}
         onSectionChange={onSettingsSectionChange}
         onSetBackendEnabled={onSetBackendEnabled}
         onSetBackendEntrypoints={onSetBackendEntrypoints}
+        onSetChannelEnabled={onSetChannelEnabled}
+        onStartWechatQrSetup={onStartWechatQrSetup}
         workdir={workdir}
       />
     );

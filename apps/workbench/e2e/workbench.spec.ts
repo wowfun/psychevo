@@ -170,7 +170,7 @@ test.describe("pevo Web Workbench", () => {
         }
       await page.getByRole("button", { name: "Settings" }).click();
 
-      const settings = page.getByRole("region", { name: "Settings" });
+      const settings = page.getByRole("region", { name: "Settings", exact: true });
       await expect(settings).toBeVisible();
       await expect(settings.locator(".centerPageTitle p")).toHaveCount(0);
       await expect(settings.getByRole("heading", { name: "Settings" })).toHaveCount(0);
@@ -260,6 +260,62 @@ test.describe("pevo Web Workbench", () => {
 
       await settings.getByRole("button", { name: "Back to app" }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("renders Channels settings with compact detail and QR-first setup", async ({ page, isMobile }, testInfo) => {
+    await page.setViewportSize(isMobile ? { width: 390, height: 900 } : { width: 1440, height: 1000 });
+    const server = await startPevoWeb({
+      live: false,
+      configAppend: CHANNELS_VISUAL_CONFIG,
+      envFile: CHANNELS_VISUAL_ENV
+    });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      }
+      await page.getByRole("button", { name: "Settings" }).click();
+      const settings = page.getByRole("region", { name: "Settings", exact: true });
+      await settings.getByRole("button", { name: "Channels" }).click();
+
+      const channels = settings.getByRole("region", { name: "Channels" });
+      await expect(channels.getByText("Connected Channels")).toBeVisible();
+      await expect(channels.getByText("WeChat · wechat · polling")).toBeVisible();
+      await expect(channels.getByText("ready")).toBeVisible();
+      await expect(channels.getByLabel("wechat status").getByText("Runner stopped")).toBeVisible();
+      await expect(channels.getByRole("switch", { name: "Disable wechat" })).toBeVisible();
+      await expect(channels.getByRole("button", { name: "All" })).toHaveCount(0);
+      await assertNoHorizontalOverflow(page, settings);
+      await expectControlsFitHorizontally(settings);
+      await captureChannelsWorkbench(page, testInfo, `settings-channels-list-${isMobile ? "mobile" : "desktop"}`);
+
+      await channels.getByRole("button", { name: "Settings wechat" }).click();
+      const detail = settings.getByRole("region", { name: "Channel settings" });
+      await expect(detail.getByText("Config", { exact: true })).toBeVisible();
+      await expect(detail.getByText("Runner", { exact: true })).toBeVisible();
+      await expect(detail.getByText("Credential", { exact: true })).toBeVisible();
+      await expect(detail.getByText("Allowlist", { exact: true })).toBeVisible();
+      await expect(detail.getByText("Runtime defaults", { exact: true })).toBeVisible();
+      await detail.getByRole("button", { name: "Test wechat" }).click();
+      await expect(detail.getByLabel("wechat doctor checks")).toContainText("credential");
+      await expect(detail.getByLabel("wechat doctor checks")).toContainText("allowlist");
+      await assertNoHorizontalOverflow(page, settings);
+      await expectControlsFitHorizontally(settings);
+      await captureChannelsWorkbench(page, testInfo, `settings-channel-detail-${isMobile ? "mobile" : "desktop"}`);
+
+      await detail.getByRole("button", { name: "Back to Channels" }).click();
+      const listAgain = settings.getByRole("region", { name: "Channels" });
+      await listAgain.getByRole("tab", { name: "WeChat" }).click();
+      await expect(listAgain.getByText("WeChat connected")).toBeVisible();
+      await expect(listAgain.getByRole("button", { name: "Reconnect QR" })).toBeVisible();
+      await assertNoHorizontalOverflow(page, settings);
+      await expectControlsFitHorizontally(settings);
+      await listAgain.getByText("WeChat connected").scrollIntoViewIfNeeded();
+      await captureChannelsWorkbench(page, testInfo, `settings-channel-wechat-setup-${isMobile ? "mobile" : "desktop"}`);
     } finally {
       await server.stop();
     }
@@ -432,6 +488,35 @@ test.describe("pevo Web Workbench", () => {
 });
 
 const LIVE_TRANSLATE_SUBAGENT_PROMPT = "使用 translate agent 并发演示简单的中译英和英译中";
+const CHANNELS_VISUAL_CONFIG = `
+
+[[channels.connections]]
+id = "wechat"
+channel = "wechat"
+enabled = true
+label = "WeChat"
+transport = "polling"
+model = "lmstudio/noop"
+credential_env = "WECHAT_BOT_TOKEN"
+account_env = "WECHAT_ACCOUNT_ID"
+allow_users = ["wx-user"]
+
+[[channels.connections]]
+id = "ops-lark"
+channel = "lark"
+enabled = false
+label = "Ops Lark"
+transport = "long_connection"
+credential_env = "LARK_APP_SECRET"
+app_id_env = "LARK_APP_ID"
+allow_groups = []
+`;
+const CHANNELS_VISUAL_ENV = [
+  "WECHAT_BOT_TOKEN=test-wechat-token",
+  "WECHAT_ACCOUNT_ID=test-wechat-account",
+  "LARK_APP_ID=test-lark-app"
+].join("\n");
+const CHANNELS_SCREENSHOT_DIR = path.join(repoRoot, ".local/playwright/screenshots/channels");
 
 function ensureLiveSubagentWorkdir(): string {
   const workdir = process.env.PSYCHEVO_PLAYWRIGHT_LIVE_SUBAGENT_WORKDIR
@@ -499,6 +584,16 @@ async function captureWorkbench(page: Page, testInfo: TestInfo, label: string) {
   await page.screenshot({
     fullPage: true,
     path: testInfo.outputPath(`${label}-${testInfo.project.name}.png`)
+  });
+}
+
+async function captureChannelsWorkbench(page: Page, testInfo: TestInfo, label: string) {
+  await captureWorkbench(page, testInfo, label);
+  mkdirSync(CHANNELS_SCREENSHOT_DIR, { recursive: true });
+  await page.screenshot({
+    fullPage: true,
+    scale: "css",
+    path: path.join(CHANNELS_SCREENSHOT_DIR, `${label}.png`)
   });
 }
 

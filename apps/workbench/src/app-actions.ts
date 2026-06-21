@@ -12,6 +12,8 @@ import {
   WorkspaceDiffResultSchema,
   WorkspaceFileReadResultSchema,
   WorkspaceFileWriteResultSchema,
+  type ChannelWechatQrPollResult,
+  type ChannelWechatQrStartResult,
   type ContextReadResult,
   type GatewayInputPart,
   type GatewayMention,
@@ -45,7 +47,9 @@ import type {
   RightWorkspaceTabKind,
   TraceState,
   WorkbenchBackend,
-  WorkbenchBackendDoctor
+  WorkbenchBackendDoctor,
+  WorkbenchChannel,
+  WorkbenchChannelDoctor
 } from "./types";
 import {
   createHistoryDraftSession,
@@ -110,6 +114,7 @@ type AppActionsParams = {
   setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
   setBackendDoctor: Dispatch<SetStateAction<Record<string, WorkbenchBackendDoctor>>>;
   setBackendDraft: Dispatch<SetStateAction<BackendDraft | null>>;
+  setChannelDoctor: Dispatch<SetStateAction<Record<string, WorkbenchChannelDoctor>>>;
   setCommandFeedback: Dispatch<SetStateAction<CommandFeedback>>;
   setContextUsage: Dispatch<SetStateAction<ContextReadResult | null>>;
   setDraftSession: Dispatch<SetStateAction<ReturnType<typeof createHistoryDraftSession> | null>>;
@@ -132,6 +137,14 @@ type AppActionsParams = {
   setWorkMode: Dispatch<SetStateAction<string>>;
   updateMainView(value: "transcript" | "search" | "settings"): void;
 };
+
+function upsertChannel(channels: WorkbenchChannel[], channel: WorkbenchChannel): WorkbenchChannel[] {
+  const index = channels.findIndex((item) => item.id === channel.id);
+  if (index === -1) {
+    return [...channels, channel];
+  }
+  return channels.map((item) => (item.id === channel.id ? channel : item));
+}
 
 export function createAppActions(params: AppActionsParams) {
   function scope(): GatewayRequestScope {
@@ -478,6 +491,97 @@ export function createAppActions(params: AppActionsParams) {
     }));
   }
 
+  async function setChannelEnabled(channel: WorkbenchChannel, enabled: boolean) {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const result = await params.client.request("channel/enable", {
+      scope: scope(),
+      id: channel.id,
+      enabled
+    });
+    params.setSettings((current) => current
+      ? {
+          ...current,
+          channels: {
+            channels: current.channels.channels.map((item) => (
+              item.id === result.channel.id ? result.channel : item
+            ))
+          }
+        }
+      : current);
+  }
+
+  async function doctorChannel(channel: WorkbenchChannel) {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const result = await params.client.request("channel/doctor", {
+      scope: scope(),
+      id: channel.id,
+      live: false
+    });
+    const checked = result.channels.find((item) => item.id === channel.id);
+    if (checked) {
+      params.setChannelDoctor((current) => ({
+        ...current,
+        [channel.id]: checked
+      }));
+    }
+  }
+
+  async function doctorChannels() {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const result = await params.client.request("channel/doctor", {
+      scope: scope(),
+      id: null,
+      live: false
+    });
+    params.setChannelDoctor((current) => {
+      const next = { ...current };
+      for (const channel of result.channels) {
+        next[channel.id] = channel;
+      }
+      return next;
+    });
+  }
+
+  async function startWechatQrSetup(): Promise<ChannelWechatQrStartResult> {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    return await params.client.request("channel/wechat-qr/start", {
+      scope: scope(),
+      id: "wechat",
+      label: "WeChat"
+    });
+  }
+
+  async function pollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult> {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const result = await params.client.request("channel/wechat-qr/poll", {
+      scope: scope(),
+      sessionId,
+      enable: true
+    });
+    const channel = result.channel;
+    if (channel) {
+      params.setSettings((current) => current
+        ? {
+            ...current,
+            channels: {
+              channels: upsertChannel(current.channels.channels, channel)
+            }
+          }
+        : current);
+    }
+    return result;
+  }
+
   async function restoreArchivedSession(threadId: string) {
     if (!params.client) {
       return;
@@ -503,7 +607,9 @@ export function createAppActions(params: AppActionsParams) {
     createWorkspace,
     deleteArchivedSession,
     deleteBackend,
+    doctorChannel,
     doctorBackend,
+    doctorChannels,
     handleAttachment,
     loadThreadSearchText,
     openDiffPreview,
@@ -512,9 +618,12 @@ export function createAppActions(params: AppActionsParams) {
     restoreArchivedSession,
     saveBackendDraft,
     saveFileFromEditor,
+    pollWechatQrSetup,
+    startWechatQrSetup,
     startNewThread,
     startShell,
     submitTurn,
-    updateBackendDraftFields
+    updateBackendDraftFields,
+    setChannelEnabled
   };
 }

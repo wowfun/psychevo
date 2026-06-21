@@ -17,10 +17,14 @@ export interface PevoWebServer {
 }
 
 export async function startPevoWeb({
+  configAppend,
+  envFile,
   live,
   model,
   workdir
 }: {
+  configAppend?: string;
+  envFile?: string;
   live: boolean;
   model?: string;
   workdir?: string;
@@ -40,7 +44,10 @@ export async function startPevoWeb({
     ? process.env.PSYCHEVO_CONFIG ?? path.join(homedir(), ".psychevo/config.toml")
     : path.join(root, "config.toml");
   if (!live) {
-    writeFileSync(configPath, `model = "${model ?? "lmstudio/noop"}"\n`);
+    writeFileSync(configPath, `model = "${model ?? "lmstudio/noop"}"\n${configAppend ?? ""}`);
+    if (envFile) {
+      writeFileSync(path.join(root, ".env"), envFile);
+    }
   }
   if (live && !existsSync(configPath)) {
     throw new Error(`live config not found: ${configPath}`);
@@ -51,11 +58,12 @@ export async function startPevoWeb({
   const child = spawnPevoWeb({
     configPath,
     dbPath,
+    live,
     staticDir,
     workdir: resolvedWorkdir,
     home
   });
-  const env = gatewayEnv(configPath, dbPath, home);
+  const env = gatewayEnv(configPath, dbPath, home, live);
   const url = modelUrl(
     await waitForServerUrl(child),
     live ? process.env.PSYCHEVO_PLAYWRIGHT_MODEL : undefined
@@ -116,6 +124,7 @@ function spawnPevoWeb(options: {
   configPath: string;
   dbPath: string;
   home: string;
+  live: boolean;
   staticDir: string;
   workdir: string;
 }): ChildProcessWithoutNullStreams {
@@ -145,7 +154,7 @@ function spawnPevoWeb(options: {
 
   return spawn(command, args, {
     cwd: repoRoot,
-    env: gatewayEnv(options.configPath, options.dbPath, options.home),
+    env: gatewayEnv(options.configPath, options.dbPath, options.home, options.live),
     stdio: ["ignore", "pipe", "pipe"]
   });
 }
@@ -183,12 +192,13 @@ function waitForServerUrl(child: ChildProcessWithoutNullStreams): Promise<string
   });
 }
 
-function gatewayEnv(configPath: string, dbPath: string, home: string): NodeJS.ProcessEnv {
+function gatewayEnv(configPath: string, dbPath: string, home: string, live: boolean): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PSYCHEVO_CONFIG: configPath,
     PSYCHEVO_DB: dbPath,
-    PSYCHEVO_HOME: home
+    PSYCHEVO_HOME: home,
+    PSYCHEVO_CHANNEL_RUNTIME: process.env.PSYCHEVO_CHANNEL_RUNTIME ?? (live ? "on" : "off")
   };
 }
 

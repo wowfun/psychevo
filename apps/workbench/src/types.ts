@@ -1,5 +1,7 @@
 import type {
   ContextReadResult,
+  ChannelConfigView,
+  ChannelDoctorChannelView,
   GatewayEvent,
   GatewayInputPart,
   SessionUsageSummaryView,
@@ -54,6 +56,9 @@ export type WorkbenchBackendDoctor = {
   checks: Array<{ name: string; ok: boolean; message: string; path: string | null }>;
 };
 
+export type WorkbenchChannel = ChannelConfigView;
+export type WorkbenchChannelDoctor = ChannelDoctorChannelView;
+
 export type BackendDraft = {
   id: string;
   enabled: boolean;
@@ -102,7 +107,7 @@ export type RightWorkspaceTab = {
 };
 
 export type MainView = "transcript" | "search" | "settings";
-export type SettingsSection = "appearance" | "usage" | "debug" | "agents" | "archived";
+export type SettingsSection = "appearance" | "usage" | "debug" | "agents" | "channels" | "archived";
 export type WorkbenchUsageStats = UsageReadResult;
 export type Appearance = "dark" | "light" | "warm";
 export type CommandOverlay = "commands";

@@ -169,6 +169,7 @@ import type {
   WorkbenchAgent,
   WorkbenchBackend,
   WorkbenchBackendDoctor,
+  WorkbenchChannelDoctor,
   WorkbenchCommand,
   WorkbenchDiagnostic,
   WorkbenchPrefs
@@ -250,6 +251,7 @@ export function App() {
   const [backends, setBackends] = useState<WorkbenchBackend[]>([]);
   const [backendDraft, setBackendDraft] = useState<BackendDraft | null>(null);
   const [backendDoctor, setBackendDoctor] = useState<Record<string, WorkbenchBackendDoctor>>({});
+  const [channelDoctor, setChannelDoctor] = useState<Record<string, WorkbenchChannelDoctor>>({});
   const [commands, setCommands] = useState<WorkbenchCommand[]>([]);
   const [rightTabs, setRightTabs] = useState<RightWorkspaceTab[]>([]);
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null);
@@ -788,7 +790,9 @@ export function App() {
     createWorkspace,
     deleteArchivedSession,
     deleteBackend,
+    doctorChannel,
     doctorBackend,
+    doctorChannels,
     handleAttachment,
     loadThreadSearchText,
     openDiffPreview,
@@ -797,10 +801,13 @@ export function App() {
     restoreArchivedSession,
     saveBackendDraft,
     saveFileFromEditor,
+    pollWechatQrSetup,
+    startWechatQrSetup,
     startNewThread,
     startShell,
     submitTurn,
-    updateBackendDraftFields
+    updateBackendDraftFields,
+    setChannelEnabled
   } = createAppActions({
     activeScope,
     attachments,
@@ -838,6 +845,7 @@ export function App() {
     setAttachments,
     setBackendDoctor,
     setBackendDraft,
+    setChannelDoctor,
     setCommandFeedback,
     setContextUsage,
     setDraftSession,
@@ -963,22 +971,22 @@ export function App() {
     acceptWorkspaceChange, activeCommandOverlay, activeRightTab, activeRightTabId, activeScope, activeWorkbenchWorkdir,
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch,
     beginRightResize, changeAgentSelection, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
-    commands, composerDraftPatch, contextUsage, controls, copyTranscriptText, createWorkspace, currentThreadId,
-    debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, disabled, doctorBackend, endpoint, error,
+    channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyTranscriptText, createWorkspace, currentThreadId,
+    debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, extraRuntimeModeValues, handleAttachment, host, init, latestGatewayEvent, leftCollapsed, loadThreadSearchText,
     loadingOlderWorkdir, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
-    pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable,
+    pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable, pollWechatQrSetup,
     refreshAgentSurface, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
     restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runnableAgents, runAction,
     runCommandAlternateAction, running, runtimeAcceptsAgentPersona, runtimeBackends, runtimeModeOption,
     runtimeModeUnavailable, runtimeOptionsError, saveBackendDraft, saveFileFromEditor, selectedAgentName, selectedModel,
     selectedRuntimeMode, selectedRuntimeRef, selectedVariant, modelReady, modelTurnBlockReason, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
-    setAttachments, setBackendDraft, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
+    setAttachments, setBackendDraft, setChannelEnabled, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
     setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
     setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel, setSelectedRuntimeMode, setSelectedRuntimeRef,
     setSelectedVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, settings, settingsSection,
     usageStats, usageStatsError, usageStatsLoading, refreshUsageStats,
-    clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
+    clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, startWechatQrSetup, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
     togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateMainView, viewEpochRef, workMode,
     workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;

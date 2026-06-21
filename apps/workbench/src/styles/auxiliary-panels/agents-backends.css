@@ -465,3 +465,664 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.channelSettingsToolbar {
+  align-items: center;
+}
+
+.channelToolbarActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agentSurfaceHeaderWithAction .channelToolbarActions button {
+  width: auto;
+  min-width: 0;
+  gap: 5px;
+  padding: 0 8px;
+}
+
+.agentSurfaceHeaderWithAction .channelToolbarActions button span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.channelSurfaceList {
+  gap: 7px;
+}
+
+.channelSurfaceRow {
+  align-items: start;
+}
+
+.channelRowMain {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.channelIdentityLine {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.channelIdentityLine strong {
+  min-width: 0;
+}
+
+.channelInlineStates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.channelInlineStates small {
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 45%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
+  border-radius: var(--pevo-radius-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelStatusPill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 35%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
+  border-radius: 999px;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+}
+
+.channelStatusPill.is-ready,
+.channelStatusPill.is-ok {
+  color: var(--pevo-success, var(--pevo-accent));
+  border-color: color-mix(in oklch, var(--pevo-success, var(--pevo-accent)), transparent 45%);
+}
+
+.channelStatusPill.is-blocked,
+.channelStatusPill.is-danger {
+  color: var(--pevo-danger);
+  border-color: color-mix(in oklch, var(--pevo-danger), transparent 45%);
+}
+
+.channelStatusPill.is-needs_qr_login,
+.channelStatusPill.is-needs_account,
+.channelStatusPill.is-needs_allow_user,
+.channelStatusPill.is-group_limited,
+.channelStatusPill.is-warning {
+  color: var(--pevo-warning, var(--pevo-danger));
+  border-color: color-mix(in oklch, var(--pevo-warning, var(--pevo-danger)), transparent 45%);
+}
+
+.channelAddSection,
+.channelDetailPage {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.channelAddSection {
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 52%);
+}
+
+.channelAddSection header {
+  color: var(--pevo-muted);
+}
+
+.channelPlatformPicker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+}
+
+.channelPlatformPicker button {
+  min-width: 0;
+  min-height: 30px;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelPlatformPicker button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 22%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.channelSetupCard {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 34%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-small);
+}
+
+.channelSetupCard strong {
+  color: var(--pevo-ink);
+}
+
+.channelSetupCardWechat {
+  grid-template-columns: 168px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+}
+
+.channelSetupCardConnected {
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.channelSetupCardPending {
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: color-mix(in oklch, var(--pevo-accent), transparent 92%);
+  border-color: color-mix(in oklch, var(--pevo-accent), transparent 52%);
+}
+
+.channelSetupCardPending .channelConnectedMark {
+  color: var(--pevo-accent);
+  background: color-mix(in oklch, var(--pevo-accent), transparent 88%);
+  border-color: color-mix(in oklch, var(--pevo-accent), transparent 48%);
+}
+
+.channelSetupCardReconnect {
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: color-mix(in oklch, var(--pevo-warning, #f59e0b), transparent 91%);
+  border-color: color-mix(in oklch, var(--pevo-warning, #f59e0b), transparent 50%);
+}
+
+.channelSetupCardReconnect .channelConnectedMark {
+  color: var(--pevo-warning, #f59e0b);
+  background: color-mix(in oklch, var(--pevo-warning, #f59e0b), transparent 88%);
+  border-color: color-mix(in oklch, var(--pevo-warning, #f59e0b), transparent 48%);
+}
+
+.channelConnectedMark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  color: var(--pevo-success, var(--pevo-accent));
+  background: color-mix(in oklch, var(--pevo-success, var(--pevo-accent)), transparent 88%);
+  border: 1px solid color-mix(in oklch, var(--pevo-success, var(--pevo-accent)), transparent 52%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelWechatQrBox {
+  display: grid;
+  place-items: center;
+  width: 168px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 10%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 38%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelWechatQrSvg,
+.channelWechatQrSvg svg,
+.channelWechatQrImage {
+  display: block;
+  width: min(142px, 100%);
+  height: min(142px, 100%);
+}
+
+.channelWechatQrImage {
+  object-fit: contain;
+  background: white;
+}
+
+.channelQrPlaceholder {
+  display: grid;
+  grid-template-columns: repeat(2, 18px);
+  gap: 7px;
+  opacity: 0.65;
+}
+
+.channelQrPlaceholder span {
+  width: 18px;
+  height: 18px;
+  border: 4px solid var(--pevo-muted);
+  border-radius: 5px;
+}
+
+.channelWechatSetupBody {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.channelWechatSetupBody > span,
+.channelWechatSetupBody small {
+  color: var(--pevo-muted);
+}
+
+.channelWechatTimer {
+  width: fit-content;
+  padding: 3px 7px;
+  color: var(--pevo-danger);
+  background: color-mix(in oklch, var(--pevo-danger), transparent 88%);
+  border: 1px solid color-mix(in oklch, var(--pevo-danger), transparent 62%);
+  border-radius: var(--pevo-radius-xs);
+  font-weight: 700;
+}
+
+.channelWechatActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.channelWechatActions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--pevo-accent-ink);
+  background: var(--pevo-accent);
+  border: 1px solid color-mix(in oklch, var(--pevo-accent), black 12%);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 700;
+}
+
+.channelWechatActions button + button {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border-color: var(--pevo-border);
+}
+
+.channelWechatActions button:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.channelWechatActions button:first-child:disabled {
+  color: color-mix(in oklch, var(--pevo-accent-ink), var(--pevo-muted) 12%);
+  background: color-mix(in oklch, var(--pevo-accent), var(--pevo-panel) 22%);
+  border-color: color-mix(in oklch, var(--pevo-accent), var(--pevo-border) 22%);
+}
+
+.channelWechatActions button + button:disabled {
+  color: color-mix(in oklch, var(--pevo-muted), var(--pevo-ink) 18%);
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-panel-muted) 28%);
+  border-color: color-mix(in oklch, var(--pevo-border), transparent 24%);
+}
+
+.channelSetupCard code {
+  display: block;
+  min-width: 0;
+  padding: 7px 8px;
+  overflow-x: auto;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: var(--pevo-font-size-xsmall);
+  white-space: nowrap;
+}
+
+.channelSetupFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.channelSetupFields span {
+  padding: 2px 6px;
+  color: var(--pevo-muted);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
+  border-radius: 999px;
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelDetailHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+.channelDetailHeader > button,
+.channelDetailActions button,
+.channelDangerRow button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+}
+
+.channelDetailHeader > button:hover,
+.channelDetailActions button:hover,
+.channelDangerRow button:hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 38%);
+}
+
+.channelDetailTitle {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.channelDetailTitle strong,
+.channelDetailTitle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelDetailTitle strong {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-session);
+}
+
+.channelDetailTitle span,
+.channelDetailSummaryItem span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelDetailActions,
+.channelDoctorResult {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settingsContent > .channelDetailPage {
+  align-self: start;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+}
+
+.channelDetailSummary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+.channelDetailSummaryItem {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 9px 10px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 52%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelDetailSummaryItem strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelDetailSummaryItem small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelDetailSummaryItem.is-ok {
+  border-color: color-mix(in oklch, var(--pevo-success, var(--pevo-accent)), var(--pevo-border) 62%);
+}
+
+.channelDetailSummaryItem.is-ok strong {
+  color: var(--pevo-success, var(--pevo-accent));
+}
+
+.channelDetailSummaryItem.is-warning {
+  border-color: color-mix(in oklch, var(--pevo-warning, var(--pevo-danger)), var(--pevo-border) 58%);
+}
+
+.channelDetailSummaryItem.is-warning strong {
+  color: var(--pevo-warning, var(--pevo-danger));
+}
+
+.channelDetailSummaryItem.is-danger {
+  border-color: color-mix(in oklch, var(--pevo-danger), var(--pevo-border) 58%);
+}
+
+.channelDetailSummaryItem.is-danger strong {
+  color: var(--pevo-danger);
+}
+
+.channelDoctorResult {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-content: stretch;
+  gap: 7px;
+}
+
+.channelDoctorCheck {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 42%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelDoctorCheck span,
+.channelDoctorCheck strong,
+.channelDoctorCheck small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelDoctorCheck span {
+  color: var(--pevo-muted);
+}
+
+.channelDoctorCheck strong {
+  color: var(--pevo-muted);
+}
+
+.channelDoctorCheck small {
+  grid-column: 1 / -1;
+  color: var(--pevo-muted);
+}
+
+.channelDoctorCheck.is-ok strong {
+  color: var(--pevo-success, var(--pevo-accent));
+}
+
+.channelDoctorCheck.is-warning strong {
+  color: var(--pevo-warning, var(--pevo-danger));
+}
+
+.channelDoctorCheck.is-danger strong {
+  color: var(--pevo-danger);
+}
+
+.channelDetailsGroups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.channelDetailGroup {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 56%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 38%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelDetailGroup:last-child {
+  grid-column: 1 / -1;
+}
+
+.channelDetailGroup summary {
+  min-height: 34px;
+  padding: 8px 10px;
+  cursor: pointer;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+  font-weight: 650;
+  list-style-position: inside;
+}
+
+.channelDetailGroup[open] summary {
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 52%);
+}
+
+.channelDetailGroup dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 9px 10px 10px;
+}
+
+.channelDetailGroup dl > div,
+.channelDangerRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.channelDetailGroup dt,
+.channelDetailGroup dd,
+.channelDangerRow span {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelDetailGroup dt {
+  color: var(--pevo-muted);
+}
+
+.channelDetailGroup dd,
+.channelDangerRow span {
+  color: var(--pevo-ink);
+}
+
+.channelDangerRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0;
+  padding: 9px 10px 10px;
+}
+
+.channelDangerRow button {
+  color: var(--pevo-danger);
+}
+
+@media (max-width: 620px) {
+  .channelSettingsToolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .channelSettingsToolbar > span {
+    width: 100%;
+  }
+
+  .channelToolbarActions,
+  .channelDetailActions {
+    justify-content: flex-start;
+  }
+
+  .channelSurfaceRow,
+  .channelSetupCardConnected,
+  .channelSetupCardPending,
+  .channelSetupCardReconnect,
+  .channelSetupCardWechat,
+  .channelDetailHeader,
+  .channelDetailSummary,
+  .channelDoctorResult,
+  .channelDetailsGroups,
+  .channelDetailGroup dl > div,
+  .channelDangerRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .channelWechatQrBox {
+    width: min(100%, 220px);
+  }
+
+  .channelPlatformPicker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

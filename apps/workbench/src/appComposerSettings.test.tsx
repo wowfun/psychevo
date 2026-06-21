@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   agentRecord,
@@ -42,6 +42,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(settingsRegion).getByRole("button", { name: "Usage" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Debug" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Agents" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Channels" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Dark" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Light" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Warm" })).toBeTruthy();
@@ -95,6 +96,206 @@ describe("Workbench settings and backend controls", () => {
 
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
     expect(await screen.findByRole("button", { name: "Agent" })).toBeTruthy();
+  });
+
+  it("shows Channels as Settings rows with switches and an independent detail page", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
+
+    const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    expect(within(channelsPanel).getByText("Connected Channels")).toBeTruthy();
+    expect(within(channelsPanel).queryByRole("button", { name: "All" })).toBeNull();
+    expect(within(channelsPanel).queryByRole("button", { name: "Enabled" })).toBeNull();
+    expect(within(channelsPanel).queryByRole("button", { name: "Needs setup" })).toBeNull();
+    expect(within(channelsPanel).getByText("Release Bot")).toBeTruthy();
+    expect(within(channelsPanel).getByText("ready")).toBeTruthy();
+    expect(within(channelsPanel).getByText("Credential present")).toBeTruthy();
+    expect(within(channelsPanel).getByText("Allowlist present")).toBeTruthy();
+
+    fireEvent.click(within(channelsPanel).getByRole("switch", { name: "Disable release" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "channel/enable",
+        params: expect.objectContaining({
+          id: "release",
+          enabled: false
+        })
+      });
+    });
+
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Test release" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "channel/doctor",
+        params: expect.objectContaining({ id: "release", live: false })
+      });
+    });
+
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Settings release" }));
+    const detailPage = await within(settingsRegion).findByRole("region", { name: "Channel settings" });
+    expect(within(detailPage).getByRole("button", { name: "Back to Channels" })).toBeTruthy();
+    expect(within(detailPage).getByText("Connection")).toBeTruthy();
+    expect(within(detailPage).getByText("Access control")).toBeTruthy();
+    expect(within(detailPage).getByText("Runtime settings")).toBeTruthy();
+    expect(within(detailPage).getByText("Danger zone")).toBeTruthy();
+    expect(within(detailPage).queryByText("Connected Channels")).toBeNull();
+
+    fireEvent.click(within(detailPage).getByRole("button", { name: "Back to Channels" }));
+    const listAgain = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(listAgain).getByRole("tab", { name: "Feishu" }));
+    expect(within(listAgain).getByText("FEISHU_APP_ID")).toBeTruthy();
+    fireEvent.click(within(listAgain).getByRole("tab", { name: "WeChat" }));
+    expect(within(listAgain).getByText("Generate a QR code, scan it with WeChat, then Psychevo saves the iLink token locally.")).toBeTruthy();
+
+    vi.useFakeTimers({ now: new Date("2026-06-22T00:00:00Z") });
+    try {
+      fireEvent.click(within(listAgain).getByRole("button", { name: "Generate QR" }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "channel/wechat-qr/start",
+        params: expect.objectContaining({ id: "wechat", label: "WeChat" })
+      });
+      const qrRegion = within(listAgain).getByLabelText("WeChat QR code");
+      const directQr = qrRegion.querySelector("img");
+      expect(directQr?.getAttribute("src")).toBe("data:image/png;base64,wechat-qr-image");
+      expect(within(listAgain).getByText("120s left")).toBeTruthy();
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(within(listAgain).getByText("119s left")).toBeTruthy();
+
+      fireEvent.click(within(listAgain).getByRole("button", { name: "Check status" }));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "channel/wechat-qr/poll",
+        params: expect.objectContaining({ sessionId: "wechat-session", enable: true })
+      });
+      expect(within(listAgain).getByText("WeChat polling is starting")).toBeTruthy();
+      expect(within(listAgain).getByText("WeChat credentials saved. Gateway is starting polling.")).toBeTruthy();
+      expect(within(listAgain).queryByText("WeChat QR session not found")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears stale WeChat QR sessions instead of leaving a scannable expired code", async () => {
+    gatewayMock.wechatQrPoll = () => {
+      throw new Error("WeChat QR session not found");
+    };
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
+    const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("tab", { name: "WeChat" }));
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Generate QR" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(within(channelsPanel).getByLabelText("WeChat QR code").querySelector("img")).toBeTruthy();
+
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Check status" }));
+    await waitFor(() => {
+      expect(within(channelsPanel).getByText(/expired, completed, or was created before the Gateway restarted/)).toBeTruthy();
+    });
+    expect(within(channelsPanel).getByLabelText("WeChat QR code").querySelector("img")).toBeNull();
+    expect(within(channelsPanel).queryByText(/s left/)).toBeNull();
+    expect((within(channelsPanel).getByRole("button", { name: "Check status" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(channelsPanel).getByRole("button", { name: "Generate again" })).toBeTruthy();
+  });
+
+  it("shows reconnect-first WeChat setup when the runner needs QR login", async () => {
+    gatewayMock.channelRecords = [
+      {
+        id: "wechat",
+        channel: "wechat",
+        domain: "wechat",
+        enabled: true,
+        label: "WeChat",
+        transport: "polling",
+        workdir: null,
+        model: null,
+        permissionMode: null,
+        requireMention: true,
+        credential: { env: "WECHAT_BOT_TOKEN", status: "present" },
+        allowlist: { users: ["wx-user"], groups: [], status: "present" },
+        runtimeStatus: "ready",
+        runner: {
+          state: "blocked",
+          reason: "needs_qr_login",
+          lastPollAtMs: null,
+          lastHealthyPollAtMs: null,
+          lastInboundAtMs: null,
+          lastOutboundAtMs: null,
+          lastIlinkErrcode: -14,
+          lastError: "WeChat iLink getupdates failed: needs_qr_login errcode=-14: session timeout"
+        }
+      }
+    ];
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
+    const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("tab", { name: "WeChat" }));
+
+    expect(within(channelsPanel).getByText("WeChat reconnect required")).toBeTruthy();
+    expect(within(channelsPanel).queryByText("WeChat connected")).toBeNull();
+    expect(within(channelsPanel).getByRole("button", { name: "Reconnect QR" })).toBeTruthy();
+    expect(within(channelsPanel).getByText("needs_qr_login")).toBeTruthy();
+  });
+
+  it("shows a neutral WeChat setup state while fresh QR polling is starting", async () => {
+    gatewayMock.channelRecords = [
+      {
+        id: "wechat",
+        channel: "wechat",
+        domain: "wechat",
+        enabled: true,
+        label: "WeChat",
+        transport: "polling",
+        workdir: null,
+        model: null,
+        permissionMode: null,
+        requireMention: true,
+        credential: { env: "WECHAT_BOT_TOKEN", status: "present" },
+        allowlist: { users: ["wx-user"], groups: [], status: "present" },
+        runtimeStatus: "ready",
+        runner: {
+          state: "running",
+          reason: "qr_login_pending",
+          lastPollAtMs: null,
+          lastHealthyPollAtMs: null,
+          lastInboundAtMs: null,
+          lastOutboundAtMs: null,
+          lastIlinkErrcode: -14,
+          lastError: null
+        }
+      }
+    ];
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
+    const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("tab", { name: "WeChat" }));
+
+    expect(within(channelsPanel).getByText("WeChat polling is starting")).toBeTruthy();
+    expect(within(channelsPanel).getByText("qr_login_pending")).toBeTruthy();
+    expect(within(channelsPanel).queryByText("WeChat connected")).toBeNull();
+    expect(within(channelsPanel).queryByText("WeChat reconnect required")).toBeNull();
   });
 
   it("shows archived sessions from Settings without turning the sidebar into an archive filter", async () => {

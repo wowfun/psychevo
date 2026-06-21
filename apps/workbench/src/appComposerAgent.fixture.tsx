@@ -48,6 +48,7 @@ const gatewayMock = vi.hoisted(() => {
     endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" } as { wsUrl: string; baseUrl: string } | null,
     observabilityRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     usageRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    wechatQrPoll: null as null | ((params: unknown) => unknown | Promise<unknown>),
     permissionRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     clarifyRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     openDownloadLog: [] as string[],
@@ -58,6 +59,58 @@ const gatewayMock = vi.hoisted(() => {
     archivedSessionSummaries: [] as Array<Record<string, unknown>>,
     agentRecords: [] as Array<Record<string, unknown>>,
     backendRecords: [] as Array<Record<string, unknown>>,
+    channelRecords: [
+      {
+        id: "release",
+        channel: "telegram",
+        domain: null,
+        enabled: true,
+        label: "Release Bot",
+        transport: "polling",
+        workdir: null,
+        model: "xiaomi/xiaomi-token-high",
+        permissionMode: null,
+        requireMention: true,
+        credential: { env: "TELEGRAM_BOT_TOKEN", status: "present" },
+        allowlist: { users: ["12345"], groups: [], status: "present" },
+        runtimeStatus: "ready",
+        runner: {
+          state: "running",
+          reason: "polling_empty",
+          lastPollAtMs: Date.now(),
+          lastHealthyPollAtMs: Date.now(),
+          lastInboundAtMs: null,
+          lastOutboundAtMs: null,
+          lastIlinkErrcode: null,
+          lastError: null
+        }
+      },
+      {
+        id: "ops-lark",
+        channel: "lark",
+        domain: "lark",
+        enabled: false,
+        label: "Ops Lark",
+        transport: "long_connection",
+        workdir: "/tmp/project",
+        model: null,
+        permissionMode: "default",
+        requireMention: true,
+        credential: { env: "LARK_APP_SECRET", status: "missing" },
+        allowlist: { users: [], groups: [], status: "missing" },
+        runtimeStatus: "disabled",
+        runner: {
+          state: "stopped",
+          reason: null,
+          lastPollAtMs: null,
+          lastHealthyPollAtMs: null,
+          lastInboundAtMs: null,
+          lastOutboundAtMs: null,
+          lastIlinkErrcode: null,
+          lastError: null
+        }
+      }
+    ] as Array<Record<string, unknown>>,
     scope,
     sessionSummaries: [] as Array<Record<string, unknown>>,
     model: "xiaomi/xiaomi-token-high" as string | null,
@@ -71,6 +124,7 @@ const gatewayMock = vi.hoisted(() => {
           displayPath: "/tmp/project",
           branch: gatewayMock.projectBranch
         },
+        channels: { channels: gatewayMock.channelRecords },
         memoryResources: { mode: "status_only", available: true },
         secrets: { frontendPersistence: "disabled" },
         controls: {
@@ -287,6 +341,124 @@ vi.mock("@psychevo/client", async () => {
             { name: "enabled", ok: true, message: "backend enabled", path: null },
             { name: "command", ok: true, message: "command resolved", path: "/usr/bin/opencode" }
           ]
+        };
+      }
+      if (method === "channel/list") {
+        return { channels: gatewayMock.channelRecords };
+      }
+      if (method === "channel/show") {
+        const record = params as { id?: string };
+        return {
+          channel: gatewayMock.channelRecords.find((channel) => channel.id === record.id) ?? gatewayMock.channelRecords[0]
+        };
+      }
+      if (method === "channel/enable") {
+        const record = params as { id?: string; enabled?: boolean };
+        gatewayMock.channelRecords = gatewayMock.channelRecords.map((channel) => {
+          if (channel.id !== record.id) {
+            return channel;
+          }
+          const enabled = record.enabled === true;
+          const blocked = channel.credential &&
+            typeof channel.credential === "object" &&
+            "status" in channel.credential &&
+            channel.credential.status !== "present";
+          return {
+            ...channel,
+            enabled,
+            runtimeStatus: enabled ? blocked ? "blocked" : "ready" : "disabled",
+            runner: {
+              ...(channel.runner as Record<string, unknown> | undefined),
+              state: enabled ? blocked ? "blocked" : "running" : "stopped",
+              reason: enabled ? blocked ? "blocked_allowlist" : "polling_empty" : null,
+              lastError: blocked ? "credential env is missing" : null
+            }
+          };
+        });
+        return {
+          channel: gatewayMock.channelRecords.find((channel) => channel.id === record.id) ?? gatewayMock.channelRecords[0]
+        };
+      }
+      if (method === "channel/doctor") {
+        const record = params as { id?: string | null } | undefined;
+        const selected = record?.id
+          ? gatewayMock.channelRecords.filter((channel) => channel.id === record.id)
+          : gatewayMock.channelRecords;
+        return {
+          live: false,
+          channels: selected.map((channel) => ({
+            id: channel.id,
+            channel: channel.channel,
+            enabled: channel.enabled,
+            runtimeStatus: channel.runtimeStatus,
+            runner: channel.runner,
+            checks: [
+              {
+                name: "credential",
+                status: (channel.credential as { status?: string }).status === "present" ? "ok" : "fail",
+                message: "credential env check"
+              },
+              {
+                name: "allowlist",
+                status: (channel.allowlist as { status?: string }).status === "present" ? "ok" : "fail",
+                message: "allowlist check"
+              },
+              { name: "live", status: "skipped", message: "local check only" }
+            ]
+          }))
+        };
+      }
+      if (method === "channel/wechat-qr/start") {
+        return {
+          sessionId: "wechat-session",
+          qrUrl: "data:image/png;base64,wechat-qr-image",
+          qrImage: "data:image/png;base64,wechat-qr-image",
+          qrSvg: null,
+          status: "wait",
+          message: "Scan with WeChat to connect this channel.",
+          intervalMs: 3000,
+          expiresAtMs: Date.now() + 120000
+        };
+      }
+      if (method === "channel/wechat-qr/poll") {
+        if (gatewayMock.wechatQrPoll) {
+          return gatewayMock.wechatQrPoll(params);
+        }
+        const channel = {
+          id: "wechat",
+          channel: "wechat",
+          domain: "wechat",
+          enabled: true,
+          label: "WeChat",
+          transport: "polling",
+          workdir: null,
+          model: null,
+          permissionMode: null,
+          requireMention: true,
+          credential: { env: "WECHAT_BOT_TOKEN", status: "present" },
+          allowlist: { users: ["wx-user"], groups: [], status: "present" },
+          runtimeStatus: "ready",
+          runner: {
+            state: "running",
+            reason: "qr_login_pending",
+            lastPollAtMs: null,
+            lastHealthyPollAtMs: null,
+            lastInboundAtMs: null,
+            lastOutboundAtMs: null,
+            lastIlinkErrcode: null,
+            lastError: null
+          }
+        };
+        gatewayMock.channelRecords = [
+          ...gatewayMock.channelRecords.filter((item) => item.id !== "wechat"),
+          channel
+        ];
+        return {
+          done: true,
+          status: "qr_login_pending",
+          message: "WeChat credentials saved. Gateway is starting polling.",
+          channel,
+          expiresAtMs: null
         };
       }
       if (method === "runtime/options") {
@@ -607,6 +779,7 @@ afterEach(() => {
   gatewayMock.modelStatus = "resolved";
   gatewayMock.observabilityRead = null;
   gatewayMock.usageRead = null;
+  gatewayMock.wechatQrPoll = null;
   gatewayMock.permissionRespond = () => ({ accepted: true });
   gatewayMock.clarifyRespond = () => ({ accepted: true });
   gatewayMock.openDownloadLog.length = 0;
@@ -617,6 +790,58 @@ afterEach(() => {
   gatewayMock.archivedSessionSummaries = [];
   gatewayMock.agentRecords = [];
   gatewayMock.backendRecords = [];
+  gatewayMock.channelRecords = [
+    {
+      id: "release",
+      channel: "telegram",
+      domain: null,
+      enabled: true,
+      label: "Release Bot",
+      transport: "polling",
+      workdir: null,
+      model: "xiaomi/xiaomi-token-high",
+      permissionMode: null,
+      requireMention: true,
+      credential: { env: "TELEGRAM_BOT_TOKEN", status: "present" },
+      allowlist: { users: ["12345"], groups: [], status: "present" },
+      runtimeStatus: "ready",
+      runner: {
+        state: "running",
+        reason: "polling_empty",
+        lastPollAtMs: Date.now(),
+        lastHealthyPollAtMs: Date.now(),
+        lastInboundAtMs: null,
+        lastOutboundAtMs: null,
+        lastIlinkErrcode: null,
+        lastError: null
+      }
+    },
+    {
+      id: "ops-lark",
+      channel: "lark",
+      domain: "lark",
+      enabled: false,
+      label: "Ops Lark",
+      transport: "long_connection",
+      workdir: "/tmp/project",
+      model: null,
+      permissionMode: "default",
+      requireMention: true,
+      credential: { env: "LARK_APP_SECRET", status: "missing" },
+      allowlist: { users: [], groups: [], status: "missing" },
+      runtimeStatus: "disabled",
+      runner: {
+        state: "stopped",
+        reason: null,
+        lastPollAtMs: null,
+        lastHealthyPollAtMs: null,
+        lastInboundAtMs: null,
+        lastOutboundAtMs: null,
+        lastIlinkErrcode: null,
+        lastError: null
+      }
+    }
+  ];
   gatewayMock.sessionSummaries = [];
   gatewayMock.snapshot.thread = {
     id: "thread-1",

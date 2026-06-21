@@ -31,6 +31,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     beginRightResize,
     changeAgentSelection,
     clearRightWorkspaceTabPendingPrompt,
+    channelDoctor,
     client,
     commandFeedback,
     commands,
@@ -45,6 +46,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     deleteBackend,
     disabled,
     doctorBackend,
+    doctorChannel,
+    doctorChannels,
     endpoint,
     error,
     executeCommand,
@@ -71,6 +74,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     pinnedSessionIds,
     pinnedSessions,
     planModeAvailable,
+    pollWechatQrSetup,
     refreshAgentSurface,
     refreshHistory,
     refreshSnapshot,
@@ -104,6 +108,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     setAppearance,
     setAttachments,
     setBackendDraft,
+    setChannelEnabled,
     setDebugEnabled,
     setDirtyRightTabs,
     setDraftSession,
@@ -131,6 +136,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     snapshot,
     startNewThread,
     startShell,
+    startWechatQrSetup,
     submitTurn,
     submitThreadTurn,
     switchMainView,
@@ -329,6 +335,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
               backendDraft={backendDraft}
               backendDoctor={backendDoctor}
               backends={backends}
+              channelDoctor={channelDoctor}
+              channels={settings?.channels.channels ?? []}
               debugEnabled={debugEnabled}
               disabled={disabled}
               mainView={mainView}
@@ -347,9 +355,14 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onChangeBackendDraft={setBackendDraft}
               onDeleteBackend={(backend) => void runAction(async () => deleteBackend(backend))}
               onDoctorBackend={(backend) => void runAction(async () => doctorBackend(backend))}
+              onDoctorChannel={(channel) => void runAction(async () => doctorChannel(channel))}
+              onDoctorChannels={() => void runAction(async () => doctorChannels())}
               onEditBackend={(backend) => setBackendDraft(backendDraftFromBackend(backend))}
+              onPollWechatQrSetup={(sessionId) => pollWechatQrSetup(sessionId)}
+              onSetChannelEnabled={(channel, enabled) => void runAction(async () => setChannelEnabled(channel, enabled))}
               onSetBackendEnabled={(backend, enabled) => void runAction(async () => updateBackendDraftFields(backend, { enabled }))}
               onSetBackendEntrypoints={(backend, entrypoints) => void runAction(async () => updateBackendDraftFields(backend, { entrypoints }))}
+              onStartWechatQrSetup={() => startWechatQrSetup()}
               onMainViewChange={switchMainView}
               onNewBackend={() => {
                 setSettingsSection("agents");

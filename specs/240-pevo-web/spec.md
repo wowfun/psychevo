@@ -220,6 +220,7 @@ after prompt submission.
   evidence, status, and observability rendering invariants.
 - [270 UI Interaction](../270-ui-interaction/spec.md) defines shared composer,
   command, permission/clarify, and interrupt semantics.
+- [280 Channels](../280-channels/spec.md) defines Settings > Channels behavior.
 - [220 pevo Gateway](../220-pevo-gateway/spec.md) defines managed local Web
   launch lifecycle.
 - [221 pevo Serve](../221-pevo-serve/spec.md) defines the headless API server.
