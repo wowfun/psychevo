@@ -57,18 +57,20 @@ pub use compaction::{
     auto_compaction_due_for_snapshot, compact_session,
 };
 pub use config::{
-    ChannelRuntimeConnection, ChannelSetupInput, DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT,
-    ToolsetMutationResult, append_local_permission_allow_rule, append_local_permission_rule,
-    auth_status_value, channel_doctor_value, channel_list_value, channel_runtime_connections,
-    channel_show_value, channel_summary_value, config_provider_list_value, config_show_value,
-    configured_models, create_global_custom_provider, create_local_toolset,
-    create_scoped_custom_provider, custom_provider_api_key_env, fetch_model_catalog,
+    ChannelRuntimeConnection, ChannelSetupInput, ChannelUpdateInput, DEFAULT_WORKSPACE_NAME,
+    DEFAULT_WORKSPACE_ROOT, ToolsetMutationResult, append_local_permission_allow_rule,
+    append_local_permission_rule, auth_status_value, channel_doctor_value, channel_list_value,
+    channel_runtime_connections, channel_show_value, channel_summary_value,
+    config_provider_list_value, config_show_value, configured_models,
+    create_global_custom_provider, create_local_toolset, create_scoped_custom_provider,
+    custom_provider_api_key_env, delete_channel_connection, fetch_model_catalog,
     load_agent_backend_configs, model_catalog_endpoint, model_catalog_providers,
     permission_rules_value, refresh_model_metadata_cache, remove_config_value,
     remove_local_permission_rule, remove_local_toolset, resolve_default_workspace_workdir,
     resolve_workspace_root, selected_configured_model, set_channel_enabled, set_config_value,
     set_default_model, set_default_model_with_reasoning, set_local_toolset_enabled,
-    set_provider_api_key, setup_channel_connection, toolsets_value, upsert_channel_connection,
+    set_provider_api_key, setup_channel_connection, toolsets_value, update_channel_connection,
+    upsert_channel_connection,
 };
 pub use context::prune_context;
 pub use context_usage::{

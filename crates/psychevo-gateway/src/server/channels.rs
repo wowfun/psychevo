@@ -30,6 +30,12 @@ struct RuntimeChannelConfigRow {
     permission_mode: Option<String>,
     require_mention: bool,
     credential: RuntimeChannelCredential,
+    #[serde(default)]
+    account: Option<RuntimeChannelCredential>,
+    #[serde(default)]
+    base_url: Option<RuntimeChannelCredential>,
+    #[serde(default)]
+    app_id: Option<RuntimeChannelCredential>,
     allowlist: RuntimeChannelAllowlist,
     runtime_status: String,
 }
@@ -104,6 +110,67 @@ pub(super) fn channel_enable_result(
     set_channel_enabled(config_dir, &params.id, params.enabled)?;
     channel_runtime::reconcile(state.clone());
     channel_show_result(state, scope, &params.id)
+}
+
+pub(super) fn channel_update_result(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ChannelUpdateParams,
+) -> psychevo_runtime::Result<wire::ChannelEnableResult> {
+    let config_dir = active_profile_config_dir(state, scope);
+    let requested_workdir = params.workdir.clone();
+    let previous_workdir = if requested_workdir.is_some() {
+        Some(
+            channel_show_result(state, scope, &params.id)?
+                .channel
+                .workdir,
+        )
+    } else {
+        None
+    };
+    psychevo_runtime::update_channel_connection(psychevo_runtime::ChannelUpdateInput {
+        config_dir,
+        id: params.id.clone(),
+        label: params.label,
+        enabled: params.enabled,
+        workdir: params.workdir,
+        model: params.model,
+        permission_mode: params.permission_mode,
+        require_mention: params.require_mention,
+        credential_env: params.credential_env,
+        account_env: params.account_env,
+        base_url_env: params.base_url_env,
+        app_id_env: params.app_id_env,
+        allow_users: params.allow_users,
+        allow_groups: params.allow_groups,
+    })?;
+    if let Some(workdir) = requested_workdir
+        && previous_workdir.flatten() != normalized_channel_update_text(&workdir)
+    {
+        state
+            .inner
+            .gateway
+            .rotate_channel_connection_sources(&params.id)?;
+        state.inner.channel_runtime.restart(&params.id);
+    }
+    channel_runtime::reconcile(state.clone());
+    channel_show_result(state, scope, &params.id)
+}
+
+fn normalized_channel_update_text(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+pub(super) fn channel_delete_result(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ChannelIdParams,
+) -> psychevo_runtime::Result<wire::ChannelListResult> {
+    let config_dir = active_profile_config_dir(state, scope);
+    psychevo_runtime::delete_channel_connection(config_dir, &params.id)?;
+    channel_runtime::reconcile(state.clone());
+    channel_list_result_for_scope(state, scope)
 }
 
 pub(super) async fn channel_doctor_result_live(
@@ -458,6 +525,18 @@ fn channel_config_view_from_runtime(
             env: row.credential.env,
             status: row.credential.status,
         },
+        account: row.account.map(|credential| wire::ChannelCredentialView {
+            env: credential.env,
+            status: credential.status,
+        }),
+        base_url: row.base_url.map(|credential| wire::ChannelCredentialView {
+            env: credential.env,
+            status: credential.status,
+        }),
+        app_id: row.app_id.map(|credential| wire::ChannelCredentialView {
+            env: credential.env,
+            status: credential.status,
+        }),
         allowlist: wire::ChannelAllowlistView {
             users: row.allowlist.users,
             groups: row.allowlist.groups,

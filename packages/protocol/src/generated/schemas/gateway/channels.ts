@@ -263,6 +263,184 @@ export const gatewayChannelSchemas = {
   "title": "ChannelEnableParams",
   "type": "object"
 },
+  ChannelUpdateParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "workdir"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "accountEnv": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "allowGroups": {
+      "default": null,
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "allowUsers": {
+      "default": null,
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "appIdEnv": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "baseUrlEnv": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "credentialEnv": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "enabled": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "model": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "permissionMode": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requireMention": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "ChannelUpdateParams",
+  "type": "object"
+},
   ChannelDoctorParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -637,8 +815,41 @@ export const gatewayChannelSchemas = {
     },
     "ChannelConfigView": {
       "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "allowlist": {
           "$ref": "#/definitions/ChannelAllowlistView"
+        },
+        "appId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "baseUrl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "channel": {
           "type": "string"
@@ -992,8 +1203,41 @@ export const gatewayChannelSchemas = {
     }
   },
   "properties": {
+    "account": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ChannelCredentialView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "allowlist": {
       "$ref": "#/definitions/ChannelAllowlistView"
+    },
+    "appId": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ChannelCredentialView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "baseUrl": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ChannelCredentialView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "channel": {
       "type": "string"
@@ -1163,8 +1407,41 @@ export const gatewayChannelSchemas = {
     },
     "ChannelConfigView": {
       "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "allowlist": {
           "$ref": "#/definitions/ChannelAllowlistView"
+        },
+        "appId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "baseUrl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "channel": {
           "type": "string"
@@ -1364,8 +1641,41 @@ export const gatewayChannelSchemas = {
     },
     "ChannelConfigView": {
       "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "allowlist": {
           "$ref": "#/definitions/ChannelAllowlistView"
+        },
+        "appId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "baseUrl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "channel": {
           "type": "string"

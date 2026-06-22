@@ -458,6 +458,233 @@ allow_users = ["12345"]
     }
 
     #[tokio::test]
+    async fn channel_update_and_delete_rpc_refresh_settings_without_exposing_secrets() {
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        std::fs::write(
+            state.inner.home.join("config.toml"),
+            r#"[[channels.connections]]
+id = "release"
+channel = "telegram"
+label = "Release Bot"
+transport = "polling"
+enabled = false
+workdir = "/tmp/project"
+model = "provider/model"
+permission_mode = "dontAsk"
+credential_env = "CUSTOM_TELEGRAM_TOKEN"
+allow_users = ["12345"]
+"#,
+        )
+        .expect("config");
+        std::fs::write(
+            state.inner.home.join(".env"),
+            "CUSTOM_TELEGRAM_TOKEN=old-secret\nTELEGRAM_BOT_TOKEN=telegram-secret\n",
+        )
+        .expect("env");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let bound_thread = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.workdir, "channel", "model", "provider", None)
+            .expect("bound thread");
+        state
+            .inner
+            .state
+            .store()
+            .upsert_gateway_source_binding(psychevo_runtime::GatewaySourceBindingInput {
+                source_key: "im.telegram:release-lane",
+                source_kind: "im.telegram",
+                raw_identity: json!({
+                    "connectionId": "release",
+                    "chatId": "release-lane",
+                }),
+                visible_name: Some("Release lane"),
+                thread_id: &bound_thread,
+                backend_kind: "psychevo",
+                backend_native_id: Some(&bound_thread),
+                lineage: None,
+            })
+            .expect("source binding");
+
+        let updated = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "channel/update".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "id": "release",
+                    "label": "Ops Bot",
+                    "enabled": true,
+                    "workdir": "",
+                    "model": "",
+                    "permissionMode": "default",
+                    "requireMention": false,
+                    "credentialEnv": "",
+                    "allowUsers": ["alice", "alice", "bob"],
+                    "allowGroups": ["team", "team"]
+                })),
+            },
+        )
+        .await
+        .expect("channel/update");
+        assert_eq!(updated["channel"]["label"], "Ops Bot");
+        assert_eq!(updated["channel"]["enabled"], true);
+        assert_eq!(updated["channel"]["workdir"], Value::Null);
+        assert_eq!(updated["channel"]["model"], Value::Null);
+        assert_eq!(updated["channel"]["permissionMode"], Value::Null);
+        assert_eq!(updated["channel"]["requireMention"], false);
+        assert_eq!(updated["channel"]["credential"]["env"], "TELEGRAM_BOT_TOKEN");
+        assert_eq!(updated["channel"]["allowlist"]["users"], json!(["alice", "bob"]));
+        assert_eq!(updated["channel"]["allowlist"]["groups"], json!(["team"]));
+        assert!(!updated.to_string().contains("telegram-secret"));
+        assert!(!updated.to_string().contains("old-secret"));
+        assert!(
+            state
+                .inner
+                .state
+                .store()
+                .gateway_source_binding("im.telegram:release-lane")
+                .expect("rotated binding lookup")
+                .is_none()
+        );
+        let bound_summary = state
+            .inner
+            .state
+            .store()
+            .session_summary(&bound_thread)
+            .expect("bound summary")
+            .expect("bound session");
+        assert_eq!(
+            bound_summary.end_reason.as_deref(),
+            Some("channel_workspace_changed")
+        );
+        assert!(bound_summary.archived_at_ms.is_some());
+
+        let same_workdir_thread = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.workdir, "channel", "model", "provider", None)
+            .expect("same workdir thread");
+        state
+            .inner
+            .state
+            .store()
+            .upsert_gateway_source_binding(psychevo_runtime::GatewaySourceBindingInput {
+                source_key: "im.telegram:same-workdir-lane",
+                source_kind: "im.telegram",
+                raw_identity: json!({
+                    "connectionId": "release",
+                    "chatId": "same-workdir-lane",
+                }),
+                visible_name: Some("Same workdir lane"),
+                thread_id: &same_workdir_thread,
+                backend_kind: "psychevo",
+                backend_native_id: Some(&same_workdir_thread),
+                lineage: None,
+            })
+            .expect("same workdir binding");
+        handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("same-workdir")),
+                method: "channel/update".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "id": "release",
+                    "workdir": ""
+                })),
+            },
+        )
+        .await
+        .expect("same workdir channel/update");
+        assert_eq!(
+            state
+                .inner
+                .state
+                .store()
+                .gateway_source_binding("im.telegram:same-workdir-lane")
+                .expect("same workdir binding lookup")
+                .expect("same workdir binding")
+                .thread_id,
+            same_workdir_thread
+        );
+
+        let settings = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "settings/read".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("settings/read");
+        assert_eq!(settings["channels"]["channels"][0]["label"], "Ops Bot");
+        assert_eq!(
+            settings["channels"]["channels"][0]["credential"]["status"],
+            "present"
+        );
+        assert!(!settings.to_string().contains("telegram-secret"));
+
+        let env = std::fs::read_to_string(state.inner.home.join(".env")).expect("env");
+        assert!(env.contains("CUSTOM_TELEGRAM_TOKEN=old-secret"));
+        assert!(env.contains("TELEGRAM_BOT_TOKEN=telegram-secret"));
+
+        let deleted = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "channel/delete".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "id": "release"
+                })),
+            },
+        )
+        .await
+        .expect("channel/delete");
+        assert_eq!(deleted["channels"], json!([]));
+        assert!(!deleted.to_string().contains("telegram-secret"));
+
+        let settings_after_delete = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("4")),
+                method: "settings/read".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("settings/read after delete");
+        assert_eq!(settings_after_delete["channels"]["channels"], json!([]));
+        let env = std::fs::read_to_string(state.inner.home.join(".env")).expect("env");
+        assert!(env.contains("CUSTOM_TELEGRAM_TOKEN=old-secret"));
+        assert!(env.contains("TELEGRAM_BOT_TOKEN=telegram-secret"));
+    }
+
+    #[tokio::test]
     async fn channel_wechat_qr_rpc_connects_and_writes_secret_free_config() {
         async fn qr_code() -> Json<Value> {
             Json(json!({

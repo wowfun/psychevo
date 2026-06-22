@@ -123,6 +123,7 @@ export const gatewaySchemas = {
   ChannelListParams: gatewayChannelSchemas.ChannelListParams,
   ChannelIdParams: gatewayChannelSchemas.ChannelIdParams,
   ChannelEnableParams: gatewayChannelSchemas.ChannelEnableParams,
+  ChannelUpdateParams: gatewayChannelSchemas.ChannelUpdateParams,
   ChannelDoctorParams: gatewayChannelSchemas.ChannelDoctorParams,
   ChannelWechatQrStartParams: gatewayChannelSchemas.ChannelWechatQrStartParams,
   ChannelWechatQrStartResult: gatewayChannelSchemas.ChannelWechatQrStartResult,

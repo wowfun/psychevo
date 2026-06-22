@@ -140,8 +140,41 @@ export const settingsSchemas = {
     },
     "ChannelConfigView": {
       "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "allowlist": {
           "$ref": "#/definitions/ChannelAllowlistView"
+        },
+        "appId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "baseUrl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChannelCredentialView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "channel": {
           "type": "string"

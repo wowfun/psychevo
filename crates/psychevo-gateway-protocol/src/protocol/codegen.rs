@@ -806,6 +806,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(ChannelListParams),
         exported_type!(ChannelIdParams),
         exported_type!(ChannelEnableParams),
+        exported_type!(ChannelUpdateParams),
         exported_type!(ChannelDoctorParams),
         exported_type!(ChannelWechatQrStartParams),
         exported_type!(ChannelWechatQrStartResult),

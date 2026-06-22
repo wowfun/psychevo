@@ -31,6 +31,8 @@ import { clientRequestBackendDeleteSchema } from './rpc/client-request/backend-d
 import { clientRequestChannelListSchema } from './rpc/client-request/channel-list';
 import { clientRequestChannelShowSchema } from './rpc/client-request/channel-show';
 import { clientRequestChannelEnableSchema } from './rpc/client-request/channel-enable';
+import { clientRequestChannelUpdateSchema } from './rpc/client-request/channel-update';
+import { clientRequestChannelDeleteSchema } from './rpc/client-request/channel-delete';
 import { clientRequestChannelDoctorSchema } from './rpc/client-request/channel-doctor';
 import { clientRequestChannelWechatQrStartSchema } from './rpc/client-request/channel-wechat-qr-start';
 import { clientRequestChannelWechatQrPollSchema } from './rpc/client-request/channel-wechat-qr-poll';
@@ -348,6 +350,12 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/channel-enable.json"
     },
     {
+      "$ref": "ClientRequest/channel-update.json"
+    },
+    {
+      "$ref": "ClientRequest/channel-delete.json"
+    },
+    {
       "$ref": "ClientRequest/channel-doctor.json"
     },
     {
@@ -480,6 +488,8 @@ export const rpcSchemaRefs = [
   clientRequestChannelListSchema,
   clientRequestChannelShowSchema,
   clientRequestChannelEnableSchema,
+  clientRequestChannelUpdateSchema,
+  clientRequestChannelDeleteSchema,
   clientRequestChannelDoctorSchema,
   clientRequestChannelWechatQrStartSchema,
   clientRequestChannelWechatQrPollSchema,

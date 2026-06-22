@@ -92,6 +92,46 @@ impl Gateway {
         Ok(previous)
     }
 
+    pub fn rotate_channel_connection_sources(
+        &self,
+        connection_id: &str,
+    ) -> psychevo_runtime::Result<usize> {
+        let bindings = self
+            .state
+            .store()
+            .gateway_source_bindings_for_connection_id(connection_id)?;
+        let mut rotated = 0usize;
+        let mut archived_threads = HashSet::new();
+        for binding in bindings {
+            if !self
+                .state
+                .store()
+                .delete_gateway_source_binding(&binding.source_key)?
+            {
+                continue;
+            }
+
+            rotated += 1;
+            let source_key = SourceKey(binding.source_key.clone());
+            self.bump_source_generation_key(&source_key);
+            self.register_active_queue_alias(
+                &source_key_key(&source_key),
+                &thread_key(&binding.thread_id),
+            );
+
+            if archived_threads.insert(binding.thread_id.clone()) {
+                self.state
+                    .store()
+                    .mark_session_ended_with_reason(
+                        &binding.thread_id,
+                        "channel_workspace_changed",
+                    )?;
+                self.state.store().archive_session(&binding.thread_id)?;
+            }
+        }
+        Ok(rotated)
+    }
+
     pub fn bind_source_thread(
         &self,
         source: &GatewaySource,

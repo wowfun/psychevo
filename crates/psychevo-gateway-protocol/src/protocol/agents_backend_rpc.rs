@@ -464,6 +464,10 @@ pub enum ClientRequest {
     ChannelShow(ChannelIdParams),
     #[serde(rename = "channel/enable")]
     ChannelEnable(ChannelEnableParams),
+    #[serde(rename = "channel/update")]
+    ChannelUpdate(ChannelUpdateParams),
+    #[serde(rename = "channel/delete")]
+    ChannelDelete(ChannelIdParams),
     #[serde(rename = "channel/doctor")]
     ChannelDoctor(ChannelDoctorParams),
     #[serde(rename = "channel/wechat-qr/start")]

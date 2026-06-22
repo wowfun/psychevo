@@ -9,10 +9,12 @@
     struct FakeRun {
         prompt: String,
         session: Option<String>,
+        workdir: PathBuf,
     }
 
     #[derive(Debug, Clone)]
     struct WaitFirst {
+        run_number: usize,
         started: Arc<Notify>,
         release: Arc<Notify>,
     }
@@ -40,7 +42,13 @@
         }
 
         fn wait_on_first_run(&self) -> WaitFirst {
+            self.wait_on_next_run()
+        }
+
+        fn wait_on_next_run(&self) -> WaitFirst {
+            let run_number = self.inner.next_run.load(Ordering::SeqCst) + 1;
             let wait = WaitFirst {
+                run_number,
                 started: Arc::new(Notify::new()),
                 release: Arc::new(Notify::new()),
             };
@@ -80,6 +88,7 @@
                     runs.push(FakeRun {
                         prompt: request.options.prompt.clone(),
                         session: request.options.session.clone(),
+                        workdir: request.options.workdir.clone(),
                     });
                 }
 
@@ -88,8 +97,8 @@
                     .lock()
                     .expect("fake wait lock poisoned")
                     .clone();
-                if run_number == 1
-                    && let Some(wait) = wait_first
+                if let Some(wait) = wait_first
+                    && run_number == wait.run_number
                 {
                     wait.started.notify_one();
                     wait.release.notified().await;

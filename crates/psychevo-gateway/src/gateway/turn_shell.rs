@@ -7,6 +7,7 @@ impl Gateway {
     ) -> psychevo_runtime::Result<GatewayTurnResult> {
         let base_event_sink = request.event_sink.clone();
         let queue_source = request.source.clone();
+        let alias_source_to_active = request.thread_id.is_none();
         let bind_source = request.bind_source.clone().or_else(|| queue_source.clone());
         let bind_source_generation = bind_source
             .as_ref()
@@ -25,8 +26,13 @@ impl Gateway {
         } else {
             None
         };
-        let active_thread_id = request.thread_id.clone().or(mapped_thread_id);
+        let active_thread_id = request
+            .thread_id
+            .clone()
+            .or(mapped_thread_id)
+            .or_else(|| options.session.clone());
         if let Some(thread_id) = active_thread_id.clone() {
+            options.workdir = self.thread_workdir(&thread_id)?;
             options.session = Some(thread_id);
             options.continue_latest = false;
         }
@@ -108,6 +114,11 @@ impl Gateway {
             control_handle,
             ActiveActivityKind::Turn,
         );
+        if alias_source_to_active
+            && let Some(source) = queue_source.as_ref().or(bind_source.as_ref())
+        {
+            self.register_active_queue_alias(&source_key_key(&source.source_key()), queue_key);
+        }
 
         let stream = wrap_stream(
             request.stream,
@@ -364,6 +375,11 @@ impl Gateway {
             Some(control_handle),
             ActiveActivityKind::Shell,
         );
+        if request.thread_id.is_none()
+            && let Some(source) = &request.source
+        {
+            self.register_active_queue_alias(&source_key_key(&source.source_key()), queue_key);
+        }
         self.run_shell_with_control(request, shell_id, control, None, Some(queue_key))
             .await
     }
@@ -381,7 +397,7 @@ impl Gateway {
 
     async fn run_shell_with_control(
         &self,
-        request: SendShellRequest,
+        mut request: SendShellRequest,
         shell_id: String,
         control: RunControl,
         inject_into: Option<RunControlHandle>,
@@ -409,6 +425,8 @@ impl Gateway {
                     .and_then(|source| self.lookup_source_thread(source).ok().flatten())
             });
         if let Some(thread_id) = active_thread_id.clone() {
+            let workdir = self.thread_workdir(&thread_id)?;
+            request.workdir = workdir;
             context.session = Some(thread_id);
             context.continue_latest = false;
         }
@@ -529,6 +547,15 @@ impl Gateway {
             result,
             committed_entries,
         })
+    }
+
+    fn thread_workdir(&self, thread_id: &str) -> psychevo_runtime::Result<PathBuf> {
+        let summary = self
+            .state
+            .store()
+            .session_summary(thread_id)?
+            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+        Ok(PathBuf::from(summary.workdir))
     }
 
 }

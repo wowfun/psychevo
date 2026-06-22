@@ -24,6 +24,38 @@ pub struct ChannelEnableParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct ChannelUpdateParams {
+    pub id: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    #[serde(default)]
+    pub require_mention: Option<bool>,
+    #[serde(default)]
+    pub allow_users: Option<Vec<String>>,
+    #[serde(default)]
+    pub allow_groups: Option<Vec<String>>,
+    #[serde(default)]
+    pub credential_env: Option<String>,
+    #[serde(default)]
+    pub account_env: Option<String>,
+    #[serde(default)]
+    pub base_url_env: Option<String>,
+    #[serde(default)]
+    pub app_id_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ChannelDoctorParams {
     #[serde(default)]
     pub id: Option<String>,
@@ -114,6 +146,12 @@ pub struct ChannelConfigView {
     #[serde(rename = "requireMention")]
     pub require_mention: bool,
     pub credential: ChannelCredentialView,
+    #[serde(default)]
+    pub account: Option<ChannelCredentialView>,
+    #[serde(default)]
+    pub base_url: Option<ChannelCredentialView>,
+    #[serde(default)]
+    pub app_id: Option<ChannelCredentialView>,
     pub allowlist: ChannelAllowlistView,
     #[serde(rename = "runtimeStatus")]
     pub runtime_status: String,

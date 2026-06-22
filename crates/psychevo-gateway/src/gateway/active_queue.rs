@@ -2,10 +2,6 @@ impl Gateway {
     fn finish_activity_and_spawn_next(&self, queue_key: String) {
         let next = {
             let mut active = self.active.lock().expect("gateway active map poisoned");
-            self.active_aliases
-                .lock()
-                .expect("gateway active alias map poisoned")
-                .retain(|_, primary| primary != &queue_key);
             let Some(state) = active.get_mut(&queue_key) else {
                 return;
             };
@@ -17,6 +13,10 @@ impl Gateway {
                 Some(next)
             } else {
                 active.remove(&queue_key);
+                self.active_aliases
+                    .lock()
+                    .expect("gateway active alias map poisoned")
+                    .retain(|_, primary| primary != &queue_key);
                 None
             }
         };
@@ -48,18 +48,18 @@ impl Gateway {
 
     fn queue_key_for_request(&self, request: &SendTurnRequest) -> psychevo_runtime::Result<String> {
         if let Some(thread_id) = &request.thread_id {
-            return Ok(thread_key(thread_id));
+            return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
         if let Some(source) = &request.source {
             if !request.reset_source_binding
                 && let Some(thread_id) = self.lookup_source_thread(source)?
             {
-                return Ok(thread_key(&thread_id));
+                return Ok(self.primary_queue_key_for_alias(thread_key(&thread_id)));
             }
-            return Ok(source_key_key(&source.source_key()));
+            return Ok(self.primary_queue_key_for_alias(source_key_key(&source.source_key())));
         }
         if let Some(thread_id) = &request.options.session {
-            return Ok(thread_key(thread_id));
+            return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
         Ok(format!("invocation:{}", Uuid::now_v7()))
     }
@@ -69,16 +69,16 @@ impl Gateway {
         request: &SendShellRequest,
     ) -> psychevo_runtime::Result<String> {
         if let Some(thread_id) = &request.thread_id {
-            return Ok(thread_key(thread_id));
+            return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
         if let Some(source) = &request.source {
             if let Some(thread_id) = self.lookup_source_thread(source)? {
-                return Ok(thread_key(&thread_id));
+                return Ok(self.primary_queue_key_for_alias(thread_key(&thread_id)));
             }
-            return Ok(source_key_key(&source.source_key()));
+            return Ok(self.primary_queue_key_for_alias(source_key_key(&source.source_key())));
         }
         if let Some(thread_id) = &request.context.session {
-            return Ok(thread_key(thread_id));
+            return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
         Ok(format!("shell:{}", Uuid::now_v7()))
     }
@@ -181,13 +181,26 @@ impl Gateway {
 
     fn register_active_thread_alias(&self, key: &str, thread_id: &str) {
         let alias = thread_key(thread_id);
-        if alias == key {
+        self.register_active_queue_alias(&alias, key);
+    }
+
+    fn register_active_queue_alias(&self, alias: &str, primary: &str) {
+        if alias == primary {
             return;
         }
         self.active_aliases
             .lock()
             .expect("gateway active alias map poisoned")
-            .insert(alias, key.to_string());
+            .insert(alias.to_string(), primary.to_string());
+    }
+
+    fn primary_queue_key_for_alias(&self, key: String) -> String {
+        self.active_aliases
+            .lock()
+            .expect("gateway active alias map poisoned")
+            .get(&key)
+            .cloned()
+            .unwrap_or(key)
     }
 
     fn control_for_selector(

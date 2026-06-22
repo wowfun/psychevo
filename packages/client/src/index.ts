@@ -27,6 +27,7 @@ import {
   type ChannelIdParams,
   type ChannelListParams,
   type ChannelListResult,
+  type ChannelUpdateParams,
   type ChannelWechatQrPollParams,
   type ChannelWechatQrPollResult,
   type ChannelWechatQrStartParams,
@@ -120,9 +121,11 @@ export interface GatewayRequestParams {
   "backend/list": BackendListParams;
   "backend/write": BackendWriteParams;
   "channel/doctor": ChannelDoctorParams;
+  "channel/delete": ChannelIdParams;
   "channel/enable": ChannelEnableParams;
   "channel/list": ChannelListParams;
   "channel/show": ChannelIdParams;
+  "channel/update": ChannelUpdateParams;
   "channel/wechat-qr/poll": ChannelWechatQrPollParams;
   "channel/wechat-qr/start": ChannelWechatQrStartParams;
   "clarify/respond": ClarifyRespondParams;
@@ -178,9 +181,11 @@ export interface GatewayRequestResults {
   "backend/list": BackendListResult;
   "backend/write": BackendWriteResult;
   "channel/doctor": ChannelDoctorResult;
+  "channel/delete": ChannelListResult;
   "channel/enable": ChannelEnableResult;
   "channel/list": ChannelListResult;
   "channel/show": ChannelEnableResult;
+  "channel/update": ChannelEnableResult;
   "channel/wechat-qr/poll": ChannelWechatQrPollResult;
   "channel/wechat-qr/start": ChannelWechatQrStartResult;
   "clarify/respond": InteractionRespondResult;

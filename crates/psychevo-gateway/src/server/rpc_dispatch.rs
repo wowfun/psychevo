@@ -898,6 +898,20 @@ async fn handle_rpc(
                 &state, &scope, params,
             )?)?)
         }
+        "channel/update" => {
+            let params = request.required_params::<wire::ChannelUpdateParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(channel_update_result(
+                &state, &scope, params,
+            )?)?)
+        }
+        "channel/delete" => {
+            let params = request.required_params::<wire::ChannelIdParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(channel_delete_result(
+                &state, &scope, params,
+            )?)?)
+        }
         "channel/doctor" => {
             let params = request.params::<wire::ChannelDoctorParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;

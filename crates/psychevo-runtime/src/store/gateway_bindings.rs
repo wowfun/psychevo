@@ -75,6 +75,37 @@ impl SqliteStore {
         .map_err(Into::into)
     }
 
+    pub fn gateway_source_bindings_for_connection_id(
+        &self,
+        connection_id: &str,
+    ) -> Result<Vec<GatewaySourceBindingRecord>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT source_key, source_kind, raw_identity_json, visible_name,
+                   thread_id, backend_kind, backend_native_id, created_at_ms,
+                   updated_at_ms, lineage_json
+            FROM gateway_source_bindings
+            WHERE source_kind LIKE 'im.%'
+            ORDER BY updated_at_ms DESC
+            "#,
+        )?;
+        let rows = stmt.query_map([], gateway_source_binding_from_row)?;
+        let mut bindings = Vec::new();
+        for row in rows {
+            let binding = row?;
+            if binding
+                .raw_identity
+                .get("connectionId")
+                .and_then(Value::as_str)
+                == Some(connection_id)
+            {
+                bindings.push(binding);
+            }
+        }
+        Ok(bindings)
+    }
+
     pub fn delete_gateway_source_binding(&self, source_key: &str) -> Result<bool> {
         let changed = self.write_retry(|conn| {
             conn.execute(

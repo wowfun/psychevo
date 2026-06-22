@@ -18,6 +18,24 @@ pub struct ChannelSetupInput {
 }
 
 #[derive(Debug, Clone)]
+pub struct ChannelUpdateInput {
+    pub config_dir: PathBuf,
+    pub id: String,
+    pub label: Option<String>,
+    pub enabled: Option<bool>,
+    pub workdir: Option<String>,
+    pub model: Option<String>,
+    pub permission_mode: Option<String>,
+    pub require_mention: Option<bool>,
+    pub credential_env: Option<String>,
+    pub account_env: Option<String>,
+    pub base_url_env: Option<String>,
+    pub app_id_env: Option<String>,
+    pub allow_users: Option<Vec<String>>,
+    pub allow_groups: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ChannelRuntimeConnection {
     pub id: String,
     pub channel: String,
@@ -215,6 +233,132 @@ pub fn setup_channel_connection(input: ChannelSetupInput) -> Result<Value> {
 
 pub fn upsert_channel_connection(input: ChannelSetupInput) -> Result<Value> {
     setup_channel_connection_inner(input, true)
+}
+
+pub fn update_channel_connection(input: ChannelUpdateInput) -> Result<Value> {
+    let id = input.id.trim().to_string();
+    validate_channel_id(&id)?;
+    let config_path = input.config_dir.join(CONFIG_FILE_NAME);
+    let mut parsed = load_toml_config_file(&config_path, true)?;
+    let channels = channels_config_from_value(&parsed)?;
+    let platform = channels
+        .connections
+        .iter()
+        .find(|connection| connection.id == id)
+        .map(|connection| connection.platform)
+        .ok_or_else(|| Error::Config(format!("unknown channel connection `{id}`")))?;
+    let connections = parsed
+        .get_mut("channels")
+        .and_then(Value::as_object_mut)
+        .and_then(|channels| channels.get_mut("connections"))
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| Error::Config("channels.connections is not configured".to_string()))?;
+    let connection = connections
+        .iter_mut()
+        .find(|connection| connection.get("id").and_then(Value::as_str) == Some(id.as_str()))
+        .ok_or_else(|| Error::Config(format!("unknown channel connection `{id}`")))?;
+    let connection = connection
+        .as_object_mut()
+        .ok_or_else(|| Error::Config(format!("channel connection `{id}` must be an object")))?;
+
+    if let Some(label) = input.label {
+        let label = normalize_optional_single_line("channel label", Some(label))?
+            .unwrap_or_else(|| platform.default_label().to_string());
+        connection.insert("label".to_string(), json!(label));
+    }
+    if let Some(enabled) = input.enabled {
+        connection.insert("enabled".to_string(), json!(enabled));
+    }
+    if let Some(value) = input.workdir {
+        set_optional_string_field(connection, "workdir", "channel workdir", value, false)?;
+    }
+    if let Some(value) = input.model {
+        set_optional_string_field(connection, "model", "channel model", value, false)?;
+    }
+    if let Some(value) = input.permission_mode {
+        let permission_mode = normalize_permission_mode(value)?;
+        set_object_optional_string(connection, "permission_mode", permission_mode);
+    }
+    if let Some(require_mention) = input.require_mention {
+        connection.insert("require_mention".to_string(), json!(require_mention));
+    }
+    if let Some(value) = input.credential_env {
+        set_env_field(
+            connection,
+            "credential_env",
+            value,
+            Some(platform.default_credential_env()),
+        )?;
+    }
+    if let Some(value) = input.account_env {
+        set_env_field(
+            connection,
+            "account_env",
+            value,
+            platform.default_account_env(),
+        )?;
+    }
+    if let Some(value) = input.base_url_env {
+        set_env_field(
+            connection,
+            "base_url_env",
+            value,
+            platform.default_base_url_env(),
+        )?;
+    }
+    if let Some(value) = input.app_id_env {
+        set_env_field(
+            connection,
+            "app_id_env",
+            value,
+            platform.default_app_id_env(),
+        )?;
+    }
+    if let Some(users) = input.allow_users {
+        connection.insert(
+            "allow_users".to_string(),
+            json!(normalize_channel_list(users)),
+        );
+    }
+    if let Some(groups) = input.allow_groups {
+        connection.insert(
+            "allow_groups".to_string(),
+            json!(normalize_channel_list(groups)),
+        );
+    }
+
+    channels_config_from_value(&parsed)?;
+    write_toml_config_file(&config_path, &parsed)?;
+    Ok(json!({
+        "id": id,
+        "channel": platform.as_str(),
+        "path": config_path,
+    }))
+}
+
+pub fn delete_channel_connection(config_dir: PathBuf, id: &str) -> Result<Value> {
+    let id = id.trim().to_string();
+    validate_channel_id(&id)?;
+    let config_path = config_dir.join(CONFIG_FILE_NAME);
+    let mut parsed = load_toml_config_file(&config_path, true)?;
+    let connections = parsed
+        .get_mut("channels")
+        .and_then(Value::as_object_mut)
+        .and_then(|channels| channels.get_mut("connections"))
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| Error::Config("channels.connections is not configured".to_string()))?;
+    let before = connections.len();
+    connections
+        .retain(|connection| connection.get("id").and_then(Value::as_str) != Some(id.as_str()));
+    if connections.len() == before {
+        return Err(Error::Config(format!("unknown channel connection `{id}`")));
+    }
+    channels_config_from_value(&parsed)?;
+    write_toml_config_file(&config_path, &parsed)?;
+    Ok(json!({
+        "id": id,
+        "path": config_path,
+    }))
 }
 
 fn setup_channel_connection_inner(input: ChannelSetupInput, upsert: bool) -> Result<Value> {
@@ -454,6 +598,95 @@ pub fn set_channel_enabled(config_dir: PathBuf, id: &str, enabled: bool) -> Resu
     }))
 }
 
+fn normalize_optional_single_line(label: &str, value: Option<String>) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim().to_string();
+    if value.contains('\n') || value.contains('\r') {
+        return Err(Error::Config(format!("{label} must be single-line")));
+    }
+    Ok((!value.is_empty()).then_some(value))
+}
+
+fn set_optional_string_field(
+    object: &mut serde_json::Map<String, Value>,
+    field: &str,
+    label: &str,
+    value: String,
+    keep_default: bool,
+) -> Result<()> {
+    let value = normalize_optional_single_line(label, Some(value))?;
+    if keep_default {
+        object.insert(field.to_string(), json!(value.unwrap_or_default()));
+    } else {
+        set_object_optional_string(object, field, value);
+    }
+    Ok(())
+}
+
+fn set_object_optional_string(
+    object: &mut serde_json::Map<String, Value>,
+    field: &str,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        object.insert(field.to_string(), json!(value));
+    } else {
+        object.remove(field);
+    }
+}
+
+fn normalize_permission_mode(value: String) -> Result<Option<String>> {
+    let Some(value) = normalize_optional_single_line("permission mode", Some(value))? else {
+        return Ok(None);
+    };
+    if value == "default" {
+        return Ok(None);
+    }
+    let Some(mode) = crate::types::PermissionMode::parse(&value) else {
+        return Err(Error::Config(
+            "permission mode must be default, acceptEdits, dontAsk, or bypassPermissions"
+                .to_string(),
+        ));
+    };
+    Ok(Some(mode.as_str().to_string()))
+}
+
+fn set_env_field(
+    object: &mut serde_json::Map<String, Value>,
+    field: &str,
+    value: String,
+    default: Option<&'static str>,
+) -> Result<()> {
+    let normalized = normalize_optional_single_line(field, Some(value))?;
+    let next = normalized.or_else(|| default.map(str::to_string));
+    if let Some(env) = next {
+        if !valid_env_name(&env) {
+            return Err(Error::Config(format!(
+                "{field} must be a valid environment variable name"
+            )));
+        }
+        object.insert(field.to_string(), json!(env));
+    } else {
+        object.remove(field);
+    }
+    Ok(())
+}
+
+fn normalize_channel_list(values: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if value.is_empty() || !seen.insert(value.to_string()) {
+            continue;
+        }
+        out.push(value.to_string());
+    }
+    out
+}
+
 fn load_channels_config(options: &RunOptions, workdir: &Path) -> Result<LoadedChannelsConfig> {
     let loaded = load_config_value(options, workdir)?;
     Ok(LoadedChannelsConfig {
@@ -494,6 +727,10 @@ fn channel_row(connection: &ChannelConnectionConfig, env: &BTreeMap<String, Stri
         "credential": {
             "env": connection.credential_env,
             "status": if channel_credential_present(connection, env) { "present" } else { "missing" },
+        },
+        "app_id": {
+            "env": connection.app_id_env,
+            "status": channel_app_id_status(connection, env),
         },
         "account": {
             "env": connection.account_env,
@@ -573,6 +810,17 @@ fn channel_account_status(
     env: &BTreeMap<String, String>,
 ) -> &'static str {
     match connection.account_env.as_deref() {
+        Some(key) if env_value(env, key).is_some() => "present",
+        Some(_) => "missing",
+        None => "not_required",
+    }
+}
+
+fn channel_app_id_status(
+    connection: &ChannelConnectionConfig,
+    env: &BTreeMap<String, String>,
+) -> &'static str {
+    match connection.app_id_env.as_deref() {
         Some(key) if env_value(env, key).is_some() => "present",
         Some(_) => "missing",
         None => "not_required",

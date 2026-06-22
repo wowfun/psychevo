@@ -198,6 +198,76 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
 }
 
 #[test]
+pub(crate) fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let store = SqliteStore::open(&db).expect("store");
+    let wechat_session = store
+        .create_session_with_metadata(&workdir, "channel", "model", "provider", None)
+        .expect("wechat session");
+    let telegram_session = store
+        .create_session_with_metadata(&workdir, "channel", "model", "provider", None)
+        .expect("telegram session");
+    let web_session = store
+        .create_session_with_metadata(&workdir, "web", "model", "provider", None)
+        .expect("web session");
+
+    store
+        .upsert_gateway_source_binding(GatewaySourceBindingInput {
+            source_key: "im.wechat:user-1",
+            source_kind: "im.wechat",
+            raw_identity: json!({
+                "connectionId": "wechat",
+                "chatId": "user-1",
+            }),
+            visible_name: Some("WeChat user 1"),
+            thread_id: &wechat_session,
+            backend_kind: "psychevo",
+            backend_native_id: Some(&wechat_session),
+            lineage: None,
+        })
+        .expect("wechat binding");
+    store
+        .upsert_gateway_source_binding(GatewaySourceBindingInput {
+            source_key: "im.telegram:user-1",
+            source_kind: "im.telegram",
+            raw_identity: json!({
+                "connectionId": "telegram",
+                "chatId": "user-1",
+            }),
+            visible_name: Some("Telegram user 1"),
+            thread_id: &telegram_session,
+            backend_kind: "psychevo",
+            backend_native_id: Some(&telegram_session),
+            lineage: None,
+        })
+        .expect("telegram binding");
+    store
+        .upsert_gateway_source_binding(GatewaySourceBindingInput {
+            source_key: "web:user-1",
+            source_kind: "web",
+            raw_identity: json!({
+                "connectionId": "wechat",
+                "chatId": "user-1",
+            }),
+            visible_name: Some("Workbench user 1"),
+            thread_id: &web_session,
+            backend_kind: "psychevo",
+            backend_native_id: Some(&web_session),
+            lineage: None,
+        })
+        .expect("web binding");
+
+    let bindings = store
+        .gateway_source_bindings_for_connection_id("wechat")
+        .expect("bindings");
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].source_key, "im.wechat:user-1");
+    assert_eq!(bindings[0].thread_id, wechat_session);
+}
+
+#[test]
 pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");

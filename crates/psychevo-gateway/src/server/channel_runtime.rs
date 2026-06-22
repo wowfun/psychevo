@@ -5,8 +5,8 @@ use crate::im::adapters::{
     WechatIlinkConfig, is_wechat_ilink_session_expired_error, wechat_ilink_error_code_from_message,
 };
 use crate::im::{
-    ChannelAdapterBinding, ChannelAllowlist, ChannelGateway, ImInboundMessage, ImOutboundMessage,
-    gateway_source_for_im,
+    ChannelAdapterBinding, ChannelAllowlist, ChannelGateway, ImIdentity, ImInboundMessage,
+    ImOutboundMessage, gateway_source_for_im,
 };
 use psychevo_runtime::{ChannelRuntimeConnection, channel_runtime_connections};
 use tokio_util::sync::CancellationToken;
@@ -568,7 +568,53 @@ async fn handle_channel_message(
     message: ImInboundMessage,
 ) -> psychevo_runtime::Result<()> {
     let source = gateway_source_for_im(&message);
-    let workdir = channel_workdir(&state.inner.workdir, connection);
+    if let Some(reply) = route_channel_command(state, runtime, connection, &message, &source)? {
+        channel_gateway
+            .send(ImOutboundMessage {
+                identity: message.identity,
+                thread_id: channel_reply_thread_id(state, &source),
+                text: reply,
+            })
+            .await?;
+        runtime.mark_outbound(&connection.id);
+        return Ok(());
+    }
+    let turn_state = state.clone();
+    let turn_runtime = runtime.clone();
+    let turn_connection = connection.clone();
+    let turn_gateway = channel_gateway.clone();
+    let _handle = tokio::spawn(async move {
+        if let Err(err) = run_channel_inbound_turn(
+            turn_state,
+            turn_runtime.clone(),
+            turn_connection.clone(),
+            turn_gateway,
+            message,
+            source,
+        )
+        .await
+        {
+            turn_runtime.mark_error(&turn_connection.id, &err);
+            eprintln!(
+                "channel turn failed: id={} channel={} error={}",
+                turn_connection.id,
+                turn_connection.channel,
+                redact_channel_error(&err.to_string())
+            );
+        }
+    });
+    Ok(())
+}
+
+async fn run_channel_inbound_turn(
+    state: WebState,
+    runtime: ChannelRuntimeState,
+    connection: ChannelRuntimeConnection,
+    channel_gateway: ChannelGateway,
+    message: ImInboundMessage,
+    source: GatewaySource,
+) -> psychevo_runtime::Result<()> {
+    let workdir = channel_workdir(&state.inner.workdir, &connection);
     let mut options = state.run_options(workdir, None);
     options.model = connection.model.clone();
     options.permission_mode = connection
@@ -576,6 +622,13 @@ async fn handle_channel_message(
         .as_deref()
         .and_then(PermissionMode::parse)
         .or(options.permission_mode);
+    let event_sink = channel_event_sink(
+        runtime.clone(),
+        connection.id.clone(),
+        channel_gateway.clone(),
+        message.identity.clone(),
+        source.source_key(),
+    );
     let result = state
         .inner
         .gateway
@@ -591,7 +644,7 @@ async fn handle_channel_message(
             runtime_source: Some(format!("channel/{}", connection.channel)),
             continue_sources: vec![format!("channel/{}", connection.channel)],
             stream: None,
-            event_sink: None,
+            event_sink: Some(event_sink),
             control_handle: None,
             control: None,
             lineage: Some(json!({
@@ -614,6 +667,251 @@ async fn handle_channel_message(
         .await?;
     runtime.mark_outbound(&connection.id);
     Ok(())
+}
+
+fn route_channel_command(
+    state: &WebState,
+    runtime: &ChannelRuntimeState,
+    connection: &ChannelRuntimeConnection,
+    message: &ImInboundMessage,
+    source: &GatewaySource,
+) -> psychevo_runtime::Result<Option<String>> {
+    let text = message.text.trim();
+    let Some((command, args)) = parse_channel_command(text) else {
+        return Ok(None);
+    };
+    let reply = match command.as_str() {
+        "help" => {
+            "Channel commands: /help, /status, /stop, /new, /reset, /approve <id>, /deny <id>, /answer <id> <text>, /cancel <id>. Send a normal message to start or continue a thread.".to_string()
+        }
+        "status" => {
+            let runner = runtime.runner_view(&connection.id);
+            let thread = state
+                .inner
+                .gateway
+                .resolve_source_thread(source)?
+                .unwrap_or_else(|| "none".to_string());
+            format!(
+                "Channel {} is {}{}; config {}; thread {}.",
+                connection.label,
+                runner.state,
+                runner
+                    .reason
+                    .as_deref()
+                    .map(|reason| format!(" ({reason})"))
+                    .unwrap_or_default(),
+                connection.config_status,
+                thread
+            )
+        }
+        "stop" => {
+            let interrupted = state
+                .inner
+                .gateway
+                .interrupt_turn(GatewayThreadSelector::source(source.source_key()));
+            if interrupted {
+                "Stop requested for this channel thread.".to_string()
+            } else {
+                "No active turn is running for this channel thread.".to_string()
+            }
+        }
+        "approve" | "allow" => {
+            let request_id = args.split_whitespace().next().unwrap_or("");
+            if request_id.is_empty() {
+                "Usage: /approve <request_id>".to_string()
+            } else if state.inner.gateway.submit_permission(
+                GatewayThreadSelector::source(source.source_key()),
+                request_id,
+                PermissionApprovalDecision::allow_once(),
+            ) {
+                format!("Approved request {request_id}.")
+            } else {
+                format!("No matching permission request for {request_id}.")
+            }
+        }
+        "deny" => {
+            let request_id = args.split_whitespace().next().unwrap_or("");
+            if request_id.is_empty() {
+                "Usage: /deny <request_id>".to_string()
+            } else if state.inner.gateway.submit_permission(
+                GatewayThreadSelector::source(source.source_key()),
+                request_id,
+                PermissionApprovalDecision::deny(),
+            ) {
+                format!("Denied request {request_id}.")
+            } else {
+                format!("No matching permission request for {request_id}.")
+            }
+        }
+        "answer" => {
+            let (request_id, answer) = split_first_arg(args);
+            if request_id.is_empty() || answer.is_empty() {
+                "Usage: /answer <request_id> <answer>".to_string()
+            } else if state.inner.gateway.submit_clarify(
+                GatewayThreadSelector::source(source.source_key()),
+                request_id,
+                ClarifyResult::Answered(ClarifyResponse {
+                    answers: vec![ClarifyAnswer {
+                        answers: vec![answer.to_string()],
+                    }],
+                }),
+            ) {
+                format!("Answered request {request_id}.")
+            } else {
+                format!("No matching Ask request for {request_id}.")
+            }
+        }
+        "cancel" => {
+            let request_id = args.split_whitespace().next().unwrap_or("");
+            if request_id.is_empty() {
+                "Usage: /cancel <request_id>".to_string()
+            } else if state.inner.gateway.submit_clarify(
+                GatewayThreadSelector::source(source.source_key()),
+                request_id,
+                ClarifyResult::Cancelled,
+            ) {
+                format!("Cancelled request {request_id}.")
+            } else {
+                format!("No matching Ask request for {request_id}.")
+            }
+        }
+        "new" | "reset" => {
+            let previous = state.inner.gateway.reset_source_to_empty(source)?;
+            if previous.is_some() {
+                "Started a new channel thread. The next message will use this channel's current default workspace.".to_string()
+            } else {
+                "No channel thread was active. The next message will start a new channel thread.".to_string()
+            }
+        }
+        "" => return Ok(None),
+        _ => "Unsupported channel command. Send /help for available commands.".to_string(),
+    };
+    Ok(Some(reply))
+}
+
+fn parse_channel_command(text: &str) -> Option<(String, &str)> {
+    let text = text.trim();
+    let command_line = text.strip_prefix('/')?;
+    let split_at = command_line
+        .find(char::is_whitespace)
+        .unwrap_or(command_line.len());
+    let (token, args) = command_line.split_at(split_at);
+    let command = token.split('@').next().unwrap_or("").to_ascii_lowercase();
+    Some((command, args.trim()))
+}
+
+fn split_first_arg(value: &str) -> (&str, &str) {
+    let value = value.trim();
+    let split_at = value.find(char::is_whitespace).unwrap_or(value.len());
+    let (first, rest) = value.split_at(split_at);
+    (first, rest.trim())
+}
+
+fn channel_reply_thread_id(state: &WebState, source: &GatewaySource) -> String {
+    state
+        .inner
+        .gateway
+        .resolve_source_thread(source)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| source.source_key().0)
+}
+
+fn channel_event_sink(
+    runtime: ChannelRuntimeState,
+    connection_id: String,
+    channel_gateway: ChannelGateway,
+    identity: ImIdentity,
+    fallback_source_key: SourceKey,
+) -> GatewayEventSink {
+    Arc::new(move |event| {
+        let Some(text) = channel_event_reply_text(&event) else {
+            return;
+        };
+        let thread_id = channel_event_thread_id(&event, &fallback_source_key);
+        let gateway = channel_gateway.clone();
+        let runtime = runtime.clone();
+        let connection_id = connection_id.clone();
+        let identity = identity.clone();
+        tokio::spawn(async move {
+            let result = gateway
+                .send(ImOutboundMessage {
+                    identity,
+                    thread_id,
+                    text,
+                })
+                .await;
+            match result {
+                Ok(()) => runtime.mark_outbound(&connection_id),
+                Err(err) => {
+                    runtime.mark_error(&connection_id, &err);
+                    eprintln!(
+                        "channel event delivery failed: id={} error={}",
+                        connection_id,
+                        redact_channel_error(&err.to_string())
+                    );
+                }
+            }
+        });
+    })
+}
+
+fn channel_event_reply_text(event: &GatewayEvent) -> Option<String> {
+    match event {
+        GatewayEvent::PermissionRequested {
+            request_id,
+            tool_name,
+            summary,
+            reason,
+            ..
+        } => {
+            let detail = if !summary.trim().is_empty() {
+                summary.trim()
+            } else if !reason.trim().is_empty() {
+                reason.trim()
+            } else {
+                "approval requested"
+            };
+            Some(format!(
+                "Permission required for {tool_name}: {detail}. Reply /approve {request_id} to allow once or /deny {request_id} to deny."
+            ))
+        }
+        GatewayEvent::ClarifyRequested {
+            request_id, raw, ..
+        } => {
+            let question = raw
+                .get("questions")
+                .and_then(Value::as_array)
+                .and_then(|questions| questions.first())
+                .and_then(|question| question.get("question"))
+                .and_then(Value::as_str)
+                .filter(|question| !question.trim().is_empty())
+                .unwrap_or("Please provide more information.");
+            Some(format!(
+                "Psychevo asks: {question}. Reply /answer {request_id} <answer> or /cancel {request_id}."
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn channel_event_thread_id(event: &GatewayEvent, fallback_source_key: &SourceKey) -> String {
+    match event {
+        GatewayEvent::PermissionRequested {
+            thread_id,
+            source_key,
+            ..
+        }
+        | GatewayEvent::ClarifyRequested {
+            thread_id,
+            source_key,
+            ..
+        } => thread_id
+            .clone()
+            .or_else(|| source_key.clone())
+            .unwrap_or_else(|| fallback_source_key.0.clone()),
+        _ => fallback_source_key.0.clone(),
+    }
 }
 
 fn channel_workdir(default_workdir: &Path, connection: &ChannelRuntimeConnection) -> PathBuf {
@@ -670,15 +968,23 @@ pub(super) fn redact_channel_error(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::im::{FakeImAdapter, ImIdentity};
+    use crate::im::FakeImAdapter;
     use futures::future::BoxFuture;
     use psychevo_runtime::{Outcome, RunResult, StateRuntime};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::collections::BTreeSet;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[derive(Debug, Default)]
     struct TestBackend {
         prompts: Arc<Mutex<Vec<String>>>,
         runs: AtomicUsize,
+        request_permission: AtomicBool,
+    }
+
+    impl TestBackend {
+        fn request_permission(&self) {
+            self.request_permission.store(true, Ordering::SeqCst);
+        }
     }
 
     #[derive(Debug)]
@@ -721,7 +1027,28 @@ mod tests {
         ) -> BoxFuture<'static, psychevo_runtime::Result<RunResult>> {
             let prompts = Arc::clone(&self.prompts);
             let run_number = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
+            let request_permission = self.request_permission.load(Ordering::SeqCst);
             Box::pin(async move {
+                if request_permission {
+                    let Some(handler) = request.options.approval_handler.clone() else {
+                        return Err(Error::Message("approval handler missing".to_string()));
+                    };
+                    let decision = handler
+                        .request_permission(psychevo_runtime::PermissionApprovalRequest {
+                            tool_call_id: "permission-1".to_string(),
+                            tool_name: "fake_tool".to_string(),
+                            summary: "fake permission".to_string(),
+                            reason: "test permission".to_string(),
+                            matched_rule: None,
+                            suggested_rule: None,
+                            allow_always: false,
+                            timeout_secs: 300,
+                        })
+                        .await;
+                    if matches!(decision.outcome, PermissionApprovalOutcome::Deny) {
+                        return Err(Error::Message("permission denied".to_string()));
+                    }
+                }
                 prompts
                     .lock()
                     .expect("prompts poisoned")
@@ -757,6 +1084,60 @@ mod tests {
         }
     }
 
+    fn ready_wechat_connection(workdir: Option<String>) -> ChannelRuntimeConnection {
+        ChannelRuntimeConnection {
+            id: "wechat".to_string(),
+            channel: "wechat".to_string(),
+            domain: Some("wechat".to_string()),
+            enabled: true,
+            label: "WeChat".to_string(),
+            transport: "polling".to_string(),
+            workdir,
+            model: None,
+            permission_mode: None,
+            require_mention: true,
+            credential: None,
+            app_id: None,
+            app_secret: None,
+            account_id: None,
+            base_url: None,
+            allow_users: vec!["wx-user".to_string()],
+            allow_groups: Vec::new(),
+            config_status: "ready".to_string(),
+        }
+    }
+
+    fn wechat_message(text: &str, message_id: &str) -> ImInboundMessage {
+        ImInboundMessage {
+            identity: ImIdentity {
+                connection_id: Some("wechat".to_string()),
+                platform: "wechat".to_string(),
+                domain: Some("wechat".to_string()),
+                workspace_id: None,
+                chat_type: Some("dm".to_string()),
+                chat_id: "wx-user".to_string(),
+                thread_id: None,
+                user_id: Some("wx-user".to_string()),
+                operator_id: None,
+                reply_to: None,
+            },
+            message_id: message_id.to_string(),
+            text: text.to_string(),
+            task_key: None,
+        }
+    }
+
+    async fn wait_for_sent(adapter: &FakeImAdapter, count: usize) -> Vec<ImOutboundMessage> {
+        for _ in 0..100 {
+            let sent = adapter.sent();
+            if sent.len() >= count {
+                return sent;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        adapter.sent()
+    }
+
     #[tokio::test]
     async fn channel_message_runs_gateway_turn_and_sends_final_answer() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -782,57 +1163,283 @@ mod tests {
             ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
         )]);
         let runtime = ChannelRuntimeState::new(temp.path());
-        let connection = ChannelRuntimeConnection {
-            id: "wechat".to_string(),
-            channel: "wechat".to_string(),
-            domain: Some("wechat".to_string()),
-            enabled: true,
-            label: "WeChat".to_string(),
-            transport: "polling".to_string(),
-            workdir: None,
-            model: None,
-            permission_mode: None,
-            require_mention: true,
-            credential: None,
-            app_id: None,
-            app_secret: None,
-            account_id: None,
-            base_url: None,
-            allow_users: vec!["wx-user".to_string()],
-            allow_groups: Vec::new(),
-            config_status: "ready".to_string(),
-        };
-        let message = ImInboundMessage {
-            identity: ImIdentity {
-                connection_id: Some("wechat".to_string()),
-                platform: "wechat".to_string(),
-                domain: Some("wechat".to_string()),
-                workspace_id: None,
-                chat_type: Some("dm".to_string()),
-                chat_id: "wx-user".to_string(),
-                thread_id: None,
-                user_id: Some("wx-user".to_string()),
-                operator_id: None,
-                reply_to: None,
-            },
-            message_id: "wx-message".to_string(),
-            text: "ping".to_string(),
-            task_key: None,
-        };
+        let connection = ready_wechat_connection(None);
+        let message = wechat_message("ping", "wx-message");
 
         handle_channel_message(&state, &runtime, &connection, &channel_gateway, message)
             .await
             .expect("message handled");
 
+        let sent = wait_for_sent(&adapter, 1).await;
         assert_eq!(
             prompts.lock().expect("prompts poisoned").as_slice(),
             ["ping"]
         );
-        let sent = adapter.sent();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].text, "answer 1");
         assert_eq!(runtime.runner_view("wechat").state, "running");
         assert!(runtime.runner_view("wechat").last_outbound_at_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn channel_help_command_replies_without_running_gateway_turn() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workdir = temp.path().join("work");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&workdir).expect("workdir");
+        let backend = Arc::new(TestBackend::default());
+        let prompts = Arc::clone(&backend.prompts);
+        let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let gateway = Gateway::with_backend(state_runtime, backend);
+        let state = WebState::new(GatewayWebServerConfig::new(
+            gateway,
+            home,
+            workdir,
+            None,
+            BTreeMap::new(),
+            temp.path().join("static"),
+        ));
+        let adapter = FakeImAdapter::new("wechat");
+        let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+            "wechat",
+            Arc::new(adapter.clone()),
+            ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+        )]);
+        let runtime = ChannelRuntimeState::new(temp.path());
+
+        handle_channel_message(
+            &state,
+            &runtime,
+            &ready_wechat_connection(None),
+            &channel_gateway,
+            wechat_message("/help", "wx-help"),
+        )
+        .await
+        .expect("help handled");
+
+        assert!(prompts.lock().expect("prompts poisoned").is_empty());
+        let sent = wait_for_sent(&adapter, 1).await;
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].text.contains("/status"));
+        assert!(sent[0].thread_id.starts_with("im.wechat:"));
+    }
+
+    #[tokio::test]
+    async fn channel_new_command_clears_binding_for_next_default_workdir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workdir = temp.path().join("work");
+        let changed_workdir = temp.path().join("changed");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&workdir).expect("workdir");
+        std::fs::create_dir_all(&changed_workdir).expect("changed workdir");
+        let backend = Arc::new(TestBackend::default());
+        let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let store_state = state_runtime.clone();
+        let gateway = Gateway::with_backend(state_runtime, backend);
+        let state = WebState::new(GatewayWebServerConfig::new(
+            gateway,
+            home,
+            workdir.clone(),
+            None,
+            BTreeMap::new(),
+            temp.path().join("static"),
+        ));
+        let adapter = FakeImAdapter::new("wechat");
+        let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+            "wechat",
+            Arc::new(adapter.clone()),
+            ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+        )]);
+        let runtime = ChannelRuntimeState::new(temp.path());
+
+        handle_channel_message(
+            &state,
+            &runtime,
+            &ready_wechat_connection(None),
+            &channel_gateway,
+            wechat_message("first", "wx-first"),
+        )
+        .await
+        .expect("first handled");
+        let sent = wait_for_sent(&adapter, 1).await;
+        assert_eq!(sent.len(), 1);
+        handle_channel_message(
+            &state,
+            &runtime,
+            &ready_wechat_connection(Some(changed_workdir.to_string_lossy().to_string())),
+            &channel_gateway,
+            wechat_message("/new", "wx-new"),
+        )
+        .await
+        .expect("new handled");
+        let sent = wait_for_sent(&adapter, 2).await;
+        assert_eq!(sent.len(), 2);
+        handle_channel_message(
+            &state,
+            &runtime,
+            &ready_wechat_connection(Some(changed_workdir.to_string_lossy().to_string())),
+            &channel_gateway,
+            wechat_message("second", "wx-second"),
+        )
+        .await
+        .expect("second handled");
+
+        let sent = wait_for_sent(&adapter, 3).await;
+        assert_eq!(sent.len(), 3);
+        assert_ne!(sent[0].thread_id, sent[2].thread_id);
+        let active_sessions = store_state
+            .store()
+            .list_sessions_with_sources(&["channel/wechat"])
+            .expect("sessions");
+        let archived_sessions = store_state
+            .store()
+            .list_archived_sessions_with_sources(&["channel/wechat"])
+            .expect("archived sessions");
+        let workdirs = active_sessions
+            .iter()
+            .chain(archived_sessions.iter())
+            .map(|session| session.workdir.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(workdirs.contains(workdir.to_string_lossy().as_ref()));
+        assert!(workdirs.contains(changed_workdir.to_string_lossy().as_ref()));
+    }
+
+    #[tokio::test]
+    async fn channel_permission_request_can_be_approved_by_command() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workdir = temp.path().join("work");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&workdir).expect("workdir");
+        let backend = Arc::new(TestBackend::default());
+        backend.request_permission();
+        let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let gateway = Gateway::with_backend(state_runtime, backend);
+        let state = WebState::new(GatewayWebServerConfig::new(
+            gateway,
+            home,
+            workdir,
+            None,
+            BTreeMap::new(),
+            temp.path().join("static"),
+        ));
+        let adapter = FakeImAdapter::new("wechat");
+        let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+            "wechat",
+            Arc::new(adapter.clone()),
+            ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+        )]);
+        let runtime = ChannelRuntimeState::new(temp.path());
+
+        handle_channel_message(
+            &state,
+            &runtime,
+            &ready_wechat_connection(None),
+            &channel_gateway,
+            wechat_message("needs approval", "wx-approval-turn"),
+        )
+        .await
+        .expect("approval turn accepted");
+
+        let sent = wait_for_sent(&adapter, 1).await;
+        assert!(sent[0].text.contains("Permission required for fake_tool"));
+        assert!(sent[0].text.contains("/approve permission-1"));
+
+        handle_channel_message(
+            &state,
+            &runtime,
+            &ready_wechat_connection(None),
+            &channel_gateway,
+            wechat_message("/approve permission-1", "wx-approve"),
+        )
+        .await
+        .expect("approval command handled");
+
+        let sent = wait_for_sent(&adapter, 3).await;
+        assert!(
+            sent.iter()
+                .any(|message| message.text == "Approved request permission-1.")
+        );
+        assert!(sent.iter().any(|message| message.text == "answer 1"));
+    }
+
+    #[tokio::test]
+    async fn channel_answer_command_reports_missing_ask_request() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workdir = temp.path().join("work");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&workdir).expect("workdir");
+        let backend = Arc::new(TestBackend::default());
+        let prompts = Arc::clone(&backend.prompts);
+        let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let gateway = Gateway::with_backend(state_runtime, backend);
+        let state = WebState::new(GatewayWebServerConfig::new(
+            gateway,
+            home,
+            workdir,
+            None,
+            BTreeMap::new(),
+            temp.path().join("static"),
+        ));
+        let adapter = FakeImAdapter::new("wechat");
+        let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+            "wechat",
+            Arc::new(adapter.clone()),
+            ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+        )]);
+        let runtime = ChannelRuntimeState::new(temp.path());
+
+        handle_channel_message(
+            &state,
+            &runtime,
+            &ready_wechat_connection(None),
+            &channel_gateway,
+            wechat_message("/answer ask-1 use repo root", "wx-answer"),
+        )
+        .await
+        .expect("answer command handled");
+
+        assert!(prompts.lock().expect("prompts poisoned").is_empty());
+        let sent = wait_for_sent(&adapter, 1).await;
+        assert_eq!(sent[0].text, "No matching Ask request for ask-1.");
+    }
+
+    #[tokio::test]
+    async fn channel_event_sink_sends_clarify_prompt() {
+        let adapter = FakeImAdapter::new("wechat");
+        let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+            "wechat",
+            Arc::new(adapter.clone()),
+            ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+        )]);
+        let runtime = ChannelRuntimeState::default();
+        let identity = wechat_message("ignored", "wx-event").identity;
+        let sink = channel_event_sink(
+            runtime,
+            "wechat".to_string(),
+            channel_gateway,
+            identity,
+            SourceKey("im.wechat:fallback".to_string()),
+        );
+
+        sink(GatewayEvent::ClarifyRequested {
+            request_id: "ask-1".to_string(),
+            raw: json!({
+                "questions": [
+                    { "question": "Which workspace should I use?" }
+                ]
+            }),
+            thread_id: Some("thread-1".to_string()),
+            turn_id: None,
+            activity_id: None,
+            source_key: None,
+            owner_id: None,
+            lease_expires_at_ms: None,
+        });
+
+        let sent = wait_for_sent(&adapter, 1).await;
+        assert_eq!(sent[0].thread_id, "thread-1");
+        assert!(sent[0].text.contains("Which workspace should I use?"));
+        assert!(sent[0].text.contains("/answer ask-1 <answer>"));
     }
 
     #[tokio::test]

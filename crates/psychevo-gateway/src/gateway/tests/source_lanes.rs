@@ -118,6 +118,205 @@
     }
 
     #[tokio::test]
+    async fn bound_thread_uses_stored_workdir_over_request_default() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+        let source = GatewaySource::new("im.wechat", "remote-lane").persistent();
+        let changed_default = harness
+            .workdir
+            .parent()
+            .expect("temp root")
+            .join("changed-default");
+        std::fs::create_dir_all(&changed_default).expect("changed default workdir");
+
+        let first = harness
+            .gateway
+            .send_turn(request(&harness, source.clone(), "first"))
+            .await
+            .expect("first turn");
+        let mut second_request = request(&harness, source, "second");
+        second_request.options.workdir = changed_default.clone();
+        let second = harness
+            .gateway
+            .send_turn(second_request)
+            .await
+            .expect("second turn");
+
+        assert_eq!(first.result.session_id, second.result.session_id);
+        let runs = backend.runs();
+        assert_eq!(runs[1].session.as_deref(), Some(first.result.session_id.as_str()));
+        assert_eq!(runs[0].workdir, harness.workdir);
+        assert_eq!(runs[1].workdir, harness.workdir);
+        assert_ne!(runs[1].workdir, changed_default);
+    }
+
+    #[tokio::test]
+    async fn channel_connection_rotation_starts_next_turn_in_changed_default_workdir() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+        let source = GatewaySource::new("im.wechat", "remote-lane")
+            .persistent()
+            .with_raw_identity(json!({
+                "connectionId": "wechat",
+                "chatId": "remote-lane",
+            }));
+        let other_source = GatewaySource::new("im.telegram", "remote-lane")
+            .persistent()
+            .with_raw_identity(json!({
+                "connectionId": "telegram",
+                "chatId": "remote-lane",
+            }));
+        let changed_default = harness
+            .workdir
+            .parent()
+            .expect("temp root")
+            .join("changed-default");
+        std::fs::create_dir_all(&changed_default).expect("changed default workdir");
+
+        let first = harness
+            .gateway
+            .send_turn(request(&harness, source.clone(), "first"))
+            .await
+            .expect("first turn");
+        let other = harness
+            .gateway
+            .send_turn(request(&harness, other_source.clone(), "other"))
+            .await
+            .expect("other turn");
+
+        assert_eq!(
+            harness
+                .gateway
+                .rotate_channel_connection_sources("wechat")
+                .expect("rotate wechat"),
+            1
+        );
+        assert!(
+            harness
+                .state
+                .store()
+                .gateway_source_binding(&source.source_key().0)
+                .expect("binding lookup")
+                .is_none()
+        );
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .gateway_source_binding(&other_source.source_key().0)
+                .expect("other binding lookup")
+                .expect("other binding")
+                .thread_id,
+            other.result.session_id
+        );
+        let old_summary = harness
+            .state
+            .store()
+            .session_summary(&first.result.session_id)
+            .expect("old summary")
+            .expect("old session");
+        assert_eq!(
+            old_summary.end_reason.as_deref(),
+            Some("channel_workspace_changed")
+        );
+        assert!(old_summary.archived_at_ms.is_some());
+
+        let mut second_request = request(&harness, source.clone(), "second");
+        second_request.options.workdir = changed_default.clone();
+        let second = harness
+            .gateway
+            .send_turn(second_request)
+            .await
+            .expect("second turn");
+
+        assert_ne!(first.result.session_id, second.result.session_id);
+        assert_eq!(backend.runs().last().expect("last run").workdir, changed_default);
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .gateway_source_binding(&source.source_key().0)
+                .expect("new binding lookup")
+                .expect("new binding")
+                .thread_id,
+            second.result.session_id
+        );
+    }
+
+    #[tokio::test]
+    async fn channel_connection_rotation_waits_for_running_bound_turn() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+        let source = GatewaySource::new("im.wechat", "remote-lane")
+            .persistent()
+            .with_raw_identity(json!({
+                "connectionId": "wechat",
+                "chatId": "remote-lane",
+            }));
+        let changed_default = harness
+            .workdir
+            .parent()
+            .expect("temp root")
+            .join("changed-default");
+        std::fs::create_dir_all(&changed_default).expect("changed default workdir");
+
+        let first = harness
+            .gateway
+            .send_turn(request(&harness, source.clone(), "first"))
+            .await
+            .expect("first turn");
+
+        let wait = backend.wait_on_next_run();
+        let second_gateway = harness.gateway.clone();
+        let second_request = request(&harness, source.clone(), "second-running");
+        let second = tokio::spawn(async move { second_gateway.send_turn(second_request).await });
+        wait.started.notified().await;
+
+        assert_eq!(
+            harness
+                .gateway
+                .rotate_channel_connection_sources("wechat")
+                .expect("rotate wechat"),
+            1
+        );
+
+        let third_gateway = harness.gateway.clone();
+        let mut third_request = request(&harness, source.clone(), "third-new-workdir");
+        third_request.options.workdir = changed_default.clone();
+        let third = tokio::spawn(async move { third_gateway.send_turn(third_request).await });
+
+        tokio::task::yield_now().await;
+        assert_eq!(
+            backend
+                .runs()
+                .into_iter()
+                .map(|run| run.prompt)
+                .collect::<Vec<_>>(),
+            vec!["first".to_string(), "second-running".to_string()]
+        );
+
+        wait.release.notify_one();
+        let second = second.await.expect("second task").expect("second turn");
+        let third = third.await.expect("third task").expect("third turn");
+
+        assert_eq!(first.result.session_id, second.result.session_id);
+        assert_ne!(first.result.session_id, third.result.session_id);
+        let runs = backend.runs();
+        assert_eq!(runs[1].workdir, harness.workdir);
+        assert_eq!(runs[2].workdir, changed_default);
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .gateway_source_binding(&source.source_key().0)
+                .expect("new binding lookup")
+                .expect("new binding")
+                .thread_id,
+            third.result.session_id
+        );
+    }
+
+    #[tokio::test]
     async fn first_shell_without_bound_source_creates_and_binds_runtime_session() {
         let backend = Arc::new(FakeBackend::default());
         let harness = harness(backend);
