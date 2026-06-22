@@ -1,14 +1,26 @@
 # Changelog
 
+## 2026-06-23
+
+- Simplified Channel details to show `Cancel` and `Save` only in dirty state;
+  moved `Enable` and `Test` to connected rows.
+- Rotated IM source bindings on workspace changes so subsequent messages start
+  clean threads in the new workspace.
+
 ## 2026-06-22
 
-- Fixed WeChat QR setup and reconnect end to end: direct iLink QR images, live
-  countdowns, immediate secret-free credential persistence, stale-session
-  cleanup, `qr_login_pending` grace, and duplicate-id upserts.
-- Started enabled, config-ready Channels from the managed Gateway so WeChat
-  iLink polling can run Gateway turns, reply to chat, and report secret-free
-  runner diagnostics in CLI, RPC, and Workbench.
-- Added a `peval-py` Deepagents adapter for converting session JSON.
+- Reorganized channel specs into shared foundations, Channel UX, and platform
+  topics for WeChat, Telegram, and Feishu/Lark.
+- Enabled config-ready managed Gateway channels (notably WeChat iLink), including
+  QR reconnect flow, polling turns, chat reply, and secret-free diagnostics across
+  CLI, RPC, and Workbench.
+- Refined Workbench channel settings and details into a cleaner staged workflow
+  with mobile/desktop coverage and workspace-aware message routing.
+- Delivered `peval-py` Trial-cell migration: state schema v3, collapsed trial
+  pointer model, and artifact updates for `notes.md`, `analysis.md`, and typed
+  `analysis.json`.
+- Expanded `peval-py serve` Source Manager to near-full-screen with per-adapter
+  default SQLite persistence and report rendering updates.
 
 ## 2026-06-21
 
