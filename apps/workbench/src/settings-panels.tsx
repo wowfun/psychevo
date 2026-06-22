@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   Activity,
   Archive,
@@ -23,8 +23,10 @@ import {
   X
 } from "lucide-react";
 import type {
+  ChannelUpdateParams,
   ChannelWechatQrPollResult,
   ChannelWechatQrStartResult,
+  SettingsReadResult,
   SessionSummary
 } from "@psychevo/protocol";
 import { prettyJson } from "./data";
@@ -32,6 +34,7 @@ import type {
   Appearance,
   BackendCommandJson,
   BackendDraft,
+  SessionBrowserWorkspaceState,
   SettingsSection,
   WorkbenchUsageStats,
   WorkbenchBackend,
@@ -42,6 +45,8 @@ import type {
 
 const BACKEND_ENTRYPOINTS = ["peer", "subagent"] as const;
 const BACKEND_CLIENT_CAPABILITIES = ["fs.read", "fs.write", "terminal"] as const;
+type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
+type ChannelSettingsControls = SettingsReadResult["controls"];
 const BACKEND_COMMAND_JSON_TEMPLATE = `{
   "command": "opencode",
   "args": ["acp"],
@@ -74,6 +79,7 @@ export function SettingsPage({
   backends,
   channelDoctor,
   channels,
+  controls,
   debugEnabled,
   disabled,
   section,
@@ -86,6 +92,7 @@ export function SettingsPage({
   onDebugChange,
   onDeleteArchivedSession,
   onDeleteBackend,
+  onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
   onDoctorBackend,
@@ -101,6 +108,8 @@ export function SettingsPage({
   onSetBackendEntrypoints,
   onSetChannelEnabled,
   onStartWechatQrSetup,
+  onUpdateChannel,
+  sessionBrowserWorkspaces,
   workdir
 }: {
   appearance: Appearance;
@@ -110,6 +119,7 @@ export function SettingsPage({
   backends: WorkbenchBackend[];
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
+  controls: ChannelSettingsControls;
   debugEnabled: boolean;
   disabled: boolean;
   section: SettingsSection;
@@ -122,6 +132,7 @@ export function SettingsPage({
   onDebugChange(value: boolean): void;
   onDeleteArchivedSession(threadId: string): void;
   onDeleteBackend(backend: WorkbenchBackend): void;
+  onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
   onDoctorBackend(backend: WorkbenchBackend): void;
@@ -137,6 +148,8 @@ export function SettingsPage({
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
+  onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
+  sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   workdir: string;
 }) {
   const [query, setQuery] = useState("");
@@ -203,47 +216,53 @@ export function SettingsPage({
           </div>
         </aside>
         <div className="settingsContent">
-          <header className="settingsSectionHeader">
-            <span>{settingsSectionIcon(active.id, 17)}</span>
-            <div>
-              <h3>{active.label}</h3>
-            </div>
-          </header>
-          <SettingsSectionPanel
-            appearance={appearance}
-            archivedSessions={archivedSessions}
-            backendDraft={backendDraft}
-            backendDoctor={backendDoctor}
-            backends={backends}
-            channelDoctor={channelDoctor}
-            channels={channels}
-            debugEnabled={debugEnabled}
-            disabled={disabled}
-            section={section}
-            usageStats={usageStats}
-            usageStatsError={usageStatsError}
-            usageStatsLoading={usageStatsLoading}
-            onAppearanceChange={onAppearanceChange}
-            onCancelBackendEdit={onCancelBackendEdit}
-            onChangeBackendDraft={onChangeBackendDraft}
-            onDebugChange={onDebugChange}
-            onDeleteArchivedSession={onDeleteArchivedSession}
-            onDeleteBackend={onDeleteBackend}
-            onDoctorChannel={onDoctorChannel}
-            onDoctorChannels={onDoctorChannels}
-            onDoctorBackend={onDoctorBackend}
-            onEditBackend={onEditBackend}
-            onNewBackend={onNewBackend}
-            onPollWechatQrSetup={onPollWechatQrSetup}
-            onRestoreArchivedSession={onRestoreArchivedSession}
-            onSaveBackendDraft={onSaveBackendDraft}
-            onRefreshUsageStats={onRefreshUsageStats}
-            onSetBackendEnabled={onSetBackendEnabled}
-            onSetBackendEntrypoints={onSetBackendEntrypoints}
-            onSetChannelEnabled={onSetChannelEnabled}
-            onStartWechatQrSetup={onStartWechatQrSetup}
-            workdir={workdir}
-          />
+          <div className="settingsContentInner">
+            <header className="settingsSectionHeader">
+              <span>{settingsSectionIcon(active.id, 17)}</span>
+              <div>
+                <h3>{active.label}</h3>
+              </div>
+            </header>
+            <SettingsSectionPanel
+              appearance={appearance}
+              archivedSessions={archivedSessions}
+              backendDraft={backendDraft}
+              backendDoctor={backendDoctor}
+              backends={backends}
+              channelDoctor={channelDoctor}
+              channels={channels}
+              controls={controls}
+              debugEnabled={debugEnabled}
+              disabled={disabled}
+              section={section}
+              usageStats={usageStats}
+              usageStatsError={usageStatsError}
+              usageStatsLoading={usageStatsLoading}
+              onAppearanceChange={onAppearanceChange}
+              onCancelBackendEdit={onCancelBackendEdit}
+              onChangeBackendDraft={onChangeBackendDraft}
+              onDebugChange={onDebugChange}
+              onDeleteArchivedSession={onDeleteArchivedSession}
+              onDeleteBackend={onDeleteBackend}
+              onDeleteChannel={onDeleteChannel}
+              onDoctorChannel={onDoctorChannel}
+              onDoctorChannels={onDoctorChannels}
+              onDoctorBackend={onDoctorBackend}
+              onEditBackend={onEditBackend}
+              onNewBackend={onNewBackend}
+              onPollWechatQrSetup={onPollWechatQrSetup}
+              onRestoreArchivedSession={onRestoreArchivedSession}
+              onSaveBackendDraft={onSaveBackendDraft}
+              onRefreshUsageStats={onRefreshUsageStats}
+              onSetBackendEnabled={onSetBackendEnabled}
+              onSetBackendEntrypoints={onSetBackendEntrypoints}
+              onSetChannelEnabled={onSetChannelEnabled}
+              onStartWechatQrSetup={onStartWechatQrSetup}
+              onUpdateChannel={onUpdateChannel}
+              sessionBrowserWorkspaces={sessionBrowserWorkspaces}
+              workdir={workdir}
+            />
+          </div>
         </div>
       </div>
     </section>
@@ -258,6 +277,7 @@ function SettingsSectionPanel({
   backends,
   channelDoctor,
   channels,
+  controls,
   debugEnabled,
   disabled,
   section,
@@ -270,6 +290,7 @@ function SettingsSectionPanel({
   onDebugChange,
   onDeleteArchivedSession,
   onDeleteBackend,
+  onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
   onDoctorBackend,
@@ -283,6 +304,8 @@ function SettingsSectionPanel({
   onSetBackendEntrypoints,
   onSetChannelEnabled,
   onStartWechatQrSetup,
+  onUpdateChannel,
+  sessionBrowserWorkspaces,
   workdir
 }: {
   appearance: Appearance;
@@ -292,6 +315,7 @@ function SettingsSectionPanel({
   backends: WorkbenchBackend[];
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
+  controls: ChannelSettingsControls;
   debugEnabled: boolean;
   disabled: boolean;
   section: SettingsSection;
@@ -304,6 +328,7 @@ function SettingsSectionPanel({
   onDebugChange(value: boolean): void;
   onDeleteArchivedSession(threadId: string): void;
   onDeleteBackend(backend: WorkbenchBackend): void;
+  onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
   onDoctorBackend(backend: WorkbenchBackend): void;
@@ -317,6 +342,8 @@ function SettingsSectionPanel({
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
+  onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
+  sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   workdir: string;
 }) {
   switch (section) {
@@ -390,12 +417,16 @@ function SettingsSectionPanel({
         <ChannelsSettingsPanel
           channelDoctor={channelDoctor}
           channels={channels}
+          controls={controls}
           disabled={disabled}
+          onDeleteChannel={onDeleteChannel}
           onDoctorChannel={onDoctorChannel}
           onDoctorChannels={onDoctorChannels}
           onPollWechatQrSetup={onPollWechatQrSetup}
           onSetChannelEnabled={onSetChannelEnabled}
           onStartWechatQrSetup={onStartWechatQrSetup}
+          onUpdateChannel={onUpdateChannel}
+          sessionBrowserWorkspaces={sessionBrowserWorkspaces}
           workdir={workdir}
         />
       );
@@ -662,42 +693,62 @@ const CHANNEL_CHOICES: ChannelChoice[] = ["wechat", "telegram", "feishu", "lark"
 function ChannelsSettingsPanel({
   channelDoctor,
   channels,
+  controls,
   disabled,
+  onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
   onPollWechatQrSetup,
   onSetChannelEnabled,
   onStartWechatQrSetup,
+  onUpdateChannel,
+  sessionBrowserWorkspaces,
   workdir
 }: {
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
+  controls: ChannelSettingsControls;
   disabled: boolean;
+  onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
+  onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
+  sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   workdir: string;
 }) {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [selectedChannelChoice, setSelectedChannelChoice] = useState<ChannelChoice>("wechat");
+  const panelRef = useRef<HTMLElement | null>(null);
   const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) ?? null;
   const configuredChoiceChannel = channels.find((channel) => channel.channel === selectedChannelChoice) ?? null;
+  useEffect(() => {
+    const settingsContent = panelRef.current?.closest<HTMLElement>(".settingsContent");
+    settingsContent?.scrollTo?.({ top: 0, left: 0 });
+  }, [selectedChannelId]);
   if (selectedChannel) {
     return (
       <ChannelSettingsDetail
         channel={selectedChannel}
+        controls={controls}
         doctor={channelDoctor[selectedChannel.id] ?? null}
         disabled={disabled}
         onBack={() => setSelectedChannelId(null)}
-        onDoctor={() => onDoctorChannel(selectedChannel)}
-        onSetEnabled={(enabled) => onSetChannelEnabled(selectedChannel, enabled)}
+        onDelete={async () => {
+          await onDeleteChannel(selectedChannel);
+          setSelectedChannelId(null);
+        }}
+        onUpdate={(draft) => onUpdateChannel(selectedChannel, draft)}
+        rootRef={panelRef}
+        sessionBrowserWorkspaces={sessionBrowserWorkspaces}
+        workdir={workdir}
       />
     );
   }
   return (
-    <section className="agentSurfacePanel channelsSettingsPanel" aria-label="Channels">
+    <section className="agentSurfacePanel channelsSettingsPanel" aria-label="Channels" ref={panelRef}>
       <header className="agentSurfaceHeaderWithAction channelSettingsToolbar">
         <span><MessageCircle size={15} /> Connected Channels <b>{channels.length}</b></span>
         <div className="channelToolbarActions">
@@ -797,56 +848,155 @@ function ChannelsSettingsPanel({
 
 function ChannelSettingsDetail({
   channel,
+  controls,
   disabled,
   doctor,
   onBack,
-  onDoctor,
-  onSetEnabled
+  onDelete,
+  onUpdate,
+  rootRef,
+  sessionBrowserWorkspaces,
+  workdir
 }: {
   channel: WorkbenchChannel;
+  controls: ChannelSettingsControls;
   disabled: boolean;
   doctor: WorkbenchChannelDoctor | null;
   onBack(): void;
-  onDoctor(): void;
-  onSetEnabled(enabled: boolean): void;
+  onDelete(): Promise<void>;
+  onUpdate(draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
+  rootRef: RefObject<HTMLElement | null>;
+  sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
+  workdir: string;
 }) {
-  const runtimeSummary = channelRuntimeSummary(channel, "default workdir");
+  const [draft, setDraft] = useState<ChannelSettingsDraft>(() => channelDraftFromChannel(channel));
+  const [discardPrompt, setDiscardPrompt] = useState(false);
+  const [deletePrompt, setDeletePrompt] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(channelDraftFromChannel(channel));
+    setDiscardPrompt(false);
+    setDeletePrompt(false);
+    setError(null);
+    setSavedNotice(null);
+  }, [channel.id]);
+
+  const savedSignature = channelDraftSignature(channelDraftFromChannel(channel));
+  const draftSignature = channelDraftSignature(draft);
+  const dirty = draftSignature !== savedSignature;
+  const permissionOptions = channelPermissionOptions(controls, channel, draft);
+  const modelOptions = channelModelOptions(controls, channel, draft);
+  const workspaceOptions = channelWorkspaceOptions(sessionBrowserWorkspaces);
+  const busy = disabled || saving || deleting;
+
+  function updateDraft(patch: Partial<ChannelSettingsDraft>) {
+    setError(null);
+    setSavedNotice(null);
+    setDiscardPrompt(false);
+    setDraft((current) => ({ ...current, ...patch }));
+  }
+
+  function requestBack() {
+    if (dirty) {
+      setDiscardPrompt(true);
+      return;
+    }
+    onBack();
+  }
+
+  function cancelEdits() {
+    setDraft(channelDraftFromChannel(channel));
+    setDiscardPrompt(false);
+    setError(null);
+    setSavedNotice(null);
+  }
+
+  async function saveDraft() {
+    if (!dirty || busy) {
+      return;
+    }
+    const workspaceChanged = draft.workdir.trim() !== channelDraftFromChannel(channel).workdir.trim();
+    setSaving(true);
+    setError(null);
+    setSavedNotice(null);
+    try {
+      const nextChannel = await onUpdate(channelUpdateDraftFromDraft(draft));
+      setDraft(channelDraftFromChannel(nextChannel));
+      setDiscardPrompt(false);
+      setSavedNotice(workspaceChanged ? "Next message will start in the new workspace." : null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteChannel() {
+    if (busy) {
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      await onDelete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setDeleting(false);
+    }
+  }
+
   return (
-    <section className="channelsSettingsPanel channelDetailPage" aria-label="Channel settings">
-      <header className="channelDetailHeader">
-        <button aria-label="Back to Channels" onClick={onBack} title="Back to Channels" type="button">
+    <section className="channelsSettingsPanel channelDetailPage" aria-label="Channel settings" ref={rootRef}>
+      <header className="channelDetailHeader channelDetailHeaderStaged">
+        <button aria-label="Back to Channels" onClick={requestBack} title="Back to Channels" type="button">
           <ArrowLeft size={14} />
           <span>Back</span>
         </button>
         <div className="channelDetailTitle">
-          <strong>{channel.label || channel.id}</strong>
+          <strong>{draft.label.trim() || channel.id}</strong>
           <span>{formatChannelName(channel.channel)} · {channel.transport}</span>
         </div>
         <div className="channelDetailActions">
-          <button aria-label={`Test ${channel.id}`} disabled={disabled} onClick={onDoctor} title="Test" type="button">
-            <Wrench size={13} />
-            <span>Test</span>
+          {dirty && (
+            <button disabled={busy} onClick={cancelEdits} type="button">
+              <X size={13} />
+              <span>Cancel</span>
+            </button>
+          )}
+          <button
+            className="channelDetailSave"
+            disabled={busy || !dirty}
+            onClick={() => void saveDraft()}
+            type="button"
+          >
+            <Save size={13} />
+            <span>{saving ? "Saving" : "Save"}</span>
           </button>
-          <label className="backendSwitch">
-            <input
-              aria-label={`${channel.enabled ? "Disable" : "Enable"} ${channel.id}`}
-              checked={channel.enabled}
-              disabled={disabled}
-              onChange={(event) => onSetEnabled(event.currentTarget.checked)}
-              role="switch"
-              type="checkbox"
-            />
-            <span className="backendSwitchTrack" aria-hidden />
-            <span>{channel.enabled ? "Enabled" : "Disabled"}</span>
-          </label>
         </div>
       </header>
-      <div className="channelDetailSummary" aria-label={`${channel.id} channel status`}>
-        <ChannelDetailSummaryItem label="Config" tone={channelStatusTone(channel.runtimeStatus)} value={channel.runtimeStatus} />
-        <ChannelDetailSummaryItem label="Runner" meta={formatRunnerActivity(channel)} tone={channelRunnerTone(channel.runner.state)} value={channel.runner.state} />
-        <ChannelDetailSummaryItem label="Credential" meta={channel.credential.env ?? "env missing"} tone={channelStatusTone(channel.credential.status)} value={channel.credential.status} />
-        <ChannelDetailSummaryItem label="Allowlist" meta={channelAllowlistSummary(channel)} tone={channelStatusTone(channel.allowlist.status)} value={channel.allowlist.status} />
-        <ChannelDetailSummaryItem label="Runtime defaults" meta={runtimeSummary} tone="muted" value={channel.permissionMode ?? "default"} />
+      {discardPrompt && (
+        <div className="channelDiscardNotice" role="alert">
+          <strong>Discard unsaved changes?</strong>
+          <button disabled={busy} onClick={() => { cancelEdits(); onBack(); }} type="button">
+            Discard changes
+          </button>
+          <button disabled={busy} onClick={() => setDiscardPrompt(false)} type="button">
+            Keep editing
+          </button>
+        </div>
+      )}
+      {error && <p className="channelDetailError" role="alert">{error}</p>}
+      {savedNotice && <p className="channelSavedNotice" role="status">{savedNotice}</p>}
+      <div className="channelHealthSummary" aria-label={`${channel.id} channel health summary`}>
+        <ChannelHealthItem label="Config" tone={channelStatusTone(channel.runtimeStatus)} value={channel.runtimeStatus} />
+        <ChannelHealthItem label="Runner" tone={channelRunnerTone(channel.runner.state)} value={channel.runner.state} />
+        <ChannelHealthItem label="Credential" tone={channelStatusTone(channel.credential.status)} value={channel.credential.status} />
+        <ChannelHealthItem label="Allowlist" tone={channelStatusTone(channel.allowlist.status)} value={channelAllowlistSummary(channel)} />
+        <ChannelHealthItem label="Runtime" tone="muted" value={channelRuntimeDefaultsSummary(draft)} />
       </div>
       {doctor && (
         <div className="channelDoctorResult" role="status" aria-label={`${channel.id} doctor checks`}>
@@ -859,70 +1009,391 @@ function ChannelSettingsDetail({
           ))}
         </div>
       )}
-      <div className="channelDetailsGroups">
-        <ChannelDetailGroup title="Connection" rows={[
-          ["ID", channel.id],
-          ["Channel", formatChannelName(channel.channel)],
-          ["Transport", channel.transport],
-          ["Domain", channel.domain ?? "default"]
-        ]} />
-        <ChannelDetailGroup title="Access control" rows={[
-          ["Users", channel.allowlist.users.length ? channel.allowlist.users.join(", ") : "none"],
-          ["Groups", channel.allowlist.groups.length ? channel.allowlist.groups.join(", ") : "none"],
-          ["Group mention", channel.requireMention ? "required" : "not required"]
-        ]} />
-        <ChannelDetailGroup title="Runtime settings" rows={[
-          ["Model", channel.model ?? "default"],
-          ["Workdir", channel.workdir ?? "default"],
-          ["Permission mode", channel.permissionMode ?? "default"]
-        ]} />
-        <ChannelDetailGroup title="Credentials" rows={[
-          ["Credential env", channel.credential.env ?? "not configured"],
-          ["Credential state", channel.credential.status]
-        ]} />
-        <ChannelDetailGroup title="Runtime runner" rows={[
-          ["State", channel.runner.state],
-          ["Reason", channel.runner.reason ?? "none"],
-          ["Last poll", formatRunnerTimestamp(channel.runner.lastPollAtMs)],
-          ["Last healthy poll", formatRunnerTimestamp(channel.runner.lastHealthyPollAtMs)],
-          ["Last inbound", formatRunnerTimestamp(channel.runner.lastInboundAtMs)],
-          ["Last outbound", formatRunnerTimestamp(channel.runner.lastOutboundAtMs)],
-          ["Last iLink code", channel.runner.lastIlinkErrcode == null ? "none" : String(channel.runner.lastIlinkErrcode)],
-          ["Last error", channel.runner.lastError ?? "none"]
-        ]} />
-        <ChannelDetailGroup title="Delivery behavior" rows={[
-          ["Outbound", "text fallback"],
-          ["Diagnostics", "local doctor by default"],
-          ["Live checks", "opt-in only"]
-        ]} />
-        <details className="channelDetailGroup">
-          <summary>Danger zone</summary>
-          <div className="channelDangerRow">
-            <span>Disable inbound delivery for this connection.</span>
-            <button disabled={disabled || !channel.enabled} onClick={() => onSetEnabled(false)} type="button">
-              Disable
-            </button>
-          </div>
+      <div className="channelDetailsForm">
+        <ChannelDetailSection title="Connection">
+          <ChannelFormRow label="Label" hint="Shown in the connected channel list.">
+            <div className="channelControl">
+              <input
+                aria-label="Channel label"
+                disabled={busy}
+                onChange={(event) => updateDraft({ label: event.currentTarget.value })}
+                type="text"
+                value={draft.label}
+              />
+            </div>
+          </ChannelFormRow>
+        </ChannelDetailSection>
+
+        <ChannelDetailSection title="Access control">
+          <ChannelFormRow label="Group mention" hint="Groups only start work after an explicit mention.">
+            <label className="channelInlineToggle">
+              <input
+                aria-label="Require mention in groups"
+                checked={draft.requireMention}
+                disabled={busy}
+                onChange={(event) => updateDraft({ requireMention: event.currentTarget.checked })}
+                type="checkbox"
+              />
+              <span>{draft.requireMention ? "Required" : "Not required"}</span>
+            </label>
+          </ChannelFormRow>
+          <ChannelFormRow label="Allowed callers" hint="Comma or newline separated ids, saved as structured allowlists.">
+            <div className="channelTextareaPair">
+              <textarea
+                aria-label="Allowed direct users"
+                disabled={busy}
+                onChange={(event) => updateDraft({ allowUsersText: event.currentTarget.value })}
+                rows={4}
+                value={draft.allowUsersText}
+              />
+              <textarea
+                aria-label="Allowed groups"
+                disabled={busy}
+                onChange={(event) => updateDraft({ allowGroupsText: event.currentTarget.value })}
+                rows={4}
+                value={draft.allowGroupsText}
+              />
+            </div>
+          </ChannelFormRow>
+        </ChannelDetailSection>
+
+        <ChannelDetailSection title="Runtime settings">
+          <ChannelFormRow label="Permission mode" hint="Controls write and command approval defaults for this channel.">
+            <div className="channelSegmentedControl" role="group" aria-label="Permission mode">
+              {permissionOptions.map((option) => (
+                <button
+                  className={draft.permissionMode === option ? "is-selected" : ""}
+                  disabled={busy}
+                  key={option}
+                  onClick={() => updateDraft({ permissionMode: option })}
+                  type="button"
+                >
+                  {permissionModeLabel(option)}
+                </button>
+              ))}
+            </div>
+          </ChannelFormRow>
+          <ChannelFormRow label="Model" hint="Blank uses the profile default model.">
+            <div className="channelControl">
+              <select
+                aria-label="Channel model"
+                disabled={busy}
+                onChange={(event) => updateDraft({ model: event.currentTarget.value })}
+                value={draft.model}
+              >
+                <option value="">Profile default</option>
+                {modelOptions.map((option) => (
+                  <option key={option} value={option}>{modelOptionLabel(option, channel, controls)}</option>
+                ))}
+              </select>
+            </div>
+          </ChannelFormRow>
+          <ChannelFormRow label="Workspace" hint="Changing workspace starts a fresh channel thread on the next message. Current running work is not interrupted.">
+            <div className="channelControl channelWorkspaceControl">
+              <select
+                aria-label="Channel workspace preset"
+                disabled={busy}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  if (value !== CHANNEL_WORKSPACE_MANUAL_VALUE) {
+                    updateDraft({ workdir: value });
+                  }
+                }}
+                value={channelWorkspaceSelectValue(draft.workdir, workspaceOptions)}
+              >
+                <option value="">Profile default</option>
+                {workspaceOptions.map((path) => (
+                  <option key={path} value={path}>{channelWorkspaceOptionLabel(path)}</option>
+                ))}
+                {channelWorkspaceSelectValue(draft.workdir, workspaceOptions) === CHANNEL_WORKSPACE_MANUAL_VALUE && (
+                  <option value={CHANNEL_WORKSPACE_MANUAL_VALUE}>Manual path</option>
+                )}
+              </select>
+              <input
+                aria-label="Channel workspace"
+                disabled={busy}
+                onChange={(event) => updateDraft({ workdir: event.currentTarget.value })}
+                placeholder={workdir}
+                type="text"
+                value={draft.workdir}
+              />
+            </div>
+          </ChannelFormRow>
+        </ChannelDetailSection>
+
+        <details className="channelAdvancedDiagnostics">
+          <summary>Advanced diagnostics</summary>
+          <ChannelCredentialRow
+            disabled={busy}
+            hint="Advanced credential-name override for custom or manual setups. Raw secrets stay in the profile environment."
+            label="Credential env"
+            onChange={(value) => updateDraft({ credentialEnv: value })}
+            status={channel.credential.status}
+            value={draft.credentialEnv}
+          />
+          <ChannelFormRow label="Runner activity" hint="Diagnostics are read-only and secret-free.">
+            <dl className="channelRunnerGrid">
+              <div><dt>State</dt><dd>{channel.runner.state}</dd></div>
+              <div><dt>Reason</dt><dd>{channel.runner.reason ?? "none"}</dd></div>
+              <div><dt>Last poll</dt><dd>{formatRunnerTimestamp(channel.runner.lastPollAtMs)}</dd></div>
+              <div><dt>Last healthy poll</dt><dd>{formatRunnerTimestamp(channel.runner.lastHealthyPollAtMs)}</dd></div>
+              <div><dt>Last inbound</dt><dd>{formatRunnerTimestamp(channel.runner.lastInboundAtMs)}</dd></div>
+              <div><dt>Last outbound</dt><dd>{formatRunnerTimestamp(channel.runner.lastOutboundAtMs)}</dd></div>
+              <div><dt>Last iLink code</dt><dd>{channel.runner.lastIlinkErrcode == null ? "none" : String(channel.runner.lastIlinkErrcode)}</dd></div>
+              <div><dt>Last error</dt><dd>{channel.runner.lastError ?? "none"}</dd></div>
+            </dl>
+          </ChannelFormRow>
         </details>
+
+        <section className="channelDangerSection" aria-labelledby="channel-danger-heading">
+          <div>
+            <h4 id="channel-danger-heading">Danger zone</h4>
+            <span>Remove this channel config. .env secret values are left intact.</span>
+          </div>
+          <div className="channelDangerActions">
+            {deletePrompt ? (
+              <>
+                <button disabled={busy} onClick={() => void deleteChannel()} type="button">
+                  {deleting ? "Removing" : "Confirm remove"}
+                </button>
+                <button disabled={busy} onClick={() => setDeletePrompt(false)} type="button">
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button disabled={busy} onClick={() => setDeletePrompt(true)} type="button">
+                <Trash2 size={13} />
+                <span>Remove channel</span>
+              </button>
+            )}
+          </div>
+        </section>
       </div>
     </section>
   );
 }
 
-function ChannelDetailGroup({ rows, title }: { rows: Array<[string, string]>; title: string }) {
+type ChannelSettingsDraft = {
+  label: string;
+  enabled: boolean;
+  workdir: string;
+  model: string;
+  permissionMode: string;
+  requireMention: boolean;
+  allowUsersText: string;
+  allowGroupsText: string;
+  credentialEnv: string;
+};
+
+function ChannelDetailSection({
+  children,
+  title
+}: {
+  children: ReactNode;
+  title: string;
+}) {
   return (
-    <details className="channelDetailGroup" open>
-      <summary>{title}</summary>
-      <dl>
-        {rows.map(([label, value]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </details>
+    <section className="channelDetailSection" aria-labelledby={`channel-section-${sectionDomId(title)}`}>
+      <h4 id={`channel-section-${sectionDomId(title)}`}>{title}</h4>
+      {children}
+    </section>
   );
+}
+
+function ChannelFormRow({
+  children,
+  hint,
+  label
+}: {
+  children: ReactNode;
+  hint: string;
+  label: string;
+}) {
+  return (
+    <div className="channelFormRow">
+      <div className="channelFormCopy">
+        <strong>{label}</strong>
+        <span>{hint}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ChannelCredentialRow({
+  disabled,
+  hint,
+  label,
+  onChange,
+  status,
+  value
+}: {
+  disabled: boolean;
+  hint: string;
+  label: string;
+  onChange(value: string): void;
+  status: string;
+  value: string;
+}) {
+  return (
+    <ChannelFormRow label={label} hint={hint}>
+      <div className="channelCredentialControl">
+        <div className="channelCredentialLine">
+          <code>{value.trim() || "platform default"}</code>
+          <small className={`channelCredentialStatus is-${channelStatusTone(status)}`}>{status}</small>
+        </div>
+        <input
+          aria-label={label}
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          type="text"
+          value={value}
+        />
+      </div>
+    </ChannelFormRow>
+  );
+}
+
+function sectionDomId(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+const DEFAULT_PERMISSION_MODE_OPTIONS = ["default", "acceptEdits", "dontAsk", "bypassPermissions"];
+const CHANNEL_WORKSPACE_MANUAL_VALUE = "__manual__";
+
+function channelWorkspaceOptions(workspaces: SessionBrowserWorkspaceState[]): string[] {
+  const seen = new Set<string>();
+  const options: string[] = [];
+  for (const workspace of workspaces) {
+    const workdir = workspace.workdir.trim();
+    if (!workdir || seen.has(workdir)) {
+      continue;
+    }
+    seen.add(workdir);
+    options.push(workdir);
+  }
+  return options;
+}
+
+function channelWorkspaceSelectValue(value: string, options: string[]): string {
+  const workdir = value.trim();
+  if (!workdir) {
+    return "";
+  }
+  return options.includes(workdir) ? workdir : CHANNEL_WORKSPACE_MANUAL_VALUE;
+}
+
+function channelWorkspaceOptionLabel(workdir: string): string {
+  const normalized = workdir.trim();
+  const trimmed = normalized.replace(/[\\/]+$/, "");
+  const segments = trimmed.split(/[\\/]/).filter(Boolean);
+  const basename = segments[segments.length - 1] ?? "Workspace";
+  return basename && basename !== normalized ? `${basename} - ${normalized}` : normalized;
+}
+
+function channelDraftFromChannel(channel: WorkbenchChannel): ChannelSettingsDraft {
+  return {
+    label: channel.label ?? "",
+    enabled: channel.enabled,
+    workdir: channel.workdir ?? "",
+    model: channel.model ?? "",
+    permissionMode: channel.permissionMode ?? "default",
+    requireMention: channel.requireMention,
+    allowUsersText: channel.allowlist.users.join("\n"),
+    allowGroupsText: channel.allowlist.groups.join("\n"),
+    credentialEnv: channel.credential.env ?? ""
+  };
+}
+
+function channelUpdateDraftFromDraft(draft: ChannelSettingsDraft): ChannelUpdateDraft {
+  return {
+    label: draft.label.trim(),
+    enabled: draft.enabled,
+    workdir: draft.workdir.trim(),
+    model: draft.model.trim(),
+    permissionMode: draft.permissionMode,
+    requireMention: draft.requireMention,
+    allowUsers: splitChannelListText(draft.allowUsersText),
+    allowGroups: splitChannelListText(draft.allowGroupsText),
+    credentialEnv: draft.credentialEnv.trim()
+  };
+}
+
+function channelDraftSignature(draft: ChannelSettingsDraft): string {
+  return JSON.stringify(channelUpdateDraftFromDraft(draft));
+}
+
+function splitChannelListText(value: string): string[] {
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const part of value.split(/[,\n]/)) {
+    const item = part.trim();
+    if (!item || seen.has(item)) {
+      continue;
+    }
+    seen.add(item);
+    items.push(item);
+  }
+  return items;
+}
+
+function channelPermissionOptions(
+  controls: ChannelSettingsControls,
+  channel: WorkbenchChannel,
+  draft: ChannelSettingsDraft
+): string[] {
+  return uniqueStrings([
+    ...(controls?.permissionModeOptions ?? DEFAULT_PERMISSION_MODE_OPTIONS),
+    "default",
+    channel.permissionMode ?? "",
+    draft.permissionMode
+  ]).filter((value) => DEFAULT_PERMISSION_MODE_OPTIONS.includes(value));
+}
+
+function channelModelOptions(
+  controls: ChannelSettingsControls,
+  channel: WorkbenchChannel,
+  draft: ChannelSettingsDraft
+): string[] {
+  return uniqueStrings([
+    ...(controls?.modelOptions ?? []),
+    channel.model ?? "",
+    draft.model
+  ]).filter(Boolean);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const item = value.trim();
+    if (!item || seen.has(item)) {
+      continue;
+    }
+    seen.add(item);
+    out.push(item);
+  }
+  return out;
+}
+
+function permissionModeLabel(value: string): string {
+  switch (value) {
+    case "acceptEdits":
+      return "Accept edits";
+    case "dontAsk":
+      return "Inline approvals";
+    case "bypassPermissions":
+      return "Bypass permissions";
+    default:
+      return "Profile default";
+  }
+}
+
+function modelOptionLabel(value: string, channel: WorkbenchChannel, controls: ChannelSettingsControls): string {
+  if (channel.model === value && !(controls?.modelOptions ?? []).includes(value)) {
+    return `${value} (current)`;
+  }
+  return value;
 }
 
 type WechatQrSetupState = {
@@ -1252,23 +1723,26 @@ function QrPlaceholder() {
   );
 }
 
-function ChannelDetailSummaryItem({
+function channelRuntimeDefaultsSummary(draft: ChannelSettingsDraft): string {
+  const model = draft.model.trim() || "profile model";
+  const workspace = draft.workdir.trim() ? "custom workspace" : "default workspace";
+  return `${permissionModeLabel(draft.permissionMode)} · ${model} · ${workspace}`;
+}
+
+function ChannelHealthItem({
   label,
-  meta,
   tone,
   value
 }: {
   label: string;
-  meta?: string;
   tone: "danger" | "muted" | "ok" | "warning";
   value: string;
 }) {
   return (
-    <div className={`channelDetailSummaryItem is-${tone}`}>
+    <span className={`channelHealthItem is-${tone}`}>
       <span>{label}</span>
       <strong>{value}</strong>
-      {meta && <small>{meta}</small>}
-    </div>
+    </span>
   );
 }
 

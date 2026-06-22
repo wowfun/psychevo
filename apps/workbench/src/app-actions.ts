@@ -12,6 +12,7 @@ import {
   WorkspaceDiffResultSchema,
   WorkspaceFileReadResultSchema,
   WorkspaceFileWriteResultSchema,
+  type ChannelUpdateParams,
   type ChannelWechatQrPollResult,
   type ChannelWechatQrStartResult,
   type ContextReadResult,
@@ -60,6 +61,8 @@ import {
   fileBasename,
   isUnsupportedPreviewFile
 } from "./right-workspace";
+
+type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
 type RefreshSnapshot = (
   nextClient?: GatewayClient | null,
@@ -512,6 +515,50 @@ export function createAppActions(params: AppActionsParams) {
       : current);
   }
 
+  async function updateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel> {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const result = await params.client.request("channel/update", {
+      scope: scope(),
+      id: channel.id,
+      ...draft
+    });
+    const nextChannel = result.channel as WorkbenchChannel;
+    params.setSettings((current) => current
+      ? {
+          ...current,
+          channels: {
+            channels: upsertChannel(current.channels.channels, nextChannel)
+          }
+        }
+      : current);
+    return nextChannel;
+  }
+
+  async function deleteChannel(channel: WorkbenchChannel) {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const result = await params.client.request("channel/delete", {
+      scope: scope(),
+      id: channel.id
+    });
+    params.setSettings((current) => current
+      ? {
+          ...current,
+          channels: {
+            channels: result.channels
+          }
+        }
+      : current);
+    params.setChannelDoctor((current) => {
+      const next = { ...current };
+      delete next[channel.id];
+      return next;
+    });
+  }
+
   async function doctorChannel(channel: WorkbenchChannel) {
     if (!params.client) {
       throw new Error("Gateway client is unavailable.");
@@ -607,6 +654,7 @@ export function createAppActions(params: AppActionsParams) {
     createWorkspace,
     deleteArchivedSession,
     deleteBackend,
+    deleteChannel,
     doctorChannel,
     doctorBackend,
     doctorChannels,
@@ -623,6 +671,7 @@ export function createAppActions(params: AppActionsParams) {
     startNewThread,
     startShell,
     submitTurn,
+    updateChannel,
     updateBackendDraftFields,
     setChannelEnabled
   };

@@ -57,6 +57,7 @@ const gatewayMock = vi.hoisted(() => {
     requestLog: [] as Array<{ method: string; params: unknown }>,
     subscribers: [] as Array<(notification: { method: string; params?: unknown }) => void>,
     archivedSessionSummaries: [] as Array<Record<string, unknown>>,
+    browserWorkspaces: null as Array<Record<string, unknown>> | null,
     agentRecords: [] as Array<Record<string, unknown>>,
     backendRecords: [] as Array<Record<string, unknown>>,
     channelRecords: [
@@ -72,6 +73,9 @@ const gatewayMock = vi.hoisted(() => {
         permissionMode: null,
         requireMention: true,
         credential: { env: "TELEGRAM_BOT_TOKEN", status: "present" },
+        account: null,
+        baseUrl: null,
+        appId: null,
         allowlist: { users: ["12345"], groups: [], status: "present" },
         runtimeStatus: "ready",
         runner: {
@@ -97,6 +101,9 @@ const gatewayMock = vi.hoisted(() => {
         permissionMode: "default",
         requireMention: true,
         credential: { env: "LARK_APP_SECRET", status: "missing" },
+        account: null,
+        baseUrl: null,
+        appId: { env: "LARK_APP_ID", status: "missing" },
         allowlist: { users: [], groups: [], status: "missing" },
         runtimeStatus: "disabled",
         runner: {
@@ -135,7 +142,7 @@ const gatewayMock = vi.hoisted(() => {
           modelStatus: gatewayMock.modelStatus,
           modelError: gatewayMock.modelError,
           variant: "none",
-          permissionModeOptions: ["default"],
+          permissionModeOptions: ["default", "acceptEdits", "dontAsk", "bypassPermissions"],
           modeOptions: ["default", "plan"],
           modelOptions: ["xiaomi/xiaomi-token-high", "openai/gpt-4o"],
           variantOptions: ["none"],
@@ -169,6 +176,77 @@ const gatewayMock = vi.hoisted(() => {
     }
   };
 });
+
+function normalizeNullableString(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized ? normalized : null;
+}
+
+function normalizePermissionMode(value: string | null | undefined): string | null {
+  const normalized = normalizeNullableString(value);
+  return normalized && normalized !== "default" ? normalized : null;
+}
+
+function normalizeEnvRecord(value: string | null | undefined, fallback: string | null): string | null {
+  return normalizeNullableString(value) ?? fallback;
+}
+
+function currentEnvRecord(
+  channel: Record<string, unknown>,
+  field: "credential" | "account" | "baseUrl" | "appId",
+  fallback: string | null
+): string | null {
+  const record = channel[field] as { env?: string | null } | null | undefined;
+  return record?.env ?? fallback;
+}
+
+function uniqueList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const value of values) {
+    const item = value.trim();
+    if (!item || seen.has(item)) {
+      continue;
+    }
+    seen.add(item);
+    next.push(item);
+  }
+  return next;
+}
+
+function defaultCredentialEnv(channel: string): string | null {
+  switch (channel) {
+    case "wechat":
+      return "WECHAT_BOT_TOKEN";
+    case "telegram":
+      return "TELEGRAM_BOT_TOKEN";
+    case "feishu":
+      return "FEISHU_APP_SECRET";
+    case "lark":
+      return "LARK_APP_SECRET";
+    default:
+      return null;
+  }
+}
+
+function defaultAccountEnv(channel: string): string | null {
+  return channel === "wechat" ? "WECHAT_ACCOUNT_ID" : null;
+}
+
+function defaultBaseUrlEnv(channel: string): string | null {
+  return channel === "wechat" ? "WECHAT_ILINK_BASE_URL" : null;
+}
+
+function defaultAppIdEnv(channel: string): string | null {
+  switch (channel) {
+    case "feishu":
+      return "FEISHU_APP_ID";
+    case "lark":
+      return "LARK_APP_ID";
+    default:
+      return null;
+  }
+}
 
 export { gatewayMock };
 
@@ -220,7 +298,7 @@ vi.mock("@psychevo/client", async () => {
       }
       if (method === "thread/browser") {
         return {
-          workspaces: [
+          workspaces: gatewayMock.browserWorkspaces ?? [
             {
               workdir: gatewayMock.scope.workdir,
               project: {
@@ -379,6 +457,82 @@ vi.mock("@psychevo/client", async () => {
           channel: gatewayMock.channelRecords.find((channel) => channel.id === record.id) ?? gatewayMock.channelRecords[0]
         };
       }
+      if (method === "channel/update") {
+        const record = params as {
+          id?: string;
+          label?: string | null;
+          enabled?: boolean | null;
+          workdir?: string | null;
+          model?: string | null;
+          permissionMode?: string | null;
+          requireMention?: boolean | null;
+          credentialEnv?: string | null;
+          accountEnv?: string | null;
+          baseUrlEnv?: string | null;
+          appIdEnv?: string | null;
+          allowUsers?: string[] | null;
+          allowGroups?: string[] | null;
+        };
+        let updated = gatewayMock.channelRecords[0];
+        gatewayMock.channelRecords = gatewayMock.channelRecords.map((channel) => {
+          if (channel.id !== record.id) {
+            return channel;
+          }
+          const channelName = String(channel.channel ?? "");
+          const channelRecord = channel as Record<string, unknown>;
+          const credentialEnv = "credentialEnv" in record
+            ? normalizeEnvRecord(record.credentialEnv, defaultCredentialEnv(channelName))
+            : currentEnvRecord(channelRecord, "credential", defaultCredentialEnv(channelName));
+          const accountEnv = "accountEnv" in record
+            ? normalizeEnvRecord(record.accountEnv, defaultAccountEnv(channelName))
+            : currentEnvRecord(channelRecord, "account", defaultAccountEnv(channelName));
+          const baseUrlEnv = "baseUrlEnv" in record
+            ? normalizeEnvRecord(record.baseUrlEnv, defaultBaseUrlEnv(channelName))
+            : currentEnvRecord(channelRecord, "baseUrl", defaultBaseUrlEnv(channelName));
+          const appIdEnv = "appIdEnv" in record
+            ? normalizeEnvRecord(record.appIdEnv, defaultAppIdEnv(channelName))
+            : currentEnvRecord(channelRecord, "appId", defaultAppIdEnv(channelName));
+          const allowUsers = record.allowUsers ? uniqueList(record.allowUsers) : (channel.allowlist as { users?: string[] }).users ?? [];
+          const allowGroups = record.allowGroups ? uniqueList(record.allowGroups) : (channel.allowlist as { groups?: string[] }).groups ?? [];
+          const enabled = record.enabled ?? Boolean(channel.enabled);
+          const missingCredential = !credentialEnv || (channel.credential as { status?: string }).status !== "present";
+          const missingAllowlist = allowUsers.length === 0 && allowGroups.length === 0;
+          updated = {
+            ...channel,
+            label: normalizeNullableString(record.label) ?? channel.label,
+            enabled,
+            workdir: normalizeNullableString(record.workdir),
+            model: normalizeNullableString(record.model),
+            permissionMode: normalizePermissionMode(record.permissionMode),
+            requireMention: record.requireMention ?? channel.requireMention,
+            credential: {
+              env: credentialEnv,
+              status: (channel.credential as { status?: string }).status ?? "missing"
+            },
+            account: accountEnv ? { env: accountEnv, status: (channel.account as { status?: string } | null)?.status ?? "missing" } : null,
+            baseUrl: baseUrlEnv ? { env: baseUrlEnv, status: (channel.baseUrl as { status?: string } | null)?.status ?? "default" } : null,
+            appId: appIdEnv ? { env: appIdEnv, status: (channel.appId as { status?: string } | null)?.status ?? "missing" } : null,
+            allowlist: {
+              users: allowUsers,
+              groups: allowGroups,
+              status: missingAllowlist ? "missing" : "present"
+            },
+            runtimeStatus: enabled ? (missingCredential || missingAllowlist ? "blocked" : "ready") : "disabled",
+            runner: {
+              ...(channel.runner as Record<string, unknown> | undefined),
+              state: enabled ? (missingCredential || missingAllowlist ? "blocked" : "running") : "stopped",
+              reason: enabled ? (missingCredential || missingAllowlist ? "blocked_allowlist" : "polling_empty") : null
+            }
+          };
+          return updated;
+        });
+        return { channel: updated };
+      }
+      if (method === "channel/delete") {
+        const record = params as { id?: string };
+        gatewayMock.channelRecords = gatewayMock.channelRecords.filter((channel) => channel.id !== record.id);
+        return { channels: gatewayMock.channelRecords };
+      }
       if (method === "channel/doctor") {
         const record = params as { id?: string | null } | undefined;
         const selected = record?.id
@@ -436,6 +590,9 @@ vi.mock("@psychevo/client", async () => {
           permissionMode: null,
           requireMention: true,
           credential: { env: "WECHAT_BOT_TOKEN", status: "present" },
+          account: { env: "WECHAT_ACCOUNT_ID", status: "present" },
+          baseUrl: { env: "WECHAT_ILINK_BASE_URL", status: "present" },
+          appId: null,
           allowlist: { users: ["wx-user"], groups: [], status: "present" },
           runtimeStatus: "ready",
           runner: {
@@ -788,6 +945,7 @@ afterEach(() => {
   gatewayMock.requestLog.length = 0;
   gatewayMock.subscribers = [];
   gatewayMock.archivedSessionSummaries = [];
+  gatewayMock.browserWorkspaces = null;
   gatewayMock.agentRecords = [];
   gatewayMock.backendRecords = [];
   gatewayMock.channelRecords = [
@@ -803,6 +961,9 @@ afterEach(() => {
       permissionMode: null,
       requireMention: true,
       credential: { env: "TELEGRAM_BOT_TOKEN", status: "present" },
+      account: null,
+      baseUrl: null,
+      appId: null,
       allowlist: { users: ["12345"], groups: [], status: "present" },
       runtimeStatus: "ready",
       runner: {
@@ -828,6 +989,9 @@ afterEach(() => {
       permissionMode: "default",
       requireMention: true,
       credential: { env: "LARK_APP_SECRET", status: "missing" },
+      account: null,
+      baseUrl: null,
+      appId: { env: "LARK_APP_ID", status: "missing" },
       allowlist: { users: [], groups: [], status: "missing" },
       runtimeStatus: "disabled",
       runner: {

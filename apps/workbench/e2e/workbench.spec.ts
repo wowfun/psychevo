@@ -299,15 +299,42 @@ test.describe("pevo Web Workbench", () => {
       await expect(detail.getByText("Runner", { exact: true })).toBeVisible();
       await expect(detail.getByText("Credential", { exact: true })).toBeVisible();
       await expect(detail.getByText("Allowlist", { exact: true })).toBeVisible();
-      await expect(detail.getByText("Runtime defaults", { exact: true })).toBeVisible();
-      await detail.getByRole("button", { name: "Test wechat" }).click();
-      await expect(detail.getByLabel("wechat doctor checks")).toContainText("credential");
-      await expect(detail.getByLabel("wechat doctor checks")).toContainText("allowlist");
+      await expect(detail.getByText("Runtime", { exact: true })).toBeVisible();
+      await expect(detail.getByRole("heading", { name: "Runtime settings" })).toBeVisible();
+      await expect(detail.getByRole("combobox", { name: "Channel model" })).toBeVisible();
+      const workspacePreset = detail.getByRole("combobox", { name: "Channel workspace preset" });
+      await expect(workspacePreset).toBeVisible();
+      await expect(workspacePreset.locator("option", { hasText: "Profile default" })).toHaveCount(1);
+      await expect(detail.getByRole("textbox", { name: "Channel workspace" })).toBeVisible();
+      await expect(detail.getByText("Changing workspace starts a fresh channel thread on the next message. Current running work is not interrupted.")).toBeVisible();
+      await expect(detail.getByRole("textbox", { name: "Allowed direct users" })).toBeVisible();
+      await expect(detail.getByText("Advanced diagnostics")).toBeVisible();
+      await expect(detail.getByText("Runner activity")).toBeHidden();
+      await expect(detail.getByText("Account env")).toHaveCount(0);
+      await expect(detail.getByText("Base URL env")).toHaveCount(0);
+      await expect(detail.getByText("WECHAT_ACCOUNT_ID")).toHaveCount(0);
+      await expect(detail.getByText("WECHAT_ILINK_BASE_URL")).toHaveCount(0);
+      await expect(detail.getByLabel("wechat doctor checks")).toHaveCount(0);
+      await expect(detail.getByRole("switch", { name: "Disable wechat on save" })).toHaveCount(0);
+      await expect(detail.getByRole("switch", { name: "Enable wechat on save" })).toHaveCount(0);
+      await expect(detail.getByRole("button", { name: "Test wechat" })).toHaveCount(0);
+      await expect(detail.getByRole("button", { name: "Cancel" })).toHaveCount(0);
+      await expect(detail.getByRole("button", { name: "Save" }).first()).toBeDisabled();
+      await detail.getByRole("textbox", { name: "Channel label" }).fill("WeChat Ops");
+      await expect(detail.getByText("Unsaved changes")).toHaveCount(0);
+      await expect(detail.getByRole("button", { name: "Cancel" })).toHaveCount(1);
+      await expect(detail.getByRole("button", { name: "Save" })).toHaveCount(1);
+      await expect(detail.getByRole("button", { name: "Save" }).first()).toBeEnabled();
       await assertNoHorizontalOverflow(page, settings);
       await expectControlsFitHorizontally(settings);
+      if (!isMobile) {
+        await expectSettingsGutterScrollsContent(page, settings);
+      }
       await captureChannelsWorkbench(page, testInfo, `settings-channel-detail-${isMobile ? "mobile" : "desktop"}`);
 
       await detail.getByRole("button", { name: "Back to Channels" }).click();
+      await expect(detail.getByText("Discard unsaved changes?")).toBeVisible();
+      await detail.getByRole("button", { name: "Discard changes" }).click();
       const listAgain = settings.getByRole("region", { name: "Channels" });
       await listAgain.getByRole("tab", { name: "WeChat" }).click();
       await expect(listAgain.getByText("WeChat connected")).toBeVisible();
@@ -632,6 +659,35 @@ async function assertNoHorizontalOverflow(page: Page, locator: Locator) {
   expect(result.left).toBeGreaterThanOrEqual(-1);
   expect(result.right).toBeLessThanOrEqual(viewport!.width + 1);
   expect(result.scrollWidth).toBeLessThanOrEqual(result.clientWidth + 1);
+}
+
+async function expectSettingsGutterScrollsContent(page: Page, settings: Locator) {
+  const content = settings.locator(".settingsContent");
+  const inner = settings.locator(".settingsContentInner");
+  const metrics = await content.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight
+  }));
+  if (metrics.scrollHeight <= metrics.clientHeight + 1) {
+    return;
+  }
+  await content.evaluate((element) => { element.scrollTop = 0; });
+  const [contentBox, innerBox] = await Promise.all([
+    content.boundingBox(),
+    inner.boundingBox()
+  ]);
+  expect(contentBox).not.toBeNull();
+  expect(innerBox).not.toBeNull();
+  const contentRight = contentBox!.x + contentBox!.width;
+  const contentBottom = contentBox!.y + contentBox!.height;
+  const innerRight = innerBox!.x + innerBox!.width;
+  const gutter = Math.max(8, contentRight - innerRight);
+  const x = Math.min(contentRight - 12, innerRight + gutter / 2);
+  const y = Math.min(contentBottom - 80, contentBox!.y + 220);
+  await page.mouse.move(x, y);
+  await page.mouse.wheel(0, 520);
+  await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await content.evaluate((element) => { element.scrollTop = 0; });
 }
 
 async function expectControlsFitHorizontally(locator: Locator) {

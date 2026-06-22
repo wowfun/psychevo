@@ -790,6 +790,7 @@ export function App() {
     createWorkspace,
     deleteArchivedSession,
     deleteBackend,
+    deleteChannel,
     doctorChannel,
     doctorBackend,
     doctorChannels,
@@ -806,6 +807,7 @@ export function App() {
     startNewThread,
     startShell,
     submitTurn,
+    updateChannel,
     updateBackendDraftFields,
     setChannelEnabled
   } = createAppActions({
@@ -972,7 +974,7 @@ export function App() {
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch,
     beginRightResize, changeAgentSelection, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
     channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyTranscriptText, createWorkspace, currentThreadId,
-    debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
+    debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, extraRuntimeModeValues, handleAttachment, host, init, latestGatewayEvent, leftCollapsed, loadThreadSearchText,
     loadingOlderWorkdir, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
     pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable, pollWechatQrSetup,
@@ -987,7 +989,7 @@ export function App() {
     setSelectedVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, settings, settingsSection,
     usageStats, usageStatsError, usageStatsLoading, refreshUsageStats,
     clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, startWechatQrSetup, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
-    togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateMainView, viewEpochRef, workMode,
+    togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateChannel, updateMainView, viewEpochRef, workMode,
     workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;
 }

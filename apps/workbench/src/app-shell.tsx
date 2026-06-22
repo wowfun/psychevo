@@ -1,6 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { FolderPlus, Pin, Settings, X } from "lucide-react";
-import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, SessionSummary } from "@psychevo/protocol";
+import type {
+  ChannelUpdateParams,
+  ChannelWechatQrPollResult,
+  ChannelWechatQrStartResult,
+  SessionSummary,
+  SettingsReadResult
+} from "@psychevo/protocol";
 import { SearchPage } from "./search";
 import { SettingsPage } from "./settings-panels";
 import { shortSessionId } from "./session-utils";
@@ -9,12 +15,15 @@ import type {
   BackendDraft,
   MainView,
   SettingsSection,
+  SessionBrowserWorkspaceState,
   WorkbenchBackend,
   WorkbenchBackendDoctor,
   WorkbenchChannel,
   WorkbenchChannelDoctor,
   WorkbenchUsageStats
 } from "./types";
+
+type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
 export function LeftUtilityRail({
   value,
@@ -156,6 +165,7 @@ export function MainSurface({
   backends,
   channelDoctor,
   channels,
+  controls,
   debugEnabled,
   disabled,
   loadThreadSearchText,
@@ -166,6 +176,7 @@ export function MainSurface({
   onDebugChange,
   onDeleteArchivedSession,
   onDeleteBackend,
+  onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
   onDoctorBackend,
@@ -182,7 +193,9 @@ export function MainSurface({
   onSetChannelEnabled,
   onSettingsSectionChange,
   onStartWechatQrSetup,
+  onUpdateChannel,
   settingsSection,
+  sessionBrowserWorkspaces,
   usageStats,
   usageStatsError,
   usageStatsLoading,
@@ -197,6 +210,7 @@ export function MainSurface({
   backends: WorkbenchBackend[];
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
+  controls: SettingsReadResult["controls"];
   debugEnabled: boolean;
   disabled: boolean;
   loadThreadSearchText(threadId: string): Promise<string>;
@@ -207,6 +221,7 @@ export function MainSurface({
   onDebugChange(value: boolean): void;
   onDeleteArchivedSession(threadId: string): void;
   onDeleteBackend(backend: WorkbenchBackend): void;
+  onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
   onDoctorBackend(backend: WorkbenchBackend): void;
@@ -223,7 +238,9 @@ export function MainSurface({
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onSettingsSectionChange(value: SettingsSection): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
+  onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
   settingsSection: SettingsSection;
+  sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   usageStats: WorkbenchUsageStats | null;
   usageStatsError: string | null;
   usageStatsLoading: boolean;
@@ -244,6 +261,7 @@ export function MainSurface({
         backends={backends}
         channelDoctor={channelDoctor}
         channels={channels}
+        controls={controls}
         debugEnabled={debugEnabled}
         disabled={disabled}
         section={settingsSection}
@@ -256,6 +274,7 @@ export function MainSurface({
         onDebugChange={onDebugChange}
         onDeleteArchivedSession={onDeleteArchivedSession}
         onDeleteBackend={onDeleteBackend}
+        onDeleteChannel={onDeleteChannel}
         onDoctorChannel={onDoctorChannel}
         onDoctorChannels={onDoctorChannels}
         onDoctorBackend={onDoctorBackend}
@@ -271,6 +290,8 @@ export function MainSurface({
         onSetBackendEntrypoints={onSetBackendEntrypoints}
         onSetChannelEnabled={onSetChannelEnabled}
         onStartWechatQrSetup={onStartWechatQrSetup}
+        onUpdateChannel={onUpdateChannel}
+        sessionBrowserWorkspaces={sessionBrowserWorkspaces}
         workdir={workdir}
       />
     );

@@ -166,13 +166,17 @@
 }
 
 .settingsContent {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settingsContentInner {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   align-content: start;
   gap: 12px;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
 }
 
 .settingsSectionHeader {
@@ -226,12 +230,12 @@
   font-size: var(--pevo-font-size-small);
 }
 
-.settingsContent > .agentSurfacePanel,
-.settingsContent > .archivedSessionsPanel {
+.settingsContentInner > .agentSurfacePanel,
+.settingsContentInner > .archivedSessionsPanel {
   align-self: start;
   align-content: start;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   padding: 0;
   background: transparent;
   border: 0;
@@ -645,9 +649,16 @@
 }
 
 .appShell[data-main-view="settings"] .settingsContent {
-  width: min(860px, 100%);
+  justify-self: stretch;
+  width: 100%;
   padding: 24px 32px;
   overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.appShell[data-main-view="settings"] .settingsContentInner {
+  width: min(980px, 100%);
+  margin: 0 auto;
 }
 
 @media (max-width: 860px) {
@@ -715,6 +726,10 @@
   .appShell[data-main-view="settings"] .settingsContent {
     width: 100%;
     padding: 0;
+  }
+
+  .appShell[data-main-view="settings"] .settingsContentInner {
+    width: 100%;
   }
 }
 

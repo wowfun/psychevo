@@ -99,6 +99,11 @@ describe("Workbench settings and backend controls", () => {
   });
 
   it("shows Channels as Settings rows with switches and an independent detail page", async () => {
+    gatewayMock.channelRecords = gatewayMock.channelRecords.map((channel) => (
+      channel.id === "release"
+        ? { ...channel, model: "custom/current-model" }
+        : channel
+    ));
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
@@ -111,9 +116,9 @@ describe("Workbench settings and backend controls", () => {
     expect(within(channelsPanel).queryByRole("button", { name: "Enabled" })).toBeNull();
     expect(within(channelsPanel).queryByRole("button", { name: "Needs setup" })).toBeNull();
     expect(within(channelsPanel).getByText("Release Bot")).toBeTruthy();
-    expect(within(channelsPanel).getByText("ready")).toBeTruthy();
-    expect(within(channelsPanel).getByText("Credential present")).toBeTruthy();
-    expect(within(channelsPanel).getByText("Allowlist present")).toBeTruthy();
+    expect(within(channelsPanel).getAllByText("ready").length).toBeGreaterThan(0);
+    expect(within(channelsPanel).getAllByText("Credential present").length).toBeGreaterThan(0);
+    expect(within(channelsPanel).getAllByText("Allowlist present").length).toBeGreaterThan(0);
 
     fireEvent.click(within(channelsPanel).getByRole("switch", { name: "Disable release" }));
     await waitFor(() => {
@@ -137,14 +142,102 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.click(within(channelsPanel).getByRole("button", { name: "Settings release" }));
     const detailPage = await within(settingsRegion).findByRole("region", { name: "Channel settings" });
     expect(within(detailPage).getByRole("button", { name: "Back to Channels" })).toBeTruthy();
-    expect(within(detailPage).getByText("Connection")).toBeTruthy();
-    expect(within(detailPage).getByText("Access control")).toBeTruthy();
-    expect(within(detailPage).getByText("Runtime settings")).toBeTruthy();
-    expect(within(detailPage).getByText("Danger zone")).toBeTruthy();
+    expect(within(detailPage).getByRole("heading", { name: "Connection" })).toBeTruthy();
+    expect(within(detailPage).getByRole("heading", { name: "Access control" })).toBeTruthy();
+    expect(within(detailPage).getByRole("heading", { name: "Runtime settings" })).toBeTruthy();
+    expect(within(detailPage).getByText("Advanced diagnostics")).toBeTruthy();
+    expect(within(detailPage).queryByRole("heading", { name: "Credentials" })).toBeNull();
+    expect(within(detailPage).queryByRole("heading", { name: "Runtime runner diagnostics" })).toBeNull();
+    expect(within(detailPage).getByRole("heading", { name: "Danger zone" })).toBeTruthy();
+    const detailForm = detailPage.querySelector(".channelDetailsForm");
+    expect(detailForm?.classList.contains("channelDetailsGroups")).toBe(false);
+    expect(Array.from(detailForm?.children ?? []).filter((child) => child.classList.contains("channelDetailSection")).length).toBe(3);
+    expect(within(detailPage).getByText("Allowed callers")).toBeTruthy();
+    expect(within(detailPage).queryByText("Connection identity")).toBeNull();
     expect(within(detailPage).queryByText("Connected Channels")).toBeNull();
+    expect(within(detailPage).queryByRole("switch", { name: "Enable release on save" })).toBeNull();
+    expect(within(detailPage).queryByRole("switch", { name: "Disable release on save" })).toBeNull();
+    expect(within(detailPage).queryByRole("button", { name: "Test release" })).toBeNull();
+    expect(within(detailPage).queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(detailPage).getByRole("option", { name: "custom/current-model (current)" })).toBeTruthy();
+    const workspacePreset = within(detailPage).getByRole("combobox", { name: "Channel workspace preset" });
+    expect(workspacePreset).toBeTruthy();
+    expect(within(workspacePreset).getByRole("option", { name: "Profile default" })).toBeTruthy();
+    expect(within(workspacePreset).getByRole("option", { name: "project - /tmp/project" })).toBeTruthy();
+    expect(within(detailPage).getByText("Changing workspace starts a fresh channel thread on the next message. Current running work is not interrupted.")).toBeTruthy();
+
+    const labelInput = within(detailPage).getByRole("textbox", { name: "Channel label" }) as HTMLInputElement;
+    fireEvent.change(labelInput, { target: { value: "Release Ops" } });
+    expect(within(detailPage).queryByText("Unsaved changes")).toBeNull();
+    expect(within(detailPage).getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(within(detailPage).getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+    expect(within(detailPage).getAllByRole("button", { name: "Save" })).toHaveLength(1);
+    expect((within(detailPage).getAllByRole("button", { name: "Save" })[0] as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(within(detailPage).getByRole("button", { name: "Back to Channels" }));
+    expect(within(detailPage).getByText("Discard unsaved changes?")).toBeTruthy();
+    fireEvent.click(within(detailPage).getByRole("button", { name: "Keep editing" }));
+    expect(within(detailPage).queryByText("Discard unsaved changes?")).toBeNull();
+
+    fireEvent.click(within(detailPage).getByRole("button", { name: "Cancel" }));
+    expect((within(detailPage).getByRole("textbox", { name: "Channel label" }) as HTMLInputElement).value).toBe("Release Bot");
+    expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(within(detailPage).getByRole("textbox", { name: "Channel label" }), { target: { value: "Release Ops" } });
+    fireEvent.change(within(detailPage).getByRole("textbox", { name: "Allowed direct users" }), {
+      target: { value: "alice, bob\nalice" }
+    });
+    fireEvent.change(within(detailPage).getByRole("textbox", { name: "Allowed groups" }), {
+      target: { value: "team\nteam, ops" }
+    });
+    fireEvent.click(within(detailPage).getByRole("checkbox", { name: "Require mention in groups" }));
+    fireEvent.change(within(detailPage).getByRole("combobox", { name: "Channel model" }), {
+      target: { value: "openai/gpt-4o" }
+    });
+    fireEvent.change(within(detailPage).getByRole("textbox", { name: "Channel workspace" }), {
+      target: { value: "/tmp/channel-workspace" }
+    });
+    fireEvent.click(within(detailPage).getByRole("button", { name: "Bypass permissions" }));
+    fireEvent.click(within(detailPage).getByText("Advanced diagnostics"));
+    fireEvent.change(within(detailPage).getByRole("textbox", { name: "Credential env" }), {
+      target: { value: "" }
+    });
+    fireEvent.click(within(detailPage).getAllByRole("button", { name: "Save" })[0]!);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "channel/update")).toBe(true);
+    });
+    const updateEntry = gatewayMock.requestLog.find((entry) => entry.method === "channel/update");
+    expect(updateEntry?.params).toEqual(expect.objectContaining({
+      id: "release",
+      label: "Release Ops",
+      enabled: false,
+      workdir: "/tmp/channel-workspace",
+      model: "openai/gpt-4o",
+      permissionMode: "bypassPermissions",
+      requireMention: false,
+      credentialEnv: "",
+      allowUsers: ["alice", "bob"],
+      allowGroups: ["team", "ops"]
+    }));
+    expect(updateEntry?.params).not.toHaveProperty("accountEnv");
+    expect(updateEntry?.params).not.toHaveProperty("baseUrlEnv");
+    await waitFor(() => {
+      expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+    expect(within(detailPage).getByText("Next message will start in the new workspace.")).toBeTruthy();
+
+    fireEvent.click(within(detailPage).getByRole("button", { name: "Remove channel" }));
+    expect(within(detailPage).getByRole("button", { name: "Confirm remove" })).toBeTruthy();
+    fireEvent.click(within(detailPage).getByRole("button", { name: "Confirm remove" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "channel/delete",
+        params: expect.objectContaining({ id: "release" })
+      });
+    });
     const listAgain = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    expect(within(listAgain).queryByText("Release Ops")).toBeNull();
     fireEvent.click(within(listAgain).getByRole("tab", { name: "Feishu" }));
     expect(within(listAgain).getByText("FEISHU_APP_ID")).toBeTruthy();
     fireEvent.click(within(listAgain).getByRole("tab", { name: "WeChat" }));
@@ -185,6 +278,139 @@ describe("Workbench settings and backend controls", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps internal WeChat env names out of the default detail save surface", async () => {
+    gatewayMock.channelRecords = [
+      {
+        id: "wechat",
+        channel: "wechat",
+        domain: "wechat",
+        enabled: true,
+        label: "WeChat Ops",
+        transport: "polling",
+        workdir: null,
+        model: null,
+        permissionMode: null,
+        requireMention: true,
+        credential: { env: "WECHAT_BOT_TOKEN", status: "present" },
+        account: { env: "WECHAT_ACCOUNT_ID", status: "present" },
+        baseUrl: { env: "WECHAT_ILINK_BASE_URL", status: "present" },
+        appId: null,
+        allowlist: { users: ["wx-user"], groups: [], status: "present" },
+        runtimeStatus: "ready",
+        runner: {
+          state: "running",
+          reason: "polling_empty",
+          lastPollAtMs: Date.now(),
+          lastHealthyPollAtMs: Date.now(),
+          lastInboundAtMs: null,
+          lastOutboundAtMs: null,
+          lastIlinkErrcode: null,
+          lastError: null
+        }
+      }
+    ];
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
+    const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Settings wechat" }));
+
+    const wechatDetail = await within(settingsRegion).findByRole("region", { name: "Channel settings" });
+    expect(within(wechatDetail).queryByText("Account env")).toBeNull();
+    expect(within(wechatDetail).queryByText("Base URL env")).toBeNull();
+    expect(within(wechatDetail).queryByText("WECHAT_ACCOUNT_ID")).toBeNull();
+    expect(within(wechatDetail).queryByText("WECHAT_ILINK_BASE_URL")).toBeNull();
+    expect(within(wechatDetail).getByText("Advanced diagnostics")).toBeTruthy();
+
+    fireEvent.change(within(wechatDetail).getByRole("textbox", { name: "Channel label" }), { target: { value: "WeChat Ops Edited" } });
+    fireEvent.click(within(wechatDetail).getAllByRole("button", { name: "Save" })[0]!);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "channel/update")).toBe(true);
+    });
+    const updateEntry = gatewayMock.requestLog.find((entry) => entry.method === "channel/update");
+    expect(updateEntry?.params).toEqual(expect.objectContaining({
+      id: "wechat",
+      label: "WeChat Ops Edited"
+    }));
+    expect(updateEntry?.params).not.toHaveProperty("accountEnv");
+    expect(updateEntry?.params).not.toHaveProperty("baseUrlEnv");
+  });
+
+  it("saves Channel workspace picker choices while keeping manual paths available", async () => {
+    gatewayMock.browserWorkspaces = [
+      {
+        workdir: "/tmp/project",
+        project: { workdir: "/tmp/project", label: "project", displayPath: "/tmp/project" },
+        sessions: [],
+        hiddenCount: 0,
+        nextCursor: null
+      },
+      {
+        workdir: "/tmp/recent-ops",
+        project: { workdir: "/tmp/recent-ops", label: "recent-ops", displayPath: "/tmp/recent-ops" },
+        sessions: [],
+        hiddenCount: 0,
+        nextCursor: null
+      }
+    ];
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
+    const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Settings release" }));
+
+    const detailPage = await within(settingsRegion).findByRole("region", { name: "Channel settings" });
+    const workspacePreset = within(detailPage).getByRole("combobox", { name: "Channel workspace preset" }) as HTMLSelectElement;
+    const workspaceInput = within(detailPage).getByRole("textbox", { name: "Channel workspace" }) as HTMLInputElement;
+    expect(within(detailPage).getByRole("option", { name: "project - /tmp/project" })).toBeTruthy();
+    expect(within(detailPage).getByRole("option", { name: "recent-ops - /tmp/recent-ops" })).toBeTruthy();
+
+    fireEvent.change(workspacePreset, { target: { value: "/tmp/recent-ops" } });
+    expect(workspaceInput.value).toBe("/tmp/recent-ops");
+    fireEvent.click(within(detailPage).getAllByRole("button", { name: "Save" })[0]!);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").length).toBe(1);
+    });
+    expect(within(detailPage).getByText("Next message will start in the new workspace.")).toBeTruthy();
+    expect(gatewayMock.requestLog.find((entry) => entry.method === "channel/update")?.params).toEqual(expect.objectContaining({
+      id: "release",
+      workdir: "/tmp/recent-ops"
+    }));
+
+    await waitFor(() => {
+      expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+    fireEvent.change(workspacePreset, { target: { value: "" } });
+    expect(workspaceInput.value).toBe("");
+    fireEvent.click(within(detailPage).getAllByRole("button", { name: "Save" })[0]!);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").length).toBe(2);
+    });
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").at(-1)?.params).toEqual(expect.objectContaining({
+      id: "release",
+      workdir: ""
+    }));
+
+    await waitFor(() => {
+      expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+    fireEvent.change(workspaceInput, { target: { value: "/tmp/manual-channel" } });
+    expect(workspacePreset.value).toBe("__manual__");
+    expect(within(detailPage).getByRole("option", { name: "Manual path" })).toBeTruthy();
+    fireEvent.click(within(detailPage).getAllByRole("button", { name: "Save" })[0]!);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").length).toBe(3);
+    });
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").at(-1)?.params).toEqual(expect.objectContaining({
+      id: "release",
+      workdir: "/tmp/manual-channel"
+    }));
   });
 
   it("clears stale WeChat QR sessions instead of leaving a scannable expired code", async () => {
