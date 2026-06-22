@@ -70,14 +70,20 @@ Validate report JSON:
 python <skill-dir>/scripts/report_tools.py check <workspace>/report.json
 ```
 
-When analysis artifacts are intended to be recognized by peval-py reports, re-run the same report command with `-r <workspace>` or from the workspace root/descendant, then validate the fields matching the artifact(s) you wrote:
+When Trial cell artifacts are intended to be recognized by peval-py reports, re-run the same report command with `-r <workspace>` or from the workspace root/descendant, then validate the fields matching the artifact(s) you wrote. Pass `--trial-key <trial-key>` or `--index <n>` when the report contains more than one Trial:
 
 ```sh
+# If notes.md was written:
+python <skill-dir>/scripts/report_tools.py check <workspace>/report.json --trial-key <trial-key> --require-notes
+
 # If analysis.json was written:
-python <skill-dir>/scripts/report_tools.py check <workspace>/report.json --require-summary
+python <skill-dir>/scripts/report_tools.py check <workspace>/report.json --trial-key <trial-key> --require-summary
+
+# If analysis findings were written:
+python <skill-dir>/scripts/report_tools.py check <workspace>/report.json --trial-key <trial-key> --require-findings
 
 # If analysis.md was written:
-python <skill-dir>/scripts/report_tools.py check <workspace>/report.json --require-md-report
+python <skill-dir>/scripts/report_tools.py check <workspace>/report.json --trial-key <trial-key> --require-md-report
 ```
 
 ## Render HTML Or Serve

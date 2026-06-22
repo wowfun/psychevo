@@ -113,13 +113,16 @@ cell analysis from
 `runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json`
 and `analysis.md`. The default slug is `default`; matching summaries and
 Markdown reports appear in the selected Trial Analysis section and in JSON
-`annotations.analysis[]`.
+`annotations.analysis[]`. The `<cell_key>` is the rendered Trial key normalized
+for a path segment.
 
 The same task tree can also provide manual Trial notes at
 `runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md`.
 These appear in JSON `annotations.notes[]` before CLI/table notes. In
 `peval-py serve`, refreshable sources can edit or add that cell-local
-`notes.md`; snapshot uploads remain read-only.
+`notes.md`; snapshot uploads remain read-only. Session-root `analysis.json`,
+`analysis.md`, and `notes.md` are reserved for session-level artifacts and are
+not read into Trial reports in this version.
 When serving saved snapshots, current workspace-side `analysis.json`,
 `analysis.md`, and `notes.md` are overlaid when the active report is composed,
 so reload or Refresh can show note/analysis changes even if the original source
