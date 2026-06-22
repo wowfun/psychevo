@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import shutil
 import sqlite3
 import time
 import tomllib
@@ -11,7 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from peval_py.analysis import cached_analysis_report, cached_note_report, save_cell_note
+from peval_py.analysis import (
+    MERGEABLE_ANALYSIS_LIST_FIELDS,
+    cached_analysis_report,
+    cached_note_report,
+    write_note_file,
+)
 from peval_py.atif import convert_atif_trajectory, is_atif_trajectory
 from peval_py.config import ToolConfig, config_for_adapter
 from peval_py.inputs import AdapterAssignments, LoadedInputs, LoadedSession, load_inputs
@@ -21,14 +28,16 @@ from peval_py.report import (
     build_multi_report,
     build_report_from_snapshots,
     empty_report,
-    token_total,
-    trial_wall_duration_ms,
 )
 from peval_py.sources import read_jsonl_text
 
 PEVAL_PY_CONFIG = "peval-py.toml"
 PEVAL_ROOT_ENV = "PEVAL_ROOT"
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
+DEFAULT_ANALYSIS_EVAL_SLUG = "default"
+AGENT_DIR = "agent"
+TRAJECTORY_FILENAME = "trajectory.json"
+TRAJECTORY_META_FILENAME = "trajectory_meta.json"
 UPLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 REFRESH_LOG_LIMIT = 200
 
@@ -41,9 +50,9 @@ class WorkspacePaths:
 
 
 @dataclass(frozen=True)
-class SourceSnapshot:
-    source_key: str
-    source: dict[str, Any]
+class TrialArtifacts:
+    trajectory_path: Path
+    meta_path: Path
 
 
 def now_ms() -> int:
@@ -116,18 +125,14 @@ class ServeStateStore:
         self.paths.state_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.paths.state_db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.migrate()
+        self.initialize_schema()
 
     def close(self) -> None:
         self.conn.close()
 
-    def migrate(self) -> None:
+    def initialize_schema(self) -> None:
         self.conn.executescript(
             """
-            CREATE TABLE IF NOT EXISTS peval_py_schema_migrations (
-                version INTEGER PRIMARY KEY,
-                applied_at_ms INTEGER NOT NULL
-            );
             CREATE TABLE IF NOT EXISTS peval_py_sources (
                 source_key TEXT PRIMARY KEY,
                 kind TEXT NOT NULL,
@@ -140,6 +145,8 @@ class ServeStateStore:
                 agent_name TEXT,
                 agent_version TEXT,
                 model TEXT,
+                artifact_dir TEXT,
+                artifact_updated_at_ms INTEGER,
                 refreshable INTEGER NOT NULL,
                 active INTEGER NOT NULL,
                 snapshot INTEGER NOT NULL,
@@ -148,24 +155,6 @@ class ServeStateStore:
                 last_status TEXT,
                 last_error TEXT,
                 last_refreshed_at_ms INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS peval_py_trials (
-                source_key TEXT PRIMARY KEY,
-                trial_key TEXT NOT NULL,
-                session_id TEXT,
-                adapter TEXT,
-                status TEXT,
-                duration_ms INTEGER,
-                wall_duration_ms INTEGER,
-                turns INTEGER,
-                tools INTEGER,
-                tokens INTEGER,
-                cost_usd REAL,
-                trajectory_json TEXT NOT NULL,
-                meta_json TEXT NOT NULL,
-                report_json TEXT NOT NULL,
-                updated_at_ms INTEGER NOT NULL,
-                FOREIGN KEY(source_key) REFERENCES peval_py_sources(source_key)
             );
             CREATE TABLE IF NOT EXISTS peval_py_refresh_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,33 +166,14 @@ class ServeStateStore:
             );
             """
         )
-        self.ensure_column("peval_py_sources", "source_alias", "TEXT")
-        self.conn.execute(
-            """
-            INSERT OR IGNORE INTO peval_py_schema_migrations(version, applied_at_ms)
-            VALUES (?, ?)
-            """,
-            (STATE_SCHEMA_VERSION, now_ms()),
-        )
         self.conn.commit()
-
-    def ensure_column(self, table: str, column: str, definition: str) -> None:
-        columns = {
-            str(row["name"])
-            for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
-        }
-        if column not in columns:
-            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def upsert_loaded_sources(
         self,
         loaded_inputs: LoadedInputs,
         config: ToolConfig,
     ) -> list[str]:
-        keys = []
-        for session in loaded_inputs.sessions:
-            keys.append(self.upsert_loaded_source(session, config))
-        return keys
+        return self.import_loaded_sources(loaded_inputs, config)
 
     def upsert_loaded_source(
         self,
@@ -213,15 +183,82 @@ class ServeStateStore:
         commit: bool = True,
         timestamp: int | None = None,
     ) -> str:
-        key = source_key_for_session(session)
-        timestamp = timestamp if timestamp is not None else now_ms()
+        del commit, timestamp
+        return self.import_loaded_sources(
+            LoadedInputs(sessions=[session], notes=[]),
+            config,
+        )[0]
+
+    def import_loaded_sources(
+        self,
+        loaded_inputs: LoadedInputs,
+        config: ToolConfig,
+    ) -> list[str]:
+        prepared: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]] = {}
+        ordered_keys: list[str] = []
+        for session in loaded_inputs.sessions:
+            source = source_row_for_session(session)
+            report_session = report_session_for_loaded(session, config)
+            report = build_multi_report([report_session], config, [])
+            trajectory, meta = trial_payload_from_report(report)
+            source_key = source_key_for_trial(
+                config.analysis_eval_slug,
+                source,
+                trajectory,
+                meta,
+            )
+            warnings = meta.get("warnings") or []
+            if source_key not in prepared:
+                ordered_keys.append(source_key)
+            prepared[source_key] = (source, trajectory, meta, len(warnings))
+
+        timestamp = now_ms()
+        try:
+            for source_key in ordered_keys:
+                source, trajectory, meta, warning_count = prepared[source_key]
+                artifact_dir = self.store_trial(
+                    trajectory,
+                    meta,
+                    config.analysis_eval_slug,
+                    source=source,
+                )
+                self.upsert_source_row(
+                    source_key,
+                    source,
+                    artifact_dir,
+                    timestamp,
+                    refreshable=True,
+                    snapshot=False,
+                    status="ok",
+                )
+                self.log_refresh(source_key, "ok", warning_count, None, timestamp)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return ordered_keys
+
+    def upsert_source_row(
+        self,
+        source_key: str,
+        source: dict[str, Any],
+        artifact_dir: str,
+        timestamp: int,
+        *,
+        refreshable: bool,
+        snapshot: bool,
+        status: str,
+        error: str | None = None,
+    ) -> None:
         self.conn.execute(
             """
             INSERT INTO peval_py_sources
             (source_key, kind, adapter, label, input_path, db_path, session_id,
              source_alias, agent_name, agent_version, model,
-             refreshable, active, snapshot, created_at_ms, updated_at_ms, last_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?, 'pending')
+             artifact_dir, artifact_updated_at_ms,
+             refreshable, active, snapshot, created_at_ms, updated_at_ms,
+             last_status, last_error, last_refreshed_at_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source_key) DO UPDATE SET
                 kind = excluded.kind,
                 adapter = excluded.adapter,
@@ -233,69 +270,39 @@ class ServeStateStore:
                 agent_name = excluded.agent_name,
                 agent_version = excluded.agent_version,
                 model = excluded.model,
-                refreshable = 1,
-                snapshot = 0,
+                artifact_dir = excluded.artifact_dir,
+                artifact_updated_at_ms = excluded.artifact_updated_at_ms,
+                refreshable = excluded.refreshable,
+                snapshot = excluded.snapshot,
                 active = 1,
-                updated_at_ms = excluded.updated_at_ms
+                updated_at_ms = excluded.updated_at_ms,
+                last_status = excluded.last_status,
+                last_error = excluded.last_error,
+                last_refreshed_at_ms = excluded.last_refreshed_at_ms
             """,
             (
-                key,
-                session.source_kind,
-                session.adapter_id,
-                session.input_label,
-                normalized_optional_path(session.input_path),
-                normalized_optional_path(session.db_path),
-                session.session_hint,
-                session.source_alias,
-                session.agent_name,
-                session.agent_version,
-                session.model,
+                source_key,
+                source["kind"],
+                source["adapter"],
+                source["label"],
+                source.get("input_path"),
+                source.get("db_path"),
+                source.get("session_id"),
+                source.get("source_alias"),
+                source.get("agent_name"),
+                source.get("agent_version"),
+                source.get("model"),
+                artifact_dir,
                 timestamp,
+                1 if refreshable else 0,
+                1 if snapshot else 0,
+                timestamp,
+                timestamp,
+                status,
+                error,
                 timestamp,
             ),
         )
-        if commit:
-            self.conn.commit()
-        return key
-
-    def import_loaded_sources(
-        self,
-        loaded_inputs: LoadedInputs,
-        config: ToolConfig,
-    ) -> list[str]:
-        prepared: list[tuple[str, LoadedSession, dict[str, Any], int]] = []
-        for session in loaded_inputs.sessions:
-            source_key = source_key_for_session(session)
-            report_session = report_session_for_loaded(session, config)
-            report = build_multi_report([report_session], config, [])
-            warnings = report["trajectory_meta"][0].get("warnings") or []
-            prepared.append((source_key, session, report, len(warnings)))
-
-        timestamp = now_ms()
-        try:
-            for source_key, session, report, warning_count in prepared:
-                self.upsert_loaded_source(
-                    session,
-                    config,
-                    commit=False,
-                    timestamp=timestamp,
-                )
-                self.store_report_for_source(source_key, report)
-                self.conn.execute(
-                    """
-                    UPDATE peval_py_sources
-                    SET last_status = ?, last_error = NULL,
-                        last_refreshed_at_ms = ?, updated_at_ms = ?
-                    WHERE source_key = ?
-                    """,
-                    ("ok", timestamp, timestamp, source_key),
-                )
-                self.log_refresh(source_key, "ok", warning_count, None, timestamp)
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
-        return [source_key for source_key, _, _, _ in prepared]
 
     def refresh_sources(self, source_keys: list[str] | None, config: ToolConfig) -> None:
         rows = self.source_rows(source_keys=source_keys, active_only=False)
@@ -311,18 +318,23 @@ class ServeStateStore:
             session = loaded_session_from_source(source)
             report_session = report_session_for_loaded(session, config)
             report = build_multi_report([report_session], config, [])
-            self.store_report_for_source(source_key, report)
-            warnings = report["trajectory_meta"][0].get("warnings") or []
+            artifact_dir, warning_count = self.store_report_for_source(
+                source_key,
+                report,
+                config,
+                source=source,
+            )
             self.conn.execute(
                 """
                 UPDATE peval_py_sources
-                SET last_status = ?, last_error = NULL, last_refreshed_at_ms = ?,
+                SET artifact_dir = ?, artifact_updated_at_ms = ?,
+                    last_status = ?, last_error = NULL, last_refreshed_at_ms = ?,
                     updated_at_ms = ?
                 WHERE source_key = ?
                 """,
-                ("ok", timestamp, timestamp, source_key),
+                (artifact_dir, timestamp, "ok", timestamp, timestamp, source_key),
             )
-            self.log_refresh(source_key, "ok", len(warnings), None, timestamp)
+            self.log_refresh(source_key, "ok", warning_count, None, timestamp)
         except Exception as exc:  # noqa: BLE001 - state boundary.
             self.conn.execute(
                 """
@@ -336,64 +348,78 @@ class ServeStateStore:
             self.log_refresh(source_key, "error", 0, str(exc), timestamp)
         self.conn.commit()
 
-    def store_report_for_source(self, source_key: str, report: dict[str, Any]) -> None:
-        trajectories = report.get("trajectory") or []
-        metas = report.get("trajectory_meta") or []
-        if len(trajectories) != 1 or len(metas) != 1:
-            raise ValueError("source refresh must produce exactly one Trial")
-        self.store_trial(source_key, trajectories[0], metas[0], report)
+    def source_by_key(self, source_key: str) -> dict[str, Any]:
+        row = self.conn.execute(
+            "SELECT * FROM peval_py_sources WHERE source_key = ?",
+            (source_key,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown source: {source_key}")
+        return dict(row)
+
+    def store_report_for_source(
+        self,
+        source_key: str,
+        report: dict[str, Any],
+        config: ToolConfig,
+        *,
+        source: dict[str, Any] | None = None,
+    ) -> tuple[str, int]:
+        source = source or self.source_by_key(source_key)
+        trajectory, meta = trial_payload_from_report(report)
+        refreshed_source_key = source_key_for_trial(
+            config.analysis_eval_slug,
+            source,
+            trajectory,
+            meta,
+        )
+        if refreshed_source_key != source_key:
+            raise ValueError(
+                "refreshed source resolved to a different Trial cell; "
+                f"expected {source_key}, got {refreshed_source_key}"
+            )
+        artifact_dir = self.store_trial(
+            trajectory,
+            meta,
+            config.analysis_eval_slug,
+            source=source,
+        )
+        return artifact_dir, len(meta.get("warnings") or [])
 
     def store_trial(
         self,
-        source_key: str,
         trajectory: dict[str, Any],
         meta: dict[str, Any],
-        report: dict[str, Any],
-    ) -> None:
-        metrics = trajectory.get("final_metrics") if isinstance(trajectory, dict) else {}
-        if not isinstance(metrics, dict):
-            metrics = {}
-        self.conn.execute(
-            """
-            INSERT INTO peval_py_trials
-            (source_key, trial_key, session_id, adapter, status, duration_ms,
-             wall_duration_ms, turns, tools, tokens, cost_usd, trajectory_json,
-             meta_json, report_json, updated_at_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(source_key) DO UPDATE SET
-                trial_key = excluded.trial_key,
-                session_id = excluded.session_id,
-                adapter = excluded.adapter,
-                status = excluded.status,
-                duration_ms = excluded.duration_ms,
-                wall_duration_ms = excluded.wall_duration_ms,
-                turns = excluded.turns,
-                tools = excluded.tools,
-                tokens = excluded.tokens,
-                cost_usd = excluded.cost_usd,
-                trajectory_json = excluded.trajectory_json,
-                meta_json = excluded.meta_json,
-                report_json = excluded.report_json,
-                updated_at_ms = excluded.updated_at_ms
-            """,
-            (
-                source_key,
-                str(meta.get("trial_key") or trajectory.get("trajectory_id") or source_key),
-                optional_str(trajectory.get("session_id")),
-                optional_str(meta.get("adapter")),
-                optional_str(meta.get("status")),
-                optional_int(meta.get("duration_ms")),
-                optional_int(trial_wall_duration_ms(meta)),
-                optional_int(metrics.get("total_turns")),
-                optional_int(metrics.get("total_tool_calls")),
-                optional_int(token_total(metrics)),
-                optional_float(metrics.get("total_cost_usd")),
-                json.dumps(trajectory, ensure_ascii=False),
-                json.dumps(meta, ensure_ascii=False),
-                json.dumps(report, ensure_ascii=False),
-                now_ms(),
-            ),
+        eval_slug: str,
+        *,
+        source: dict[str, Any],
+    ) -> str:
+        return self.write_trial_artifacts(
+            source=source,
+            trajectory=trajectory,
+            meta=meta,
+            eval_slug=eval_slug,
         )
+
+    def write_trial_artifacts(
+        self,
+        *,
+        source: dict[str, Any],
+        trajectory: dict[str, Any],
+        meta: dict[str, Any],
+        eval_slug: str,
+    ) -> str:
+        artifact_dir = trial_cell_dir(
+            self.paths.root,
+            eval_slug=eval_slug,
+            source=source,
+            trajectory=trajectory,
+            meta=meta,
+        )
+        artifacts = trial_artifacts(artifact_dir)
+        write_json_file(artifacts.trajectory_path, trajectory)
+        write_json_file(artifacts.meta_path, meta)
+        return relative_to_root(self.paths.root, artifact_dir)
 
     def ingest_upload(
         self,
@@ -412,15 +438,26 @@ class ServeStateStore:
             except json.JSONDecodeError:
                 parsed_json = None
         if isinstance(parsed_json, dict) and is_report_json(parsed_json):
-            return self.ingest_report_snapshot(parsed_json, label)
+            return self.ingest_report_snapshot(
+                parsed_json,
+                label,
+                config,
+                materialize_annotations=True,
+            )
         if isinstance(parsed_json, dict) and is_atif_trajectory(parsed_json):
             conversion = convert_atif_trajectory(parsed_json)
             report = build_multi_report(
-                [ReportSession(conversion=conversion, input_label=label, adapter_id="atif")],
+                [
+                    ReportSession(
+                        conversion=conversion,
+                        input_label=label,
+                        adapter_id="atif",
+                    )
+                ],
                 config_for_adapter(config, "atif"),
                 [],
             )
-            return self.ingest_report_snapshot(report, label, adapter="atif")
+            return self.ingest_report_snapshot(report, label, config, adapter="atif")
         if not label.endswith(".jsonl"):
             raise ValueError("uploaded source must be JSONL, ATIF JSON, or report JSON")
         source_config = config_for_adapter(config, adapter or config.adapter)
@@ -437,97 +474,201 @@ class ServeStateStore:
             source_config,
             [],
         )
-        return self.ingest_report_snapshot(report, label, adapter=source_config.adapter)
+        return self.ingest_report_snapshot(
+            report,
+            label,
+            source_config,
+            adapter=source_config.adapter,
+        )
 
     def ingest_report_snapshot(
         self,
         report: dict[str, Any],
         label: str,
+        config: ToolConfig | None = None,
         *,
         adapter: str | None = None,
+        materialize_annotations: bool = False,
     ) -> list[str]:
         trajectories = report.get("trajectory")
         metas = report.get("trajectory_meta")
         if not isinstance(trajectories, list) or not isinstance(metas, list):
-            raise ValueError("report JSON snapshot must contain trajectory and trajectory_meta arrays")
+            raise ValueError(
+                "report JSON snapshot must contain trajectory and trajectory_meta arrays"
+            )
         if len(trajectories) != len(metas):
             raise ValueError("report JSON snapshot trajectory/meta counts differ")
-        keys: list[str] = []
-        digest = content_digest(report)
-        for index, (trajectory, meta) in enumerate(zip(trajectories, metas, strict=True), start=1):
+        eval_slug = (
+            config.analysis_eval_slug
+            if config is not None
+            else workspace_analysis_eval_slug(self.paths)
+        )
+        prepared: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]] = {}
+        ordered_keys: list[str] = []
+        for index, (trajectory, meta) in enumerate(
+            zip(trajectories, metas, strict=True),
+            start=1,
+        ):
             if not isinstance(trajectory, dict) or not isinstance(meta, dict):
                 raise ValueError("report JSON snapshot contains non-object Trial data")
-            source_key = snapshot_source_key(label, digest, meta.get("trial_key"), index)
             source_label = (
                 f"{label}:{trajectory.get('session_id') or meta.get('trial_key') or index}"
             )
-            timestamp = now_ms()
-            self.conn.execute(
-                """
-                INSERT INTO peval_py_sources
-                (source_key, kind, adapter, label, input_path, db_path, session_id,
-                 source_alias, agent_name, agent_version, model,
-                 refreshable, active, snapshot, created_at_ms, updated_at_ms,
-                 last_status, last_refreshed_at_ms)
-                VALUES (?, 'snapshot', ?, ?, NULL, NULL, ?, NULL, NULL, NULL, NULL,
-                        0, 1, 1, ?, ?, 'ok', ?)
-                ON CONFLICT(source_key) DO UPDATE SET
-                    adapter = excluded.adapter,
-                    label = excluded.label,
-                    session_id = excluded.session_id,
-                    source_alias = COALESCE(excluded.source_alias, peval_py_sources.source_alias),
-                    active = 1,
-                    updated_at_ms = excluded.updated_at_ms,
-                    last_status = 'ok',
-                    last_error = NULL,
-                    last_refreshed_at_ms = excluded.last_refreshed_at_ms
-                """,
-                (
-                    source_key,
-                    adapter or optional_str(meta.get("adapter")) or "snapshot",
-                    source_label,
-                    optional_str(trajectory.get("session_id")),
-                    timestamp,
-                    timestamp,
-                    timestamp,
+            source = {
+                "kind": "snapshot",
+                "adapter": adapter or optional_str(meta.get("adapter")) or "snapshot",
+                "label": source_label,
+                "input_path": None,
+                "db_path": None,
+                "session_id": optional_str(
+                    trajectory.get("session_id") or meta.get("trial_key")
                 ),
+                "source_alias": None,
+                "agent_name": None,
+                "agent_version": None,
+                "model": None,
+            }
+            source_key = source_key_for_trial(
+                eval_slug,
+                source,
+                trajectory,
+                meta,
             )
-            single_report = build_report_from_snapshots([trajectory], [meta], input_label=label)
-            self.store_trial(source_key, trajectory, meta, single_report)
-            self.log_refresh(source_key, "ok", len(meta.get("warnings") or []), None, timestamp)
-            keys.append(source_key)
-        self.conn.commit()
-        return keys
+            if source_key not in prepared:
+                ordered_keys.append(source_key)
+            prepared[source_key] = (
+                source,
+                trajectory,
+                meta,
+                len(meta.get("warnings") or []),
+            )
+
+        timestamp = now_ms()
+        try:
+            for source_key in ordered_keys:
+                source, trajectory, meta, warning_count = prepared[source_key]
+                artifact_dir = self.store_trial(
+                    trajectory,
+                    meta,
+                    eval_slug,
+                    source=source,
+                )
+                if materialize_annotations:
+                    self.materialize_snapshot_annotations(report, meta, artifact_dir)
+                self.upsert_source_row(
+                    source_key,
+                    source,
+                    artifact_dir,
+                    timestamp,
+                    refreshable=False,
+                    snapshot=True,
+                    status="ok",
+                )
+                self.log_refresh(
+                    source_key,
+                    "ok",
+                    warning_count,
+                    None,
+                    timestamp,
+                )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return ordered_keys
+
+    def materialize_snapshot_annotations(
+        self,
+        report: dict[str, Any],
+        meta: dict[str, Any],
+        artifact_dir: str,
+    ) -> None:
+        annotations = parsed_object(report.get("annotations"))
+        trial_key = str(meta.get("trial_key") or "")
+        cell_dir = self.resolve_artifact_dir(artifact_dir)
+
+        notes = matching_annotation_items(annotations, "notes", trial_key)
+        note_markdown = merged_note_markdown(notes)
+        if note_markdown:
+            write_note_file(cell_dir / "notes.md", self.paths.root, note_markdown)
+
+        analyses = matching_annotation_items(annotations, "analysis", trial_key)
+        analysis_payload = merged_analysis_json(analyses)
+        if analysis_payload is not None:
+            write_json_file(cell_dir / "analysis.json", analysis_payload)
+        analysis_markdown = merged_analysis_markdown(analyses)
+        if analysis_markdown:
+            write_text_file(cell_dir / "analysis.md", analysis_markdown)
 
     def active_report(self, config: ToolConfig | None = None) -> dict[str, Any]:
+        annotation_config = self.annotation_config(config)
         rows = self.conn.execute(
             """
-            SELECT s.*, t.trial_key AS stored_trial_key,
-                   t.trajectory_json, t.meta_json, t.report_json
-            FROM peval_py_sources s
-            JOIN peval_py_trials t ON t.source_key = s.source_key
-            WHERE s.active = 1
-            ORDER BY s.created_at_ms ASC, s.source_key ASC
+            SELECT *
+            FROM peval_py_sources
+            WHERE active = 1 AND artifact_dir IS NOT NULL
+            ORDER BY created_at_ms ASC, source_key ASC
             """
         ).fetchall()
         if not rows:
             return empty_report("serve")
-        trajectories = [json.loads(row["trajectory_json"]) for row in rows]
+        stored = [self.read_trial_artifacts(dict(row)) for row in rows]
+        trajectories = [item["trajectory"] for item in stored]
         metas = uniquify_trial_keys(
             [
-                meta_with_source_alias(json.loads(row["meta_json"]), row["source_alias"])
-                for row in rows
+                meta_with_source_alias(item["meta"], row["source_alias"])
+                for row, item in zip(rows, stored, strict=True)
             ]
         )
         reports = [
-            source_report_with_current_annotations(dict(row), trajectory, meta, config)
-            for row, trajectory, meta in zip(rows, trajectories, metas, strict=True)
+            source_report_with_current_annotations(
+                dict(row),
+                trajectory,
+                meta,
+                annotation_config,
+            )
+            for row, trajectory, meta in zip(
+                rows,
+                trajectories,
+                metas,
+                strict=True,
+            )
         ]
         return build_report_from_snapshots(
             trajectories,
             metas,
             input_label="serve",
             source_reports=reports,
+        )
+
+    def annotation_config(self, config: ToolConfig | None) -> ToolConfig:
+        if config is not None and config.workspace_root:
+            return config
+        eval_slug = (
+            config.analysis_eval_slug
+            if config is not None
+            else workspace_analysis_eval_slug(self.paths)
+        )
+        if config is None:
+            return ToolConfig(
+                workspace_root=str(self.paths.root),
+                analysis_eval_slug=eval_slug,
+            )
+        return ToolConfig(
+            adapter=config.adapter,
+            locale=config.locale,
+            workspace_root=str(self.paths.root),
+            analysis_eval_slug=eval_slug,
+            agent_name=config.agent_name,
+            agent_version=config.agent_version,
+            model=config.model,
+            trajectory_id=config.trajectory_id,
+            max_content_chars=config.max_content_chars,
+            redact=config.redact,
+            db=config.db,
+            adapter_options=config.adapter_options,
+            adapter_options_by_id=config.adapter_options_by_id,
+            adapter_default_db_paths=config.adapter_default_db_paths,
         )
 
     def source_rows(
@@ -554,29 +695,55 @@ class ServeStateStore:
     def source_payload(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             """
-            SELECT s.*, t.trial_key AS stored_trial_key,
-                   t.session_id AS trial_session_id, t.meta_json AS meta_json
-            FROM peval_py_sources s
-            LEFT JOIN peval_py_trials t ON t.source_key = s.source_key
-            ORDER BY s.created_at_ms ASC, s.source_key ASC
+            SELECT *
+            FROM peval_py_sources
+            ORDER BY created_at_ms ASC, source_key ASC
             """
         ).fetchall()
         payload: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
-            meta = parsed_object(item.pop("meta_json", None))
+            trajectory = {}
+            meta = {}
+            artifact_dir = item.get("artifact_dir")
+            if artifact_dir:
+                artifacts = self.read_trial_artifacts(item)
+                trajectory = artifacts["trajectory"]
+                meta = artifacts["meta"]
             item["refreshable"] = bool(item["refreshable"])
             item["active"] = bool(item["active"])
             item["snapshot"] = bool(item["snapshot"])
-            item["trial_key"] = optional_str(item.pop("stored_trial_key", None))
-            item["trial_session_id"] = optional_str(item.get("trial_session_id"))
+            item["trial_key"] = optional_str(
+                meta.get("trial_key") or trajectory.get("trajectory_id")
+            )
+            item["trial_session_id"] = optional_str(trajectory.get("session_id"))
             item["last_turn_finished_at_ms"] = optional_int(meta.get("finished_at_ms"))
             payload.append(item)
         return payload
 
+    def read_trial_artifacts(self, row: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        artifact_dir = row.get("artifact_dir")
+        if not artifact_dir:
+            raise ValueError(f"trial has no artifact directory: {row.get('source_key')}")
+        artifacts = trial_artifacts(self.resolve_artifact_dir(str(artifact_dir)))
+        return {
+            "trajectory": read_json_object(artifacts.trajectory_path),
+            "meta": read_json_object(artifacts.meta_path),
+        }
+
+    def resolve_artifact_dir(self, artifact_dir: str) -> Path:
+        path = Path(artifact_dir)
+        if not path.is_absolute():
+            path = self.paths.root / path
+        return path.resolve()
+
     def set_source_active(self, source_key: str, active: bool) -> None:
         cursor = self.conn.execute(
-            "UPDATE peval_py_sources SET active = ?, updated_at_ms = ? WHERE source_key = ?",
+            """
+            UPDATE peval_py_sources
+            SET active = ?, updated_at_ms = ?
+            WHERE source_key = ?
+            """,
             (1 if active else 0, now_ms(), source_key),
         )
         if cursor.rowcount == 0:
@@ -585,7 +752,11 @@ class ServeStateStore:
 
     def set_source_alias(self, source_key: str, alias: str | None) -> None:
         cursor = self.conn.execute(
-            "UPDATE peval_py_sources SET source_alias = ?, updated_at_ms = ? WHERE source_key = ?",
+            """
+            UPDATE peval_py_sources
+            SET source_alias = ?, updated_at_ms = ?
+            WHERE source_key = ?
+            """,
             (alias or None, now_ms(), source_key),
         )
         if cursor.rowcount == 0:
@@ -593,19 +764,28 @@ class ServeStateStore:
         self.conn.commit()
 
     def delete_source(self, source_key: str) -> None:
-        exists = self.conn.execute(
-            "SELECT 1 FROM peval_py_sources WHERE source_key = ?",
+        row = self.conn.execute(
+            """
+            SELECT source_key, artifact_dir
+            FROM peval_py_sources
+            WHERE source_key = ?
+            """,
             (source_key,),
         ).fetchone()
-        if exists is None:
+        if row is None:
             raise ValueError(f"unknown source: {source_key}")
-        self.conn.execute("DELETE FROM peval_py_trials WHERE source_key = ?", (source_key,))
+        artifact_dir = row["artifact_dir"]
         self.conn.execute(
             "DELETE FROM peval_py_refresh_log WHERE source_key = ?",
             (source_key,),
         )
         self.conn.execute("DELETE FROM peval_py_sources WHERE source_key = ?", (source_key,))
         self.conn.commit()
+        if artifact_dir:
+            remove_artifact_dir(
+                self.paths.root,
+                self.resolve_artifact_dir(str(artifact_dir)),
+            )
 
     def save_source_notes(
         self,
@@ -615,10 +795,9 @@ class ServeStateStore:
     ) -> None:
         row = self.conn.execute(
             """
-            SELECT s.*, t.trajectory_json AS trajectory_json
-            FROM peval_py_sources s
-            LEFT JOIN peval_py_trials t ON t.source_key = s.source_key
-            WHERE s.source_key = ?
+            SELECT *
+            FROM peval_py_sources
+            WHERE source_key = ?
             """,
             (source_key,),
         ).fetchone()
@@ -627,22 +806,12 @@ class ServeStateStore:
         source = dict(row)
         if not source.get("refreshable") or source.get("snapshot"):
             raise ValueError("notes.md can only be saved for refreshable sources")
-        trajectory: dict[str, Any] = {}
-        if source.get("trajectory_json"):
-            try:
-                parsed = json.loads(source["trajectory_json"])
-            except json.JSONDecodeError:
-                parsed = None
-            if isinstance(parsed, dict):
-                trajectory = parsed
-        session_id = optional_str(trajectory.get("session_id")) or source.get("session_id")
-        agent_id = source.get("agent_name") or source.get("adapter")
-        save_cell_note(
-            workspace_root=str(self.paths.root),
-            eval_slug=config.analysis_eval_slug,
-            agent_id=agent_id,
-            session_id=session_id,
-            markdown=markdown,
+        if not source.get("artifact_dir"):
+            raise ValueError("notes.md requires a persisted Trial cell")
+        write_note_file(
+            self.resolve_artifact_dir(str(source["artifact_dir"])) / "notes.md",
+            self.paths.root,
+            markdown,
         )
         self.refresh_source(source, config)
 
@@ -705,30 +874,78 @@ def loaded_session_from_source(source: dict[str, Any]) -> LoadedSession:
     )
 
 
-def source_key_for_session(session: LoadedSession) -> str:
-    payload = {
+def source_row_for_session(session: LoadedSession) -> dict[str, Any]:
+    return {
         "kind": session.source_kind,
         "adapter": session.adapter_id,
+        "label": session.input_label,
         "input_path": normalized_optional_path(session.input_path),
         "db_path": normalized_optional_path(session.db_path),
-        "session_id": session.session_hint or "",
+        "session_id": session.session_hint,
+        "source_alias": session.source_alias,
+        "agent_name": session.agent_name,
+        "agent_version": session.agent_version,
+        "model": session.model,
     }
-    return "src_" + hashlib.sha256(
+
+
+def trial_payload_from_report(
+    report: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    trajectories = report.get("trajectory") or []
+    metas = report.get("trajectory_meta") or []
+    if len(trajectories) != 1 or len(metas) != 1:
+        raise ValueError("source refresh must produce exactly one Trial")
+    trajectory = trajectories[0]
+    meta = metas[0]
+    if not isinstance(trajectory, dict) or not isinstance(meta, dict):
+        raise ValueError("source refresh produced non-object Trial data")
+    return trajectory, meta
+
+
+def source_key_for_trial(
+    eval_slug: str,
+    source: dict[str, Any],
+    trajectory: dict[str, Any],
+    meta: dict[str, Any],
+) -> str:
+    payload = trial_cell_components(
+        eval_slug=eval_slug,
+        source=source,
+        trajectory=trajectory,
+        meta=meta,
+    )
+    return "cell_" + hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")
     ).hexdigest()[:20]
 
 
-def snapshot_source_key(label: str, digest: str, trial_key: object, index: int) -> str:
-    payload = {
-        "kind": "snapshot",
-        "label": label,
-        "digest": digest,
-        "trial_key": str(trial_key or index),
-        "index": index,
+def trial_cell_components(
+    *,
+    eval_slug: str,
+    source: dict[str, Any],
+    trajectory: dict[str, Any],
+    meta: dict[str, Any],
+) -> dict[str, str]:
+    agent = trajectory.get("agent")
+    trajectory_agent = agent.get("name") if isinstance(agent, dict) else None
+    return {
+        "eval_slug": artifact_segment(eval_slug, DEFAULT_ANALYSIS_EVAL_SLUG),
+        "agent_id": artifact_segment(
+            source.get("agent_name")
+            or trajectory_agent
+            or meta.get("adapter")
+            or source.get("adapter"),
+            "unknown-agent",
+        ),
+        "session_id": artifact_segment(
+            trajectory.get("session_id")
+            or source.get("session_id")
+            or meta.get("trial_key"),
+            "unknown-session",
+        ),
+        "cell_key": required_artifact_segment(meta.get("trial_key"), "trial_key"),
     }
-    return "src_" + hashlib.sha256(
-        json.dumps(payload, sort_keys=True).encode("utf-8")
-    ).hexdigest()[:20]
 
 
 def normalized_optional_path(path: str | None) -> str | None:
@@ -737,10 +954,223 @@ def normalized_optional_path(path: str | None) -> str | None:
     return str(Path(path).expanduser().resolve())
 
 
-def content_digest(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+def workspace_analysis_eval_slug(paths: WorkspacePaths) -> str:
+    if not paths.config_path.is_file():
+        return DEFAULT_ANALYSIS_EVAL_SLUG
+    try:
+        data = tomllib.loads(paths.config_path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return DEFAULT_ANALYSIS_EVAL_SLUG
+    value = data.get("analysis_eval_slug")
+    return artifact_segment(value, DEFAULT_ANALYSIS_EVAL_SLUG)
+
+
+def trial_cell_dir(
+    root: Path,
+    *,
+    eval_slug: str,
+    source: dict[str, Any],
+    trajectory: dict[str, Any],
+    meta: dict[str, Any],
+) -> Path:
+    components = trial_cell_components(
+        eval_slug=eval_slug,
+        source=source,
+        trajectory=trajectory,
+        meta=meta,
+    )
+    return (
+        root
+        / "runs"
+        / components["eval_slug"]
+        / components["agent_id"]
+        / components["session_id"]
+        / components["cell_key"]
+    )
+
+
+def trial_artifacts(artifact_dir: Path) -> TrialArtifacts:
+    agent_dir = artifact_dir / AGENT_DIR
+    return TrialArtifacts(
+        trajectory_path=agent_dir / TRAJECTORY_FILENAME,
+        meta_path=agent_dir / TRAJECTORY_META_FILENAME,
+    )
+
+
+def artifact_segment(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    safe = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "_"
+        for char in text
+    ).strip("._")
+    return safe or fallback
+
+
+def required_artifact_segment(value: Any, label: str) -> str:
+    text = str(value or "").strip()
+    safe = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "_"
+        for char in text
+    ).strip("._")
+    if not safe:
+        raise ValueError(f"{label} is required for Trial cell artifacts")
+    return safe
+
+
+def relative_to_root(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return str(path.resolve())
+
+
+def write_json_file(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(path)
+
+
+def write_text_file(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(value, encoding="utf-8")
+    tmp.replace(path)
+
+
+def read_json_object(path: Path) -> dict[str, Any]:
+    return json_object(path.read_text(encoding="utf-8"), str(path))
+
+
+def json_object(value: str, label: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"failed to parse {label}: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{label} must contain a JSON object")
+    return parsed
+
+
+def remove_artifact_dir(root: Path, artifact_dir: Path) -> None:
+    resolved_root = root.resolve()
+    resolved_artifact = artifact_dir.resolve()
+    if resolved_artifact == resolved_root or resolved_root not in resolved_artifact.parents:
+        raise ValueError(
+            f"refusing to remove artifact directory outside workspace: {artifact_dir}"
+        )
+    if resolved_artifact.is_dir():
+        shutil.rmtree(resolved_artifact)
+
+
+def matching_annotation_items(
+    annotations: dict[str, Any],
+    key: str,
+    trial_key: str,
+) -> list[dict[str, Any]]:
+    return [
+        deepcopy(item)
+        for item in annotations.get(key) or []
+        if isinstance(item, dict) and str(item.get("trial_key") or "") == trial_key
+    ]
+
+
+def merged_note_markdown(notes: list[dict[str, Any]]) -> str | None:
+    sections: list[str] = []
+    for index, note in enumerate(notes, start=1):
+        markdown = optional_str(note.get("markdown"))
+        if not markdown or not markdown.strip():
+            continue
+        label = optional_str(note.get("label"))
+        source = optional_str(note.get("source"))
+        if label or source:
+            heading = label or f"Note {index}"
+            lines = [f"## {heading}"]
+            if source:
+                lines.extend(["", f"Source: {source}"])
+            lines.extend(["", markdown.strip()])
+            sections.append("\n".join(lines))
+        else:
+            sections.append(markdown.strip())
+    if not sections:
+        return None
+    return "\n\n".join(sections) + "\n"
+
+
+def merged_analysis_json(analyses: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not analyses:
+        return None
+    summaries = [
+        summary.strip()
+        for summary in (optional_str(item.get("summary")) for item in analyses)
+        if summary and summary.strip()
+    ]
+    payload: dict[str, Any] = {
+        "summary": "\n\n".join(summaries) if summaries else "",
+        "items": deepcopy(analyses),
+    }
+    for key in MERGEABLE_ANALYSIS_LIST_FIELDS:
+        values: list[Any] = []
+        for item in analyses:
+            value = item.get(key)
+            if isinstance(value, list) and value:
+                values.extend(deepcopy(value))
+        if values:
+            payload[key] = values
+    for source_key, target_key in (
+        ("analysis_status", "status"),
+        ("subject", "subject"),
+        ("analysis_metrics", "metrics"),
+        ("confidence", "confidence"),
+    ):
+        value = unique_analysis_value(analyses, source_key)
+        if value is not None:
+            payload[target_key] = value
+    return payload
+
+
+def unique_analysis_value(items: list[dict[str, Any]], key: str) -> Any:
+    values: list[Any] = []
+    for item in items:
+        if key not in item:
+            continue
+        value = item[key]
+        if key == "analysis_status":
+            if isinstance(value, str) and value.strip():
+                values.append(value)
+        elif key in {"subject", "analysis_metrics"}:
+            if isinstance(value, dict) and value:
+                values.append(deepcopy(value))
+        elif key == "confidence":
+            if isinstance(value, str) and value.strip():
+                values.append(value)
+            elif (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+            ):
+                values.append(value)
+    unique_values: list[Any] = []
+    for value in values:
+        if not any(value == existing for existing in unique_values):
+            unique_values.append(value)
+    if len(unique_values) == 1:
+        return unique_values[0]
+    return None
+
+
+def merged_analysis_markdown(analyses: list[dict[str, Any]]) -> str | None:
+    sections = [
+        markdown.strip()
+        for markdown in (optional_str(item.get("md_report")) for item in analyses)
+        if markdown and markdown.strip()
+    ]
+    if not sections:
+        return None
+    return "\n\n".join(sections) + "\n"
 
 
 def is_report_json(value: Any) -> bool:
@@ -784,12 +1214,15 @@ def source_report_with_current_annotations(
     meta: dict[str, Any],
     config: ToolConfig | None,
 ) -> dict[str, Any]:
-    report = parsed_object(source.get("report_json"))
-    if config is None or not bool(source.get("refreshable")) or bool(source.get("snapshot")):
-        return report
+    if config is None:
+        return {}
 
     trial_key = str(meta.get("trial_key") or "")
-    session_id = optional_str(trajectory.get("session_id")) or source.get("session_id")
+    session_id = (
+        optional_str(trajectory.get("session_id"))
+        or source.get("session_id")
+        or optional_str(meta.get("trial_key"))
+    )
     agent_id = annotation_agent_id(source, trajectory)
     current_note = cached_note_report(
         workspace_root=config.workspace_root,
@@ -805,19 +1238,12 @@ def source_report_with_current_annotations(
         session_id=session_id,
         trial_key=trial_key,
     )
-    annotations = parsed_object(report.get("annotations"))
-    stored_non_cell_notes = [
-        deepcopy(item)
-        for item in annotations.get("notes") or []
-        if not is_cell_note(item)
-    ]
     notes: list[dict[str, Any]] = []
     if current_note is not None:
         notes.append(current_note)
-    notes.extend(stored_non_cell_notes)
 
     next_annotations: dict[str, Any] = {
-        "report_notes": deepcopy(annotations.get("report_notes") or []),
+        "report_notes": [],
         "notes": notes,
     }
     if current_analysis is not None:
@@ -828,12 +1254,8 @@ def source_report_with_current_annotations(
         or next_annotations["notes"]
         or next_annotations.get("analysis")
     ):
-        report = deepcopy(report)
-        report["annotations"] = next_annotations
-    else:
-        report = deepcopy(report)
-        report.pop("annotations", None)
-    return report
+        return {"annotations": next_annotations}
+    return {}
 
 
 def annotation_agent_id(source: dict[str, Any], trajectory: dict[str, Any]) -> str | None:
@@ -843,14 +1265,6 @@ def annotation_agent_id(source: dict[str, Any], trajectory: dict[str, Any]) -> s
         optional_str(source.get("agent_name"))
         or optional_str(trajectory_agent)
         or optional_str(source.get("adapter"))
-    )
-
-
-def is_cell_note(value: Any) -> bool:
-    return (
-        isinstance(value, dict)
-        and value.get("source") == "cell"
-        and value.get("label") == "notes.md"
     )
 
 
@@ -874,9 +1288,3 @@ def optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
-
-
-def optional_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    return float(value)

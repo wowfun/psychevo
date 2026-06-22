@@ -154,6 +154,42 @@ class PevalPyServeStateTests(unittest.TestCase):
                 self.assertEqual(len(store.source_payload()), 1)
                 active_report = store.active_report()
                 self.assertEqual(len(active_report["trajectory"]), 1)
+                source_payload = store.source_payload()[0]
+                artifact_dir = root / source_payload["artifact_dir"]
+                self.assertEqual(
+                    artifact_dir.relative_to(root).parts[:5],
+                    ("runs", "default", "opencode", "common_session", "session_t001"),
+                )
+                agent_artifact_files = {
+                    path.relative_to(artifact_dir / "agent").as_posix()
+                    for path in (artifact_dir / "agent").rglob("*.json")
+                }
+                self.assertEqual(
+                    agent_artifact_files,
+                    {
+                        "trajectory.json",
+                        "trajectory_meta.json",
+                    },
+                )
+                source_columns = {
+                    row["name"]
+                    for row in store.conn.execute(
+                        "PRAGMA table_info(peval_py_sources)"
+                    ).fetchall()
+                }
+                self.assertIn("artifact_dir", source_columns)
+                self.assertIn("artifact_updated_at_ms", source_columns)
+                trial_table = store.conn.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'peval_py_trials'
+                    """
+                ).fetchone()
+                self.assertIsNone(
+                    trial_table,
+                    "Trial cell artifact pointers belong on peval_py_sources",
+                )
                 self.assertEqual(
                     active_report["annotations"]["analysis"][0]["summary"],
                     "Initial cached analysis.",
@@ -228,27 +264,7 @@ class PevalPyServeStateTests(unittest.TestCase):
                 keys = store.import_loaded_sources(loaded, config)
                 self.assertNotIn("annotations", store.active_report())
 
-                stored_report = json.loads(
-                    store.conn.execute(
-                        "SELECT report_json FROM peval_py_trials WHERE source_key = ?",
-                        (keys[0],),
-                    ).fetchone()[0]
-                )
-                stored_report["annotations"] = {
-                    "report_notes": [],
-                    "notes": [
-                        {
-                            "trial_key": stored_report["trajectory_meta"][0]["trial_key"],
-                            "source": "cli",
-                            "label": "CLI note 1",
-                            "markdown": "Stored CLI note.",
-                        }
-                    ],
-                }
-                store.conn.execute(
-                    "UPDATE peval_py_trials SET report_json = ? WHERE source_key = ?",
-                    (json.dumps(stored_report), keys[0]),
-                )
+                artifact_dir = root / store.source_payload()[0]["artifact_dir"]
                 store.conn.execute(
                     """
                     UPDATE peval_py_sources
@@ -280,7 +296,7 @@ class PevalPyServeStateTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     [item["markdown"] for item in annotations["notes"]],
-                    ["Live overlay note.", "Stored CLI note."],
+                    ["Live overlay note."],
                 )
                 self.assertEqual(store.source_payload()[0]["last_status"], "error")
 
@@ -305,6 +321,73 @@ class PevalPyServeStateTests(unittest.TestCase):
             root = peval_py_workspace(Path(tmp))
             config = ToolConfig(adapter="opencode")
             report = sample_report(config)
+            trial_key = report["trajectory_meta"][0]["trial_key"]
+            report["annotations"] = {
+                "report_notes": [
+                    {"label": "Report note 1", "markdown": "Ignored report note."}
+                ],
+                "notes": [
+                    {
+                        "trial_key": trial_key,
+                        "source": "cli",
+                        "label": "Uploaded note",
+                        "markdown": "Uploaded report note.",
+                    },
+                    {
+                        "trial_key": trial_key,
+                        "source": "review",
+                        "label": "Second note",
+                        "markdown": "Second uploaded note.",
+                    },
+                    {
+                        "trial_key": "other",
+                        "source": "cli",
+                        "label": "Other note",
+                        "markdown": "Wrong Trial note.",
+                    },
+                ],
+                "analysis": [
+                    {
+                        "trial_key": trial_key,
+                        "status": "cached",
+                        "relative_path": "old/analysis.json",
+                        "summary": "Uploaded summary.",
+                        "md_report": "Uploaded markdown.",
+                        "analysis_status": "reviewed",
+                        "subject": {"session_id": "common_session", "trial_key": trial_key},
+                        "findings": [
+                            {
+                                "severity": "high",
+                                "title": "Uploaded finding.",
+                            }
+                        ],
+                        "recommendations": ["Preserve uploaded recommendation."],
+                        "limitations": ["Preserve uploaded limitation."],
+                        "commands": ["peval-py view tr -f json"],
+                        "analysis_metrics": {"review_count": 1},
+                        "confidence": 0.8,
+                    },
+                    {
+                        "trial_key": trial_key,
+                        "status": "cached",
+                        "relative_path": "old/analysis-2.json",
+                        "summary": "Second summary.",
+                        "md_report": "Second markdown.",
+                        "findings": [
+                            {
+                                "severity": "low",
+                                "title": "Second finding.",
+                            }
+                        ],
+                    },
+                    {
+                        "trial_key": "other",
+                        "status": "cached",
+                        "relative_path": "old/other.json",
+                        "summary": "Wrong Trial summary.",
+                    }
+                ],
+            }
             store = open_workspace_state(str(root))
             try:
                 keys = store.ingest_upload(
@@ -318,7 +401,85 @@ class PevalPyServeStateTests(unittest.TestCase):
                 self.assertEqual(sources[0]["kind"], "snapshot")
                 self.assertTrue(sources[0]["snapshot"])
                 self.assertFalse(sources[0]["refreshable"])
-                self.assertEqual(len(store.active_report()["trajectory"]), 1)
+                artifact_dir = root / sources[0]["artifact_dir"]
+                agent_artifact_files = {
+                    path.relative_to(artifact_dir / "agent").as_posix()
+                    for path in (artifact_dir / "agent").rglob("*.json")
+                }
+                self.assertEqual(
+                    agent_artifact_files,
+                    {"trajectory.json", "trajectory_meta.json"},
+                )
+                note_text = (artifact_dir / "notes.md").read_text(encoding="utf-8")
+                self.assertIn("## Uploaded note", note_text)
+                self.assertIn("Source: cli", note_text)
+                self.assertIn("Uploaded report note.", note_text)
+                self.assertIn("## Second note", note_text)
+                self.assertIn("Second uploaded note.", note_text)
+                self.assertNotIn("Wrong Trial note.", note_text)
+                analysis_json = json.loads(
+                    (artifact_dir / "analysis.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    analysis_json["summary"],
+                    "Uploaded summary.\n\nSecond summary.",
+                )
+                self.assertEqual(
+                    [item["summary"] for item in analysis_json["items"]],
+                    ["Uploaded summary.", "Second summary."],
+                )
+                self.assertEqual(analysis_json["status"], "reviewed")
+                self.assertEqual(analysis_json["subject"]["trial_key"], trial_key)
+                self.assertEqual(
+                    [item["title"] for item in analysis_json["findings"]],
+                    ["Uploaded finding.", "Second finding."],
+                )
+                self.assertEqual(
+                    analysis_json["recommendations"],
+                    ["Preserve uploaded recommendation."],
+                )
+                self.assertEqual(
+                    analysis_json["limitations"],
+                    ["Preserve uploaded limitation."],
+                )
+                self.assertEqual(analysis_json["commands"], ["peval-py view tr -f json"])
+                self.assertEqual(analysis_json["metrics"], {"review_count": 1})
+                self.assertEqual(analysis_json["confidence"], 0.8)
+                analysis_md = (artifact_dir / "analysis.md").read_text(encoding="utf-8")
+                self.assertEqual(
+                    analysis_md,
+                    "Uploaded markdown.\n\nSecond markdown.\n",
+                )
+                active_report = store.active_report()
+                self.assertEqual(len(active_report["trajectory"]), 1)
+                self.assertEqual(
+                    active_report["annotations"]["notes"][0]["markdown"],
+                    note_text,
+                )
+                self.assertEqual(
+                    active_report["annotations"]["analysis"][0]["summary"],
+                    "Uploaded summary.\n\nSecond summary.",
+                )
+                self.assertEqual(
+                    active_report["annotations"]["analysis"][0]["analysis_status"],
+                    "reviewed",
+                )
+                self.assertEqual(
+                    active_report["annotations"]["analysis"][0]["analysis_metrics"],
+                    {"review_count": 1},
+                )
+                self.assertEqual(
+                    [
+                        item["title"]
+                        for item in active_report["annotations"]["analysis"][0]["findings"]
+                    ],
+                    ["Uploaded finding.", "Second finding."],
+                )
+                self.assertEqual(
+                    active_report["annotations"]["analysis"][0]["md_report"],
+                    analysis_md,
+                )
+                self.assertEqual(active_report["annotations"]["report_notes"], [])
 
                 with self.assertRaisesRegex(ValueError, "20 MiB"):
                     store.ingest_upload(
@@ -326,6 +487,30 @@ class PevalPyServeStateTests(unittest.TestCase):
                         "x" * (UPLOAD_LIMIT_BYTES + 1),
                         config,
                     )
+            finally:
+                store.close()
+
+    def test_duplicate_cell_import_updates_one_source_and_delete_removes_cell(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode")
+            report = sample_report(config)
+            store = open_workspace_state(str(root))
+            try:
+                key_a = store.ingest_upload("a-report.json", json.dumps(report), config)[0]
+                key_b = store.ingest_upload("b-report.json", json.dumps(report), config)[0]
+                self.assertEqual(key_a, key_b)
+                payload_by_key = {
+                    item["source_key"]: item
+                    for item in store.source_payload()
+                }
+                self.assertEqual(len(payload_by_key), 1)
+                artifact_a = root / payload_by_key[key_a]["artifact_dir"]
+                self.assertTrue(artifact_a.is_dir())
+
+                store.delete_source(key_a)
+                self.assertFalse(artifact_a.exists())
+                self.assertEqual(store.source_payload(), [])
             finally:
                 store.close()
 
@@ -590,6 +775,91 @@ class PevalPyServeStateTests(unittest.TestCase):
                 thread.join(timeout=5)
                 store.close()
 
+    def test_http_adapter_default_db_endpoint_writes_config_and_updates_rendering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode", locale="en")
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, rejected = request_json(
+                    port,
+                    "POST",
+                    "/api/config/adapter-default-db",
+                    {"adapter": "opencode", "default_db_path": "db/opencode.db"},
+                    origin="http://example.test",
+                )
+                self.assertEqual(status, 403)
+                self.assertIn("same-origin", rejected["error"])
+
+                status, _, invalid = request_json(
+                    port,
+                    "POST",
+                    "/api/config/adapter-default-db",
+                    {"adapter": "missing", "default_db_path": "db/missing.db"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn(
+                    "unsupported adapter for adapter default DB: missing",
+                    invalid["error"],
+                )
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/config/adapter-default-db",
+                    {"adapter": "opencode", "default_db_path": "db/opencode.db"},
+                    origin=origin,
+                )
+                expected = str((root / "db/opencode.db").resolve())
+                self.assertEqual(status, 200)
+                self.assertEqual(body["adapter"], "opencode")
+                self.assertEqual(body["default_db_path"], expected)
+                self.assertEqual(body["adapter_defaults"]["opencode"], expected)
+                config_text = (root / "peval-py.toml").read_text(encoding="utf-8")
+                self.assertIn("[adapters.opencode]\n", config_text)
+                self.assertIn('default_db_path = "db/opencode.db"\n', config_text)
+
+                status, _, html = request_text(port, "/")
+                self.assertEqual(status, 200)
+                self.assertIn(
+                    f'<option value="opencode" selected data-default-db="{expected}">opencode</option>',
+                    html,
+                )
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/config/adapter-default-db",
+                    {"adapter": "opencode", "default_db_path": ""},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["adapter"], "opencode")
+                self.assertIsNone(body["default_db_path"])
+                self.assertNotIn("opencode", body["adapter_defaults"])
+                self.assertNotIn(
+                    "default_db_path",
+                    (root / "peval-py.toml").read_text(encoding="utf-8"),
+                )
+
+                status, _, html = request_text(port, "/")
+                self.assertEqual(status, 200)
+                self.assertNotIn(expected, html)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
     def test_http_sources_batch_path_quotes_failure_and_delete(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = peval_py_workspace(Path(tmp))
@@ -619,6 +889,12 @@ class PevalPyServeStateTests(unittest.TestCase):
                 self.assertEqual(len(body["sources"]), 2)
                 self.assertEqual(len(body["report"]["trajectory"]), 2)
                 source_keys = [source["source_key"] for source in body["sources"]]
+                artifact_dirs = {
+                    source["source_key"]: root / source["artifact_dir"]
+                    for source in body["sources"]
+                }
+                self.assertTrue(artifact_dirs[source_keys[0]].is_dir())
+                self.assertTrue(artifact_dirs[source_keys[1]].is_dir())
                 log_count = store.conn.execute(
                     "SELECT COUNT(*) FROM peval_py_refresh_log"
                 ).fetchone()[0]
@@ -661,9 +937,11 @@ class PevalPyServeStateTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(len(body["sources"]), 1)
                 self.assertTrue(source_a.exists())
+                self.assertFalse(artifact_dirs[source_keys[0]].exists())
+                self.assertTrue(artifact_dirs[source_keys[1]].is_dir())
                 self.assertEqual(
                     store.conn.execute(
-                        "SELECT COUNT(*) FROM peval_py_trials WHERE source_key = ?",
+                        "SELECT COUNT(*) FROM peval_py_sources WHERE source_key = ?",
                         (source_keys[0],),
                     ).fetchone()[0],
                     0,
@@ -686,6 +964,17 @@ class PevalPyServeStateTests(unittest.TestCase):
                 self.assertEqual(status, 403)
                 self.assertIn("same-origin", rejected["error"])
                 self.assertEqual(len(store.source_payload()), 1)
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_keys[1]}/delete",
+                    {},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["sources"], [])
+                self.assertFalse(artifact_dirs[source_keys[1]].exists())
             finally:
                 server.shutdown()
                 server.server_close()
@@ -821,15 +1110,7 @@ class PevalPyServeStateTests(unittest.TestCase):
                 keys = store.upsert_loaded_sources(loaded, config)
                 store.refresh_sources(keys, config)
                 store.save_source_notes(keys[0], "", config)
-                created = (
-                    root
-                    / "runs"
-                    / "default"
-                    / "opencode"
-                    / "common_session"
-                    / "peval-py-notes"
-                    / "notes.md"
-                )
+                created = root / store.source_payload()[0]["artifact_dir"] / "notes.md"
                 self.assertTrue(created.is_file())
                 self.assertEqual(created.read_text(encoding="utf-8"), "")
                 self.assertEqual(
@@ -839,7 +1120,7 @@ class PevalPyServeStateTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_source_notes_save_rejects_ambiguous_cells(self) -> None:
+    def test_source_notes_save_uses_exact_trial_cell(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = peval_py_workspace(Path(tmp))
             source = root / "common_session.jsonl"
@@ -868,8 +1149,17 @@ class PevalPyServeStateTests(unittest.TestCase):
                 )
                 keys = store.upsert_loaded_sources(loaded, config)
                 store.refresh_sources(keys, config)
-                with self.assertRaisesRegex(ValueError, "multiple notes cells"):
-                    store.save_source_notes(keys[0], "cannot pick", config)
+                store.save_source_notes(keys[0], "exact cell", config)
+                created = root / store.source_payload()[0]["artifact_dir"] / "notes.md"
+                self.assertEqual(created.read_text(encoding="utf-8"), "exact cell")
+                self.assertEqual(
+                    (root / "runs" / "default" / "opencode" / "common_session" / "one" / "notes.md").read_text(encoding="utf-8"),
+                    "one",
+                )
+                self.assertEqual(
+                    (root / "runs" / "default" / "opencode" / "common_session" / "two" / "notes.md").read_text(encoding="utf-8"),
+                    "two",
+                )
             finally:
                 store.close()
 
@@ -901,8 +1191,23 @@ class PevalPyServeStateTests(unittest.TestCase):
                 )
                 keys = store.upsert_loaded_sources(loaded, config)
                 store.refresh_sources(keys, config)
-                with self.assertRaisesRegex(ValueError, "multiple analysis cells"):
-                    store.save_source_notes(keys[0], "cannot pick", config)
+                store.save_source_notes(keys[0], "exact cell from analysis siblings", config)
+                created = root / store.source_payload()[0]["artifact_dir"] / "notes.md"
+                self.assertEqual(
+                    created.read_text(encoding="utf-8"),
+                    "exact cell from analysis siblings",
+                )
+                self.assertFalse(
+                    (
+                        root
+                        / "runs"
+                        / "default"
+                        / "opencode"
+                        / "common_session"
+                        / "one"
+                        / "notes.md"
+                    ).exists()
+                )
             finally:
                 store.close()
 
@@ -1249,7 +1554,7 @@ def write_cached_analysis(
     session_id: str,
     summary: str,
     eval_slug: str = "default",
-    cell_key: str = "abcdef0123456789",
+    cell_key: str = "session_t001",
 ) -> Path:
     path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1267,7 +1572,7 @@ def write_cached_markdown(
     session_id: str,
     markdown: str,
     eval_slug: str = "default",
-    cell_key: str = "abcdef0123456789",
+    cell_key: str = "session_t001",
 ) -> Path:
     path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1282,7 +1587,7 @@ def write_cached_note(
     session_id: str,
     markdown: str,
     eval_slug: str = "default",
-    cell_key: str = "abcdef0123456789",
+    cell_key: str = "session_t001",
 ) -> Path:
     path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "notes.md"
     path.parent.mkdir(parents=True, exist_ok=True)

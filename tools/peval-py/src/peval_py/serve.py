@@ -15,7 +15,11 @@ from urllib.parse import unquote, urlsplit
 from urllib.request import urlopen
 
 from peval_py.adapters import available_adapter_ids, normalize_adapter_id
-from peval_py.config import ToolConfig, write_workspace_locale
+from peval_py.config import (
+    ToolConfig,
+    write_workspace_adapter_default_db,
+    write_workspace_locale,
+)
 from peval_py.html import render_serve_html
 from peval_py.inputs import (
     AdapterAssignments,
@@ -66,9 +70,7 @@ def run_serve_command(
     server: HTTPServer | None = None
     try:
         loaded_inputs = load_serve_inputs(args, adapter_assignments, config)
-        source_keys = store.upsert_loaded_sources(loaded_inputs, config)
-        if source_keys:
-            store.refresh_sources(source_keys, config)
+        store.import_loaded_sources(loaded_inputs, config)
 
         handler = make_handler(store, config)
         server = bind_server(host, getattr(args, "port", None), handler)
@@ -163,6 +165,30 @@ def make_handler(
                     write_workspace_locale(store.paths.config_path, locale)
                     runtime.config = replace(runtime.config, locale=locale)
                     self.write_json({"locale": locale})
+                    return
+                if path == "/api/config/adapter-default-db":
+                    adapter_id, raw_db_path = adapter_default_db_payload(payload)
+                    resolved = write_workspace_adapter_default_db(
+                        store.paths.config_path,
+                        adapter_id,
+                        raw_db_path,
+                    )
+                    adapter_defaults = dict(runtime.config.adapter_default_db_paths)
+                    if resolved:
+                        adapter_defaults[adapter_id] = resolved
+                    else:
+                        adapter_defaults.pop(adapter_id, None)
+                    runtime.config = replace(
+                        runtime.config,
+                        adapter_default_db_paths=adapter_defaults,
+                    )
+                    self.write_json(
+                        {
+                            "adapter": adapter_id,
+                            "default_db_path": resolved,
+                            "adapter_defaults": adapter_defaults,
+                        }
+                    )
                     return
                 if path == "/api/db-sessions":
                     self.write_json(db_sessions_payload(store, payload))
@@ -377,6 +403,15 @@ def db_sessions_payload(
             for index, session in enumerate(sessions, start=1)
         ],
     }
+
+
+def adapter_default_db_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
+    adapter_id = validate_selected_adapter(
+        normalize_adapter_id(required_string(payload, "adapter")),
+        set(available_adapter_ids()),
+        "adapter default DB",
+    )
+    return adapter_id, optional_string(payload.get("default_db_path"))
 
 
 def adapter_for_db_inspect(path: str, raw_adapter: str | None) -> tuple[str, bool]:

@@ -120,6 +120,10 @@ def render_serve_source_manager(
             "DROP_COPY": escape(messages["serve_drop_copy"]),
             "CLOSE": escape(messages["close"]),
             "ADD_SOURCE": escape(messages["serve_add_source"]),
+            "ADAPTER_DEFAULT_DB_PANEL": render_adapter_default_db_panel(
+                messages,
+                adapter_defaults,
+            ),
             "SOURCE_FORMS": "".join(
                 [
                     render_source_add_form("path", messages, adapter_defaults),
@@ -133,6 +137,56 @@ def render_serve_source_manager(
             "SOURCE_LIST_ITEMS": render_source_list_items(sources, messages),
         },
     )
+
+
+def render_adapter_default_db_panel(
+    messages: dict[str, str],
+    adapter_defaults: dict[str, str],
+) -> str:
+    adapter_ids = available_adapter_ids()
+    if not adapter_ids:
+        return ""
+    selected = next(
+        (adapter_id for adapter_id in adapter_ids if adapter_id in adapter_defaults),
+        adapter_ids[0],
+    )
+    options = "".join(
+        render_adapter_default_db_option(adapter_id, selected, adapter_defaults)
+        for adapter_id in adapter_ids
+    )
+    default_db = adapter_defaults.get(selected, "")
+    return f"""
+      <section class="adapter-default-db-panel" aria-label="{escape(messages["serve_adapter_default_db"])}">
+        <div>
+          <strong>{escape(messages["serve_adapter_default_db"])}</strong>
+          <p class="copy">{escape(messages["serve_adapter_default_db_copy"])}</p>
+        </div>
+        <form class="adapter-default-db-form" data-adapter-default-db-form>
+          <label>{escape(messages["serve_adapter"])}
+            <select name="adapter" data-adapter-default-db-select>
+              {options}
+            </select>
+          </label>
+          <label>{escape(messages["serve_default_db"])}
+            <input name="default_db_path" value="{escape(default_db)}" autocomplete="off" data-adapter-default-db-input>
+          </label>
+          <div class="adapter-default-db-actions">
+            <button class="step-toggle-button" type="button" data-adapter-default-db-clear>{escape(messages["serve_clear_adapter_default_db"])}</button>
+            <button class="step-toggle-button primary" type="submit">{escape(messages["serve_save_adapter_default_db"])}</button>
+          </div>
+        </form>
+      </section>"""
+
+
+def render_adapter_default_db_option(
+    adapter_id: str,
+    selected_adapter: str,
+    adapter_defaults: dict[str, str],
+) -> str:
+    default_db = adapter_defaults.get(adapter_id)
+    default_attr = f' data-default-db="{escape(default_db)}"' if default_db else ""
+    selected = " selected" if adapter_id == selected_adapter else ""
+    return f'<option value="{escape(adapter_id)}"{selected}{default_attr}>{escape(adapter_id)}</option>'
 
 
 def render_echarts_script(mode: str) -> str:

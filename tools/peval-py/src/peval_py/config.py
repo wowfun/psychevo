@@ -10,6 +10,8 @@ from typing import Any
 from peval_py.i18n import normalize_locale
 
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+DEFAULT_DB_PATH_RE = re.compile(r"^\s*default_db_path\s*=")
+TABLE_HEADER_RE = re.compile(r"^\s*\[([^\]\n]+)\]\s*(?:#.*)?$")
 PEVAL_PY_CONFIG = "peval-py.toml"
 
 
@@ -223,6 +225,101 @@ def write_workspace_locale(config_path: Path, locale: str) -> None:
             return
     lines.insert(first_table_index, locale_line)
     path.write_text("".join(lines), encoding="utf-8")
+
+
+def write_workspace_adapter_default_db(
+    config_path: Path,
+    adapter: object,
+    default_db_path: str | None,
+) -> str | None:
+    adapter_id = _normalize_adapter_id(adapter)
+    raw_path = str(default_db_path or "").strip()
+    path = config_path.expanduser()
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = text.splitlines(keepends=True)
+    table_range = _adapter_table_range(lines, adapter_id)
+
+    if not raw_path:
+        if table_range is not None:
+            start, end = table_range
+            existing = _default_db_path_line_index(lines, start + 1, end)
+            if existing is not None:
+                del lines[existing]
+                path.write_text("".join(lines), encoding="utf-8")
+        return None
+
+    config_line = f"default_db_path = {json.dumps(raw_path)}\n"
+    if table_range is None:
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            lines[-1] = lines[-1] + "\n"
+        if lines and "".join(lines).strip():
+            lines.append("\n")
+        lines.extend([f"[{_adapter_table_key(adapter_id)}]\n", config_line])
+    else:
+        start, end = table_range
+        existing = _default_db_path_line_index(lines, start + 1, end)
+        if existing is None:
+            lines.insert(start + 1, config_line)
+        else:
+            lines[existing] = config_line
+    path.write_text("".join(lines), encoding="utf-8")
+    return _resolve_config_path(raw_path, base_dir=path.parent)
+
+
+def _adapter_table_range(
+    lines: list[str],
+    adapter_id: str,
+) -> tuple[int, int] | None:
+    for index, line in enumerate(lines):
+        if not _is_adapter_table_header(line, adapter_id):
+            continue
+        end = next(
+            (
+                candidate
+                for candidate in range(index + 1, len(lines))
+                if _is_table_header(lines[candidate])
+            ),
+            len(lines),
+        )
+        return index, end
+    return None
+
+
+def _default_db_path_line_index(
+    lines: list[str],
+    start: int,
+    end: int,
+) -> int | None:
+    for index in range(start, end):
+        if DEFAULT_DB_PATH_RE.match(lines[index]):
+            return index
+    return None
+
+
+def _is_table_header(line: str) -> bool:
+    return bool(TABLE_HEADER_RE.match(line))
+
+
+def _is_adapter_table_header(line: str, adapter_id: str) -> bool:
+    match = TABLE_HEADER_RE.match(line)
+    if not match:
+        return False
+    header = match.group(1).strip()
+    try:
+        parsed = tomllib.loads(f"[{header}]\n__peval_marker = true\n")
+    except tomllib.TOMLDecodeError:
+        return False
+    adapters = parsed.get("adapters")
+    if not isinstance(adapters, dict):
+        return False
+    adapter_config = adapters.get(adapter_id)
+    return isinstance(adapter_config, dict) and adapter_config.get("__peval_marker") is True
+
+
+def _adapter_table_key(adapter_id: str) -> str:
+    if IDENTIFIER_RE.match(adapter_id):
+        return f"adapters.{adapter_id}"
+    return f"adapters.{json.dumps(adapter_id)}"
 
 
 def _adapter_override(value: object) -> str | None:

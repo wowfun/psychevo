@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from peval_py.analysis import cached_analysis_report, cached_note_report
+from peval_py.analysis import (
+    ANALYSIS_REPORT_FIELDS,
+    cached_analysis_report,
+    cached_note_report,
+)
 from peval_py.adapters.base import (
     ConversionResult,
     ObservationMeta,
@@ -456,9 +460,16 @@ def analysis_reports_from_snapshots(
             if not isinstance(item, dict):
                 continue
             remapped = {
-                key: value
+                key: deepcopy(value)
                 for key, value in item.items()
-                if key in {"status", "relative_path", "summary", "md_report", "relative_paths"}
+                if key
+                in {
+                    "status",
+                    "relative_path",
+                    "md_report",
+                    "relative_paths",
+                    *ANALYSIS_REPORT_FIELDS,
+                }
             }
             if remapped.get("status") != "cached" or not remapped.get("relative_path"):
                 continue

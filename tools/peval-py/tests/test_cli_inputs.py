@@ -9,12 +9,21 @@ def write_cli_cached_analysis(
     eval_slug: str = "default",
     agent_id: str = "agent-a",
     session_id: str = "common_session",
-    cell_key: str = "peval-py-analysis",
+    cell_key: str = "session_t001",
     summary: str = "Root-selected cached analysis.",
 ) -> Path:
     path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"summary": summary}), encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {
+                "summary": summary,
+                "findings": [{"title": "Root-selected finding."}],
+                "metrics": {"review_turns": 2},
+            }
+        ),
+        encoding="utf-8",
+    )
     return path
 
 
@@ -24,7 +33,7 @@ def write_cli_cached_markdown(
     eval_slug: str = "default",
     agent_id: str = "agent-a",
     session_id: str = "common_session",
-    cell_key: str = "peval-py-analysis",
+    cell_key: str = "session_t001",
     markdown: str = "## Root selected analysis\n\nCached markdown body.",
 ) -> Path:
     path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.md"
@@ -936,6 +945,8 @@ default_db_path = "state.db"
             payload = json.loads(out_path.read_text(encoding="utf-8"))
             analysis = payload["annotations"]["analysis"][0]
             self.assertEqual(analysis["summary"], "Root-selected cached analysis.")
+            self.assertEqual(analysis["findings"][0]["title"], "Root-selected finding.")
+            self.assertEqual(analysis["analysis_metrics"], {"review_turns": 2})
             self.assertIn("Cached markdown body.", analysis["md_report"])
             self.assertEqual(
                 analysis["relative_paths"],

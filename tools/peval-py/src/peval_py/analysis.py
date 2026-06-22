@@ -1,11 +1,29 @@
 from __future__ import annotations
 
 import json
+import math
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 MAX_NOTE_BYTES = 1024 * 1024
-PEVAL_PY_NOTES_CELL = "peval-py-notes"
+MERGEABLE_ANALYSIS_LIST_FIELDS = (
+    "findings",
+    "recommendations",
+    "limitations",
+    "commands",
+)
+ANALYSIS_REPORT_FIELDS = (
+    "summary",
+    "analysis_status",
+    "subject",
+    "findings",
+    "recommendations",
+    "limitations",
+    "commands",
+    "analysis_metrics",
+    "confidence",
+)
 
 
 def cached_analysis_report(
@@ -16,18 +34,16 @@ def cached_analysis_report(
     session_id: str | None,
     trial_key: str,
 ) -> dict[str, Any] | None:
-    roots = task_root_for(
+    roots = cell_root_for(
         workspace_root=workspace_root,
         eval_slug=eval_slug,
         agent_id=agent_id,
         session_id=session_id,
+        cell_key=trial_key,
     )
     if roots is None:
         return None
-    root, task_root = roots
-    cell_dir = unique_analysis_cell_dir(task_root)
-    if cell_dir is None:
-        return None
+    root, cell_dir = roots
 
     relative_paths: dict[str, str] = {}
     report: dict[str, Any] = {
@@ -36,12 +52,11 @@ def cached_analysis_report(
     }
 
     json_path = cell_dir / "analysis.json"
-    json_relative = read_json_summary(json_path, root)
+    json_relative = read_json_analysis(json_path, root)
     if json_relative is not None:
         relative_paths["json"] = json_relative[0]
         report["relative_path"] = json_relative[0]
-        if json_relative[1]:
-            report["summary"] = json_relative[1]
+        report.update(json_relative[1])
 
     md_path = cell_dir / "analysis.md"
     md_relative = read_markdown_report(md_path, root)
@@ -67,18 +82,16 @@ def cached_note_report(
     session_id: str | None,
     trial_key: str,
 ) -> dict[str, Any] | None:
-    roots = task_root_for(
+    roots = cell_root_for(
         workspace_root=workspace_root,
         eval_slug=eval_slug,
         agent_id=agent_id,
         session_id=session_id,
+        cell_key=trial_key,
     )
     if roots is None:
         return None
-    root, task_root = roots
-    cell_dir = unique_note_cell_dir(task_root)
-    if cell_dir is None:
-        return None
+    root, cell_dir = roots
     return read_note_report(cell_dir / "notes.md", root, trial_key)
 
 
@@ -88,38 +101,32 @@ def save_cell_note(
     eval_slug: str,
     agent_id: str | None,
     session_id: str | None,
+    cell_key: str | None,
     markdown: str,
 ) -> str:
     if not isinstance(markdown, str):
         raise ValueError("markdown must be a string")
     if len(markdown.encode("utf-8")) > MAX_NOTE_BYTES:
         raise ValueError("notes.md exceeds 1 MiB limit")
-    roots = task_root_for(
+    roots = cell_root_for(
         workspace_root=workspace_root,
         eval_slug=eval_slug,
         agent_id=agent_id,
         session_id=session_id,
+        cell_key=cell_key,
     )
     if roots is None:
-        raise ValueError("cannot locate peval workspace task for notes.md")
-    root, task_root = roots
+        raise ValueError("cannot locate peval workspace cell for notes.md")
+    root, cell_dir = roots
+    return write_note_file(cell_dir / "notes.md", root, markdown)
 
-    note_cells = matching_cell_dirs(task_root, ("notes.md",))
-    if len(note_cells) > 1:
-        raise ValueError("cannot save notes.md: multiple notes cells match this source")
-    if len(note_cells) == 1:
-        target = note_cells[0] / "notes.md"
-    else:
-        analysis_cells = matching_cell_dirs(task_root, ("analysis.json", "analysis.md"))
-        if len(analysis_cells) > 1:
-            raise ValueError(
-                "cannot save notes.md: multiple analysis cells match this source"
-            )
-        if len(analysis_cells) == 1:
-            target = analysis_cells[0] / "notes.md"
-        else:
-            target = task_root / PEVAL_PY_NOTES_CELL / "notes.md"
 
+def write_note_file(path: Path, root: Path, markdown: str) -> str:
+    if not isinstance(markdown, str):
+        raise ValueError("markdown must be a string")
+    if len(markdown.encode("utf-8")) > MAX_NOTE_BYTES:
+        raise ValueError("notes.md exceeds 1 MiB limit")
+    target = path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(markdown, encoding="utf-8")
     try:
@@ -144,33 +151,28 @@ def task_root_for(
     return root, root / "runs" / eval_part / agent_part / session_part
 
 
-def unique_analysis_cell_dir(task_root: Path) -> Path | None:
-    matches = matching_cell_dirs(task_root, ("analysis.json", "analysis.md"))
-    if len(matches) != 1:
+def cell_root_for(
+    *,
+    workspace_root: str | None,
+    eval_slug: str,
+    agent_id: str | None,
+    session_id: str | None,
+    cell_key: str | None,
+) -> tuple[Path, Path] | None:
+    roots = task_root_for(
+        workspace_root=workspace_root,
+        eval_slug=eval_slug,
+        agent_id=agent_id,
+        session_id=session_id,
+    )
+    cell_part = safe_segment(cell_key)
+    if roots is None or cell_part is None:
         return None
-    return matches[0]
+    root, task_root = roots
+    return root, task_root / cell_part
 
 
-def unique_note_cell_dir(task_root: Path) -> Path | None:
-    matches = matching_cell_dirs(task_root, ("notes.md",))
-    if len(matches) != 1:
-        return None
-    return matches[0]
-
-
-def matching_cell_dirs(task_root: Path, file_names: tuple[str, ...]) -> list[Path]:
-    try:
-        return sorted(
-            path
-            for path in task_root.iterdir()
-            if path.is_dir()
-            and any((path / file_name).is_file() for file_name in file_names)
-        )
-    except OSError:
-        return []
-
-
-def read_json_summary(path: Path, root: Path) -> tuple[str, str | None] | None:
+def read_json_analysis(path: Path, root: Path) -> tuple[str, dict[str, Any]] | None:
     if not path.is_file():
         return None
     try:
@@ -183,10 +185,37 @@ def read_json_summary(path: Path, root: Path) -> tuple[str, str | None] | None:
         relative_path = path.relative_to(root).as_posix()
     except ValueError:
         return None
+    return relative_path, analysis_fields_from_json(payload)
+
+
+def analysis_fields_from_json(payload: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
     summary = payload.get("summary")
     if isinstance(summary, str) and summary.strip():
-        return relative_path, summary
-    return relative_path, None
+        fields["summary"] = summary
+    status = payload.get("status")
+    if isinstance(status, str) and status.strip():
+        fields["analysis_status"] = status
+    subject = payload.get("subject")
+    if isinstance(subject, dict) and subject:
+        fields["subject"] = deepcopy(subject)
+    for key in MERGEABLE_ANALYSIS_LIST_FIELDS:
+        value = payload.get(key)
+        if isinstance(value, list) and value:
+            fields[key] = deepcopy(value)
+    metrics = payload.get("metrics")
+    if isinstance(metrics, dict) and metrics:
+        fields["analysis_metrics"] = deepcopy(metrics)
+    confidence = payload.get("confidence")
+    if isinstance(confidence, str) and confidence.strip():
+        fields["confidence"] = confidence
+    elif (
+        isinstance(confidence, (int, float))
+        and not isinstance(confidence, bool)
+        and math.isfinite(float(confidence))
+    ):
+        fields["confidence"] = confidence
+    return fields
 
 
 def read_markdown_report(path: Path, root: Path) -> tuple[str, str | None] | None:
@@ -243,6 +272,10 @@ def safe_segment(value: object) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    if not text or text in {".", ".."} or "/" in text or "\\" in text:
+    safe = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "_"
+        for char in text
+    ).strip("._")
+    if not safe:
         return None
-    return text
+    return safe

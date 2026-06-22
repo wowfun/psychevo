@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from peval_py_test_support import *
+from peval_py.config import write_workspace_adapter_default_db
 
 
 class PevalPyConfigAdapterTests(unittest.TestCase):
@@ -178,6 +179,75 @@ default_db_path = "../hermes/state.db"
                 {"label_prefix": "configured"},
             )
             self.assertEqual(config.adapter_options_by_id["hermes"], {})
+
+
+    def test_write_workspace_adapter_default_db_preserves_adapter_options(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "peval-py.toml"
+            config_path.write_text(
+                """
+locale = "en"
+
+[adapters.opencode]
+label_prefix = "configured"
+default_db_path = "old.db"
+enabled = true
+
+[adapters.hermes]
+default_db_path = "hermes.db"
+""",
+                encoding="utf-8",
+            )
+
+            resolved = write_workspace_adapter_default_db(
+                config_path,
+                "opencode",
+                "db/new.db",
+            )
+
+            self.assertEqual(resolved, str((Path(tmp) / "db/new.db").resolve()))
+            config = load_config(str(config_path))
+            self.assertEqual(
+                config.adapter_default_db_paths["opencode"],
+                str((Path(tmp) / "db/new.db").resolve()),
+            )
+            self.assertEqual(
+                config.adapter_default_db_paths["hermes"],
+                str((Path(tmp) / "hermes.db").resolve()),
+            )
+            self.assertEqual(
+                config.adapter_options_by_id["opencode"],
+                {"label_prefix": "configured", "enabled": True},
+            )
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn('default_db_path = "db/new.db"\n', text)
+            self.assertIn('label_prefix = "configured"\n', text)
+            self.assertIn('enabled = true\n', text)
+
+            cleared = write_workspace_adapter_default_db(
+                config_path,
+                "opencode",
+                "",
+            )
+
+            self.assertIsNone(cleared)
+            config = load_config(str(config_path))
+            self.assertNotIn("opencode", config.adapter_default_db_paths)
+            self.assertEqual(
+                config.adapter_default_db_paths["hermes"],
+                str((Path(tmp) / "hermes.db").resolve()),
+            )
+            self.assertEqual(
+                config.adapter_options_by_id["opencode"],
+                {"label_prefix": "configured", "enabled": True},
+            )
+            text = config_path.read_text(encoding="utf-8")
+            opencode_section = text.split("[adapters.opencode]", 1)[1].split(
+                "[adapters.hermes]",
+                1,
+            )[0]
+            self.assertNotIn("default_db_path", opencode_section)
+            self.assertIn('default_db_path = "hermes.db"\n', text)
 
 
     def test_adapter_registry_discovers_builtins_and_entry_points_lazily(self) -> None:

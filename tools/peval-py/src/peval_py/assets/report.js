@@ -30,12 +30,15 @@ function fmtScore(value) { return hasMetricValue(value) ? Number(value).toLocale
 function hasMetricValue(value) { return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value)); }
 function data() { return JSON.parse($("peval-py-data").textContent || "{}"); }
 function serveMode() { return RENDER_OPTIONS?.mode === "serve"; }
-function adapterDefaults() {
+function initialAdapterDefaults() {
   return RENDER_OPTIONS?.adapter_defaults && typeof RENDER_OPTIONS.adapter_defaults === "object"
-    ? RENDER_OPTIONS.adapter_defaults
+    ? { ...RENDER_OPTIONS.adapter_defaults }
     : {};
 }
-const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], notesEditor: null };
+function adapterDefaults() {
+  return state.adapterDefaults || {};
+}
+const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], adapterDefaults: initialAdapterDefaults(), notesEditor: null };
 const SUBMENU_DETAILS_SELECTOR = ".export-menu,.filter-control";
 const OPEN_SUBMENU_DETAILS_SELECTOR = ".export-menu[open],.filter-control[open]";
 function closeOpenSubmenus(except = null) {
@@ -904,11 +907,82 @@ async function changeServeLocale(locale) {
   }
 }
 function bindAdapterDefaultDbControls() {
+  bindAdapterDefaultDbConfigForm();
   document.querySelectorAll("[data-source-add-form][data-source-kind=\"db\"]").forEach(form => {
     const select = form.querySelector("[name=\"adapter\"]");
     if (!select) return;
     select.addEventListener("change", () => applyDefaultDbToForm(form, { force: true }));
     applyDefaultDbToForm(form);
+  });
+}
+function bindAdapterDefaultDbConfigForm() {
+  const form = document.querySelector("[data-adapter-default-db-form]");
+  if (!form) return;
+  const select = form.querySelector("[name=\"adapter\"]");
+  const input = form.querySelector("[name=\"default_db_path\"]");
+  if (!select || !input) return;
+  select.addEventListener("change", () => syncAdapterDefaultDbForm(form));
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    saveAdapterDefaultDb(form);
+  });
+  form.querySelector("[data-adapter-default-db-clear]")?.addEventListener("click", event => {
+    event.preventDefault();
+    input.value = "";
+    saveAdapterDefaultDb(form);
+  });
+  syncAdapterDefaultDbForm(form);
+}
+function syncAdapterDefaultDbForm(form) {
+  const select = form?.querySelector?.("[name=\"adapter\"]");
+  const input = form?.querySelector?.("[name=\"default_db_path\"]");
+  if (!select || !input) return;
+  input.value = adapterDefaults()[select.value] || "";
+}
+async function saveAdapterDefaultDb(form) {
+  const adapter = String(form?.querySelector?.("[name=\"adapter\"]")?.value || "").trim();
+  const input = form?.querySelector?.("[name=\"default_db_path\"]");
+  const defaultDbPath = String(input?.value || "").trim();
+  if (!adapter) return;
+  try {
+    const payload = await serveApi("/api/config/adapter-default-db", {
+      method: "POST",
+      body: {
+        adapter,
+        default_db_path: defaultDbPath
+      }
+    });
+    state.adapterDefaults = payload?.adapter_defaults && typeof payload.adapter_defaults === "object"
+      ? { ...payload.adapter_defaults }
+      : { ...adapterDefaults(), [adapter]: payload?.default_db_path || "" };
+    if (!payload?.default_db_path) delete state.adapterDefaults[adapter];
+    updateAdapterDefaultOptions();
+    syncAdapterDefaultDbForm(form);
+    applyUpdatedAdapterDefaultToDbForms(adapter);
+    const message = payload?.default_db_path
+      ? t("serve_adapter_default_db_saved", "Adapter default DB saved")
+      : t("serve_adapter_default_db_cleared", "Adapter default DB cleared");
+    setServeStatus(message);
+    showServeNotice(message);
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+    showServeNotice(error.message || String(error), true);
+  }
+}
+function updateAdapterDefaultOptions() {
+  document.querySelectorAll("select[name=\"adapter\"] option").forEach(option => {
+    const defaultDb = adapterDefaults()[option.value] || "";
+    if (defaultDb) {
+      option.dataset.defaultDb = defaultDb;
+    } else {
+      delete option.dataset.defaultDb;
+    }
+  });
+}
+function applyUpdatedAdapterDefaultToDbForms(adapter) {
+  document.querySelectorAll("[data-source-add-form][data-source-kind=\"db\"]").forEach(form => {
+    const selected = selectedAdapterValue(form);
+    applyDefaultDbToForm(form, { force: Boolean(selected && selected === adapter) });
   });
 }
 function dbFieldFor(form) {
@@ -1447,8 +1521,71 @@ function renderSelectedAnalysis(trialKey) {
   if (!analysis) return "";
   const summary = analysis.summary ? `<pre>${esc(analysis.summary)}</pre>` : "";
   const markdown = analysis.md_report ? `<div class="note-body analysis-md">${renderMarkdown(analysis.md_report)}</div>` : "";
+  const structured = renderStructuredAnalysis(analysis);
   const paths = renderAnalysisPaths(analysis);
-  return `<section class="selected-extra selected-analysis"><h3>${esc(t("analysis", "Analysis"))}</h3><article class="selected-evidence-card analysis-card"><div class="note-meta"><span class="chip">${esc(analysis.status || "cached")}</span><strong>${esc(t("cached_analysis", "Cached analysis"))}</strong></div>${summary}${markdown}${paths}</article></section>`;
+  return `<section class="selected-extra selected-analysis"><h3>${esc(t("analysis", "Analysis"))}</h3><article class="selected-evidence-card analysis-card"><div class="note-meta"><span class="chip">${esc(analysis.status || "cached")}</span><strong>${esc(t("cached_analysis", "Cached analysis"))}</strong></div>${summary}${markdown}${structured}${paths}</article></section>`;
+}
+function renderStructuredAnalysis(analysis) {
+  const blocks = [
+    renderAnalysisFindings(analysis.findings),
+    renderAnalysisList(t("recommendations", "Recommendations"), analysis.recommendations),
+    renderAnalysisList(t("limitations", "Limitations"), analysis.limitations),
+    renderAnalysisList(t("analysis_commands", "Analysis Commands"), analysis.commands),
+    renderAnalysisDetails(analysis),
+  ].filter(Boolean);
+  return blocks.length ? `<div class="analysis-structured">${blocks.join("")}</div>` : "";
+}
+function renderAnalysisFindings(findings) {
+  if (!Array.isArray(findings) || !findings.length) return "";
+  return `<div class="analysis-block"><h4>${esc(t("findings", "Findings"))}</h4><ul class="evidence-list analysis-list">${findings.map(renderAnalysisFinding).join("")}</ul></div>`;
+}
+function renderAnalysisFinding(finding) {
+  if (!isPlainObject(finding)) return `<li>${renderAnalysisValue(finding)}</li>`;
+  const severity = finding.severity ? `<span class="chip">${esc(finding.severity)}</span>` : "";
+  const title = finding.title || finding.summary || finding.message || t("finding", "Finding");
+  const evidence = Array.isArray(finding.evidence) && finding.evidence.length
+    ? `<p class="copy">${esc(t("evidence", "Evidence"))}: ${finding.evidence.map(analysisValueText).map(esc).join("; ")}</p>`
+    : "";
+  const recommendation = finding.recommendation
+    ? `<p class="copy">${esc(t("recommendation", "Recommendation"))}: ${renderAnalysisValue(finding.recommendation)}</p>`
+    : "";
+  return `<li><div class="analysis-finding-head">${severity}<strong>${esc(title)}</strong></div>${evidence}${recommendation}</li>`;
+}
+function renderAnalysisList(label, values) {
+  if (!Array.isArray(values) || !values.length) return "";
+  return `<div class="analysis-block"><h4>${esc(label)}</h4><ul class="evidence-list analysis-list">${values.map(value => `<li>${renderAnalysisValue(value)}</li>`).join("")}</ul></div>`;
+}
+function renderAnalysisDetails(analysis) {
+  const statusRows = [];
+  if (analysis.analysis_status) statusRows.push([t("analysis_status", "Analysis Status"), analysis.analysis_status]);
+  if (analysis.confidence !== undefined && analysis.confidence !== null && String(analysis.confidence).trim()) statusRows.push([t("confidence", "Confidence"), analysis.confidence]);
+  const blocks = [];
+  if (statusRows.length) blocks.push(infoGrid(statusRows));
+  blocks.push(renderAnalysisObject(t("subject", "Subject"), analysis.subject));
+  blocks.push(renderAnalysisObject(t("analysis_metrics", "Analysis Metrics"), analysis.analysis_metrics));
+  const html = blocks.filter(Boolean).join("");
+  return html ? `<div class="analysis-block analysis-details">${html}</div>` : "";
+}
+function renderAnalysisObject(label, value) {
+  if (!isPlainObject(value) || !Object.keys(value).length) return "";
+  const rows = Object.entries(value).map(([key, item]) => [key, analysisValueText(item)]);
+  return `<div class="analysis-object"><h4>${esc(label)}</h4>${infoGrid(rows)}</div>`;
+}
+function renderAnalysisValue(value) {
+  return esc(analysisValueText(value));
+}
+function analysisValueText(value) {
+  if (value === null || value === undefined) return "-";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch (_error) {
+    return String(value);
+  }
+}
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 function renderAnalysisPaths(analysis) {
   const paths = analysis.relative_paths || {};

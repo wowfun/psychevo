@@ -13,20 +13,22 @@ def write_cached_analysis(
     eval_slug: str = "default",
     agent_id: str = "agent-a",
     session_id: str = "common_session",
-    cell_key: str = "abcdef0123456789",
+    cell_key: str = "session_t001",
     summary: str = "Cached analysis summary.",
+    extra: dict | None = None,
 ) -> Path:
     path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "trial_name": session_id,
+        "summary": summary,
+        "checks": {},
+    }
+    if extra:
+        payload.update(extra)
     path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "trial_name": session_id,
-                "summary": summary,
-                "checks": {},
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
     return path
@@ -38,7 +40,7 @@ def write_cached_markdown(
     eval_slug: str = "default",
     agent_id: str = "agent-a",
     session_id: str = "common_session",
-    cell_key: str = "abcdef0123456789",
+    cell_key: str = "session_t001",
     markdown: str = "## Finding\n\n- Cached markdown report.",
 ) -> Path:
     path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "analysis.md"
@@ -53,7 +55,7 @@ def write_cached_note(
     eval_slug: str = "default",
     agent_id: str = "agent-a",
     session_id: str = "common_session",
-    cell_key: str = "abcdef0123456789",
+    cell_key: str = "session_t001",
     markdown: str = "Manual cell note.",
 ) -> Path:
     path = root / "runs" / eval_slug / agent_id / session_id / cell_key / "notes.md"
@@ -338,7 +340,30 @@ class PevalPyReportHtmlTests(unittest.TestCase):
     def test_report_reads_cached_analysis_from_peval_runs_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            analysis_path = write_cached_analysis(root)
+            analysis_path = write_cached_analysis(
+                root,
+                extra={
+                    "status": "reviewed",
+                    "subject": {
+                        "session_id": "common_session",
+                        "trial_key": "session:t001",
+                    },
+                    "findings": [
+                        {
+                            "severity": "high",
+                            "title": "Slow step <script>alert(2)</script>",
+                            "evidence": ["step #2"],
+                            "recommendation": "Inspect cached markdown.",
+                        }
+                    ],
+                    "recommendations": ["Keep the structured analysis."],
+                    "limitations": ["No live provider validation."],
+                    "commands": ["peval-py view tr -f json"],
+                    "metrics": {"review_turns": 3},
+                    "confidence": "medium",
+                    "unknown_field": "not exposed",
+                },
+            )
             markdown_path = write_cached_markdown(
                 root,
                 markdown=(
@@ -368,7 +393,20 @@ class PevalPyReportHtmlTests(unittest.TestCase):
             analysis = report["annotations"]["analysis"][0]
             self.assertEqual(analysis["trial_key"], report["trajectory_meta"][0]["trial_key"])
             self.assertEqual(analysis["status"], "cached")
+            self.assertEqual(analysis["analysis_status"], "reviewed")
             self.assertEqual(analysis["summary"], "Cached analysis summary.")
+            self.assertEqual(analysis["subject"]["session_id"], "common_session")
+            self.assertEqual(analysis["findings"][0]["severity"], "high")
+            self.assertEqual(
+                analysis["recommendations"],
+                ["Keep the structured analysis."],
+            )
+            self.assertEqual(analysis["limitations"], ["No live provider validation."])
+            self.assertEqual(analysis["commands"], ["peval-py view tr -f json"])
+            self.assertEqual(analysis["analysis_metrics"], {"review_turns": 3})
+            self.assertEqual(analysis["confidence"], "medium")
+            self.assertNotIn("unknown_field", analysis)
+            self.assertNotIn("checks", analysis)
             self.assertIn("## Slow step", analysis["md_report"])
             self.assertEqual(
                 analysis["relative_path"],
@@ -386,19 +424,73 @@ class PevalPyReportHtmlTests(unittest.TestCase):
             html = render_html(report)
             self.assertIn("Analysis", html)
             self.assertIn("Cached analysis summary.", html)
+            self.assertIn("Slow step \\u003cscript\\u003ealert(2)\\u003c/script\\u003e", html)
+            self.assertIn("Keep the structured analysis.", html)
+            self.assertIn("No live provider validation.", html)
+            self.assertIn("review_turns", html)
             self.assertIn("## Slow step", html)
             self.assertIn("Check cached markdown.", html)
             self.assertIn("renderMarkdown(analysis.md_report)", html)
             self.assertIn("\\u003cscript", html)
             self.assertNotIn("<script>alert(1)</script>", html)
+            self.assertNotIn("<script>alert(2)</script>", html)
             self.assertIn(
-                "runs/default/agent-a/common_session/abcdef0123456789/analysis.json",
+                "runs/default/agent-a/common_session/session_t001/analysis.json",
                 html,
             )
             self.assertIn(
-                "runs/default/agent-a/common_session/abcdef0123456789/analysis.md",
+                "runs/default/agent-a/common_session/session_t001/analysis.md",
                 html,
             )
+
+    def test_report_ignores_invalid_analysis_json_typed_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_cached_analysis(
+                root,
+                extra={
+                    "status": ["wrong"],
+                    "subject": ["wrong"],
+                    "findings": {"wrong": True},
+                    "recommendations": "wrong",
+                    "limitations": "wrong",
+                    "commands": "wrong",
+                    "metrics": ["wrong"],
+                    "confidence": True,
+                    "unknown_field": "not exposed",
+                },
+            )
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            report = build_report_from_loaded_inputs(
+                LoadedInputs(
+                    sessions=[
+                        LoadedSession(
+                            records=read_jsonl(str(FIXTURES / "common_session.jsonl")),
+                            input_label="common_session.jsonl",
+                            adapter_id="opencode",
+                            session_hint="common_session",
+                            agent_name="agent-a",
+                        )
+                    ],
+                    notes=[],
+                ),
+                config,
+            )
+
+            analysis = report["annotations"]["analysis"][0]
+            self.assertEqual(analysis["summary"], "Cached analysis summary.")
+            for key in [
+                "analysis_status",
+                "subject",
+                "findings",
+                "recommendations",
+                "limitations",
+                "commands",
+                "analysis_metrics",
+                "confidence",
+                "unknown_field",
+            ]:
+                self.assertNotIn(key, analysis)
 
     def test_report_reads_cell_notes_separately_from_analysis(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -446,15 +538,18 @@ class PevalPyReportHtmlTests(unittest.TestCase):
 
             html = render_html(report)
             self.assertIn("notes.md", html)
-            self.assertIn("runs/default/agent-a/common_session/abcdef0123456789/notes.md", html)
+            self.assertIn("runs/default/agent-a/common_session/session_t001/notes.md", html)
             self.assertIn("Cell note with \\u003cscript", html)
             self.assertNotIn("<script>alert(1)</script>", html)
 
-    def test_report_omits_ambiguous_cell_notes(self) -> None:
+    def test_report_reads_notes_only_from_exact_trial_cell(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_cached_note(root, agent_id="opencode", cell_key="one")
             write_cached_note(root, agent_id="opencode", cell_key="two")
+            session_note = root / "runs" / "default" / "opencode" / "common_session" / "notes.md"
+            session_note.parent.mkdir(parents=True, exist_ok=True)
+            session_note.write_text("Session note is not a Trial note.", encoding="utf-8")
             config = ToolConfig(adapter="opencode", workspace_root=str(root))
             conversion = convert_records(read_jsonl(str(FIXTURES / "common_session.jsonl")), config)
             report = build_multi_report(
@@ -506,7 +601,7 @@ class PevalPyReportHtmlTests(unittest.TestCase):
                 {"md": markdown_path.relative_to(root).as_posix()},
             )
 
-    def test_report_omits_missing_malformed_or_ambiguous_analysis(self) -> None:
+    def test_report_omits_missing_or_non_trial_cell_analysis(self) -> None:
         config = ToolConfig(adapter="opencode")
         conversion = convert_records(read_jsonl(str(FIXTURES / "common_session.jsonl")), config)
         missing = build_multi_report(
@@ -528,7 +623,9 @@ class PevalPyReportHtmlTests(unittest.TestCase):
             root = Path(tmp)
             write_cached_analysis(root, agent_id="opencode", cell_key="one")
             write_cached_analysis(root, agent_id="opencode", cell_key="two")
-            ambiguous = build_multi_report(
+            session_analysis = root / "runs" / "default" / "opencode" / "common_session" / "analysis.json"
+            session_analysis.write_text(json.dumps({"summary": "Session analysis"}), encoding="utf-8")
+            non_trial_cell = build_multi_report(
                 [
                     ReportSession(
                         conversion=conversion,
@@ -540,7 +637,7 @@ class PevalPyReportHtmlTests(unittest.TestCase):
                 ToolConfig(adapter="opencode", workspace_root=str(root)),
                 [],
             )
-            self.assertNotIn("annotations", ambiguous)
+            self.assertNotIn("annotations", non_trial_cell)
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -550,7 +647,7 @@ class PevalPyReportHtmlTests(unittest.TestCase):
                 / "default"
                 / "opencode"
                 / "common_session"
-                / "cell"
+                / "session_t001"
                 / "analysis.json"
             )
             bad_path.parent.mkdir(parents=True)
@@ -558,7 +655,7 @@ class PevalPyReportHtmlTests(unittest.TestCase):
             write_cached_markdown(
                 root,
                 agent_id="opencode",
-                cell_key="cell",
+                cell_key="session_t001",
                 markdown="Markdown survives malformed JSON.",
             )
             malformed = build_multi_report(
@@ -649,6 +746,17 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn('class="serve-source-toolbar"', serve_html)
         self.assertIn('data-locale-select', serve_html)
         self.assertIn('class="source-manager-modal"', serve_html)
+        self.assertIn("width:min(1480px,calc(100vw - 28px));", serve_html)
+        self.assertIn('class="adapter-default-db-panel"', serve_html)
+        self.assertIn("Adapter default DB", serve_html)
+        self.assertIn("data-adapter-default-db-form", serve_html)
+        self.assertIn("data-adapter-default-db-select", serve_html)
+        self.assertIn("data-adapter-default-db-input", serve_html)
+        self.assertIn("data-adapter-default-db-clear", serve_html)
+        self.assertIn(
+            '<option value="opencode" selected data-default-db="/tmp/opencode.db">opencode</option>',
+            serve_html,
+        )
         self.assertIn("Upload snapshot", serve_html)
         self.assertIn("report JSON uploads", serve_html)
         self.assertIn("Session / ATIF Path", serve_html)
@@ -693,6 +801,10 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         self.assertIn("leaderboard-export", serve_html)
         self.assertIn("function bindServeSourceControls()", serve_html)
         self.assertIn('serveApi("/api/config/locale"', serve_html)
+        self.assertIn('serveApi("/api/config/adapter-default-db"', serve_html)
+        self.assertIn("adapterDefaults: initialAdapterDefaults()", serve_html)
+        self.assertIn("function saveAdapterDefaultDb(form)", serve_html)
+        self.assertIn("function updateAdapterDefaultOptions()", serve_html)
         self.assertIn("function bindAdapterDefaultDbControls()", serve_html)
         self.assertIn("function saveSourceAlias(button)", serve_html)
         self.assertIn('serveApi("/api/db-sessions"', serve_html)
