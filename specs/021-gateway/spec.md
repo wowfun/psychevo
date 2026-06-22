@@ -485,8 +485,11 @@ deterministic source/session routing while preserving Psychevo's Gateway core:
 - Task-scoped routing state is explicit in the request context; process-global
   mutable session state is not part of the boundary.
 - Platform message editing, rate limits, mentions, pairing, credentials,
-  webhook servers, and SDK-specific delivery behavior are owned by concrete
-  channel specs such as [280 Channels](../280-channels/spec.md).
+  webhook servers, and SDK-specific delivery behavior are owned by
+  [028 Channels](../028-channels/spec.md) and concrete platform specs such as
+  [281 WeChat Channel](../281-wechat-channel/spec.md),
+  [282 Telegram Channel](../282-telegram-channel/spec.md), and
+  [283 Feishu / Lark Channel](../283-feishu-lark-channel/spec.md).
 
 ## Related Topics
 
@@ -496,4 +499,8 @@ deterministic source/session routing while preserving Psychevo's Gateway core:
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines state relationships.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines SQLite persistence boundaries.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines runtime capability contribution semantics.
-- [280 Channels](../280-channels/spec.md) defines first-party IM channel behavior.
+- [028 Channels](../028-channels/spec.md) defines shared channel behavior.
+- [281 WeChat Channel](../281-wechat-channel/spec.md),
+  [282 Telegram Channel](../282-telegram-channel/spec.md), and
+  [283 Feishu / Lark Channel](../283-feishu-lark-channel/spec.md) define
+  first-party platform behavior.

@@ -408,7 +408,7 @@ the installed binary, and optionally initializes the global Psychevo home.
   semantics exposed by `pevo skill`.
 - [051 Agents](../051-agents/spec.md) defines agent definition semantics.
 - [051 Subagents](../051-agents/subagents.md) defines subagent command semantics.
-- [280 Channels](../280-channels/spec.md) defines `pevo gateway setup`
+- [280 Channel UX](../280-channel-ux/spec.md) defines `pevo gateway setup`
   channel behavior.
 - [120 Provider Registry](../120-provider-registry/spec.md) defines
   provider/model configuration and resolution.

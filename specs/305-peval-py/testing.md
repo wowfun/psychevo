@@ -162,29 +162,41 @@ Coverage must verify:
 - `-n/--note 0=TEXT` creates report-level notes, `-n/--note N=TEXT` attaches
   to the one-based session index, repeated notes preserve CLI order, and
   out-of-range indexes fail clearly.
-- cached analysis enrichment reads exactly one cell directory matching
-  `runs/<eval-slug>/<agent-id>/<session-id>/*/analysis.{json,md}`, prefers
-  `agent_name` over adapter id for the path, writes `annotations.analysis[]`
-  with cached status, compatible `relative_path`, optional `summary`,
-  optional `md_report`, and per-format `relative_paths`, and silently omits
-  missing or ambiguous cell matches while keeping valid Markdown when sibling
-  JSON is malformed.
-- cell-local peval manual notes read exactly one
-  `runs/<eval-slug>/<agent-id>/<session-id>/*/notes.md` cell, prefer
-  `agent_name` over adapter id for the path, write `annotations.notes[]` with
-  `source = "cell"`, `label = "notes.md"`, Markdown body, and a note
-  `source_ref.relative_path`, render before CLI/table Trial notes, stay
-  separate from `annotations.analysis[]`, and silently omit missing or
-  ambiguous note cells.
-- report snapshot aggregation preserves and remaps both cached analysis and
-  cell-local notes when serve composes active source snapshots.
-- serve active report composition overlays current workspace-side cached
-  analysis and cell-local notes for refreshable sources even when the stored
-  source's latest refresh status is `error`, while preserving CLI/table notes
-  from the stored snapshot.
+- cached analysis enrichment reads the exact
+  `runs/<eval-slug>/<agent-id>/<session-id>/<trial-key>/analysis.{json,md}`
+  cell derived from `trajectory_meta.trial_key`, prefers `agent_name` over
+  adapter id for the path, writes `annotations.analysis[]` with cached status,
+  compatible `relative_path`, optional `summary`, optional `md_report`, and
+  per-format `relative_paths`, plus typed incremental analysis fields from the
+  `analysis.json` whitelist. Tests verify `analysis.json.status` maps to
+  `analysis_status`, `analysis.json.metrics` maps to `analysis_metrics`, unknown
+  top-level fields and recognized fields with incompatible types are ignored,
+  session-root analysis artifacts are ignored, and valid Markdown survives when
+  sibling JSON is malformed.
+- cell-local peval manual notes read the exact
+  `runs/<eval-slug>/<agent-id>/<session-id>/<trial-key>/notes.md` cell derived
+  from `trajectory_meta.trial_key`, prefer `agent_name` over adapter id for the
+  path, write `annotations.notes[]` with `source = "cell"`, `label =
+  "notes.md"`, Markdown body, and a note `source_ref.relative_path`, render
+  before CLI/table Trial notes, stay separate from `annotations.analysis[]`,
+  and ignore session-root notes.
+- report artifact aggregation preserves and remaps both cached analysis and
+  cell-local notes when serve composes active source artifacts.
+- serve state persists Trial agent artifacts as only `agent/trajectory.json`
+  and `agent/trajectory_meta.json`, stores the Trial cell artifact pointer
+  directly on `peval_py_sources`, and does not create a separate
+  `peval_py_trials` table.
+- serve active report composition reads current cell-local `analysis.json`,
+  `analysis.md`, and `notes.md` for all active sources, including snapshots and
+  refreshable sources whose latest refresh status is `error`.
+- report JSON uploads materialize matching Trial annotations into cell-local
+  `notes.md`, `analysis.json`, and `analysis.md`; multiple Trial notes or
+  analysis entries merge deterministically, typed incremental analysis fields
+  are preserved when they can be merged without ambiguity, and report-level
+  notes are ignored.
 - serve source payloads include stored Trial identity and
-  `last_turn_finished_at_ms` from `trajectory_meta.finished_at_ms` without a
-  state schema migration, and source aliases remain display-only.
+  `last_turn_finished_at_ms` from `trajectory_meta.finished_at_ms`, and source
+  aliases remain display-only.
 - comparison JSON contains one canonical `leaderboard.entries` row list, omits
   legacy duplicate `session_heatmap.rows` and `session_table.rows`, and does not
   emit benchmark, task, task-set, task-family, matrix task-axis, row `selected`,
@@ -236,11 +248,9 @@ Coverage must verify:
   mutating API checks.
 - serve HTTP exposes `POST /api/sources/{source_key}/notes`; tests verify it
   rejects snapshots and unknown sources, enforces the 1 MiB Markdown limit and
-  same-origin JSON POST rules, overwrites an existing unique notes cell, saves
-  beside a unique analysis cell when no notes cell exists, creates
-  `peval-py-notes/notes.md` when no cell exists, returns a clear error for
-  ambiguous note or analysis cells, refreshes the source snapshot immediately,
-  and returns the standard `{ sources, report }` mutation payload.
+  same-origin JSON POST rules, writes `notes.md` to the selected source's
+  persisted Trial cell, refreshes the source snapshot immediately, and returns
+  the standard `{ sources, report }` mutation payload.
 - serve UI row-selection state is independent from selected-Trial state:
   checkbox clicks stop row selection, row clicks still update the selected
   Trial, and Trajectory Overview rows keep following filtered and sorted
@@ -378,15 +388,17 @@ Coverage must verify:
   using the root-selected config; and `view/export trajectory -r DIR` failing
   clearly when `DIR` is missing or does not contain `peval-py.toml`.
 - init tests verify `peval-py init` creates only `<workspace>/peval-py.toml` and
-  migrated `<workspace>/state.db`, preserves existing valid `peval-py.toml`
+  `<workspace>/state.db`, preserves existing valid `peval-py.toml`
   state DB paths, rejects invalid peval-py TOML, and does not create
   `peval.toml`, `runs/`, `datasets/`, `scripts/`, default templates,
   `$PSYCHEVO_HOME/peval-config.toml`, or `.gitignore`.
 - saved-workspace tests verify peval-py workspace discovery from current-or-parent
   `peval-py.toml`, explicit `--root` and `PEVAL_ROOT` handling as a peval-py
   root override without requiring `peval.toml`, `<workspace>/peval-py.toml` defaults,
-  `<workspace>/state.db` creation, `peval_py_*` migrations, stable source keys,
-  source alias storage without changing stable keys, source update instead of duplicate append, active/archive lifecycle, latest
+  `<workspace>/state.db` creation, current `peval_py_*` tables, canonical
+  cell-derived stable source keys, source alias storage without changing stable
+  keys, duplicate imports resolving to the same cell updating one source row,
+  active/archive lifecycle, latest
   canonical Trial snapshots including refreshed cached analysis JSON/Markdown
   and cell-local notes, refresh-log rows, and no non-peval-py table writes.
 - CLI smoke tests cover `init --root`, `init --root --json`, `serve -p`,
@@ -398,8 +410,14 @@ Coverage must verify:
   JSONL upload, ATIF JSON upload, report JSON upload, unsupported upload
   rejection, 20 MiB upload cap rejection, no CORS header, JSON POST requirement,
   same-origin rejection for mutating APIs, `/api/config/locale` TOML updates,
-  `/api/sources/{source_key}/alias`, and the ECharts cached asset route using
-  fake cache/download paths rather than real network.
+  `/api/config/adapter-default-db` TOML updates and clears, Source Manager HTML
+  regeneration with updated adapter defaults, `/api/sources/{source_key}/alias`,
+  and the ECharts cached asset route using fake cache/download paths rather than
+  real network.
+- serve UI HTML and interaction tests verify the near-full-screen Source Manager
+  workbench structure, adapter default DB configuration controls, mutable
+  adapter default state in `report.js`, and continued DB form autofill from
+  configured adapter defaults.
 - legacy top-level `report` and `convert` commands are rejected.
 - translated evaluation docs exist under `docs/i18n/zh-CN/...`, the peval-py
   tool README translation exists beside `tools/peval-py/README.md`, English
@@ -407,23 +425,32 @@ Coverage must verify:
   pages when available, and spec links still target canonical specs.
 - the repo-distributed `skills/peval-py` package validates as a skill package,
   omits agent-specific `agents/openai.yaml`, documents the distinction between
-  reports, exports, `serve`, and `analysis.json` / `analysis.md` artifacts,
+  reports, exports, `serve`, `notes.md`, and `analysis.json` / `analysis.md`
+  Trial cell artifacts,
+  defines `notes.md` as the cell-local manual Trial note artifact,
   defines `analysis.json` as the fixed-format machine-readable artifact,
   defines `analysis.md` as a free-form human/agent-readable artifact, directs
   agents to output one analysis artifact by default or complementary artifacts
   when both are useful,
   and directs agents to use `view tr -r <workspace>` or discovered
-  current-directory workspace config when verifying `annotations.analysis[]`.
+  current-directory workspace config when verifying `annotations.notes[]` or
+  `annotations.analysis[]`.
 - the skill helper script under `skills/peval-py/scripts/` validates with
   `compileall`, uses argparse subcommands, and replaces embedded Python
-  snippets for report subject extraction and analysis-recognition checks.
+  snippets for report subject extraction and analysis-recognition checks. Its
+  subject extraction emits both raw report identities and normalized path
+  segments for the Trial cell, with optional full `notes.md`, `analysis.json`,
+  and `analysis.md` paths when a workspace is provided. Its report checks can
+  target a specific Trial by rendered `trial_key` or one-based report index
+  instead of assuming `annotations.analysis[0]`.
 - a fixture-backed smoke creates a temporary peval-py workspace, writes
-  `runs/default/agent-a/common_session/peval-py-analysis/analysis.json` with a
-  top-level `summary`, writes sibling `analysis.md`, runs `view tr` with
-  `-r <workspace>` against `tools/peval-py/tests/fixtures/common_session.jsonl`
-  with `-a opencode --agent-name agent-a -f json`, and verifies the generated
-  report contains both `annotations.analysis[0].summary` and
-  `annotations.analysis[0].md_report`.
+  `runs/default/agent-a/common_session/<trial-key>/analysis.json` with a
+  top-level `summary` and representative typed whitelist fields, writes sibling
+  `analysis.md`, runs `view tr` with `-r <workspace>` against
+  `tools/peval-py/tests/fixtures/common_session.jsonl` with `-a opencode
+  --agent-name agent-a -f json`, and verifies the generated report contains a
+  matching `annotations.analysis[]` item with both `summary` and `md_report`
+  plus the structured fields.
 
 ## Validation
 

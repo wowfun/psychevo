@@ -413,10 +413,11 @@ peval cell 的 cached analysis，不会修改原始 trajectory。读取路径为
 
 `analysis_eval_slug` 默认为 `default`。`<session-id>` 使用报告中的 session id；
 `<agent-id>` 优先使用输入侧 `agent_name`，没有时使用 effective adapter id。
-只有匹配 session 目录下恰好有一个 cell 目录包含 `analysis.json` 或 `analysis.md`
-时才会采用；同一个 cell 目录里两者同时存在时，会合并 JSON summary 和 Markdown
-report。缺失、JSON 格式错误、Markdown 无法读取或多个 cell 同时匹配时都会静默省略
-对应内容。
+`<cell_key>` 是报告中的 Trial key 经过路径段规范化后的值。同一个 Trial cell 里
+两者同时存在时，会合并 JSON summary 和 Markdown report。缺失、JSON 格式错误、
+Markdown 无法读取或写在其他 cell 中的 analysis 都会静默省略。Session 根目录下的
+`analysis.json` 和 `analysis.md` 保留给 session-level artifact，本版本不会读入
+Trial report。
 
 JSON report 会把匹配结果写入 `annotations.analysis[]`，包含兼容旧消费者的
 `relative_path`、可选 JSON 顶层 `summary`、可选 Markdown `md_report`，以及按格式
@@ -433,15 +434,15 @@ peval-py 也会从同一个 task 目录树读取 peval cell manual notes：
 <workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md
 ```
 
-`notes.md` 是 Trial note，不属于 Analysis。只有恰好一个 cell 目录包含
-`notes.md` 时才会采用，并写入 `annotations.notes[]`：`source = "cell"`、label 为
+`notes.md` 是 Trial note，不属于 Analysis。peval-py 从 Trial key 对应的精确
+Trial cell 读取它，并写入 `annotations.notes[]`：`source = "cell"`、label 为
 `notes.md`、包含 Markdown 正文和相对 `source_ref`。Cell notes 会排在同一个 Trial
-的 CLI 或 input-table notes 前面。
+的 CLI 或 input-table notes 前面。Session 根目录下的 `notes.md` 保留给
+session-level note，本版本不会读入 Trial report。
 
 在 `serve` 中，`Edit notes` / `Add notes` 会为可刷新 source 写入这个 cell-local
-`notes.md`，并立即刷新该 source snapshot。如果当前没有 note cell，peval-py 会写到
-唯一 analysis cell 同级；如果也没有 cell，则创建 `peval-py-notes/notes.md`。多个
-note 或 analysis cell 同时匹配时会失败且不写入。
+`notes.md`，目标是该 source 已持久化的 Trial cell，并立即刷新该 source snapshot。
+Snapshot upload source 保持只读。
 
 ## 本地化 HTML 报告
 

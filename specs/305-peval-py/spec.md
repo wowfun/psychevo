@@ -62,32 +62,45 @@ depend on unrelated Rust peval workspace files such as `peval.toml`, `runs/`,
 
 The repo-distributed `skills/peval-py` package teaches agents how to use
 `peval-py` for retained session inspection, report rendering, ATIF export, DB
-session listing, local serving, and analysis artifact construction. It is an
-instruction package only: it must not add a new CLI command, execute agents,
-run live providers, mutate source databases, or install itself into
-`.agents/skills`, `.psychevo/skills`, or a global skill directory. Because the
-skill supports multiple agent surfaces, it must not include agent-specific
-`agents/openai.yaml` metadata.
+session listing, local serving, Trial cell notes, and analysis artifact
+construction. It is an instruction package only: it must not add a new CLI
+command, execute agents, run live providers, mutate source databases, or install
+itself into `.agents/skills`, `.psychevo/skills`, or a global skill directory.
+Because the skill supports multiple agent surfaces, it must not include
+agent-specific `agents/openai.yaml` metadata.
 
-Analysis artifacts are independent from report rendering. The skill must not
-imply that every use requires both `analysis.json` / `analysis.md` and a
-generated report. It should guide agents to output one analysis artifact by
-default, or both only when their contents are complementary. When the user
-wants analysis artifacts to be recognized by peval-py reports or `serve`, the
-preferred path is:
+Cell-local notes and analysis artifacts are independent from report rendering.
+The skill must not imply that every use requires `notes.md`, both
+`analysis.json` / `analysis.md`, and a generated report. It should guide agents
+to write `notes.md` when the user asks for Trial notes, output one analysis
+artifact by default when analysis is requested, or write both analysis artifacts
+only when their contents are complementary. When the user wants these Trial
+cell artifacts to be recognized by peval-py reports or `serve`, the preferred
+path is:
 
 ```text
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md
 <workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.json
 <workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/analysis.md
 ```
+
+`notes.md` is the cell-local manual Trial note. Current peval-py report
+generation reads this file into `annotations.notes[]` with `source = "cell"` and
+`label = "notes.md"`.
 
 `Cached analysis` is the peval/peval-py report concept for analysis loaded
 from a workspace; the skill must not require every analysis artifact to be
 cached or placed under `runs/...`. `analysis.json` is the fixed-format,
 machine-readable analysis artifact. It must be a top-level JSON object with at
 least `summary`, because current peval-py report generation reads that field
-into `annotations.analysis[].summary`. Additional structured fields may
-describe status, findings, evidence references, metrics, and recommendations.
+into `annotations.analysis[].summary`. Report generation also recognizes a
+typed whitelist of incremental analysis fields: `status` as
+`annotations.analysis[].analysis_status`, `subject`, `findings`,
+`recommendations`, `limitations`, `commands`, `metrics` as
+`annotations.analysis[].analysis_metrics`, and `confidence`. Unknown top-level
+fields and recognized fields with incompatible types are ignored so
+`analysis.json` remains a stable machine-readable annotation contract rather
+than an arbitrary JSON passthrough.
 
 `analysis.md` is the free-form analysis artifact readable by humans and
 agents. Its format and content are intentionally unconstrained by the skill.
@@ -101,11 +114,16 @@ report instead of guessing when writing to the preferred recognized path.
 `<analysis_eval_slug>` defaults to `default` unless top-level
 `analysis_eval_slug` in `peval-py.toml` says otherwise. `<agent-id>` is the
 input `--agent-name` when supplied; otherwise it is the effective adapter id.
-`<cell_key>` defaults to `peval-py-analysis` only when no existing analysis
-cell matches. If exactly one cell under the session directory contains
-`analysis.json` or `analysis.md`, update that cell. If multiple cells match,
-stop and ask for resolution because peval-py intentionally omits ambiguous
-workspace analysis.
+`<session-id>` is the rendered `trajectory.session_id` when present, otherwise
+the rendered Trial key after the same safe path-segment normalization used by
+serve artifacts.
+`<cell_key>` is the rendered Trial's `trajectory_meta.trial_key` after the same
+safe path-segment normalization used by serve artifacts. A cell is the minimum
+Trial unit: `analysis.json`, `analysis.md`, `notes.md`, and `agent/*` written
+under that cell all belong to that Trial. `analysis.json`, `analysis.md`, and
+`notes.md` directly under `<session-id>/` are session-level artifacts reserved
+for a later session-summary surface and are not read into Trial reports in this
+version.
 
 When the workspace is known, the skill should pass `-r <workspace>` to
 `view tr` validation commands so peval-py loads that workspace's config and
@@ -196,7 +214,7 @@ when `-r/--root` is omitted.
 
 `init` accepts `-r, --root DIR` and `--json`. Without `--root`, it initializes
 the current directory. It creates `<workspace>/peval-py.toml` when missing and
-migrates `<workspace>/state.db`. Existing valid `peval-py.toml` files are
+creates or opens `<workspace>/state.db`. Existing valid `peval-py.toml` files are
 preserved, including custom relative or absolute `state_db` paths. It must not
 create or edit `peval.toml`, `runs/`, `datasets/`, `scripts/`, workspace
 templates, `$PSYCHEVO_HOME/peval-config.toml`, or `.gitignore`. `--json` emits
@@ -215,11 +233,15 @@ and `PEVAL_ROOT`. `serve` discovery must not read or require Rust
 `serve` accepts `-c`, `-a`, `-p`, `-d`, `-s`, `-i`, `-n`, and
 `--source-alias` with the same trajectory-source semantics as `view
 trajectory`. Source flags are persistent: they create or update stable saved
-sources in `<workspace>/state.db`, then immediately refresh those sources into
-the canonical state layer before the server starts. Stable source keys are
-derived from adapter, input kind, normalized path, and selected session id so
-repeated imports update the same source instead of appending duplicates. Source
-aliases are display-only metadata and must not contribute to source keys.
+sources in `<workspace>/state.db` after conversion succeeds and before the
+server starts. In serve state, one source is one Trial cell: it is the
+user-facing management object for that cell and is not a separate provenance row
+that can share artifacts with another source. Stable source keys are derived
+from the canonical cell identity after conversion: analysis eval slug, effective
+agent id, session id, and `trajectory_meta.trial_key`. Repeated imports that
+resolve to the same cell update the same source instead of appending duplicates.
+Source aliases are display-only metadata and must not contribute to source
+keys.
 Uploaded JSONL, ATIF JSON, and report JSON sources are stored as canonical
 snapshots and are not refreshable.
 In the web UI, DB sources may also be added through a session picker: the user
@@ -417,28 +439,53 @@ Serve may also create an ECharts cache at
 `<workspace>/.cache/echarts/6.0.0/echarts.min.js`.
 Runtime state lives in
 `<workspace>/state.db`, which may become a shared state database later; this
-version creates and updates only `peval_py_*` tables:
+version creates and updates only these `peval_py_*` tables:
 
-- `peval_py_schema_migrations` records peval-py state schema versions.
 - `peval_py_sources` stores stable source keys, source kind, adapter, original
   path or DB/session metadata, optional display alias, active/archived state,
-  refreshability, and latest status/error summary.
-- `peval_py_trials` stores the latest canonical trajectory/report JSON blobs and
-  index columns for session, status, duration, wall duration, turns, tools,
-  tokens, and cost.
+  refreshability, latest status/error summary, and the latest Trial cell
+  artifact directory/update time for that source.
 - `peval_py_refresh_log` stores refresh attempts with time, status, source key,
   warning count, and error summary.
 
 Active sources compose the default served report. Archived sources remain in the
 state database and can be restored, but they do not contribute Trial rows. The
-state layer keeps only the latest canonical snapshot for each source plus a
-bounded refresh log; it does not preserve every historical report blob.
+state layer keeps only the latest canonical Trial artifacts for each source plus
+a bounded refresh log; it does not preserve every historical report blob.
+
+Canonical Trial artifacts live under the peval run tree, not inside SQLite. The
+minimum persisted unit is the Trial cell:
+
+```text
+<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell-key>/
+  agent/trajectory.json
+  agent/trajectory_meta.json
+  notes.md
+  analysis.json
+  analysis.md
+```
+
+`<cell-key>` is `trajectory_meta.trial_key` after safe path-segment
+normalization. `peval_py_sources.artifact_dir` points at this cell directory.
+`trajectory.json` is the ATIF-like agent trajectory. `trajectory_meta.json` is
+the viewer/report sidecar for timing, status, warnings, and step metadata.
+Cell-local `analysis.json`, `analysis.md`, and `notes.md` are the persisted
+annotation truth for that Trial. Session-root `analysis.json`, `analysis.md`,
+and `notes.md` belong to the whole session and are reserved but not read by this
+version. These files are general peval run artifacts; they must not be treated
+as private `serve` cache. The served report JSON is computed from active source
+rows plus these artifacts and is not persisted as a complete blob.
 
 Uploaded JSONL files are converted through the selected adapter. Uploaded ATIF
 JSON trajectory objects and uploaded peval-py report JSON are accepted without
 requiring a message adapter. Uploaded source payloads are limited to 20 MiB,
-converted immediately, persisted only as canonical state rows, and discarded
-after ingestion; raw uploaded files are not written to disk or stored as blobs.
+converted immediately, persisted only as canonical Trial artifacts plus source
+rows, and discarded after ingestion; raw uploaded files are not written to disk
+or stored as blobs. When the uploaded source is a peval-py report JSON, matching
+Trial `annotations.notes[]` are materialized into that Trial cell's `notes.md`,
+matching `annotations.analysis[]` entries are materialized into `analysis.json`
+and `analysis.md`, and report-level notes are ignored until a session/report
+artifact model exists.
 
 `peval-py init` writes only the Python-owned serve state described above.
 Existing unrelated workspace files are left untouched, but they are neither
@@ -612,10 +659,13 @@ task-family, or matrix task-axis fields.
 Serve UI mode keeps the report body as the primary mental model rather than
 turning the page into a separate dashboard. It shows a compact source/status
 toolbar with a persistent language select above the report title and opens
-source management in a modal dialog.
+source management in a near-full-screen workbench modal dialog.
 The modal supports Session/ATIF path, DB, and input-table source forms, upload
 of JSONL, ATIF JSON, or peval-py report JSON snapshots, explicit refresh,
 active/archive/delete source lifecycle, and per-source status display. The
+modal exposes an adapter default SQLite DB configuration strip above the source
+forms and source list; saving a non-empty path updates that adapter's
+`default_db_path`, while saving or clearing an empty value removes that default.
 Session/ATIF path and DB path fields accept one or more whitespace-separated
 paths and honor single- or double-quoted paths; they import refreshable local
 paths and do not upload file contents. The DB Inspect action still inspects
@@ -644,11 +694,11 @@ paths and do not upload file contents. The DB Inspect action still inspects
   uploads, and menu surfaces remain solid enough to read.
 
 `serve` does not refresh sources on startup unless source flags were supplied on
-that invocation. The page opens from the latest canonical trajectory snapshots
+that invocation. The page opens from the latest canonical Trial artifacts
 and marks sources with their latest status. When composing the active served
 report, `serve` re-reads current workspace-side cell `analysis.json`,
 `analysis.md`, and `notes.md` for each active refreshable source and overlays
-those annotations on the stored snapshot without mutating the stored trajectory
+those annotations on the stored artifacts without mutating the stored trajectory
 or requiring the original source file/DB session to refresh successfully.
 Refresh is explicit from the source manager or through source flags on the
 `serve` command.
@@ -678,6 +728,15 @@ normalizes the locale, writes top-level `locale` to `<workspace>/peval-py.toml`,
 updates the running serve config, and returns the normalized locale. The browser
 then reloads the page so embedded i18n messages are regenerated.
 
+`POST /api/config/adapter-default-db` accepts JSON
+`{ "adapter": "ADAPTER_ID", "default_db_path": "PATH" }`, validates the adapter
+against the available adapter registry, writes or clears
+`[adapters.<adapter-id>].default_db_path` in `<workspace>/peval-py.toml`,
+updates the running serve config, and returns the updated adapter default DB
+map. Blank `default_db_path` clears the adapter default. The save endpoint does
+not require the SQLite file to exist; DB import and inspect remain responsible
+for checking usable DB paths.
+
 `POST /api/db-sessions` accepts JSON `{ "db": "PATH", "adapter": "optional" }`.
 The DB path resolves like other serve source paths: relative paths are resolved
 under the workspace root and absolute paths are expanded directly. Without an
@@ -696,33 +755,26 @@ resolved under the workspace root, and POSIX hosts may map existing drive paths
 through `/mnt/<drive>/...`. New source imports are all-or-nothing: if any
 newly submitted source fails to load, convert, or refresh, the endpoint returns
 a JSON error and does not persist any source from that request. Refreshing an
-already persisted source keeps the existing status-and-log behavior. `POST
+already persisted source keeps the existing artifact directory when conversion
+fails, and records the latest status/error/log entry. If refreshing a persisted
+source converts to a different canonical cell identity, refresh fails and keeps
+the existing source/artifact unchanged instead of silently changing one source
+into another Trial. `POST
 /api/sources/{source_key}/alias` accepts JSON `{ "alias": "..." }`, updates only
 the display alias for that source, rebuilds the composed report payload from
 stored snapshots, and does not refresh or mutate the original source file or DB.
 An empty alias clears the alias. `POST /api/sources/{source_key}/delete` deletes
-only peval-py state for that source, including its canonical Trial snapshot and
-refresh-log rows; it never deletes the original local file or DB.
+only peval-py state for that source and refresh-log rows; it never deletes the
+original local file or DB. Because serve enforces one source per Trial cell, it
+also deletes that source's persisted Trial cell artifacts.
 
-`POST /api/sources/{source_key}/notes` accepts JSON
-`{ "markdown": "..." }`, requires the same JSON POST and same-origin checks as
-other mutating APIs, and writes UTF-8 `notes.md` only for refreshable sources.
-The Markdown payload is limited to 1 MiB after UTF-8 encoding. On success, the
-server refreshes that source immediately and returns the standard mutation
-payload `{ sources, report }`. Saving chooses the target as follows:
-
-1. If exactly one existing `notes.md` cell exists for the source task,
-   overwrite that file.
-2. If no notes cell exists and exactly one analysis cell exists, write
-   `notes.md` beside that cell's `analysis.json` or `analysis.md`.
-3. If neither notes nor analysis cells exist, create
-   `<task-root>/peval-py-notes/notes.md` without writing Rust peval cell
-   metadata.
-4. If multiple notes cells exist, or multiple analysis cells exist when no
-   unique notes cell exists, return a JSON error and do not write.
-
-Saving an empty string writes an empty `notes.md`; delete semantics are not part
-of v1.
+`POST /api/sources/{source_key}/notes` accepts JSON `{ "markdown": "..." }`,
+requires the same JSON POST and same-origin checks as other mutating APIs, and
+writes UTF-8 `notes.md` only for refreshable sources with a persisted Trial
+cell. The Markdown payload is limited to 1 MiB after UTF-8 encoding. On success,
+the server writes `<artifact_dir>/notes.md`, refreshes that source immediately,
+and returns the standard mutation payload `{ sources, report }`. Saving an empty
+string writes an empty `notes.md`; delete semantics are not part of v1.
 
 In serve UI mode, the Leaderboard may add a row-selection checkbox column at
 the start of the existing full column set. Header and row checkboxes control
@@ -875,11 +927,11 @@ cell manual notes from
 `<workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md`.
 These notes are Trial annotations, not Analysis. `<session-id>` is the
 displayed trajectory session id, and `<agent-id>` is the input `agent_name`
-when provided, otherwise the effective adapter id. A static read accepts the
-note only when exactly one cell directory under the task directory contains
-`notes.md`. Missing, unreadable, invalid UTF-8, oversized, or ambiguous note
-files are silently omitted so ordinary view/export/serve workflows keep
-rendering. Valid cell notes enter `annotations.notes[]` with `trial_key`,
+when provided, otherwise the effective adapter id. `<cell_key>` is the
+Trial's `trajectory_meta.trial_key` after safe path-segment normalization.
+Missing, unreadable, invalid UTF-8, or oversized note files are silently omitted
+so ordinary view/export/serve workflows keep rendering. Valid cell notes enter
+`annotations.notes[]` with `trial_key`,
 `source = "cell"`, `label = "notes.md"`, `markdown`, and a
 `source_ref = { kind = "note", label = "notes.md", relative_path = "..." }`
 object. For the same Trial, cell notes render before CLI or input-table notes.
@@ -891,20 +943,23 @@ with Rust peval cached analysis from
 `<workspace>/runs/<analysis_eval_slug>/<agent-id>/<task-id>/<cell_key>/analysis.json`
 and `analysis.md`. The default `analysis_eval_slug` is `default`; `<task-id>`
 is the displayed session id; `<agent-id>` is the input `agent_name` when
-provided, otherwise the effective adapter id. The `cell_key` segment is selected
-only when exactly one cell directory under the task directory contains
-`analysis.json` or `analysis.md`. Missing files, malformed JSON, unreadable
-Markdown, or ambiguous cell matches are silently omitted so ordinary
+provided, otherwise the effective adapter id. `<cell_key>` is the Trial's
+`trajectory_meta.trial_key` after safe path-segment normalization. Missing
+files, malformed JSON, or unreadable Markdown are silently omitted so ordinary
 view/export/serve workflows keep rendering. Valid cached analysis is exposed as
 `annotations.analysis[]` entries with `trial_key`, `status = "cached"`,
 `relative_path`, optional `summary` from the analysis JSON top-level `summary`
-field, optional `md_report` from `analysis.md`, and optional `relative_paths`
-with `json` and `md` entries. `relative_path` is retained for compatibility and
-points to JSON when present, otherwise Markdown. Absolute paths are not exposed,
-ATIF trajectory data is not changed, and peval-py never executes analysis agents
-or writes analysis cache. In `serve`, the active report composition path
-refreshes only this workspace-side annotation overlay; the persisted trajectory
-snapshot remains the last successful source conversion.
+field, optional typed incremental fields from `analysis.json`, optional
+`md_report` from `analysis.md`, and optional `relative_paths` with `json` and
+`md` entries. `relative_path` is retained for compatibility and points to JSON
+when present, otherwise Markdown. `status` on the annotation remains the cache
+source status; `analysis.json.status` is exposed as `analysis_status`, and
+`analysis.json.metrics` is exposed as `analysis_metrics` to avoid conflicting
+with trajectory/report metrics. Absolute paths are not exposed, ATIF trajectory
+data is not changed, and peval-py never executes analysis agents or writes
+analysis cache. In `serve`, the active report composition path refreshes only
+this workspace-side annotation overlay; the persisted trajectory snapshot
+remains the last successful source conversion.
 
 ## Redaction
 

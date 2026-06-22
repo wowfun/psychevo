@@ -446,11 +446,12 @@ lookup is read-only and uses:
 
 `analysis_eval_slug` defaults to `default`. `<session-id>` is the rendered
 session id. `<agent-id>` is the input `agent_name` when available, otherwise
-the effective adapter id. peval-py only uses cached analysis when exactly one
-cell directory under the matching session directory contains `analysis.json` or
-`analysis.md`. If both files exist in that one cell directory, JSON summary and
+the effective adapter id. `<cell_key>` is the rendered Trial key normalized for
+a path segment. If both files exist in that Trial cell, JSON summary and
 Markdown report are merged. Missing files, malformed JSON, unreadable Markdown,
-or ambiguous cell matches are silently ignored.
+or analysis files in other cells are silently ignored. Session-root
+`analysis.json` and `analysis.md` are reserved for session-level artifacts and
+are not read into Trial reports in this version.
 
 The JSON report stores matching analysis under `annotations.analysis[]` with
 compatible `relative_path`, optional top-level JSON `summary`, optional Markdown
@@ -468,16 +469,16 @@ peval-py also reads peval cell manual notes from the same task tree:
 <workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell_key>/notes.md
 ```
 
-`notes.md` is a Trial note, not analysis. It is accepted only when exactly one
-cell directory with `notes.md` matches the task, then appears in
-`annotations.notes[]` with `source = "cell"`, label `notes.md`, Markdown text,
-and a relative `source_ref`. Cell notes render before CLI or input-table notes.
+`notes.md` is a Trial note, not analysis. peval-py reads it from the exact
+Trial cell derived from the Trial key, then exposes it in `annotations.notes[]`
+with `source = "cell"`, label `notes.md`, Markdown text, and a relative
+`source_ref`. Cell notes render before CLI or input-table notes. Session-root
+`notes.md` is reserved for session-level notes and is not read into Trial
+reports in this version.
 
 In `serve`, `Edit notes` or `Add notes` writes that cell-local `notes.md` for a
-refreshable source and immediately refreshes the source snapshot. If no note
-cell exists, peval-py writes beside a unique analysis cell, or creates
-`peval-py-notes/notes.md` when no cell exists. Ambiguous note or analysis cells
-fail without writing.
+refreshable source's persisted Trial cell and immediately refreshes the source
+snapshot. Snapshot uploads remain read-only.
 
 ## Localized HTML Reports
 
