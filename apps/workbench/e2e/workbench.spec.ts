@@ -310,6 +310,14 @@ test.describe("pevo Web Workbench", () => {
       await expect(detail.getByRole("textbox", { name: "Allowed direct users" })).toBeVisible();
       await expect(detail.getByText("Advanced diagnostics")).toBeVisible();
       await expect(detail.getByText("Runner activity")).toBeHidden();
+      await detail.getByText("Advanced diagnostics").click();
+      await expect(detail.getByText("Runner activity")).toBeVisible();
+      await expect(detail.getByText("Remote lanes", { exact: true })).toBeVisible();
+      await expect(detail.getByText("No remote lanes have started a local thread yet.")).toBeVisible();
+      await assertNoHorizontalOverflow(page, settings);
+      await expectControlsFitHorizontally(settings);
+      await detail.getByText("Advanced diagnostics").click();
+      await expect(detail.getByText("Runner activity")).toBeHidden();
       await expect(detail.getByText("Account env")).toHaveCount(0);
       await expect(detail.getByText("Base URL env")).toHaveCount(0);
       await expect(detail.getByText("WECHAT_ACCOUNT_ID")).toHaveCount(0);

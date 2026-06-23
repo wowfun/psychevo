@@ -59,6 +59,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     leftCollapsed,
     latestGatewayEvent,
     loadingOlderWorkdir,
+    loadChannelSources,
     loadOlderSessions,
     loadThreadSearchText,
     mainView,
@@ -363,6 +364,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onDoctorChannel={(channel) => void runAction(async () => doctorChannel(channel))}
               onDoctorChannels={() => void runAction(async () => doctorChannels())}
               onEditBackend={(backend) => setBackendDraft(backendDraftFromBackend(backend))}
+              onLoadChannelSources={(channel) => loadChannelSources(channel)}
               onPollWechatQrSetup={(sessionId) => pollWechatQrSetup(sessionId)}
               onSetChannelEnabled={(channel, enabled) => void runAction(async () => setChannelEnabled(channel, enabled))}
               onSetBackendEnabled={(backend, enabled) => void runAction(async () => updateBackendDraftFields(backend, { enabled }))}

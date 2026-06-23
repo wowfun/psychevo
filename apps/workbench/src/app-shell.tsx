@@ -20,6 +20,7 @@ import type {
   WorkbenchBackendDoctor,
   WorkbenchChannel,
   WorkbenchChannelDoctor,
+  WorkbenchChannelSource,
   WorkbenchUsageStats
 } from "./types";
 
@@ -184,6 +185,7 @@ export function MainSurface({
   onMainViewChange,
   onNewBackend,
   onOpenSession,
+  onLoadChannelSources,
   onPollWechatQrSetup,
   onRestoreArchivedSession,
   onRefreshUsageStats,
@@ -229,6 +231,7 @@ export function MainSurface({
   onMainViewChange(value: MainView): void;
   onNewBackend(): void;
   onOpenSession(threadId: string): void;
+  onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRestoreArchivedSession(threadId: string): void;
   onRefreshUsageStats(): void;
@@ -281,6 +284,7 @@ export function MainSurface({
         onEditBackend={onEditBackend}
         onNewBackend={onNewBackend}
         onOpenTranscript={() => onMainViewChange("transcript")}
+        onLoadChannelSources={onLoadChannelSources}
         onPollWechatQrSetup={onPollWechatQrSetup}
         onRefreshUsageStats={onRefreshUsageStats}
         onRestoreArchivedSession={onRestoreArchivedSession}

@@ -533,6 +533,29 @@ vi.mock("@psychevo/client", async () => {
         gatewayMock.channelRecords = gatewayMock.channelRecords.filter((channel) => channel.id !== record.id);
         return { channels: gatewayMock.channelRecords };
       }
+      if (method === "channel/source/list") {
+        const record = params as { id?: string };
+        return {
+          sources: [
+            {
+              sourceKey: `im.${record.id ?? "channel"}:source-hash`,
+              connectionId: record.id ?? "release",
+              platform: "telegram",
+              domain: "telegram",
+              chatType: "dm",
+              chatLabel: "ra...3456",
+              userLabel: "ra...4321",
+              visibleName: "telegram dm chat ra...3456 user ra...4321",
+              threadId: "thread-channel-source",
+              threadTitle: "Channel lane",
+              workdir: "/tmp/project",
+              activityStatus: "idle",
+              queuedTurns: 0,
+              updatedAtMs: Date.now()
+            }
+          ]
+        };
+      }
       if (method === "channel/doctor") {
         const record = params as { id?: string | null } | undefined;
         const selected = record?.id

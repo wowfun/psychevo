@@ -13,6 +13,7 @@ import {
   WorkspaceFileReadResultSchema,
   WorkspaceFileWriteResultSchema,
   type ChannelUpdateParams,
+  type ChannelSourceListResult,
   type ChannelWechatQrPollResult,
   type ChannelWechatQrStartResult,
   type ContextReadResult,
@@ -50,7 +51,8 @@ import type {
   WorkbenchBackend,
   WorkbenchBackendDoctor,
   WorkbenchChannel,
-  WorkbenchChannelDoctor
+  WorkbenchChannelDoctor,
+  WorkbenchChannelSource
 } from "./types";
 import {
   createHistoryDraftSession,
@@ -536,6 +538,17 @@ export function createAppActions(params: AppActionsParams) {
     return nextChannel;
   }
 
+  async function loadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]> {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const result = await params.client.request("channel/source/list", {
+      scope: scope(),
+      id: channel.id
+    }) as ChannelSourceListResult;
+    return result.sources as WorkbenchChannelSource[];
+  }
+
   async function deleteChannel(channel: WorkbenchChannel) {
     if (!params.client) {
       throw new Error("Gateway client is unavailable.");
@@ -671,6 +684,7 @@ export function createAppActions(params: AppActionsParams) {
     startNewThread,
     startShell,
     submitTurn,
+    loadChannelSources,
     updateChannel,
     updateBackendDraftFields,
     setChannelEnabled

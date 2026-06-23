@@ -200,6 +200,12 @@ describe("Workbench settings and backend controls", () => {
     });
     fireEvent.click(within(detailPage).getByRole("button", { name: "Bypass permissions" }));
     fireEvent.click(within(detailPage).getByText("Advanced diagnostics"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "channel/source/list")).toBe(true);
+    });
+    expect(within(detailPage).getByText("Remote lanes")).toBeTruthy();
+    expect(within(detailPage).getByText("Channel lane")).toBeTruthy();
+    expect(within(detailPage).getByText("/tmp/project")).toBeTruthy();
     fireEvent.change(within(detailPage).getByRole("textbox", { name: "Credential env" }), {
       target: { value: "" }
     });

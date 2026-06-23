@@ -40,7 +40,8 @@ import type {
   WorkbenchBackend,
   WorkbenchBackendDoctor,
   WorkbenchChannel,
-  WorkbenchChannelDoctor
+  WorkbenchChannelDoctor,
+  WorkbenchChannelSource
 } from "./types";
 
 const BACKEND_ENTRYPOINTS = ["peer", "subagent"] as const;
@@ -99,6 +100,7 @@ export function SettingsPage({
   onEditBackend,
   onNewBackend,
   onOpenTranscript,
+  onLoadChannelSources,
   onPollWechatQrSetup,
   onRestoreArchivedSession,
   onSaveBackendDraft,
@@ -139,6 +141,7 @@ export function SettingsPage({
   onEditBackend(backend: WorkbenchBackend): void;
   onNewBackend(): void;
   onOpenTranscript(): void;
+  onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRestoreArchivedSession(threadId: string): void;
   onSaveBackendDraft(draft: BackendDraft): void;
@@ -250,6 +253,7 @@ export function SettingsPage({
               onDoctorBackend={onDoctorBackend}
               onEditBackend={onEditBackend}
               onNewBackend={onNewBackend}
+              onLoadChannelSources={onLoadChannelSources}
               onPollWechatQrSetup={onPollWechatQrSetup}
               onRestoreArchivedSession={onRestoreArchivedSession}
               onSaveBackendDraft={onSaveBackendDraft}
@@ -296,6 +300,7 @@ function SettingsSectionPanel({
   onDoctorBackend,
   onEditBackend,
   onNewBackend,
+  onLoadChannelSources,
   onPollWechatQrSetup,
   onRefreshUsageStats,
   onRestoreArchivedSession,
@@ -334,6 +339,7 @@ function SettingsSectionPanel({
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
   onNewBackend(): void;
+  onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRefreshUsageStats(): void;
   onRestoreArchivedSession(threadId: string): void;
@@ -422,6 +428,7 @@ function SettingsSectionPanel({
           onDeleteChannel={onDeleteChannel}
           onDoctorChannel={onDoctorChannel}
           onDoctorChannels={onDoctorChannels}
+          onLoadChannelSources={onLoadChannelSources}
           onPollWechatQrSetup={onPollWechatQrSetup}
           onSetChannelEnabled={onSetChannelEnabled}
           onStartWechatQrSetup={onStartWechatQrSetup}
@@ -698,6 +705,7 @@ function ChannelsSettingsPanel({
   onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
+  onLoadChannelSources,
   onPollWechatQrSetup,
   onSetChannelEnabled,
   onStartWechatQrSetup,
@@ -712,6 +720,7 @@ function ChannelsSettingsPanel({
   onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
+  onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
@@ -740,6 +749,7 @@ function ChannelsSettingsPanel({
           await onDeleteChannel(selectedChannel);
           setSelectedChannelId(null);
         }}
+        onLoadSources={() => onLoadChannelSources(selectedChannel)}
         onUpdate={(draft) => onUpdateChannel(selectedChannel, draft)}
         rootRef={panelRef}
         sessionBrowserWorkspaces={sessionBrowserWorkspaces}
@@ -853,6 +863,7 @@ function ChannelSettingsDetail({
   doctor,
   onBack,
   onDelete,
+  onLoadSources,
   onUpdate,
   rootRef,
   sessionBrowserWorkspaces,
@@ -864,6 +875,7 @@ function ChannelSettingsDetail({
   doctor: WorkbenchChannelDoctor | null;
   onBack(): void;
   onDelete(): Promise<void>;
+  onLoadSources(): Promise<WorkbenchChannelSource[]>;
   onUpdate(draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
   rootRef: RefObject<HTMLElement | null>;
   sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
@@ -876,6 +888,9 @@ function ChannelSettingsDetail({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [sources, setSources] = useState<WorkbenchChannelSource[] | null>(null);
 
   useEffect(() => {
     setDraft(channelDraftFromChannel(channel));
@@ -883,6 +898,9 @@ function ChannelSettingsDetail({
     setDeletePrompt(false);
     setError(null);
     setSavedNotice(null);
+    setSourceError(null);
+    setSourceLoading(false);
+    setSources(null);
   }, [channel.id]);
 
   const savedSignature = channelDraftSignature(channelDraftFromChannel(channel));
@@ -946,6 +964,21 @@ function ChannelSettingsDetail({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setDeleting(false);
+    }
+  }
+
+  async function loadSources() {
+    if (sourceLoading || sources !== null) {
+      return;
+    }
+    setSourceLoading(true);
+    setSourceError(null);
+    try {
+      setSources(await onLoadSources());
+    } catch (err) {
+      setSourceError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSourceLoading(false);
     }
   }
 
@@ -1121,7 +1154,14 @@ function ChannelSettingsDetail({
           </ChannelFormRow>
         </ChannelDetailSection>
 
-        <details className="channelAdvancedDiagnostics">
+        <details
+          className="channelAdvancedDiagnostics"
+          onToggle={(event) => {
+            if (event.currentTarget.open) {
+              void loadSources();
+            }
+          }}
+        >
           <summary>Advanced diagnostics</summary>
           <ChannelCredentialRow
             disabled={busy}
@@ -1142,6 +1182,13 @@ function ChannelSettingsDetail({
               <div><dt>Last iLink code</dt><dd>{channel.runner.lastIlinkErrcode == null ? "none" : String(channel.runner.lastIlinkErrcode)}</dd></div>
               <div><dt>Last error</dt><dd>{channel.runner.lastError ?? "none"}</dd></div>
             </dl>
+          </ChannelFormRow>
+          <ChannelFormRow label="Remote lanes" hint="Shows which remote chats are bound to local threads.">
+            <ChannelSourceList
+              error={sourceError}
+              loading={sourceLoading}
+              sources={sources}
+            />
           </ChannelFormRow>
         </details>
 
@@ -1251,6 +1298,44 @@ function ChannelCredentialRow({
         />
       </div>
     </ChannelFormRow>
+  );
+}
+
+function ChannelSourceList({
+  error,
+  loading,
+  sources
+}: {
+  error: string | null;
+  loading: boolean;
+  sources: WorkbenchChannelSource[] | null;
+}) {
+  if (loading && sources === null) {
+    return <p className="channelSourceEmpty">Loading remote lanes...</p>;
+  }
+  if (error) {
+    return <p className="channelDetailError" role="alert">{error}</p>;
+  }
+  if (!sources || sources.length === 0) {
+    return <p className="channelSourceEmpty">No remote lanes have started a local thread yet.</p>;
+  }
+  return (
+    <div className="channelSourceList">
+      {sources.map((source) => (
+        <div className="channelSourceItem" key={source.sourceKey}>
+          <div>
+            <strong>{source.visibleName ?? `${source.platform} channel lane`}</strong>
+            <span>{source.threadTitle ?? source.threadId}</span>
+          </div>
+          <dl>
+            <div><dt>Workdir</dt><dd>{source.workdir || "unknown"}</dd></div>
+            <div><dt>Activity</dt><dd>{source.activityStatus}{source.queuedTurns > 0 ? ` (${source.queuedTurns} queued)` : ""}</dd></div>
+            <div><dt>Chat</dt><dd>{source.chatLabel ?? "unknown"}</dd></div>
+            <div><dt>User</dt><dd>{source.userLabel ?? "unknown"}</dd></div>
+          </dl>
+        </div>
+      ))}
+    </div>
   );
 }
 

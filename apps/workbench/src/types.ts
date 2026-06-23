@@ -2,6 +2,7 @@ import type {
   ContextReadResult,
   ChannelConfigView,
   ChannelDoctorChannelView,
+  ChannelSourceBindingView,
   GatewayEvent,
   GatewayInputPart,
   SessionUsageSummaryView,
@@ -58,6 +59,7 @@ export type WorkbenchBackendDoctor = {
 
 export type WorkbenchChannel = ChannelConfigView;
 export type WorkbenchChannelDoctor = ChannelDoctorChannelView;
+export type WorkbenchChannelSource = ChannelSourceBindingView;
 
 export type BackendDraft = {
   id: string;

@@ -1331,6 +1331,70 @@
   font-size: var(--pevo-font-size-xsmall);
 }
 
+.channelSourceEmpty {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelSourceList {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.channelSourceItem {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 45%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelSourceItem > div,
+.channelSourceItem dl,
+.channelSourceItem dl > div {
+  min-width: 0;
+}
+
+.channelSourceItem > div {
+  display: grid;
+  gap: 2px;
+}
+
+.channelSourceItem strong,
+.channelSourceItem span,
+.channelSourceItem dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelSourceItem span,
+.channelSourceItem dt {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelSourceItem dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.channelSourceItem dt,
+.channelSourceItem dd {
+  margin: 0;
+}
+
+.channelSourceItem dd {
+  font-size: var(--pevo-font-size-xsmall);
+}
+
 .channelAdvancedDiagnostics {
   min-width: 0;
   overflow: hidden;
@@ -1437,6 +1501,7 @@
   .channelTextareaPair,
   .channelReadonlyGrid,
   .channelRunnerGrid,
+  .channelSourceItem dl,
   .channelDangerSection {
     grid-template-columns: minmax(0, 1fr);
   }
