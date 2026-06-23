@@ -2,13 +2,20 @@
 
 ## 2026-06-23
 
+- Expanded model management for Workbench/TUI: Settings assignment pickers,
+  shared model-state synchronization, aux-model routing, fetched catalogs, and
+  improved picker UX/filtering for faster selection.
+- Fixed model controls and provider behavior: default-model persistence,
+  stale composer/model sync, no-auth OpenAI execution, and more readable
+  session/panel rendering in Workbench.
+- Updated shared Channel surface and `/agents` behavior, including cleaner
+  Channel detail affordances and IM workspace-binding rotation.
+- Advanced `peval-py` Trial workflows with analysis import, ATIF-compatible
+  trajectory conversion, reduced metric duplication, and cleaner report
+  rendering/interpretation.
 - Moved Channels toward a shared user-surface path with normalized input parts,
   shared slash-command handling, WeChat media metadata fallback, and source
   lane diagnostics in Workbench.
-- Simplified Channel details to show `Cancel` and `Save` only in dirty state;
-  moved `Enable` and `Test` to connected rows.
-- Rotated IM source bindings on workspace changes so subsequent messages start
-  clean threads in the new workspace.
 
 ## 2026-06-22
 
