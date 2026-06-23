@@ -95,6 +95,14 @@ Playwright desktop/mobile coverage. Channel runtime invariants are owned by
   or raw internal ids.
 - Slash command discovery is capability-filtered for channel entrypoints.
 - Explicit unsupported slash commands return bounded guidance.
+- Channel `/help` reflects the shared command catalog filtered for messaging
+  capabilities, including dynamic skills where available.
+- Channel skill and agent commands execute through the shared runtime path, not
+  a channel-only prompt rewrite.
+- Native IM image and file attachments are represented as validated Gateway
+  input or bounded context; unsupported media produces a bounded explanation.
+- Advanced diagnostics can show recent remote source lanes, local thread ids,
+  workdirs, and running/queued state without exposing raw secrets.
 - Desktop and mobile Playwright checks assert no horizontal overflow.
 
 ## Validation Boundaries

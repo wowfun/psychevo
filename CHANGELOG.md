@@ -2,6 +2,9 @@
 
 ## 2026-06-23
 
+- Moved Channels toward a shared user-surface path with normalized input parts,
+  shared slash-command handling, WeChat media metadata fallback, and source
+  lane diagnostics in Workbench.
 - Simplified Channel details to show `Cancel` and `Save` only in dirty state;
   moved `Enable` and `Test` to connected rows.
 - Rotated IM source bindings on workspace changes so subsequent messages start

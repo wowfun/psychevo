@@ -66,6 +66,8 @@ connections do not rewrite an existing thread's workdir or history.
 `DeliveryCapabilities` describe what an entrypoint can render or accept,
 including text, markdown, image and file attachments, voice, typing, edit
 streaming, buttons, cards, native threads, message deletion, and length limits.
+Capabilities are adapter facts, not product promises. Shared channel logic must
+branch on capabilities instead of platform names whenever possible.
 
 ## Configuration
 
@@ -150,10 +152,18 @@ while a turn is active, permission level, and whether it is read-only or can
 mutate local state. A channel advertises and executes only the commands it can
 represent safely.
 
-Attachment handling is a shared pipeline. The adapter downloads platform media,
-checks size and MIME constraints, stores it under a session or workspace
-attachment cache, and passes normalized attachment references to Gateway and
-runtime. Runtime code should not consume platform URLs directly.
+Attachment handling is a shared pipeline. For media kinds with a confirmed
+transfer contract, the adapter downloads platform media, checks size and MIME
+constraints, stores it under a session or workspace attachment cache, and
+passes normalized attachment references to Gateway and runtime. When transfer
+is unavailable, unconfirmed, or fails validation, the adapter emits bounded
+attachment metadata instead of dropping the message or exposing raw platform
+URLs. Runtime code should not consume platform URLs directly.
+
+The first shared attachment contract maps images to Gateway image input and
+maps files to validated model-visible context or bounded metadata. A future
+native file input part may replace that fallback, but channels must not invent
+platform-specific runtime file semantics.
 
 Permission approvals and Ask requests route through the originating surface.
 When a platform cannot render buttons or cards, the channel degrades to bounded
@@ -194,8 +204,9 @@ must not alter the underlying local thread transcript.
   runtime execution, so slash commands, interrupts, permission approvals, Ask
   replies, source ordering, queueing, and transcript projection do not fork
   into channel-only implementations.
-- Attachments pass through a shared validation and cache pipeline before
-  reaching Gateway/runtime; runtime code does not consume raw platform URLs.
+- Downloaded attachment bytes pass through a shared validation and cache
+  pipeline before reaching Gateway/runtime; unsupported or unconfirmed media
+  becomes bounded metadata; runtime code does not consume raw platform URLs.
 - Diagnostics, JSON views, logs, transcripts, model-visible context, and
   frontend state remain secret-free.
 

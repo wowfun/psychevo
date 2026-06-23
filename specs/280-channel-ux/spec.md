@@ -198,6 +198,27 @@ surfaces.
 Command discovery is capability-filtered. Unsupported commands return short
 guidance when typed explicitly.
 
+Channel command help should expose the same shared command catalog as other
+entrypoints, filtered for messaging capabilities. Workbench-only panel actions
+must degrade to concise text summaries or be hidden. Dynamic skill commands and
+agent invocation are user-surface features and must not require a Workbench
+session.
+
+Attachment UX is native to the messaging platform. Users send images and files
+with the IM client attachment flow; Channels normalize those attachments before
+runtime sees them. When a platform cannot upload or download a media kind, the
+fallback is a bounded explanation, not a raw platform URL or leaked local path.
+
+Workbench Channel diagnostics may show recent remote lanes bound to local
+threads, including workdir and running/queued state. The default Settings page
+stays focused on runtime policy; source/thread diagnostics live behind an
+advanced or diagnostic affordance.
+
+Workbench uses `channel/source/list` for that advanced view. The result is
+secret-free and redacts raw remote chat/user ids. Resetting a lane may remain
+an IM command such as `/reset` until a dedicated Workbench reset affordance has
+explicit confirmation behavior.
+
 ## Related Topics
 
 - [028 Channels](../028-channels/spec.md) defines the common model and shared

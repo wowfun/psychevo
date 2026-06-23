@@ -11,8 +11,9 @@ iLink checks are live opt-in only.
 - QR setup captures and persists WeChat iLink credentials without exposing
   secret values.
 - Runtime polling distinguishes healthy empty polls from expired QR sessions.
-- WeChat stays text-first and DM-first until platform capabilities prove richer
-  behavior.
+- WeChat stays DM-first, uses text fallback controls, and enables image/file
+  media only after the iLink item and transfer contract is confirmed and
+  covered by fake iLink tests.
 - Reconnect updates credentials while preserving user-owned runtime defaults
   and allowlists.
 - Real iLink checks are live opt-in only.
@@ -20,8 +21,8 @@ iLink checks are live opt-in only.
 ## Current Implementation Slice
 
 Current automation uses fake iLink servers, isolated profile homes, and
-Workbench harnesses for QR setup, reconnect, runner diagnostics, and text-only
-adapter behavior.
+Workbench harnesses for QR setup, reconnect, runner diagnostics, text command
+fallbacks, and any confirmed media item shapes.
 
 ## Scenario Matrix
 
@@ -38,8 +39,19 @@ adapter behavior.
 - Manual fallback tests cover `--credential-stdin`, `--account-id`,
   `--account-env`, `--ilink-base-url`, and `--json`.
 - iLink adapter tests cover polling, accepted inbound DM text, fail-closed
-  allowlists, `sendmessage`, context-token persistence, and text-only
+  allowlists, `sendmessage`, context-token persistence, and text fallback
   approval/clarify commands.
+- Current media fallback tests cover inbound image and file items becoming
+  bounded metadata instead of being silently ignored.
+- Confirmed CDN media tests, when enabled, must cover inbound image items,
+  inbound file items, required media download requests, validation failures,
+  cache writes, and the Gateway input shape created from each media kind.
+- Outbound media tests, when enabled, cover explicit validated attachment
+  references, sendmessage payload shape, upload failure fallback, and rejection
+  of arbitrary local paths in model text.
+- If iLink media item or endpoint shapes are not confirmed, tests must assert
+  that media is disabled with bounded diagnostics rather than silently ignored
+  or guessed.
 - Local long-poll read timeouts are treated as empty healthy polls.
 - iLink `ret=-14` or `errcode=-14` during fresh-login grace keeps the runner
   running with reason `qr_login_pending`.

@@ -6,7 +6,7 @@ psychevo_self_edit: deny
 Define Psychevo's first-party WeChat channel behavior.
 
 WeChat uses the Tencent iLink Bot API as a polling channel. The connection is
-QR-first, text-first, and DM-first. It follows the common channel model in
+QR-first and DM-first. It follows the common channel model in
 [028 Channels](../028-channels/spec.md) and the shared setup UX in
 [280 Channel UX](../280-channel-ux/spec.md).
 
@@ -15,8 +15,9 @@ QR-first, text-first, and DM-first. It follows the common channel model in
 - WeChat iLink credential and account setup
 - QR login and reconnect behavior
 - WeChat source identity and DM/group limitations
-- iLink polling, outbound sendmessage, and timeout classification
-- WeChat capability map and text fallback behavior
+- iLink polling, outbound sendmessage, media transfer, and timeout
+  classification
+- WeChat capability map, slash-command behavior, and text fallback behavior
 - WeChat-specific runner diagnostics
 
 Out of scope:
@@ -84,15 +85,61 @@ Group configuration is advanced. Ordinary WeChat group events may not be
 delivered by iLink. Group allowlists require an explicit warning and remain
 blocked if iLink never emits group events.
 
+## Capability Map
+
+WeChat supports plain text inbound/outbound and text fallback controls. It does
+not expose rich cards, buttons, message edits, or native thread controls in the
+current product contract.
+
+WeChat should accept image and file attachments when the iLink media contract is
+known. The observed iLink item type mapping is:
+
+- `1`: text, using `text_item.text`
+- `2`: image, using `image_item.media`
+- `3`: voice, using `voice_item.media`
+- `4`: file, using `file_item.media` plus file metadata
+- `5`: video, using `video_item.media`
+
+Media transfer uses iLink CDN references. Inbound media contains encrypted CDN
+download parameters and an AES key. Outbound media requires `getuploadurl`, CDN
+upload, and the resulting encrypted download parameter in `sendmessage`.
+Gateway and runtime must not see raw iLink CDN URLs or encrypted query params.
+
+Media support has a stricter implementation gate than text:
+
+- adapter code may depend only on item fields covered by fake iLink tests;
+- CDN upload/download, encryption, filename, MIME, and size handling must live
+  behind the WeChat adapter and shared attachment pipeline;
+- when CDN transfer is not implemented or fails, the adapter must preserve the
+  message as bounded attachment metadata rather than silently dropping it;
+- live iLink checks validate the fake contract but are never the default test
+  gate.
+
+Voice and video are out of scope unless iLink exposes them through the same
+confirmed media path with no additional user-facing semantics.
+
 ## Adapter Behavior
 
-The WeChat adapter polls iLink `getupdates`, submits accepted inbound text as a
-Gateway source-scoped turn, and sends final assistant text through iLink
+The WeChat adapter polls iLink `getupdates`, submits accepted inbound messages
+as Gateway source-scoped turns, and sends final assistant output through iLink
 `sendmessage`.
 
-WeChat is text-first in the initial slice. Approval and Ask requests use
-bounded text commands. Rich cards, buttons, message edits, and native threads
-are unavailable unless a later iLink capability proves otherwise.
+Approval and Ask requests use bounded text commands. Slash commands use the
+shared command catalog filtered for messaging capabilities. Unsupported
+commands return concise guidance instead of falling through as prompts.
+
+When WeChat CDN transfer is implemented and enabled, inbound images are
+downloaded, validated, cached, and passed as Gateway image input. Inbound
+text-like files are downloaded, validated, cached, and passed as visible
+bounded context. Until that transfer contract is covered by fake iLink and
+fake CDN tests, image, file, voice, and video items are preserved as bounded
+metadata instead of silently disappearing or leaking raw iLink CDN details.
+Other files remain bounded metadata until Gateway/runtime has native file input
+semantics.
+
+Outbound attachment delivery is allowed only for explicit, validated file
+references produced by Psychevo. The adapter must never send arbitrary model
+text that merely looks like a local path.
 
 The adapter may persist owner-only context tokens under the active profile home
 when iLink requires them. Context tokens are secrets and follow the same
