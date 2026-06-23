@@ -51,6 +51,7 @@ import {
   type GatewayInputPart,
   type GatewayRequestScope,
   type InitializeResult,
+  type ModelOptionView,
   type ObservabilityReadResult,
   type RuntimeOptionsResult,
   type SessionSummary,
@@ -423,6 +424,55 @@ export function App() {
   const controls = settings?.controls ?? null;
   const modelReady = Boolean(selectedModel?.trim());
   const modelTurnBlockReason = modelTurnBlockReasonForControls(controls);
+
+  function mergeModelCatalogOptions(options: ModelOptionView[]) {
+    if (options.length === 0) {
+      return;
+    }
+    setSettings((current) => {
+      if (!current?.controls) {
+        return current;
+      }
+      const modelDetails = new Map<string, ModelOptionView>();
+      for (const option of current.controls.modelDetails ?? []) {
+        modelDetails.set(option.value, option);
+      }
+      for (const option of options) {
+        modelDetails.set(option.value, option);
+      }
+      const modelOptions = new Set(current.controls.modelOptions ?? []);
+      for (const option of options) {
+        modelOptions.add(option.value);
+      }
+      return {
+        ...current,
+        controls: {
+          ...current.controls,
+          modelOptions: [...modelOptions].sort(),
+          modelDetails: [...modelDetails.values()].sort((left, right) => left.value.localeCompare(right.value))
+        }
+      };
+    });
+  }
+
+  async function refreshWorkbenchControls() {
+    if (!client) {
+      return;
+    }
+    await runAction(async () => {
+      const nextSettings = SettingsReadResultSchema.parse(await client.request("settings/read", {
+        threadId: currentThreadId ?? null,
+        workdir: activeWorkbenchWorkdir
+      }));
+      setSettings(nextSettings);
+      const nextControls = nextSettings.controls;
+      if (!nextControls) {
+        return;
+      }
+      setSelectedModel(nextControls.model ?? null);
+      setSelectedVariant(nextControls.variant ?? "none");
+    });
+  }
 
   function updateMainView(value: MainView) {
     mainViewRef.current = value;
@@ -970,6 +1020,54 @@ export function App() {
     updateMainView
   });
 
+  function persistComposerModelState(nextModel: string | null, nextVariant: string) {
+    const model = nextModel?.trim();
+    if (!client || !model) {
+      return;
+    }
+    void runAction(async () => {
+      const result = asRecord(await client.request("model/state/set", {
+        workdir: activeWorkbenchWorkdir,
+        threadId: currentThreadId ?? null,
+        model,
+        reasoningEffort: nextVariant === "none" ? null : nextVariant
+      }));
+      const resultModel = optionalStringField(result.model) ?? model;
+      const resultVariant = optionalStringField(result.reasoningEffort) ?? "none";
+      const recentModels = stringArray(result.recentModels);
+      setSettings((current) => {
+        if (!current?.controls) {
+          return current;
+        }
+        return {
+          ...current,
+          controls: {
+            ...current.controls,
+            model: resultModel,
+            variant: resultVariant,
+            recentModels: recentModels.length > 0 ? recentModels : current.controls.recentModels
+          }
+        };
+      });
+    });
+  }
+
+  function changeComposerModelSelection(nextModel: string | null, nextVariant: string) {
+    setSelectedModel(nextModel);
+    setSelectedVariant(nextVariant);
+    persistComposerModelState(nextModel, nextVariant);
+  }
+
+  function changeComposerModel(nextModel: string | null) {
+    setSelectedModel(nextModel);
+    persistComposerModelState(nextModel, selectedVariant);
+  }
+
+  function changeComposerVariant(nextVariant: string) {
+    setSelectedVariant(nextVariant);
+    persistComposerModelState(selectedModel, nextVariant);
+  }
+
   return <WorkbenchLayout {...{
     acceptWorkspaceChange, activeCommandOverlay, activeRightTab, activeRightTabId, activeScope, activeWorkbenchWorkdir,
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch,
@@ -978,6 +1076,7 @@ export function App() {
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, extraRuntimeModeValues, handleAttachment, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
     loadingOlderWorkdir, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
+    onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
     pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable, pollWechatQrSetup,
     refreshAgentSurface, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
     restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runnableAgents, runAction,
@@ -986,8 +1085,8 @@ export function App() {
     selectedRuntimeMode, selectedRuntimeRef, selectedVariant, modelReady, modelTurnBlockReason, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
     setAttachments, setBackendDraft, setChannelEnabled, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
     setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
-    setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel, setSelectedRuntimeMode, setSelectedRuntimeRef,
-    setSelectedVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, settings, settingsSection,
+    setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel: changeComposerModel, setSelectedModelSelection: changeComposerModelSelection, setSelectedRuntimeMode, setSelectedRuntimeRef,
+    setSelectedVariant: changeComposerVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, settings, settingsSection,
     usageStats, usageStatsError, usageStatsLoading, refreshUsageStats,
     clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, startWechatQrSetup, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
     togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateChannel, updateMainView, viewEpochRef, workMode,

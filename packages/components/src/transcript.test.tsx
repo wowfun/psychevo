@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 import { TranscriptPanel } from "./transcript";
 
@@ -269,3 +269,136 @@ describe("TranscriptPanel read evidence", () => {
     expect(screen.queryByText("path")).toBeNull();
   });
 });
+
+describe("TranscriptPanel session scroll behavior", () => {
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+  const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+  const originalScrollTo = Element.prototype.scrollTo;
+  let scrollHeight = 1200;
+  let clientHeight = 400;
+  let scrollToMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    scrollHeight = 1200;
+    clientHeight = 400;
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return scrollHeight;
+      }
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return clientHeight;
+      }
+    });
+    scrollToMock = vi.fn(function (this: Element, options?: ScrollToOptions | number, y?: number) {
+      const top = typeof options === "number" ? y ?? 0 : options?.top ?? 0;
+      setScrollTop(this as HTMLElement, top);
+    });
+    Element.prototype.scrollTo = scrollToMock as typeof Element.prototype.scrollTo;
+  });
+
+  afterEach(() => {
+    restorePrototypeDescriptor("scrollHeight", scrollHeightDescriptor);
+    restorePrototypeDescriptor("clientHeight", clientHeightDescriptor);
+    Element.prototype.scrollTo = originalScrollTo;
+  });
+
+  it("positions an initial long thread at the latest message without smooth scrolling", () => {
+    render(<TranscriptPanel entries={[scrollEntry("thread-a")]} threadId="thread-a" />);
+
+    expect(scrollToMock).toHaveBeenLastCalledWith({ top: 1200, behavior: "auto" });
+    expect(scrollToMock).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+  });
+
+  it("positions an unvisited switched thread at the latest message without animation", () => {
+    const { rerender } = render(<TranscriptPanel entries={[scrollEntry("thread-a")]} threadId="thread-a" />);
+    scrollToMock.mockClear();
+
+    rerender(<TranscriptPanel entries={[scrollEntry("thread-b")]} threadId="thread-b" />);
+
+    expect(scrollToMock).toHaveBeenLastCalledWith({ top: 1200, behavior: "auto" });
+    expect(scrollToMock).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+  });
+
+  it("restores a visited thread's in-memory scroll position", () => {
+    const { container, rerender } = render(<TranscriptPanel entries={[scrollEntry("thread-a")]} threadId="thread-a" />);
+    const scroller = transcriptScroller(container);
+    setScrollTop(scroller, 220);
+    fireEvent.scroll(scroller);
+
+    rerender(<TranscriptPanel entries={[scrollEntry("thread-b")]} threadId="thread-b" />);
+    scrollToMock.mockClear();
+
+    rerender(<TranscriptPanel entries={[scrollEntry("thread-a")]} threadId="thread-a" />);
+
+    expect(scrollToMock).toHaveBeenLastCalledWith({ top: 220, behavior: "auto" });
+  });
+
+  it("does not force same-thread updates to the bottom after the user scrolls away", () => {
+    const { container, rerender } = render(<TranscriptPanel entries={[scrollEntry("thread-a")]} threadId="thread-a" />);
+    const scroller = transcriptScroller(container);
+    scrollToMock.mockClear();
+    setScrollTop(scroller, 180);
+    fireEvent.scroll(scroller);
+
+    rerender(<TranscriptPanel entries={[scrollEntry("thread-a"), scrollEntry("thread-a", "entry-a-2")]} threadId="thread-a" />);
+
+    expect(scrollToMock).not.toHaveBeenCalled();
+  });
+
+  it("jumps directly to latest and hides the jump control", () => {
+    const { container } = render(<TranscriptPanel entries={[scrollEntry("thread-a")]} threadId="thread-a" />);
+    const scroller = transcriptScroller(container);
+    scrollToMock.mockClear();
+    setScrollTop(scroller, 160);
+    fireEvent.scroll(scroller);
+
+    fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+
+    expect(scrollToMock).toHaveBeenLastCalledWith({ top: 1200, behavior: "auto" });
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+  });
+});
+
+function scrollEntry(threadId: string, id = `entry-${threadId}`): TranscriptEntry {
+  return {
+    ...transcriptEntry([
+      transcriptBlock({
+        id: `${id}:text`,
+        kind: "text",
+        body: `message for ${threadId}`,
+        metadata: null
+      })
+    ]),
+    id,
+    threadId
+  };
+}
+
+function transcriptScroller(container: HTMLElement): HTMLElement {
+  const scroller = container.querySelector(".pevo-threadItems");
+  expect(scroller).toBeTruthy();
+  return scroller as HTMLElement;
+}
+
+function setScrollTop(scroller: HTMLElement, top: number): void {
+  Object.defineProperty(scroller, "scrollTop", {
+    configurable: true,
+    value: top,
+    writable: true
+  });
+}
+
+function restorePrototypeDescriptor(
+  property: "clientHeight" | "scrollHeight",
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(HTMLElement.prototype, property, descriptor);
+    return;
+  }
+  delete (HTMLElement.prototype as unknown as Record<string, unknown>)[property];
+}

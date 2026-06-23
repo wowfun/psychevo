@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { PREFS_APPEARANCE_VERSION, PREFS_KEY } from "../src/storage";
 import { repoRoot, startPevoWeb } from "./harness";
 
 test.describe("pevo Web Workbench", () => {
@@ -180,6 +181,7 @@ test.describe("pevo Web Workbench", () => {
       await expect(settings.getByRole("button", { name: "Appearance" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "Debug" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "Agents" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Models" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "Archived sessions" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "General", exact: true })).toHaveCount(0);
       await expect(settings.getByRole("button", { name: "Session", exact: true })).toHaveCount(0);
@@ -207,6 +209,30 @@ test.describe("pevo Web Workbench", () => {
       await assertNoHorizontalOverflow(page, settings);
       await captureWorkbench(page, testInfo, `settings-appearance-${isMobile ? "mobile" : "desktop"}`);
 
+      await settings.getByRole("button", { name: "Light" }).click();
+      await expect(page.locator("html")).toHaveAttribute("data-pevo-appearance", "light");
+      await settings.getByRole("button", { name: "Usage" }).click();
+      const usage = settings.getByRole("region", { name: "Usage" });
+      await expect(usage).toBeVisible();
+      const heatmap = usage.getByRole("region", { name: "Token activity" });
+      await expect(heatmap).toBeVisible();
+      await heatmap.locator(".usageHeatmapGrid").evaluate((grid) => {
+        const cells = Array.from(grid.querySelectorAll<HTMLElement>(".usageHeatmapCell:not(.is-empty)")).slice(0, 5);
+        cells.forEach((cell, index) => {
+          cell.dataset.level = String(index);
+          cell.title = index === 0 ? "No tokens" : `Level ${index}`;
+        });
+      });
+      const heatmapColors = await heatmap.locator(".usageHeatmapCell:not(.is-empty)").evaluateAll((cells) => (
+        Array.from(new Set(cells.slice(0, 5).map((cell) => getComputedStyle(cell).backgroundColor)))
+      ));
+      expect(heatmapColors.length).toBeGreaterThanOrEqual(5);
+      await assertNoHorizontalOverflow(page, settings);
+      await captureWorkbench(page, testInfo, `settings-usage-light-${isMobile ? "mobile" : "desktop"}`);
+      await settings.getByRole("button", { name: "Appearance" }).click();
+      await settings.getByRole("button", { name: "Dark" }).click();
+      await expect(page.locator("html")).toHaveAttribute("data-pevo-appearance", "dark");
+
       await settings.getByRole("button", { name: "Debug" }).click();
       await expect(settings.getByRole("heading", { name: "Debug" })).toBeVisible();
       await assertNoHorizontalOverflow(page, settings);
@@ -221,6 +247,34 @@ test.describe("pevo Web Workbench", () => {
       await assertNoHorizontalOverflow(page, settings);
       await captureWorkbench(page, testInfo, `settings-agents-${isMobile ? "mobile" : "desktop"}`);
 
+      await settings.getByRole("button", { name: "Models" }).click();
+      const models = settings.getByRole("region", { name: "Models" });
+      await expect(models).toBeVisible();
+      await expect(models.getByRole("button", { name: "Default model" })).toBeVisible();
+      await expect(models.getByRole("button", { name: "Title generation" })).toBeVisible();
+      await expect(models.getByRole("button", { name: "Context compression" })).toBeVisible();
+      await expect(models.getByRole("combobox", { name: /model|reasoning/i })).toHaveCount(0);
+      await expect(models.locator('input[placeholder="provider/model"]')).toHaveCount(0);
+      await expect(models.getByText("OpenCode Zen")).toBeVisible();
+      await expect(models.getByText("Default reasoning")).toHaveCount(0);
+      await models.getByRole("button", { name: "Default model" }).click();
+      const defaultPicker = models.getByRole("dialog", { name: "Default model and reasoning" });
+      await expect(defaultPicker.getByRole("searchbox", { name: "Default model filter" })).toBeVisible();
+      await expect(defaultPicker.getByText("Explicit reasoning effort")).toHaveCount(0);
+      await expect(defaultPicker.locator(".modelReasoningProviderHeading", { hasText: "LM Studio" })).toBeVisible();
+      await expect(defaultPicker.getByRole("radio", { name: /noop/ })).toHaveAttribute("data-model-value", "lmstudio/noop");
+      await expect(defaultPicker.getByRole("radio", { name: /noop/ })).not.toHaveAttribute("title", /.+/);
+      await expectModelRowsFillPopover(defaultPicker);
+      await captureWorkbench(page, testInfo, `settings-models-picker-${isMobile ? "mobile" : "desktop"}`);
+      await page.keyboard.press("Escape");
+      await expect(models.locator(".modelAssignmentRow > div:first-child span")).toHaveCount(0);
+      await expect(models.getByText(/missing OPENROUTER_API_KEY/)).toHaveCount(0);
+      await expect(models.getByText("no key required")).toHaveCount(0);
+      await expect(models.locator(".modelProviderIdentity > span").filter({ hasText: /models|OPENROUTER_API_KEY|no key required|Available/ })).toHaveCount(0);
+      await assertNoHorizontalOverflow(page, settings);
+      await expectControlsFitHorizontally(models.locator(".modelAssignmentPanel"));
+      await captureWorkbench(page, testInfo, `settings-models-${isMobile ? "mobile" : "desktop"}`);
+
       await settings.getByRole("button", { name: "Archived sessions" }).click();
       await expect(settings.getByRole("region", { name: "Archived sessions" })).toBeVisible();
       await assertNoHorizontalOverflow(page, settings);
@@ -233,16 +287,20 @@ test.describe("pevo Web Workbench", () => {
       await expect(form.getByLabel("Target")).toHaveCount(0);
       await expect(form.getByLabel("ID")).toHaveValue("");
       const commandJson = form.getByLabel("Command JSON");
-      await expect(commandJson).toHaveValue("");
-      await expect(commandJson).toHaveAttribute("placeholder", /"command": "opencode"/);
-      await expect(commandJson).toHaveAttribute("placeholder", /"args": \["acp"\]/);
+      await expect(commandJson).toHaveValue(/"command": "opencode"/);
+      expect(JSON.parse(await commandJson.inputValue())).toEqual({
+        command: "opencode",
+        args: ["acp"],
+        env: {}
+      });
+      expect(await commandJson.evaluate((element) => (element as HTMLTextAreaElement).placeholder)).toBe("");
       await expect(form.getByLabel("Command", { exact: true })).toHaveCount(0);
       await expect(form.getByLabel("Args")).toHaveCount(0);
       await expect(form.getByLabel("Env")).toHaveCount(0);
       await expect(form.getByLabel("CWD")).toHaveValue("");
       await expect(form.locator("label").filter({ hasText: "Label" }).getByText("Optional")).toBeVisible();
       await expect(form.locator("label").filter({ hasText: "Description" }).getByText("Optional")).toBeVisible();
-      await expect(form.getByText(/Resolves to /)).toBeVisible();
+      await expect(form.getByText(/Resolves to /)).toHaveCount(0);
       await expect(form.getByLabel("Enabled")).toHaveCount(0);
       await expect(form.getByText("Entrypoints")).toHaveCount(0);
       await assertNoHorizontalOverflow(page, form);
@@ -399,9 +457,13 @@ test.describe("pevo Web Workbench", () => {
       await page.goto(server.url);
       for (const appearance of ["dark", "light", "warm"] as const) {
         await page.evaluate((value) => {
-          localStorage.setItem("psychevo.workbench.v0.prefs", JSON.stringify({ appearance: value, debug: false }));
-        }, appearance);
+          localStorage.setItem(
+            value.key,
+            JSON.stringify({ appearance: value.appearance, appearanceVersion: value.version, debug: false })
+          );
+        }, { appearance, key: PREFS_KEY, version: PREFS_APPEARANCE_VERSION });
         await page.reload();
+        await expect(page.locator("html")).toHaveAttribute("data-pevo-appearance", appearance);
         await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
         await openPanel(page, isMobile, "Transcript");
         await injectStructuredToolRows(page);
@@ -424,7 +486,7 @@ test.describe("pevo Web Workbench", () => {
     }
   });
 
-  test("secondary menus close on outside click", async ({ page, isMobile }) => {
+  test("secondary menus close on outside click", async ({ page, isMobile }, testInfo) => {
     const server = await startPevoWeb({ live: false });
     try {
       await page.goto(server.url);
@@ -436,13 +498,41 @@ test.describe("pevo Web Workbench", () => {
       await page.getByRole("button", { name: "Send message" }).click();
       await expect(page.locator(".pevo-threadItems")).toContainText("Create a visible history row.");
       await openPanel(page, isMobile, "History");
+      const sessionRow = page.locator(".pevo-sessionRow").first();
+      await sessionRow.locator(".pevo-sessionTitle").evaluate((element) => {
+        const longTitle = "A very long session title that must truncate before the recent update time and running status";
+        element.textContent = longTitle;
+        element.setAttribute("title", longTitle);
+      });
+      await sessionRow.locator(".pevo-sessionMeta").evaluate((element) => {
+        const running = document.createElement("b");
+        running.className = "pevo-sessionRunning";
+        running.setAttribute("aria-label", "running");
+        running.textContent = "running";
+        element.appendChild(running);
+      });
+      await sessionRow.hover();
+      const sessionList = page.locator(".pevo-sessionList");
+      await expect.poll(() => sessionList.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+      const titleLayout = await sessionRow.evaluate((element) => {
+        const title = element.querySelector(".pevo-sessionTitleAnchor")?.getBoundingClientRect();
+        const meta = element.querySelector(".pevo-sessionMeta")?.getBoundingClientRect();
+        return title && meta ? { titleRight: title.right, metaLeft: meta.left } : null;
+      });
+      expect(titleLayout).not.toBeNull();
+      expect(titleLayout!.titleRight).toBeLessThanOrEqual(titleLayout!.metaLeft + 1);
+      await captureWorkbench(page, testInfo, `history-long-session-${isMobile ? "mobile" : "desktop"}`);
       const sessionMenu = page.locator(".pevo-sessionMenu").first();
       const sessionTrigger = sessionMenu.locator("summary");
       await expect(sessionMenu).toHaveCount(1);
       await sessionTrigger.click();
       await expect(sessionMenu).toHaveJSProperty("open", true);
-      await page.mouse.click(10, 10);
+      await openPanel(page, isMobile, "Transcript");
+      const transcriptBox = await page.getByRole("region", { name: "Transcript" }).boundingBox();
+      expect(transcriptBox).not.toBeNull();
+      await page.mouse.click(transcriptBox!.x + transcriptBox!.width / 2, transcriptBox!.y + 24);
       await expect(sessionMenu).toHaveJSProperty("open", false);
+      await openPanel(page, isMobile, "History");
       await sessionTrigger.click();
       await sessionMenu.getByRole("menuitem", { name: "Rename" }).click();
       await expect(page.locator(".pevo-sessionMenu[open]")).toHaveCount(0);
@@ -711,6 +801,17 @@ async function expectControlsFitHorizontally(locator: Locator) {
       .filter((item) => item.clippedX)
   );
   expect(clipped).toEqual([]);
+}
+
+async function expectModelRowsFillPopover(popover: Locator) {
+  const gaps = await popover.locator(".modelReasoningModelRows .modelReasoningRow").evaluateAll((rows) => (
+    rows.map((row) => {
+      const element = row as HTMLElement;
+      const parent = element.parentElement as HTMLElement | null;
+      return parent ? parent.clientWidth - element.clientWidth : 0;
+    })
+  ));
+  expect(Math.max(...gaps)).toBeLessThanOrEqual(8);
 }
 
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {

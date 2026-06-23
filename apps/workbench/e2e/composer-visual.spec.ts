@@ -4,10 +4,25 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { repoRoot, startPevoWeb } from "./harness";
 
 const screenshotDir = path.join(repoRoot, ".local/playwright/screenshots");
+const MANY_MODEL_CONFIG = `
+[provider.lmstudio.models."alpha-1"]
+[provider.lmstudio.models."beta-2"]
+[provider.lmstudio.models."gamma-3"]
+[provider.lmstudio.models."delta-4"]
+[provider.lmstudio.models."epsilon-5"]
+[provider.lmstudio.models."zeta-6"]
+
+[provider.opencode-zen.options]
+base_url = "https://opencode.ai/zen/v1"
+no_auth = true
+
+[provider.opencode-zen.models."big-pickle"]
+cost = { input = 0, output = 0, cache_read = 0, cache_write = 0, request = 0 }
+`;
 
 test.describe("Workbench composer visual contract", () => {
   test("renders composer controls, plan chip, and interrupt state without overlap", async ({ page, isMobile }, testInfo) => {
-    const server = await startPevoWeb({ live: false });
+    const server = await startPevoWeb({ configAppend: MANY_MODEL_CONFIG, live: false, model: "opencode-zen/big-pickle" });
     mkdirSync(screenshotDir, { recursive: true });
     try {
       await page.goto(server.url);
@@ -35,12 +50,42 @@ test.describe("Workbench composer visual contract", () => {
       });
       await agentControl.click();
       expect(await selectedOptionText(page.getByRole("combobox", { name: "Permission mode" }))).toBe("Default Permission");
-      const modelSelect = page.getByRole("combobox", { name: "Model" });
-      await expect(modelSelect).toBeVisible();
-      expect(await selectedOptionText(modelSelect)).toBe("lmstudio/noop");
-      await expect(page.locator('.composerSubmitControls .statusSelect[data-status="model"] .statusSelectDisplay')).toHaveText("noop");
-      await expectSelectTextFits(modelSelect);
-      await expect(page.getByRole("combobox", { name: "Variant" })).toBeVisible();
+      const modelButton = page.getByRole("button", { name: "Model" });
+      await expect(modelButton).toBeVisible();
+      await expect(modelButton).toContainText("big-pickle Default");
+      await expect(modelButton).not.toContainText("opencode-zen/big-pickle");
+      await expect(modelButton).toHaveAttribute("title", "opencode-zen/big-pickle / Default");
+      await expectTextFits(modelButton.locator("span").first());
+      await expect(page.getByRole("combobox", { name: "Model" })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Variant" })).toHaveCount(0);
+      await expect(page.getByRole("option", { name: "Select model" })).toHaveCount(0);
+      await modelButton.click();
+      const modelPopover = page.getByRole("dialog", { name: "Model and reasoning" });
+      await expect(modelPopover).toBeVisible();
+      await expect(modelPopover.getByRole("searchbox", { name: "Model filter" })).toBeVisible();
+      const freeModelRow = modelPopover.getByRole("radiogroup", { name: "Model" }).getByRole("radio", { name: /big-pickle/ });
+      await expect(freeModelRow).toHaveAttribute("aria-checked", "true");
+      await expect(freeModelRow).toHaveAttribute("data-model-value", "opencode-zen/big-pickle");
+      await expect(freeModelRow).toHaveAttribute("data-model-free", "true");
+      await expect(freeModelRow.locator(".modelReasoningFreeBadge")).toHaveText("Free");
+      await expect(freeModelRow).not.toHaveAttribute("title", /.+/);
+      await expect(modelPopover.getByText("opencode-zen/big-pickle")).toHaveCount(0);
+      await expect(modelPopover.locator(".modelReasoningProviderHeading", { hasText: "OpenCode Zen" })).toBeVisible();
+      await expect(modelPopover.getByRole("radiogroup", { name: "Reasoning" }).getByRole("radio", { name: "Default" })).toHaveAttribute("aria-checked", "true");
+      await expect(modelPopover.getByText("Explicit reasoning effort")).toHaveCount(0);
+      const modelRows = modelPopover.locator(".modelReasoningModelRows");
+      await expect(modelRows.getByRole("radio")).toHaveCount(7);
+      expect(await modelRows.evaluate((element) => element.scrollHeight > element.clientHeight && element.clientHeight <= 232)).toBe(true);
+      await expectModelRowsFillPopover(modelPopover);
+      await expectElementInsideViewport(page, modelPopover);
+      const modelPopoverBox = await modelPopover.boundingBox();
+      expect(modelPopoverBox).not.toBeNull();
+      expect(modelPopoverBox!.width).toBeGreaterThanOrEqual(220);
+      expect(modelPopoverBox!.width).toBeLessThan(320);
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-model-reasoning-${testInfo.project.name}.png`)
+      });
+      await modelButton.click();
       await expect(page.getByRole("button", { name: "Context usage" })).toBeVisible();
       await expect(page.getByRole("tablist", { name: "Turn mode" })).toHaveCount(0);
       await assertComposerGeometry(page, { isMobile, plan: false });
@@ -110,12 +155,18 @@ test.describe("Workbench composer visual contract", () => {
       await page.getByRole("button", { name: "New Session" }).click();
       await openPanel(page, isMobile, "Transcript");
 
-      const modelSelect = page.getByRole("combobox", { name: "Model" });
-      await expect(modelSelect).toBeVisible();
-      expect(await selectedOptionText(modelSelect)).toBe("lmstudio/mimo-v2.5-pro");
-      await expect(page.locator('.composerSubmitControls .statusSelect[data-status="model"] .statusSelectDisplay')).toHaveText("mimo-v2.5-pro");
-      await expectSelectTextFits(modelSelect);
-      await expect(modelSelect).toHaveAttribute("title", "lmstudio/mimo-v2.5-pro");
+      const modelButton = page.getByRole("button", { name: "Model" });
+      await expect(modelButton).toBeVisible();
+      await expect(modelButton).toContainText("mimo-v2.5-pro Default");
+      await expect(modelButton).not.toContainText("lmstudio/mimo-v2.5-pro");
+      await expectTextFits(modelButton.locator("span").first());
+      await expect(modelButton).toHaveAttribute("title", "lmstudio/mimo-v2.5-pro / Default");
+      await modelButton.click();
+      const modelPopover = page.getByRole("dialog", { name: "Model and reasoning" });
+      await expect(modelPopover.getByRole("radio", { name: /mimo-v2\.5-pro/ })).toHaveAttribute("data-model-value", "lmstudio/mimo-v2.5-pro");
+      await expect(modelPopover.getByRole("radio", { name: /mimo-v2\.5-pro/ })).not.toHaveAttribute("title", /.+/);
+      await expectElementInsideViewport(page, modelPopover);
+      await modelButton.click();
 
       const threadItems = page.locator(".pevo-threadItems");
       await threadItems.evaluate((container) => {
@@ -391,18 +442,16 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   const footer = page.locator(".pevo-composerFooter");
   const action = page.locator(".pevo-sendButton");
   const agent = page.getByRole("button", { name: "Agent" });
-  const model = page.getByRole("combobox", { name: "Model" });
-  const variant = page.getByRole("combobox", { name: "Variant" });
+  const model = page.getByRole("button", { name: "Model" });
   const context = page.getByRole("button", { name: "Context usage" });
   const chip = page.locator(".pevo-planChip");
-  const [addBox, inputBox, footerBox, actionBox, agentBox, modelBox, variantBox, contextBox, chipBox] = await Promise.all([
+  const [addBox, inputBox, footerBox, actionBox, agentBox, modelBox, contextBox, chipBox] = await Promise.all([
     add.boundingBox(),
     input.boundingBox(),
     footer.boundingBox(),
     action.boundingBox(),
     agent.boundingBox(),
     model.boundingBox(),
-    variant.boundingBox(),
     context.boundingBox(),
     options.plan ? chip.boundingBox() : Promise.resolve(null)
   ]);
@@ -413,7 +462,6 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   expect(actionBox).not.toBeNull();
   expect(agentBox).not.toBeNull();
   expect(modelBox).not.toBeNull();
-  expect(variantBox).not.toBeNull();
   expect(contextBox).not.toBeNull();
   expect(agentBox!.width).toBeLessThanOrEqual(210);
 
@@ -421,19 +469,17 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   const addCenterY = addBox!.y + addBox!.height / 2;
   const agentCenterY = agentBox!.y + agentBox!.height / 2;
   const modelCenterY = modelBox!.y + modelBox!.height / 2;
-  const variantCenterY = variantBox!.y + variantBox!.height / 2;
   const contextCenterY = contextBox!.y + contextBox!.height / 2;
   if (options.isMobile) {
     const viewport = await page.viewportSize();
     expect(viewport).not.toBeNull();
-    const visibleBoxes = [addBox!, agentBox!, modelBox!, variantBox!, contextBox!, actionBox!];
+    const visibleBoxes = [addBox!, agentBox!, modelBox!, contextBox!, actionBox!];
     for (const box of visibleBoxes) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(viewport!.width);
     }
     expect(Math.abs(addCenterY - agentCenterY)).toBeLessThanOrEqual(5);
     expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(5);
-    expect(Math.abs(actionCenterY - variantCenterY)).toBeLessThanOrEqual(5);
     expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(5);
     if (options.plan) {
       expect(chipBox).not.toBeNull();
@@ -441,14 +487,12 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
     }
     expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
     expect(addBox!.x).toBeLessThan(agentBox!.x);
-    expect(variantBox!.x).toBeGreaterThan(modelBox!.x);
-    expect(contextBox!.x).toBeGreaterThan(variantBox!.x);
+    expect(contextBox!.x).toBeGreaterThan(modelBox!.x);
     expect(contextBox!.x).toBeLessThan(actionBox!.x);
     return;
   }
   expect(Math.abs(actionCenterY - agentCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(4);
-  expect(Math.abs(actionCenterY - variantCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(4);
 
   if (options.plan) {
@@ -462,8 +506,7 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   expect(addBox!.x).toBeLessThan(agentBox!.x);
   expect(modelBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeLessThan(actionBox!.x);
-  expect(variantBox!.x).toBeGreaterThan(modelBox!.x);
-  expect(contextBox!.x).toBeGreaterThan(variantBox!.x);
+  expect(contextBox!.x).toBeGreaterThan(modelBox!.x);
   expect(contextBox!.x).toBeLessThan(actionBox!.x);
 }
 
@@ -492,6 +535,17 @@ async function forceInterruptVisualState(page: Page) {
       footer.insertBefore(status, rightControls);
     }
   });
+}
+
+async function expectModelRowsFillPopover(popover: Locator) {
+  const gaps = await popover.locator(".modelReasoningModelRows .modelReasoningRow").evaluateAll((rows) => (
+    rows.map((row) => {
+      const element = row as HTMLElement;
+      const parent = element.parentElement as HTMLElement | null;
+      return parent ? parent.clientWidth - element.clientWidth : 0;
+    })
+  ));
+  expect(Math.max(...gaps)).toBeLessThanOrEqual(8);
 }
 
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {

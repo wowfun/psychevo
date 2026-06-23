@@ -9,6 +9,7 @@ import type {
   SessionUsageSummaryView,
   SettingsReadResult
 } from "@psychevo/protocol";
+import { ModelReasoningSelector, modelOptionsForControls } from "./model-picker";
 import { SessionUsageGrid, normalizedPercent } from "./right-workspace";
 
 export function ComposerRequests({
@@ -262,6 +263,7 @@ export function ComposerSubmitControls({
   model,
   variant,
   onModelChange,
+  onModelSelectionChange,
   onVariantChange
 }: {
   context: ContextReadResult | null;
@@ -270,6 +272,7 @@ export function ComposerSubmitControls({
   model: string | null;
   variant: string;
   onModelChange(value: string | null): void;
+  onModelSelectionChange?(model: string | null, variant: string): void;
   onVariantChange(value: string): void;
 }) {
   const contextPercent = normalizedPercent(context?.percent);
@@ -301,21 +304,16 @@ export function ComposerSubmitControls({
 
   return (
     <div className="composerSubmitControls" aria-label="Composer submit controls">
-      <StatusSelect
-        label="Model"
-        value={model ?? ""}
-        values={modelSelectValues(model, controls?.modelOptions ?? [])}
-        optionLabels={{ "": emptyModelOptionLabel(controls) }}
-        renderDisplayValue={(value) => modelDisplayValue(value, controls)}
-        onChange={(value) => onModelChange(value || null)}
-      />
-      <StatusSelect
-        label="Variant"
-        optionLabels={{ none: "default" }}
-        renderDisplayValue={(value) => value === "none" ? "default" : value || "variant"}
-        value={variant}
-        values={controls?.variantOptions ?? ["none"]}
-        onChange={onVariantChange}
+      <ModelReasoningSelector
+        emptyLabel={emptyModelOptionLabel(controls)}
+        model={model}
+        options={modelOptionsForControls(controls, model)}
+        recentModels={controls?.recentModels ?? []}
+        variant={variant}
+        variantOptions={controls?.variantOptions ?? []}
+        onModelChange={onModelChange}
+        onSelectionChange={onModelSelectionChange}
+        onVariantChange={onVariantChange}
       />
       <div className="composerStatusContext" ref={contextPopoverRef}>
         <button
@@ -433,26 +431,6 @@ function defaultStatusSelectValue(label: string, value: string): string {
     return "Default Permission";
   }
   return value || label.toLowerCase();
-}
-
-function modelSelectValues(model: string | null, options: string[]): string[] {
-  const values = ["", ...options];
-  const selected = model?.trim();
-  if (selected && !values.includes(selected)) {
-    values.splice(1, 0, selected);
-  }
-  return values;
-}
-
-function modelDisplayValue(
-  value: string,
-  controls: SettingsReadResult["controls"]
-): string {
-  const trimmed = value.trim();
-  if (trimmed) {
-    return trimmed;
-  }
-  return emptyModelOptionLabel(controls);
 }
 
 function emptyModelOptionLabel(controls: SettingsReadResult["controls"]): string {

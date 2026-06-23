@@ -109,7 +109,7 @@ export type RightWorkspaceTab = {
 };
 
 export type MainView = "transcript" | "search" | "settings";
-export type SettingsSection = "appearance" | "usage" | "debug" | "agents" | "channels" | "archived";
+export type SettingsSection = "appearance" | "models" | "usage" | "debug" | "agents" | "channels" | "archived";
 export type WorkbenchUsageStats = UsageReadResult;
 export type Appearance = "dark" | "light" | "warm";
 export type CommandOverlay = "commands";

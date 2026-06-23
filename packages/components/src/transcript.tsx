@@ -1,5 +1,5 @@
 import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, ExternalLink } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -26,6 +26,7 @@ export interface TranscriptPanelProps {
   entries: TranscriptEntry[];
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
+  threadId?: string | null;
 }
 
 export interface MarkdownTextProps {
@@ -40,31 +41,58 @@ const STREAM_REVEAL_INITIAL_CHARS = 24;
 const STREAM_REVEAL_INTERVAL_MS = 24;
 const STREAM_REVEAL_MAX_STEP_CHARS = 16;
 const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+const BOTTOM_THRESHOLD_PX = 48;
+const TRANSCRIPT_SCROLL_MEMORY_LIMIT = 64;
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSession }: TranscriptPanelProps) {
+type TranscriptScrollMemory = {
+  atBottom: boolean;
+  top: number;
+};
+
+export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSession, threadId }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollIdleTimer = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
+  const scrollMemoryRef = useRef<Map<string, TranscriptScrollMemory>>(new Map());
+  const activeThreadKeyRef = useRef<string | null>(null);
   const orderedEntries = useMemo(() => orderTranscriptEntries(entries), [entries]);
   const visibleEntries = useMemo(() => orderedEntries.filter((entry) => visibleBlocks(entry).length > 0), [orderedEntries]);
+  const threadKey = useMemo(() => transcriptThreadKey(threadId, visibleEntries), [threadId, visibleEntries]);
   const hasRunningActivityBlock = useMemo(
     () => visibleEntries.some((entry) => visibleBlocks(entry).some(isRunningActivityBlock)),
     [visibleEntries]
   );
   const threadItemsClass = `pevo-threadItems ${scrolling ? "is-scrolling" : ""}`.trim();
 
-  useEffect(() => {
-    if (!followingBottom) {
-      return;
-    }
+  function updateFollowingBottom(value: boolean) {
+    setFollowingBottom(value);
+  }
+
+  useIsomorphicLayoutEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) {
       return;
     }
-    scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
-  }, [followingBottom, visibleEntries, activity?.running]);
+    const threadChanged = activeThreadKeyRef.current !== threadKey;
+    activeThreadKeyRef.current = threadKey;
+    if (threadChanged) {
+      const remembered = threadKey ? recallTranscriptScroll(scrollMemoryRef.current, threadKey) : null;
+      const atBottom = remembered?.atBottom ?? true;
+      const top = atBottom ? scroller.scrollHeight : clampScrollTop(scroller, remembered?.top ?? 0);
+      scrollTranscript(scroller, top);
+      updateFollowingBottom(atBottom);
+      rememberCurrentTranscriptScroll(scrollMemoryRef.current, threadKey, top, atBottom);
+      return;
+    }
+    if (!followingBottom) {
+      return;
+    }
+    scrollTranscript(scroller, scroller.scrollHeight);
+    rememberCurrentTranscriptScroll(scrollMemoryRef.current, threadKey, scroller.scrollHeight, true);
+  }, [followingBottom, threadKey, visibleEntries, activity?.running]);
 
   useEffect(() => () => {
     if (scrollIdleTimer.current !== null) {
@@ -87,8 +115,9 @@ export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSess
         ref={scrollRef}
         onScroll={(event) => {
           const target = event.currentTarget;
-          const atBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 48;
-          setFollowingBottom(atBottom);
+          const atBottom = transcriptAtBottom(target);
+          updateFollowingBottom(atBottom);
+          rememberCurrentTranscriptScroll(scrollMemoryRef.current, activeThreadKeyRef.current ?? threadKey, target.scrollTop, atBottom);
           setScrolling(true);
           if (scrollIdleTimer.current !== null) {
             globalThis.clearTimeout(scrollIdleTimer.current);
@@ -120,8 +149,11 @@ export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSess
           data-tooltip="Jump to latest"
           onClick={() => {
             const scroller = scrollRef.current;
-            scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
-            setFollowingBottom(true);
+            if (scroller) {
+              scrollTranscript(scroller, scroller.scrollHeight);
+              rememberCurrentTranscriptScroll(scrollMemoryRef.current, activeThreadKeyRef.current ?? threadKey, scroller.scrollHeight, true);
+            }
+            updateFollowingBottom(true);
           }}
           title="Jump to latest"
           type="button"
@@ -131,6 +163,65 @@ export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSess
       )}
     </section>
   );
+}
+
+function transcriptThreadKey(threadId: string | null | undefined, entries: TranscriptEntry[]): string | null {
+  const explicit = threadId?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  for (const entry of entries) {
+    if (entry.threadId.trim()) {
+      return entry.threadId;
+    }
+  }
+  return null;
+}
+
+function transcriptAtBottom(scroller: HTMLElement): boolean {
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < BOTTOM_THRESHOLD_PX;
+}
+
+function scrollTranscript(scroller: HTMLElement, top: number): void {
+  scroller.scrollTo({ top, behavior: "auto" });
+}
+
+function clampScrollTop(scroller: HTMLElement, top: number): number {
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  return Math.min(Math.max(0, top), maxTop);
+}
+
+function recallTranscriptScroll(
+  memory: Map<string, TranscriptScrollMemory>,
+  threadKey: string
+): TranscriptScrollMemory | null {
+  const remembered = memory.get(threadKey);
+  if (!remembered) {
+    return null;
+  }
+  memory.delete(threadKey);
+  memory.set(threadKey, remembered);
+  return remembered;
+}
+
+function rememberCurrentTranscriptScroll(
+  memory: Map<string, TranscriptScrollMemory>,
+  threadKey: string | null,
+  top: number,
+  atBottom: boolean
+): void {
+  if (!threadKey) {
+    return;
+  }
+  memory.delete(threadKey);
+  memory.set(threadKey, { atBottom, top });
+  while (memory.size > TRANSCRIPT_SCROLL_MEMORY_LIMIT) {
+    const oldest = memory.keys().next().value;
+    if (typeof oldest !== "string") {
+      break;
+    }
+    memory.delete(oldest);
+  }
 }
 
 function orderTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {

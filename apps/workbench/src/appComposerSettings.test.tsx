@@ -40,6 +40,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(settingsRegion).getByRole("heading", { name: "Appearance" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Archived sessions" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Usage" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Models" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Debug" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Agents" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Channels" })).toBeTruthy();
@@ -60,6 +61,210 @@ describe("Workbench settings and backend controls", () => {
     expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
   });
 
+  it("configures providers and auxiliary models in Settings Models", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Models" }));
+
+    const modelsPanel = await within(settingsRegion).findByRole("region", { name: "Models" });
+    expect(within(modelsPanel).getByText("OpenCode Zen")).toBeTruthy();
+    expect(within(modelsPanel).getByText("Xiaomi Token Plan")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "model/settings/read")).toBe(true);
+
+    const zenRow = within(modelsPanel).getByText("OpenCode Zen").closest(".modelProviderRow") as HTMLElement;
+    fireEvent.click(within(zenRow).getByRole("button", { name: "Fetch" }));
+    expect(await within(modelsPanel).findByText("OpenCode Zen: catalog updated")).toBeTruthy();
+    expect(within(zenRow).getByRole("button", { name: "2 models" })).toBeTruthy();
+    expect(gatewayMock.requestLog).toContainEqual({
+      method: "model/provider/catalog",
+      params: expect.objectContaining({
+        providerId: "opencode-zen",
+        refresh: true
+      })
+    });
+
+    const defaultRow = within(modelsPanel).getByText("Default model").closest(".modelAssignmentRow") as HTMLElement;
+    fireEvent.click(within(defaultRow).getByRole("button", { name: "Default model" }));
+    const defaultPicker = within(defaultRow).getByRole("dialog", { name: "Default model and reasoning" });
+    expect(within(defaultPicker).getByRole("searchbox", { name: "Default model filter" })).toBeTruthy();
+    const freeDefaultRow = within(defaultPicker).getByRole("radio", { name: /mimo-v2\.5-free/ });
+    expect(freeDefaultRow.getAttribute("data-model-free")).toBe("true");
+    expect(freeDefaultRow.querySelector(".modelReasoningFreeBadge")?.textContent).toBe("Free");
+    const paidDefaultRow = within(defaultPicker).getByRole("radio", { name: /deepseek-v4-pro/ });
+    expect(paidDefaultRow.getAttribute("data-model-free")).toBeNull();
+    expect(paidDefaultRow.querySelector(".modelReasoningFreeBadge")).toBeNull();
+    fireEvent.click(freeDefaultRow);
+    fireEvent.click(within(defaultPicker).getByRole("radio", { name: "High" }));
+    fireEvent.keyDown(defaultPicker, { key: "Escape" });
+    expect(within(modelsPanel).getByText(/free models may route data/)).toBeTruthy();
+    expect(within(defaultRow).queryByRole("textbox")).toBeNull();
+    const settingsReadCountBeforeDefaultSave = gatewayMock.requestLog.filter((entry) => entry.method === "settings/read").length;
+    fireEvent.click(within(defaultRow).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "model/assignment/set",
+        params: expect.objectContaining({
+          target: "default",
+          provider: "opencode-zen",
+          model: "mimo-v2.5-free",
+          reasoningEffort: "high"
+        })
+      });
+    });
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "settings/read").length).toBeGreaterThan(settingsReadCountBeforeDefaultSave);
+    });
+
+    const titleRow = within(modelsPanel).getByText("Title generation").closest(".modelAssignmentRow") as HTMLElement;
+    fireEvent.click(within(titleRow).getByRole("button", { name: "Title generation" }));
+    const titlePicker = within(titleRow).getByRole("dialog", { name: "Title generation and reasoning" });
+    fireEvent.click(within(titlePicker).getByRole("radio", { name: /mimo-v2\.5-free/ }));
+    fireEvent.click(within(titlePicker).getByRole("radio", { name: "Low" }));
+    fireEvent.click(within(titleRow).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "model/assignment/set",
+        params: expect.objectContaining({
+          target: "auxiliary",
+          task: "title_generation",
+          provider: "opencode-zen",
+          model: "mimo-v2.5-free",
+          reasoningEffort: "low"
+        })
+      });
+    });
+
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
+    const modelButton = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => {
+      expect(modelButton.textContent).toContain("mimo-v2.5-free Default");
+    });
+    fireEvent.click(modelButton);
+    const modelPopover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    const freeComposerRow = within(modelPopover).getByRole("radio", { name: /mimo-v2\.5-free/ });
+    expect(freeComposerRow.getAttribute("data-model-value")).toBe("opencode-zen/mimo-v2.5-free");
+    expect(freeComposerRow.getAttribute("data-model-free")).toBe("true");
+    expect(freeComposerRow.querySelector(".modelReasoningFreeBadge")?.textContent).toBe("Free");
+    expect(modelProviderHeadings(modelPopover)).toContain("OpenCode Zen");
+    expect(freeComposerRow.getAttribute("title")).toBeNull();
+    fireEvent.keyDown(modelPopover, { key: "Escape" });
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "use the saved default" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          input: [{ type: "text", text: "use the saved default" }],
+          model: "opencode-zen/mimo-v2.5-free",
+          reasoningEffort: null
+        })
+      });
+    });
+  });
+
+  it("keeps the scoped composer model after saving a different global default", async () => {
+    gatewayMock.model = "openai/gpt-4o";
+    gatewayMock.modelSettings = {
+      ...gatewayMock.modelSettings,
+      defaultModel: "openai/gpt-4o"
+    };
+    gatewayMock.modelOverride = "xiaomi/xiaomi-token-high";
+
+    render(<App />);
+
+    const initialModelButton = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => {
+      expect(initialModelButton.textContent).toContain("xiaomi-token-high Default");
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Models" }));
+    const modelsPanel = await within(settingsRegion).findByRole("region", { name: "Models" });
+    const zenRow = within(modelsPanel).getByText("OpenCode Zen").closest(".modelProviderRow") as HTMLElement;
+    fireEvent.click(within(zenRow).getByRole("button", { name: "Fetch" }));
+    expect(await within(modelsPanel).findByText("OpenCode Zen: catalog updated")).toBeTruthy();
+
+    const defaultRow = within(modelsPanel).getByText("Default model").closest(".modelAssignmentRow") as HTMLElement;
+    fireEvent.click(within(defaultRow).getByRole("button", { name: "Default model" }));
+    const defaultPicker = within(defaultRow).getByRole("dialog", { name: "Default model and reasoning" });
+    fireEvent.click(within(defaultPicker).getByRole("radio", { name: /mimo-v2\.5-free/ }));
+    fireEvent.keyDown(defaultPicker, { key: "Escape" });
+    fireEvent.click(within(defaultRow).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "model/assignment/set",
+        params: expect.objectContaining({
+          target: "default",
+          provider: "opencode-zen",
+          model: "mimo-v2.5-free"
+        })
+      });
+    });
+
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
+    const modelButton = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => {
+      expect(modelButton.textContent).toContain("xiaomi-token-high Default");
+    });
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "keep scoped model" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          input: [{ type: "text", text: "keep scoped model" }],
+          model: "xiaomi/xiaomi-token-high"
+        })
+      });
+    });
+  });
+
+  it("shows the global Settings default separately from the current effective composer model", async () => {
+    gatewayMock.model = "xiaomi/xiaomi-token-high";
+    gatewayMock.modelSettings = {
+      ...gatewayMock.modelSettings,
+      defaultModel: "opencode-zen/big-pickle",
+      defaultReasoningEffort: "high",
+      modelOptions: [
+        ...(gatewayMock.modelSettings.modelOptions as Array<Record<string, unknown>>),
+        { provider: "opencode-zen", id: "big-pickle", value: "opencode-zen/big-pickle", label: null, providerLabel: "OpenCode Zen", free: true, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
+      ]
+    };
+
+    render(<App />);
+
+    const composerModelButton = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => {
+      expect(composerModelButton.textContent).toContain("xiaomi-token-high Default");
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Models" }));
+    const modelsPanel = await within(settingsRegion).findByRole("region", { name: "Models" });
+    const defaultRow = within(modelsPanel).getByText("Default model").closest(".modelAssignmentRow") as HTMLElement;
+    const defaultButton = within(defaultRow).getByRole("button", { name: "Default model" });
+
+    await waitFor(() => {
+      expect(defaultButton.textContent).toContain("big-pickle High");
+    });
+    expect(defaultButton.textContent).not.toContain("xiaomi-token-high");
+    expect(defaultButton.getAttribute("title")).toBe("opencode-zen/big-pickle / High");
+
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
+    const currentComposerModelButton = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => {
+      expect(currentComposerModelButton.textContent).toContain("xiaomi-token-high Default");
+    });
+  });
+
   it("loads all-history usage summaries in Settings", async () => {
     render(<App />);
 
@@ -72,6 +277,10 @@ describe("Workbench settings and backend controls", () => {
     expect(within(usagePanel).getByText("Last 30 days")).toBeTruthy();
     expect(within(usagePanel).getByText("Last 7 days")).toBeTruthy();
     expect(within(usagePanel).getByText("Token activity")).toBeTruthy();
+    const heatmap = within(usagePanel).getByRole("region", { name: "Token activity" });
+    for (const level of ["1", "2", "3", "4"]) {
+      expect(heatmap.querySelectorAll(`.usageHeatmapCell[data-level="${level}"]`).length).toBeGreaterThan(0);
+    }
     expect(within(usagePanel).getByRole("button", { name: "Refresh usage" })).toBeTruthy();
     expect(gatewayMock.requestLog.some((entry) => (
       entry.method === "usage/read"
@@ -550,20 +759,106 @@ describe("Workbench settings and backend controls", () => {
     });
   });
 
-  it("renders provider-qualified model options in the selected indicator", async () => {
+  it("renders model and reasoning in one grouped selector", async () => {
     render(<App />);
 
-    const modelSelect = await screen.findByRole("combobox", { name: "Model" }) as HTMLSelectElement;
-    expect(modelSelect.selectedOptions[0]?.textContent).toBe("xiaomi/xiaomi-token-high");
-    expect(modelSelect.title).toBe("xiaomi/xiaomi-token-high");
-    expect(screen.getByRole("option", { name: "openai/gpt-4o" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "xiaomi/xiaomi-token-high" })).toBeTruthy();
-    expect(screen.getAllByText("xiaomi/xiaomi-token-high").length).toBeGreaterThan(0);
-    expect(screen.queryByText("xiaomi-token-high")).toBeNull();
-    expect(modelSelect.closest(".statusSelect")?.getAttribute("style")).toContain("--pevo-status-select-value-width: 25ch");
-    const variantSelect = screen.getByRole("combobox", { name: "Variant" }) as HTMLSelectElement;
-    expect(variantSelect.selectedOptions[0]?.textContent).toBe("default");
+    const modelButton = await screen.findByRole("button", { name: "Model" });
+    expect(modelButton.textContent).toContain("xiaomi-token-high Default");
+    expect(modelButton.textContent).not.toContain("xiaomi/xiaomi-token-high");
+    expect(modelButton.getAttribute("title")).toBe("xiaomi/xiaomi-token-high / Default");
+    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Variant" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Select model" })).toBeNull();
+
+    fireEvent.click(modelButton);
+    const popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    const filter = within(popover).getByRole("searchbox", { name: "Model filter" });
+    expect(filter).toBeTruthy();
+    const modelGroup = within(popover).getByRole("radiogroup", { name: "Model" });
+    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).getAttribute("aria-checked")).toBe("true");
+    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).getAttribute("data-model-value")).toBe("xiaomi/xiaomi-token-high");
+    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).getAttribute("title")).toBeNull();
+    expect(within(modelGroup).queryByText(/xiaomi\/xiaomi-token-high/)).toBeNull();
+    expect((popover as HTMLElement).style.getPropertyValue("--pevo-model-picker-popover-width")).toBe("25ch");
+    expect(modelProviderHeadings(modelGroup)).toEqual(["Xiaomi", "OpenAI", "Xiaomi"]);
+    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).querySelector("small")).toBeNull();
+    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).querySelector(".modelReasoningFreeBadge")).toBeNull();
+    fireEvent.change(filter, { target: { value: "gpt" } });
+    expect(within(modelGroup).queryByRole("radio", { name: /xiaomi-token-high/ })).toBeNull();
+    expect(within(modelGroup).getByRole("radio", { name: /gpt-4o/ })).toBeTruthy();
+    expect((popover as HTMLElement).style.getPropertyValue("--pevo-model-picker-popover-width")).toBe("24ch");
+    expect(modelProviderHeadings(modelGroup)).toEqual(["OpenAI"]);
+    fireEvent.change(filter, { target: { value: "" } });
+    const reasoningGroup = within(popover).getByRole("radiogroup", { name: "Reasoning" });
+    expect(within(reasoningGroup).getByRole("radio", { name: /Default/ }).getAttribute("aria-checked")).toBe("true");
+    expect(within(reasoningGroup).getByRole("radio", { name: "High" })).toBeTruthy();
+    expect(within(reasoningGroup).queryByText("Explicit reasoning effort")).toBeNull();
     expect(screen.queryByText("medium")).toBeNull();
+  });
+
+  it("groups adjacent visible model providers after recent ordering", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Model" }));
+    let popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    fireEvent.click(within(popover).getByRole("radio", { name: /gpt-4o/ }));
+    fireEvent.click(within(popover).getByRole("radio", { name: /xiaomi-token-high/ }));
+
+    popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    const modelGroup = within(popover).getByRole("radiogroup", { name: "Model" });
+    expect(modelProviderHeadings(modelGroup)).toEqual(["Xiaomi", "OpenAI", "Xiaomi"]);
+    expect(Array.from(modelGroup.querySelectorAll(".modelReasoningRow")).map((row) => row.getAttribute("data-model-value"))).toEqual([
+      "xiaomi/xiaomi-token-high",
+      "openai/gpt-4o",
+      "xiaomi/xiaomi-token-low"
+    ]);
+  });
+
+  it("persists composer model choices to shared model state", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Model" }));
+    let popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    fireEvent.click(within(popover).getByRole("radio", { name: /gpt-4o/ }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "model/state/set",
+        params: expect.objectContaining({
+          workdir: "/tmp/project",
+          model: "openai/gpt-4o",
+          reasoningEffort: null
+        })
+      });
+    });
+
+    fireEvent.click(within(popover).getByRole("radio", { name: /xiaomi-token-low/ }));
+    popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    fireEvent.click(within(popover).getByRole("radio", { name: "Medium" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "model/state/set",
+        params: expect.objectContaining({
+          workdir: "/tmp/project",
+          model: "xiaomi/xiaomi-token-low",
+          reasoningEffort: "medium"
+        })
+      });
+    });
+  });
+
+  it("adapts reasoning options when switching models", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Model" }));
+    let popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    fireEvent.click(within(popover).getByRole("radio", { name: /High/ }));
+    expect((within(popover).getByRole("radio", { name: /High/ })).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(within(popover).getByRole("radio", { name: /gpt-4o/ }));
+
+    popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    const reasoningGroup = within(popover).getByRole("radiogroup", { name: "Reasoning" });
+    expect(within(reasoningGroup).getByRole("radio", { name: /Default/ }).getAttribute("aria-checked")).toBe("true");
+    expect(within(reasoningGroup).queryByRole("radio", { name: /High/ })).toBeNull();
   });
 
   it("blocks prompt turns until a concrete provider-qualified model is selected", async () => {
@@ -580,7 +875,9 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Model" }), { target: { value: "openai/gpt-4o" } });
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    const popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    fireEvent.click(within(popover).getByRole("radio", { name: /gpt-4o/ }));
     expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -829,3 +1126,9 @@ describe("Workbench settings and backend controls", () => {
     });
   });
 });
+
+function modelProviderHeadings(root: Element): string[] {
+  return Array.from(root.querySelectorAll(".modelReasoningProviderHeading"))
+    .map((heading) => heading.textContent?.trim() ?? "")
+    .filter(Boolean);
+}

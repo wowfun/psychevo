@@ -34,6 +34,25 @@ const gatewayMock = vi.hoisted(() => {
     pendingPermissions: [] as Array<Record<string, unknown>>,
     pendingClarifies: [] as Array<Record<string, unknown>>
   };
+  function mergeMockModelOptions(
+    current: Array<Record<string, unknown>>,
+    next: Array<Record<string, unknown>>
+  ): Array<Record<string, unknown>> {
+    const merged = new Map<string, Record<string, unknown>>();
+    for (const option of current) {
+      const value = option.value;
+      if (typeof value === "string") {
+        merged.set(value, option);
+      }
+    }
+    for (const option of next) {
+      const value = option.value;
+      if (typeof value === "string") {
+        merged.set(value, option);
+      }
+    }
+    return [...merged.values()];
+  }
   return {
     commandExecute: ((command: string): unknown => {
       return {
@@ -121,9 +140,115 @@ const gatewayMock = vi.hoisted(() => {
     scope,
     sessionSummaries: [] as Array<Record<string, unknown>>,
     model: "xiaomi/xiaomi-token-high" as string | null,
+    modelVariant: "none",
+    modelOverride: null as string | null,
+    modelVariantOverride: null as string | null,
+    recentModels: [] as string[],
     modelError: null as string | null,
     modelStatus: "resolved" as "resolved" | "unconfigured" | "error",
+    modelSettings: {
+      scope: "global",
+      workdir: scope.workdir,
+      defaultModel: "xiaomi/xiaomi-token-high",
+      defaultReasoningEffort: null,
+      providers: [
+        {
+          id: "opencode-zen",
+          label: "OpenCode Zen",
+          builtIn: true,
+          configured: false,
+          baseUrl: "https://opencode.ai/zen/v1",
+          apiKeyEnv: "OPENCODE_ZEN_API_KEY",
+          credentialStatus: "notRequired",
+          noAuth: true,
+          canFetchModels: true,
+          unavailableReason: null
+        },
+        {
+          id: "xiaomi-token-plan",
+          label: "Xiaomi Token Plan",
+          builtIn: true,
+          configured: true,
+          baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+          apiKeyEnv: "XIAOMI_TOKEN_PLAN_API_KEY",
+          credentialStatus: "present",
+          noAuth: false,
+          canFetchModels: true,
+          unavailableReason: null
+        },
+        {
+          id: "custom",
+          label: "Custom",
+          builtIn: false,
+          configured: false,
+          baseUrl: null,
+          apiKeyEnv: null,
+          credentialStatus: "missing",
+          noAuth: false,
+          canFetchModels: false,
+          unavailableReason: "requires provider setup"
+        }
+      ],
+      auxiliary: [
+        { task: "title_generation", label: "Title generation", provider: "auto", model: "", reasoningEffort: null, effectiveModel: null },
+        { task: "compression", label: "Context compression", provider: "xiaomi-token-plan", model: "mimo-v2.5-pro", reasoningEffort: null, effectiveModel: "xiaomi-token-plan/mimo-v2.5-pro" }
+      ],
+      modelOptions: [
+        { provider: "xiaomi-token-plan", id: "mimo-v2.5-pro", value: "xiaomi-token-plan/mimo-v2.5-pro", label: null, providerLabel: "Xiaomi Token Plan", free: false, contextLimit: 1048576, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] },
+        { provider: "xiaomi", id: "xiaomi-token-high", value: "xiaomi/xiaomi-token-high", label: null, providerLabel: "Xiaomi", free: false, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
+      ]
+    } as Record<string, unknown>,
+    modelCatalog: [
+      { provider: "opencode-zen", id: "mimo-v2.5-free", value: "opencode-zen/mimo-v2.5-free", label: null, providerLabel: "OpenCode Zen", free: true, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] },
+      { provider: "opencode-zen", id: "deepseek-v4-pro", value: "opencode-zen/deepseek-v4-pro", label: null, providerLabel: "OpenCode Zen", free: false, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
+    ] as Array<Record<string, unknown>>,
+    mergeModelOptions: mergeMockModelOptions,
+    modelSettingsResult() {
+      return {
+        ...gatewayMock.modelSettings,
+        providers: [...(gatewayMock.modelSettings.providers as Array<Record<string, unknown>>)],
+        auxiliary: [...(gatewayMock.modelSettings.auxiliary as Array<Record<string, unknown>>)],
+        modelOptions: [...(gatewayMock.modelSettings.modelOptions as Array<Record<string, unknown>>)]
+      };
+    },
     settingsResult(agent: string | null) {
+      const fetchedCatalogOptions = (gatewayMock.modelSettings.modelOptions as Array<Record<string, unknown>>)
+        .filter((option) => option.provider === "opencode-zen");
+      const modelDetails = mergeMockModelOptions([
+        {
+          provider: "xiaomi",
+          id: "xiaomi-token-high",
+          value: "xiaomi/xiaomi-token-high",
+          label: null,
+          providerLabel: "Xiaomi",
+          free: false,
+          contextLimit: null,
+          reasoningSupported: true,
+          reasoningEfforts: ["none", "low", "medium", "high"]
+        },
+        {
+          provider: "openai",
+          id: "gpt-4o",
+          value: "openai/gpt-4o",
+          label: null,
+          providerLabel: "OpenAI",
+          free: false,
+          contextLimit: null,
+          reasoningSupported: false,
+          reasoningEfforts: ["none"]
+        },
+        {
+          provider: "xiaomi",
+          id: "xiaomi-token-low",
+          value: "xiaomi/xiaomi-token-low",
+          label: null,
+          providerLabel: "Xiaomi",
+          free: false,
+          contextLimit: null,
+          reasoningSupported: true,
+          reasoningEfforts: ["none", "low", "medium"]
+        }
+      ], fetchedCatalogOptions);
       return {
         workdir: scope.workdir,
         project: {
@@ -138,13 +263,17 @@ const gatewayMock = vi.hoisted(() => {
           permissionMode: "default",
           mode: "default",
           agent,
-          model: gatewayMock.model,
+          model: gatewayMock.modelOverride ?? gatewayMock.model,
           modelStatus: gatewayMock.modelStatus,
           modelError: gatewayMock.modelError,
-          variant: "none",
+          variant: gatewayMock.modelVariantOverride ?? gatewayMock.modelVariant,
           permissionModeOptions: ["default", "acceptEdits", "dontAsk", "bypassPermissions"],
           modeOptions: ["default", "plan"],
-          modelOptions: ["xiaomi/xiaomi-token-high", "openai/gpt-4o"],
+          modelOptions: modelDetails
+            .map((option) => option.value)
+            .filter((value): value is string => typeof value === "string"),
+          modelDetails,
+          recentModels: gatewayMock.recentModels,
           variantOptions: ["none"],
           runtimeRef: "native"
         }
@@ -327,6 +456,115 @@ vi.mock("@psychevo/client", async () => {
       if (method === "settings/update") {
         const record = params as { agent?: string | null };
         return gatewayMock.settingsResult(record.agent ?? null);
+      }
+      if (method === "model/settings/read") {
+        return gatewayMock.modelSettingsResult();
+      }
+      if (method === "model/provider/catalog") {
+        const record = params as { providerId?: string };
+        gatewayMock.modelSettings = {
+          ...gatewayMock.modelSettings,
+          modelOptions: gatewayMock.mergeModelOptions(
+            gatewayMock.modelSettings.modelOptions as Array<Record<string, unknown>>,
+            gatewayMock.modelCatalog
+          )
+        };
+        return {
+          providerId: record?.providerId ?? "opencode-zen",
+          models: gatewayMock.modelCatalog
+        };
+      }
+      if (method === "model/provider/save") {
+        const record = params as {
+          providerId: string;
+          label: string;
+          baseUrl: string;
+          apiKeyEnv?: string | null;
+          noAuth?: boolean;
+        };
+        gatewayMock.modelSettings = {
+          ...gatewayMock.modelSettings,
+          providers: (gatewayMock.modelSettings.providers as Array<Record<string, unknown>>).map((provider) => (
+            provider.id === record.providerId
+              ? {
+                  ...provider,
+                  label: record.label,
+                  configured: true,
+                  baseUrl: record.baseUrl,
+                  apiKeyEnv: record.apiKeyEnv ?? null,
+                  credentialStatus: record.noAuth ? "notRequired" : "present",
+                  noAuth: Boolean(record.noAuth),
+                  canFetchModels: true,
+                  unavailableReason: null
+                }
+              : provider
+          ))
+        };
+        return gatewayMock.modelSettingsResult();
+      }
+      if (method === "model/state/set") {
+        const record = params as {
+          threadId?: string | null;
+          workdir?: string | null;
+          model: string;
+          reasoningEffort?: string | null;
+        };
+        gatewayMock.model = record.model;
+        gatewayMock.modelVariant = record.reasoningEffort && record.reasoningEffort !== "none"
+          ? record.reasoningEffort
+          : "none";
+        gatewayMock.recentModels = [
+          record.model,
+          ...gatewayMock.recentModels.filter((model) => model !== record.model)
+        ].slice(0, 8);
+        return {
+          workdir: record.workdir ?? gatewayMock.scope.workdir,
+          threadId: record.threadId ?? null,
+          model: gatewayMock.model,
+          reasoningEffort: gatewayMock.modelVariant === "none" ? null : gatewayMock.modelVariant,
+          recentModels: gatewayMock.recentModels
+        };
+      }
+      if (method === "model/assignment/set") {
+        const record = params as {
+          target: "default" | "auxiliary";
+          task?: string | null;
+          provider: string;
+          model: string;
+          reasoningEffort?: string | null;
+        };
+        if (record.target === "default") {
+          const defaultModel = `${record.provider}/${record.model}`;
+          gatewayMock.modelSettings = {
+            ...gatewayMock.modelSettings,
+            defaultModel,
+            defaultReasoningEffort: record.reasoningEffort && record.reasoningEffort !== "none"
+              ? record.reasoningEffort
+              : null
+          };
+          if (gatewayMock.modelOverride == null) {
+            gatewayMock.model = defaultModel;
+            gatewayMock.modelVariant = "none";
+          }
+        } else {
+          gatewayMock.modelSettings = {
+            ...gatewayMock.modelSettings,
+            auxiliary: (gatewayMock.modelSettings.auxiliary as Array<Record<string, unknown>>).map((item) => (
+              item.task === record.task
+                ? {
+                    ...item,
+                    provider: record.provider,
+                    model: record.model,
+                    reasoningEffort: record.reasoningEffort && record.reasoningEffort !== "none"
+                      ? record.reasoningEffort
+                      : null,
+                    effectiveModel: record.model ? `${record.provider}/${record.model}` : null
+                  }
+                : item
+            ))
+          };
+        }
+        return { ok: true, target: record.target, task: record.task ?? null, provider: record.provider, model: record.model };
       }
       if (method === "agent/list") {
         return {
@@ -955,8 +1193,67 @@ afterEach(() => {
   gatewayMock.commandList = [];
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.model = "xiaomi/xiaomi-token-high";
+  gatewayMock.modelVariant = "none";
+  gatewayMock.modelOverride = null;
+  gatewayMock.modelVariantOverride = null;
   gatewayMock.modelError = null;
   gatewayMock.modelStatus = "resolved";
+  gatewayMock.modelSettings = {
+    scope: "global",
+    workdir: gatewayMock.scope.workdir,
+    defaultModel: "xiaomi/xiaomi-token-high",
+    defaultReasoningEffort: null,
+    providers: [
+      {
+        id: "opencode-zen",
+        label: "OpenCode Zen",
+        builtIn: true,
+        configured: false,
+        baseUrl: "https://opencode.ai/zen/v1",
+        apiKeyEnv: "OPENCODE_ZEN_API_KEY",
+        credentialStatus: "notRequired",
+        noAuth: true,
+        canFetchModels: true,
+        unavailableReason: null
+      },
+      {
+        id: "xiaomi-token-plan",
+        label: "Xiaomi Token Plan",
+        builtIn: true,
+        configured: true,
+        baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+        apiKeyEnv: "XIAOMI_TOKEN_PLAN_API_KEY",
+        credentialStatus: "present",
+        noAuth: false,
+        canFetchModels: true,
+        unavailableReason: null
+      },
+      {
+        id: "custom",
+        label: "Custom",
+        builtIn: false,
+        configured: false,
+        baseUrl: null,
+        apiKeyEnv: null,
+        credentialStatus: "missing",
+        noAuth: false,
+        canFetchModels: false,
+        unavailableReason: "requires provider setup"
+      }
+    ],
+    auxiliary: [
+      { task: "title_generation", label: "Title generation", provider: "auto", model: "", reasoningEffort: null, effectiveModel: null },
+      { task: "compression", label: "Context compression", provider: "xiaomi-token-plan", model: "mimo-v2.5-pro", reasoningEffort: null, effectiveModel: "xiaomi-token-plan/mimo-v2.5-pro" }
+    ],
+    modelOptions: [
+      { provider: "xiaomi-token-plan", id: "mimo-v2.5-pro", value: "xiaomi-token-plan/mimo-v2.5-pro", label: null, providerLabel: "Xiaomi Token Plan", free: false, contextLimit: 1048576, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] },
+      { provider: "xiaomi", id: "xiaomi-token-high", value: "xiaomi/xiaomi-token-high", label: null, providerLabel: "Xiaomi", free: false, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
+    ]
+  };
+  gatewayMock.modelCatalog = [
+    { provider: "opencode-zen", id: "mimo-v2.5-free", value: "opencode-zen/mimo-v2.5-free", label: null, providerLabel: "OpenCode Zen", free: true, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] },
+    { provider: "opencode-zen", id: "deepseek-v4-pro", value: "opencode-zen/deepseek-v4-pro", label: null, providerLabel: "OpenCode Zen", free: false, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
+  ];
   gatewayMock.observabilityRead = null;
   gatewayMock.usageRead = null;
   gatewayMock.wechatQrPoll = null;

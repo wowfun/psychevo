@@ -1,9 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { FolderPlus, Pin, Settings, X } from "lucide-react";
 import type {
+  GatewayClient,
+} from "@psychevo/client";
+import type {
   ChannelUpdateParams,
   ChannelWechatQrPollResult,
   ChannelWechatQrStartResult,
+  ModelOptionView,
   SessionSummary,
   SettingsReadResult
 } from "@psychevo/protocol";
@@ -166,6 +170,7 @@ export function MainSurface({
   backends,
   channelDoctor,
   channels,
+  client,
   controls,
   debugEnabled,
   disabled,
@@ -183,6 +188,8 @@ export function MainSurface({
   onDoctorBackend,
   onEditBackend,
   onMainViewChange,
+  onModelAssignmentSaved,
+  onModelCatalogLoaded,
   onNewBackend,
   onOpenSession,
   onLoadChannelSources,
@@ -212,6 +219,7 @@ export function MainSurface({
   backends: WorkbenchBackend[];
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
+  client: GatewayClient | null;
   controls: SettingsReadResult["controls"];
   debugEnabled: boolean;
   disabled: boolean;
@@ -229,6 +237,8 @@ export function MainSurface({
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
   onMainViewChange(value: MainView): void;
+  onModelAssignmentSaved(): Promise<void>;
+  onModelCatalogLoaded(options: ModelOptionView[]): void;
   onNewBackend(): void;
   onOpenSession(threadId: string): void;
   onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
@@ -264,6 +274,7 @@ export function MainSurface({
         backends={backends}
         channelDoctor={channelDoctor}
         channels={channels}
+        client={client}
         controls={controls}
         debugEnabled={debugEnabled}
         disabled={disabled}
@@ -282,6 +293,8 @@ export function MainSurface({
         onDoctorChannels={onDoctorChannels}
         onDoctorBackend={onDoctorBackend}
         onEditBackend={onEditBackend}
+        onModelAssignmentSaved={onModelAssignmentSaved}
+        onModelCatalogLoaded={onModelCatalogLoaded}
         onNewBackend={onNewBackend}
         onOpenTranscript={() => onMainViewChange("transcript")}
         onLoadChannelSources={onLoadChannelSources}

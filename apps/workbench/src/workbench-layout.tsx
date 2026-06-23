@@ -70,6 +70,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     openAgentSessionTab,
     openFilePreview,
     openRightWorkspaceTab,
+    onModelAssignmentSaved,
+    onModelCatalogLoaded,
     pendingClarifies,
     pendingPermissions,
     permissionMode,
@@ -126,6 +128,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     setRuntimeSessionId,
     setCommandFeedback,
     setSelectedModel,
+    setSelectedModelSelection,
     setSelectedRuntimeMode,
     setSelectedRuntimeRef,
     setSelectedVariant,
@@ -340,6 +343,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               backends={backends}
               channelDoctor={channelDoctor}
               channels={settings?.channels.channels ?? []}
+              client={client}
               controls={controls}
               debugEnabled={debugEnabled}
               disabled={disabled}
@@ -372,6 +376,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onStartWechatQrSetup={() => startWechatQrSetup()}
               onUpdateChannel={(channel, draft) => updateChannel(channel, draft)}
               onMainViewChange={switchMainView}
+              onModelAssignmentSaved={onModelAssignmentSaved}
+              onModelCatalogLoaded={onModelCatalogLoaded}
               onNewBackend={() => {
                 setSettingsSection("agents");
                 setBackendDraft({ ...EMPTY_BACKEND_DRAFT });
@@ -391,6 +397,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   entries={transcriptEntries}
                   onCopyText={copyTranscriptText}
                   onOpenAgentSession={openAgentSessionTab}
+                  threadId={snapshot.thread?.id ?? null}
                 />
               )}
             />
@@ -473,6 +480,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   model={selectedModel}
                   variant={selectedVariant}
                   onModelChange={setSelectedModel}
+                  onModelSelectionChange={setSelectedModelSelection}
                   onVariantChange={setSelectedVariant}
                 />
               )}

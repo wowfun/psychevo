@@ -58,8 +58,10 @@ export function ThreadPanel({
   const [error, setError] = useState<string | null>(null);
   const pendingEventsRef = useRef<GatewayEventFeed[]>([]);
   const consumedPendingPromptRef = useRef<string | null>(null);
-  const activity = normalizeSnapshot(snapshot ?? emptyThreadSnapshot(threadId)).activity;
-  const entries = snapshot?.entries ?? [];
+  const snapshotMatchesThread = (snapshot?.thread?.id ?? null) === threadId;
+  const visibleSnapshot = snapshotMatchesThread ? snapshot : null;
+  const activity = normalizeSnapshot(visibleSnapshot ?? emptyThreadSnapshot(threadId)).activity;
+  const entries = visibleSnapshot?.entries ?? [];
   const running = activity.running;
   const icon = kind === "agentSession" ? <Bot size={16} /> : <MessageSquare size={16} />;
   const threadLabel = useMemo(() => threadId ?? "unavailable", [threadId]);
@@ -219,6 +221,7 @@ export function ThreadPanel({
           entries={entries}
           onCopyText={onCopyText}
           onOpenAgentSession={onOpenAgentSession}
+          threadId={threadId}
         />
       </div>
       <div className="threadPanelComposerDock">

@@ -71,7 +71,7 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await assertTranscriptRowsFit(page);
       await capture(page, testInfo, `03-live-stream-${projectSuffix(isMobile)}`);
 
-      await expect(page.locator(".pevo-message.is-assistant")).toContainText("done", {
+      await expect(page.locator(".pevo-message.is-assistant").filter({ hasText: "done" })).toBeVisible({
         timeout: 30_000
       });
       const completedTool = page.locator(".pevo-evidence").filter({ hasText: "Run visual tool" });

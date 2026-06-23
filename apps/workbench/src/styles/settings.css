@@ -350,6 +350,216 @@
   margin: 0;
 }
 
+.modelsSettingsPanel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.modelSettingsToolbar,
+.modelAssignmentRow,
+.modelProviderRow {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.modelSettingsToolbar {
+  display: flex;
+  justify-content: flex-end;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.modelSettingsToolbar button,
+.modelProviderActions button,
+.modelAssignmentControls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.modelSettingsToolbar button:disabled,
+.modelProviderActions button:disabled,
+.modelAssignmentControls button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.modelSettingsMessage {
+  min-width: 0;
+  padding: 7px 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+}
+
+.modelSettingsMessage.is-error {
+  color: var(--pevo-danger);
+}
+
+.modelSettingsMessage.is-warning {
+  color: color-mix(in oklch, #b27218, var(--pevo-ink) 16%);
+}
+
+.modelAssignmentPanel,
+.modelProvidersPanel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.modelAssignmentRow {
+  grid-template-columns: minmax(180px, 0.32fr) minmax(0, 1fr);
+  min-height: 42px;
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.modelAssignmentRow strong,
+.modelProviderIdentity strong {
+  display: block;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-session);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelAssignmentRow span,
+.modelProviderIdentity > span {
+  display: block;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelAssignmentControls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.modelAssignmentControls .modelReasoningSelector {
+  width: 100%;
+}
+
+.modelAssignmentControls .modelReasoningButton {
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+}
+
+.modelAssignmentControls .modelReasoningButton:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.modelProviderRow {
+  grid-template-columns: minmax(160px, 0.28fr) minmax(0, 1fr) auto;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.modelProviderIdentity,
+.modelProviderFields,
+.modelProviderActions {
+  min-width: 0;
+}
+
+.modelProviderBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 5px;
+}
+
+.modelProviderBadges span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 5px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 42%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
+  border-radius: var(--pevo-radius-xs);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.modelProviderFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.modelProviderFields label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.modelProviderFields label > span {
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelProviderFields input {
+  min-width: 0;
+  width: 100%;
+  min-height: 30px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+}
+
+.modelProviderFields input {
+  padding: 0 8px;
+}
+
+.modelNoAuthToggle {
+  align-self: end;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  min-height: 30px;
+}
+
+.modelProviderActions {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
 .usageSettingsPanel {
   display: grid;
   align-content: start;
@@ -572,25 +782,29 @@
   display: block;
   width: 11px;
   height: 11px;
-  background: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-border) 20%);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 56%);
+  background: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-border) 18%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 44%);
   border-radius: 2px;
 }
 
 .usageHeatmapCell[data-level="1"] {
-  background: color-mix(in oklch, #2ea56f, var(--pevo-panel) 76%);
+  background: oklch(83% 0.085 151);
+  border-color: oklch(70% 0.11 151);
 }
 
 .usageHeatmapCell[data-level="2"] {
-  background: color-mix(in oklch, #2ea56f, var(--pevo-panel) 56%);
+  background: oklch(70% 0.135 151);
+  border-color: oklch(58% 0.16 151);
 }
 
 .usageHeatmapCell[data-level="3"] {
-  background: color-mix(in oklch, #2ea56f, var(--pevo-panel) 34%);
+  background: oklch(56% 0.17 154);
+  border-color: oklch(46% 0.18 154);
 }
 
 .usageHeatmapCell[data-level="4"] {
-  background: #2ea56f;
+  background: oklch(43% 0.19 156);
+  border-color: oklch(35% 0.17 156);
 }
 
 .usageHeatmapCell.is-empty {
@@ -745,6 +959,21 @@
 
   .agentBackendRow {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modelAssignmentRow,
+  .modelProviderRow {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .modelAssignmentControls,
+  .modelProviderFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modelProviderActions {
+    justify-content: flex-start;
   }
 
   .agentBackendSide {
