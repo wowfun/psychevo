@@ -152,6 +152,14 @@ while a turn is active, permission level, and whether it is read-only or can
 mutate local state. A channel advertises and executes only the commands it can
 represent safely.
 
+Channel agent discovery is shared agent discovery, not a channel-specific
+registry. In messaging channels, `/agents` answers "which agents can this lane
+call from the current workspace?" and therefore prioritizes `subagent`
+entrypoints that can be invoked with `@agent-name <task>` during a normal
+channel turn. Peer runtimes may be shown as secondary diagnostics, but they do
+not replace callable agents unless the channel also has a peer-runtime
+selection flow.
+
 Attachment handling is a shared pipeline. For media kinds with a confirmed
 transfer contract, the adapter downloads platform media, checks size and MIME
 constraints, stores it under a session or workspace attachment cache, and
@@ -204,6 +212,9 @@ must not alter the underlying local thread transcript.
   runtime execution, so slash commands, interrupts, permission approvals, Ask
   replies, source ordering, queueing, and transcript projection do not fork
   into channel-only implementations.
+- Channel `/agents` lists workspace-discovered callable subagents by default
+  and does not hide ordinary project Markdown agents behind peer-runtime
+  filtering.
 - Downloaded attachment bytes pass through a shared validation and cache
   pipeline before reaching Gateway/runtime; unsupported or unconfirmed media
   becomes bounded metadata; runtime code does not consume raw platform URLs.

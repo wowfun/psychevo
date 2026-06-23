@@ -151,8 +151,9 @@ restore/delete workflows, and `Debug` owns the local Debug switch. The ordinary
 Workbench left sidebar remains an active-session list and must not switch to
 archived sessions. The default is the dark ledger appearance. The setting is a
 Workbench host preference and does not require Gateway to persist
-provider/runtime configuration. `light` is the neutral daytime shell with white
-canvas, pale gray sidebar, soft gray dividers, and low-contrast selected rows.
+provider/runtime configuration. `light` is the neutral paper-warm daytime shell
+with a near-white canvas, warmer paper sidebar, soft warm-gray dividers, and
+low-contrast selected rows while keeping neutral text and accent semantics.
 `warm` is the reading-paper palette formerly exposed as light, with ivory
 canvas, warm paper panels, taupe borders, warm charcoal text, and low-chroma
 amber/taupe active states. The dark palette keeps the near-black ledger
@@ -221,11 +222,16 @@ desktop packaging.
 The transcript renders user and assistant Markdown, streams assistant and
 reasoning updates without waiting for turn completion, keeps observed block
 order, and follows the bottom while the user has not intentionally scrolled
-away. Tool calls render as collapsible evidence rows with parameters and
-results shown once. The center transcript uses a shared reading column: user
-messages align right inside that column with a filled neutral bubble, while
-assistant text, reasoning rows, and tool rows keep a common left edge and do not
-become filled message cards.
+away. Snapshot replacement and explicit session switching position the
+transcript instantly rather than animating through historical content. New or
+unvisited sessions open at the latest message, while sessions already visited
+in the current browser tab may restore their in-memory transcript scroll
+position without writing that state to Gateway, protocol fields, durable
+session metadata, or host storage. Tool calls render as collapsible evidence
+rows with parameters and results shown once. The center transcript uses a
+shared reading column: user messages align right inside that column with a
+filled neutral bubble, while assistant text, reasoning rows, and tool rows keep
+a common left edge and do not become filled message cards.
 Only real reasoning projections are labeled `Thinking` in the UI; `Reasoning`
 and `Preamble` remain internal protocol/projection terms and must not appear as
 ordinary transcript headers. Empty reasoning completions and no-text assistant

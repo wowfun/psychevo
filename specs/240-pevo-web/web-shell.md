@@ -87,6 +87,51 @@ model's configured default reasoning effort. `settings/update` accepts
 `agent: string | null` with a `threadId`, validates concrete Agents against the
 active catalog, and writes either concrete main-agent metadata or an explicit
 session default marker. It does not write project-local Agent defaults.
+The composer model control presents model and reasoning effort as one grouped
+selector. Its closed state shows the selected model id plus the current
+reasoning label separated by a space, never the provider prefix, and uses the
+provider-qualified model only in hover/title affordances. Visible model-row
+content shows only the model id plus compact state badges such as a muted green
+`Free` badge when catalog metadata marks the model as free; provider identity is
+rendered as compact group headings above contiguous visible model rows from the
+same provider.
+`Select model` is an empty-state label, not an option and must not be submitted
+as a model selection. The selector lists concrete models from `settings/read`,
+including provider catalog rows fetched in Settings > Models, with recently used
+models promoted ahead of the catalog order. Provider grouping is applied after
+filtering and recent-model ordering, so non-adjacent runs from the same provider
+remain separate groups rather than globally regrouping the list. The model group
+includes a name-filter field above the model rows, and the model-row viewport is
+capped to five visible model rows with overflow scrolling for the rest. Radio
+rows inside the popover fill the available popover width and must not inherit
+compact toolbar-button max-width rules that leave unused gutters. The popover
+width adapts to the longest visible model, provider heading, or reasoning item,
+with a compact minimum and viewport maximum rather than a fixed menu width. The
+selector also includes a reasoning effort group for the selected model. Models with
+metadata that explicitly disables reasoning expose only `none` displayed as
+`Default`; models with reasoning support or unknown reasoning metadata expose
+the shared reasoning effort values. Switching models preserves the current
+reasoning effort when it is valid for the new model and otherwise resets the
+override to `none`.
+Settings > Models is the profile-level model configuration page. It may save
+future default model configuration, built-in/custom provider configuration, and
+auxiliary model assignments for title generation and context compression
+through model-specific RPCs. Model assignment rows use catalog-backed picker
+controls that reuse the composer model/reasoning filtering, recent-model
+promotion, short-label, and model-specific reasoning rules; the GUI does not
+expose manual model name entry or repeat selected picker values as secondary
+label text. Provider rows do not repeat API-key env, no-auth, or fetched
+catalog-count values when those values are already visible in controls. Fetched
+provider catalogs appear in the default and auxiliary assignment controls
+immediately and are reflected in the composer selector without persisting every
+fetched model to config or changing the saved default. The page reads
+profile/global assignment state for its default and auxiliary rows; project
+`.psychevo/config.toml` model overrides affect composer/effective controls but
+must not be shown as the saved profile default. It must not silently hot-swap
+the currently running turn or move the composer session controls into Settings.
+Secret inputs are transient UI state only; durable secrets are written by
+Gateway/runtime configuration APIs and returned only as redacted credential
+status.
 The composer also exposes execution runtime separately from Agent persona,
 although compact GUI surfaces may present both controls through one grouped
 Agent popover. The default runtime is `native`; ACP backend runtimes are
@@ -328,8 +373,11 @@ The Workbench Settings Usage page renders these summaries independently from
 the right Status inspector. It uses compact summary bands for all time, last 30
 days, and last 7 days, then a one-year daily token activity heatmap. Heatmap
 cells are based on persisted message timestamps in the Gateway host's local
-calendar. Empty days remain visible with stable dimensions; days with unknown
-cost still contribute token activity while their cost is counted as unknown.
+calendar. Empty days remain visible with stable dimensions; nonzero days use a
+visibly stepped four-level color scale derived from the nonzero activity
+distribution so a single peak day does not flatten ordinary activity into the
+same low-contrast shade. Days with unknown cost still contribute token activity
+while their cost is counted as unknown.
 The page must label costs as local estimates rather than bills and must expose
 unknown pricing counts when present.
 
@@ -377,7 +425,10 @@ display title and timestamp on the same line with the timestamp right-aligned;
 the row does not show project name or entry count under the title. The archive
 history toggle belongs in Settings rather than the Sessions header. The
 Sessions scroller reserves a stable scrollbar gutter so project header actions
-do not shift horizontally as overflow appears or disappears.
+do not shift horizontally as overflow appears or disappears. The Sessions
+browser must not expose horizontal scrolling or swipe panning. Long session
+titles truncate with an ellipsis inside the title area; they must not cover or
+push out the recent-update timestamp, running indicator, or row actions.
 
 Selecting or creating a Web thread is allowed while another thread is running.
 The original thread continues in the background, remains visible in history with
@@ -473,6 +524,17 @@ Successful display-only feedback with no follow-up action may auto-dismiss after
 a short delay and may be dismissed by clicking outside its panel. Error feedback
 and feedback with follow-up actions must remain until explicit dismissal or a
 normal transient clear.
+
+Composer model selection is durable UX state, not default configuration. The
+Workbench composer reads and writes `$PSYCHEVO_HOME/model-state.json` through
+Gateway model-state RPCs for the active workdir. Selecting a model updates the
+next-turn composer choice and recent-model ordering; it must not write
+`config.toml`. Settings > Models remains the GUI surface for default and
+auxiliary model configuration. After Settings > Models saves the global default
+model, Workbench refreshes `settings/read.controls` and syncs the in-memory
+composer control to the backend-resolved model for the current scope. If the
+current session or workdir has an explicit composer model, that scoped model
+continues to display instead of the new global default.
 
 Workbench observes accepted-turn settlement through Gateway live events and
 `thread/read` snapshots. Provider/runtime failures after turn acceptance must

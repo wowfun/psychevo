@@ -97,6 +97,11 @@ Playwright desktop/mobile coverage. Channel runtime invariants are owned by
 - Explicit unsupported slash commands return bounded guidance.
 - Channel `/help` reflects the shared command catalog filtered for messaging
   capabilities, including dynamic skills where available.
+- Channel `/agents` lists ordinary project Markdown agents that default to the
+  `subagent` entrypoint, explains `@agent-name <task>`, and does not only show
+  peer runtimes such as `opencode`.
+- Peer-only agents, when present, are separated from callable agents and do not
+  suppress the callable list.
 - Channel skill and agent commands execute through the shared runtime path, not
   a channel-only prompt rewrite.
 - Native IM image and file attachments are represented as validated Gateway

@@ -79,8 +79,9 @@ current session explicitly.
 
 TUI sessions have an optional display title. When a new TUI session is created
 from a user prompt and the session title is still empty, TUI attempts to
-generate a concise title with the selected provider/model by using a
-non-persisted, no-tool title request. That title request must not append
+generate a concise title with `auxiliary.title_generation` when configured,
+falling back to the selected provider/model, by using a non-persisted, no-tool
+title request. That title request must not append
 messages, tool calls, usage rows, or evidence to the session transcript. If the
 title request fails, returns empty text, or returns unusable text, TUI falls
 back to a deterministic title derived from the first user prompt. Titles are

@@ -69,6 +69,35 @@ isolation is required. They must not print tokens or secrets.
 - Inline transcript diff fixtures cover desktop and narrow viewports, including
   direct rendered-diff detail without Input/Change metadata, single-gutter
   rows, clipped long lines, and malformed-diff fallback.
+- Settings > Models tests cover provider configuration, explicit fake catalog
+  fetch, OpenCode Zen free-model warning state, independent default/title/
+  compression saves, fetched catalog propagation into assignment controls and
+  the composer selector, model-specific reasoning-effort assignment saves, no
+  manual model-id text entry, profile/global default display even when the
+  current project has its own `.psychevo/config.toml` model override,
+  default-save refresh of current Workbench controls, and preservation of
+  composer session/workdir/effective controls when a scoped override exists.
+- Composer model-control tests cover the grouped model/reasoning selector,
+  including non-selectable empty state, short model display in the closed
+  control, provider-qualified hover/title metadata without visible duplicate
+  model names, provider group headings for adjacent visible provider runs,
+  no row-level provider metadata, muted green free-model badges from
+  `ModelOptionView.free`, model-specific reasoning effort options, recent-model
+  promotion, model name filtering, five-row model-list overflow behavior,
+  closed control model-plus-reasoning display, longest-visible-option popover
+  width adaptation, full-width popover rows without unused right gutters, and
+  switching models without submitting an invalid `Select model` value.
+- Settings > Models assignment tests cover reuse of the same model/reasoning
+  selector behavior used by the composer, including provider group headings,
+  filtering, recent-model promotion, free-model badges, model-specific
+  reasoning effort lists, and independent saves for default, title generation,
+  and context compression.
+- Settings > Usage visual tests cover token-activity heatmap levels with
+  distinct computed colors across zero and four nonzero activity levels in the
+  light appearance.
+- Sessions-browser tests cover long title truncation without horizontal
+  scrolling, while preserving recent-update time, running state, and row action
+  visibility.
 
 ## Validation Boundaries
 

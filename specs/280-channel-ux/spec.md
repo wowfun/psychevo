@@ -204,6 +204,14 @@ must degrade to concise text summaries or be hidden. Dynamic skill commands and
 agent invocation are user-surface features and must not require a Workbench
 session.
 
+Channel `/agents` presents callable agents for the current Channel workspace.
+The primary group is `Callable agents`, containing agents with the `subagent`
+entrypoint that users can reference as `@agent-name <task>` in ordinary IM
+messages. Peer-only runtimes may appear in a secondary `Peer runtimes` group
+for visibility with copy that they require a peer-runtime entrypoint rather
+than ordinary `@agent` delegation. The command must not behave like the
+Workbench runtime selector.
+
 Attachment UX is native to the messaging platform. Users send images and files
 with the IM client attachment flow; Channels normalize those attachments before
 runtime sees them. When a platform cannot upload or download a media kind, the

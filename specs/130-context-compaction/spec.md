@@ -34,11 +34,14 @@ Compaction is enabled by default. The effective TOML configuration may define:
 - `compression.model`, optional provider/model selection for summary generation
 - `compression.reasoning_effort`, optional summary-model reasoning effort;
   `none` suppresses the provider reasoning field
+- `auxiliary.compression.provider` and `auxiliary.compression.model`, preferred
+  provider/model selection for summary generation from GUI model settings
 
-When `compression.model` is absent, runtime uses the current invocation model
-for summary generation. When `compression.model` is present but cannot be
-resolved or fails during summary generation, runtime must leave the session
-unchanged and report the compaction failure.
+When `auxiliary.compression.model` is absent, runtime falls back to legacy
+`compression.model`; when both are absent, runtime uses the current invocation
+model for summary generation. When the configured auxiliary or legacy
+compression model cannot be resolved or fails during summary generation,
+runtime must leave the session unchanged and report the compaction failure.
 
 ## Checkpoints
 

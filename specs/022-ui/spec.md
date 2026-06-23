@@ -47,6 +47,18 @@ different host technologies:
 - host-specific layout, input gestures, package boundaries, and visual polish
   belong to the concrete product surface spec
 
+## Information Density
+
+Controls are authoritative display surfaces for their current values. If a
+control already communicates a selected value, enabled state, placeholder,
+credential env name, no-auth toggle, model choice, reasoning choice, filter,
+or count, the same information should not be repeated elsewhere on the same
+page or panel as secondary text, badges, helper copy, or status labels. Repeat
+information only when it is needed for accessibility outside the control,
+disambiguates a destructive or high-risk action, explains an error, or appears
+in a different workflow context where the original control is no longer
+visible.
+
 ## Source Of Truth
 
 - [250 UI Display Model](../250-ui-display-model/spec.md) owns semantic

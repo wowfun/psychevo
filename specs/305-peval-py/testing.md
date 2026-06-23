@@ -16,8 +16,8 @@ Define deterministic validation for the `peval-py` Python CLI.
 - session-comparison view behavior and CLI notes
 - saved-workspace `serve` state and local HTTP behavior
 - minimal peval-py serve state initialization from `peval-py init`
-- bundled `skills/peval-py` package shape and fixture-backed recognition of
-  its peval-py-recognized analysis artifact contract
+- bundled `skills/peval-py` package shape and fixture-backed coverage of
+  analysis report import into Trial-cell artifacts
 
 Out of scope:
 
@@ -103,19 +103,20 @@ Coverage must verify:
 - ATIF step ids are sequential and tool observations link to source tool calls.
 - final metrics aggregate available usage, accounting, turn, tool-call, and
   tool-error facts.
-- report JSON contains the v18 subset top-level fields.
+- report JSON contains the v19 subset top-level fields.
 - report JSON records active `duration_ms` plus `wall_duration_ms` for each
-  Trial and comparison leaderboard row.
+  Trial in `trajectory_meta[]`; HTML/CSV comparison rows derive those values at
+  render/export time instead of storing duplicate JSON rows.
 - peval-py report JSON can be ingested as a canonical snapshot source without a
   message adapter.
 - report JSON can derive Hermes active model/tool durations from strictly
-  matched `agent.log` timing while preserving the existing JSON v18 shape.
+  matched `agent.log` timing while preserving the existing JSON v19 shape.
 - retained sessions with multi-hour idle gaps keep the full `wall_duration_ms`
   but exclude that idle gap from active `duration_ms`.
 - active duration fallback counts short missing-metadata timestamp spans and
   excludes spans longer than 600,000 ms.
 - repeated `-p` inputs in `view trajectory` create one trajectory per input
-  and include a session-oriented comparison summary.
+  without writing a persisted comparison summary.
 - `-d` with repeated `-s` reads each SQLite session independently through the
   effective adapter.
 - repeated `-d` inputs may use different adapters and generate one comparison
@@ -165,14 +166,50 @@ Coverage must verify:
 - cached analysis enrichment reads the exact
   `runs/<eval-slug>/<agent-id>/<session-id>/<trial-key>/analysis.{json,md}`
   cell derived from `trajectory_meta.trial_key`, prefers `agent_name` over
-  adapter id for the path, writes `annotations.analysis[]` with cached status,
-  compatible `relative_path`, optional `summary`, optional `md_report`, and
-  per-format `relative_paths`, plus typed incremental analysis fields from the
-  `analysis.json` whitelist. Tests verify `analysis.json.status` maps to
-  `analysis_status`, `analysis.json.metrics` maps to `analysis_metrics`, unknown
-  top-level fields and recognized fields with incompatible types are ignored,
+  adapter id for the path, and merges cached status, compatible
+  `relative_path`, optional `summary`, optional `md_report`, per-format
+  `relative_paths`, and typed incremental analysis fields into the Trial's
+  computed `annotations.analysis[]` item. Tests verify every Trial receives
+  `analysis_metrics.auto` without cached analysis, cached analysis updates the
+  same item to `status = "cached"`, `analysis.json.status` maps to
+  `analysis_status`, `analysis.json.metrics` and compiled
+  `analysis.json.extra.metrics` map to flat keys under `analysis_metrics`,
+  `analysis_metrics.auto` remains present and peval-py-owned while omitting
+  direct canonical facts such as outcome status, durations, turns, tool counts,
+  token totals, token breakdowns, raw cost, tokens per turn, and tools per turn,
+  unknown top-level fields and recognized fields with incompatible types are ignored,
   session-root analysis artifacts are ignored, and valid Markdown survives when
   sibling JSON is malformed.
+- `peval-py import analysis` requires an existing workspace root, a Trial cell
+  `--run-path`, and at least one `--path/-p` analysis input. Tests verify JSON
+  analysis report import writes compiled `analysis.json` with `subject` derived from
+  `runs/<eval-slug>/<agent-id>/<session-id>/<trial-key>`, defaults omitted
+  input status to `analyzed`, preserves non-standard input fields under
+  `extra`, keeps imported `subject`, `metrics`, and `commands` under `extra`
+  without overriding the compiled `subject`, does not synthesize top-level
+  metrics or commands, and keeps the imported artifact recognized by later
+  `view trajectory -r DIR`.
+- JSON analysis import tests cover `extra` object merging with non-standard
+  top-level fields, deterministic top-level override on duplicate extra keys,
+  report generation ignoring `extra`, and non-object `extra` failing
+  without partial writes.
+- JSON analysis import tests cover `--json` warnings for top-level
+  `subject`, `metrics`, `commands`, `analysis_status`, and
+  `analysis_metrics`, plus standard input fields nested under `extra`. Tests
+  verify warnings do not block import, input `metrics` later appears as flat
+  imported keys under `analysis_metrics`, input `analysis_metrics` or `auto` cannot
+  overwrite `analysis_metrics.auto`, unknown custom fields remain silent, and
+  default text output does not include warnings.
+- `peval-py import analysis` infers input format from suffix. Tests verify
+  `.json` writes `analysis.json`, `.md` and `.markdown` write `analysis.md`,
+  Markdown-only import does not create `analysis.json`, JSON plus Markdown
+  writes both artifacts, duplicate JSON/Markdown inputs fail, unsupported
+  suffixes fail, invalid JSON fails, and failures do not leave partial imported
+  files.
+- import path validation tests cover relative and absolute in-workspace
+  `--run-path` values, outside-workspace paths, paths outside `runs/`, too-short
+  run paths, and machine-readable `--json` output with selected run path and
+  written artifact paths.
 - cell-local peval manual notes read the exact
   `runs/<eval-slug>/<agent-id>/<session-id>/<trial-key>/notes.md` cell derived
   from `trajectory_meta.trial_key`, prefer `agent_name` over adapter id for the
@@ -197,13 +234,29 @@ Coverage must verify:
 - serve source payloads include stored Trial identity and
   `last_turn_finished_at_ms` from `trajectory_meta.finished_at_ms`, and source
   aliases remain display-only.
-- comparison JSON contains one canonical `leaderboard.entries` row list, omits
-  legacy duplicate `session_heatmap.rows` and `session_table.rows`, and does not
-  emit benchmark, task, task-set, task-family, matrix task-axis, row `selected`,
-  or derived `successful_tool_calls` fields.
+- report JSON omits persisted comparison projections, including
+  `comparison.summary`, `comparison.selected_trial_key`,
+  `comparison.leaderboard.entries`, legacy `session_heatmap.rows`, and
+  `session_table.rows`, `scope`, and `path_selections`; HTML still renders
+  Leaderboard and Trajectory Overview by synthesizing rows from canonical Trial
+  facts, and CSV export uses the same runtime rows.
+- converter output keeps `trajectory[]` ATIF-v1.7 compatible: provider
+  `usage` and `accounting` maps appear under `steps[].metrics.extra`, aggregate
+  custom metrics appear under `final_metrics.extra`, and no non-ATIF metrics
+  keys appear at the standard metrics roots.
+- direct ATIF JSON path input rejects non-ATIF metric root fields instead of
+  passing them through to report JSON.
+- report JSON omits per-step `trajectory_meta[].steps[].data_preview`; HTML
+  step summaries and overview tooltips synthesize previews directly from
+  `trajectory.steps[]` content and do not use meta preview fallbacks.
 - HTML escapes text, safely embeds JSON, exposes one step visibility toggle,
   and renders peval-style tool names, tool execution timing, and observations
   inside the corresponding Agent step.
+- HTML Analysis metrics render structured JSON values without dumping arrays or
+  objects into one-line metric cells: automatic step/tool/model latency
+  distributions render together as a compact vertical box plot with duration
+  labels inside the chart and category labels below the x-axis, and imported
+  array/object metrics render as compact tables or collapsed details.
 - HTML renderer source templates, CSS, and JavaScript live in package asset
   files and are still inlined into the emitted offline HTML report.
 - static HTML reports use the default report presentation mode and do not
@@ -332,7 +385,7 @@ Coverage must verify:
   labels instead of a large fixed margin, use stable interval-aware x-axis ticks
   that avoid repeated rounded labels on short traces, keep message previews out
   of Waterfall labels/tooltips and Detail Table Stage cells, and do not mutate
-  the embedded JSON v18 report data. Timeline bar, user/system marker with a
+  the embedded JSON v19 report data. Timeline bar, user/system marker with a
   source `step_id`, and Detail Table row clicks open the existing Step details
   drawer for the corresponding source step without changing the selected Trial,
   including in single-session reports that have no Leaderboard rows to
@@ -378,8 +431,9 @@ Coverage must verify:
 - step duration covers matched observations and is not computed as the
   previous-step gap.
 - CLI smoke commands cover `view trajectory`, `export trajectory`, the `tr`
-  scenario alias, localized HTML output from `[defaults].locale = "zh-CN"`, and
-  short flags including `-p`, `-a`, `-i`, `-n`, and `-o`.
+  scenario alias, `import analysis`, localized HTML output from
+  `[defaults].locale = "zh-CN"`, and short flags including `-p`, `-a`, `-i`,
+  `-n`, and `-o`.
 - CLI input tests cover `view trajectory -r DIR` and
   `export trajectory -r DIR` loading an existing peval-py workspace config from
   outside the workspace, including adapter `default_db_path` expansion through
@@ -425,24 +479,28 @@ Coverage must verify:
   pages when available, and spec links still target canonical specs.
 - the repo-distributed `skills/peval-py` package validates as a skill package,
   omits agent-specific `agents/openai.yaml`, documents the distinction between
-  reports, exports, `serve`, `notes.md`, and `analysis.json` / `analysis.md`
-  Trial cell artifacts,
-  defines `notes.md` as the cell-local manual Trial note artifact,
-  defines `analysis.json` as the fixed-format machine-readable artifact,
-  defines `analysis.md` as a free-form human/agent-readable artifact, directs
-  agents to output one analysis artifact by default or complementary artifacts
-  when both are useful,
-  and directs agents to use `view tr -r <workspace>` or discovered
-  current-directory workspace config when verifying `annotations.notes[]` or
-  `annotations.analysis[]`.
+  reports, exports, `serve`, analysis report creation, and Trial-cell import,
+  does not instruct agents to create or validate `notes.md` because that file is
+  a human/serve note path,
+  keeps `SKILL.md` as a compact workflow router without expanded
+  `runs/<analysis_eval_slug>/...` templates, path-segment derivation rules, or
+  compiled JSON field semantics,
+  directs agents to write one analysis report by default or complementary
+  reports when both are useful, keeps analysis creation separate from
+  Trial-cell import,
+  directs agents to use `peval-py import analysis -r <workspace> --run-path
+  <cell-path> -p <analysis-report>` when Trial-cell import is desired,
+  leaves JSON field and tolerant `extra` details in the analysis reference,
+  and directs agents to use normal peval-py report commands when the user asks
+  to render or inspect imported analysis.
 - the skill helper script under `skills/peval-py/scripts/` validates with
   `compileall`, uses argparse subcommands, and replaces embedded Python
-  snippets for report subject extraction and analysis-recognition checks. Its
-  subject extraction emits both raw report identities and normalized path
-  segments for the Trial cell, with optional full `notes.md`, `analysis.json`,
-  and `analysis.md` paths when a workspace is provided. Its report checks can
-  target a specific Trial by rendered `trial_key` or one-based report index
-  instead of assuming `annotations.analysis[0]`.
+  snippets for report subject extraction. It must not provide report annotation
+  validation after import; users should rely on `peval-py import analysis`
+  output and normal peval-py report commands when they ask to render or inspect
+  a report. Subject extraction emits both raw report identities and normalized
+  path segments for the Trial cell, with optional full `analysis.json` and
+  `analysis.md` paths when a workspace is provided.
 - a fixture-backed smoke creates a temporary peval-py workspace, writes
   `runs/default/agent-a/common_session/<trial-key>/analysis.json` with a
   top-level `summary` and representative typed whitelist fields, writes sibling

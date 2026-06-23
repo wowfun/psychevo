@@ -45,6 +45,7 @@ The built-in provider ids and aliases are:
 - `dashscope`, with aliases `alibaba`, `qwen`
 - `xiaomi`, with alias `mimo`
 - `xiaomi-token-plan`
+- `opencode-zen`, with aliases `opencode`, `opencode_zen`, `zen`
 - `lmstudio`
 - `custom`
 
@@ -111,6 +112,10 @@ Configuration may define:
   `enabled`, `auto`, `threshold_percent`, `reserve_tokens`,
   `keep_recent_tokens`, optional summary `model`, and optional
   `reasoning_effort`
+- optional top-level `auxiliary` object with per-task model routing. The first
+  built-in task slots are `title_generation` and `compression`. Each slot may
+  define `provider` and `model`; `provider = "auto"` or empty model means use
+  the task fallback chain.
 
 The legacy model `context_limit` field is rejected. Configurations must use
 `limit.context` for context-window token limits.
@@ -144,6 +149,12 @@ rules as top-level `model`. When it is absent, runtime may use the current
 invocation model for context compaction summaries. `compression.reasoning_effort`
 uses the same valid values as model `reasoning_effort`; `none` disables the
 request field for summary generation.
+
+When `auxiliary.compression.model` is present, it is the preferred summary
+model selection. `compression.model` remains accepted as a legacy fallback when
+the auxiliary compression slot does not provide a model. New GUI writes must
+persist compression model assignments under `auxiliary.compression`, while
+leaving threshold and enablement settings under `compression`.
 
 Configuration must not contain raw API keys. Credentials are resolved from the
 local environment map through `api_key_env` or built-in credential environment
@@ -227,13 +238,15 @@ credentials in this order:
 
 1. `openrouter`
 2. `openai`
-3. `xai`
-4. `zai`
-5. `deepseek`
-6. `dashscope`
-7. `xiaomi`
-8. `lmstudio`
-9. `custom`
+3. `opencode-zen`
+4. `xai`
+5. `zai`
+6. `deepseek`
+7. `dashscope`
+8. `xiaomi`
+9. `xiaomi-token-plan`
+10. `lmstudio`
+11. `custom`
 
 The selected provider must have a model from CLI, configuration, or
 `PSYCHEVO_INFERENCE_MODEL`. CLI and env model values may use the

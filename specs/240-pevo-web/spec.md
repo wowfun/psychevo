@@ -167,10 +167,12 @@ behavior, and browser validation expectations are specified in
 [075 Design System](../075-design-system/spec.md). Workbench appearance is a
 frontend preference with three concrete palettes: `dark`, `light`, and `warm`.
 `warm` preserves the original reading-paper light palette, while `light` is a
-neutral macOS-style light shell with a white canvas, pale gray sidebar, and
-low-contrast borders. All appearances share the same readable Workbench
-typographic scale so theme switching does not change font size, line height, or
-row density.
+neutral paper-warm light shell with very low-chroma warm white surfaces, a
+paper-warm sidebar that avoids gray drift, and low-contrast warm-gray borders.
+`light` keeps neutral text and accent semantics, and remains much less warm
+than the ivory/taupe `warm` palette. All appearances share the same readable
+Workbench typographic scale so theme switching does not change font size, line
+height, or row density.
 
 ## Validation
 

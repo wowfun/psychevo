@@ -231,15 +231,22 @@ the session id as a single observability group instead of being duplicated in a
 primary metric grid. The compact usage grid must not repeat Messages, Provider,
 or Model once the context label/status already identifies the active provider
 usage source.
+Settings Usage token activity uses a visible stepped heatmap scale: zero-token
+days stay neutral, nonzero days move through clearly separated mint, leaf,
+green, and deep-green levels, and adjacent levels must remain distinguishable
+in light, warm, and dark appearances.
 
 Appearance is a frontend/host preference, not a provider or secret setting.
 Workbench supports `dark`, `light`, and `warm` appearances. `light` is the
-neutral daytime shell: a white main canvas, pale gray sidebar, soft gray
-dividers, dark neutral text, and low-contrast selected rows that read like
-macOS application chrome. `warm` is the reading-paper palette formerly exposed
-as `light`: the canvas is ivory, panels are warm paper, borders are taupe,
-primary text is warm charcoal, and selected controls, status accents, and
-active UI state use low-chroma amber/taupe tokens so they read as quiet
+neutral paper-warm daytime shell: a near-white main canvas with a faint paper
+temperature, a warmer paper sidebar, soft warm-gray dividers, dark neutral
+text, and low-contrast selected rows that read like application chrome. Its
+main surfaces stay in the very low chroma range, while the sidebar may use a
+slightly higher paper chroma to avoid reading as gray, but still remains much
+weaker than `warm`. `warm` is the reading-paper palette formerly
+exposed as `light`: the canvas is ivory, panels are warm paper, borders are
+taupe, primary text is warm charcoal, and selected controls, status accents,
+and active UI state use low-chroma amber/taupe tokens so they read as quiet
 application chrome instead of a saturated brand color.
 The bottom Settings utility entry is a location marker, not a primary action;
 when Settings is active it uses the ordinary sidebar selected surface instead
