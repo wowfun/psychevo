@@ -36,64 +36,83 @@ class PevalPySkillPackageTests(unittest.TestCase):
             self.assertEqual(rows[0]["session_segment"], "trial_one")
             self.assertEqual(rows[0]["cell_segment"], "trial_one")
             self.assertEqual(
+                rows[0]["run_path"],
+                "runs/custom_eval/Agent_A/trial_one/trial_one",
+            )
+            self.assertEqual(
                 rows[0]["cell_dir"],
                 str(workspace / "runs" / "custom_eval" / "Agent_A" / "trial_one" / "trial_one"),
             )
-            self.assertEqual(
-                rows[0]["notes_path"],
-                str(
-                    workspace
-                    / "runs"
-                    / "custom_eval"
-                    / "Agent_A"
-                    / "trial_one"
-                    / "trial_one"
-                    / "notes.md"
-                ),
-            )
+            self.assertNotIn("notes_path", rows[0])
             self.assertEqual(rows[1]["agent_segment"], "Agent_B")
             self.assertEqual(rows[1]["session_segment"], "common_session")
             self.assertEqual(rows[1]["cell_segment"], "trial_two")
+            self.assertEqual(
+                rows[1]["run_path"],
+                "runs/custom_eval/Agent_B/common_session/trial_two",
+            )
 
-    def test_report_tools_check_can_target_trial_annotations(self) -> None:
+    def test_report_tools_check_subcommand_is_removed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report_json = Path(tmp) / "report.json"
             write_report(report_json)
 
-            by_index = run_report_tools(
-                "check",
-                str(report_json),
-                "--index",
-                "2",
-                "--require-analysis",
-                "--require-notes",
-                "--require-findings",
-            )
-            self.assertEqual(by_index.returncode, 0, by_index.stderr)
-            self.assertIn("requested annotation fields recognized", by_index.stdout)
+            removed_check = run_report_tools("check", str(report_json))
 
-            by_trial = run_report_tools(
-                "check",
-                str(report_json),
-                "--trial-key",
-                "trial/two",
-                "--require-summary",
-                "--require-notes",
-            )
-            self.assertEqual(by_trial.returncode, 0, by_trial.stderr)
+            self.assertNotEqual(removed_check.returncode, 0)
+            self.assertIn("invalid choice", removed_check.stderr)
 
-            missing = run_report_tools(
-                "check",
-                str(report_json),
-                "--index",
-                "1",
-                "--require-summary",
-            )
-            self.assertNotEqual(missing.returncode, 0)
-            self.assertIn(
-                "missing annotations.analysis.summary for trial_key=trial:one",
-                missing.stderr,
-            )
+    def test_skill_docs_separate_analysis_reports_from_import(self) -> None:
+        skill = (REPO_ROOT / "skills" / "peval-py" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        artifacts = (
+            REPO_ROOT
+            / "skills"
+            / "peval-py"
+            / "references"
+            / "analysis-artifacts.md"
+        ).read_text(encoding="utf-8")
+        workflows = (
+            REPO_ROOT
+            / "skills"
+            / "peval-py"
+            / "references"
+            / "cli-workflows.md"
+        ).read_text(encoding="utf-8")
+
+        for text in (skill, artifacts, workflows):
+            self.assertIn("peval-py import analysis", text)
+            self.assertIn("--run-path", text)
+            self.assertIn("analysis report", text)
+            self.assertNotIn("notes.md", text)
+            self.assertNotIn("annotations.notes", text)
+            self.assertNotIn("report_tools.py check", text)
+            self.assertNotIn("--require-", text)
+            lowered = text.lower()
+            self.assertNotIn("analysis draft", lowered)
+            self.assertNotIn("json draft", lowered)
+            self.assertNotIn("markdown draft", lowered)
+        self.assertNotIn("## Contents", artifacts)
+        self.assertIn("Create analysis reports", skill)
+        self.assertIn("Import analysis reports", skill)
+        self.assertIn("--run-path <cell-path>", skill)
+        self.assertNotIn("runs/<analysis_eval_slug>", skill)
+        self.assertNotIn("Standard JSON report fields", skill)
+        self.assertNotIn("compiled `analysis.json.extra`", skill)
+        self.assertIn("--run-path <cell-path>", artifacts)
+        self.assertIn("--run-path <cell-path>", workflows)
+        self.assertNotIn("runs/<analysis_eval_slug>", artifacts)
+        self.assertNotIn("runs/<analysis_eval_slug>", workflows)
+        self.assertNotIn("Standard JSON report fields", workflows)
+        self.assertNotIn("extra", workflows)
+        self.assertIn("extra", artifacts)
+        self.assertIn("summary", artifacts)
+        self.assertIn("recommendations", artifacts)
+        self.assertIn("subject", artifacts)
+        self.assertIn("do not override", artifacts)
+        self.assertNotIn('"commands": []', artifacts)
+        self.assertNotIn('"metrics": {', artifacts)
 
 
 def write_report(path: Path) -> None:
@@ -132,14 +151,6 @@ def write_report(path: Path) -> None:
                             "md_report": "Second Trial markdown.",
                             "findings": [{"title": "Second Trial finding."}],
                         },
-                    ],
-                    "notes": [
-                        {
-                            "trial_key": "trial/two",
-                            "source": "cell",
-                            "label": "notes.md",
-                            "markdown": "Second Trial notes.",
-                        }
                     ],
                 },
             }

@@ -36,6 +36,12 @@ def main(argv: list[str] | None = None) -> int:
 
             run_init_command(args)
             return 0
+        if args.command == "import":
+            from peval_py.analysis import run_import_analysis_command
+
+            workspace_root = validated_workspace_root(args)
+            run_import_analysis_command(args, workspace_root)
+            return 0
         workspace_root = validated_workspace_root(args)
         config = apply_overrides(
             load_config(args.config, workspace_root=workspace_root),
@@ -94,8 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="peval-py",
         description=(
             "Lightweight standalone Python peval. Current scenarios init, "
-            "export, view, or serve retained agent trajectories from JSONL "
-            "paths or adapter-owned SQLite databases."
+            "export, import, view, or serve retained agent trajectories and "
+            "analysis artifacts."
         ),
     )
     verbs = parser.add_subparsers(dest="command", required=True)
@@ -177,6 +183,50 @@ def build_parser() -> argparse.ArgumentParser:
     add_shared_args(export_trajectory)
     add_root_arg(export_trajectory)
 
+    import_cmd = verbs.add_parser(
+        "import",
+        help="import workspace artifacts",
+        description="Import analysis files into peval-py workspace artifacts.",
+    )
+    import_scenarios = import_cmd.add_subparsers(dest="scenario", required=True)
+    import_analysis = import_scenarios.add_parser(
+        "analysis",
+        help="import Trial analysis reports",
+        description=(
+            "Import JSON or Markdown analysis reports into a selected workspace "
+            "Trial cell."
+        ),
+    )
+    import_analysis.add_argument(
+        "-r",
+        "--root",
+        required=True,
+        metavar="DIR",
+        help="existing peval-py workspace root",
+    )
+    import_analysis.add_argument(
+        "--run-path",
+        required=True,
+        metavar="PATH",
+        help=(
+            "Trial cell path such as "
+            "runs/default/psychevo/<session-id>/<cell-key>"
+        ),
+    )
+    import_analysis.add_argument(
+        "-p",
+        "--path",
+        action="append",
+        required=True,
+        metavar="PATH",
+        help="analysis report path; repeat once for JSON and once for Markdown",
+    )
+    import_analysis.add_argument(
+        "--json",
+        action="store_true",
+        help="print machine-readable import results",
+    )
+
     serve = verbs.add_parser(
         "serve",
         help="serve the local saved trajectory workspace UI",
@@ -211,7 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def validated_workspace_root(args: argparse.Namespace) -> str | None:
     root = getattr(args, "root", None)
-    if root and getattr(args, "command", None) in {"view", "export"}:
+    if root and getattr(args, "command", None) in {"view", "export", "import"}:
         from peval_py.state import ensure_workspace_root
 
         return str(ensure_workspace_root(Path(root).expanduser()))
