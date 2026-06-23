@@ -77,10 +77,11 @@ use agents::{
 use channels::{
     channel_delete_result, channel_doctor_result_live, channel_enable_result,
     channel_list_result_for_scope, channel_list_result_for_workdir, channel_show_result,
-    channel_update_result, channel_wechat_qr_poll_result, channel_wechat_qr_start_result,
+    channel_source_list_result, channel_update_result, channel_wechat_qr_poll_result,
+    channel_wechat_qr_start_result,
 };
 use commands::{
-    command_completion_detail, command_execute_value, command_list_value,
+    command_completion_detail, command_execute_value, command_list_value, compact_prompt_text,
     gateway_command_capabilities, web_desktop_command_visible,
 };
 #[cfg(test)]

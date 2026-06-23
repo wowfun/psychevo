@@ -818,6 +818,8 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(ChannelRunnerView),
         exported_type!(ChannelListResult),
         exported_type!(ChannelEnableResult),
+        exported_type!(ChannelSourceBindingView),
+        exported_type!(ChannelSourceListResult),
         exported_type!(ChannelDoctorCheck),
         exported_type!(ChannelDoctorChannelView),
         exported_type!(ChannelDoctorResult),

@@ -1842,6 +1842,194 @@ export const gatewayChannelSchemas = {
   "title": "ChannelEnableResult",
   "type": "object"
 },
+  ChannelSourceBindingView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "activityStatus": {
+      "type": "string"
+    },
+    "chatLabel": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "chatType": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "connectionId": {
+      "type": "string"
+    },
+    "domain": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "platform": {
+      "type": "string"
+    },
+    "queuedTurns": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "sourceKey": {
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "threadTitle": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updatedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "userLabel": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "visibleName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "activityStatus",
+    "connectionId",
+    "platform",
+    "queuedTurns",
+    "sourceKey",
+    "threadId",
+    "updatedAtMs",
+    "workdir"
+  ],
+  "title": "ChannelSourceBindingView",
+  "type": "object"
+},
+  ChannelSourceListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ChannelSourceBindingView": {
+      "properties": {
+        "activityStatus": {
+          "type": "string"
+        },
+        "chatLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chatType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "domain": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": "string"
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sourceKey": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "threadTitle": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "userLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "activityStatus",
+        "connectionId",
+        "platform",
+        "queuedTurns",
+        "sourceKey",
+        "threadId",
+        "updatedAtMs",
+        "workdir"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "sources": {
+      "items": {
+        "$ref": "#/definitions/ChannelSourceBindingView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "sources"
+  ],
+  "title": "ChannelSourceListResult",
+  "type": "object"
+},
   ChannelDoctorCheck: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {

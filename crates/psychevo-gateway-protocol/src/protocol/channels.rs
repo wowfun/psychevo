@@ -127,6 +127,37 @@ pub struct ChannelEnableResult {
     pub channel: ChannelConfigView,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelSourceListResult {
+    pub sources: Vec<ChannelSourceBindingView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelSourceBindingView {
+    pub source_key: String,
+    pub connection_id: String,
+    pub platform: String,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub chat_type: Option<String>,
+    #[serde(default)]
+    pub chat_label: Option<String>,
+    #[serde(default)]
+    pub user_label: Option<String>,
+    #[serde(default)]
+    pub visible_name: Option<String>,
+    pub thread_id: String,
+    #[serde(default)]
+    pub thread_title: Option<String>,
+    pub workdir: String,
+    pub activity_status: String,
+    pub queued_turns: usize,
+    pub updated_at_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelConfigView {

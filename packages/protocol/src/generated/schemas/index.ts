@@ -135,6 +135,8 @@ export const gatewaySchemas = {
   ChannelRunnerView: gatewayChannelSchemas.ChannelRunnerView,
   ChannelListResult: gatewayChannelSchemas.ChannelListResult,
   ChannelEnableResult: gatewayChannelSchemas.ChannelEnableResult,
+  ChannelSourceBindingView: gatewayChannelSchemas.ChannelSourceBindingView,
+  ChannelSourceListResult: gatewayChannelSchemas.ChannelSourceListResult,
   ChannelDoctorCheck: gatewayChannelSchemas.ChannelDoctorCheck,
   ChannelDoctorChannelView: gatewayChannelSchemas.ChannelDoctorChannelView,
   ChannelDoctorResult: gatewayChannelSchemas.ChannelDoctorResult,

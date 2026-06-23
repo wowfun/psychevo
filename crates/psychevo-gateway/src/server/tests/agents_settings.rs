@@ -642,6 +642,65 @@ allow_users = ["12345"]
         );
         assert!(!settings.to_string().contains("telegram-secret"));
 
+        let source_list_thread = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.workdir, "channel", "model", "provider", None)
+            .expect("source list thread");
+        state
+            .inner
+            .state
+            .store()
+            .upsert_gateway_source_binding(psychevo_runtime::GatewaySourceBindingInput {
+                source_key: "im.telegram:source-hash",
+                source_kind: "im.telegram",
+                raw_identity: json!({
+                    "connectionId": "release",
+                    "platform": "telegram",
+                    "domain": "telegram",
+                    "chatType": "dm",
+                    "chatId": "raw-chat-123456",
+                    "userId": "raw-user-654321"
+                }),
+                visible_name: Some("raw-chat-123456/raw-user-654321"),
+                thread_id: &source_list_thread,
+                backend_kind: "psychevo",
+                backend_native_id: Some(&source_list_thread),
+                lineage: None,
+            })
+            .expect("source list binding");
+        let sources = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("sources")),
+                method: "channel/source/list".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "id": "release"
+                })),
+            },
+        )
+        .await
+        .expect("channel/source/list");
+        let source = sources["sources"]
+            .as_array()
+            .expect("sources array")
+            .iter()
+            .find(|source| source["sourceKey"] == "im.telegram:source-hash")
+            .expect("source view");
+        assert_eq!(source["threadId"], source_list_thread);
+        assert_eq!(source["workdir"], state.inner.workdir.display().to_string());
+        assert_eq!(source["activityStatus"], "idle");
+        assert!(source["chatLabel"].as_str().unwrap().contains("..."));
+        assert!(source["userLabel"].as_str().unwrap().contains("..."));
+        let source_json = source.to_string();
+        assert!(!source_json.contains("raw-chat-123456"));
+        assert!(!source_json.contains("raw-user-654321"));
+
         let env = std::fs::read_to_string(state.inner.home.join(".env")).expect("env");
         assert!(env.contains("CUSTOM_TELEGRAM_TOKEN=old-secret"));
         assert!(env.contains("TELEGRAM_BOT_TOKEN=telegram-secret"));

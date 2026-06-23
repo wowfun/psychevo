@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, mpsc};
 
-use super::{ImAdapter, ImIdentity, ImInboundMessage, ImOutboundMessage};
+use super::{ImAdapter, ImAttachment, ImIdentity, ImInboundMessage, ImOutboundMessage};
 
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
 pub const WECHAT_ILINK_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
@@ -22,6 +22,10 @@ const WECHAT_ILINK_APP_ID: &str = "bot";
 const WECHAT_CHANNEL_VERSION: &str = "2.2.0";
 const WECHAT_ILINK_CLIENT_VERSION: u32 = (2 << 16) | (2 << 8);
 const WECHAT_ITEM_TEXT: i64 = 1;
+const WECHAT_ITEM_IMAGE: i64 = 2;
+const WECHAT_ITEM_VOICE: i64 = 3;
+const WECHAT_ITEM_FILE: i64 = 4;
+const WECHAT_ITEM_VIDEO: i64 = 5;
 const WECHAT_MSG_TYPE_BOT: i64 = 2;
 const WECHAT_MSG_STATE_FINISH: i64 = 2;
 const WECHAT_QR_BOT_TYPE: &str = "3";
@@ -224,6 +228,7 @@ fn telegram_update_to_message(
         },
         message_id,
         text: text.to_string(),
+        attachments: Vec::new(),
         task_key: None,
     })
 }
@@ -705,8 +710,9 @@ fn wechat_message_to_inbound(
         return None;
     }
     let items = raw.get("item_list").and_then(Value::as_array)?;
-    let text = extract_wechat_text(items)?.trim().to_string();
-    if text.is_empty() {
+    let text = extract_wechat_text(items).trim().to_string();
+    let attachments = extract_wechat_media_metadata(items);
+    if text.is_empty() && attachments.is_empty() {
         return None;
     }
     let (chat_type, chat_id) = wechat_chat_identity(raw, account_id, sender);
@@ -731,11 +737,12 @@ fn wechat_message_to_inbound(
         },
         message_id,
         text,
+        attachments,
         task_key: None,
     })
 }
 
-fn extract_wechat_text(items: &[Value]) -> Option<String> {
+fn extract_wechat_text(items: &[Value]) -> String {
     let mut chunks = Vec::new();
     for item in items {
         if item.get("type").and_then(Value::as_i64) != Some(WECHAT_ITEM_TEXT) {
@@ -750,7 +757,89 @@ fn extract_wechat_text(items: &[Value]) -> Option<String> {
             chunks.push(text.to_string());
         }
     }
-    (!chunks.is_empty()).then(|| chunks.join("\n"))
+    chunks.join("\n")
+}
+
+fn extract_wechat_media_metadata(items: &[Value]) -> Vec<ImAttachment> {
+    let mut attachments = Vec::new();
+    for item in items {
+        match item.get("type").and_then(Value::as_i64) {
+            Some(WECHAT_ITEM_IMAGE) => attachments.push(ImAttachment::MediaMetadata {
+                media_kind: "image".to_string(),
+                filename: None,
+                mime_type: Some("image/*".to_string()),
+                size_bytes: wechat_image_size(item),
+                reason: "WeChat media download is not enabled yet".to_string(),
+            }),
+            Some(WECHAT_ITEM_FILE) => {
+                let file = item.get("file_item").unwrap_or(item);
+                attachments.push(ImAttachment::MediaMetadata {
+                    media_kind: "file".to_string(),
+                    filename: file
+                        .get("file_name")
+                        .or_else(|| file.get("filename"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    mime_type: None,
+                    size_bytes: file
+                        .get("len")
+                        .or_else(|| file.get("size"))
+                        .and_then(value_to_u64),
+                    reason: "WeChat media download is not enabled yet".to_string(),
+                });
+            }
+            Some(WECHAT_ITEM_VOICE) => {
+                let voice = item.get("voice_item").unwrap_or(item);
+                let transcript = voice
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                attachments.push(ImAttachment::MediaMetadata {
+                    media_kind: "voice".to_string(),
+                    filename: None,
+                    mime_type: Some("audio/*".to_string()),
+                    size_bytes: None,
+                    reason: transcript
+                        .map(|text| format!("voice transcription: {text}"))
+                        .unwrap_or_else(|| "WeChat voice download is not enabled yet".to_string()),
+                });
+            }
+            Some(WECHAT_ITEM_VIDEO) => attachments.push(ImAttachment::MediaMetadata {
+                media_kind: "video".to_string(),
+                filename: None,
+                mime_type: Some("video/*".to_string()),
+                size_bytes: item
+                    .get("video_item")
+                    .and_then(|video| video.get("video_size"))
+                    .and_then(value_to_u64),
+                reason: "WeChat video download is not enabled yet".to_string(),
+            }),
+            _ => {}
+        }
+    }
+    attachments
+}
+
+fn wechat_image_size(item: &Value) -> Option<u64> {
+    let image = item.get("image_item").unwrap_or(item);
+    [
+        "hd_size",
+        "mid_size",
+        "thumb_size",
+        "size",
+        "raw_size",
+        "rawsize",
+    ]
+    .into_iter()
+    .find_map(|key| image.get(key).and_then(value_to_u64))
+}
+
+fn value_to_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
+        .or_else(|| value.as_str()?.parse::<u64>().ok())
 }
 
 fn wechat_chat_identity(raw: &Value, account_id: &str, sender: &str) -> (String, String) {
@@ -1161,6 +1250,7 @@ fn feishu_event_to_inbound(
         },
         message_id,
         text,
+        attachments: Vec::new(),
         task_key: None,
     })
 }
@@ -1294,6 +1384,71 @@ mod tests {
         assert_eq!(message.identity.chat_type.as_deref(), Some("dm"));
         assert_eq!(message.identity.chat_id, "wx_user");
         assert_eq!(message.text, "ping");
+    }
+
+    #[test]
+    fn wechat_message_preserves_media_metadata_when_download_is_not_available() {
+        let raw = json!({
+            "message_id": "wx_msg_media",
+            "from_user_id": "wx_user",
+            "to_user_id": "account",
+            "item_list": [
+                {
+                    "type": 2,
+                    "image_item": {
+                        "media": {
+                            "encrypt_query_param": "encrypted",
+                            "aes_key": "key"
+                        },
+                        "hd_size": 4096
+                    }
+                },
+                {
+                    "type": 4,
+                    "file_item": {
+                        "file_name": "notes.pdf",
+                        "len": "12345",
+                        "media": {
+                            "encrypt_query_param": "encrypted-file",
+                            "aes_key": "key"
+                        }
+                    }
+                }
+            ]
+        });
+
+        let message = wechat_message_to_inbound(&raw, Some("wechat"), "account").expect("message");
+
+        assert!(message.text.is_empty());
+        assert_eq!(message.attachments.len(), 2);
+        match &message.attachments[0] {
+            ImAttachment::MediaMetadata {
+                media_kind,
+                mime_type,
+                size_bytes,
+                reason,
+                ..
+            } => {
+                assert_eq!(media_kind, "image");
+                assert_eq!(mime_type.as_deref(), Some("image/*"));
+                assert_eq!(*size_bytes, Some(4096));
+                assert!(reason.contains("download is not enabled"));
+            }
+            other => panic!("expected image metadata, got {other:?}"),
+        }
+        match &message.attachments[1] {
+            ImAttachment::MediaMetadata {
+                media_kind,
+                filename,
+                size_bytes,
+                ..
+            } => {
+                assert_eq!(media_kind, "file");
+                assert_eq!(filename.as_deref(), Some("notes.pdf"));
+                assert_eq!(*size_bytes, Some(12345));
+            }
+            other => panic!("expected file metadata, got {other:?}"),
+        }
     }
 
     #[tokio::test]

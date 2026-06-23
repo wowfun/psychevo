@@ -6,7 +6,7 @@ use psychevo_runtime::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{GatewaySource, GatewaySourceLifetime};
+use crate::{GatewayImageInput, GatewayInputPart, GatewaySource, GatewaySourceLifetime};
 
 #[path = "im_adapters.rs"]
 pub mod adapters;
@@ -47,7 +47,45 @@ pub struct ImInboundMessage {
     pub identity: ImIdentity,
     pub message_id: String,
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<ImAttachment>,
     pub task_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ImAttachment {
+    Image {
+        path: String,
+        #[serde(default)]
+        filename: Option<String>,
+        #[serde(default)]
+        mime_type: Option<String>,
+    },
+    File {
+        #[serde(default)]
+        filename: Option<String>,
+        #[serde(default)]
+        mime_type: Option<String>,
+        #[serde(default)]
+        size_bytes: Option<u64>,
+        #[serde(default)]
+        text: Option<String>,
+    },
+    MediaMetadata {
+        media_kind: String,
+        #[serde(default)]
+        filename: Option<String>,
+        #[serde(default)]
+        mime_type: Option<String>,
+        #[serde(default)]
+        size_bytes: Option<u64>,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +214,65 @@ pub fn gateway_source_for_im(message: &ImInboundMessage) -> GatewaySource {
     }
 }
 
+pub fn gateway_input_parts_for_im(message: &ImInboundMessage) -> Vec<GatewayInputPart> {
+    let mut input = Vec::new();
+    let text = message.text.trim();
+    if !text.is_empty() {
+        input.push(GatewayInputPart::Text {
+            text: text.to_string(),
+        });
+    }
+    for attachment in &message.attachments {
+        match attachment {
+            ImAttachment::Image { path, .. } if !path.trim().is_empty() => {
+                input.push(GatewayInputPart::Image {
+                    input: GatewayImageInput::LocalPath {
+                        path: path.to_string(),
+                    },
+                });
+            }
+            ImAttachment::Image { .. } => {}
+            ImAttachment::File {
+                filename,
+                mime_type,
+                size_bytes,
+                text,
+            } => {
+                input.push(GatewayInputPart::Context {
+                    label: channel_file_context_label(filename.as_deref()),
+                    text: channel_file_context_text(
+                        filename.as_deref(),
+                        mime_type.as_deref(),
+                        *size_bytes,
+                        text.as_deref(),
+                    ),
+                    visible_to_model: true,
+                });
+            }
+            ImAttachment::MediaMetadata {
+                media_kind,
+                filename,
+                mime_type,
+                size_bytes,
+                reason,
+            } => {
+                input.push(GatewayInputPart::Context {
+                    label: channel_media_context_label(media_kind, filename.as_deref()),
+                    text: channel_media_context_text(
+                        media_kind,
+                        filename.as_deref(),
+                        mime_type.as_deref(),
+                        *size_bytes,
+                        reason,
+                    ),
+                    visible_to_model: true,
+                });
+            }
+        }
+    }
+    input
+}
+
 pub fn im_task_route_key(message: &ImInboundMessage) -> String {
     let task = message.task_key.as_deref().unwrap_or("default");
     format!(
@@ -183,6 +280,72 @@ pub fn im_task_route_key(message: &ImInboundMessage) -> String {
         normalize_source_part(&message.identity.platform),
         stable_source_hash(&format!("{}\n{task}", message.identity.route_material()))
     )
+}
+
+fn channel_file_context_label(filename: Option<&str>) -> String {
+    filename
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("Attachment: {value}"))
+        .unwrap_or_else(|| "Attachment".to_string())
+}
+
+fn channel_media_context_label(media_kind: &str, filename: Option<&str>) -> String {
+    filename
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("Attachment: {value}"))
+        .unwrap_or_else(|| format!("Attachment: {media_kind}"))
+}
+
+fn channel_file_context_text(
+    filename: Option<&str>,
+    mime_type: Option<&str>,
+    size_bytes: Option<u64>,
+    text: Option<&str>,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push("Attached file metadata:".to_string());
+    if let Some(filename) = filename.map(str::trim).filter(|value| !value.is_empty()) {
+        lines.push(format!("filename: {filename}"));
+    }
+    if let Some(mime_type) = mime_type.map(str::trim).filter(|value| !value.is_empty()) {
+        lines.push(format!("mime_type: {mime_type}"));
+    }
+    if let Some(size_bytes) = size_bytes {
+        lines.push(format!("size_bytes: {size_bytes}"));
+    }
+    if let Some(text) = text.map(str::trim).filter(|value| !value.is_empty()) {
+        lines.push(String::new());
+        lines.push("Extracted text:".to_string());
+        lines.push(text.to_string());
+    } else {
+        lines.push("content: not extracted".to_string());
+    }
+    lines.join("\n")
+}
+
+fn channel_media_context_text(
+    media_kind: &str,
+    filename: Option<&str>,
+    mime_type: Option<&str>,
+    size_bytes: Option<u64>,
+    reason: &str,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push("Attached media metadata:".to_string());
+    lines.push(format!("kind: {media_kind}"));
+    if let Some(filename) = filename.map(str::trim).filter(|value| !value.is_empty()) {
+        lines.push(format!("filename: {filename}"));
+    }
+    if let Some(mime_type) = mime_type.map(str::trim).filter(|value| !value.is_empty()) {
+        lines.push(format!("mime_type: {mime_type}"));
+    }
+    if let Some(size_bytes) = size_bytes {
+        lines.push(format!("size_bytes: {size_bytes}"));
+    }
+    lines.push(format!("content: {reason}"));
+    lines.join("\n")
 }
 
 #[derive(Debug, Default, Clone)]
@@ -321,6 +484,7 @@ mod tests {
             },
             message_id: "message-raw".to_string(),
             text: "hello".to_string(),
+            attachments: Vec::new(),
             task_key: task_key.map(ToString::to_string),
         }
     }
@@ -345,6 +509,54 @@ mod tests {
 
         assert_eq!(im_task_route_key(&first), im_task_route_key(&second));
         assert_ne!(im_task_route_key(&first), im_task_route_key(&other_task));
+    }
+
+    #[test]
+    fn im_input_parts_include_text_images_and_file_context() {
+        let mut message = inbound("chat-raw", "user-raw", None);
+        message.text = "look at these".to_string();
+        message.attachments = vec![
+            ImAttachment::Image {
+                path: "/tmp/screenshot.png".to_string(),
+                filename: Some("screenshot.png".to_string()),
+                mime_type: Some("image/png".to_string()),
+            },
+            ImAttachment::File {
+                filename: Some("notes.txt".to_string()),
+                mime_type: Some("text/plain".to_string()),
+                size_bytes: Some(12),
+                text: Some("hello notes".to_string()),
+            },
+        ];
+
+        let parts = gateway_input_parts_for_im(&message);
+
+        assert_eq!(parts.len(), 3);
+        match &parts[0] {
+            GatewayInputPart::Text { text } => assert_eq!(text, "look at these"),
+            other => panic!("expected text input, got {other:?}"),
+        }
+        match &parts[1] {
+            GatewayInputPart::Image {
+                input: GatewayImageInput::LocalPath { path },
+            } => assert_eq!(path, "/tmp/screenshot.png"),
+            other => panic!("expected local image input, got {other:?}"),
+        }
+        match &parts[2] {
+            GatewayInputPart::Context {
+                label,
+                text,
+                visible_to_model,
+            } => {
+                assert_eq!(label, "Attachment: notes.txt");
+                assert_eq!(
+                    text,
+                    "Attached file metadata:\nfilename: notes.txt\nmime_type: text/plain\nsize_bytes: 12\n\nExtracted text:\nhello notes"
+                );
+                assert!(*visible_to_model);
+            }
+            other => panic!("expected context input, got {other:?}"),
+        }
     }
 
     #[tokio::test]

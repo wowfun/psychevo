@@ -104,6 +104,9 @@
       "$ref": "ClientRequest/channel-doctor.json"
     },
     {
+      "$ref": "ClientRequest/channel-source-list.json"
+    },
+    {
       "$ref": "ClientRequest/channel-wechat-qr-start.json"
     },
     {

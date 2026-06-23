@@ -412,7 +412,7 @@ fn web_desktop_unavailable_message(command: &str, action: SlashCommandAction) ->
     }
 }
 
-fn compact_prompt_text(instructions: Option<String>) -> String {
+pub(super) fn compact_prompt_text(instructions: Option<String>) -> String {
     match instructions {
         Some(instructions) if !instructions.trim().is_empty() => {
             format!(

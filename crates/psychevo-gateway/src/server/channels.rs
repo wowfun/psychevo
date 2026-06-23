@@ -173,6 +173,124 @@ pub(super) fn channel_delete_result(
     channel_list_result_for_scope(state, scope)
 }
 
+pub(super) fn channel_source_list_result(
+    state: &WebState,
+    _scope: &ResolvedScope,
+    params: wire::ChannelIdParams,
+) -> psychevo_runtime::Result<wire::ChannelSourceListResult> {
+    let bindings = state
+        .inner
+        .state
+        .store()
+        .gateway_source_bindings_for_connection_id(&params.id)?;
+    let mut sources = Vec::new();
+    for binding in bindings {
+        let raw = &binding.raw_identity;
+        let platform = raw
+            .get("platform")
+            .and_then(Value::as_str)
+            .unwrap_or("channel")
+            .to_string();
+        let domain = raw
+            .get("domain")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let chat_type = raw
+            .get("chatType")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let chat_label = raw
+            .get("chatId")
+            .and_then(Value::as_str)
+            .map(redacted_remote_label);
+        let user_label = raw
+            .get("userId")
+            .and_then(Value::as_str)
+            .map(redacted_remote_label);
+        let summary = state
+            .inner
+            .state
+            .store()
+            .session_summary(&binding.thread_id)?;
+        let activity = state
+            .inner
+            .gateway
+            .activity_for_selector(GatewayThreadSelector::thread_id(&binding.thread_id));
+        let activity_status = if activity.running {
+            "running"
+        } else if activity.queued_turns > 0 {
+            "queued"
+        } else {
+            "idle"
+        }
+        .to_string();
+        let thread_title = summary.as_ref().and_then(|summary| summary.title.clone());
+        let workdir = summary
+            .as_ref()
+            .map(|summary| summary.workdir.clone())
+            .unwrap_or_default();
+        let visible_name = Some(redacted_channel_source_name(
+            &platform,
+            chat_type.as_deref(),
+            chat_label.as_deref(),
+            user_label.as_deref(),
+        ));
+        sources.push(wire::ChannelSourceBindingView {
+            source_key: binding.source_key,
+            connection_id: params.id.clone(),
+            platform,
+            domain,
+            chat_type,
+            chat_label,
+            user_label,
+            visible_name,
+            thread_id: binding.thread_id,
+            thread_title,
+            workdir,
+            activity_status,
+            queued_turns: activity.queued_turns,
+            updated_at_ms: binding.updated_at_ms,
+        });
+    }
+    Ok(wire::ChannelSourceListResult { sources })
+}
+
+fn redacted_remote_label(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return "unknown".to_string();
+    }
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= 6 {
+        return "***".to_string();
+    }
+    let prefix = chars.iter().take(2).collect::<String>();
+    let suffix = chars
+        .iter()
+        .skip(chars.len().saturating_sub(4))
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
+}
+
+fn redacted_channel_source_name(
+    platform: &str,
+    chat_type: Option<&str>,
+    chat_label: Option<&str>,
+    user_label: Option<&str>,
+) -> String {
+    let mut parts = vec![platform.to_string()];
+    if let Some(chat_type) = chat_type.filter(|value| !value.trim().is_empty()) {
+        parts.push(chat_type.to_string());
+    }
+    if let Some(chat_label) = chat_label {
+        parts.push(format!("chat {chat_label}"));
+    }
+    if let Some(user_label) = user_label {
+        parts.push(format!("user {user_label}"));
+    }
+    parts.join(" ")
+}
+
 pub(super) async fn channel_doctor_result_live(
     state: &WebState,
     scope: &ResolvedScope,

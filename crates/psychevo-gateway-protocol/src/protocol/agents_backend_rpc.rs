@@ -470,6 +470,8 @@ pub enum ClientRequest {
     ChannelDelete(ChannelIdParams),
     #[serde(rename = "channel/doctor")]
     ChannelDoctor(ChannelDoctorParams),
+    #[serde(rename = "channel/source/list")]
+    ChannelSourceList(ChannelIdParams),
     #[serde(rename = "channel/wechat-qr/start")]
     ChannelWechatQrStart(ChannelWechatQrStartParams),
     #[serde(rename = "channel/wechat-qr/poll")]

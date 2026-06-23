@@ -919,6 +919,13 @@ async fn handle_rpc(
                 channel_doctor_result_live(&state, &scope, params).await?,
             )?)
         }
+        "channel/source/list" => {
+            let params = request.required_params::<wire::ChannelIdParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(channel_source_list_result(
+                &state, &scope, params,
+            )?)?)
+        }
         "channel/wechat-qr/start" => {
             let params = request.params::<wire::ChannelWechatQrStartParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
