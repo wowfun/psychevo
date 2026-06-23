@@ -46,6 +46,16 @@ import {
   type InitializeParams,
   type InitializeResult,
   type InteractionRespondResult,
+  type ModelAssignmentSetParams,
+  type ModelAssignmentSetResult,
+  type ModelProviderCatalogParams,
+  type ModelProviderCatalogResult,
+  type ModelProviderSaveParams,
+  type ModelSettingsReadParams,
+  type ModelSettingsResult,
+  type ModelStateReadParams,
+  type ModelStateResult,
+  type ModelStateSetParams,
   type ObservabilityReadParams,
   type ObservabilityReadResult,
   type PermissionRespondParams,
@@ -135,6 +145,12 @@ export interface GatewayRequestParams {
   "command/list": CommandListParams;
   "completion/list": CompletionListParams;
   "context/read": ContextReadParams;
+  "model/assignment/set": ModelAssignmentSetParams;
+  "model/provider/catalog": ModelProviderCatalogParams;
+  "model/provider/save": ModelProviderSaveParams;
+  "model/settings/read": ModelSettingsReadParams;
+  "model/state/read": ModelStateReadParams;
+  "model/state/set": ModelStateSetParams;
   "observability/read": ObservabilityReadParams;
   "usage/read": UsageReadParams;
   "initialize": InitializeParams;
@@ -196,6 +212,12 @@ export interface GatewayRequestResults {
   "command/list": CommandListResult;
   "completion/list": CompletionListResult;
   "context/read": ContextReadResult;
+  "model/assignment/set": ModelAssignmentSetResult;
+  "model/provider/catalog": ModelProviderCatalogResult;
+  "model/provider/save": ModelSettingsResult;
+  "model/settings/read": ModelSettingsResult;
+  "model/state/read": ModelStateResult;
+  "model/state/set": ModelStateResult;
   "observability/read": ObservabilityReadResult;
   "usage/read": UsageReadResult;
   "initialize": InitializeResult;

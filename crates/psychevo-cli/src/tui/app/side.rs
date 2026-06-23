@@ -160,15 +160,12 @@ impl TuiApp {
 
     pub(crate) fn restore_parent_tui_state(&mut self) -> Result<()> {
         if let Some(model) = self.current_model.clone() {
-            self.state.set_model(&self.workdir_key, model);
+            self.model_state
+                .set_model(&self.workdir_key, model, self.current_variant.clone());
         } else {
-            self.state.clear_model(&self.workdir_key);
+            self.model_state.clear_workdir_model(&self.workdir_key);
         }
-        if let Some(variant) = self.current_variant.clone() {
-            self.state.set_variant(&self.workdir_key, variant);
-        } else {
-            self.state.clear_variant(&self.workdir_key);
-        }
+        self.model_state.save(&self.model_state_path)?;
         self.state
             .set_mode(&self.workdir_key, self.current_mode.as_str().to_string());
         self.state.set_permission_mode(

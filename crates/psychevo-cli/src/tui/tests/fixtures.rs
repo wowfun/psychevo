@@ -73,6 +73,8 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         home: home.clone(),
         state_path: home.join("tui-state.json"),
         state: TuiState::default(),
+        model_state_path: ModelState::path_for_home(&home),
+        model_state: ModelState::default(),
         state_runtime,
         gateway,
         db_path,

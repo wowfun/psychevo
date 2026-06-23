@@ -459,8 +459,9 @@ impl TuiApp {
 
     pub(crate) fn model_lines(&self) -> Result<Vec<String>> {
         let mut lines = vec![format!("model: {}", self.model_display_value())];
-        if !self.state.recent_models.is_empty() {
-            lines.push(format!("recent: {}", self.state.recent_models.join(", ")));
+        let recent_models = self.model_state.recent_model_values();
+        if !recent_models.is_empty() {
+            lines.push(format!("recent: {}", recent_models.join(", ")));
         }
         lines.push("configured models:".to_string());
         lines.extend(self.configured_model_lines()?);

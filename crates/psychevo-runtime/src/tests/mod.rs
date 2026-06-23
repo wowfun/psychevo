@@ -12,16 +12,18 @@ pub(crate) use crate::config::{
     ResolvedRunProvider, create_global_custom_provider, custom_provider_api_key_env,
     fetch_model_catalog_with_client, load_agent_backend_configs,
     load_project_context_instruction_mode, load_run_config, model_catalog_endpoint,
-    model_catalog_providers, resolve_default_workspace_workdir, resolve_run_provider,
-    resolve_workspace_root, set_default_model, set_default_model_with_reasoning,
+    model_catalog_entry_is_free, model_catalog_provider, model_catalog_providers,
+    resolve_compression_config, resolve_default_workspace_workdir, resolve_run_provider,
+    resolve_workspace_root, set_auxiliary_model_with_reasoning, set_default_model,
+    set_default_model_with_reasoning,
 };
 pub(crate) use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};
 pub(crate) use crate::paths::canonical_workdir;
 pub(crate) use crate::run::{SESSION_TITLE_MAX_CHARS, ensure_new_tui_session_title};
 pub(crate) use crate::snapshot::SnapshotStore;
 pub(crate) use crate::types::{
-    MessageAccounting, ModelCost, ModelCostTier, ModelMetadata, ProjectContextInstructionMode,
-    SelectedAgent,
+    MessageAccounting, ModelCatalogEntry, ModelCost, ModelCostTier, ModelMetadata,
+    ProjectContextInstructionMode, SelectedAgent,
 };
 pub(crate) use psychevo_agent_core::{
     AgentEvent, AssistantBlock, EventSink, Message, ToolDisplaySpec,

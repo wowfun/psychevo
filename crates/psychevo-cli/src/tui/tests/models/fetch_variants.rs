@@ -157,7 +157,7 @@ pub(crate) async fn model_variant_panel_up_down_wraps_between_first_and_last_row
 }
 
 #[tokio::test]
-pub(crate) async fn model_config_default_clears_variant_override() {
+pub(crate) async fn model_config_default_saves_composer_model_state() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     app.current_variant = Some("xhigh".to_string());
@@ -173,20 +173,26 @@ pub(crate) async fn model_config_default_clears_variant_override() {
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("select config default");
 
-    assert_eq!(app.current_model, None);
-    assert_eq!(app.current_variant, None);
-    assert_eq!(app.state.model_for(&app.workdir_key), None);
-    assert_eq!(app.state.variant_for(&app.workdir_key), None);
+    assert_eq!(app.current_model.as_deref(), Some("mock/other-model"));
+    assert_eq!(app.current_variant.as_deref(), Some("high"));
+    assert_eq!(
+        app.model_state.model_for(&app.workdir_key).as_deref(),
+        Some("mock/other-model")
+    );
+    assert_eq!(
+        app.model_state
+            .reasoning_effort_for(&app.workdir_key)
+            .as_deref(),
+        Some("high")
+    );
     let local_config =
         fs::read_to_string(app.workdir.join(".psychevo/config.toml")).expect("local config");
-    assert!(local_config.contains("[model]"));
-    assert!(local_config.contains("id = \"mock/other-model\""));
-    assert!(local_config.contains("reasoning_effort = \"high\""));
+    assert!(!local_config.contains("id = \"mock/other-model\""));
     assert!(ui.bottom_panel.is_none());
 }
 
 #[tokio::test]
-pub(crate) async fn model_explicit_variant_writes_reasoning_effort_without_variant_override() {
+pub(crate) async fn model_explicit_variant_saves_composer_reasoning_effort() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -208,14 +214,22 @@ pub(crate) async fn model_explicit_variant_writes_reasoning_effort_without_varia
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("select variant");
 
-    assert_eq!(app.current_model, None);
-    assert_eq!(app.current_variant, None);
-    assert_eq!(app.state.variant_for(&app.workdir_key), None);
+    assert_eq!(app.current_model.as_deref(), Some("mock/other-model"));
+    assert_eq!(app.current_variant.as_deref(), Some("xhigh"));
+    assert_eq!(
+        app.model_state.model_for(&app.workdir_key).as_deref(),
+        Some("mock/other-model")
+    );
+    assert_eq!(
+        app.model_state
+            .reasoning_effort_for(&app.workdir_key)
+            .as_deref(),
+        Some("xhigh")
+    );
     let local_config =
         fs::read_to_string(app.workdir.join(".psychevo/config.toml")).expect("local config");
-    assert!(local_config.contains("[model]"));
-    assert!(local_config.contains("id = \"mock/other-model\""));
-    assert!(local_config.contains("reasoning_effort = \"xhigh\""));
+    assert!(!local_config.contains("id = \"mock/other-model\""));
+    assert!(!local_config.contains("reasoning_effort = \"xhigh\""));
 }
 
 #[tokio::test]

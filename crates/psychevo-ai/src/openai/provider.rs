@@ -47,12 +47,14 @@ impl GenerationProvider for OpenAiChatProvider {
 
             let endpoint = openai_chat_completions_endpoint(&base_url);
             let body = openai_chat_request_body(&request, &base_url);
-            let send = client
+            let mut http_request = client
                 .post(endpoint)
-                .bearer_auth(api_key)
                 .header("accept", "text/event-stream")
-                .json(&body)
-                .send();
+                .json(&body);
+            if !api_key.trim().is_empty() {
+                http_request = http_request.bearer_auth(api_key);
+            }
+            let send = http_request.send();
             let response = tokio::select! {
                 biased;
                 _ = abort.wait_for_abort() => return Ok(aborted_generation_stream()),

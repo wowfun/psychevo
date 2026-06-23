@@ -1092,6 +1092,61 @@ async fn handle_rpc(
             )?;
             settings_read_value(&state, &scope.workdir, Some(&params.thread_id))
         }
+        "model/settings/read" => {
+            let params = request.params::<wire::ModelSettingsReadParams>()?;
+            let workdir = resolve_workdir_filter(&state, &auth, params.workdir)?;
+            model_settings_value(&state, &workdir)
+        }
+        "model/provider/save" => {
+            let params = request.required_params::<wire::ModelProviderSaveParams>()?;
+            let workdir = default_resolved_scope(&state, &auth)?.workdir;
+            model_provider_save_value(&state, &workdir, params)
+        }
+        "model/provider/catalog" => {
+            let params = request.required_params::<wire::ModelProviderCatalogParams>()?;
+            let workdir = resolve_workdir_filter(&state, &auth, params.workdir.clone())?;
+            model_provider_catalog_value(&state, &workdir, params).await
+        }
+        "model/state/read" => {
+            let params = request.params::<wire::ModelStateReadParams>()?;
+            let (workdir, thread_id) =
+                resolve_model_state_request_scope(&state, &auth, params.workdir, params.thread_id)?;
+            model_state_read_value(&state, &workdir, thread_id.as_deref())
+        }
+        "model/state/set" => {
+            let params = request.required_params::<wire::ModelStateSetParams>()?;
+            let (workdir, thread_id) = resolve_model_state_request_scope(
+                &state,
+                &auth,
+                params.workdir.clone(),
+                params.thread_id.clone(),
+            )?;
+            model_state_set_value(&state, &workdir, thread_id.as_deref(), params)
+        }
+        "model/assignment/set" => {
+            let params = request.required_params::<wire::ModelAssignmentSetParams>()?;
+            let workdir = default_resolved_scope(&state, &auth)?.workdir;
+            model_assignment_set_value(&state, &workdir, params)
+        }
         method => Err(Error::Message(format!("method not found: {method}"))),
     }
+}
+
+fn resolve_model_state_request_scope(
+    state: &WebState,
+    auth: &AuthContext,
+    workdir: Option<String>,
+    thread_id: Option<String>,
+) -> psychevo_runtime::Result<(PathBuf, Option<String>)> {
+    if let Some(thread_id) = thread_id {
+        authorize_thread(state, auth, &thread_id)?;
+        let summary = state
+            .inner
+            .state
+            .store()
+            .session_summary(&thread_id)?
+            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+        return Ok((PathBuf::from(summary.workdir), Some(thread_id)));
+    }
+    Ok((resolve_workdir_filter(state, auth, workdir)?, None))
 }

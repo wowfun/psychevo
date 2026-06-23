@@ -145,6 +145,33 @@ pub(crate) async fn openai_provider_posts_public_request_body() {
 }
 
 #[tokio::test]
+pub(crate) async fn openai_provider_omits_authorization_for_empty_api_key() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (request_tx, request_rx) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let request = read_http_request(&mut stream);
+        request_tx.send(request).expect("request");
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: 14\r\nconnection: close\r\n\r\ndata: [DONE]\n\n",
+            )
+            .expect("response");
+    });
+
+    let provider = OpenAiChatProvider::new(format!("http://{addr}/v1"), "", "mock");
+    let (_abort_tx, abort_rx) = watch::channel(false);
+    let _stream = provider
+        .stream(basic_generation_request(), AbortSignal::new(abort_rx))
+        .await
+        .expect("stream");
+    let request = request_rx.recv().expect("captured request");
+    assert!(!request.to_lowercase().contains("authorization:"));
+    server.join().expect("server");
+}
+
+#[tokio::test]
 pub(crate) async fn openai_provider_abort_wakes_pending_http_response() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("addr");

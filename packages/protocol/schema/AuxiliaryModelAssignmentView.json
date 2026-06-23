@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "effectiveModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "label": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "reasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "label",
+    "model",
+    "provider",
+    "task"
+  ],
+  "title": "AuxiliaryModelAssignmentView",
+  "type": "object"
+}

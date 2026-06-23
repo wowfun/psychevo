@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "apiKey": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "apiKeyEnv": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "baseUrl": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "noAuth": {
+      "default": false,
+      "type": "boolean"
+    },
+    "providerId": {
+      "type": "string"
+    },
+    "scope": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelSettingsScope"
+        }
+      ],
+      "default": "global"
+    }
+  },
+  "required": [
+    "baseUrl",
+    "label",
+    "providerId"
+  ],
+  "title": "ModelProviderSaveParams",
+  "type": "object"
+}

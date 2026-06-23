@@ -65,6 +65,10 @@ pub struct WorkbenchControlsView {
     #[serde(default)]
     pub model_options: Vec<String>,
     #[serde(default)]
+    pub model_details: Vec<ModelOptionView>,
+    #[serde(default)]
+    pub recent_models: Vec<String>,
+    #[serde(default)]
     pub variant_options: Vec<String>,
 }
 
@@ -75,6 +79,194 @@ pub enum WorkbenchModelStatus {
     #[default]
     Unconfigured,
     Error,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelSettingsScope {
+    #[default]
+    Global,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSettingsReadParams {
+    #[serde(default)]
+    pub scope: ModelSettingsScope,
+    #[serde(default)]
+    pub workdir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderSaveParams {
+    #[serde(default)]
+    pub scope: ModelSettingsScope,
+    pub provider_id: String,
+    pub label: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub no_auth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderCatalogParams {
+    #[serde(default)]
+    pub scope: ModelSettingsScope,
+    pub provider_id: String,
+    #[serde(default)]
+    pub refresh: bool,
+    #[serde(default)]
+    pub workdir: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStateReadParams {
+    #[serde(default)]
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStateSetParams {
+    #[serde(default)]
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStateResult {
+    pub workdir: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub recent_models: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelAssignmentTarget {
+    Default,
+    Auxiliary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelAssignmentSetParams {
+    #[serde(default)]
+    pub scope: ModelSettingsScope,
+    pub target: ModelAssignmentTarget,
+    #[serde(default)]
+    pub task: Option<String>,
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSettingsResult {
+    pub scope: ModelSettingsScope,
+    pub workdir: String,
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub default_reasoning_effort: Option<String>,
+    pub providers: Vec<ModelProviderView>,
+    pub auxiliary: Vec<AuxiliaryModelAssignmentView>,
+    pub model_options: Vec<ModelOptionView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderView {
+    pub id: String,
+    pub label: String,
+    pub built_in: bool,
+    pub configured: bool,
+    pub base_url: Option<String>,
+    pub api_key_env: Option<String>,
+    pub credential_status: ModelCredentialStatus,
+    pub no_auth: bool,
+    pub can_fetch_models: bool,
+    pub unavailable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelCredentialStatus {
+    Present,
+    Missing,
+    NotRequired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOptionView {
+    pub provider: String,
+    pub id: String,
+    pub value: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub provider_label: Option<String>,
+    #[serde(default)]
+    pub free: bool,
+    #[serde(default)]
+    pub context_limit: Option<u64>,
+    #[serde(default)]
+    pub reasoning_supported: Option<bool>,
+    #[serde(default)]
+    pub reasoning_efforts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AuxiliaryModelAssignmentView {
+    pub task: String,
+    pub label: String,
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    pub effective_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderCatalogResult {
+    pub provider_id: String,
+    pub models: Vec<ModelOptionView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelAssignmentSetResult {
+    pub ok: bool,
+    pub target: ModelAssignmentTarget,
+    #[serde(default)]
+    pub task: Option<String>,
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

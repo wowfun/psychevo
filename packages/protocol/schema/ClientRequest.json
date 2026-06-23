@@ -143,6 +143,24 @@
       "$ref": "ClientRequest/settings-read.json"
     },
     {
+      "$ref": "ClientRequest/model-settings-read.json"
+    },
+    {
+      "$ref": "ClientRequest/model-provider-save.json"
+    },
+    {
+      "$ref": "ClientRequest/model-provider-catalog.json"
+    },
+    {
+      "$ref": "ClientRequest/model-state-read.json"
+    },
+    {
+      "$ref": "ClientRequest/model-state-set.json"
+    },
+    {
+      "$ref": "ClientRequest/model-assignment-set.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-files.json"
     },
     {

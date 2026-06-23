@@ -237,6 +237,7 @@ struct WebStateInner {
     review: WorkspaceReviewState,
     pending_permissions: Mutex<HashMap<String, PendingPermissionView>>,
     pending_clarifies: Mutex<HashMap<String, PendingClarifyView>>,
+    model_catalog_cache: Mutex<HashMap<String, CachedModelCatalog>>,
     wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
 }
@@ -259,6 +260,12 @@ struct LaunchEntry {
 enum AuthContext {
     Bearer,
     Browser { session_id: String },
+}
+
+#[derive(Debug, Clone)]
+struct CachedModelCatalog {
+    provider: ModelCatalogProvider,
+    models: Vec<ModelCatalogEntry>,
 }
 
 impl AuthContext {
@@ -289,6 +296,7 @@ impl WebState {
                 review: WorkspaceReviewState::default(),
                 pending_permissions: Mutex::new(HashMap::new()),
                 pending_clarifies: Mutex::new(HashMap::new()),
+                model_catalog_cache: Mutex::new(HashMap::new()),
                 wechat_qr_sessions: Mutex::new(HashMap::new()),
                 channel_runtime,
             }),

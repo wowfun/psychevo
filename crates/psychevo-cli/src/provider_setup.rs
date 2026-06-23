@@ -10,6 +10,7 @@ pub(crate) enum ProviderSetupPresetId {
     DeepSeek,
     Zai,
     XiaomiTokenPlan,
+    OpenCodeZen,
     Custom,
 }
 
@@ -19,6 +20,7 @@ impl ProviderSetupPresetId {
             Self::DeepSeek => "deepseek",
             Self::Zai => "zai",
             Self::XiaomiTokenPlan => "xiaomi-token-plan",
+            Self::OpenCodeZen => "opencode-zen",
             Self::Custom => "custom",
         }
     }
@@ -71,6 +73,11 @@ const XIAOMI_TOKEN_PLAN_BASE_URLS: &[ProviderSetupBaseUrl] = &[
     },
 ];
 
+const OPENCODE_ZEN_BASE_URLS: &[ProviderSetupBaseUrl] = &[ProviderSetupBaseUrl {
+    label: "Default",
+    url: "https://opencode.ai/zen/v1",
+}];
+
 const CUSTOM_BASE_URLS: &[ProviderSetupBaseUrl] = &[ProviderSetupBaseUrl {
     label: "Custom",
     url: "http://127.0.0.1:1234/v1",
@@ -104,6 +111,14 @@ const PROVIDER_SETUP_PRESETS: &[ProviderSetupPreset] = &[
             "XIAOMI_TOKEN_PLAN_CN_API_KEY",
             "XIAOMI_API_KEY",
         ],
+    },
+    ProviderSetupPreset {
+        id: ProviderSetupPresetId::OpenCodeZen,
+        label: "OpenCode Zen",
+        provider_id: Some("opencode-zen"),
+        default_model: "mimo-v2.5-free",
+        base_urls: OPENCODE_ZEN_BASE_URLS,
+        api_key_env_candidates: &["OPENCODE_ZEN_API_KEY"],
     },
     ProviderSetupPreset {
         id: ProviderSetupPresetId::Custom,

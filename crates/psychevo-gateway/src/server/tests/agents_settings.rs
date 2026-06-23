@@ -359,6 +359,149 @@ command = "cursor-agent"
     }
 
     #[tokio::test]
+    async fn model_state_rpc_saves_workdir_selection_and_controls_recent_models() {
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let workdir = state.inner.workdir.display().to_string();
+
+        let saved = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-state-set")),
+                method: "model/state/set".to_string(),
+                params: Some(json!({
+                    "workdir": workdir,
+                    "model": "mock/model-a",
+                    "reasoningEffort": "high"
+                })),
+            },
+        )
+        .await
+        .expect("model/state/set");
+
+        assert_eq!(saved["model"], "mock/model-a");
+        assert_eq!(saved["reasoningEffort"], "high");
+        assert_eq!(saved["recentModels"], json!(["mock/model-a"]));
+
+        let read = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-state-read")),
+                method: "model/state/read".to_string(),
+                params: Some(json!({ "workdir": state.inner.workdir.display().to_string() })),
+            },
+        )
+        .await
+        .expect("model/state/read");
+        assert_eq!(read["model"], "mock/model-a");
+        assert_eq!(read["reasoningEffort"], "high");
+
+        let settings = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("settings-read")),
+                method: "settings/read".to_string(),
+                params: Some(json!({ "workdir": state.inner.workdir.display().to_string() })),
+            },
+        )
+        .await
+        .expect("settings/read");
+        assert_eq!(settings["controls"]["model"], "mock/model-a");
+        assert_eq!(settings["controls"]["variant"], "high");
+        assert_eq!(settings["controls"]["recentModels"], json!(["mock/model-a"]));
+
+        let model_state = ModelState::load(&ModelState::path_for_home(&state.inner.home))
+            .expect("model state");
+        assert_eq!(
+            model_state
+                .model_for(state.inner.workdir.to_string_lossy().as_ref())
+                .as_deref(),
+            Some("mock/model-a")
+        );
+    }
+
+    #[tokio::test]
+    async fn model_state_rpc_with_thread_updates_session_model_metadata() {
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.workdir, "web", "old-model", "old", None)
+            .expect("session");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let saved = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-state-thread-set")),
+                method: "model/state/set".to_string(),
+                params: Some(json!({
+                    "threadId": session_id,
+                    "model": "mock/model-b",
+                    "reasoningEffort": "low"
+                })),
+            },
+        )
+        .await
+        .expect("model/state/set");
+        assert_eq!(saved["threadId"], session_id);
+        assert_eq!(saved["model"], "mock/model-b");
+        assert_eq!(saved["reasoningEffort"], "low");
+
+        let summary = state
+            .inner
+            .state
+            .store()
+            .session_summary(&session_id)
+            .expect("summary")
+            .expect("session");
+        assert_eq!(summary.provider, "mock");
+        assert_eq!(summary.model, "model-b");
+        let metadata = state
+            .inner
+            .state
+            .store()
+            .session_metadata(&session_id)
+            .expect("metadata")
+            .expect("metadata");
+        assert_eq!(
+            metadata[SESSION_COMPOSER_MODEL_METADATA_KEY]["reasoningEffort"],
+            "low"
+        );
+
+        let settings = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("settings-read-thread")),
+                method: "settings/read".to_string(),
+                params: Some(json!({ "threadId": session_id })),
+            },
+        )
+        .await
+        .expect("settings/read");
+        assert_eq!(settings["controls"]["model"], "mock/model-b");
+        assert_eq!(settings["controls"]["variant"], "low");
+    }
+
+    #[tokio::test]
     async fn settings_read_and_channel_rpc_expose_secret_free_channels() {
         let (_temp, state) = web_state();
         std::fs::create_dir_all(&state.inner.home).expect("home");
@@ -969,6 +1112,325 @@ allow_users = ["existing-user"]
     }
 
     #[tokio::test]
+    async fn model_settings_rpc_saves_zen_no_auth_and_auxiliary_assignment() {
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let saved = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-save")),
+                method: "model/provider/save".to_string(),
+                params: Some(json!({
+                    "scope": "global",
+                    "providerId": "zen",
+                    "label": "OpenCode Zen",
+                    "baseUrl": "https://opencode.ai/zen/v1",
+                    "apiKeyEnv": null,
+                    "apiKey": null,
+                    "noAuth": true
+                })),
+            },
+        )
+        .await
+        .expect("model/provider/save");
+        let zen = saved["providers"]
+            .as_array()
+            .expect("providers")
+            .iter()
+            .find(|provider| provider["id"] == "opencode-zen")
+            .expect("zen provider");
+        assert_eq!(zen["configured"], true);
+        assert_eq!(zen["noAuth"], true);
+        assert_eq!(zen["credentialStatus"], "notRequired");
+
+        let assignment = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-assignment")),
+                method: "model/assignment/set".to_string(),
+                params: Some(json!({
+                    "scope": "global",
+                    "target": "auxiliary",
+                    "task": "title_generation",
+                    "provider": "opencode",
+                    "model": "mimo-v2.5-free",
+                    "reasoningEffort": "high"
+                })),
+            },
+        )
+        .await
+        .expect("model/assignment/set");
+        assert_eq!(assignment["ok"], true);
+        assert_eq!(assignment["provider"], "opencode-zen");
+        assert_eq!(assignment["reasoningEffort"], "high");
+
+        let config = std::fs::read_to_string(state.inner.home.join("config.toml")).expect("config");
+        assert!(config.contains("[provider.opencode-zen.options]"));
+        assert!(config.contains("no_auth = true"));
+        assert!(!config.contains("api_key_env"));
+        assert!(config.contains("[auxiliary.title_generation]"));
+        assert!(config.contains("provider = \"opencode-zen\""));
+        assert!(config.contains("id = \"mimo-v2.5-free\""));
+        assert!(config.contains("reasoning_effort = \"high\""));
+
+        let read = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            mpsc::unbounded_channel().0,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-settings-read")),
+                method: "model/settings/read".to_string(),
+                params: Some(json!({ "scope": "global" })),
+            },
+        )
+        .await
+        .expect("model/settings/read");
+        let title = read["auxiliary"]
+            .as_array()
+            .expect("auxiliary")
+            .iter()
+            .find(|value| value["task"].as_str() == Some("title_generation"))
+            .expect("title generation assignment");
+        assert_eq!(title["reasoningEffort"], "high");
+    }
+
+    #[tokio::test]
+    async fn model_provider_catalog_rpc_fetches_fake_catalog() {
+        async fn models() -> Json<Value> {
+            Json(json!({
+                "data": [
+                    { "id": "beta" },
+                    { "id": "alpha-free" }
+                ]
+            }))
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let base_url = format!("http://{}/v1", listener.local_addr().expect("addr"));
+        let router = Router::new().route("/v1/models", get(models));
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.expect("serve");
+        });
+
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        std::fs::write(
+            state.inner.home.join("config.toml"),
+            format!(
+                r#"
+[provider.localmodels]
+label = "Local Models"
+
+[provider.localmodels.options]
+base_url = "{base_url}"
+no_auth = true
+"#
+            ),
+        )
+        .expect("config");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("catalog")),
+                method: "model/provider/catalog".to_string(),
+                params: Some(json!({
+                    "scope": "global",
+                    "providerId": "localmodels",
+                    "refresh": true
+                })),
+            },
+        )
+        .await
+        .expect("model/provider/catalog");
+
+        assert_eq!(result["providerId"], "localmodels");
+        assert_eq!(result["models"][0]["value"], "localmodels/alpha-free");
+        assert_eq!(result["models"][1]["value"], "localmodels/beta");
+
+        let settings = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("settings")),
+                method: "settings/read".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .expect("settings/read");
+        assert!(
+            settings["controls"]["modelDetails"]
+                .as_array()
+                .expect("model details")
+                .iter()
+                .any(|value| value["value"].as_str() == Some("localmodels/alpha-free"))
+        );
+
+        let model_settings = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-settings")),
+                method: "model/settings/read".to_string(),
+                params: Some(json!({ "scope": "global" })),
+            },
+        )
+        .await
+        .expect("model/settings/read");
+        assert!(
+            model_settings["modelOptions"]
+                .as_array()
+                .expect("model options")
+                .iter()
+            .any(|value| value["value"].as_str() == Some("localmodels/beta"))
+        );
+    }
+
+    #[tokio::test]
+    async fn model_settings_global_scope_ignores_project_model_override() {
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        std::fs::create_dir_all(state.inner.workdir.join(".psychevo")).expect("project config dir");
+        std::fs::write(
+            state.inner.home.join("config.toml"),
+            r#"
+[model]
+id = "opencode-zen/big-pickle"
+reasoning_effort = "high"
+
+[provider.opencode-zen.options]
+base_url = "https://opencode.ai/zen/v1"
+no_auth = true
+
+[provider.xiaomi-token-plan]
+label = "Xiaomi Token Plan"
+
+[provider.xiaomi-token-plan.options]
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+no_auth = true
+"#,
+        )
+        .expect("global config");
+        std::fs::write(
+            state.inner.workdir.join(".psychevo/config.toml"),
+            r#"
+[model]
+id = "xiaomi-token-plan/mimo-v2.5-pro"
+reasoning_effort = "high"
+"#,
+        )
+        .expect("project config");
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let model_settings = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-settings")),
+                method: "model/settings/read".to_string(),
+                params: Some(json!({
+                    "scope": "global",
+                    "workdir": state.inner.workdir.display().to_string()
+                })),
+            },
+        )
+        .await
+        .expect("model/settings/read");
+        assert_eq!(model_settings["defaultModel"], "opencode-zen/big-pickle");
+        assert_eq!(model_settings["defaultReasoningEffort"], "high");
+
+        handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("assignment")),
+                method: "model/assignment/set".to_string(),
+                params: Some(json!({
+                    "scope": "global",
+                    "target": "default",
+                    "provider": "opencode-zen",
+                    "model": "claude-haiku-4-5",
+                    "reasoningEffort": "low"
+                })),
+            },
+        )
+        .await
+        .expect("model/assignment/set");
+        let global_config =
+            std::fs::read_to_string(state.inner.home.join("config.toml")).expect("global config");
+        let project_config = std::fs::read_to_string(
+            state.inner.workdir.join(".psychevo/config.toml"),
+        )
+        .expect("project config");
+        assert!(global_config.contains("id = \"opencode-zen/claude-haiku-4-5\""));
+        assert!(project_config.contains("id = \"xiaomi-token-plan/mimo-v2.5-pro\""));
+
+        let model_settings = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("model-settings-after-save")),
+                method: "model/settings/read".to_string(),
+                params: Some(json!({
+                    "scope": "global",
+                    "workdir": state.inner.workdir.display().to_string()
+                })),
+            },
+        )
+        .await
+        .expect("model/settings/read after save");
+        assert_eq!(
+            model_settings["defaultModel"],
+            "opencode-zen/claude-haiku-4-5"
+        );
+        assert_eq!(model_settings["defaultReasoningEffort"], "low");
+
+        let settings = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("settings")),
+                method: "settings/read".to_string(),
+                params: Some(json!({ "workdir": model_settings["workdir"] })),
+            },
+        )
+        .await
+        .expect("settings/read");
+        assert_eq!(
+            settings["controls"]["model"],
+            "xiaomi-token-plan/mimo-v2.5-pro"
+        );
+        assert_eq!(settings["controls"]["variant"], "none");
+    }
+
+    #[tokio::test]
     async fn channel_wechat_qr_start_generates_svg_for_url_payload() {
         async fn qr_code() -> Json<Value> {
             Json(json!({
@@ -1025,6 +1487,9 @@ allow_users = ["existing-user"]
 
 [provider.deepseek.models."deepseek-chat"]
 reasoning_effort = "medium"
+
+[provider.deepseek.models."deepseek-chat-lite"]
+reasoning = false
 "#,
         )
         .expect("config");
@@ -1053,6 +1518,41 @@ reasoning_effort = "medium"
                 .expect("model options")
                 .iter()
                 .any(|value| value.as_str() == Some("deepseek/deepseek-chat"))
+        );
+        let model_details = result["controls"]["modelDetails"]
+            .as_array()
+            .expect("model details");
+        let selected_detail = model_details
+            .iter()
+            .find(|value| value["value"].as_str() == Some("deepseek/deepseek-chat"))
+            .expect("selected model detail");
+        assert_eq!(selected_detail["provider"].as_str(), Some("deepseek"));
+        assert_eq!(selected_detail["id"].as_str(), Some("deepseek-chat"));
+        assert_eq!(
+            selected_detail["providerLabel"].as_str(),
+            Some("DeepSeek")
+        );
+        assert_eq!(selected_detail["reasoningSupported"].as_bool(), None);
+        assert!(
+            selected_detail["reasoningEfforts"]
+                .as_array()
+                .expect("reasoning efforts")
+                .iter()
+                .any(|value| value.as_str() == Some("high"))
+        );
+        let no_reasoning_detail = model_details
+            .iter()
+            .find(|value| value["value"].as_str() == Some("deepseek/deepseek-chat-lite"))
+            .expect("no reasoning model detail");
+        assert_eq!(
+            no_reasoning_detail["reasoningSupported"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            no_reasoning_detail["reasoningEfforts"]
+                .as_array()
+                .expect("reasoning efforts"),
+            &vec![json!("none")]
         );
         assert_eq!(result["controls"]["variant"], "none");
     }

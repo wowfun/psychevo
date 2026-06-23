@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "model": {
+      "type": "string"
+    },
+    "reasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "model"
+  ],
+  "title": "ModelStateSetParams",
+  "type": "object"
+}

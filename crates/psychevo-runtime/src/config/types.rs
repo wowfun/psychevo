@@ -54,6 +54,19 @@ impl Default for CompressionConfig {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AuxiliaryConfig {
+    pub(crate) title_generation: AuxiliaryTaskConfig,
+    pub(crate) compression: AuxiliaryTaskConfig,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AuxiliaryTaskConfig {
+    pub(crate) provider: Option<String>,
+    pub(crate) model: ModelSelection,
+    pub(crate) model_configured: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LspConfig {
     pub(crate) enabled: bool,
@@ -294,6 +307,7 @@ pub(crate) struct LoadedConfigValue {
 pub(crate) const AUTO_PROVIDER_ORDER: &[&str] = &[
     "openrouter",
     "openai",
+    "opencode-zen",
     "xai",
     "zai",
     "deepseek",
@@ -304,7 +318,7 @@ pub(crate) const AUTO_PROVIDER_ORDER: &[&str] = &[
     "custom",
 ];
 
-pub(crate) const REASONING_EFFORT_VALUES: &[&str] =
+pub const REASONING_EFFORT_VALUES: &[&str] =
     &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 pub(crate) const MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -324,6 +338,14 @@ pub(crate) const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
         api_key_envs: &["OPENAI_API_KEY"],
         base_url_env: Some("OPENAI_BASE_URL"),
         allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "opencode-zen",
+        label: "OpenCode Zen",
+        base_url: Some("https://opencode.ai/zen/v1"),
+        api_key_envs: &["OPENCODE_ZEN_API_KEY"],
+        base_url_env: Some("OPENCODE_ZEN_BASE_URL"),
+        allow_no_auth: true,
     },
     BuiltInProvider {
         id: "xai",

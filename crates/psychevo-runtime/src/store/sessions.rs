@@ -251,6 +251,19 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn set_session_model(&self, session_id: &str, provider: &str, model: &str) -> Result<()> {
+        let changed = self.write_retry(|conn| {
+            conn.execute(
+                "UPDATE sessions SET provider = ?1, model = ?2, updated_at_ms = ?3 WHERE id = ?4",
+                params![provider, model, now_ms(), session_id],
+            )
+        })?;
+        if changed == 0 {
+            return Err(Error::Message(format!("session not found: {session_id}")));
+        }
+        Ok(())
+    }
+
     pub fn set_session_title(&self, session_id: &str, title: &str) -> Result<String> {
         let title = normalize_session_title(title)
             .ok_or_else(|| Error::Message("session title is empty".to_string()))?;

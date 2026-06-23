@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+use crate::config::resolve_title_generation_provider;
 
 pub(crate) async fn run_live_internal(
     options: RunOptions,
@@ -281,8 +282,13 @@ pub(crate) async fn run_live_internal(
         resolved.api_key.clone(),
         resolved.provider.clone(),
     ));
+    let title_resolved = resolve_title_generation_provider(&resolved_options, &loaded, &resolved)?;
+    let provider_for_title: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+        title_resolved.base_url.clone(),
+        title_resolved.api_key.clone(),
+        title_resolved.provider.clone(),
+    ));
     let context_recorder = ContextRecorder::default();
-    let provider_for_title = Arc::clone(&provider);
     let provider: Arc<dyn GenerationProvider> = Arc::new(ContextRecordingProvider::new(
         Arc::clone(&provider),
         context_recorder.clone(),
@@ -686,7 +692,7 @@ pub(crate) async fn run_live_internal(
             &selected_skills,
             &skill_catalog,
             provider_for_title,
-            &resolved,
+            &title_resolved,
         )
         .await?;
     }

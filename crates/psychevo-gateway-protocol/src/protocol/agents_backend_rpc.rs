@@ -496,6 +496,18 @@ pub enum ClientRequest {
     SettingsUpdate(SettingsUpdateParams),
     #[serde(rename = "settings/read")]
     SettingsRead(SettingsReadParams),
+    #[serde(rename = "model/settings/read")]
+    ModelSettingsRead(ModelSettingsReadParams),
+    #[serde(rename = "model/provider/save")]
+    ModelProviderSave(ModelProviderSaveParams),
+    #[serde(rename = "model/provider/catalog")]
+    ModelProviderCatalog(ModelProviderCatalogParams),
+    #[serde(rename = "model/state/read")]
+    ModelStateRead(ModelStateReadParams),
+    #[serde(rename = "model/state/set")]
+    ModelStateSet(ModelStateSetParams),
+    #[serde(rename = "model/assignment/set")]
+    ModelAssignmentSet(ModelAssignmentSetParams),
     #[serde(rename = "workspace/files")]
     WorkspaceFiles(WorkspaceFilesParams),
     #[serde(rename = "workspace/file/read")]

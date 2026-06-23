@@ -107,6 +107,7 @@ pub(crate) async fn model_catalog_fetch_parses_models_and_sends_auth() {
             .to_lowercase()
             .contains("authorization: bearer secret-key")
     );
+    assert!(request.to_lowercase().contains("user-agent: psychevo/"));
 }
 
 #[tokio::test]
@@ -130,6 +131,47 @@ pub(crate) async fn model_catalog_fetch_omits_auth_for_no_auth_providers() {
     let request = server.request();
     assert!(request.starts_with("GET /v1/models HTTP/1.1"));
     assert!(!request.to_lowercase().contains("authorization:"));
+}
+
+#[test]
+pub(crate) fn opencode_zen_catalog_provider_allows_no_auth_without_config_entry() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let home = home_dir(&temp);
+    fs::create_dir_all(&home).expect("home");
+    write_config(home.join("config.toml"), "# initialized\n").expect("config");
+    let provider = model_catalog_provider(&options, "zen")
+        .expect("provider")
+        .expect("zen provider");
+
+    assert_eq!(provider.provider, "opencode-zen");
+    assert_eq!(provider.base_url, "https://opencode.ai/zen/v1");
+    assert_eq!(provider.missing_credentials, None);
+    assert!(provider.no_auth);
+    assert!(provider.fetchable());
+}
+
+#[test]
+pub(crate) fn opencode_zen_free_models_are_classified_from_ids() {
+    let free = ModelCatalogEntry {
+        id: "mimo-v2.5-free".to_string(),
+        context_limit: None,
+        metadata: ModelMetadata::default(),
+    };
+    let stealth = ModelCatalogEntry {
+        id: "big-pickle".to_string(),
+        context_limit: None,
+        metadata: ModelMetadata::default(),
+    };
+    let paid = ModelCatalogEntry {
+        id: "deepseek-v4-pro".to_string(),
+        context_limit: None,
+        metadata: ModelMetadata::default(),
+    };
+
+    assert!(model_catalog_entry_is_free("opencode-zen", &free));
+    assert!(model_catalog_entry_is_free("zen", &stealth));
+    assert!(!model_catalog_entry_is_free("opencode-zen", &paid));
 }
 
 #[tokio::test]

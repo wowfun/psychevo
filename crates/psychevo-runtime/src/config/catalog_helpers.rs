@@ -129,7 +129,7 @@ pub(crate) fn truncate_error(value: &str) -> String {
     }
 }
 
-pub(crate) fn normalize_provider_id(provider: &str) -> String {
+pub fn normalize_provider_id(provider: &str) -> String {
     let key = provider.trim().to_lowercase();
     match key.as_str() {
         "z.ai" | "z-ai" | "glm" => "zai".to_string(),
@@ -137,6 +137,7 @@ pub(crate) fn normalize_provider_id(provider: &str) -> String {
         "mimo" => "xiaomi".to_string(),
         "x-ai" | "x.ai" | "grok" => "xai".to_string(),
         "lm-studio" | "lm_studio" => "lmstudio".to_string(),
+        "opencode" | "opencode_zen" | "zen" => "opencode-zen".to_string(),
         other => other.to_string(),
     }
 }

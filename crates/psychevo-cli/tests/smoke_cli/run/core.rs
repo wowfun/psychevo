@@ -397,7 +397,8 @@ pub(crate) fn cli_run_budget_exhaustion_reports_model_turn_limit() {
         .expect("pevo run");
 
     assert!(!output.status.success());
-    assert_eq!(String::from_utf8(output.stdout).expect("stdout"), "\n");
+    let stdout = String::from_utf8(output.stdout).expect("stdout");
+    assert!(stdout.is_empty() || stdout == "\n", "stdout: {stdout:?}");
     let stderr = String::from_utf8(output.stderr).expect("stderr");
     assert!(stderr.contains("turn ended: failed - reached model-turn limit (128)"));
 

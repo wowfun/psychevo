@@ -35,18 +35,18 @@ pub(crate) use psychevo_runtime::{
     ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot,
     GatewayLiveEventRecord, GatewayLiveSnapshotRecord, ImageInput, InstallOptions, LoadedMainAgent,
     MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget,
-    PendingInputId, PermissionApprovalDecision, PermissionApprovalOutcome,
+    ModelState, PendingInputId, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
     ReloadContextOptions, RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
-    SESSION_MAIN_AGENT_METADATA_KEY, SIDE_CONVERSATION_METADATA_KEY, SIDE_INHERITED_METADATA_KEY,
-    ScopedCustomProviderInput, SessionArtifactKind, SessionExportFormat, SessionExportOptions,
-    SessionExportWriteResult, SessionSummary, SessionUndoOptions, SessionUsageOptions,
-    SessionUsageSummary, SkillBundle, SkillCatalog, SkillDiscoveryOptions, SkillTarget,
-    SqliteStore, StateRuntime, StatsOptions, TUI_DISPLAY_METADATA_KEY,
-    TUI_SIDE_CONVERSATION_SESSION_SOURCE, TerminalReason, ToolDisplayBodyPolicy,
-    ToolDisplayCategory, ToolDisplaySpec, TuiMessageSummary, USER_SHELL_METADATA_KEY,
-    UserShellContextOptions, UserShellOptions, WorkspaceDiff, agent_spawn_paused,
-    agent_status_value, auto_compaction_due_for_snapshot, canonicalize_workdir,
+    SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
+    SIDE_CONVERSATION_METADATA_KEY, SIDE_INHERITED_METADATA_KEY, ScopedCustomProviderInput,
+    SessionArtifactKind, SessionExportFormat, SessionExportOptions, SessionExportWriteResult,
+    SessionSummary, SessionUndoOptions, SessionUsageOptions, SessionUsageSummary, SkillBundle,
+    SkillCatalog, SkillDiscoveryOptions, SkillTarget, SqliteStore, StateRuntime, StatsOptions,
+    TUI_DISPLAY_METADATA_KEY, TUI_SIDE_CONVERSATION_SESSION_SOURCE, TerminalReason,
+    ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, TuiMessageSummary,
+    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, WorkspaceDiff,
+    agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot, canonicalize_workdir,
     collect_workspace_diff, compact_session, config_show_value, configured_models,
     context_snapshot, create_scoped_custom_provider, custom_provider_api_key_env,
     default_session_export_filename, discover_agents, discover_skills, fetch_model_catalog,
@@ -54,16 +54,16 @@ pub(crate) use psychevo_runtime::{
     format_context_total_value_parts, install_skill, list_skill_bundles,
     main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
     model_catalog_providers, model_metadata_explicitly_disallows_image_input,
-    normalize_context_bar_width, permission_rules_value, prompt_message_from_inputs_with_options,
-    prompt_starts_with_supported_image_path, redo_session, refresh_model_metadata_cache,
-    reload_session_context, remove_installed_skill, resolve_agent_definition, resolve_image_source,
-    run_control, run_user_shell_command_streaming_controlled, scan_skill_path,
-    selected_configured_model, session_base_agent_name_from_metadata, session_usage_summary,
-    set_agent_spawn_paused, set_default_model_with_reasoning, set_local_toolset_enabled,
-    set_provider_api_key, set_skill_config_value, set_skill_enabled,
-    side_conversation_boundary_prompt, side_inherited_metadata_hidden, spawn_agent_background,
-    stop_agent_id_with_grace, toolsets_value, undo_session, usage_stats, view_skill_value,
-    write_session_export,
+    normalize_context_bar_width, normalize_reasoning_effort, permission_rules_value,
+    prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path, redo_session,
+    refresh_model_metadata_cache, reload_session_context, remove_installed_skill,
+    resolve_agent_definition, resolve_image_source, run_control,
+    run_user_shell_command_streaming_controlled, scan_skill_path, selected_configured_model,
+    session_base_agent_name_from_metadata, session_usage_summary, set_agent_spawn_paused,
+    set_default_model_with_reasoning, set_local_toolset_enabled, set_provider_api_key,
+    set_skill_config_value, set_skill_enabled, side_conversation_boundary_prompt,
+    side_inherited_metadata_hidden, spawn_agent_background, stop_agent_id_with_grace,
+    toolsets_value, undo_session, usage_stats, view_skill_value, write_session_export,
 };
 pub(crate) use ratatui::Frame;
 pub(crate) use ratatui::Terminal;
@@ -127,11 +127,16 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let workdir_key = workdir.to_string_lossy().to_string();
     let state_path = home.join("tui-state.json");
     let state = TuiState::load(&state_path)?;
-    let current_model = args.model.clone().or_else(|| state.model_for(&workdir_key));
+    let model_state_path = ModelState::path_for_home(&home);
+    let model_state = ModelState::load(&model_state_path)?;
+    let current_model = args
+        .model
+        .clone()
+        .or_else(|| model_state.model_for(&workdir_key));
     let current_variant = args
         .variant
         .map(|variant| variant.as_str().to_string())
-        .or_else(|| state.variant_for(&workdir_key));
+        .or_else(|| model_state.reasoning_effort_for(&workdir_key));
     let current_mode = state
         .mode_for(&workdir_key)
         .and_then(|value| RunMode::parse(&value))
@@ -172,6 +177,8 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         home,
         state_path,
         state,
+        model_state_path,
+        model_state,
         state_runtime,
         gateway,
         db_path,

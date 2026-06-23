@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelCredentialStatus": {
+      "enum": [
+        "present",
+        "missing",
+        "notRequired"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "apiKeyEnv": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "baseUrl": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "builtIn": {
+      "type": "boolean"
+    },
+    "canFetchModels": {
+      "type": "boolean"
+    },
+    "configured": {
+      "type": "boolean"
+    },
+    "credentialStatus": {
+      "$ref": "#/definitions/ModelCredentialStatus"
+    },
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "noAuth": {
+      "type": "boolean"
+    },
+    "unavailableReason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "builtIn",
+    "canFetchModels",
+    "configured",
+    "credentialStatus",
+    "id",
+    "label",
+    "noAuth"
+  ],
+  "title": "ModelProviderView",
+  "type": "object"
+}

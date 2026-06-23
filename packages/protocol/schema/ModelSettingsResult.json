@@ -1,0 +1,216 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AuxiliaryModelAssignmentView": {
+      "properties": {
+        "effectiveModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "model",
+        "provider",
+        "task"
+      ],
+      "type": "object"
+    },
+    "ModelCredentialStatus": {
+      "enum": [
+        "present",
+        "missing",
+        "notRequired"
+      ],
+      "type": "string"
+    },
+    "ModelOptionView": {
+      "properties": {
+        "contextLimit": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "free": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "providerLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoningEfforts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reasoningSupported": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ModelProviderView": {
+      "properties": {
+        "apiKeyEnv": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "baseUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "builtIn": {
+          "type": "boolean"
+        },
+        "canFetchModels": {
+          "type": "boolean"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "credentialStatus": {
+          "$ref": "#/definitions/ModelCredentialStatus"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "noAuth": {
+          "type": "boolean"
+        },
+        "unavailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "builtIn",
+        "canFetchModels",
+        "configured",
+        "credentialStatus",
+        "id",
+        "label",
+        "noAuth"
+      ],
+      "type": "object"
+    },
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "auxiliary": {
+      "items": {
+        "$ref": "#/definitions/AuxiliaryModelAssignmentView"
+      },
+      "type": "array"
+    },
+    "defaultModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "defaultReasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "modelOptions": {
+      "items": {
+        "$ref": "#/definitions/ModelOptionView"
+      },
+      "type": "array"
+    },
+    "providers": {
+      "items": {
+        "$ref": "#/definitions/ModelProviderView"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "$ref": "#/definitions/ModelSettingsScope"
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "auxiliary",
+    "modelOptions",
+    "providers",
+    "scope",
+    "workdir"
+  ],
+  "title": "ModelSettingsResult",
+  "type": "object"
+}

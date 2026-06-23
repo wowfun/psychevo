@@ -768,8 +768,8 @@ impl TuiApp {
             for model in &models {
                 by_spec.insert(format_model_spec(model), model);
             }
-            for recent in &self.state.recent_models {
-                if let Some(model) = by_spec.get(recent) {
+            for recent in self.model_state.recent_model_values() {
+                if let Some(model) = by_spec.get(&recent) {
                     push_model_metadata_target(&mut targets, &mut seen, model, &self.model_catalog);
                 } else if let Some((provider, model)) = recent.split_once('/') {
                     push_raw_model_metadata_target(

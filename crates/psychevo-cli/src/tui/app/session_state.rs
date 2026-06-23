@@ -427,6 +427,24 @@ impl TuiApp {
         global: bool,
     ) -> Result<String> {
         validate_model_spec(&model)?;
+        if !global {
+            self.current_model = Some(model.clone());
+            self.current_variant = normalize_reasoning_effort(reasoning_effort.clone());
+            self.model_state
+                .set_model(&self.workdir_key, model.clone(), reasoning_effort);
+            self.model_state.save(&self.model_state_path)?;
+            self.persist_current_session_model_selection()?;
+            self.refresh_selected_model();
+            let reasoning = self
+                .current_variant
+                .as_deref()
+                .map(|value| format!("  reasoning_effort: {value}"))
+                .unwrap_or_default();
+            return Ok(format!(
+                "model: {model}{reasoning}  scope: composer  path: {}",
+                self.model_state_path.display()
+            ));
+        }
         let value = set_default_model_with_reasoning(
             &self.home,
             &self.workdir,
@@ -436,10 +454,9 @@ impl TuiApp {
         )?;
         self.current_model = None;
         self.current_variant = None;
-        self.state.set_model(&self.workdir_key, model.clone());
-        self.state.clear_model(&self.workdir_key);
-        self.state.clear_variant(&self.workdir_key);
-        self.state.save(&self.state_path)?;
+        self.model_state
+            .push_recent_model(model.clone(), reasoning_effort);
+        self.model_state.save(&self.model_state_path)?;
         self.refresh_selected_model();
         let scope = value["scope"]
             .as_str()
@@ -472,10 +489,44 @@ impl TuiApp {
 
     pub(crate) fn set_variant_no_print(&mut self, variant: String) -> Result<()> {
         validate_variant(&variant)?;
-        self.current_variant = Some(variant.clone());
-        self.state.set_variant(&self.workdir_key, variant);
-        self.state.save(&self.state_path)?;
+        let reasoning_effort = normalize_reasoning_effort(Some(variant));
+        self.current_variant = reasoning_effort.clone();
+        self.model_state
+            .set_reasoning_effort(&self.workdir_key, reasoning_effort);
+        self.model_state.save(&self.model_state_path)?;
+        self.persist_current_session_model_selection()?;
         self.refresh_selected_model();
+        Ok(())
+    }
+
+    fn persist_current_session_model_selection(&self) -> Result<()> {
+        let Some(session_id) = self.current_session.as_deref() else {
+            return Ok(());
+        };
+        let Some(model) = self.current_model.as_deref() else {
+            return Ok(());
+        };
+        let Some((provider, model_id)) = model.split_once('/') else {
+            return Ok(());
+        };
+        let store = self.state_runtime.store();
+        if store.session_summary(session_id)?.is_none() {
+            return Ok(());
+        }
+        store.set_session_model(session_id, provider, model_id)?;
+        let mut metadata = serde_json::Map::new();
+        metadata.insert("model".to_string(), Value::String(model.to_string()));
+        if let Some(reasoning_effort) = self.current_variant.as_deref() {
+            metadata.insert(
+                "reasoningEffort".to_string(),
+                Value::String(reasoning_effort.to_string()),
+            );
+        }
+        store.set_session_metadata_field(
+            session_id,
+            SESSION_COMPOSER_MODEL_METADATA_KEY,
+            Some(Value::Object(metadata)),
+        )?;
         Ok(())
     }
 

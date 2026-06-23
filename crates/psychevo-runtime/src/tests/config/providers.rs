@@ -34,6 +34,35 @@ api_key_env = "DEEPSEEK_API_KEY"
 }
 
 #[test]
+pub(crate) fn opencode_zen_no_auth_resolves_without_api_key() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+model = "opencode-zen/mimo-v2.5-free"
+
+[provider."opencode-zen".options]
+base_url = "https://opencode.ai/zen/v1"
+no_auth = true
+
+[provider."opencode-zen".models."mimo-v2.5-free"]
+"#,
+    )
+    .expect("config");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let loaded = load_run_config(&options, &workdir).expect("config");
+    let resolved = resolve_run_provider(&options, &loaded).expect("provider");
+    assert_eq!(resolved.provider, "opencode-zen");
+    assert_eq!(resolved.model, "mimo-v2.5-free");
+    assert_eq!(resolved.api_key_env, None);
+    assert_eq!(resolved.api_key, "");
+}
+
+#[test]
 pub(crate) fn psychevo_home_overrides_default_home() {
     let temp = tempdir().expect("temp");
     let custom_home = temp.path().join("custom-home");
@@ -736,6 +765,91 @@ base_url = "http://127.0.0.1:9"
         set_default_model(&home, &workdir, false, "unknown/model").expect_err("unknown provider");
     assert!(unknown_err.to_string().contains("unknown provider"));
     assert!(!home.join("models_dev_cache.json").exists());
+}
+
+#[test]
+pub(crate) fn auxiliary_compression_model_precedes_legacy_compression_model() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let home = home_dir(&temp);
+    fs::create_dir_all(&home).expect("home");
+    write_config(
+        home.join("config.toml"),
+        r#"
+model = "main/main-model"
+
+[provider.main.options]
+base_url = "http://127.0.0.1:9/v1"
+
+[provider.main.models.main-model]
+
+[provider.legacy.options]
+base_url = "http://127.0.0.1:10/v1"
+
+[provider.legacy.models.legacy-model]
+
+[provider.aux.options]
+base_url = "http://127.0.0.1:11/v1"
+
+[provider.aux.models.aux-model]
+
+[compression]
+model = "legacy/legacy-model"
+
+[auxiliary.compression]
+provider = "aux"
+model = "aux-model"
+"#,
+    )
+    .expect("config");
+
+    let workdir = canonical_workdir(&options.workdir).expect("workdir");
+    let loaded = load_run_config(&options, &workdir).expect("config");
+    let current = resolve_run_provider(&options, &loaded).expect("main provider");
+    let compression =
+        resolve_compression_config(&options, &loaded, &current).expect("compression provider");
+
+    assert!(compression.model_configured);
+    assert_eq!(compression.provider.provider, "aux");
+    assert_eq!(compression.provider.model, "aux-model");
+}
+
+#[test]
+pub(crate) fn auxiliary_model_assignment_writes_hermes_style_task_slot() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    write_config(
+        home.join("config.toml"),
+        r#"
+[provider."opencode-zen".options]
+base_url = "https://opencode.ai/zen/v1"
+no_auth = true
+"#,
+    )
+    .expect("config");
+
+    let value = set_auxiliary_model_with_reasoning(
+        &home,
+        &workdir,
+        true,
+        "title_generation",
+        "zen",
+        "mimo-v2.5-free",
+        Some("high"),
+    )
+    .expect("aux model");
+
+    assert_eq!(value["task"], "title_generation");
+    assert_eq!(value["provider"], "opencode-zen");
+    assert_eq!(value["model"], "mimo-v2.5-free");
+    assert_eq!(value["reasoning_effort"], "high");
+    let config = fs::read_to_string(home.join("config.toml")).expect("config");
+    assert!(config.contains("[auxiliary.title_generation]"));
+    assert!(config.contains("provider = \"opencode-zen\""));
+    assert!(config.contains("id = \"mimo-v2.5-free\""));
+    assert!(config.contains("reasoning_effort = \"high\""));
 }
 
 #[test]

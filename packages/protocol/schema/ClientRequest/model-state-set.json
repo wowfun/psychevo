@@ -1,0 +1,55 @@
+{
+  "$id": "ClientRequest/model-state-set.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelStateSetParams": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workdir": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "model/state/set"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/ModelStateSetParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest model/state/set",
+  "type": "object"
+}

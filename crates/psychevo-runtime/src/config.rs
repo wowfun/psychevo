@@ -28,6 +28,7 @@ pub(crate) struct RunConfig {
     pub(crate) model: ModelSelection,
     pub(crate) provider: BTreeMap<String, ConfigProviderEntry>,
     pub(crate) compression: CompressionConfig,
+    pub(crate) auxiliary: AuxiliaryConfig,
     pub(crate) permissions: PermissionConfig,
     pub(crate) sandbox: SandboxConfig,
     pub(crate) lsp: LspConfig,
@@ -45,8 +46,8 @@ pub(crate) mod config_types;
 #[allow(unused_imports)]
 pub(crate) use config_types::*;
 pub use config_types::{
-    DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, load_agent_backend_configs,
-    resolve_default_workspace_workdir, resolve_workspace_root,
+    DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, REASONING_EFFORT_VALUES,
+    load_agent_backend_configs, resolve_default_workspace_workdir, resolve_workspace_root,
 };
 #[path = "config/file_env.rs"]
 pub(crate) mod config_file_env;
@@ -65,8 +66,9 @@ pub(crate) mod config_resolution;
 pub(crate) use config_resolution::*;
 #[path = "config/catalog_helpers.rs"]
 pub(crate) mod config_catalog_helpers;
+pub use config_catalog_helpers::normalize_provider_id;
 #[allow(unused_imports)]
-use config_catalog_helpers::*;
+pub(crate) use config_catalog_helpers::*;
 #[path = "config/models.rs"]
 pub(crate) mod config_models;
 pub use config_models::*;

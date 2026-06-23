@@ -432,6 +432,823 @@ export const systemSchemas = {
   "title": "TerminalExitedPayload",
   "type": "object"
 },
+  ModelSettingsScope: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "global"
+  ],
+  "title": "ModelSettingsScope",
+  "type": "string"
+},
+  ModelSettingsReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelSettingsScope"
+        }
+      ],
+      "default": "global"
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "ModelSettingsReadParams",
+  "type": "object"
+},
+  ModelProviderSaveParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "apiKey": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "apiKeyEnv": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "baseUrl": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "noAuth": {
+      "default": false,
+      "type": "boolean"
+    },
+    "providerId": {
+      "type": "string"
+    },
+    "scope": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelSettingsScope"
+        }
+      ],
+      "default": "global"
+    }
+  },
+  "required": [
+    "baseUrl",
+    "label",
+    "providerId"
+  ],
+  "title": "ModelProviderSaveParams",
+  "type": "object"
+},
+  ModelProviderCatalogParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "providerId": {
+      "type": "string"
+    },
+    "refresh": {
+      "default": false,
+      "type": "boolean"
+    },
+    "scope": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelSettingsScope"
+        }
+      ],
+      "default": "global"
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "providerId"
+  ],
+  "title": "ModelProviderCatalogParams",
+  "type": "object"
+},
+  ModelStateReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "ModelStateReadParams",
+  "type": "object"
+},
+  ModelStateSetParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "model": {
+      "type": "string"
+    },
+    "reasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "model"
+  ],
+  "title": "ModelStateSetParams",
+  "type": "object"
+},
+  ModelStateResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "model": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recentModels": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "workdir"
+  ],
+  "title": "ModelStateResult",
+  "type": "object"
+},
+  ModelAssignmentTarget: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "default",
+    "auxiliary"
+  ],
+  "title": "ModelAssignmentTarget",
+  "type": "string"
+},
+  ModelAssignmentSetParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelAssignmentTarget": {
+      "enum": [
+        "default",
+        "auxiliary"
+      ],
+      "type": "string"
+    },
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "model": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "reasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelSettingsScope"
+        }
+      ],
+      "default": "global"
+    },
+    "target": {
+      "$ref": "#/definitions/ModelAssignmentTarget"
+    },
+    "task": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "model",
+    "provider",
+    "target"
+  ],
+  "title": "ModelAssignmentSetParams",
+  "type": "object"
+},
+  ModelSettingsResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AuxiliaryModelAssignmentView": {
+      "properties": {
+        "effectiveModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "model",
+        "provider",
+        "task"
+      ],
+      "type": "object"
+    },
+    "ModelCredentialStatus": {
+      "enum": [
+        "present",
+        "missing",
+        "notRequired"
+      ],
+      "type": "string"
+    },
+    "ModelOptionView": {
+      "properties": {
+        "contextLimit": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "free": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "providerLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoningEfforts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reasoningSupported": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ModelProviderView": {
+      "properties": {
+        "apiKeyEnv": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "baseUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "builtIn": {
+          "type": "boolean"
+        },
+        "canFetchModels": {
+          "type": "boolean"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "credentialStatus": {
+          "$ref": "#/definitions/ModelCredentialStatus"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "noAuth": {
+          "type": "boolean"
+        },
+        "unavailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "builtIn",
+        "canFetchModels",
+        "configured",
+        "credentialStatus",
+        "id",
+        "label",
+        "noAuth"
+      ],
+      "type": "object"
+    },
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "auxiliary": {
+      "items": {
+        "$ref": "#/definitions/AuxiliaryModelAssignmentView"
+      },
+      "type": "array"
+    },
+    "defaultModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "defaultReasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "modelOptions": {
+      "items": {
+        "$ref": "#/definitions/ModelOptionView"
+      },
+      "type": "array"
+    },
+    "providers": {
+      "items": {
+        "$ref": "#/definitions/ModelProviderView"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "$ref": "#/definitions/ModelSettingsScope"
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "auxiliary",
+    "modelOptions",
+    "providers",
+    "scope",
+    "workdir"
+  ],
+  "title": "ModelSettingsResult",
+  "type": "object"
+},
+  ModelProviderView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelCredentialStatus": {
+      "enum": [
+        "present",
+        "missing",
+        "notRequired"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "apiKeyEnv": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "baseUrl": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "builtIn": {
+      "type": "boolean"
+    },
+    "canFetchModels": {
+      "type": "boolean"
+    },
+    "configured": {
+      "type": "boolean"
+    },
+    "credentialStatus": {
+      "$ref": "#/definitions/ModelCredentialStatus"
+    },
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "noAuth": {
+      "type": "boolean"
+    },
+    "unavailableReason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "builtIn",
+    "canFetchModels",
+    "configured",
+    "credentialStatus",
+    "id",
+    "label",
+    "noAuth"
+  ],
+  "title": "ModelProviderView",
+  "type": "object"
+},
+  ModelCredentialStatus: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "present",
+    "missing",
+    "notRequired"
+  ],
+  "title": "ModelCredentialStatus",
+  "type": "string"
+},
+  ModelOptionView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "contextLimit": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "free": {
+      "default": false,
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider": {
+      "type": "string"
+    },
+    "providerLabel": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reasoningEfforts": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "reasoningSupported": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "value": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "provider",
+    "value"
+  ],
+  "title": "ModelOptionView",
+  "type": "object"
+},
+  AuxiliaryModelAssignmentView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "effectiveModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "label": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "reasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "label",
+    "model",
+    "provider",
+    "task"
+  ],
+  "title": "AuxiliaryModelAssignmentView",
+  "type": "object"
+},
+  ModelProviderCatalogResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelOptionView": {
+      "properties": {
+        "contextLimit": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "free": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "providerLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoningEfforts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reasoningSupported": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "value"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "models": {
+      "items": {
+        "$ref": "#/definitions/ModelOptionView"
+      },
+      "type": "array"
+    },
+    "providerId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "models",
+    "providerId"
+  ],
+  "title": "ModelProviderCatalogResult",
+  "type": "object"
+},
+  ModelAssignmentSetResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelAssignmentTarget": {
+      "enum": [
+        "default",
+        "auxiliary"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "model": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "reasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target": {
+      "$ref": "#/definitions/ModelAssignmentTarget"
+    },
+    "task": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "model",
+    "ok",
+    "provider",
+    "target"
+  ],
+  "title": "ModelAssignmentSetResult",
+  "type": "object"
+},
   ObservabilityReadParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {

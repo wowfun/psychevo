@@ -147,6 +147,15 @@ pub fn model_catalog_providers(options: &RunOptions) -> Result<Vec<ModelCatalogP
     Ok(rows)
 }
 
+pub fn model_catalog_provider(
+    options: &RunOptions,
+    provider: &str,
+) -> Result<Option<ModelCatalogProvider>> {
+    let workdir = canonical_workdir(&options.workdir)?;
+    let loaded = load_run_config(options, &workdir)?;
+    Ok(catalog_provider_for(provider, &loaded))
+}
+
 pub async fn fetch_model_catalog(
     provider: &ModelCatalogProvider,
 ) -> Result<Vec<ModelCatalogEntry>> {
@@ -166,7 +175,13 @@ pub async fn fetch_model_catalog_with_client(
         return Err(Error::Config(format!("missing {missing}")));
     }
     let endpoint = model_catalog_endpoint(&provider.base_url);
-    let request = client.get(endpoint).header("accept", "application/json");
+    let request = client
+        .get(endpoint)
+        .header("accept", "application/json")
+        .header(
+            "user-agent",
+            format!("psychevo/{}", env!("CARGO_PKG_VERSION")),
+        );
     let request = if let Some(api_key) = &provider.api_key {
         request.bearer_auth(api_key)
     } else {
@@ -191,6 +206,33 @@ pub async fn fetch_model_catalog_with_client(
     .await
     .map_err(|_| Error::Message("timeout".to_string()))??;
     parse_model_catalog_response(&provider.provider, &value)
+}
+
+pub fn model_catalog_entry_is_free(provider: &str, entry: &ModelCatalogEntry) -> bool {
+    if model_cost_is_free(entry.metadata.cost.as_ref()) {
+        return true;
+    }
+    let provider = normalize_provider_id(provider);
+    if provider == "opencode-zen" {
+        let id = entry.id.trim().to_lowercase();
+        return id.ends_with("-free") || id == "big-pickle";
+    }
+    false
+}
+
+pub(crate) fn model_cost_is_free(cost: Option<&ModelCost>) -> bool {
+    let Some(cost) = cost else {
+        return false;
+    };
+    let values = [
+        cost.input,
+        cost.output,
+        cost.cache_read,
+        cost.cache_write,
+        cost.request,
+    ];
+    values.iter().flatten().any(|value| *value == 0.0)
+        && values.iter().flatten().all(|value| *value == 0.0)
 }
 
 pub fn selected_configured_model(options: &RunOptions) -> Result<Option<ConfiguredModel>> {

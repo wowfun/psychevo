@@ -1058,20 +1058,51 @@ fn channel_agents_text(
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<String> {
     let catalog = discover_gateway_agents(state, scope)?;
-    let agents = catalog
-        .agents
-        .into_iter()
-        .filter(|agent| agent.supports_entrypoint(AgentEntrypoint::Peer))
-        .collect::<Vec<_>>();
-    if agents.is_empty() {
-        return Ok("No peer agents found for this workspace.".to_string());
+    let mut callable = Vec::new();
+    let mut peer_only = Vec::new();
+    for agent in catalog.agents {
+        if agent.supports_entrypoint(AgentEntrypoint::Subagent) {
+            callable.push(agent);
+        } else if agent.supports_entrypoint(AgentEntrypoint::Peer) {
+            peer_only.push(agent);
+        }
     }
-    let mut lines = vec!["Channel-available agents:".to_string()];
-    for agent in agents.iter().take(20) {
+    if callable.is_empty() && peer_only.is_empty() {
+        return Ok("No channel-callable agents found for this workspace.".to_string());
+    }
+
+    let mut lines = Vec::new();
+    if callable.is_empty() {
+        lines.push("No channel-callable agents found for this workspace.".to_string());
+        lines.push("Add a project agent with entrypoints: [subagent] to call it here.".to_string());
+    } else {
+        lines.push("Callable agents:".to_string());
+    }
+    for agent in callable.iter().take(20) {
         lines.push(format!("@{} - {}", agent.name, agent.description));
     }
-    if agents.len() > 20 {
-        lines.push(format!("...and {} more.", agents.len() - 20));
+    if callable.len() > 20 {
+        lines.push(format!("...and {} more.", callable.len() - 20));
+    }
+    if !callable.is_empty() {
+        lines.push("Use @agent-name followed by a task.".to_string());
+    }
+
+    if !peer_only.is_empty() {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("Peer runtimes:".to_string());
+        for agent in peer_only.iter().take(20) {
+            lines.push(format!("@{} - {}", agent.name, agent.description));
+        }
+        if peer_only.len() > 20 {
+            lines.push(format!("...and {} more.", peer_only.len() - 20));
+        }
+        lines.push(
+            "Peer runtimes are listed for visibility; use callable agents for @agent delegation in channels."
+                .to_string(),
+        );
     }
     Ok(lines.join("\n"))
 }
@@ -1639,6 +1670,94 @@ mod tests {
         assert_eq!(prompts.as_slice(), ["$reviewer focus security"]);
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].text, "answer 1");
+    }
+
+    #[tokio::test]
+    async fn channel_agents_command_lists_callable_subagents_before_peer_runtimes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workdir = temp.path().join("work");
+        let home = temp.path().join("home");
+        let agent_dir = workdir.join(".psychevo/agents");
+        std::fs::create_dir_all(&agent_dir).expect("agent dir");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(
+            agent_dir.join("reviewer.md"),
+            "---\ndescription: Review code changes.\n---\n\nReview carefully.\n",
+        )
+        .expect("agent");
+        std::fs::write(
+            home.join("config.toml"),
+            r#"[agents.backends.opencode]
+kind = "acp"
+description = "OpenCode ACP backend."
+command = "opencode"
+entrypoints = ["peer", "subagent"]
+
+[agents.backends.cursor]
+kind = "acp"
+description = "Cursor ACP backend."
+command = "cursor-agent"
+entrypoints = ["peer"]
+"#,
+        )
+        .expect("config");
+        let backend = Arc::new(TestBackend::default());
+        let prompts = Arc::clone(&backend.prompts);
+        let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let gateway = Gateway::with_backend(state_runtime, backend);
+        let state = WebState::new(GatewayWebServerConfig::new(
+            gateway,
+            home,
+            workdir,
+            None,
+            BTreeMap::new(),
+            temp.path().join("static"),
+        ));
+        let adapter = FakeImAdapter::new("wechat");
+        let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+            "wechat",
+            Arc::new(adapter.clone()),
+            ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+        )]);
+        let runtime = ChannelRuntimeState::new(temp.path());
+
+        handle_channel_message(
+            &state,
+            &runtime,
+            &ready_wechat_connection(None),
+            &channel_gateway,
+            wechat_message("/agents", "wx-agents"),
+        )
+        .await
+        .expect("agents handled");
+
+        assert!(prompts.lock().expect("prompts poisoned").is_empty());
+        let sent = wait_for_sent(&adapter, 1).await;
+        assert_eq!(sent.len(), 1);
+        let text = &sent[0].text;
+        let callable = text.find("Callable agents:").expect("callable group");
+        let reviewer = text
+            .find("@reviewer - Review code changes.")
+            .expect("reviewer");
+        let opencode = text
+            .find("@opencode - OpenCode ACP backend.")
+            .expect("opencode");
+        let peer = text.find("Peer runtimes:").expect("peer group");
+        let cursor = text.find("@cursor - Cursor ACP backend.").expect("cursor");
+        assert!(
+            callable < reviewer && reviewer < peer,
+            "reviewer should be callable before peer runtimes:\n{text}"
+        );
+        assert!(
+            callable < opencode && opencode < peer,
+            "peer+subagent backend should stay callable:\n{text}"
+        );
+        assert!(
+            peer < cursor,
+            "peer-only backend should be grouped after callable agents:\n{text}"
+        );
+        assert!(text.contains("Use @agent-name followed by a task."));
+        assert!(text.contains("Peer runtimes are listed for visibility"));
     }
 
     #[tokio::test]

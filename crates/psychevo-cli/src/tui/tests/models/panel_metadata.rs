@@ -255,8 +255,8 @@ api_key_env = "XIAOMI_KEY"
         .insert("XIAOMI_KEY".to_string(), "test-key".to_string());
     app.config_path = Some(config_path);
     app.current_model = Some("xiaomi-token-plan/mimo-v2-omni".to_string());
-    app.state
-        .set_model("/old", "xiaomi-token-plan/unused-model".to_string());
+    app.model_state
+        .set_model("/old", "xiaomi-token-plan/unused-model", None);
     app.refresh_selected_model();
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
@@ -573,6 +573,7 @@ pub(crate) async fn model_add_provider_opens_builtin_preset_picker() {
             "DeepSeek",
             "Z.AI / GLM",
             "Xiaomi Token Plan",
+            "OpenCode Zen",
             "Custom OpenAI-compatible"
         ]
     );
@@ -876,17 +877,25 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
     app.apply_bottom_panel_selection(&mut ui, selected)
         .expect("select variant");
 
-    assert_eq!(app.current_model, None);
+    assert_eq!(
+        app.current_model.as_deref(),
+        Some("xiaomi-token-plan-cn/remote-model")
+    );
     assert_eq!(app.current_variant, None);
-    assert_eq!(app.state.model_for(&app.workdir_key), None);
+    assert_eq!(
+        app.model_state.model_for(&app.workdir_key).as_deref(),
+        Some("xiaomi-token-plan-cn/remote-model")
+    );
     let selected_model = app.selected_model.as_ref().expect("selected model");
     assert_eq!(selected_model.provider, "xiaomi-token-plan-cn");
     assert_eq!(selected_model.model, "remote-model");
     let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
     assert!(!config.contains("model = \"xiaomi-token-plan-cn/remote-model\""));
-    let local_config =
-        fs::read_to_string(app.workdir.join(".psychevo/config.toml")).expect("local config");
-    assert!(local_config.contains("model = \"xiaomi-token-plan-cn/remote-model\""));
+    let local_config_path = app.workdir.join(".psychevo/config.toml");
+    if local_config_path.exists() {
+        let local_config = fs::read_to_string(local_config_path).expect("local config");
+        assert!(!local_config.contains("model = \"xiaomi-token-plan-cn/remote-model\""));
+    }
 }
 
 #[tokio::test]
@@ -984,17 +993,22 @@ pub(crate) async fn fetched_model_selection_writes_local_default_model() {
     app.apply_bottom_panel_selection(&mut ui, selected)
         .expect("select variant");
 
-    assert_eq!(app.current_model, None);
+    assert_eq!(app.current_model.as_deref(), Some("mock/remote-model"));
     assert_eq!(app.current_variant, None);
-    assert_eq!(app.state.model_for(&app.workdir_key), None);
+    assert_eq!(
+        app.model_state.model_for(&app.workdir_key).as_deref(),
+        Some("mock/remote-model")
+    );
     assert!(
-        app.state
-            .recent_models
+        app.model_state
+            .recent_model_values()
             .contains(&"mock/remote-model".to_string())
     );
-    let local_config =
-        fs::read_to_string(app.workdir.join(".psychevo/config.toml")).expect("local config");
-    assert!(local_config.contains("model = \"mock/remote-model\""));
+    let local_config_path = app.workdir.join(".psychevo/config.toml");
+    if local_config_path.exists() {
+        let local_config = fs::read_to_string(local_config_path).expect("local config");
+        assert!(!local_config.contains("model = \"mock/remote-model\""));
+    }
 }
 
 #[tokio::test]

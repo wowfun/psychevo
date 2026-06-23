@@ -47,6 +47,12 @@ import { clientRequestPermissionRespondSchema } from './rpc/client-request/permi
 import { clientRequestClarifyRespondSchema } from './rpc/client-request/clarify-respond';
 import { clientRequestSettingsUpdateSchema } from './rpc/client-request/settings-update';
 import { clientRequestSettingsReadSchema } from './rpc/client-request/settings-read';
+import { clientRequestModelSettingsReadSchema } from './rpc/client-request/model-settings-read';
+import { clientRequestModelProviderSaveSchema } from './rpc/client-request/model-provider-save';
+import { clientRequestModelProviderCatalogSchema } from './rpc/client-request/model-provider-catalog';
+import { clientRequestModelStateReadSchema } from './rpc/client-request/model-state-read';
+import { clientRequestModelStateSetSchema } from './rpc/client-request/model-state-set';
+import { clientRequestModelAssignmentSetSchema } from './rpc/client-request/model-assignment-set';
 import { clientRequestWorkspaceFilesSchema } from './rpc/client-request/workspace-files';
 import { clientRequestWorkspaceFileReadSchema } from './rpc/client-request/workspace-file-read';
 import { clientRequestWorkspaceFileWriteSchema } from './rpc/client-request/workspace-file-write';
@@ -399,6 +405,24 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/settings-read.json"
     },
     {
+      "$ref": "ClientRequest/model-settings-read.json"
+    },
+    {
+      "$ref": "ClientRequest/model-provider-save.json"
+    },
+    {
+      "$ref": "ClientRequest/model-provider-catalog.json"
+    },
+    {
+      "$ref": "ClientRequest/model-state-read.json"
+    },
+    {
+      "$ref": "ClientRequest/model-state-set.json"
+    },
+    {
+      "$ref": "ClientRequest/model-assignment-set.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-files.json"
     },
     {
@@ -508,6 +532,12 @@ export const rpcSchemaRefs = [
   clientRequestClarifyRespondSchema,
   clientRequestSettingsUpdateSchema,
   clientRequestSettingsReadSchema,
+  clientRequestModelSettingsReadSchema,
+  clientRequestModelProviderSaveSchema,
+  clientRequestModelProviderCatalogSchema,
+  clientRequestModelStateReadSchema,
+  clientRequestModelStateSetSchema,
+  clientRequestModelAssignmentSetSchema,
   clientRequestWorkspaceFilesSchema,
   clientRequestWorkspaceFileReadSchema,
   clientRequestWorkspaceFileWriteSchema,

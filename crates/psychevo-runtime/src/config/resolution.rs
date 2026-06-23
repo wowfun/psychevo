@@ -123,6 +123,18 @@ pub(crate) fn resolve_compression_config(
     loaded: &LoadedRunConfig,
     current: &ResolvedRunProvider,
 ) -> Result<ResolvedCompressionConfig> {
+    if let Some(provider) = resolve_auxiliary_task_provider(
+        &loaded.config.auxiliary.compression,
+        options,
+        loaded,
+        current,
+    )? {
+        return Ok(ResolvedCompressionConfig {
+            model_configured: true,
+            provider,
+        });
+    }
+
     let compression = &loaded.config.compression;
     let provider = if compression.model_configured {
         let inferred_provider = compression
@@ -164,6 +176,58 @@ pub(crate) fn resolve_compression_config(
         model_configured: compression.model_configured,
         provider,
     })
+}
+
+pub(crate) fn resolve_title_generation_provider(
+    options: &RunOptions,
+    loaded: &LoadedRunConfig,
+    current: &ResolvedRunProvider,
+) -> Result<ResolvedRunProvider> {
+    resolve_auxiliary_task_provider(
+        &loaded.config.auxiliary.title_generation,
+        options,
+        loaded,
+        current,
+    )
+    .map(|provider| provider.unwrap_or_else(|| current.clone()))
+}
+
+pub(crate) fn resolve_auxiliary_task_provider(
+    task: &AuxiliaryTaskConfig,
+    options: &RunOptions,
+    loaded: &LoadedRunConfig,
+    current: &ResolvedRunProvider,
+) -> Result<Option<ResolvedRunProvider>> {
+    if !task.model_configured {
+        return Ok(None);
+    }
+    let inferred_provider = task
+        .model
+        .id
+        .as_deref()
+        .and_then(|model| infer_provider_for_model(&loaded.config, model));
+    let provider = task
+        .model
+        .provider
+        .clone()
+        .or_else(|| task.provider.clone())
+        .or(inferred_provider)
+        .unwrap_or_else(|| current.provider.clone());
+    let model = task
+        .model
+        .id
+        .clone()
+        .unwrap_or_else(|| current.model.clone());
+    let reasoning_effort = task.model.reasoning_effort.clone();
+    resolve_one_provider(
+        &provider,
+        Some(model),
+        reasoning_effort,
+        options,
+        loaded,
+        false,
+    )
+    .map(Some)
 }
 
 pub(crate) fn model_for_provider(
@@ -250,15 +314,13 @@ pub(crate) fn resolve_one_provider(
             ])
         })
         .flatten();
+    let allow_no_auth = explicit_no_auth
+        || built_in.is_some_and(|provider| provider.allow_no_auth)
+        || is_loopback_base_url(&base_url);
     let api_key = api_key_env
         .as_deref()
         .and_then(|key| env_value(&loaded.env, key))
-        .or_else(|| {
-            let allow_no_auth = explicit_no_auth
-                || built_in.is_some_and(|provider| provider.allow_no_auth)
-                || is_loopback_base_url(&base_url);
-            allow_no_auth.then(|| "not-needed".to_string())
-        });
+        .or_else(|| allow_no_auth.then(String::new));
     let Some(api_key) = api_key else {
         if skip_missing {
             return Err(Error::Config("missing credentials".to_string()));

@@ -33,6 +33,9 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(compression) = object.get("compression") {
         config.compression = parse_compression_config(compression, &configured_keys)?;
     }
+    if let Some(auxiliary) = object.get("auxiliary") {
+        config.auxiliary = parse_auxiliary_config(auxiliary, &configured_keys)?;
+    }
     if let Some(lsp) = object.get("lsp") {
         config.lsp = parse_lsp_config(lsp)?;
     }
@@ -494,6 +497,52 @@ pub(crate) fn parse_compression_config(
     }
     config.reasoning_effort =
         validate_reasoning_effort(optional_string_field(object, "reasoning_effort")?)?;
+    Ok(config)
+}
+
+pub(crate) fn parse_auxiliary_config(
+    value: &Value,
+    configured_keys: &HashSet<String>,
+) -> Result<AuxiliaryConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("auxiliary must be an object".to_string()))?;
+    let mut config = AuxiliaryConfig::default();
+    if let Some(value) = object.get("title_generation") {
+        config.title_generation =
+            parse_auxiliary_task_config("auxiliary.title_generation", value, configured_keys)?;
+    }
+    if let Some(value) = object.get("compression") {
+        config.compression =
+            parse_auxiliary_task_config("auxiliary.compression", value, configured_keys)?;
+    }
+    Ok(config)
+}
+
+pub(crate) fn parse_auxiliary_task_config(
+    path: &str,
+    value: &Value,
+    configured_keys: &HashSet<String>,
+) -> Result<AuxiliaryTaskConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config(format!("{path} must be an object")))?;
+    let provider = optional_string_field(object, "provider")?
+        .map(|provider| normalize_provider_id(&provider))
+        .filter(|provider| !provider.is_empty() && provider != "auto");
+    let mut config = AuxiliaryTaskConfig {
+        provider,
+        ..Default::default()
+    };
+    if let Some(model) = object.get("model")
+        && !model.as_str().is_some_and(|value| value.trim().is_empty())
+    {
+        config.model = parse_model_selection(model, configured_keys)?;
+        if config.model.provider.is_none() {
+            config.model.provider = config.provider.clone();
+        }
+        config.model_configured = true;
+    }
     Ok(config)
 }
 

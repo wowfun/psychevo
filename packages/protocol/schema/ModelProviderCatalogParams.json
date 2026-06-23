@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "providerId": {
+      "type": "string"
+    },
+    "refresh": {
+      "default": false,
+      "type": "boolean"
+    },
+    "scope": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelSettingsScope"
+        }
+      ],
+      "default": "global"
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "providerId"
+  ],
+  "title": "ModelProviderCatalogParams",
+  "type": "object"
+}

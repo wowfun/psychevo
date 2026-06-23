@@ -343,6 +343,66 @@ export const settingsSchemas = {
       ],
       "type": "object"
     },
+    "ModelOptionView": {
+      "properties": {
+        "contextLimit": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "free": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "providerLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoningEfforts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reasoningSupported": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "value"
+      ],
+      "type": "object"
+    },
     "WorkbenchControlsView": {
       "properties": {
         "agent": {
@@ -368,6 +428,13 @@ export const settingsSchemas = {
             "string",
             "null"
           ]
+        },
+        "modelDetails": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ModelOptionView"
+          },
+          "type": "array"
         },
         "modelError": {
           "default": null,
@@ -395,6 +462,13 @@ export const settingsSchemas = {
           "type": "string"
         },
         "permissionModeOptions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recentModels": {
           "default": [],
           "items": {
             "type": "string"
@@ -547,6 +621,66 @@ export const settingsSchemas = {
   WorkbenchControlsView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ModelOptionView": {
+      "properties": {
+        "contextLimit": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "free": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "providerLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoningEfforts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reasoningSupported": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "value"
+      ],
+      "type": "object"
+    },
     "WorkbenchModelStatus": {
       "enum": [
         "resolved",
@@ -581,6 +715,13 @@ export const settingsSchemas = {
         "null"
       ]
     },
+    "modelDetails": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/ModelOptionView"
+      },
+      "type": "array"
+    },
     "modelError": {
       "default": null,
       "type": [
@@ -607,6 +748,13 @@ export const settingsSchemas = {
       "type": "string"
     },
     "permissionModeOptions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "recentModels": {
       "default": [],
       "items": {
         "type": "string"

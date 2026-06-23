@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "model": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reasoningEffort": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recentModels": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "workdir"
+  ],
+  "title": "ModelStateResult",
+  "type": "object"
+}

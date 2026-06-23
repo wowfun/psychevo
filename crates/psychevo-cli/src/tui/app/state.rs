@@ -7,6 +7,8 @@ pub(crate) struct TuiApp {
     pub(crate) home: PathBuf,
     pub(crate) state_path: PathBuf,
     pub(crate) state: TuiState,
+    pub(crate) model_state_path: PathBuf,
+    pub(crate) model_state: ModelState,
     pub(crate) state_runtime: StateRuntime,
     pub(crate) gateway: Gateway,
     pub(crate) db_path: PathBuf,

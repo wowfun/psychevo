@@ -848,7 +848,7 @@ mod tests {
         let server = SetupCatalogServer::new(r#"{"data":[]}"#);
         let mut io = TestIo::new(
             vec![
-                "4".to_string(),
+                "5".to_string(),
                 "mock-custom".to_string(),
                 server.base_url.clone(),
                 String::new(),
