@@ -97,9 +97,11 @@ class CustomPathAdapter:
                 ],
                 "final_metrics": {
                     "total_steps": 1,
-                    "total_turns": 1,
-                    "total_tool_calls": 0,
-                    "total_tool_errors": 0,
+                    "extra": {
+                        "total_turns": 1,
+                        "total_tool_calls": 0,
+                        "total_tool_errors": 0,
+                    },
                 },
             },
             steps_meta=[StepMeta(step_id=1, source="user", timestamp_ms=100)],

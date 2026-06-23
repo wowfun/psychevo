@@ -262,7 +262,16 @@ class PevalPyServeStateTests(unittest.TestCase):
                     config,
                 )
                 keys = store.import_loaded_sources(loaded, config)
-                self.assertNotIn("annotations", store.active_report())
+                initial_report = store.active_report()
+                self.assertEqual(initial_report["annotations"]["notes"], [])
+                self.assertEqual(
+                    initial_report["annotations"]["analysis"][0]["status"],
+                    "computed",
+                )
+                self.assertIn(
+                    "auto",
+                    initial_report["annotations"]["analysis"][0]["analysis_metrics"],
+                )
 
                 artifact_dir = root / store.source_payload()[0]["artifact_dir"]
                 store.conn.execute(
@@ -465,8 +474,14 @@ class PevalPyServeStateTests(unittest.TestCase):
                     "reviewed",
                 )
                 self.assertEqual(
+                    active_report["annotations"]["analysis"][0]["analysis_metrics"][
+                        "review_count"
+                    ],
+                    1,
+                )
+                self.assertIn(
+                    "auto",
                     active_report["annotations"]["analysis"][0]["analysis_metrics"],
-                    {"review_count": 1},
                 )
                 self.assertEqual(
                     [

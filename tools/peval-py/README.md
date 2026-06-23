@@ -102,10 +102,11 @@ without changing session ids, trial keys, source identity, or Evidence/Input
 Source paths. In the Leaderboard, the canonical Session column stays unchanged
 and aliases appear in the separate Session Alias column.
 
-In comparison reports, the Leaderboard Duration column and JSON `duration_ms`
-fields show active agent/tool work time. Long retained-session idle gaps are
-kept separately as `wall_duration_ms`. The Leaderboard and `serve` Source
-Manager also show Last Turn End from `trajectory_meta.finished_at_ms`.
+In comparison reports, the Leaderboard Duration column is derived from JSON
+`trajectory_meta[].duration_ms`, which stores active agent/tool work time. Long
+retained-session idle gaps are kept separately as `wall_duration_ms`. The
+Leaderboard and `serve` Source Manager also show Last Turn End from
+`trajectory_meta.finished_at_ms`.
 
 When a peval-py workspace root is selected with `view tr -r <workspace>` or
 discovered from the current directory, reports also try to read cached peval

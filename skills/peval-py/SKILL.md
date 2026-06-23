@@ -7,7 +7,8 @@ description: Use when working with peval-py for retained agent sessions, traject
 
 Use `peval-py` for offline inspection of retained agent sessions and trajectories. The common outputs are independent and composable:
 
-- reports from `view tr`
+- reports from `view tr`, including derived automatic Trial analysis metrics under
+  `annotations.analysis[].analysis_metrics.auto`
 - ATIF trajectory JSON from `export tr`
 - analysis reports in JSON or Markdown, written wherever the user requests
 - imported Trial cell analysis files created through
@@ -34,6 +35,10 @@ Use `peval-py` for offline inspection of retained agent sessions and trajectorie
 
 ## References
 
+## Guardrails
+
+- Write explanations and analysis in the user's language by default.
+- If `peval-py` cannot satisfy the user's request, explain whether the gap is in the CLI/report behavior, the skill guidance, or both. Ask whether to improve the relevant surface instead of inventing an unsupported workaround.
 - `references/cli-workflows.md`: command recipes for `view tr`, `export tr`, DB session listing, workspace discovery, validation, and `serve`.
 - `references/analysis-artifacts.md`: analysis report formats, Trial cell import guidance, `analysis.md` template, and report identity extraction.
 - `scripts/report_tools.py`: use `subjects` only when the target cell path is missing.

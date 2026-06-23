@@ -3,7 +3,91 @@ from __future__ import annotations
 from peval_py_test_support import *
 
 
+ATIF_TRAJECTORY_KEYS = {
+    "schema_version",
+    "session_id",
+    "trajectory_id",
+    "agent",
+    "steps",
+    "notes",
+    "final_metrics",
+    "continued_trajectory_ref",
+    "extra",
+    "subagent_trajectories",
+}
+ATIF_AGENT_KEYS = {"name", "version", "model_name", "tool_definitions", "extra"}
+ATIF_STEP_KEYS = {
+    "step_id",
+    "timestamp",
+    "source",
+    "model_name",
+    "reasoning_effort",
+    "message",
+    "reasoning_content",
+    "tool_calls",
+    "observation",
+    "metrics",
+    "is_copied_context",
+    "llm_call_count",
+    "extra",
+}
+ATIF_TOOL_CALL_KEYS = {"tool_call_id", "function_name", "arguments", "extra"}
+ATIF_OBSERVATION_KEYS = {"results"}
+ATIF_OBSERVATION_RESULT_KEYS = {
+    "source_call_id",
+    "content",
+    "subagent_trajectory_ref",
+    "extra",
+}
+ATIF_METRICS_KEYS = {
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_tokens",
+    "cost_usd",
+    "prompt_token_ids",
+    "completion_token_ids",
+    "logprobs",
+    "extra",
+}
+ATIF_FINAL_METRICS_KEYS = {
+    "total_prompt_tokens",
+    "total_completion_tokens",
+    "total_cached_tokens",
+    "total_cost_usd",
+    "total_steps",
+    "extra",
+}
+
+
+def final_extra(trajectory):
+    extra = trajectory["final_metrics"].get("extra")
+    if not isinstance(extra, dict):
+        raise AssertionError("final_metrics.extra missing")
+    return extra
+
+
 class PevalPySourceConversionTests(unittest.TestCase):
+    def assertAtifCompatibleTrajectory(self, trajectory) -> None:
+        self.assertTrue(set(trajectory).issubset(ATIF_TRAJECTORY_KEYS), trajectory)
+        self.assertTrue(set(trajectory.get("agent", {})).issubset(ATIF_AGENT_KEYS))
+        final_metrics = trajectory.get("final_metrics", {})
+        self.assertTrue(set(final_metrics).issubset(ATIF_FINAL_METRICS_KEYS))
+        for key in ("total_turns", "total_tool_calls", "total_tool_errors", "usage", "accounting"):
+            self.assertNotIn(key, final_metrics)
+        for step in trajectory.get("steps", []):
+            self.assertTrue(set(step).issubset(ATIF_STEP_KEYS), step)
+            metrics = step.get("metrics", {})
+            self.assertTrue(set(metrics).issubset(ATIF_METRICS_KEYS), metrics)
+            self.assertNotIn("usage", metrics)
+            self.assertNotIn("accounting", metrics)
+            for call in step.get("tool_calls", []) or []:
+                self.assertTrue(set(call).issubset(ATIF_TOOL_CALL_KEYS), call)
+            observation = step.get("observation")
+            if observation is not None:
+                self.assertTrue(set(observation).issubset(ATIF_OBSERVATION_KEYS), observation)
+                for result in observation.get("results", []) or []:
+                    self.assertTrue(set(result).issubset(ATIF_OBSERVATION_RESULT_KEYS), result)
+
     def test_psychevo_sqlite_messages_are_ordered_by_session_seq(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "state.db"
@@ -63,8 +147,8 @@ class PevalPySourceConversionTests(unittest.TestCase):
             self.assertEqual(latest.trajectory["agent"]["model_name"], "db-model-b")
             self.assertEqual(latest.trajectory["steps"][0]["message"], "hello b")
             self.assertEqual(latest.trajectory["steps"][1]["message"], "done b")
-            self.assertEqual(latest.trajectory["final_metrics"]["usage"]["input_tokens"], 5)
-            self.assertEqual(latest.trajectory["final_metrics"]["usage"]["output_tokens"], 7)
+            self.assertEqual(final_extra(latest.trajectory)["usage"]["input_tokens"], 5)
+            self.assertEqual(final_extra(latest.trajectory)["usage"]["output_tokens"], 7)
 
             explicit = convert_db(str(db_path), "db-a", config)
             self.assertEqual(explicit.trajectory["session_id"], "db-a")
@@ -211,6 +295,11 @@ class PevalPySourceConversionTests(unittest.TestCase):
             self.assertEqual(report_step["duration_ms"], 200)
             self.assertEqual(report_step["tool_calls"][0]["timestamp_ms"], 1_500)
             self.assertEqual(report["trajectory_meta"][0]["duration_ms"], 400)
+            auto_latency = report["annotations"]["analysis"][0]["analysis_metrics"][
+                "auto"
+            ]["latency"]
+            self.assertEqual(auto_latency["model_duration_ms"]["max"], 200)
+            self.assertEqual(auto_latency["tool_execution_duration_ms"]["max"], 200)
             self.assertEqual(result.warnings, [])
 
 
@@ -388,12 +477,13 @@ class PevalPySourceConversionTests(unittest.TestCase):
         self.assertEqual(trajectory["steps"][2]["message"], "Done.")
         self.assertEqual(trajectory["final_metrics"]["total_prompt_tokens"], 8)
         self.assertEqual(trajectory["final_metrics"]["total_completion_tokens"], 10)
-        self.assertEqual(trajectory["final_metrics"]["total_tool_calls"], 1)
-        self.assertEqual(trajectory["final_metrics"]["total_tool_errors"], 0)
+        self.assertEqual(final_extra(trajectory)["total_tool_calls"], 1)
+        self.assertEqual(final_extra(trajectory)["total_tool_errors"], 0)
         self.assertEqual(trajectory["final_metrics"]["total_steps"], 3)
-        self.assertEqual(trajectory["final_metrics"]["usage"]["input_tokens"], 8)
-        self.assertEqual(trajectory["final_metrics"]["usage"]["output_tokens"], 10)
-        self.assertEqual(trajectory["final_metrics"]["usage"]["cache_read_tokens"], 1)
+        self.assertEqual(final_extra(trajectory)["usage"]["input_tokens"], 8)
+        self.assertEqual(final_extra(trajectory)["usage"]["output_tokens"], 10)
+        self.assertEqual(final_extra(trajectory)["usage"]["cache_read_tokens"], 1)
+        self.assertAtifCompatibleTrajectory(trajectory)
 
         tool_meta = result.steps_meta[1].tool_calls[0]
         self.assertEqual(tool_meta.status, "completed")
@@ -406,6 +496,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
         for adapter in ["opencode", "hermes"]:
             with self.subTest(adapter=adapter):
                 result = convert_records(records, ToolConfig(adapter=adapter))
+                self.assertAtifCompatibleTrajectory(result.trajectory)
                 self.assertEqual(result.trajectory["agent"]["name"], adapter)
                 self.assertEqual(result.trajectory["steps"][0]["source"], "system")
                 self.assertEqual(
@@ -436,6 +527,23 @@ class PevalPySourceConversionTests(unittest.TestCase):
             self.assertEqual(loaded.trajectory, source.trajectory)
             self.assertEqual(len(loaded.steps_meta), len(source.trajectory["steps"]))
             self.assertEqual(loaded.total_events, len(source.trajectory["steps"]))
+
+
+    def test_path_input_rejects_non_atif_metric_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = convert_records(
+                read_jsonl(str(FIXTURES / "common_session.jsonl")),
+                ToolConfig(adapter="opencode"),
+            )
+            source.trajectory["final_metrics"]["usage"] = {"total_tokens": 1}
+            atif_path = Path(tmp) / "trajectory.json"
+            atif_path.write_text(
+                json.dumps(source.trajectory, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "final_metrics.*usage"):
+                convert_path(str(atif_path), ToolConfig(adapter="opencode"))
 
 
     def test_opencode_db_adapter_reads_latest_and_explicit_sessions(self) -> None:
@@ -478,8 +586,8 @@ class PevalPySourceConversionTests(unittest.TestCase):
             self.assertIsNone(step_meta["duration_ms"])
             self.assertEqual(step_meta["tool_calls"][0]["timestamp_ms"], 2200)
             self.assertEqual(report["trajectory_meta"][0]["duration_ms"], 100)
-            self.assertEqual(latest.trajectory["final_metrics"]["total_tool_calls"], 1)
-            self.assertEqual(latest.trajectory["final_metrics"]["usage"]["input_tokens"], 2)
+            self.assertEqual(final_extra(latest.trajectory)["total_tool_calls"], 1)
+            self.assertEqual(final_extra(latest.trajectory)["usage"]["input_tokens"], 2)
 
             old = convert_db(str(db_path), "ses-old", config)
             self.assertEqual(old.trajectory["session_id"], "ses-old")
@@ -524,6 +632,10 @@ class PevalPySourceConversionTests(unittest.TestCase):
                 "opencode_event_tool_timestamps",
             )
             self.assertEqual(report["trajectory_meta"][0]["duration_ms"], 48_100)
+            auto_latency = report["annotations"]["analysis"][0]["analysis_metrics"][
+                "auto"
+            ]["latency"]
+            self.assertNotIn("model_duration_ms", auto_latency)
 
 
     def test_hermes_db_adapter_reads_latest_and_explicit_sessions(self) -> None:
@@ -574,11 +686,11 @@ class PevalPySourceConversionTests(unittest.TestCase):
             self.assertIsNone(step_meta["duration_ms"])
             self.assertEqual(step_meta["tool_calls"][0]["timestamp_ms"], 220_000)
             self.assertNotIn("execution_duration_ms", step_meta["tool_calls"][0])
-            self.assertEqual(latest.trajectory["final_metrics"]["total_tool_calls"], 1)
-            self.assertEqual(latest.trajectory["final_metrics"]["usage"]["input_tokens"], 11)
-            self.assertEqual(latest.trajectory["final_metrics"]["usage"]["output_tokens"], 13)
+            self.assertEqual(final_extra(latest.trajectory)["total_tool_calls"], 1)
+            self.assertEqual(final_extra(latest.trajectory)["usage"]["input_tokens"], 11)
+            self.assertEqual(final_extra(latest.trajectory)["usage"]["output_tokens"], 13)
             self.assertEqual(
-                latest.trajectory["final_metrics"]["accounting"]["pricing_source"],
+                final_extra(latest.trajectory)["accounting"]["pricing_source"],
                 "test-prices",
             )
             self.assertEqual(latest.warnings, [])
@@ -587,7 +699,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
             self.assertEqual(old.trajectory["session_id"], "hermes-old")
             self.assertEqual(old.trajectory["steps"][0]["message"], "old prompt")
             self.assertEqual(len(old.trajectory["steps"]), 1)
-            self.assertEqual(old.trajectory["final_metrics"]["usage"]["input_tokens"], 1)
+            self.assertEqual(final_extra(old.trajectory)["usage"]["input_tokens"], 1)
 
 
     def test_hermes_db_adapter_fuses_current_agent_log_timing(self) -> None:
@@ -925,8 +1037,8 @@ class PevalPySourceConversionTests(unittest.TestCase):
             trajectory["steps"][2]["observation"]["results"][0]["source_call_id"],
             "call-read-1",
         )
-        self.assertEqual(trajectory["final_metrics"]["total_tool_calls"], 2)
-        self.assertEqual(trajectory["final_metrics"]["total_tool_errors"], 1)
+        self.assertEqual(final_extra(trajectory)["total_tool_calls"], 2)
+        self.assertEqual(final_extra(trajectory)["total_tool_errors"], 1)
         self.assertEqual(result.steps_meta[1].tool_calls[0].status, "error")
         self.assertTrue(result.steps_meta[1].tool_error)
         self.assertEqual(result.steps_meta[1].tool_calls[0].execution_duration_ms, 125)
@@ -989,7 +1101,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
 
         report = build_report(result, config, "inline")
         metrics = report["trajectory"][0]["final_metrics"]
-        self.assertEqual(metrics["usage"]["input_tokens"], 11)
-        self.assertEqual(metrics["usage"]["output_tokens"], 13)
-        self.assertEqual(metrics["accounting"]["billable_input_tokens"], 11)
-        self.assertEqual(metrics["accounting"]["billable_output_tokens"], 13)
+        self.assertEqual(metrics["extra"]["usage"]["input_tokens"], 11)
+        self.assertEqual(metrics["extra"]["usage"]["output_tokens"], 13)
+        self.assertEqual(metrics["extra"]["accounting"]["billable_input_tokens"], 11)
+        self.assertEqual(metrics["extra"]["accounting"]["billable_output_tokens"], 13)

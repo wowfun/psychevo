@@ -75,6 +75,14 @@ Purpose: fixed-format, machine-readable analysis. `peval-py import analysis` com
 
 Standard fields are compiled to top-level `analysis.json` fields. Additional fields, including imported `subject`, `metrics`, and `commands`, are preserved under compiled `extra` and do not override peval-py-owned compiled `subject`. If the input includes `extra`, it must be a JSON object; top-level non-standard fields win when they use the same key as `extra`.
 
+Generated reports always add peval-py automatic metrics under
+`annotations.analysis[].analysis_metrics.auto`. These automatic metrics are
+derived analysis values and do not repeat direct facts already stored in
+`trajectory.final_metrics` or `trajectory_meta[]`. Imported JSON `metrics`
+remain flat keys in the same `analysis_metrics` object when the report is
+rendered. Do not use `auto` as a custom metric key; it is reserved for
+peval-py-owned computed metrics.
+
 Template:
 
 ```json
@@ -114,16 +122,18 @@ Current peval-py report generation recognizes these compiled `analysis.json` fie
 - `summary` -> `annotations.analysis[].summary`
 - `status` -> `annotations.analysis[].analysis_status` (`annotations.analysis[].status` remains the cache source status)
 - `subject`, `findings`, `recommendations`, `limitations`, `commands`, and `confidence` with the same field names
-- `metrics` -> `annotations.analysis[].analysis_metrics`
+- `metrics` -> flat keys in `annotations.analysis[].analysis_metrics`; the
+  reserved `auto` key is ignored so imported metrics cannot replace automatic
+  metrics
 
 Unknown top-level fields and recognized fields with the wrong type are ignored by reports, but remain in the compiled artifact for other tools.
 
 When `--json` is used, `peval-py import analysis` includes diagnostic `warnings`
 for top-level fields that look meaningful but are preserved under `extra`
 instead of compiled, such as `subject`, `metrics`, `commands`,
-`analysis_status`, and `analysis_metrics`. It also warns when standard fields
-such as `summary` or `findings` appear inside `extra`; place standard fields at
-the top level when they should be compiled.
+`analysis_status`, `analysis_metrics`, and `auto`. It also warns when standard
+fields such as `summary` or `findings` appear inside `extra`; place standard
+fields at the top level when they should be compiled.
 
 ## Markdown Analysis Report
 

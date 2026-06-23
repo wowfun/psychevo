@@ -62,7 +62,6 @@ class StepMeta:
     elapsed_ms: int | None = None
     duration_ms: int | None = None
     duration_source: str | None = None
-    data_preview: str | None = None
     truncated: bool = False
 
 

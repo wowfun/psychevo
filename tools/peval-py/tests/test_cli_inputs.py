@@ -193,10 +193,7 @@ label_prefix = "selected"
                     [item["adapter"] for item in payload["trajectory_meta"]],
                     ["opencode", "custom"],
                 )
-                self.assertEqual(
-                    [item["adapter"] for item in payload["comparison"]["leaderboard"]["entries"]],
-                    ["opencode", "custom"],
-                )
+                self.assertNotIn("comparison", payload)
                 self.assertEqual(
                     payload["trajectory"][1]["session_id"],
                     "selected:custom",
@@ -382,10 +379,7 @@ label_prefix = "selected"
                 [item["adapter"] for item in payload["trajectory_meta"]],
                 ["hermes", "opencode"],
             )
-            self.assertEqual(
-                [item["adapter"] for item in payload["comparison"]["leaderboard"]["entries"]],
-                ["hermes", "opencode"],
-            )
+            self.assertNotIn("comparison", payload)
 
             mixed_out = tmp_path / "mixed.json"
             result = main(
@@ -744,7 +738,7 @@ label_prefix = "selected"
             self.assertEqual(result.stderr, "")
             payload = json.loads(out_path.read_text(encoding="utf-8"))
             self.assertEqual([item["session_id"] for item in payload["trajectory"]], ["db-a", "db-b"])
-            self.assertEqual(payload["comparison"]["summary"]["session_count"], 2)
+            self.assertNotIn("comparison", payload)
             self.assertEqual(payload["annotations"]["report_notes"][0]["markdown"], "DB report")
             self.assertEqual(payload["annotations"]["notes"][0]["markdown"], "DB B")
 
@@ -954,7 +948,8 @@ default_db_path = "state.db"
             analysis = payload["annotations"]["analysis"][0]
             self.assertEqual(analysis["summary"], "Root-selected cached analysis.")
             self.assertEqual(analysis["findings"][0]["title"], "Root-selected finding.")
-            self.assertEqual(analysis["analysis_metrics"], {"review_turns": 2})
+            self.assertEqual(analysis["analysis_metrics"]["review_turns"], 2)
+            self.assertIn("auto", analysis["analysis_metrics"])
             self.assertIn("Cached markdown body.", analysis["md_report"])
             self.assertEqual(
                 analysis["relative_paths"],
@@ -981,7 +976,7 @@ default_db_path = "state.db"
                         "limitations": ["No live validation."],
                         "confidence": "medium",
                         "subject": {"agent_id": "input-agent"},
-                        "metrics": {"input_turns": 99},
+                        "metrics": {"input_turns": 99, "auto": {"bad": True}},
                         "commands": ["agent-authored command"],
                         "custom": {"from": "top-level"},
                         "extra": {
@@ -1032,7 +1027,7 @@ default_db_path = "state.db"
                     "custom": {"from": "top-level"},
                     "input_only": True,
                     "subject": {"agent_id": "input-agent"},
-                    "metrics": {"input_turns": 99},
+                    "metrics": {"input_turns": 99, "auto": {"bad": True}},
                     "commands": ["agent-authored command"],
                 },
             )
@@ -1063,6 +1058,9 @@ default_db_path = "state.db"
             self.assertEqual(analysis["analysis_status"], "analyzed")
             self.assertEqual(analysis["findings"][0]["title"], "Imported finding.")
             self.assertEqual(analysis["subject"]["agent_id"], "agent-a")
+            self.assertEqual(analysis["analysis_metrics"]["input_turns"], 99)
+            self.assertIn("auto", analysis["analysis_metrics"])
+            self.assertNotIn("bad", analysis["analysis_metrics"]["auto"])
             self.assertNotIn("extra", analysis)
             self.assertEqual(
                 analysis["relative_path"],
@@ -1143,6 +1141,7 @@ default_db_path = "state.db"
                         "commands": ["external command"],
                         "analysis_status": "reviewed",
                         "analysis_metrics": {"reported_turns": 3},
+                        "auto": {"bad": True},
                         "custom": {"silent": True},
                         "extra": {
                             "summary": "Nested summary.",
@@ -1218,6 +1217,12 @@ default_db_path = "state.db"
                         "extra.analysis_metrics",
                     ),
                     (
+                        "field_preserved_in_extra",
+                        "auto",
+                        "top_level",
+                        "extra.auto",
+                    ),
+                    (
                         "standard_field_nested_in_extra",
                         "summary",
                         "extra",
@@ -1280,6 +1285,7 @@ default_db_path = "state.db"
                 compiled["extra"]["analysis_metrics"],
                 {"reported_turns": 3},
             )
+            self.assertEqual(compiled["extra"]["auto"], {"bad": True})
             self.assertEqual(compiled["extra"]["summary"], "Nested summary.")
             self.assertEqual(compiled["extra"]["custom"], {"silent": True})
             self.assertTrue(compiled["extra"]["custom_nested"])
@@ -1614,13 +1620,7 @@ default_db_path = "state.db"
                 [item.get("source_alias") for item in payload["trajectory_meta"]],
                 ["CLI path alias", "Table DB alias"],
             )
-            self.assertEqual(
-                [
-                    item.get("source_alias")
-                    for item in payload["comparison"]["leaderboard"]["entries"]
-                ],
-                ["CLI path alias", "Table DB alias"],
-            )
+            self.assertNotIn("comparison", payload)
             self.assertEqual(
                 [item["session_id"] for item in payload["trajectory"]],
                 ["common_session", "db-a"],
@@ -1857,7 +1857,7 @@ default_db_path = "state.db"
             self.assertEqual(result.stderr, "")
             payload = json.loads(out_path.read_text(encoding="utf-8"))
             self.assertEqual(len(payload["trajectory"]), 2)
-            self.assertIn("comparison", payload)
+            self.assertNotIn("comparison", payload)
             subprocess.run(
                 [sys.executable, "-m", "json.tool", str(out_path)],
                 check=True,

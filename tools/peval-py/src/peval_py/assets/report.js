@@ -26,6 +26,7 @@ function fmtMs(value) {
 }
 function fmtDate(value) { return value ? new Date(Number(value)).toLocaleString() : "-"; }
 function fmtCost(value) { return hasMetricValue(value) ? `$${Number(value).toFixed(4)}` : "-"; }
+function fmtPct(value) { return hasMetricValue(value) ? `${(Number(value) * 100).toFixed(1)}%` : "-"; }
 function fmtScore(value) { return hasMetricValue(value) ? Number(value).toLocaleString() : "-"; }
 function hasMetricValue(value) { return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value)); }
 function data() { return JSON.parse($("peval-py-data").textContent || "{}"); }
@@ -46,11 +47,44 @@ function closeOpenSubmenus(except = null) {
     if (details !== except) details.open = false;
   });
 }
+function listValue(value) {
+  return Array.isArray(value) ? value : [];
+}
 function reportRows() {
-  return state.view?.comparison?.leaderboard?.entries || [];
+  const trajectories = listValue(state.view?.trajectory);
+  const metas = listValue(state.view?.trajectory_meta);
+  if (metas.length > 1) {
+    return metas
+      .map((meta, index) => synthesizedReportRow(trajectories[index] || {}, meta))
+      .filter(row => row.trial_key);
+  }
+  return [];
+}
+function synthesizedReportRow(trajectory, meta) {
+  const metrics = trajectory?.final_metrics || {};
+  const totalToolCalls = hasMetricValue(finalMetric(metrics, "total_tool_calls")) ? Number(finalMetric(metrics, "total_tool_calls")) : 0;
+  const totalToolErrors = hasMetricValue(finalMetric(metrics, "total_tool_errors")) ? Number(finalMetric(metrics, "total_tool_errors")) : 0;
+  const agent = trajectory?.agent || {};
+  return {
+    trial_key: meta?.trial_key,
+    session_id: trajectory?.session_id || "-",
+    source_alias: meta?.source_alias,
+    adapter: meta?.adapter,
+    model: agent.model_name,
+    status: meta?.status,
+    finished_at_ms: meta?.finished_at_ms,
+    duration_ms: meta?.duration_ms,
+    wall_duration_ms: trialWallDurationMs(meta),
+    turns: finalMetric(metrics, "total_turns"),
+    total_tool_calls: totalToolCalls,
+    total_tool_errors: totalToolErrors,
+    tokens: tokenTotal(metrics),
+    cost_usd: metrics.total_cost_usd,
+    warnings: Array.isArray(meta?.warnings) ? meta.warnings.length : 0,
+  };
 }
 function selectedKey() {
-  return state.selectedTrial || state.view?.comparison?.selected_trial_key || state.view?.trajectory_meta?.[0]?.trial_key || null;
+  return state.selectedTrial || state.view?.trajectory_meta?.[0]?.trial_key || null;
 }
 function selectedIndex() {
   const key = selectedKey();
@@ -170,8 +204,8 @@ function selectionColumn() {
 }
 function leaderboardColumns() {
   return [
-    { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => sourceIdentityFor(row), cellTitle: row => row.trial_key || sourceIdentityFor(row) },
-    { key: "source_alias", label: t("session_alias", "Session Alias"), width: "140px", value: row => sessionAliasValue(row), html: row => renderSessionAliasCell(row), cellTitle: row => sourceAliasFor(row) },
+    { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => sourceIdentityFor(row), cellTitle: row => row.trial_key && row.trial_key !== sourceIdentityFor(row) ? row.trial_key : "" },
+    { key: "source_alias", label: t("session_alias", "Session Alias"), width: "140px", value: row => sessionAliasValue(row), html: row => renderSessionAliasCell(row) },
     { key: "agent", label: t("agent", "Agent"), width: "120px", filterable: true, value: row => agentNameFor(row) },
     { key: "model", label: t("model", "Model"), width: "150px", filterable: true, value: row => row.model || "-" },
     { key: "status", label: t("result", "Result"), width: "104px", filterable: true, value: row => row.status || "-", filterLabel: value => statusLabel(value), html: row => `<span class="stamp ${lower(row.status || "passed")}">${esc(statusLabel(row.status))}</span>` },
@@ -179,9 +213,13 @@ function leaderboardColumns() {
     { key: "duration_ms", label: t("duration", "Active Duration"), width: "124px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.duration_ms, format: fmtMs },
     { key: "turns", label: t("turns", "Turns"), width: "82px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.turns, format: fmtNum },
     { key: "total_tool_calls", label: t("tool_calls", "Tool Calls"), width: "106px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.total_tool_calls, format: value => hasMetricValue(value) ? fmtNum(value) : "-" },
+    { key: "tool_error_rate", label: t("tool_error_rate", "Tool Error Rate"), width: "126px", type: "number", numeric: true, sortable: true, metric: true, value: row => rowToolErrorRate(row), format: fmtPct },
     { key: "tokens", label: t("tokens", "Tokens"), width: "100px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.tokens, format: fmtNum },
     { key: "cost_usd", label: t("cost", "Cost"), width: "92px", type: "number", numeric: true, sortable: true, value: row => row.cost_usd, format: fmtCost },
-    { key: "notes", label: t("notes", "Notes"), width: "220px", value: row => noteSnippetFor(row.trial_key), html: row => renderNotesCell(row.trial_key), cellTitle: row => notesPlainText(notesFor(row.trial_key)) }
+    { key: "notes", label: t("notes", "Notes"), width: "220px", value: row => noteSnippetFor(row.trial_key), html: row => renderNotesCell(row.trial_key), cellTitle: row => {
+      const text = notesPlainText(notesFor(row.trial_key));
+      return text && text !== noteSnippetFor(row.trial_key) ? text : "";
+    } }
   ];
 }
 function displayLeaderboardColumns() {
@@ -190,6 +228,10 @@ function displayLeaderboardColumns() {
 function agentNameFor(row) {
   const name = trajectoryFor(row?.trial_key)?.agent?.name;
   return name || row?.adapter || "-";
+}
+function rowToolErrorRate(row) {
+  if (!hasMetricValue(row?.total_tool_calls) || Number(row.total_tool_calls) === 0) return null;
+  return Number(row.total_tool_errors || 0) / Number(row.total_tool_calls);
 }
 function renderLeaderboard(rows = leaderboardRows()) {
   const target = $("leaderboard");
@@ -362,7 +404,7 @@ function renderTableHeader(tableId, column, controls, rows = [], filterOptionsRo
     : `<span class="static-head">${esc(column.label)}</span>`;
   const filter = column.filterable ? renderFilterControl(tableId, column, filterOptionsRows) : "";
   const contentClass = column.filterable ? "table-head-cell table-head-inline" : "table-head-cell";
-  return `<th class="${column.numeric ? "num" : ""}" title="${esc(column.label)}"><div class="${contentClass}">${label}${filter}</div></th>`;
+  return `<th class="${column.numeric ? "num" : ""}"><div class="${contentClass}">${label}${filter}</div></th>`;
 }
 function renderFilterControl(tableId, column, rows) {
   const selected = new Set(activeFilterValues(tableId, column.key));
@@ -379,7 +421,7 @@ function renderSelectionHeader(rows) {
   const selected = visible.filter(row => state.rowSelection.has(row.trial_key));
   const checked = visible.length > 0 && selected.length === visible.length;
   const partial = selected.length > 0 && selected.length < visible.length;
-  return `<th class="select-col" title="${esc(t("select_visible_rows", "Select visible rows"))}"><label class="select-box"><input type="checkbox" data-select-visible ${checked ? "checked" : ""} ${partial ? "data-partial=\"true\"" : ""} aria-label="${esc(t("select_visible_rows", "Select visible rows"))}"><span></span></label></th>`;
+  return `<th class="select-col"><label class="select-box"><input type="checkbox" data-select-visible ${checked ? "checked" : ""} ${partial ? "data-partial=\"true\"" : ""} aria-label="${esc(t("select_visible_rows", "Select visible rows"))}"><span></span></label></th>`;
 }
 function renderRowSelection(row) {
   const key = row.trial_key || "";
@@ -507,7 +549,7 @@ function exportScopeRows() {
 function exportCurrentScope(kind) {
   const rows = exportScopeRows();
   if (kind === "json") {
-    downloadText("peval-report-v18.json", "application/json", JSON.stringify(reportSubset(rows), null, 2));
+    downloadText("peval-report-v19.json", "application/json", JSON.stringify(reportSubset(rows), null, 2));
     return;
   }
   if (kind === "html") {
@@ -530,31 +572,22 @@ function reportSubset(rows) {
   const original = state.view || {};
   const metas = original.trajectory_meta || [];
   const trajectories = original.trajectory || [];
-  const entries = rows.map(row => ({ ...row }));
-  const selectedKeys = new Set(entries.map(row => row.trial_key));
+  const selectedKeys = new Set(rows.map(row => row.trial_key));
   const orderedMeta = [];
   const orderedTrajectories = [];
-  entries.forEach(row => {
+  rows.forEach(row => {
     const index = metas.findIndex(meta => meta.trial_key === row.trial_key);
     if (index >= 0) {
       orderedMeta.push({ ...metas[index] });
       orderedTrajectories.push(trajectories[index]);
     }
   });
-  const selectedTrialKey = selectedKeys.has(selectedKey()) ? selectedKey() : (entries[0]?.trial_key || original.comparison?.selected_trial_key || null);
   const subset = {
-    ...original,
+    schema_version: original.schema_version,
+    includes: listValue(original.includes).filter(item => item !== "comparison"),
     trajectory: orderedTrajectories,
     trajectory_meta: orderedMeta
   };
-  if (original.comparison) {
-    subset.comparison = {
-      ...original.comparison,
-      selected_trial_key: selectedTrialKey,
-      summary: { ...(original.comparison.summary || {}), session_count: entries.length },
-      leaderboard: { entries }
-    };
-  }
   if (original.annotations) {
     subset.annotations = {
       ...original.annotations,
@@ -646,7 +679,7 @@ function roleLetter(source) {
 function stepTitle(step, index, stepDuration = null, durationRatio = null) {
   const id = step?.step_id ?? index + 1;
   const role = step?.source || "unknown";
-  const preview = shortText(valuePreview(step?.message).trim() || valuePreview(step?.reasoning_content).trim() || firstToolName(step));
+  const preview = stepPreviewText(step);
   const duration = hasMetricValue(stepDuration) ? timeTitle("step", stepDuration, durationRatio, "slowest step") : "";
   const head = duration ? `#${id} ${role}; ${duration}` : `#${id} ${role}`;
   return preview ? `${head}: ${preview}` : head;
@@ -676,6 +709,10 @@ function firstToolName(step) {
 function shortText(value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+}
+function stepPreviewText(step) {
+  if (!step) return "";
+  return shortText(valuePreview(step?.message).trim() || valuePreview(step?.reasoning_content).trim() || firstToolName(step));
 }
 function renderTrace() {
   const trial = metaFor(selectedKey());
@@ -711,8 +748,8 @@ function renderTrace() {
       [t("score", "Score"), fmtScore(trial.score)],
       [t("evaluator", "Evaluator"), trial.score_message || "-"],
       [t("tokens", "Tokens"), fmtNum(tokenTotal(metrics))],
-      [t("turns", "Turns"), metrics.total_turns ?? "-"],
-      [t("tool_success_total", "Tool success / total"), toolCallRatio(metrics.total_tool_calls ?? 0, metrics.total_tool_errors ?? 0)],
+      [t("turns", "Turns"), finalMetric(metrics, "total_turns") ?? "-"],
+      [t("tool_success_total", "Tool success / total"), toolCallRatio(finalMetric(metrics, "total_tool_calls") ?? 0, finalMetric(metrics, "total_tool_errors") ?? 0)],
       [t("cost", "Cost"), fmtCost(metrics.total_cost_usd)]
     ])}
     ${renderSelectedNotes(trial.trial_key)}
@@ -1446,10 +1483,16 @@ function timeTitle(label, value, ratio, basis) {
 function systemExposed(trajectory) { return (trajectory?.steps || []).some(step => step.source === "system"); }
 function reasoningExposed(trajectory) { return (trajectory?.steps || []).some(step => step.reasoning_content); }
 function tokenTotal(metrics) {
-  const direct = metrics.usage?.total_tokens;
-  if (hasMetricValue(direct)) return Number(direct);
-  const values = [metrics.total_prompt_tokens, metrics.total_completion_tokens, metrics.total_cached_tokens].filter(hasMetricValue).map(Number);
-  return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+  const values = [metrics?.total_prompt_tokens, metrics?.total_completion_tokens].filter(hasMetricValue).map(Number);
+  if (values.length) return values.reduce((sum, value) => sum + value, 0);
+  const direct = metricExtra(metrics).usage?.total_tokens;
+  return hasMetricValue(direct) ? Number(direct) : null;
+}
+function finalMetric(metrics, key) {
+  return Object.prototype.hasOwnProperty.call(metrics || {}, key) ? metrics[key] : metricExtra(metrics)[key];
+}
+function metricExtra(metrics) {
+  return metrics?.extra && typeof metrics.extra === "object" ? metrics.extra : {};
 }
 function renderSelectedNotes(trialKey) {
   const notes = notesFor(trialKey);
@@ -1523,7 +1566,8 @@ function renderSelectedAnalysis(trialKey) {
   const markdown = analysis.md_report ? `<div class="note-body analysis-md">${renderMarkdown(analysis.md_report)}</div>` : "";
   const structured = renderStructuredAnalysis(analysis);
   const paths = renderAnalysisPaths(analysis);
-  return `<section class="selected-extra selected-analysis"><h3>${esc(t("analysis", "Analysis"))}</h3><article class="selected-evidence-card analysis-card"><div class="note-meta"><span class="chip">${esc(analysis.status || "cached")}</span><strong>${esc(t("cached_analysis", "Cached analysis"))}</strong></div>${summary}${markdown}${structured}${paths}</article></section>`;
+  if (!summary && !markdown && !structured && !paths && analysis.status === "computed") return "";
+  return `<section class="selected-extra selected-analysis"><h3>${esc(t("analysis", "Analysis"))}</h3><article class="selected-evidence-card analysis-card">${summary}${markdown}${structured}${paths}</article></section>`;
 }
 function renderStructuredAnalysis(analysis) {
   const blocks = [
@@ -1562,14 +1606,175 @@ function renderAnalysisDetails(analysis) {
   const blocks = [];
   if (statusRows.length) blocks.push(infoGrid(statusRows));
   blocks.push(renderAnalysisObject(t("subject", "Subject"), analysis.subject));
-  blocks.push(renderAnalysisObject(t("analysis_metrics", "Analysis Metrics"), analysis.analysis_metrics));
+  blocks.push(renderAnalysisMetrics(analysis.analysis_metrics));
   const html = blocks.filter(Boolean).join("");
   return html ? `<div class="analysis-block analysis-details">${html}</div>` : "";
 }
+function renderAnalysisMetrics(metrics) {
+  if (!isPlainObject(metrics) || !Object.keys(metrics).length) return "";
+  const blocks = [];
+  if (isPlainObject(metrics.auto) && Object.keys(metrics.auto).length) {
+    blocks.push(renderAnalysisMetricGroups(metrics.auto));
+  }
+  const imported = Object.fromEntries(Object.entries(metrics).filter(([key]) => key !== "auto"));
+  if (Object.keys(imported).length) {
+    blocks.push(renderAnalysisObject(t("imported_metrics", "Imported Metrics"), imported));
+  }
+  return blocks.length ? `<div class="analysis-metrics">${blocks.join("")}</div>` : "";
+}
+function renderAnalysisMetricGroups(autoMetrics) {
+  return Object.entries(autoMetrics)
+    .filter(([, value]) => isPlainObject(value) && Object.keys(value).length)
+    .map(([key, value]) => renderAutoMetricGroup(key, value))
+    .join("");
+}
+function renderAutoMetricGroup(key, metrics) {
+  const blocks = [];
+  const scalarRows = autoMetricScalarRows(key, metrics);
+  if (scalarRows.length) blocks.push(infoGrid(scalarRows));
+  if (key === "latency") {
+    blocks.push(renderLatencyComparison(metrics));
+  }
+  return blocks.filter(Boolean).length
+    ? `<div class="analysis-metric-group analysis-metric-group-${esc(key)}"><h5>${esc(analysisMetricGroupLabel(key))}</h5>${blocks.filter(Boolean).join("")}</div>`
+    : "";
+}
+function autoMetricScalarRows(group, metrics) {
+  return Object.entries(metrics)
+    .filter(([key, value]) => isMetricScalar(value) && !autoMetricStructuredKeys(group).has(key))
+    .map(([key, value]) => [analysisMetricLabel(key), metricValueText(key, value)]);
+}
+function autoMetricStructuredKeys(group) {
+  const keys = {
+    latency: ["step_duration_ms", "tool_execution_duration_ms", "model_duration_ms"],
+  };
+  return new Set(keys[group] || []);
+}
+function analysisMetricGroupLabel(key) {
+  const labels = {
+    tooling: t("metric_group_tooling", "Tooling"),
+    cost: t("metric_group_cost", "Cost"),
+    latency: t("metric_group_latency", "Latency"),
+  };
+  return labels[key] || key;
+}
+function analysisMetricLabel(key) {
+  const labels = {
+    tool_error_rate: t("metric_tool_error_rate", "Tool error rate"),
+    distinct_tools: t("metric_distinct_tools", "Distinct tools"),
+    cost_per_1k_tokens: t("metric_cost_per_1k_tokens", "Cost / 1k tokens"),
+    model_duration_ms: t("metric_model_duration_ms", "Model duration"),
+    count: t("metric_count", "Count"),
+    errors: t("metric_errors", "Errors"),
+    duration_ms: t("metric_duration", "Duration"),
+    p50: "p50",
+    q1: "q1",
+    q3: "q3",
+    p95: "p95",
+    min: t("metric_min", "Min"),
+    max: t("metric_max", "Max"),
+  };
+  return labels[key] || key;
+}
 function renderAnalysisObject(label, value) {
   if (!isPlainObject(value) || !Object.keys(value).length) return "";
-  const rows = Object.entries(value).map(([key, item]) => [key, analysisValueText(item)]);
-  return `<div class="analysis-object"><h4>${esc(label)}</h4>${infoGrid(rows)}</div>`;
+  return `<div class="analysis-object"><h4>${esc(label)}</h4>${renderMetricTable(value)}</div>`;
+}
+function renderMetricTable(value, depth = 0) {
+  if (!isPlainObject(value) || !Object.keys(value).length) return "";
+  const rows = Object.entries(value)
+    .map(([key, item]) => `<tr><th>${esc(analysisMetricLabel(key))}</th><td>${renderMetricValue(key, item, depth)}</td></tr>`)
+    .join("");
+  return `<table class="analysis-kv-table"><tbody>${rows}</tbody></table>`;
+}
+function renderMetricValue(key, value, depth = 0) {
+  if (isMetricScalar(value)) return esc(metricValueText(key, value));
+  if (Array.isArray(value)) {
+    if (!value.length) return `<span class="muted">[]</span>`;
+    if (depth < 1 && value.every(isPlainObject)) return renderMetricArrayTable(value, depth + 1);
+    if (depth < 1 && value.every(isMetricScalar)) return `<span class="analysis-inline-list">${value.map(item => esc(metricValueText(key, item))).join(", ")}</span>`;
+    return renderMetricDetails(value);
+  }
+  if (isPlainObject(value)) {
+    if (depth < 1) return renderMetricTable(value, depth + 1);
+    return renderMetricDetails(value);
+  }
+  return esc(analysisValueText(value));
+}
+function renderMetricArrayTable(values, depth = 0) {
+  const keys = Array.from(new Set(values.flatMap(item => Object.keys(item))));
+  if (!keys.length) return renderMetricDetails(values);
+  const head = keys.map(key => `<th>${esc(analysisMetricLabel(key))}</th>`).join("");
+  const rows = values.map(item => `<tr>${keys.map(key => `<td>${renderMetricValue(key, item[key], depth)}</td>`).join("")}</tr>`).join("");
+  return `<div class="analysis-table-wrap"><table class="analysis-data-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function renderMetricDetails(value) {
+  const summary = Array.isArray(value)
+    ? t("metric_array_summary", "Array value")
+    : t("metric_object_summary", "Object value");
+  return `<details class="analysis-json-details"><summary>${esc(summary)}</summary><pre>${esc(JSON.stringify(value, null, 2))}</pre></details>`;
+}
+function renderLatencyComparison(metrics) {
+  const rows = [
+    ["step_duration_ms", t("metric_step_duration_ms", "Step duration"), metrics.step_duration_ms],
+    ["tool_execution_duration_ms", t("metric_tool_execution_duration_ms", "Tool execution"), metrics.tool_execution_duration_ms],
+    ["model_duration_ms", t("metric_model_duration_ms", "Model duration"), metrics.model_duration_ms],
+  ].filter(([, , distribution]) => isPlainObject(distribution) && Object.keys(distribution).length);
+  if (!rows.length) return "";
+  const max = Math.max(...rows.map(([, , distribution]) => Number(distribution.max || 0)), 0);
+  const body = rows.map(([key, label, distribution]) => renderLatencyComparisonRow(key, label, distribution, max)).join("");
+  return `<div class="analysis-latency-chart">${body}</div>`;
+}
+function renderLatencyComparisonRow(key, label, distribution, max) {
+  return `<div class="analysis-latency-row analysis-latency-${esc(key)}">${renderLatencyBoxPlot(label, distribution, max)}<h6>${esc(label)}</h6></div>`;
+}
+function renderLatencyBoxPlot(label, distribution, max) {
+  const value = key => hasMetricValue(distribution[key]) ? Number(distribution[key]) : null;
+  const min = value("min") ?? value("p50") ?? 0;
+  const q1 = value("q1") ?? value("p50") ?? min;
+  const p50 = value("p50") ?? q1;
+  const q3 = value("q3") ?? p50;
+  const p95 = value("p95") ?? q3;
+  const high = value("max") ?? p95;
+  const pct = item => max > 0 ? Math.max(0, Math.min(100, (Number(item || 0) / max) * 100)) : 0;
+  const style = [
+    `--whisker-bottom:${pct(min)}%`,
+    `--whisker-height:${Math.max(0, pct(high) - pct(min))}%`,
+    `--box-bottom:${pct(q1)}%`,
+    `--box-height:${Math.max(0, pct(q3) - pct(q1))}%`,
+    `--median-bottom:${pct(p50)}%`,
+    `--p95-bottom:${pct(p95)}%`,
+  ].join(";");
+  const title = [
+    `${label}`,
+    `min ${metricValueText("duration_ms", min)}`,
+    `q1 ${metricValueText("duration_ms", q1)}`,
+    `p50 ${metricValueText("duration_ms", p50)}`,
+    `q3 ${metricValueText("duration_ms", q3)}`,
+    `p95 ${metricValueText("duration_ms", p95)}`,
+    `max ${metricValueText("duration_ms", high)}`,
+  ].join("; ");
+  const labels = [
+    ["max", high],
+    ["p95", p95],
+    ["p50", p50],
+    ["min", min],
+  ].filter(([stat, item], index, values) => index === values.findIndex(([otherStat]) => otherStat === stat));
+  const labelHtml = labels.map(([stat, item]) => {
+    const valuePct = pct(item);
+    return `<span class="analysis-box-label analysis-box-label-${esc(stat)}" style="--label-bottom:${esc(`${valuePct}%`)}"><b>${esc(analysisMetricLabel(stat))}</b> ${esc(metricValueText("duration_ms", item))}</span>`;
+  }).join("");
+  return `<div class="analysis-boxplot" style="${esc(style)}" title="${esc(title)}" aria-label="${esc(title)}"><span class="analysis-box-axis"></span><span class="analysis-box-whisker"></span><span class="analysis-box-range"></span><span class="analysis-box-median"></span><span class="analysis-box-p95"></span>${labelHtml}</div>`;
+}
+function isMetricScalar(value) {
+  return value === null || value === undefined || ["string", "number", "boolean"].includes(typeof value);
+}
+function metricValueText(key, value) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (key === "tool_error_rate") return fmtPct(value);
+  if (String(key).endsWith("_ms") || key === "duration_ms") return fmtMs(value);
+  if (typeof value === "number") return fmtNum(value);
+  return String(value);
 }
 function renderAnalysisValue(value) {
   return esc(analysisValueText(value));
@@ -1601,9 +1806,10 @@ function renderSelectedEvidence(trajectory, meta) {
 }
 function renderSelectedUsage(trajectory) {
   const metrics = trajectory?.final_metrics || {};
-  const usage = metrics.usage || {};
-  const accounting = metrics.accounting || {};
-  if (!metrics.usage && !metrics.accounting && !hasMetricValue(metrics.total_prompt_tokens) && !hasMetricValue(metrics.total_completion_tokens) && !hasMetricValue(metrics.total_cached_tokens)) return "";
+  const extra = metricExtra(metrics);
+  const usage = extra.usage || {};
+  const accounting = extra.accounting || {};
+  if (!extra.usage && !extra.accounting && !hasMetricValue(metrics.total_prompt_tokens) && !hasMetricValue(metrics.total_completion_tokens) && !hasMetricValue(metrics.total_cached_tokens)) return "";
   return `<article class="selected-evidence-card"><h4>${esc(t("usage_breakdown", "Usage Breakdown"))}</h4>${infoGrid([
     [t("input", "Input"), fmtNum(usage.input_tokens ?? metrics.total_prompt_tokens)],
     [t("output", "Output"), fmtNum(usage.output_tokens ?? metrics.total_completion_tokens)],
@@ -2262,7 +2468,7 @@ function valuePreview(value) {
 }
 function renderStep(step, meta, timingStats, options = {}) {
   const sm = stepMeta(meta, step.step_id);
-  const preview = valuePreview(step.message).trim() || "(No Message)";
+  const preview = stepPreviewText(step) || "(No Message)";
   return `<details class="step" data-step="${esc(step.step_id)}"${options.open ? " open" : ""}><summary><div class="step-row"><span class="step-id">#${esc(step.step_id)}</span><span class="role ${esc(step.source)}">${esc(step.source)}</span><span class="preview">${esc(preview)}</span></div><div class="rail">${renderStepRail(step, sm, meta?.trial_key, timingStats)}</div></summary><div class="step-body">${renderBlocks(step, sm, timingStats)}</div></details>`;
 }
 function renderBlocks(step, meta, timingStats) {
@@ -2359,8 +2565,10 @@ function stepTokenEstimate(trialKey, stepId) {
 }
 function stepTokenTotal(step) {
   const metrics = step.metrics || {};
-  const values = [metrics.prompt_tokens, metrics.completion_tokens, metrics.cached_tokens, metrics.usage?.total_tokens].filter(hasMetricValue).map(Number);
-  return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+  const values = [metrics.prompt_tokens, metrics.completion_tokens].filter(hasMetricValue).map(Number);
+  if (values.length) return values.reduce((sum, value) => sum + value, 0);
+  const direct = metricExtra(metrics).usage?.total_tokens;
+  return hasMetricValue(direct) ? Number(direct) : null;
 }
 function bindStepToggle() {
   const button = document.querySelector("[data-step-action='toggle']");

@@ -196,7 +196,6 @@ class CommonMessageAdapter:
             timestamp_ms=model_timestamp,
             duration_ms=duration,
             duration_source=duration_source,
-            data_preview=preview_text(text),
             truncated=truncated,
         )
 
@@ -258,7 +257,6 @@ class CommonMessageAdapter:
             observations=[observation_meta],
             tool_error=observation_meta.tool_error,
             timestamp_ms=timestamp,
-            data_preview=preview_text(observation.get("content")),
             truncated=observation_meta.truncated,
         )
 
@@ -318,7 +316,6 @@ def build_step(
         step_id=step_id,
         source=source,
         timestamp_ms=timestamp,
-        data_preview=preview_text(value),
         truncated=truncated,
     )
 
@@ -496,10 +493,9 @@ def metrics_from_record(record: MessageRecord) -> dict[str, Any]:
         metrics["cached_tokens"] = int(cached)
     if cost is not None:
         metrics["cost_usd"] = float(cost)
-    if usage:
-        metrics["usage"] = usage
-    if accounting:
-        metrics["accounting"] = accounting
+    extra = metrics_extra(usage, accounting)
+    if extra:
+        metrics["extra"] = extra
     return metrics
 
 
@@ -525,10 +521,11 @@ def final_metrics_from_records(
         ):
             tool_errors += 1
         metrics = metrics_from_record(record)
-        aggregate_usage(usage_totals, metrics.get("usage"))
+        metric_extra = as_dict(metrics.get("extra")) or {}
+        aggregate_usage(usage_totals, metric_extra.get("usage"))
         pricing_source = aggregate_accounting(
             accounting_totals,
-            metrics.get("accounting"),
+            metric_extra.get("accounting"),
             pricing_source,
         )
         if "prompt_tokens" in metrics:
@@ -543,11 +540,7 @@ def final_metrics_from_records(
         if "cost_usd" in metrics:
             have_cost = True
             cost += float(metrics["cost_usd"])
-    final: dict[str, Any] = {
-        "total_tool_calls": tool_calls,
-        "total_tool_errors": tool_errors,
-        "total_steps": len(steps),
-    }
+    final: dict[str, Any] = {"total_steps": len(steps)}
     if have_prompt:
         final["total_prompt_tokens"] = prompt
     if have_completion:
@@ -556,17 +549,32 @@ def final_metrics_from_records(
         final["total_cached_tokens"] = cached
     if have_cost:
         final["total_cost_usd"] = round(cost, 12)
+    extra: dict[str, Any] = {
+        "total_tool_calls": tool_calls,
+        "total_tool_errors": tool_errors,
+    }
     if turns:
-        final["total_turns"] = turns
+        extra["total_turns"] = turns
     usage = finalized_totals(usage_totals)
     if usage:
-        final["usage"] = usage
+        extra["usage"] = usage
     accounting = finalized_totals(accounting_totals)
     if pricing_source:
         accounting["pricing_source"] = pricing_source
     if accounting:
-        final["accounting"] = accounting
+        extra["accounting"] = accounting
+    if extra:
+        final["extra"] = extra
     return final
+
+
+def metrics_extra(usage: dict[str, Any], accounting: dict[str, Any]) -> dict[str, Any]:
+    extra: dict[str, Any] = {}
+    if usage:
+        extra["usage"] = usage
+    if accounting:
+        extra["accounting"] = accounting
+    return extra
 
 
 def aggregate_usage(totals: dict[str, float], usage: Any) -> None:
@@ -633,12 +641,6 @@ def bounded_value(value: Any, config: ToolConfig) -> tuple[Any, bool]:
     if len(raw) <= config.max_content_chars:
         return value, False
     return raw[: config.max_content_chars], True
-
-
-def preview_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value[:240]
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)[:240]
 
 
 def first_timestamp(meta: list[StepMeta]) -> int | None:

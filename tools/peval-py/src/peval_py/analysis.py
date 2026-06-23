@@ -43,7 +43,9 @@ ANALYSIS_IMPORT_HINT_FIELDS = (
     "commands",
     "analysis_status",
     "analysis_metrics",
+    "auto",
 )
+RESERVED_ANALYSIS_METRIC_KEYS = {"auto"}
 
 
 @dataclass(frozen=True)
@@ -551,9 +553,9 @@ def analysis_fields_from_json(payload: dict[str, Any]) -> dict[str, Any]:
         value = payload.get(key)
         if isinstance(value, list) and value:
             fields[key] = deepcopy(value)
-    metrics = payload.get("metrics")
-    if isinstance(metrics, dict) and metrics:
-        fields["analysis_metrics"] = deepcopy(metrics)
+    metrics = imported_metrics_from_json(payload)
+    if metrics:
+        fields["analysis_metrics"] = metrics
     confidence = payload.get("confidence")
     if isinstance(confidence, str) and confidence.strip():
         fields["confidence"] = confidence
@@ -564,6 +566,24 @@ def analysis_fields_from_json(payload: dict[str, Any]) -> dict[str, Any]:
     ):
         fields["confidence"] = confidence
     return fields
+
+
+def imported_metrics_from_json(payload: dict[str, Any]) -> dict[str, Any]:
+    metrics: dict[str, Any] = {}
+    extra = payload.get("extra")
+    if isinstance(extra, dict):
+        merge_imported_metric_source(metrics, extra.get("metrics"))
+    merge_imported_metric_source(metrics, payload.get("metrics"))
+    return metrics
+
+
+def merge_imported_metric_source(target: dict[str, Any], value: Any) -> None:
+    if not isinstance(value, dict):
+        return
+    for key, item in value.items():
+        if key in RESERVED_ANALYSIS_METRIC_KEYS:
+            continue
+        target[str(key)] = deepcopy(item)
 
 
 def read_markdown_report(path: Path, root: Path) -> tuple[str, str | None] | None:

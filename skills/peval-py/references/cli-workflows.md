@@ -8,7 +8,7 @@ peval-py init -r <workspace> --json
 
 ## Build A JSON Report
 
-Use `view tr` when the user asks for a peval-py report, or when a JSON report is useful for deriving Trial identities and `run_path` before importing analysis. Pass `-r <workspace>` when workspace config or imported analysis files must be discovered from outside the workspace. If `-r` is omitted, run `view tr` from the workspace root or a descendant so current-directory discovery finds `peval-py.toml`.
+Use `view tr` when the user asks for a peval-py report, or when a JSON report is useful for deriving Trial identities, `run_path`, and automatic Trial metrics before importing analysis. Pass `-r <workspace>` when workspace config or imported analysis files must be discovered from outside the workspace. If `-r` is omitted, run `view tr` from the workspace root or a descendant so current-directory discovery finds `peval-py.toml`.
 
 Path input:
 
@@ -100,7 +100,9 @@ For JSON field guidance, read `references/analysis-artifacts.md`.
 
 After importing analysis into a Trial cell, re-run the same report command with
 `-r <workspace>` or from the workspace root/descendant when the user asks to see
-the report output:
+the report output. Imported JSON `metrics` are rendered as flat keys in
+`annotations.analysis[].analysis_metrics` beside the peval-py-owned `auto`
+metrics:
 
 ```sh
 peval-py view tr -r <workspace> <same-input-flags> -f json -o <workspace>/report.json
