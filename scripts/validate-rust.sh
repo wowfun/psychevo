@@ -32,7 +32,7 @@ run_broad_step() {
   log="$(mktemp "${TMPDIR:-/tmp}/pevo-validate-${name}.XXXXXX.log")"
   validate_logs+=("$log")
 
-  printf 'validate broad: %s ... ' "$name"
+  printf 'validate rust broad: %s ... ' "$name"
   if "$@" >"$log" 2>&1; then
     printf 'ok\n'
     return 0
