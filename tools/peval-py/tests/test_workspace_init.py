@@ -15,10 +15,17 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
 
             self.assertEqual(result.schema_version, 3)
             self.assertEqual(result.root, root.resolve())
-            self.assertEqual(
-                (root / "peval-py.toml").read_text(encoding="utf-8"),
-                'state_db = "state.db"\n',
+            config_text = (root / "peval-py.toml").read_text(encoding="utf-8")
+            self.assertIn('state_db = "state.db"\n', config_text)
+            self.assertIn("[adapters.psychevo]\n", config_text)
+            self.assertIn('default_db_path = "~/.psychevo/state.db"\n', config_text)
+            self.assertIn("[adapters.opencode]\n", config_text)
+            self.assertIn(
+                'default_db_path = "~/.local/share/opencode/opencode.db"\n',
+                config_text,
             )
+            self.assertIn("[adapters.hermes]\n", config_text)
+            self.assertIn('default_db_path = "~/.hermes/state.db"\n', config_text)
             self.assertTrue((root / "state.db").is_file())
             for unwanted in [
                 "peval.toml",

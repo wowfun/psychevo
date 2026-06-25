@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field, replace
@@ -13,6 +14,13 @@ IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DEFAULT_DB_PATH_RE = re.compile(r"^\s*default_db_path\s*=")
 TABLE_HEADER_RE = re.compile(r"^\s*\[([^\]\n]+)\]\s*(?:#.*)?$")
 PEVAL_PY_CONFIG = "peval-py.toml"
+WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+WINDOWS_DRIVE_MOUNT_ROOT = Path("/mnt")
+DEFAULT_ADAPTER_DB_PATHS = {
+    "psychevo": "~/.psychevo/state.db",
+    "opencode": "~/.local/share/opencode/opencode.db",
+    "hermes": "~/.hermes/state.db",
+}
 
 
 @dataclass(frozen=True)
@@ -44,6 +52,20 @@ class ToolConfig:
         repr=False,
     )
     adapter_default_db_paths: dict[str, str] = field(default_factory=dict, repr=False)
+    workspace_state_db_path: str | None = field(default=None, repr=False)
+
+
+def default_workspace_config_text() -> str:
+    lines = ['state_db = "state.db"\n']
+    for adapter_id, default_db_path in DEFAULT_ADAPTER_DB_PATHS.items():
+        lines.extend(
+            [
+                "\n",
+                f"[{_adapter_table_key(adapter_id)}]\n",
+                f"default_db_path = {json.dumps(default_db_path)}\n",
+            ]
+        )
+    return "".join(lines)
 
 
 def load_config(path: str | None, *, workspace_root: str | None = None) -> ToolConfig:
@@ -248,7 +270,8 @@ def write_workspace_adapter_default_db(
                 path.write_text("".join(lines), encoding="utf-8")
         return None
 
-    config_line = f"default_db_path = {json.dumps(raw_path)}\n"
+    stored_path = display_config_path(raw_path, base_dir=path.parent)
+    config_line = f"default_db_path = {json.dumps(stored_path)}\n"
     if table_range is None:
         if lines and not lines[-1].endswith(("\n", "\r")):
             lines[-1] = lines[-1] + "\n"
@@ -263,7 +286,7 @@ def write_workspace_adapter_default_db(
         else:
             lines[existing] = config_line
     path.write_text("".join(lines), encoding="utf-8")
-    return _resolve_config_path(raw_path, base_dir=path.parent)
+    return _resolve_config_path(stored_path, base_dir=path.parent)
 
 
 def _adapter_table_range(
@@ -365,10 +388,67 @@ def _resolve_config_path(value: object, *, base_dir: Path | None = None) -> str:
     text = str(value).strip()
     if not text:
         raise ValueError("default_db_path must not be empty")
+    if is_windows_absolute_like_path(text):
+        return resolve_windows_absolute_like_path(text)
     path = Path(text).expanduser()
     if not path.is_absolute():
         path = (base_dir or Path.cwd()) / path
     return str(path.resolve())
+
+
+def display_config_path(value: object, *, base_dir: Path | None = None) -> str:
+    text = str(value).strip()
+    if not text:
+        return text
+    if text.startswith("~"):
+        return text
+    if is_windows_absolute_like_path(text):
+        return text
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        return text
+    home = Path.home().resolve()
+    try:
+        relative = path.resolve().relative_to(home)
+    except ValueError:
+        return text
+    return "~" if not relative.parts else "~/" + relative.as_posix()
+
+
+def is_windows_absolute_like_path(path: str) -> bool:
+    return (
+        bool(WINDOWS_DRIVE_PATH_RE.match(path))
+        or path.startswith("\\\\")
+        or path.startswith("//")
+    )
+
+
+def resolve_windows_absolute_like_path(
+    raw_path: str,
+    *,
+    windows_mount_root: Path | None = None,
+) -> str:
+    if os.name == "nt":
+        return str(Path(raw_path).expanduser())
+    original = Path(raw_path).expanduser()
+    if original.exists():
+        return str(original.resolve())
+    mapped = windows_drive_mount_path(
+        raw_path,
+        windows_mount_root or WINDOWS_DRIVE_MOUNT_ROOT,
+    )
+    if mapped is not None and mapped.exists():
+        return str(mapped.resolve())
+    return raw_path
+
+
+def windows_drive_mount_path(raw_path: str, mount_root: Path) -> Path | None:
+    if not WINDOWS_DRIVE_PATH_RE.match(raw_path):
+        return None
+    drive = raw_path[0].lower()
+    rest = raw_path[2:].lstrip("\\/")
+    parts = [part for part in re.split(r"[\\/]+", rest) if part]
+    return Path(mount_root) / drive / Path(*parts)
 
 
 def _adapter_options_for(

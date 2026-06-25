@@ -25,6 +25,21 @@ peval-py import analysis \
 
 Repeat `-p` once when importing complementary JSON and Markdown reports.
 
+## Analyze Trial Cell Artifacts
+
+When the user provides a path under `runs/<eval>/<agent>/<session>/`, treat it
+as workspace artifact evidence, not as a `view tr -p` source. If the path names
+a cell, read:
+
+- `agent/trajectory.json`
+- `agent/trajectory_meta.json`
+- existing `analysis.json` or `analysis.md`, when present
+
+If the path names a session directory and it contains exactly one cell, analyze
+that cell. If it contains multiple cells and the user has not selected one, ask
+which cell to target. Keep any generated analysis report at the user's requested
+output path; import it later only when requested.
+
 ## Find Cell Identity
 
 Skip this when the user already provided a cell path. If the cell path is missing, use a generated peval-py report instead of guessing session and agent identities:

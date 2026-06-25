@@ -1,6 +1,6 @@
 ---
 name: peval-py
-description: Use when working with peval-py for retained agent sessions, trajectory JSONL or ATIF files, report JSON, input tables, or adapter-owned SQLite databases; rendering peval-py reports; exporting ATIF trajectories; listing DB sessions; writing analysis JSON or Markdown reports; importing analysis reports into Trial cell artifacts; or using peval-py serve for offline session diagnostics.
+description: Use when working with peval-py for retained agent sessions, Trial cell artifact paths, trajectory JSONL or ATIF files, report JSON, input tables, or adapter-owned SQLite databases; rendering peval-py reports; exporting ATIF trajectories; listing DB sessions; writing analysis JSON or Markdown reports; importing analysis reports into Trial cell artifacts; or using peval-py serve for offline session diagnostics.
 ---
 
 # peval-py
@@ -15,17 +15,27 @@ Use `peval-py` for offline inspection of retained agent sessions and trajectorie
   `peval-py import analysis`
 - local browsing with `serve`
 
+## Recognize Paths
+
+- **Workspace root**: contains `peval-py.toml`; pass it as `-r <workspace>` for report rendering, imports, or serving when workspace discovery matters.
+- **Trial cell or session artifact path**: under `runs/<eval>/<agent>/<session>/...`. If the path names a cell, analyze its `agent/trajectory.json`, `agent/trajectory_meta.json`, and existing `analysis.json` / `analysis.md` files. If it names a session directory with exactly one cell, use that cell; if multiple cells exist, ask which cell to target.
+- **Trajectory/source input**: JSONL, ATIF `trajectory.json`, adapter-owned DB, or adapter source path. Use these with `view tr`, `export tr`, or `serve` source flags.
+
+Do not pass a Trial cell or session artifact directory to `view tr -p`. Use `report_tools.py subjects` only when the target cell path is missing.
+
 ## Choose The Workflow
 
 - **Render or export only**: read `references/cli-workflows.md`, choose `view tr` for reports or `export tr` for a single ATIF trajectory, and stop when the requested output exists.
 - **List or select DB sessions**: use `view tr --list` or `--list-interactive`; do not create analysis files unless requested.
-- **Create analysis reports**: read `references/analysis-artifacts.md`. Analyze the requested data or cell path, then write one JSON or Markdown analysis report at the user's requested output path. Write both only when they are complementary.
+- **Create analysis reports**: read `references/analysis-artifacts.md`. Analyze the requested data, trajectory source, or Trial cell artifacts, then write one JSON or Markdown analysis report at the user's requested output path. Write both only when they are complementary.
 - **Import analysis reports**: when requested, call `peval-py import analysis -r <workspace> --run-path <cell-path> -p <analysis-report>` using the known cell path.
-- **Combine analysis with peval-py reports**: import the requested analysis report(s), then re-run `view tr -r <workspace>` or run from the workspace root/descendant when the user asks to render or inspect the report.
+- **Combine analysis with peval-py reports**: import the requested analysis report(s), then re-run `view tr -r <workspace>` with the original trajectory/source inputs, or run from the workspace root/descendant when the user asks to render or inspect the report.
 - **Browse locally**: use `serve` only when the user asks for interactive saved-source browsing.
 
 ## Guardrails
 
+- Write explanations and analysis in the user's language by default.
+- If `peval-py` cannot satisfy the user's request, explain whether the gap is in the CLI/report behavior, the skill guidance, or both. Ask whether to improve the relevant surface instead of inventing an unsupported workaround.
 - Do not mutate source session databases or original trajectory inputs.
 - Do not assume every task needs `analysis.json`, `analysis.md`, a report, or `serve`.
 - Do not write analysis into static `report.json`; use separate analysis report files when analysis output is requested.
@@ -35,12 +45,6 @@ Use `peval-py` for offline inspection of retained agent sessions and trajectorie
 
 ## References
 
-## Guardrails
-
-- Keep command names, flags, paths, and JSON field names literal, but Write explanations and analysis in the user's language by default.
-- If `peval-py` cannot satisfy the user's request, explain whether the gap is in the CLI/report behavior, the skill guidance, or both. Ask whether to improve the relevant surface instead of inventing an unsupported workaround.
-- Write explanations and analysis in the user's language by default.
-- If `peval-py` cannot satisfy the user's request, explain whether the gap is in the CLI/report behavior, the skill guidance, or both. Ask whether to improve the relevant surface instead of inventing an unsupported workaround.
 - `references/cli-workflows.md`: command recipes for `view tr`, `export tr`, DB session listing, workspace discovery, validation, and `serve`.
 - `references/analysis-artifacts.md`: analysis report formats, Trial cell import guidance, `analysis.md` template, and report identity extraction.
 - `scripts/report_tools.py`: use `subjects` only when the target cell path is missing.

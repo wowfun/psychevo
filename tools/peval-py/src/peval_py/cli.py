@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from peval_py.config import apply_overrides, config_for_adapter, load_config
@@ -52,6 +53,19 @@ def main(argv: list[str] | None = None) -> int:
             config.adapter,
         )
         config = config_for_adapter(config, adapter_assignments.default_adapter)
+        if (
+            args.command in {"view", "export"}
+            and workspace_root
+            and getattr(args, "root", None)
+        ):
+            from peval_py.state import workspace_paths
+
+            config = replace(
+                config,
+                workspace_state_db_path=str(
+                    workspace_paths(Path(workspace_root)).state_db_path
+                ),
+            )
         if args.command == "serve":
             from peval_py.serve import run_serve_command
 
@@ -69,8 +83,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "export":
             if len(loaded_inputs.sessions) != 1:
                 raise ValueError("export trajectory accepts exactly one input session")
-            session_config = config_for_session(loaded_inputs.sessions[0], config)
-            conversion = convert_session(loaded_inputs.sessions[0], config)
+            session = loaded_inputs.sessions[0]
+            session_config = config_for_session(session, config)
+            if session.snapshot_trajectory is not None:
+                write_json(
+                    session.snapshot_trajectory,
+                    resolve_export_output(args, session.snapshot_trajectory, session_config),
+                )
+                return 0
+            conversion = convert_session(session, config)
             write_json(
                 conversion.trajectory,
                 resolve_export_output(args, conversion.trajectory, session_config),
@@ -368,7 +389,10 @@ def print_session_lists(
     for input_db in db_inputs_with_adapters(args, adapter_assignments, config):
         if len(input_db["all"]) > 1:
             print(f"d{input_db['index']} {input_db['path']} ({input_db['adapter']})")
-        print(format_session_table(input_db["sessions"]), end="")
+        if input_db.get("kind") == "workspace-state":
+            print(format_workspace_source_table(input_db["sources"]), end="")
+        else:
+            print(format_session_table(input_db["sessions"]), end="")
 
 
 def interactive_session_selection(
@@ -387,6 +411,14 @@ def interactive_session_selection(
             "use repeated -s dN=ID for multiple DB inputs"
         )
     input_db = inputs[0]
+    if input_db.get("kind") == "workspace-state":
+        print(format_workspace_source_table(input_db["sources"]), end="")
+        raw = input("Select saved sources (for example 1,3-5 or all; blank cancels): ")
+        indexes = parse_session_selection(raw, len(input_db["sources"]))
+        return [
+            str(input_db["sources"][index - 1]["source_key"])
+            for index in indexes
+        ]
     print(format_session_table(input_db["sessions"]), end="")
     raw = input("Select sessions (for example 1,3-5 or all; blank cancels): ")
     indexes = parse_session_selection(raw, len(input_db["sessions"]))
@@ -398,7 +430,12 @@ def db_inputs_with_adapters(
     adapter_assignments,
     config,
 ) -> list[dict]:
-    from peval_py.inputs import adapter_for_input_path, resolve_db_input
+    from peval_py.inputs import (
+        adapter_for_input_path,
+        is_workspace_state_db_input,
+        resolve_db_input,
+        workspace_snapshot_sources_for_input,
+    )
     from peval_py.adapters import available_adapter_ids
 
     dbs = list(getattr(args, "db", None) or [])
@@ -407,6 +444,18 @@ def db_inputs_with_adapters(
     available = set(available_adapter_ids())
     inputs = []
     for index, path in enumerate(dbs, start=1):
+        if is_workspace_state_db_input(path, config):
+            inputs.append(
+                {
+                    "index": index,
+                    "path": path,
+                    "adapter": "workspace",
+                    "kind": "workspace-state",
+                    "sources": workspace_snapshot_sources_for_input(path, config),
+                    "all": dbs,
+                }
+            )
+            continue
         resolved_path, token_adapter = resolve_db_input(path, index, adapter_assignments, config)
         adapter = token_adapter or adapter_for_input_path(
             resolved_path,
@@ -420,11 +469,56 @@ def db_inputs_with_adapters(
                 "index": index,
                 "path": resolved_path,
                 "adapter": adapter,
+                "kind": "adapter-db",
                 "sessions": list_adapter_sessions(adapter, resolved_path),
                 "all": dbs,
             }
         )
     return inputs
+
+
+def format_workspace_source_table(sources: list[dict]) -> str:
+    headers = [
+        "#",
+        "source_key",
+        "session_id",
+        "trial_key",
+        "active",
+        "kind",
+        "adapter",
+        "alias/name",
+    ]
+    rows = [
+        [
+            str(index),
+            value_or_dash(source.get("source_key")),
+            value_or_dash(source.get("trial_session_id") or source.get("session_id")),
+            value_or_dash(source.get("trial_key")),
+            "yes" if source.get("active") else "no",
+            value_or_dash(source.get("kind")),
+            value_or_dash(source.get("adapter")),
+            value_or_dash(source.get("source_alias") or source.get("label")),
+        ]
+        for index, source in enumerate(sources, start=1)
+    ]
+    widths = [
+        max(len(row[column]) for row in [headers, *rows])
+        for column in range(len(headers))
+    ]
+    lines = [format_table_row(headers, widths)]
+    lines.extend(format_table_row(row, widths) for row in rows)
+    return "\n".join(lines) + "\n"
+
+
+def format_table_row(row: list[str], widths: list[int]) -> str:
+    return "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
+
+
+def value_or_dash(value: object) -> str:
+    if value is None:
+        return "-"
+    text = str(value)
+    return text if text else "-"
 
 
 if __name__ == "__main__":

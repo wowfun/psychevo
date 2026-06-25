@@ -20,7 +20,7 @@ from peval_py.analysis import (
     write_note_file,
 )
 from peval_py.atif import convert_atif_trajectory, is_atif_trajectory
-from peval_py.config import ToolConfig, config_for_adapter
+from peval_py.config import ToolConfig, config_for_adapter, default_workspace_config_text
 from peval_py.inputs import AdapterAssignments, LoadedInputs, LoadedSession, load_inputs
 from peval_py.pipeline import report_session_for_loaded
 from peval_py.report import (
@@ -115,17 +115,28 @@ def workspace_paths(root: Path) -> WorkspacePaths:
         if not state_db_path.is_absolute():
             state_db_path = root / state_db_path
     else:
-        config_path.write_text('state_db = "state.db"\n', encoding="utf-8")
+        config_path.write_text(default_workspace_config_text(), encoding="utf-8")
     return WorkspacePaths(root=root, config_path=config_path, state_db_path=state_db_path)
 
 
 class ServeStateStore:
-    def __init__(self, paths: WorkspacePaths) -> None:
+    def __init__(
+        self,
+        paths: WorkspacePaths,
+        *,
+        initialize: bool = True,
+        readonly: bool = False,
+    ) -> None:
         self.paths = paths
-        self.paths.state_db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.paths.state_db_path, check_same_thread=False)
+        if readonly:
+            uri = self.paths.state_db_path.resolve().as_uri() + "?mode=ro"
+            self.conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        else:
+            self.paths.state_db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(self.paths.state_db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.initialize_schema()
+        if initialize:
+            self.initialize_schema()
 
     def close(self) -> None:
         self.conn.close()
@@ -848,6 +859,15 @@ class ServeStateStore:
 def open_workspace_state(root: str | None = None) -> ServeStateStore:
     resolved = resolve_workspace_root(root)
     return ServeStateStore(workspace_paths(resolved))
+
+
+def open_workspace_state_readonly(root: str | None = None) -> ServeStateStore:
+    resolved = resolve_workspace_root(root)
+    return ServeStateStore(
+        workspace_paths(resolved),
+        initialize=False,
+        readonly=True,
+    )
 
 
 def load_serve_inputs(

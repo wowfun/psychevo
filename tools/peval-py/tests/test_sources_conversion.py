@@ -879,6 +879,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
                         "tool_call_id": "missing-call",
                         "tool_name": "read",
                         "content": "orphan",
+                        "is_error": True,
                         "timestamp_ms": 1500,
                     }
                 )
@@ -892,6 +893,8 @@ class PevalPySourceConversionTests(unittest.TestCase):
             ],
             "missing-call",
         )
+        self.assertEqual(final_extra(unmatched.trajectory)["total_tool_calls"], 0)
+        self.assertEqual(final_extra(unmatched.trajectory)["total_tool_errors"], 0)
         self.assertIn("unmatched tool result: missing-call", unmatched.warnings)
 
 
@@ -977,6 +980,11 @@ class PevalPySourceConversionTests(unittest.TestCase):
                             "tool_call_id": "call-test-1",
                             "function_name": "exec_command",
                             "arguments": {"cmd": "pytest"},
+                        },
+                        {
+                            "tool_call_id": "call-lint-1",
+                            "function_name": "exec_command",
+                            "arguments": {"cmd": "ruff check ."},
                         }
                     ],
                     "timestamp_ms": 1000,
@@ -992,6 +1000,17 @@ class PevalPySourceConversionTests(unittest.TestCase):
                     "timestamp_ms": 1125,
                 },
                 metadata={"elapsed_ms": 125},
+            ),
+            MessageRecord(
+                message={
+                    "role": "tool_result",
+                    "tool_call_id": "call-lint-1",
+                    "tool_name": "exec_command",
+                    "content": {"exit_code": 1, "stderr": "F821 undefined name"},
+                    "is_error": True,
+                    "timestamp_ms": 1130,
+                },
+                metadata={"elapsed_ms": 100},
             ),
             MessageRecord(
                 message={
@@ -1037,11 +1056,13 @@ class PevalPySourceConversionTests(unittest.TestCase):
             trajectory["steps"][2]["observation"]["results"][0]["source_call_id"],
             "call-read-1",
         )
-        self.assertEqual(final_extra(trajectory)["total_tool_calls"], 2)
-        self.assertEqual(final_extra(trajectory)["total_tool_errors"], 1)
+        self.assertEqual(final_extra(trajectory)["total_tool_calls"], 3)
+        self.assertEqual(final_extra(trajectory)["total_tool_errors"], 2)
         self.assertEqual(result.steps_meta[1].tool_calls[0].status, "error")
+        self.assertEqual(result.steps_meta[1].tool_calls[1].status, "error")
         self.assertTrue(result.steps_meta[1].tool_error)
         self.assertEqual(result.steps_meta[1].tool_calls[0].execution_duration_ms, 125)
+        self.assertEqual(result.steps_meta[1].tool_calls[1].execution_duration_ms, 100)
         self.assertEqual(result.steps_meta[2].tool_calls[0].status, "completed")
         self.assertFalse(result.steps_meta[2].tool_error)
         self.assertEqual(result.warnings, [])
@@ -1052,6 +1073,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
         self.assertIsNone(step_meta[1]["duration_ms"])
         self.assertIsNone(step_meta[2]["duration_ms"])
         self.assertEqual(step_meta[1]["tool_calls"][0]["execution_duration_ms"], 125)
+        self.assertEqual(step_meta[1]["tool_calls"][1]["execution_duration_ms"], 100)
         self.assertEqual(step_meta[2]["tool_calls"][0]["execution_duration_ms"], 100)
         html = render_html(report)
         self.assertIn("tool-error-chip", html)

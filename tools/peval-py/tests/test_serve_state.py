@@ -136,10 +136,8 @@ class PevalPyServeStateTests(unittest.TestCase):
                 self.assertEqual(len(keys), 1)
                 self.assertTrue((root / "peval-py.toml").is_file())
                 self.assertTrue((root / "state.db").is_file())
-                self.assertEqual(
-                    (root / "peval-py.toml").read_text(encoding="utf-8"),
-                    'state_db = "state.db"\n',
-                )
+                config_text = (root / "peval-py.toml").read_text(encoding="utf-8")
+                self.assertIn('state_db = "state.db"\n', config_text)
 
                 table_names = [
                     row[0]

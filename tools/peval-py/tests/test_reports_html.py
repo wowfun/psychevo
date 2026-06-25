@@ -457,6 +457,155 @@ console.log(result);
         self.assertIn("analysis-json-details", rendered)
         self.assertNotIn('"top_tools_by_count"', rendered)
 
+    def test_step_rail_counts_tool_errors_per_failed_tool_call(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const context = {{
+  document: {{
+    body: {{ classList: {{ toggle() {{}} }} }},
+    addEventListener() {{}},
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  }},
+  window: {{ addEventListener() {{}} }},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  renderStepRail(
+    {{
+      step_id: 1,
+      source: "agent",
+      message: "run tools",
+      tool_calls: [
+        {{ tool_call_id: "call-test", function_name: "test", arguments: {{}} }},
+        {{ tool_call_id: "call-lint", function_name: "lint", arguments: {{}} }},
+        {{ tool_call_id: "call-read", function_name: "read", arguments: {{}} }},
+      ],
+    }},
+    {{
+      step_id: 1,
+      tool_error: true,
+      tool_calls: [
+        {{ tool_call_id: "call-test", status: "error", title: "test" }},
+        {{ tool_call_id: "call-lint", status: "error", title: "lint" }},
+        {{ tool_call_id: "call-read", status: "completed", title: "read" }},
+      ],
+    }},
+    "trial:tool-errors",
+    {{}}
+  );
+`, context);
+console.log(result);
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        self.assertIn(">1/3 tools<", node.stdout)
+        self.assertNotIn(">2/3 tools<", node.stdout)
+
+    def test_step_blocks_sort_mixed_tool_calls_and_observations_by_timestamp(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const context = {{
+  document: {{
+    body: {{ classList: {{ toggle() {{}} }} }},
+    addEventListener() {{}},
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  }},
+  window: {{ addEventListener() {{}} }},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  renderBlocks(
+    {{
+      step_id: 1,
+      source: "agent",
+      message: "I will run tools",
+      tool_calls: [
+        {{ tool_call_id: "call-late", function_name: "late", arguments: {{ cmd: "late" }} }},
+        {{ tool_call_id: "call-early", function_name: "early", arguments: {{ cmd: "early" }} }},
+      ],
+      observation: {{
+        results: [
+          {{ source_call_id: "call-late", content: "late result" }},
+          {{ source_call_id: "call-early", content: "early result" }},
+        ],
+      }},
+    }},
+    {{
+      step_id: 1,
+      tool_calls: [
+        {{ tool_call_id: "call-late", title: "late", timestamp_ms: 1200 }},
+        {{ tool_call_id: "call-early", title: "early", timestamp_ms: 1000 }},
+      ],
+      observations: [
+        {{ source_call_id: "call-late", status: "completed", timestamp_ms: 1300 }},
+        {{ source_call_id: "call-early", status: "completed", timestamp_ms: 1100 }},
+      ],
+    }},
+    {{}}
+  );
+`, context);
+console.log(result);
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        rendered = node.stdout
+        self.assertLess(rendered.index("Message"), rendered.index("ID: call-early"))
+        self.assertLess(rendered.index("ID: call-early"), rendered.index("Result for: call-early"))
+        self.assertLess(rendered.index("Result for: call-early"), rendered.index("ID: call-late"))
+        self.assertLess(rendered.index("ID: call-late"), rendered.index("Result for: call-late"))
+
     def test_report_reads_cached_analysis_from_peval_runs_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

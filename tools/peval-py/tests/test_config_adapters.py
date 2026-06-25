@@ -181,6 +181,67 @@ default_db_path = "../hermes/state.db"
             self.assertEqual(config.adapter_options_by_id["hermes"], {})
 
 
+    def test_adapter_default_db_path_expands_home_and_absolute_like_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            config_path = root / "peval-py.toml"
+            windows_path = r"C:\Users\me\AppData\Local\opencode\opencode.db"
+            unc_path = r"\\server\share\hermes\state.db"
+            config_path.write_text(
+                f"""
+[adapters.psychevo]
+default_db_path = "~/.psychevo/state.db"
+
+[adapters.opencode]
+default_db_path = '{windows_path}'
+
+[adapters.hermes]
+default_db_path = '{unc_path}'
+""",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"HOME": str(home)}):
+                config = load_config(str(config_path))
+
+            self.assertEqual(
+                config.adapter_default_db_paths["psychevo"],
+                str((home / ".psychevo/state.db").resolve()),
+            )
+            self.assertEqual(config.adapter_default_db_paths["opencode"], windows_path)
+            self.assertEqual(config.adapter_default_db_paths["hermes"], unc_path)
+
+
+    def test_write_workspace_adapter_default_db_uses_tilde_for_home_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            config_path = root / "peval-py.toml"
+            config_path.write_text('state_db = "state.db"\n', encoding="utf-8")
+            home_db = home / ".psychevo" / "state.db"
+
+            with patch.dict(os.environ, {"HOME": str(home)}):
+                resolved = write_workspace_adapter_default_db(
+                    config_path,
+                    "psychevo",
+                    str(home_db),
+                )
+                config = load_config(str(config_path))
+
+            self.assertEqual(resolved, str(home_db.resolve()))
+            self.assertEqual(
+                config.adapter_default_db_paths["psychevo"],
+                str(home_db.resolve()),
+            )
+            self.assertIn(
+                'default_db_path = "~/.psychevo/state.db"\n',
+                config_path.read_text(encoding="utf-8"),
+            )
+
+
     def test_write_workspace_adapter_default_db_preserves_adapter_options(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "peval-py.toml"

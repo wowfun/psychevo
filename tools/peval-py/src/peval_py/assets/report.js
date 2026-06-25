@@ -2476,16 +2476,44 @@ function renderBlocks(step, meta, timingStats) {
   if (step.reasoning_content) html += block("Reasoning", step.reasoning_content, "reasoning-block");
   const message = valuePreview(step.message);
   if (message.trim()) html += block(step.source === "system" ? "System Prompt" : "Message", message, "message-block");
+  html += renderStepActivityBlocks(step, meta, timingStats);
+  return html || `<p class="copy">No visible content.</p>`;
+}
+function renderStepActivityBlocks(step, meta, timingStats) {
+  const entries = [];
   (step.tool_calls || []).forEach(tool => {
     const toolMeta = toolMetaFor(meta, tool.tool_call_id);
-    const ratio = timingRatio(toolMeta?.execution_duration_ms, timingStats?.maxToolExecutionMs);
-    html += `<div class="block tool-block"><h4>Tool Calls</h4><p>${renderToolNameChip(tool, toolMeta, "", ratio)} <span class="muted">ID: ${esc(tool.tool_call_id || "-")}${toolMeta?.status ? ` / ${esc(toolMeta.status)}` : ""}${renderToolTiming(toolMeta)}</span></p><pre>${esc(valuePreview(tool.arguments || {}))}</pre></div>`;
+    entries.push({
+      timestamp: blockTimestamp(toolMeta?.timestamp_ms),
+      order: entries.length,
+      html: renderToolCallBlock(tool, toolMeta, timingStats),
+    });
   });
   ((step.observation && step.observation.results) || []).forEach(observation => {
     const observationMeta = observationMetaFor(meta, observation.source_call_id);
-    html += `<div class="block observation-block"><h4 class="${observationMeta?.tool_error ? "danger" : ""}">Observations</h4><p class="muted">Result for: ${esc(observation.source_call_id || "-")}${observationMeta?.status ? ` / ${esc(observationMeta.status)}` : ""}</p><pre>${esc(valuePreview(observation.content))}</pre></div>`;
+    entries.push({
+      timestamp: blockTimestamp(observationMeta?.timestamp_ms),
+      order: entries.length,
+      html: renderObservationBlock(observation, observationMeta),
+    });
   });
-  return html || `<p class="copy">No visible content.</p>`;
+  return entries.sort(compareStepActivityBlocks).map(entry => entry.html).join("");
+}
+function renderToolCallBlock(tool, toolMeta, timingStats) {
+  const ratio = timingRatio(toolMeta?.execution_duration_ms, timingStats?.maxToolExecutionMs);
+  return `<div class="block tool-block"><h4>Tool Calls</h4><p>${renderToolNameChip(tool, toolMeta, "", ratio)} <span class="muted">ID: ${esc(tool.tool_call_id || "-")}${toolMeta?.status ? ` / ${esc(toolMeta.status)}` : ""}${renderToolTiming(toolMeta)}</span></p><pre>${esc(valuePreview(tool.arguments || {}))}</pre></div>`;
+}
+function renderObservationBlock(observation, observationMeta) {
+  return `<div class="block observation-block"><h4 class="${observationMeta?.tool_error ? "danger" : ""}">Observations</h4><p class="muted">Result for: ${esc(observation.source_call_id || "-")}${observationMeta?.status ? ` / ${esc(observationMeta.status)}` : ""}</p><pre>${esc(valuePreview(observation.content))}</pre></div>`;
+}
+function compareStepActivityBlocks(a, b) {
+  if (a.timestamp !== null && b.timestamp !== null && a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+  if (a.timestamp !== null && b.timestamp === null) return -1;
+  if (a.timestamp === null && b.timestamp !== null) return 1;
+  return a.order - b.order;
+}
+function blockTimestamp(value) {
+  return hasMetricValue(value) ? Number(value) : null;
 }
 function block(title, content, cls) { return `<div class="block ${cls}"><h4>${esc(title)}</h4><pre>${esc(content)}</pre></div>`; }
 function fmtRailTokens(value) {
@@ -2526,7 +2554,7 @@ function renderStepRail(step, meta, trialKey, timingStats) {
   const summaryItems = [];
   const toolCalls = (step.tool_calls || []).length;
   const observations = (step.observation?.results || []).length;
-  const toolErrors = meta?.tool_error ? 1 : 0;
+  const toolErrors = toolErrorCount(meta);
   if (toolCalls || toolErrors) summaryItems.push(`<span class="rail-chip rail-chip-tools">${esc(toolCallRatio(toolCalls, toolErrors))} tools</span>`);
   else if (observations) summaryItems.push(`<span class="rail-chip rail-chip-tools">${esc(observations)} observations</span>`);
   const tokenInfo = stepTokenInfo(step, trialKey);
@@ -2549,6 +2577,9 @@ function toolCallRatio(total, errors) {
   const callTotal = Math.max(0, Number(total || 0));
   const errorTotal = Math.max(0, Number(errors || 0));
   return `${Math.max(0, callTotal - errorTotal)}/${callTotal}`;
+}
+function toolErrorCount(meta) {
+  return listValue(meta?.tool_calls).filter(tool => lower(tool?.status) === "error").length;
 }
 function toolMetaFor(meta, toolCallId) { return (meta?.tool_calls || []).find(item => item.tool_call_id === toolCallId) || null; }
 function observationMetaFor(meta, sourceCallId) { return (meta?.observations || []).find(item => item.source_call_id === sourceCallId) || null; }

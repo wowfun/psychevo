@@ -71,7 +71,7 @@ class CommonMessageAdapter:
 
         started = first_timestamp(meta)
         finished = last_timestamp(meta)
-        final_metrics = final_metrics_from_records(records, steps)
+        final_metrics = final_metrics_from_records(records, steps, meta)
         trajectory_id = config.trajectory_id or "session:t001"
         trajectory = {
             "schema_version": "ATIF-v1.7",
@@ -500,7 +500,9 @@ def metrics_from_record(record: MessageRecord) -> dict[str, Any]:
 
 
 def final_metrics_from_records(
-    records: list[MessageRecord], steps: list[dict[str, Any]]
+    records: list[MessageRecord],
+    steps: list[dict[str, Any]],
+    steps_meta: list[StepMeta],
 ) -> dict[str, Any]:
     prompt = completion = cached = 0
     cost = 0.0
@@ -508,18 +510,11 @@ def final_metrics_from_records(
     usage_totals: dict[str, float] = {}
     accounting_totals: dict[str, float] = {}
     pricing_source: str | None = None
-    tool_calls = 0
-    tool_errors = 0
     turns = 0
     for record in records:
         role = str(record.message.get("role", "")).lower()
         if role in {"assistant", "agent"}:
             turns += 1
-            tool_calls += len(tool_calls_from_message(record.message))
-        if role in {"tool", "tool_result"} and (
-            record.message.get("is_error") or record.message.get("error")
-        ):
-            tool_errors += 1
         metrics = metrics_from_record(record)
         metric_extra = as_dict(metrics.get("extra")) or {}
         aggregate_usage(usage_totals, metric_extra.get("usage"))
@@ -549,6 +544,13 @@ def final_metrics_from_records(
         final["total_cached_tokens"] = cached
     if have_cost:
         final["total_cost_usd"] = round(cost, 12)
+    tool_calls = sum(len(step.tool_calls) for step in steps_meta)
+    tool_errors = sum(
+        1
+        for step in steps_meta
+        for tool in step.tool_calls
+        if str(tool.status or "").lower() == "error"
+    )
     extra: dict[str, Any] = {
         "total_tool_calls": tool_calls,
         "total_tool_errors": tool_errors,
