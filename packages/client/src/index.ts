@@ -12,6 +12,16 @@ import {
   type AgentStatusResult,
   type AgentWriteParams,
   type AgentWriteResult,
+  type AutomationDeleteResult,
+  type AutomationDraftParams,
+  type AutomationDraftResult,
+  type AutomationIdParams,
+  type AutomationListParams,
+  type AutomationListResult,
+  type AutomationMutationResult,
+  type AutomationRunParams,
+  type AutomationRunResult,
+  type AutomationWriteParams,
   type BackendDeleteParams,
   type BackendDeleteResult,
   type BackendDoctorParams,
@@ -127,6 +137,11 @@ export interface GatewayRequestParams {
   "agent/read": AgentReadParams;
   "agent/status": AgentStatusParams;
   "agent/write": AgentWriteParams;
+  "automation/delete": AutomationIdParams;
+  "automation/draft": AutomationDraftParams;
+  "automation/list": AutomationListParams;
+  "automation/run": AutomationRunParams;
+  "automation/write": AutomationWriteParams;
   "backend/delete": BackendDeleteParams;
   "backend/doctor": BackendDoctorParams;
   "backend/list": BackendListParams;
@@ -194,6 +209,11 @@ export interface GatewayRequestResults {
   "agent/read": AgentReadResult;
   "agent/status": AgentStatusResult;
   "agent/write": AgentWriteResult;
+  "automation/delete": AutomationDeleteResult;
+  "automation/draft": AutomationDraftResult;
+  "automation/list": AutomationListResult;
+  "automation/run": AutomationRunResult;
+  "automation/write": AutomationMutationResult;
   "backend/delete": BackendDeleteResult;
   "backend/doctor": BackendDoctorResult;
   "backend/list": BackendListResult;

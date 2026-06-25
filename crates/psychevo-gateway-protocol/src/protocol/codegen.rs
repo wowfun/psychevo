@@ -424,6 +424,9 @@ fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("Backend") {
         return "gateway/backend/config";
     }
+    if name.starts_with("Automation") {
+        return "automations";
+    }
     if matches!(name, "BackendKind" | "GatewayBackendInfo") {
         return "gateway/backend/core";
     }
@@ -533,6 +536,7 @@ fn schema_group_module(name: &str) -> &'static str {
 
 fn schema_group_const(module: &str) -> &'static str {
     match module {
+        "automations" => "automationSchemas",
         "command" => "commandSchemas",
         "completion" => "completionSchemas",
         "context" => "contextSchemas",
@@ -569,6 +573,7 @@ fn schema_group_const(module: &str) -> &'static str {
 
 fn schema_group_refs_const(module: &str) -> &'static str {
     match module {
+        "automations" => "automationSchemaRefs",
         "command" => "commandSchemaRefs",
         "completion" => "completionSchemaRefs",
         "context" => "contextSchemaRefs",
@@ -841,6 +846,24 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(RuntimeConfigOptionValueView),
         exported_type!(RuntimeConfigOptionView),
         exported_type!(RuntimeOptionsResult),
+        exported_type!(AutomationScheduleInput),
+        exported_type!(AutomationTaskKind),
+        exported_type!(AutomationTargetInput),
+        exported_type!(AutomationExecutionPolicy),
+        exported_type!(AutomationExecutionInput),
+        exported_type!(AutomationListParams),
+        exported_type!(AutomationDraftParams),
+        exported_type!(AutomationDraftView),
+        exported_type!(AutomationWriteParams),
+        exported_type!(AutomationIdParams),
+        exported_type!(AutomationRunParams),
+        exported_type!(AutomationTaskView),
+        exported_type!(AutomationRunView),
+        exported_type!(AutomationListResult),
+        exported_type!(AutomationDraftResult),
+        exported_type!(AutomationMutationResult),
+        exported_type!(AutomationDeleteResult),
+        exported_type!(AutomationRunResult),
         exported_type!(TurnStartResult),
         exported_type!(TurnControlResult),
         exported_type!(TurnTakeoverResult),

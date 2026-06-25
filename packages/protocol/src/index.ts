@@ -15,6 +15,10 @@ export type {
 } from "./generated";
 import type {
   GatewayEvent,
+  AutomationDraftResult,
+  AutomationListResult,
+  AutomationMutationResult,
+  AutomationRunResult,
   ContextReadResult,
   CompletionListResult,
   InitializeResult,
@@ -80,6 +84,14 @@ export const TerminalOutputPayloadSchema =
 export const TerminalExitedPayloadSchema =
   schema<TerminalExitedPayload>("TerminalExitedPayload");
 export const InitializeResultSchema = schema<InitializeResult>("InitializeResult");
+export const AutomationListResultSchema =
+  schema<AutomationListResult>("AutomationListResult");
+export const AutomationDraftResultSchema =
+  schema<AutomationDraftResult>("AutomationDraftResult");
+export const AutomationMutationResultSchema =
+  schema<AutomationMutationResult>("AutomationMutationResult");
+export const AutomationRunResultSchema =
+  schema<AutomationRunResult>("AutomationRunResult");
 export const SettingsReadResultSchema =
   schema<SettingsReadResult>("SettingsReadResult");
 export const WorkspaceCreateResultSchema =

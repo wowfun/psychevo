@@ -50,6 +50,21 @@
       "$ref": "ClientRequest/runtime-options.json"
     },
     {
+      "$ref": "ClientRequest/automation-list.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-draft.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-write.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-delete.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-run.json"
+    },
+    {
       "$ref": "ClientRequest/completion-list.json"
     },
     {

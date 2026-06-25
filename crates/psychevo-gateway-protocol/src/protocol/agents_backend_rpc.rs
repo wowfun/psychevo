@@ -434,6 +434,16 @@ pub enum ClientRequest {
     TurnTakeover(TurnTakeoverParams),
     #[serde(rename = "runtime/options")]
     RuntimeOptions(RuntimeOptionsParams),
+    #[serde(rename = "automation/list")]
+    AutomationList(AutomationListParams),
+    #[serde(rename = "automation/draft")]
+    AutomationDraft(AutomationDraftParams),
+    #[serde(rename = "automation/write")]
+    AutomationWrite(AutomationWriteParams),
+    #[serde(rename = "automation/delete")]
+    AutomationDelete(AutomationIdParams),
+    #[serde(rename = "automation/run")]
+    AutomationRun(AutomationRunParams),
     #[serde(rename = "completion/list")]
     CompletionList(CompletionListParams),
     #[serde(rename = "command/list")]

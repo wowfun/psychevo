@@ -16,6 +16,11 @@ import { clientRequestTurnSteerSchema } from './rpc/client-request/turn-steer';
 import { clientRequestTurnInterruptSchema } from './rpc/client-request/turn-interrupt';
 import { clientRequestTurnTakeoverSchema } from './rpc/client-request/turn-takeover';
 import { clientRequestRuntimeOptionsSchema } from './rpc/client-request/runtime-options';
+import { clientRequestAutomationListSchema } from './rpc/client-request/automation-list';
+import { clientRequestAutomationDraftSchema } from './rpc/client-request/automation-draft';
+import { clientRequestAutomationWriteSchema } from './rpc/client-request/automation-write';
+import { clientRequestAutomationDeleteSchema } from './rpc/client-request/automation-delete';
+import { clientRequestAutomationRunSchema } from './rpc/client-request/automation-run';
 import { clientRequestCompletionListSchema } from './rpc/client-request/completion-list';
 import { clientRequestCommandListSchema } from './rpc/client-request/command-list';
 import { clientRequestCommandExecuteSchema } from './rpc/client-request/command-execute';
@@ -312,6 +317,21 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/runtime-options.json"
     },
     {
+      "$ref": "ClientRequest/automation-list.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-draft.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-write.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-delete.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-run.json"
+    },
+    {
       "$ref": "ClientRequest/completion-list.json"
     },
     {
@@ -501,6 +521,11 @@ export const rpcSchemaRefs = [
   clientRequestTurnInterruptSchema,
   clientRequestTurnTakeoverSchema,
   clientRequestRuntimeOptionsSchema,
+  clientRequestAutomationListSchema,
+  clientRequestAutomationDraftSchema,
+  clientRequestAutomationWriteSchema,
+  clientRequestAutomationDeleteSchema,
+  clientRequestAutomationRunSchema,
   clientRequestCompletionListSchema,
   clientRequestCommandListSchema,
   clientRequestCommandExecuteSchema,
