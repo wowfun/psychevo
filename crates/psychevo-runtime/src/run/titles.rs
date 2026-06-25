@@ -74,7 +74,7 @@ pub(crate) fn warning_event(warning: &RunWarning) -> serde_json::Value {
     value
 }
 
-pub(crate) async fn ensure_new_tui_session_title(
+pub(crate) async fn ensure_new_visible_session_title(
     store: &SqliteStore,
     session_id: &str,
     prompt: &str,
@@ -83,11 +83,16 @@ pub(crate) async fn ensure_new_tui_session_title(
     provider: Arc<dyn GenerationProvider>,
     resolved: &ResolvedRunProvider,
 ) -> Result<()> {
-    if store
-        .session_summary(session_id)?
-        .and_then(|summary| summary.title)
-        .and_then(|title| normalize_session_title(&title))
-        .is_some()
+    let Some(summary) = store.session_summary(session_id)? else {
+        return Ok(());
+    };
+    if summary.parent_session_id.is_some()
+        || !visible_session_source_allows_auto_title(&summary.source)
+        || summary
+            .title
+            .as_deref()
+            .and_then(normalize_session_title)
+            .is_some()
     {
         return Ok(());
     }
@@ -103,6 +108,11 @@ pub(crate) async fn ensure_new_tui_session_title(
     let title = generated.unwrap_or_else(|| fallback_session_title(prompt, selected_skills));
     store.set_session_title(session_id, &title)?;
     Ok(())
+}
+
+pub(crate) fn visible_session_source_allows_auto_title(source: &str) -> bool {
+    matches!(source, "run" | "tui" | "web" | "automation" | "peer_agent")
+        || source.starts_with("channel/")
 }
 
 pub(crate) async fn generate_session_title(
@@ -188,6 +198,10 @@ pub(crate) fn fallback_session_title(prompt: &str, selected_skills: &[SelectedSk
         .or_else(|| selected_skills_fallback_title(selected_skills))
         .or_else(|| normalize_session_title(prompt))
         .unwrap_or_else(|| "New session".to_string())
+}
+
+pub fn fallback_visible_session_title(prompt: &str) -> String {
+    fallback_session_title(prompt, &[])
 }
 
 pub(crate) fn prompt_without_selected_skill_markers(

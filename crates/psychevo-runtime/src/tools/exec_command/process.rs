@@ -266,31 +266,13 @@ pub(crate) fn required_u64(args: &Value, key: &str) -> Result<u64> {
 }
 
 pub(crate) fn reject_untracked_background_command(command: &str) -> Result<()> {
-    let normalized = normalize_exec_command(command);
-    if normalized.ends_with(" &")
-        || normalized.contains(" & ")
-        || normalized.starts_with("nohup ")
-        || normalized.contains(" nohup ")
-        || normalized.starts_with("disown")
-        || normalized.contains("; disown")
-        || normalized.contains("&& disown")
-        || normalized.starts_with("setsid ")
-        || normalized.contains(" setsid ")
-    {
+    if crate::permissions::shell_has_untracked_background(command) {
         return Err(Error::Message(
             "shell-level background wrappers are not supported; run the foreground command and let exec_command return a session_id"
                 .to_string(),
         ));
     }
     Ok(())
-}
-
-pub(crate) fn normalize_exec_command(command: &str) -> String {
-    command
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_ascii_lowercase()
 }
 
 #[cfg(unix)]

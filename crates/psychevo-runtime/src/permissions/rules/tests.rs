@@ -302,6 +302,17 @@ print(len(data))""#;
     }
 
     #[test]
+    fn heredoc_content_ampersands_are_not_background_wrappers() {
+        let runtime = runtime(
+            PermissionConfig::default(),
+            PermissionMode::BypassPermissions,
+        );
+        let command = "cat > /tmp/fixnull.c <<'EOF'\nint flags = value & mask;\nEOF";
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": command}));
+        assert_eq!(decision, PermissionDecision::Allow);
+    }
+
+    #[test]
     fn outside_workdir_exec_workdir_defaults_to_ask() {
         let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
         let decision = runtime.evaluate("exec_command", &json!({"cmd": "pwd", "workdir": "/tmp"}));

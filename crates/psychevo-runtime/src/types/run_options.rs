@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use futures::future::BoxFuture;
 use psychevo_agent_core::{
-    ControlHandle, ControlReceivers, Message, PendingInputId, TerminalReason,
+    ControlHandle, ControlReceivers, Message, PendingInputId, TerminalReason, ToolBinding,
 };
 use psychevo_ai::{AbortSignal, Outcome};
 use serde::{Deserialize, Serialize};
@@ -58,6 +58,35 @@ pub struct RunOptions {
     pub no_skills: bool,
     pub skill_inputs: Vec<String>,
     pub mcp_servers: Vec<McpServerInput>,
+    pub runtime_tools: Vec<RuntimeTool>,
+}
+
+#[derive(Clone)]
+pub struct RuntimeTool {
+    inner: Arc<dyn ToolBinding>,
+}
+
+impl RuntimeTool {
+    pub fn new(inner: Arc<dyn ToolBinding>) -> Self {
+        Self { inner }
+    }
+
+    pub(crate) fn binding(&self) -> Arc<dyn ToolBinding> {
+        Arc::clone(&self.inner)
+    }
+
+    pub fn name(&self) -> &str {
+        self.inner.name()
+    }
+}
+
+impl fmt::Debug for RuntimeTool {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeTool")
+            .field("name", &self.inner.name())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]

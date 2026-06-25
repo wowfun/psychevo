@@ -103,8 +103,8 @@ pub use psychevo_agent_core::{
 pub use psychevo_ai::AbortSignal;
 pub use psychevo_ai::Outcome;
 pub use run::{
-    reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,
-    spawn_agent_background,
+    fallback_visible_session_title, reload_session_context, run_live, run_live_streaming,
+    run_live_streaming_controlled, spawn_agent_background,
 };
 pub use sandbox::{sandbox_status_text, sandbox_status_value};
 pub use session_export::{
@@ -157,11 +157,12 @@ pub use types::{
     ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
     ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions,
     RunResult, RunSandboxMode, RunSandboxOverride, RunStreamEvent, RunStreamSink, RunWarning,
-    SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent, SessionExportMessageSummary,
-    SessionRedoResult, SessionSummary, SessionUndoOptions, SessionUndoResult, SessionUsageOptions,
-    SessionUsageSummary, SmokeControl, StatsOptions, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary,
-    USER_SHELL_METADATA_KEY, UsageActivity, UsageActivityDay, UsageReadOptions, UsageReadResult,
-    UsageWindowSummary, UserShellContextOptions, UserShellOptions, UserShellResult, run_control,
+    RuntimeTool, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
+    SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
+    SessionUndoResult, SessionUsageOptions, SessionUsageSummary, SmokeControl, StatsOptions,
+    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UsageActivity,
+    UsageActivityDay, UsageReadOptions, UsageReadResult, UsageWindowSummary,
+    UserShellContextOptions, UserShellOptions, UserShellResult, run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

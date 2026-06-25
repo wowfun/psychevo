@@ -35,7 +35,7 @@ impl ToolBinding for ExecCommandTool {
     }
 
     fn description(&self) -> &str {
-        "Run a bounded shell command in the working directory. Prefer read/write/edit for file I/O instead of shell cat/head/tail/sed or redirection. Prefer rg for text search and rg --files for project file listing. Commands that keep running return a session_id after yield_time_ms; use write_stdin with empty chars to poll or non-empty chars to send stdin."
+        "Run a bounded shell command in the working directory. Prefer read/write/edit for workspace file I/O, and use shell redirection only for shell-local temporary artifacts. Prefer rg for text search and rg --files for project file listing. Commands that keep running return a session_id after yield_time_ms; use write_stdin with empty chars to poll or non-empty chars to send stdin."
     }
 
     fn parameters(&self) -> Value {

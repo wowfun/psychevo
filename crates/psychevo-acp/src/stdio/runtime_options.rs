@@ -39,6 +39,7 @@ impl PsychevoAcpAgent {
             no_skills: false,
             skill_inputs: Vec::new(),
             mcp_servers: session.mcp_servers.clone(),
+            runtime_tools: Vec::new(),
         }
     }
 
@@ -75,6 +76,7 @@ impl PsychevoAcpAgent {
             no_skills: false,
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
+            runtime_tools: Vec::new(),
         }
     }
 

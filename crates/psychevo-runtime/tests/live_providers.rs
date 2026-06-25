@@ -58,6 +58,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         runtime_ref: None,
         runtime_session_id: None,
         runtime_options: std::collections::BTreeMap::new(),
+        runtime_tools: Vec::new(),
         include_reasoning: true,
         mode: psychevo_runtime::RunMode::Default,
         permission_mode: None,

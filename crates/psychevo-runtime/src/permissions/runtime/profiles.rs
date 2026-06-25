@@ -1,7 +1,11 @@
 pub(crate) fn hardline_deny(action: &PermissionAction) -> Option<String> {
     match action {
-        PermissionAction::ExecCommand { normalized, .. } => {
-            background_shell_reason(normalized).or_else(|| hardline_bash_reason(normalized))
+        PermissionAction::ExecCommand {
+            command,
+            normalized,
+            ..
+        } => {
+            background_shell_reason(command).or_else(|| hardline_bash_reason(normalized))
         }
         PermissionAction::File {
             paths, mutating, ..

@@ -14,7 +14,7 @@ impl ToolBinding for WriteTool {
     }
 
     fn description(&self) -> &str {
-        "Create or completely replace a UTF-8 text file inside the working directory. Use write instead of shell redirection when writing complete file contents. Creates missing parent directories when allowed, then returns lint and LSP diagnostics when available."
+        "Create or completely replace a UTF-8 text file inside configured writer roots, normally the working directory. Use write instead of shell redirection when writing project files; shell-only temp roots are for exec_command artifacts. Creates missing parent directories when allowed, then returns lint and LSP diagnostics when available."
     }
 
     fn parameters(&self) -> Value {
@@ -156,6 +156,30 @@ pub(crate) mod write_tool_tests {
         )
     }
 
+    fn workdir_tool_with_shell_tmp(path: &Path, tmp: &Path) -> WorkdirTool {
+        let env = BTreeMap::from([("TMPDIR".to_string(), tmp.display().to_string())]);
+        let policy = crate::sandbox::SandboxPolicy::from_config(
+            &crate::sandbox::SandboxConfig {
+                enabled: true,
+                mode: crate::sandbox::SandboxMode::WorkspaceWrite,
+                writable_roots: Vec::new(),
+                include_tmp: true,
+                include_common_caches: false,
+            },
+            path,
+            RunMode::Default,
+            &env,
+        )
+        .expect("sandbox policy");
+        WorkdirTool::with_context(
+            path.canonicalize().expect("canonical workdir"),
+            ToolRuntimeContext {
+                sandbox_policy: policy,
+                ..ToolRuntimeContext::default()
+            },
+        )
+    }
+
     #[test]
     fn write_tool_schema_describes_parameters() {
         let tool = WriteTool::new(PathBuf::from("/tmp/work"), ToolRuntimeContext::default());
@@ -251,5 +275,25 @@ pub(crate) mod write_tool_tests {
 
         assert!(err.to_string().contains("denied by sandbox policy"));
         assert!(!outside.path().join("blocked.txt").exists());
+    }
+
+    #[test]
+    fn write_tool_explains_shell_only_tmp_root_denial() {
+        let temp = tempfile::tempdir().expect("temp");
+        let shell_tmp = tempfile::tempdir().expect("shell tmp");
+        let target = shell_tmp.path().join("blocked.txt");
+        let err = write_tool_impl(
+            workdir_tool_with_shell_tmp(temp.path(), shell_tmp.path()),
+            json!({
+                "path": target.display().to_string(),
+                "content": "nope\n",
+            }),
+        )
+        .expect_err("sandbox denial");
+
+        let message = err.to_string();
+        assert!(message.contains("shell-only"), "{message}");
+        assert!(message.contains("write/edit"), "{message}");
+        assert!(!target.exists());
     }
 }

@@ -306,6 +306,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         no_skills: false,
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        runtime_tools: Vec::new(),
     };
     let project_context_mode =
         load_project_context_instruction_mode(&project_context_options, &workdir)?;
@@ -673,6 +674,7 @@ pub(crate) fn configured_context_limit(
         no_skills: false,
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        runtime_tools: Vec::new(),
     };
     selected_configured_model(&run_options)
         .ok()

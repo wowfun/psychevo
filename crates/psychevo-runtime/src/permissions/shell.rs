@@ -58,6 +58,22 @@ pub(crate) fn shell_command_invocations(src: &str) -> Option<Vec<Vec<String>>> {
     Some(commands)
 }
 
+pub(crate) fn shell_has_untracked_background(src: &str) -> bool {
+    let Some(tree) = parse_shell(src) else {
+        return legacy_background_scan(src);
+    };
+    if tree.root_node().has_error() {
+        return legacy_background_scan(src);
+    }
+    if tree_contains_background_operator(tree.root_node()) {
+        return true;
+    }
+    shell_command_invocations(src)
+        .unwrap_or_default()
+        .iter()
+        .any(|command| command_uses_detaching_wrapper(command))
+}
+
 pub(crate) fn shell_basename(raw: &str) -> Option<String> {
     std::path::Path::new(raw)
         .file_name()
@@ -78,6 +94,74 @@ pub(crate) fn shell_basename(raw: &str) -> Option<String> {
                 name.to_string()
             }
         })
+}
+
+fn tree_contains_background_operator(root: Node<'_>) -> bool {
+    let mut cursor = root.walk();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "&" && !is_non_background_ampersand(node) {
+            return true;
+        }
+        for child in node.children(&mut cursor) {
+            stack.push(child);
+        }
+    }
+    false
+}
+
+fn is_non_background_ampersand(node: Node<'_>) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        match parent.kind() {
+            "binary_expression" | "heredoc_body" | "heredoc_content" => return true,
+            _ => current = parent.parent(),
+        }
+    }
+    false
+}
+
+fn command_uses_detaching_wrapper(command: &[String]) -> bool {
+    for word in command {
+        if is_env_assignment(word) || word.starts_with('-') {
+            continue;
+        }
+        let Some(name) = shell_basename(word) else {
+            continue;
+        };
+        if matches!(name.as_str(), "env" | "sudo" | "command" | "exec") {
+            continue;
+        }
+        return matches!(name.as_str(), "nohup" | "setsid" | "disown");
+    }
+    false
+}
+
+fn is_env_assignment(word: &str) -> bool {
+    let Some((name, _)) = word.split_once('=') else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+}
+
+fn legacy_background_scan(command: &str) -> bool {
+    let normalized = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    normalized.ends_with(" &")
+        || normalized.contains(" & ")
+        || normalized.starts_with("nohup ")
+        || normalized.contains(" nohup ")
+        || normalized.starts_with("disown")
+        || normalized.contains("; disown")
+        || normalized.contains("&& disown")
+        || normalized.starts_with("setsid ")
+        || normalized.contains(" setsid ")
 }
 
 fn parse_shell(src: &str) -> Option<Tree> {
@@ -277,5 +361,23 @@ mod tests {
                 vec!["sudo".to_string(), "reboot".to_string()],
             ]
         );
+    }
+
+    #[test]
+    fn detects_real_background_execution() {
+        assert!(shell_has_untracked_background("sleep 60 &"));
+        assert!(shell_has_untracked_background("nohup sleep 60"));
+        assert!(shell_has_untracked_background("setsid sleep 60"));
+        assert!(shell_has_untracked_background("disown %1"));
+        assert!(shell_has_untracked_background("sudo nohup sleep 60"));
+        assert!(shell_has_untracked_background("env X=1 setsid sleep 60"));
+    }
+
+    #[test]
+    fn ignores_ampersands_in_foreground_content() {
+        assert!(!shell_has_untracked_background("printf 'a & b\n'"));
+        assert!(!shell_has_untracked_background(
+            "cat > /tmp/fixnull.c <<'EOF'\nint flags = value & mask;\nEOF",
+        ));
     }
 }

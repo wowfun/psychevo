@@ -113,6 +113,56 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn exec_command_sandbox_allows_standard_device_sinks() {
+        if !std::path::Path::new("/dev/null").exists()
+            || !std::path::Path::new("/dev/zero").exists()
+        {
+            eprintln!("skipping device sink sandbox test: standard devices are unavailable");
+            return;
+        }
+
+        let work = tempfile::tempdir().expect("work");
+        let env = BTreeMap::new();
+        let policy = crate::sandbox::SandboxPolicy::from_config(
+            &crate::sandbox::SandboxConfig {
+                enabled: true,
+                mode: crate::sandbox::SandboxMode::WorkspaceWrite,
+                writable_roots: Vec::new(),
+                include_tmp: false,
+                include_common_caches: false,
+            },
+            work.path(),
+            RunMode::Default,
+            &env,
+        )
+        .expect("sandbox policy");
+        let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+        let value = exec_command_tool_impl_with_context(
+            work.path().canonicalize().expect("workdir"),
+            ToolRuntimeContext {
+                sandbox_policy: policy,
+                ..ToolRuntimeContext::default()
+            },
+            "exec_command".to_string(),
+            json!({
+                "cmd": "exec 3<>/dev/null && exec 4<>/dev/zero && echo ok",
+                "yield_time_ms": 30000
+            }),
+            receivers.abort_signal(),
+        )
+        .await
+        .expect("sandboxed command should open standard device sinks");
+
+        assert_eq!(value["exit_code"].as_i64(), Some(0), "{value}");
+        assert!(
+            value["output"].as_str().unwrap_or_default().contains("ok"),
+            "{value}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn exec_command_sandbox_blocks_writes_outside_workspace() {
         let work = tempfile::tempdir().expect("work");
         let outside = tempfile::tempdir().expect("outside");

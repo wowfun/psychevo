@@ -145,6 +145,34 @@ pub(crate) async fn exec_command_rejects_shell_background_wrappers() {
     assert!(err.to_string().contains("background"));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+pub(crate) async fn exec_command_allows_foreground_heredoc_with_ampersand_content() {
+    let temp = tempdir().expect("temp");
+    let workdir = temp.path().join("work");
+    fs::create_dir_all(&workdir).expect("workdir");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let result = crate::tools::exec_command_tool_impl(
+        workdir.clone(),
+        false,
+        json!({
+            "cmd": "cat > fixnull.c <<'EOF'\nint flags = value & mask;\nEOF\ncat fixnull.c",
+            "yield_time_ms": 30000
+        }),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect("foreground heredoc should run");
+
+    assert_eq!(result["exit_code"].as_i64(), Some(0), "{result}");
+    assert_eq!(result["output"], "int flags = value & mask;\n");
+    assert_eq!(
+        fs::read_to_string(workdir.join("fixnull.c")).expect("heredoc output"),
+        "int flags = value & mask;\n"
+    );
+}
+
 #[tokio::test]
 pub(crate) async fn exec_command_pipe_stdin_is_closed_for_prompt_style_commands() {
     let temp = tempdir().expect("temp");

@@ -13,6 +13,13 @@ pub enum AutomationSchedule {
         #[serde(rename = "everyMinutes")]
         every_minutes: u32,
     },
+    Delay {
+        #[serde(rename = "afterMinutes")]
+        after_minutes: u32,
+    },
+    Once {
+        at: String,
+    },
     Daily {
         time: String,
     },
@@ -36,6 +43,14 @@ pub fn latest_due_at_ms(
         AutomationSchedule::Interval { every_minutes } => {
             latest_interval_due(*every_minutes, created_at_ms, now_ms)?
         }
+        AutomationSchedule::Delay { after_minutes } => latest_one_shot_due(
+            delay_due_at(*after_minutes, created_at_ms)?,
+            last_run_at_ms,
+            now_ms,
+        )?,
+        AutomationSchedule::Once { at } => {
+            latest_one_shot_due(parse_once_at_ms(at)?, last_run_at_ms, now_ms)?
+        }
         AutomationSchedule::Daily { time } => {
             latest_calendar_due(&parse_local_time(time)?, &[], created_at_ms, now_ms)?
         }
@@ -52,11 +67,21 @@ pub fn next_run_at_ms(
     created_at_ms: i64,
     last_run_at_ms: Option<i64>,
     now_ms: i64,
-) -> Result<i64> {
+) -> Result<Option<i64>> {
     let after_ms = now_ms.max(last_run_at_ms.unwrap_or(created_at_ms));
-    match schedule {
+    let next = match schedule {
         AutomationSchedule::Interval { every_minutes } => {
             next_interval_due(*every_minutes, created_at_ms, after_ms)
+        }
+        AutomationSchedule::Delay { after_minutes } => {
+            return next_one_shot_due(
+                delay_due_at(*after_minutes, created_at_ms)?,
+                created_at_ms,
+                last_run_at_ms,
+            );
+        }
+        AutomationSchedule::Once { at } => {
+            return next_one_shot_due(parse_once_at_ms(at)?, created_at_ms, last_run_at_ms);
         }
         AutomationSchedule::Daily { time } => {
             next_calendar_due(&parse_local_time(time)?, &[], created_at_ms, after_ms)
@@ -65,7 +90,8 @@ pub fn next_run_at_ms(
             validate_weekdays(weekdays)?;
             next_calendar_due(&parse_local_time(time)?, weekdays, created_at_ms, after_ms)
         }
-    }
+    }?;
+    Ok(Some(next))
 }
 
 fn latest_interval_due(every_minutes: u32, created_at_ms: i64, now_ms: i64) -> Result<Option<i64>> {
@@ -97,6 +123,37 @@ fn interval_ms(every_minutes: u32) -> Result<i64> {
         ));
     }
     Ok(i64::from(every_minutes).saturating_mul(60_000))
+}
+
+fn delay_due_at(after_minutes: u32, created_at_ms: i64) -> Result<i64> {
+    if after_minutes == 0 {
+        return Err(Error::Message(
+            "automation delay must be at least one minute".to_string(),
+        ));
+    }
+    Ok(created_at_ms.saturating_add(i64::from(after_minutes).saturating_mul(60_000)))
+}
+
+fn latest_one_shot_due(
+    due_at_ms: i64,
+    last_run_at_ms: Option<i64>,
+    now_ms: i64,
+) -> Result<Option<i64>> {
+    if last_run_at_ms.is_some() || now_ms < due_at_ms {
+        return Ok(None);
+    }
+    Ok(Some(due_at_ms))
+}
+
+fn next_one_shot_due(
+    due_at_ms: i64,
+    created_at_ms: i64,
+    last_run_at_ms: Option<i64>,
+) -> Result<Option<i64>> {
+    if last_run_at_ms.is_some() || due_at_ms < created_at_ms {
+        return Ok(None);
+    }
+    Ok(Some(due_at_ms))
 }
 
 fn latest_calendar_due(
@@ -182,6 +239,32 @@ fn parse_local_time(value: &str) -> Result<NaiveTime> {
         .map_err(|_| Error::Message(format!("invalid automation local time: {value}")))
 }
 
+fn parse_once_at_ms(value: &str) -> Result<i64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Message(
+            "automation once schedule requires an at timestamp".to_string(),
+        ));
+    }
+    if let Ok(value) = DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(value.timestamp_millis());
+    }
+    for format in ["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"] {
+        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(trimmed, format) {
+            return match Local.from_local_datetime(&naive) {
+                LocalResult::Single(value) => Ok(value.timestamp_millis()),
+                LocalResult::Ambiguous(early, _) => Ok(early.timestamp_millis()),
+                LocalResult::None => Err(Error::Message(format!(
+                    "invalid automation local timestamp: {trimmed}"
+                ))),
+            };
+        }
+    }
+    Err(Error::Message(format!(
+        "invalid automation once timestamp: {trimmed}"
+    )))
+}
+
 fn validate_weekdays(weekdays: &[u8]) -> Result<()> {
     if weekdays.is_empty() {
         return Err(Error::Message(
@@ -219,7 +302,7 @@ mod tests {
         );
         assert_eq!(
             next_run_at_ms(&schedule, created, None, now).expect("next"),
-            created + 70 * 60_000
+            Some(created + 70 * 60_000)
         );
     }
 
@@ -234,6 +317,74 @@ mod tests {
             latest_due_at_ms(&schedule, created, last, now).expect("due"),
             None
         );
+    }
+
+    #[test]
+    fn delay_due_runs_once() {
+        let schedule = AutomationSchedule::Delay { after_minutes: 15 };
+        let created = 1_000;
+        let due = created + 15 * 60_000;
+
+        assert_eq!(
+            next_run_at_ms(&schedule, created, None, created).expect("next"),
+            Some(due)
+        );
+        assert_eq!(
+            latest_due_at_ms(&schedule, created, None, due + 1).expect("due"),
+            Some(due)
+        );
+        assert_eq!(
+            next_run_at_ms(&schedule, created, Some(due), due + 1).expect("next after run"),
+            None
+        );
+        assert_eq!(
+            latest_due_at_ms(&schedule, created, Some(due), due + 60_000).expect("due after run"),
+            None
+        );
+    }
+
+    #[test]
+    fn once_due_uses_absolute_timestamp_once() {
+        let due = 1_772_360_400_000;
+        let schedule = AutomationSchedule::Once {
+            at: "2026-03-01T10:20:00Z".to_string(),
+        };
+        let created = due - 60_000;
+
+        assert_eq!(
+            next_run_at_ms(&schedule, created, None, created).expect("next"),
+            Some(due)
+        );
+        assert_eq!(
+            latest_due_at_ms(&schedule, created, None, due).expect("due"),
+            Some(due)
+        );
+        assert_eq!(
+            latest_due_at_ms(&schedule, created, Some(due), due + 1).expect("due after run"),
+            None
+        );
+    }
+
+    #[test]
+    fn daily_due_and_next_use_local_time() {
+        let time = NaiveTime::from_hms_opt(9, 0, 0).expect("time");
+        let due = resolve_local(Local::now().date_naive(), time)
+            .expect("daily local occurrence")
+            .timestamp_millis();
+        let schedule = AutomationSchedule::Daily {
+            time: "09:00".to_string(),
+        };
+        let created = due - 60 * 60_000;
+        let now = due + 60_000;
+
+        assert_eq!(
+            latest_due_at_ms(&schedule, created, None, now).expect("due"),
+            Some(due)
+        );
+        let next = next_run_at_ms(&schedule, created, Some(due), now)
+            .expect("next")
+            .expect("next occurrence");
+        assert!(next > now);
     }
 
     #[test]

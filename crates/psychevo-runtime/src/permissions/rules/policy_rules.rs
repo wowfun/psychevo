@@ -165,16 +165,7 @@ pub(crate) fn dangerous_bash_reason(command: &str) -> Option<String> {
 }
 
 pub(crate) fn background_shell_reason(command: &str) -> Option<String> {
-    if command.ends_with(" &")
-        || command.contains(" & ")
-        || command.starts_with("nohup ")
-        || command.contains(" nohup ")
-        || command.starts_with("disown")
-        || command.contains("; disown")
-        || command.contains("&& disown")
-        || command.starts_with("setsid ")
-        || command.contains(" setsid ")
-    {
+    if shell_has_untracked_background(command) {
         return Some(
             "shell-level background wrappers are denied; run the foreground command and let exec_command return a session_id"
                 .to_string(),

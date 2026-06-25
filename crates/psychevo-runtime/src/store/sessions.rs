@@ -251,6 +251,22 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn set_session_metadata(&self, session_id: &str, metadata: Option<Value>) -> Result<()> {
+        let metadata_json = metadata
+            .map(|value| serde_json::to_string(&value))
+            .transpose()?;
+        let changed = self.write_retry(|conn| {
+            conn.execute(
+                "UPDATE sessions SET metadata_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
+                params![metadata_json, now_ms(), session_id],
+            )
+        })?;
+        if changed == 0 {
+            return Err(Error::Message(format!("session not found: {session_id}")));
+        }
+        Ok(())
+    }
+
     pub fn set_session_model(&self, session_id: &str, provider: &str, model: &str) -> Result<()> {
         let changed = self.write_retry(|conn| {
             conn.execute(

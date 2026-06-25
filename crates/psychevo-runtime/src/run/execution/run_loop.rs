@@ -145,6 +145,12 @@ pub(crate) async fn run_live_internal(
         }
         metadata
     };
+    let first_use_empty_visible_session = options
+        .session
+        .as_deref()
+        .map(|session_id| first_use_empty_visible_session(&store, session_id))
+        .transpose()?
+        .unwrap_or(false);
     let (session_id, created_session) = if let Some(session_id) = options.session.clone() {
         store.resume_session(&session_id)?;
         (session_id, false)
@@ -176,6 +182,15 @@ pub(crate) async fn run_live_internal(
             true,
         )
     };
+    if first_use_empty_visible_session {
+        materialize_first_use_empty_session(
+            &store,
+            &session_id,
+            &resolved.provider,
+            &resolved.model,
+            session_metadata(),
+        )?;
+    }
     let invocation_started = Instant::now();
     let trace_warning_emitted = Arc::new(Mutex::new(false));
     let invocation_id = uuid::Uuid::now_v7().to_string();
@@ -391,9 +406,10 @@ pub(crate) async fn run_live_internal(
     );
     let permission_runtime =
         permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
-    let (mcp_tools, mcp_warnings) =
+    let (mut extension_tools, mcp_warnings) =
         crate::mcp::mcp_tool_bindings(&options.mcp_servers, &workdir, Some(&permission_runtime))
             .await;
+    extension_tools.extend(options.runtime_tools.iter().map(|tool| tool.binding()));
     emit_warning_events(&mcp_warnings, &events, stream_events.as_ref());
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         workdir: workdir.clone(),
@@ -414,7 +430,7 @@ pub(crate) async fn run_live_internal(
             ClarifyToolSurface::Disabled
         },
         skills: (!options.no_skills || !explicit_skill_inputs.is_empty()).then_some(skill_options),
-        extension_tools: mcp_tools,
+        extension_tools,
         agents: agent_tools,
     });
     emit_warning_events(&tool_surface.warnings, &events, stream_events.as_ref());
@@ -684,8 +700,12 @@ pub(crate) async fn run_live_internal(
         .iter()
         .filter(|message| matches!(message, Message::ToolResult { is_error: true, .. }))
         .count();
-    if created_session && source == "tui" && completion.outcome == Outcome::Normal {
-        ensure_new_tui_session_title(
+    if should_title_completed_session(
+        created_session,
+        first_use_empty_visible_session,
+        completion.outcome,
+    ) {
+        ensure_new_visible_session_title(
             &store,
             &session_id,
             &options.prompt,
@@ -730,6 +750,42 @@ pub(crate) async fn run_live_internal(
         events,
         warnings,
     })
+}
+
+pub(crate) fn first_use_empty_visible_session(
+    store: &SqliteStore,
+    session_id: &str,
+) -> Result<bool> {
+    let Some(summary) = store.session_summary(session_id)? else {
+        return Ok(false);
+    };
+    Ok(summary.message_count == 0
+        && summary.parent_session_id.is_none()
+        && summary.ended_at_ms.is_none()
+        && visible_session_source_allows_auto_title(&summary.source))
+}
+
+pub(crate) fn materialize_first_use_empty_session(
+    store: &SqliteStore,
+    session_id: &str,
+    provider: &str,
+    model: &str,
+    metadata: Value,
+) -> Result<bool> {
+    if !first_use_empty_visible_session(store, session_id)? {
+        return Ok(false);
+    }
+    store.set_session_model(session_id, provider, model)?;
+    store.set_session_metadata(session_id, Some(metadata))?;
+    Ok(true)
+}
+
+pub(crate) fn should_title_completed_session(
+    created_session: bool,
+    first_use_empty_visible_session: bool,
+    outcome: Outcome,
+) -> bool {
+    (created_session || first_use_empty_visible_session) && outcome == Outcome::Normal
 }
 
 pub(crate) fn selected_skills_for_run(

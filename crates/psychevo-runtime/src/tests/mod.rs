@@ -19,7 +19,10 @@ pub(crate) use crate::config::{
 };
 pub(crate) use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};
 pub(crate) use crate::paths::canonical_workdir;
-pub(crate) use crate::run::{SESSION_TITLE_MAX_CHARS, ensure_new_tui_session_title};
+pub(crate) use crate::run::{
+    SESSION_TITLE_MAX_CHARS, ensure_new_visible_session_title,
+    visible_session_source_allows_auto_title,
+};
 pub(crate) use crate::snapshot::SnapshotStore;
 pub(crate) use crate::types::{
     MessageAccounting, ModelCatalogEntry, ModelCost, ModelCostTier, ModelMetadata,
@@ -54,6 +57,7 @@ pub(crate) fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         runtime_ref: None,
         runtime_session_id: None,
         runtime_options: BTreeMap::new(),
+        runtime_tools: Vec::new(),
         include_reasoning: false,
         mode: RunMode::Default,
         permission_mode: None,

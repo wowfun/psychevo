@@ -91,6 +91,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         no_skills: options.no_skills,
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        runtime_tools: Vec::new(),
     };
     let project_context_mode =
         load_project_context_instruction_mode(&project_context_options, &workdir)?;
@@ -329,6 +330,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         no_skills: options.no_skills,
         skill_inputs: options.skill_inputs.clone(),
         mcp_servers: options.mcp_servers.clone(),
+        runtime_tools: Vec::new(),
     };
     let loaded = load_run_config(&run_options, &workdir)?;
     let permission_mode = options.permission_mode.unwrap_or_default();

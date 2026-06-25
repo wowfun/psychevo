@@ -212,6 +212,9 @@ impl SandboxPolicy {
                     push_existing_unique(&mut shell_extra_roots, root)?;
                 }
             }
+            for root in shell_device_sink_roots() {
+                push_existing_unique(&mut shell_extra_roots, root)?;
+            }
         }
 
         Ok(Self {
@@ -254,6 +257,20 @@ impl SandboxPolicy {
             .any(|root| path == *root || path.starts_with(root))
         {
             return Ok(SandboxWriteDecision::Allowed);
+        }
+        if let Some(root) = self
+            .shell_extra_roots
+            .iter()
+            .find(|root| path == **root || path.starts_with(root))
+        {
+            return Ok(SandboxWriteDecision::Grantable {
+                reason: format!(
+                    "write to {} is outside configured writable roots; {} is a shell-only writable root for sandboxed shell children and does not expand write/edit",
+                    path.display(),
+                    root.display()
+                ),
+                path,
+            });
         }
         Ok(SandboxWriteDecision::Grantable {
             reason: format!(
@@ -669,6 +686,14 @@ fn home_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
         })
 }
 
+const SHELL_DEVICE_SINK_ROOTS: &[&str] = &["/dev/null", "/dev/zero"];
+
+fn shell_device_sink_roots() -> impl Iterator<Item = PathBuf> {
+    SHELL_DEVICE_SINK_ROOTS
+        .iter()
+        .map(|path| PathBuf::from(*path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,6 +723,10 @@ mod tests {
                 .to_string()
                 .contains("read-only")
         );
+        assert!(
+            policy.shell_extra_roots.is_empty(),
+            "read-only policy should not add shell-only device sinks"
+        );
     }
 
     #[test]
@@ -726,6 +755,49 @@ mod tests {
             err.to_string()
                 .contains("outside configured writable roots")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_write_adds_device_sinks_only_for_shells() {
+        let dir = tempdir().unwrap();
+        let env = BTreeMap::new();
+        let config = SandboxConfig {
+            enabled: true,
+            mode: SandboxMode::WorkspaceWrite,
+            writable_roots: Vec::new(),
+            include_tmp: false,
+            include_common_caches: false,
+        };
+
+        let policy =
+            SandboxPolicy::from_config(&config, dir.path(), RunMode::Default, &env).unwrap();
+        let expected = shell_device_sink_roots()
+            .filter(|path| path.exists())
+            .map(|path| path.canonicalize().unwrap())
+            .collect::<Vec<_>>();
+
+        assert!(
+            !expected.is_empty(),
+            "expected at least one standard device sink to exist"
+        );
+        for root in expected {
+            assert!(
+                policy.shell_extra_roots.contains(&root),
+                "shell_extra_roots should include {}",
+                root.display()
+            );
+            assert!(
+                !policy.writable_roots.contains(&root),
+                "writable_roots should not include {}",
+                root.display()
+            );
+            assert!(
+                policy.ensure_write_allowed(&root).is_err(),
+                "built-in writer policy should still deny {}",
+                root.display()
+            );
+        }
     }
 
     #[test]

@@ -731,6 +731,7 @@ pub(crate) fn auto_compaction_check_run_options(
         no_skills: false,
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        runtime_tools: Vec::new(),
     }
 }
 
@@ -775,5 +776,6 @@ pub(crate) fn compaction_run_options(
         no_skills: false,
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        runtime_tools: Vec::new(),
     }
 }
