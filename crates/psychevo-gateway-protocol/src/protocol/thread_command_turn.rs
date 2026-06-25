@@ -232,6 +232,8 @@ pub struct CommandListItem {
     pub argument_kind: String,
     pub source: String,
     #[serde(default)]
+    pub expands_to: Option<String>,
+    #[serde(default)]
     pub presentation_kind: Option<String>,
     #[serde(default)]
     pub destination: Option<String>,
@@ -267,6 +269,62 @@ pub struct CommandExecuteResult {
     #[serde(default)]
     #[ts(type = "unknown | null")]
     pub action: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashSettingsReadParams {
+    #[serde(default)]
+    pub scope: Option<ModelSettingsScope>,
+    #[serde(default)]
+    pub workdir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashSettingsUpdateParams {
+    pub scope: ModelSettingsScope,
+    #[serde(default)]
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub leader_key: Option<String>,
+    #[serde(default)]
+    pub leader_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub aliases: Vec<SlashAliasSetting>,
+    #[serde(default)]
+    pub keybinds: Vec<SlashKeybindSetting>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashAliasSetting {
+    pub alias: String,
+    pub target: String,
+    #[serde(default)]
+    pub target_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashKeybindSetting {
+    pub shortcut: String,
+    pub target: String,
+    #[serde(default)]
+    pub target_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashSettingsResult {
+    pub scope: ModelSettingsScope,
+    pub workdir: String,
+    pub leader_key: String,
+    pub leader_timeout_ms: u64,
+    pub aliases: Vec<SlashAliasSetting>,
+    pub keybinds: Vec<SlashKeybindSetting>,
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

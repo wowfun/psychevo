@@ -50,6 +50,13 @@
         "null"
       ]
     },
+    "expandsTo": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "feedbackAnchor": {
       "default": null,
       "type": [

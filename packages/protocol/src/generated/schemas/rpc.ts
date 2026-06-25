@@ -19,11 +19,15 @@ import { clientRequestRuntimeOptionsSchema } from './rpc/client-request/runtime-
 import { clientRequestAutomationListSchema } from './rpc/client-request/automation-list';
 import { clientRequestAutomationDraftSchema } from './rpc/client-request/automation-draft';
 import { clientRequestAutomationWriteSchema } from './rpc/client-request/automation-write';
+import { clientRequestAutomationPauseSchema } from './rpc/client-request/automation-pause';
+import { clientRequestAutomationResumeSchema } from './rpc/client-request/automation-resume';
 import { clientRequestAutomationDeleteSchema } from './rpc/client-request/automation-delete';
 import { clientRequestAutomationRunSchema } from './rpc/client-request/automation-run';
 import { clientRequestCompletionListSchema } from './rpc/client-request/completion-list';
 import { clientRequestCommandListSchema } from './rpc/client-request/command-list';
 import { clientRequestCommandExecuteSchema } from './rpc/client-request/command-execute';
+import { clientRequestSlashSettingsReadSchema } from './rpc/client-request/slash-settings-read';
+import { clientRequestSlashSettingsUpdateSchema } from './rpc/client-request/slash-settings-update';
 import { clientRequestAgentListSchema } from './rpc/client-request/agent-list';
 import { clientRequestAgentReadSchema } from './rpc/client-request/agent-read';
 import { clientRequestAgentWriteSchema } from './rpc/client-request/agent-write';
@@ -326,6 +330,12 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/automation-write.json"
     },
     {
+      "$ref": "ClientRequest/automation-pause.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-resume.json"
+    },
+    {
       "$ref": "ClientRequest/automation-delete.json"
     },
     {
@@ -339,6 +349,12 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ClientRequest/command-execute.json"
+    },
+    {
+      "$ref": "ClientRequest/slash-settings-read.json"
+    },
+    {
+      "$ref": "ClientRequest/slash-settings-update.json"
     },
     {
       "$ref": "ClientRequest/agent-list.json"
@@ -524,11 +540,15 @@ export const rpcSchemaRefs = [
   clientRequestAutomationListSchema,
   clientRequestAutomationDraftSchema,
   clientRequestAutomationWriteSchema,
+  clientRequestAutomationPauseSchema,
+  clientRequestAutomationResumeSchema,
   clientRequestAutomationDeleteSchema,
   clientRequestAutomationRunSchema,
   clientRequestCompletionListSchema,
   clientRequestCommandListSchema,
   clientRequestCommandExecuteSchema,
+  clientRequestSlashSettingsReadSchema,
+  clientRequestSlashSettingsUpdateSchema,
   clientRequestAgentListSchema,
   clientRequestAgentReadSchema,
   clientRequestAgentWriteSchema,

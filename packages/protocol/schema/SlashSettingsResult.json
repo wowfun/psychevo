@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    },
+    "SlashAliasSetting": {
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "targetSummary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "target"
+      ],
+      "type": "object"
+    },
+    "SlashKeybindSetting": {
+      "properties": {
+        "shortcut": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "targetSummary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "shortcut",
+        "target"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "aliases": {
+      "items": {
+        "$ref": "#/definitions/SlashAliasSetting"
+      },
+      "type": "array"
+    },
+    "diagnostics": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "keybinds": {
+      "items": {
+        "$ref": "#/definitions/SlashKeybindSetting"
+      },
+      "type": "array"
+    },
+    "leaderKey": {
+      "type": "string"
+    },
+    "leaderTimeoutMs": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "scope": {
+      "$ref": "#/definitions/ModelSettingsScope"
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "aliases",
+    "keybinds",
+    "leaderKey",
+    "leaderTimeoutMs",
+    "scope",
+    "workdir"
+  ],
+  "title": "SlashSettingsResult",
+  "type": "object"
+}

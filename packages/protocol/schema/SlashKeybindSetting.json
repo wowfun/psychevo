@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "shortcut": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "targetSummary": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "shortcut",
+    "target"
+  ],
+  "title": "SlashKeybindSetting",
+  "type": "object"
+}

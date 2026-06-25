@@ -59,6 +59,12 @@
       "$ref": "ClientRequest/automation-write.json"
     },
     {
+      "$ref": "ClientRequest/automation-pause.json"
+    },
+    {
+      "$ref": "ClientRequest/automation-resume.json"
+    },
+    {
       "$ref": "ClientRequest/automation-delete.json"
     },
     {
@@ -72,6 +78,12 @@
     },
     {
       "$ref": "ClientRequest/command-execute.json"
+    },
+    {
+      "$ref": "ClientRequest/slash-settings-read.json"
+    },
+    {
+      "$ref": "ClientRequest/slash-settings-update.json"
     },
     {
       "$ref": "ClientRequest/agent-list.json"

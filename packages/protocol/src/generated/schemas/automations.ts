@@ -26,6 +26,44 @@ export const automationSchemas = {
     },
     {
       "properties": {
+        "afterMinutes": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "delay"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "afterMinutes",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "once"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
         "kind": {
           "enum": [
             "daily"
@@ -372,6 +410,44 @@ export const automationSchemas = {
         },
         {
           "properties": {
+            "afterMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "delay"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "afterMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "once"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "kind": {
               "enum": [
                 "daily"
@@ -455,10 +531,6 @@ export const automationSchemas = {
     }
   },
   "properties": {
-    "enabled": {
-      "default": true,
-      "type": "boolean"
-    },
     "execution": {
       "allOf": [
         {
@@ -544,6 +616,44 @@ export const automationSchemas = {
           },
           "required": [
             "everyMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "afterMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "delay"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "afterMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "once"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
             "kind"
           ],
           "type": "object"
@@ -699,13 +809,6 @@ export const automationSchemas = {
       "default": null,
       "type": [
         "string",
-        "null"
-      ]
-    },
-    "enabled": {
-      "default": null,
-      "type": [
-        "boolean",
         "null"
       ]
     },
@@ -899,6 +1002,44 @@ export const automationSchemas = {
           },
           "required": [
             "everyMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "afterMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "delay"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "afterMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "once"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
             "kind"
           ],
           "type": "object"
@@ -1239,6 +1380,44 @@ export const automationSchemas = {
         },
         {
           "properties": {
+            "afterMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "delay"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "afterMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "once"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "kind": {
               "enum": [
                 "daily"
@@ -1425,10 +1604,6 @@ export const automationSchemas = {
   "definitions": {
     "AutomationDraftView": {
       "properties": {
-        "enabled": {
-          "default": true,
-          "type": "boolean"
-        },
         "execution": {
           "allOf": [
             {
@@ -1510,6 +1685,44 @@ export const automationSchemas = {
           },
           "required": [
             "everyMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "afterMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "delay"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "afterMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "once"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
             "kind"
           ],
           "type": "object"
@@ -1708,6 +1921,44 @@ export const automationSchemas = {
           },
           "required": [
             "everyMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "afterMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "delay"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "afterMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "once"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
             "kind"
           ],
           "type": "object"
@@ -2008,6 +2259,44 @@ export const automationSchemas = {
           },
           "required": [
             "everyMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "afterMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "delay"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "afterMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "once"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
             "kind"
           ],
           "type": "object"

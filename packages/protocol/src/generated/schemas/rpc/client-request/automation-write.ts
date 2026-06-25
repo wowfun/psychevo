@@ -46,6 +46,44 @@ export const clientRequestAutomationWriteSchema = {
         },
         {
           "properties": {
+            "afterMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "delay"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "afterMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "once"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "kind": {
               "enum": [
                 "daily"
@@ -133,13 +171,6 @@ export const clientRequestAutomationWriteSchema = {
           "default": null,
           "type": [
             "string",
-            "null"
-          ]
-        },
-        "enabled": {
-          "default": null,
-          "type": [
-            "boolean",
             "null"
           ]
         },

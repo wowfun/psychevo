@@ -1,12 +1,28 @@
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum AutomationScheduleInput {
     Interval {
         #[serde(rename = "everyMinutes")]
         every_minutes: u32,
     },
-    Daily { time: String },
-    Weekly { weekdays: Vec<u8>, time: String },
+    Delay {
+        #[serde(rename = "afterMinutes")]
+        after_minutes: u32,
+    },
+    Once {
+        at: String,
+    },
+    Daily {
+        time: String,
+    },
+    Weekly {
+        weekdays: Vec<u8>,
+        time: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -17,7 +33,11 @@ pub enum AutomationTaskKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum AutomationTargetInput {
     Project,
     ThreadHeartbeat {
@@ -66,8 +86,6 @@ pub struct AutomationWriteParams {
     pub prompt: String,
     pub schedule: AutomationScheduleInput,
     #[serde(default)]
-    pub enabled: Option<bool>,
-    #[serde(default)]
     pub execution: Option<AutomationExecutionInput>,
     #[serde(default)]
     pub model: Option<String>,
@@ -92,8 +110,6 @@ pub struct AutomationDraftView {
     pub title: String,
     pub prompt: String,
     pub schedule: AutomationScheduleInput,
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
     #[serde(default)]
     pub execution: AutomationExecutionInput,
     #[serde(default)]
@@ -202,8 +218,4 @@ pub struct AutomationRunResult {
     pub automation: AutomationTaskView,
     #[serde(default)]
     pub run: Option<AutomationRunView>,
-}
-
-fn default_enabled() -> bool {
-    true
 }

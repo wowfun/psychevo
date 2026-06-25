@@ -163,6 +163,13 @@ export const commandSchemas = {
         "null"
       ]
     },
+    "expandsTo": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "feedbackAnchor": {
       "default": null,
       "type": [
@@ -250,6 +257,13 @@ export const commandSchemas = {
           "type": "string"
         },
         "destination": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expandsTo": {
           "default": null,
           "type": [
             "string",

@@ -440,6 +440,10 @@ pub enum ClientRequest {
     AutomationDraft(AutomationDraftParams),
     #[serde(rename = "automation/write")]
     AutomationWrite(AutomationWriteParams),
+    #[serde(rename = "automation/pause")]
+    AutomationPause(AutomationIdParams),
+    #[serde(rename = "automation/resume")]
+    AutomationResume(AutomationIdParams),
     #[serde(rename = "automation/delete")]
     AutomationDelete(AutomationIdParams),
     #[serde(rename = "automation/run")]
@@ -450,6 +454,10 @@ pub enum ClientRequest {
     CommandList(CommandListParams),
     #[serde(rename = "command/execute")]
     CommandExecute(CommandExecuteParams),
+    #[serde(rename = "slash/settings/read")]
+    SlashSettingsRead(SlashSettingsReadParams),
+    #[serde(rename = "slash/settings/update")]
+    SlashSettingsUpdate(SlashSettingsUpdateParams),
     #[serde(rename = "agent/list")]
     AgentList(AgentListParams),
     #[serde(rename = "agent/read")]

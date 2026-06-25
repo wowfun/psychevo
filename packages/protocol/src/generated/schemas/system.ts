@@ -196,6 +196,289 @@ export const systemSchemas = {
   "title": "GatewayProfileView",
   "type": "object"
 },
+  SlashSettingsReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ModelSettingsScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "SlashSettingsReadParams",
+  "type": "object"
+},
+  SlashSettingsUpdateParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    },
+    "SlashAliasSetting": {
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "targetSummary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "target"
+      ],
+      "type": "object"
+    },
+    "SlashKeybindSetting": {
+      "properties": {
+        "shortcut": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "targetSummary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "shortcut",
+        "target"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "aliases": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/SlashAliasSetting"
+      },
+      "type": "array"
+    },
+    "keybinds": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/SlashKeybindSetting"
+      },
+      "type": "array"
+    },
+    "leaderKey": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "leaderTimeoutMs": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "scope": {
+      "$ref": "#/definitions/ModelSettingsScope"
+    },
+    "workdir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "scope"
+  ],
+  "title": "SlashSettingsUpdateParams",
+  "type": "object"
+},
+  SlashAliasSetting: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "alias": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "targetSummary": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "alias",
+    "target"
+  ],
+  "title": "SlashAliasSetting",
+  "type": "object"
+},
+  SlashKeybindSetting: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "shortcut": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "targetSummary": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "shortcut",
+    "target"
+  ],
+  "title": "SlashKeybindSetting",
+  "type": "object"
+},
+  SlashSettingsResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelSettingsScope": {
+      "enum": [
+        "global"
+      ],
+      "type": "string"
+    },
+    "SlashAliasSetting": {
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "targetSummary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "target"
+      ],
+      "type": "object"
+    },
+    "SlashKeybindSetting": {
+      "properties": {
+        "shortcut": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "targetSummary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "shortcut",
+        "target"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "aliases": {
+      "items": {
+        "$ref": "#/definitions/SlashAliasSetting"
+      },
+      "type": "array"
+    },
+    "diagnostics": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "keybinds": {
+      "items": {
+        "$ref": "#/definitions/SlashKeybindSetting"
+      },
+      "type": "array"
+    },
+    "leaderKey": {
+      "type": "string"
+    },
+    "leaderTimeoutMs": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "scope": {
+      "$ref": "#/definitions/ModelSettingsScope"
+    },
+    "workdir": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "aliases",
+    "keybinds",
+    "leaderKey",
+    "leaderTimeoutMs",
+    "scope",
+    "workdir"
+  ],
+  "title": "SlashSettingsResult",
+  "type": "object"
+},
   TerminalStartParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
