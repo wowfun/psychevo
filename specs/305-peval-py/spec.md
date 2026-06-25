@@ -78,13 +78,19 @@ import. The skill must not imply that every use requires both `analysis.json` /
 `analysis.md`, a generated report, or workspace placement. It should guide
 agents to create one JSON or Markdown analysis report by default when analysis
 is requested, or create both only when their contents are complementary. A
-provided Trial cell path identifies the analysis target and a possible later
-import target. The top-level skill instructions must stay compact: they should
-not embed Trial-cell path derivation rules, compiled artifact field semantics,
-or the JSON `extra` merge contract. Those details belong in references that are
-loaded only when needed. When the user wants an existing analysis report
-attached to peval-py reports or `serve`, the skill should tell the agent to
-call `peval-py import analysis -r <workspace> --run-path <cell-path> -p
+provided Trial cell path, or a session artifact path that contains exactly one
+cell, identifies the analysis target and a possible later import target.
+Agents should read that target's `agent/trajectory.json`,
+`agent/trajectory_meta.json`, and existing analysis artifacts for evidence
+instead of generating a report to rediscover the same identity. `view tr -p`
+accepts trajectory/source inputs, not Trial cell artifact directories. The
+top-level skill instructions must stay compact: they may include minimal
+workspace path recognition, but they should not embed Trial-cell path
+derivation rules, compiled artifact field semantics, or the JSON `extra` merge
+contract. Those details belong in references that are loaded only when needed.
+When the user wants an existing analysis report attached to peval-py reports or
+`serve`, the skill should tell the agent to call
+`peval-py import analysis -r <workspace> --run-path <cell-path> -p
 <analysis-report>`.
 
 `Cached analysis` is the peval/peval-py report concept for analysis loaded
@@ -150,7 +156,11 @@ should complement each other instead of duplicating the same analysis.
 
 Reference docs may describe how to discover a missing Trial cell path from a
 report, but the common import example should use the already-known
-`<cell-path>` directly. A cell is the minimum Trial unit: `analysis.json`,
+`<cell-path>` directly. The minimum workspace cues the skill may expose are
+`<workspace>/peval-py.toml`, a Trial cell under
+`runs/<eval>/<agent>/<session>/<cell>/`, and the cell-local
+`agent/trajectory.json`, `agent/trajectory_meta.json`, `analysis.json`, and
+`analysis.md` files. A cell is the minimum Trial unit: `analysis.json`,
 `analysis.md`, and `agent/*` written under that cell all belong to that Trial
 for this skill workflow. `analysis.json` and `analysis.md` directly under
 `<session-id>/` are session-level artifacts reserved for a later
@@ -173,6 +183,14 @@ The command supports path and DB input sources:
   trajectory` may repeat `-d` to compare sessions across adapters. `-d
   @adapter` expands to that adapter's configured `default_db_path` and binds
   that DB input to the token adapter.
+  `<workspace>/state.db` is peval-py workspace state, not an adapter-owned
+  source database. When `view trajectory` or `export trajectory` is invoked
+  with an explicit `-r <workspace>` and a `-d` input resolves to that
+  workspace's configured state DB, peval-py treats the DB as a saved-source
+  registry and reads stored Trial snapshots from `peval_py_sources` and each
+  row's `artifact_dir`. Without explicit `-r`, passing a peval-py workspace
+  state DB as `-d` fails with a clear diagnostic that suggests `-r <workspace>`
+  for saved snapshots or `-d @adapter` for adapter default DBs.
 - `-i, --input-table PATH` reads a structured input manifest and appends its
   rows after any direct `-p/--path` and `-d/--db` inputs. CSV and JSON manifests
   use only the Python standard library. `.xlsx` manifests are supported only
@@ -245,6 +263,29 @@ invalid, the command fails clearly and tells the user to run
 `peval-py init -r <root>`. Existing current-directory discovery remains valid
 when `-r/--root` is omitted.
 
+Workspace state DB input is a saved snapshot input only when all of these are
+true: `view` or `export` was invoked with explicit `-r <workspace>`, the `-d`
+path resolves to that workspace's configured `state_db`, and `peval_py_sources`
+contains rows with `artifact_dir` values. This path is read-only: it does not
+refresh sources, read original DBs, scan orphaned `runs/` directories, mutate
+`peval_py_sources`, or change `serve` source persistence semantics. Raw adapter
+DB access remains explicit through `-d @adapter` or a real adapter DB path.
+
+For saved workspace snapshots, `view trajectory -r W -d W/state.db --list`
+lists saved source rows with `#`, `source_key`, `session_id`,
+`trial_key`, `active`, `kind`, `adapter`, and alias/name. `view trajectory -r W
+-d W/state.db` with no `-s` renders all active saved sources by reading
+`agent/trajectory.json` and `agent/trajectory_meta.json` under each selected
+source's `artifact_dir`, then composing the report with current cell-local
+notes and analysis overlays just as `serve` does. Repeated `-s` selectors choose
+saved sources by `source_key`, `#N`, unique stored `session_id` or
+`trial_session_id`, or unique `trial_key`; ambiguous selectors fail and ask for
+`source_key` or `#N`. Archived sources are excluded by default but may be
+selected explicitly. `export trajectory -r W -d W/state.db -s SELECTOR` writes
+that saved source's stored `trajectory.json`. Without `-s`, saved-snapshot
+export succeeds only when exactly one active saved source exists; otherwise it
+fails with a selection diagnostic.
+
 `import analysis` accepts `-r, --root DIR`, `--run-path PATH`, repeatable
 `-p, --path PATH`, and `--json`. The root is required and must already contain
 `peval-py.toml`; import must not initialize or repair workspaces. `--run-path`
@@ -264,8 +305,11 @@ warnings. Import mutates only the selected Trial cell files.
 `init` accepts `-r, --root DIR` and `--json`. Without `--root`, it initializes
 the current directory. It creates `<workspace>/peval-py.toml` when missing and
 creates or opens `<workspace>/state.db`. Existing valid `peval-py.toml` files are
-preserved, including custom relative or absolute `state_db` paths. It must not
-create or edit `peval.toml`, `runs/`, `datasets/`, `scripts/`, workspace
+preserved, including custom relative or absolute `state_db` paths and custom
+adapter defaults. New config files include built-in adapter default DB paths
+using `~`: Psychevo `~/.psychevo/state.db`, OpenCode
+`~/.local/share/opencode/opencode.db`, and Hermes `~/.hermes/state.db`. It must
+not create or edit `peval.toml`, `runs/`, `datasets/`, `scripts/`, workspace
 templates, `$PSYCHEVO_HOME/peval-config.toml`, or `.gitignore`. `--json` emits
 `schema_version`, `root`, `peval_py_config`, and `state_db`.
 
@@ -377,8 +421,12 @@ must fail with a clear config error. Adapter-specific options live under
 `[adapters.<adapter-id>]`. The reserved adapter option `default_db_path =
 "PATH"` is consumed by peval-py for `-d @adapter` and serve Source Manager
 defaults; `~` is expanded and relative paths resolve against the TOML file that
-defined the value. `peval-py` passes the remaining effective adapter option
-table through to that adapter and does not define adapter-specific CLI flags.
+defined the value. POSIX absolute paths, Windows drive paths, and UNC paths are
+treated as absolute for parsing and must not be joined to the TOML directory.
+When peval-py writes adapter defaults, paths under the current user's home are
+stored with a leading `~` while runtime config continues to expose resolved
+paths. `peval-py` passes the remaining effective adapter option table through
+to that adapter and does not define adapter-specific CLI flags.
 Top-level `analysis_eval_slug = "default"` selects the peval run subtree used
 for read-only cached analysis enrichment. Explicit `-c/--config` files may
 override this key while preserving other workspace TOML values.
@@ -483,8 +531,8 @@ stay standard and must not include peval-only fields.
 
 `peval-py serve` is backed by a selected peval-py workspace. Python-owned
 configuration lives at `<workspace>/peval-py.toml`. The first version stores
-`state_db = "state.db"`, optional top-level `locale`, and serve defaults only.
-Serve may also create an ECharts cache at
+`state_db = "state.db"`, optional top-level `locale`, built-in adapter default
+DB paths, and serve defaults only. Serve may also create an ECharts cache at
 `<workspace>/.cache/echarts/6.0.0/echarts.min.js`.
 Runtime state lives in
 `<workspace>/state.db`, which may become a shared state database later; this
@@ -612,15 +660,24 @@ writes either JSON or HTML:
   typed fields merge into the same analysis annotation and any cached/imported
   metrics remain flat keys in `analysis_metrics`; `analysis_metrics.auto`
   remains owned by report generation.
+- `trajectory.final_metrics.extra.total_tool_errors` counts failed modeled tool
+  calls, not failed Agent steps or standalone tool-result rows. A tool call is
+  counted as failed when its matched observation marks the corresponding
+  per-tool metadata status as `error`; unmatched tool results remain visible as
+  observations with warnings but do not increase this tool-call numerator.
 - HTML is emitted as a single offline file with inline CSS and JavaScript,
   while the source HTML templates, CSS, and JavaScript live in package asset
   files instead of large Python strings. It renders the selected Trial trajectory, step rows,
   reasoning, message, tool-call, observation, metrics cues, and one combined
-  Expand all / Collapse all control. The page head contains only the localized
-  report title; agent/model and metric summaries stay inside the Run and Result
-  sections instead of appearing as a separate top banner. Report typography
-  uses a 15px body text baseline, with compact labels, chips, table headers,
-  and code blocks no smaller than 12px.
+  Expand all / Collapse all control. Expanded step bodies keep reasoning and
+  message content first, then render tool-call and observation blocks in
+  ascending per-block `timestamp_ms` order when metadata timestamps are
+  available; untimed blocks keep their original relative order after timed
+  blocks. The page head contains only the localized report title; agent/model
+  and metric summaries stay inside the Run and Result sections instead of
+  appearing as a separate top banner. Report typography uses a 15px body text
+  baseline, with compact labels, chips, table headers, and code blocks no
+  smaller than 12px.
 - HTML keeps page-level titles for navigation but avoids repeated titles inside
   a single context. The selected Trial Analysis panel does not repeat
   `computed` or `cached` as a chip plus heading, and automatic metrics render

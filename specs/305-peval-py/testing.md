@@ -49,9 +49,11 @@ Coverage must verify:
 - matched tool-result observations are nested under the Agent step that issued
   the tool call.
 - matched tool-call failures in the middle of a session remain nested under the
-  issuing Agent step, mark tool meta as failed, count tool errors, and do not
-  prevent later successful tool calls from being represented.
-- unmatched tool results remain visible and produce a warning.
+  issuing Agent step, mark tool meta as failed, count tool errors per failed
+  tool call even when multiple failures share one step, and do not prevent
+  later successful tool calls from being represented.
+- unmatched tool results remain visible, produce a warning, and do not increase
+  tool-call error totals.
 - assistant and tool execution duration prefer `metadata.elapsed_ms` and fall
   back to timestamp differences only when the fallback span is no more than
   600,000 ms.
@@ -95,10 +97,11 @@ Coverage must verify:
   key from discovered `peval-py.toml`, and allows explicit `-c/--config` to
   override only that key without resetting other workspace values.
 - adapter config accepts reserved `default_db_path`, resolves relative values
-  against the TOML file that defines them, expands `~`, keeps the remaining raw
-  adapter options available to adapters, and lets `-d @adapter` expand to the
-  configured DB while rejecting missing defaults or conflicting `-a dN=...`
-  selectors.
+  against the TOML file that defines them, expands `~`, treats POSIX absolute
+  paths, Windows drive paths, and UNC paths as absolute, stores current-home
+  paths with `~` when writing adapter defaults, keeps the remaining raw adapter
+  options available to adapters, and lets `-d @adapter` expand to the configured
+  DB while rejecting missing defaults or conflicting `-a dN=...` selectors.
 - malformed JSONL lines fail with a clear line-number diagnostic.
 - ATIF step ids are sequential and tool observations link to source tool calls.
 - final metrics aggregate available usage, accounting, turn, tool-call, and
@@ -252,6 +255,9 @@ Coverage must verify:
 - HTML escapes text, safely embeds JSON, exposes one step visibility toggle,
   and renders peval-style tool names, tool execution timing, and observations
   inside the corresponding Agent step.
+- HTML expanded step bodies sort mixed tool-call and observation blocks by
+  per-block metadata timestamp while leaving reasoning and message content
+  before those activity blocks.
 - HTML Analysis metrics render structured JSON values without dumping arrays or
   objects into one-line metric cells: automatic step/tool/model latency
   distributions render together as a compact vertical box plot with duration
@@ -439,13 +445,22 @@ Coverage must verify:
   outside the workspace, including adapter `default_db_path` expansion through
   `-d @adapter`; `view trajectory -r DIR` recognizing cached
   `analysis.json` / `analysis.md`; `view trajectory --list -r DIR -d @adapter`
-  using the root-selected config; and `view/export trajectory -r DIR` failing
-  clearly when `DIR` is missing or does not contain `peval-py.toml`.
+  using the root-selected config; `view/export trajectory -r DIR -d
+  <workspace-state-db>` reading saved source snapshots from `peval_py_sources`
+  and `runs/...` artifacts, including `--list`, active-source default
+  selection, explicit `source_key`, `#N`, unique session/trial selectors,
+  archived source selection, stored trajectory export, multiple-active export
+  diagnostics, and original-source-unavailable cases; unrooted workspace state
+  DB inputs failing clearly with `-r <workspace>` and `-d @adapter` guidance; and
+  `view/export trajectory -r DIR` failing clearly when `DIR` is missing or does
+  not contain `peval-py.toml`.
 - init tests verify `peval-py init` creates only `<workspace>/peval-py.toml` and
   `<workspace>/state.db`, preserves existing valid `peval-py.toml`
-  state DB paths, rejects invalid peval-py TOML, and does not create
-  `peval.toml`, `runs/`, `datasets/`, `scripts/`, default templates,
-  `$PSYCHEVO_HOME/peval-config.toml`, or `.gitignore`.
+  state DB paths and adapter defaults, writes built-in Psychevo, OpenCode, and
+  Hermes default DB paths with `~` for new workspaces, rejects invalid
+  peval-py TOML, and does not create `peval.toml`, `runs/`, `datasets/`,
+  `scripts/`, default templates, `$PSYCHEVO_HOME/peval-config.toml`, or
+  `.gitignore`.
 - saved-workspace tests verify peval-py workspace discovery from current-or-parent
   `peval-py.toml`, explicit `--root` and `PEVAL_ROOT` handling as a peval-py
   root override without requiring `peval.toml`, `<workspace>/peval-py.toml` defaults,
@@ -482,12 +497,16 @@ Coverage must verify:
   reports, exports, `serve`, analysis report creation, and Trial-cell import,
   does not instruct agents to create or validate `notes.md` because that file is
   a human/serve note path,
-  keeps `SKILL.md` as a compact workflow router without expanded
-  `runs/<analysis_eval_slug>/...` templates, path-segment derivation rules, or
-  compiled JSON field semantics,
+  keeps `SKILL.md` as a compact workflow router that recognizes workspace roots,
+  Trial cell/session artifact paths, and trajectory/source inputs without
+  embedding path-segment derivation rules or compiled JSON field semantics,
   directs agents to write one analysis report by default or complementary
   reports when both are useful, keeps analysis creation separate from
   Trial-cell import,
+  directs agents to read `agent/trajectory.json`, `agent/trajectory_meta.json`,
+  and existing analysis artifacts when a Trial cell path or single-cell session
+  artifact path is provided, and explicitly says not to pass those artifact
+  directories to `view tr -p`,
   directs agents to use `peval-py import analysis -r <workspace> --run-path
   <cell-path> -p <analysis-report>` when Trial-cell import is desired,
   leaves JSON field and tolerant `extra` details in the analysis reference,
@@ -532,8 +551,10 @@ and inspect generated JSON with:
 python -m json.tool <output.json>
 ```
 
-The repository broad validation script remains Rust-only for this feature. Do
-not add Python package execution to `scripts/validate.sh broad`.
+The repository Rust validation script remains separate from peval-py Python
+validation. Do not add Python package execution to
+`scripts/validate-rust.sh broad`, and do not use that Rust gate as the default
+validation path for peval-py-only changes.
 
 ## Related Topics
 

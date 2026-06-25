@@ -28,9 +28,9 @@ Automation vocabulary and generic validation boundaries follow
 [060 Automation](../060-automation/spec.md).
 
 Default validation should use deterministic local harnesses and fake or test
-providers. The broad validation entrypoint is `scripts/validate.sh`; narrower
-implementation validation should cover `psychevo-runtime` tool assembly and
-exec-session behavior.
+providers. The Rust workspace broad validation entrypoint is
+`scripts/validate-rust.sh`; narrower implementation validation should cover
+`psychevo-runtime` tool assembly and exec-session behavior.
 
 Real provider and live service validation remain opt-in. Managed ripgrep tests
 must not perform real GitHub downloads; download behavior should be covered with

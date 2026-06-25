@@ -45,9 +45,9 @@ Relevant narrow validation:
 - `cargo test -p psychevo-runtime`
 - `cargo test -p psychevo-cli`
 
-Broad validation remains `scripts/validate.sh`. Documentation-only changes to
-this topic do not require code tests unless executable examples, generated
-artifacts, or validation instructions change.
+Rust broad validation remains `scripts/validate-rust.sh`. Documentation-only
+changes to this topic do not require code tests unless executable examples,
+generated artifacts, or validation instructions change.
 
 Manual real-provider validation is opt-in only.
 

@@ -103,6 +103,12 @@ failures for build and test commands. They may include `XDG_CACHE_HOME` or
 `~/.cache`, Cargo/Rustup, npm/pnpm/yarn, pip, Go, Gradle, and Maven caches
 where those paths are discoverable from the inherited environment.
 
+Shell children in `workspace-write` mode may also receive narrow write rules
+for `/dev/null` and `/dev/zero` when those devices exist. These are shell-only
+compatibility sinks for commands that open standard sink devices with write or
+read-write flags; they must not add `/dev` as a writable root and must not
+expand model-visible `write` or `edit`.
+
 Effective write roots are canonicalized with deepest-existing-ancestor
 resolution. This prevents `..`, symlink, and sibling-prefix escapes, while still
 allowing missing file tails for create operations.
@@ -112,7 +118,10 @@ allowing missing file tails for create operations.
 Writer enforcement applies before mutation. `write`, `edit` replace mode, and
 patch add/update/delete/move operations must validate every source and
 destination path that will be modified. A denial must not create, delete, move,
-or rewrite files. When a permission approval creates a sandbox write grant,
+or rewrite files. When a writer target is under a shell-only extra root such as
+a temporary or cache root, the denial should explain that the root is writable
+only for sandboxed shell children and does not expand model-visible writers.
+When a permission approval creates a sandbox write grant,
 writer enforcement may allow exactly the approved canonical target paths for
 the approved tool call, or for subsequent calls with the same session grant.
 The grant also permits creating missing parent directories needed to materialize
@@ -177,6 +186,12 @@ surface; v1 does not add new RPC request fields.
 - Built-in writers allow writes inside effective writer roots and deny writes
   outside them, including parent escape, symlink escape, sibling prefix
   collision, missing target tail, and patch move source/destination cases.
+- Built-in writer denial for shell-only temp/cache roots clearly says the path
+  is shell-only and does not imply that `bypassPermissions` can bypass sandbox
+  enforcement.
+- In `workspace-write` mode, sandboxed shell children may open `/dev/null` and
+  `/dev/zero` for writing when those devices exist, while built-in writer roots
+  remain unchanged.
 - `read-only` mode denies writer mutations and gives shell children no writable
   roots.
 - Sandboxed shell children include the `PSYCHEVO_SANDBOX*` markers.

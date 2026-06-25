@@ -14,7 +14,7 @@ Automation vocabulary and generic validation boundaries follow
 The default validation gate is:
 
 ```bash
-scripts/validate.sh broad
+scripts/validate-rust.sh broad
 ```
 
 For this topic, the default gate is the broad deterministic validation path.

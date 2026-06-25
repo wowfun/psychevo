@@ -121,6 +121,11 @@ text is appended to the configured target line and then parsed. Invalid alias
 or keybinding configuration rejects TUI startup with a bounded configuration
 error. Configured aliases participate in slash menu completion as alias rows,
 and configured concrete slash lines appear in `/help` `Custom commands`.
+Workbench Settings may write the profile/global form of this same configuration
+through typed Gateway slash-settings methods. TUI still reads the effective
+merged configuration at startup, so project-local overrides can affect TUI and
+Gateway command discovery even though the GUI v1 Settings page edits only the
+active profile config.
 
 ## Gateway Ownership
 

@@ -130,11 +130,17 @@ The concrete Web Shell behavior is specified in [Web Shell](web-shell.md). The
 attachment owns source binding, Workbench startup/reconnect behavior, runtime
 controls, settings, files, status, commands, browser host interactions, global
 session browsing, and live cross-surface session visibility.
+Global session-start actions remain active from app-level surfaces such as
+Settings and Automations. Starting a new session from those surfaces must create
+the detached draft and return the main work area to the transcript instead of
+leaving the user on the previous configuration page.
 Workbench model controls are backed by explicit Gateway model resolution state:
 only a resolved provider-qualified `provider/model` is a usable model-turn
 target. Unconfigured or errored model resolution remains visible in the shell
 as an explicit selection/unavailable state and must block prompt-turn startup
 until the user chooses a concrete provider/model.
+Profile/default model configuration, shared composer model state, and explicit
+catalog-fetch UX are defined by [125 Model Config](../125-model-config/spec.md).
 
 ## Workbench Layout
 
@@ -216,6 +222,8 @@ after prompt submission.
   interaction language.
 - [075 Brand Assets](../075-design-system/brand-assets.md) defines canonical brand asset
   locations.
+- [125 Model Config](../125-model-config/spec.md) defines saved model defaults,
+  shared composer model state, provider setup UX, and catalog-fetch UX.
 - [250 UI Display Model](../250-ui-display-model/spec.md) defines shared
   transcript projection and display-only boundaries.
 - [260 UI Rendering](../260-ui-rendering/spec.md) defines shared transcript,

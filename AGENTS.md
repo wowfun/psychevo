@@ -7,7 +7,7 @@ psychevo_self_edit: deny
 - After implementation lands, update `CHANGELOG.md`.
 
 ## Tests
-- After code changes, run the relevant validation path. When a unified default validation entrypoint exists, prefer it for broad validation.
+- After code changes, run the relevant validation path.
 - For code logic changes, prefer adding or updating the closest meaningful test. If no narrow test exists, fall back to higher-level validation.
 - Narrow validation is not permission to ignore plausibly related failures; fix them or report them explicitly.
 - If a test file is created or changed, run that test and iterate until it passes.
@@ -20,4 +20,5 @@ psychevo_self_edit: deny
 - Update snapshots, baselines, inventories, ignore lists, or expected-failure records only for intentional behavior changes or with explicit approval; treat those diffs as review material.
 - Do not rerun the exact same validation only for formality; report the validation most relevant to the changed surface.
 - Do not run multiple broad test commands concurrently in the same worktree unless the test infrastructure explicitly supports isolation.
+- Rust workspace broad gate: `scripts/validate-rust.sh broad`.
 - If validation cannot be run, report the attempted validation path and the blocker.

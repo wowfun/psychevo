@@ -285,6 +285,8 @@ First-slice JSON-RPC methods include:
 - `command/list`
 - `command/execute`
 - `completion/list`
+- `slash/settings/read`
+- `slash/settings/update`
 - `peerSession/list`
 - `peerSession/import`
 - `thread/start`
@@ -377,6 +379,18 @@ running state. A `SessionSummaryView` carries enough display projection for
 every surface to render the same row: stable id, workdir/project metadata,
 title, fallback display title, preview, visible-entry count, persisted counts,
 archive timestamp, and activity.
+
+After the first successful turn of a newly created human-visible top-level
+session, Gateway/runtime persists a concise `title` when the title is still
+empty. This applies across visible interactive sources such as `run`, `tui`,
+`web`, `automation`, `channel/*`, and top-level `peer_agent` sessions. Internal
+side conversations, child/parent-linked sessions, resumed sessions, and failed
+or aborted turns do not auto-title. Native runtime sessions may use the
+configured auxiliary title-generation model and then fall back to the first user
+prompt; peer-agent sessions prefer the peer-provided title and otherwise use the
+prompt fallback without invoking a local title model. Title generation is
+display metadata only and must not append transcript messages, tool rows, usage
+rows, or evidence.
 
 `thread/browser` is the paged session-browser contract for product surfaces. By
 default it groups sessions by workspace, shows sessions updated within the last

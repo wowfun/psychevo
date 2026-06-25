@@ -113,25 +113,15 @@ metadata that explicitly disables reasoning expose only `none` displayed as
 the shared reasoning effort values. Switching models preserves the current
 reasoning effort when it is valid for the new model and otherwise resets the
 override to `none`.
-Settings > Models is the profile-level model configuration page. It may save
-future default model configuration, built-in/custom provider configuration, and
-auxiliary model assignments for title generation and context compression
-through model-specific RPCs. Model assignment rows use catalog-backed picker
-controls that reuse the composer model/reasoning filtering, recent-model
-promotion, short-label, and model-specific reasoning rules; the GUI does not
-expose manual model name entry or repeat selected picker values as secondary
-label text. Provider rows do not repeat API-key env, no-auth, or fetched
-catalog-count values when those values are already visible in controls. Fetched
-provider catalogs appear in the default and auxiliary assignment controls
-immediately and are reflected in the composer selector without persisting every
-fetched model to config or changing the saved default. The page reads
-profile/global assignment state for its default and auxiliary rows; project
-`.psychevo/config.toml` model overrides affect composer/effective controls but
-must not be shown as the saved profile default. It must not silently hot-swap
-the currently running turn or move the composer session controls into Settings.
-Secret inputs are transient UI state only; durable secrets are written by
-Gateway/runtime configuration APIs and returned only as redacted credential
-status.
+Settings > Models is Workbench's concrete surface for
+[125 Model Config](../125-model-config/spec.md). It exposes provider
+configuration, explicit catalog fetches, profile/global default assignment, and
+title-generation/context-compression assignment controls through model-specific
+RPCs. Web assignment rows reuse the composer model/reasoning picker behavior;
+provider rows avoid repeating values already visible in controls; and fetched
+catalog rows appear immediately in Settings and the composer without persisting
+each row to config. The page must not silently hot-swap the currently running
+turn or move session-scoped composer controls into Settings.
 The composer also exposes execution runtime separately from Agent persona,
 although compact GUI surfaces may present both controls through one grouped
 Agent popover. The default runtime is `native`; ACP backend runtimes are
@@ -209,6 +199,10 @@ placeholder session. That empty source snapshot is a detached draft: delayed
 events or read-only snapshot refreshes for previously running threads must not
 bind it back to an older thread. Only the draft's own first accepted prompt or
 shell result may attach the Web view to the newly resolved runtime thread.
+When that first accepted prompt is submitted through `turn/start`, Gateway must
+materialize and bind a durable thread id before model execution so runtime tools
+observe a real current thread. Failed request validation, empty input, and
+`thread/start` itself must still leave no placeholder session behind.
 When another turn for the same browser/project source is already running,
 `thread/start` creates an internal draft source lane for the returned snapshot.
 The draft lane lets the first prompt or shell command start immediately instead
@@ -222,6 +216,9 @@ running turns must not overwrite the binding.
 Web clients may show a local draft row for this detached draft in their History
 UI, but that row is not a persisted session and must not be exposed as a
 Gateway `SessionSummaryView`.
+When a global new-session action starts this detached draft from an app-level
+surface such as Settings, Search, or Automations, Workbench must return the main
+area to the transcript view so the new draft is immediately visible and usable.
 Starting another new session while an unpersisted local draft is selected
 replaces the client-local draft row instead of accumulating multiple draft rows;
 only an accepted prompt or shell command can turn a draft into a durable
@@ -475,7 +472,11 @@ capability-filtered catalog used by slash completion. The catalog and
 Web must not carry a separate hard-coded slash inventory beyond applying typed
 host actions returned by Gateway. Unknown slash-looking input, including
 absolute-path-looking input, is returned as prompt passthrough instead of a
-local command error.
+local command error. Gateway reads the effective slash alias configuration for
+the requested workdir before serving `command/list`, `completion/list`, or
+`command/execute`. Alias rows returned to Web carry `source: "custom"` and
+`expandsTo`; executing the alias expands to the target line before normal
+shared parsing while preserving the original alias line as display text.
 The Web/Desktop surface profile is derived by Gateway from the request source
 and is not declared by the browser client. `command/list` includes runtime
 presentation metadata (`presentationKind`, `destination`, `feedbackAnchor`, and
@@ -487,6 +488,10 @@ lives in Settings > Agents. If a hidden command is typed explicitly,
 `command/execute` returns `known=true`, `accepted=false`, bounded guidance, and
 optional alternate action. Unknown slash-looking input returns `known=false`
 with a `passThroughPrompt` host action.
+Workbench uses `slash/settings/read` and `slash/settings/update` to manage
+profile/global slash aliases and shortcuts from Settings. The methods read and
+write only the active profile config, preserve unrelated TOML, return bounded
+diagnostics for validation errors, and do not edit project `.psychevo/config.toml`.
 `/btw` is a shared `Side chat` command defined by
 [250 Thread Navigation](../250-ui-display-model/thread-navigation.md). Web/Desktop
 discovery and completion expose it only when the current Workbench surface has
@@ -500,8 +505,11 @@ Workbench applies command results by destination rather than by transcript
 insertion. Navigation commands switch panels, structured inspection commands
 open their domain view such as preview or status, active-turn controls update
 local activity state, submit-style slash commands start a normal model turn, and
-export commands invoke the host download/share path. Display-only feedback from
-commands must not be persisted as transcript entries. Panel host actions must
+export commands invoke the host download/share path. Export/share commands honor
+the same parsed `-f|--format` and `-i|--include` arguments as TUI after alias
+expansion; `/export` path arguments are used only as browser download filename
+hints, not host-local write paths. Display-only feedback from commands must not
+be persisted as transcript entries. Panel host actions must
 reveal their destination in desktop and mobile layouts; focusing Status or
 History is not sufficient if the corresponding inspector/sidebar is collapsed.
 Undo and redo slash commands execute through `command/execute` and return host
@@ -525,16 +533,12 @@ a short delay and may be dismissed by clicking outside its panel. Error feedback
 and feedback with follow-up actions must remain until explicit dismissal or a
 normal transient clear.
 
-Composer model selection is durable UX state, not default configuration. The
-Workbench composer reads and writes `$PSYCHEVO_HOME/model-state.json` through
-Gateway model-state RPCs for the active workdir. Selecting a model updates the
-next-turn composer choice and recent-model ordering; it must not write
-`config.toml`. Settings > Models remains the GUI surface for default and
-auxiliary model configuration. After Settings > Models saves the global default
-model, Workbench refreshes `settings/read.controls` and syncs the in-memory
-composer control to the backend-resolved model for the current scope. If the
-current session or workdir has an explicit composer model, that scoped model
-continues to display instead of the new global default.
+Composer model persistence semantics are defined by
+[125 Model Config](../125-model-config/spec.md). Workbench implements them
+through Gateway model-state RPCs for the active workdir. After Settings > Models
+saves the global default model, Workbench refreshes `settings/read.controls`;
+active session or workdir composer overrides continue to display instead of the
+new global default.
 
 Workbench observes accepted-turn settlement through Gateway live events and
 `thread/read` snapshots. Provider/runtime failures after turn acceptance must

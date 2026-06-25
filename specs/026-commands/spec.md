@@ -53,7 +53,9 @@ prefix, or another configured alias; concrete products should reject such
 configuration during startup or configuration loading. Interactive discovery
 surfaces may render configured aliases as alias rows when that improves
 completion affordance, but they must still execute through the canonical
-command metadata and parser.
+command metadata and parser. Alias rows carry the submitted alias as their
+visible slash label and the expanded target command line as separate metadata;
+they inherit the target command's presentation metadata and capability gates.
 
 A command metadata record should identify:
 
@@ -120,9 +122,11 @@ Gateway exposes the same command catalog to reconnectable clients through
 typed `command/list` and `command/execute` methods. `command/list` returns
 `CommandListResult { commands: CommandListItem[] }`, where each item carries
 the command name, slash label, usage, summary, aliases, argument kind, source,
-and optional presentation metadata for GUI-like surfaces. TUI, Web, Desktop,
-ACP, and messaging surfaces must project the shared catalog rather than
-inventing separate slash semantics.
+optional expanded target, and optional presentation metadata for GUI-like
+surfaces. `source` is `core`, `dynamic`, or `custom`; `custom` identifies a
+user-configured alias row, not a separately implemented command. TUI, Web,
+Desktop, ACP, and messaging surfaces must project the shared catalog rather
+than inventing separate slash semantics.
 Web and Desktop shells present the shared catalog through transient command
 overlays for composer browse flows, not through a Settings command section.
 Executing `/help` or `/commands` from the composer opens the closeable overlay
@@ -140,6 +144,11 @@ include dynamic backend-provided commands when runtime exposes them. Client-side
 presentation may hide only commands that the Gateway/runtime marks unavailable
 for that host capability set; it must not drop unknown extension commands from
 completion or execution merely because the frontend does not know their names.
+Web/Desktop catalog and completion results also include effective user aliases
+from the same slash configuration used by TUI. Executing an alias expands it
+before parsing; trailing text typed after the alias is appended to the target
+line, and the original submitted alias remains the display text for any
+prompt-submission effect.
 
 GUI presentation metadata is derived from runtime command metadata rather than
 from frontend command-name allowlists. `presentationKind` uses:
@@ -172,6 +181,12 @@ Web/Desktop `command/execute` maps these shared effects to typed host actions
 where a first-slice host action exists. Effects without a Web/Desktop action
 return bounded unsupported guidance instead of falling through to arbitrary
 frontend behavior.
+Export and share host actions preserve parsed shared command arguments after
+alias expansion. For `/export`, Web/Desktop download actions carry the selected
+artifact format, include set, and optional filename hint; browser hosts treat a
+path argument as a suggested download filename rather than a local filesystem
+write path. Invalid export/share arguments return bounded command guidance
+instead of falling back to the default artifact.
 Queue-style host actions may include separate display text so the model input
 can use expanded prompt text while the transcript-visible user input remains the
 original slash line.
@@ -289,7 +304,8 @@ by a frontend-owned command-name list. Dynamic extension commands remain visible
 when returned by the runtime catalog even if the frontend has no built-in
 knowledge of their names. Completion rows may show the command summary and a
 compact destination label, but they must use the Gateway/runtime metadata rather
-than hard-coded surface curation.
+than hard-coded surface curation. Custom alias rows are grouped with their
+expanded target's presentation kind and summarize as `alias for <target>`.
 
 ## Errors
 

@@ -236,10 +236,10 @@ Read [AGENTS.md](AGENTS.md) before changing the project. Psychevo is spec-first:
 before behavior, public docs, tests, or workflow changes, read and update the
 best-fit `specs/<topic>/spec.md`.
 
-Default broad validation:
+Rust workspace broad gate:
 
 ```bash
-scripts/validate.sh broad
+scripts/validate-rust.sh broad
 ```
 
 Use narrower validation when it covers the changed behavior. Live-provider,

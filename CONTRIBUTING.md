@@ -18,14 +18,15 @@ instructions.
 
 ## Validation
 
-Use deterministic local validation by default. The broad entry point is:
+Use deterministic local validation by default. The Rust workspace broad entry
+point is:
 
 ```bash
-scripts/validate.sh broad
+scripts/validate-rust.sh broad
 ```
 
-For focused code changes, prefer a narrower command that exercises the changed
-behavior, such as:
+For focused code changes, prefer a narrower or subsystem-specific command that
+exercises the changed behavior, such as:
 
 ```bash
 cargo test -p psychevo-runtime

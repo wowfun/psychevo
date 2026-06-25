@@ -116,5 +116,5 @@ Playwright desktop/mobile coverage. Channel runtime invariants are owned by
 - CLI setup tests cover setup or status UX changes.
 - Workbench unit and Playwright tests cover Settings UI changes.
 - Generated protocol checks are required when Rust protocol schemas change.
-- Before handoff, run `scripts/validate.sh broad` unless the change is
+- Before handoff, run `scripts/validate-rust.sh broad` unless the change is
   documentation-only or a host prerequisite blocks it.

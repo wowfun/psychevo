@@ -50,22 +50,36 @@ metadata, and timestamps.
 
 Runtime may emit live `started`, `updated`, and `completed` observations while
 a turn is active. These events are presentation-only. On turn completion the
-server sends the committed transcript entries for the completed turn; clients
-discard live overlay state for that turn and replace it with entries projected
-from durable messages. Client-local optimistic prompt rows are part of the same
-live overlay and must be replaced by the committed user entry for the turn.
+Gateway transcript projection materializes the completed turn from durable
+messages; clients discard live overlay state for that turn and replace it with
+those committed entries. Client-local optimistic prompt rows are part of the
+same live overlay and must be replaced by the committed user entry for the turn.
+Committed entries emitted for a turn completion or for an active-turn snapshot
+must carry the real turn identity. Assistant entries from the same turn must
+also carry the same assistant segment ordinal used by live assistant entries.
+The owner invariant is identity-based: a visible assistant segment is owned by
+either the committed message projection or the live overlay, never both, and
+clients must not infer ownership by comparing rendered Markdown or approximate
+text. The Gateway projection is the owner seam: retained live buffers may
+hydrate an active turn, but they must not become an independent transcript
+owner once a same-turn committed projection exists.
 If a committed slice includes entries that were already loaded from history,
 the client must skip those older message sequences instead of rendering them a
-second time. During an active turn, ordinary transcript snapshot refreshes must
-not be used as the primary live display mechanism. If a snapshot or reconnect
-does include message-derived entries for the in-progress turn, the client
-reconciler removes any same-turn live overlay blocks whose visible text or tool
-signature is already covered by those message-derived entries. A live entry is
-retained only for the uncovered blocks that still represent new active
-observations; covered prompt, reasoning, assistant text, and tool blocks must
-not remain as a second copy merely because another block in the same live entry
-is still running. Full snapshot replacement is reserved for reload, resume,
-rewind, and session switching.
+second time. A completed turn is terminal for presentation state: after the
+client applies `turnCompleted` for a turn, later live entry or delta
+observations for that same turn must be ignored and must not recreate a
+`runtime.stream` overlay beside the committed message-derived entries. A
+snapshot refresh is also a terminal presentation barrier when the incoming
+snapshot reports no active turn: the client must not inherit the previous
+client snapshot's stale `activeTurnId` to retain same-thread live overlay rows.
+During an active turn, ordinary transcript snapshot refreshes must not be used
+as the primary live display mechanism. If a snapshot or reconnect does include
+message-derived entries for the in-progress turn, the client reconciler removes
+any same-turn live overlay segment whose turn and assistant segment identity is
+already owned by those message-derived entries. Covered prompt, reasoning,
+assistant text, and tool blocks must not remain as a second copy merely because
+another block in the same live entry is still running. Full snapshot
+replacement is reserved for reload, resume, rewind, and session switching.
 When live observations cross a process boundary, the owning Gateway may retain
 low-frequency boundary events and coalesced latest-entry snapshots as a
 short-lived delivery buffer. That buffer does not change transcript fact
@@ -150,6 +164,11 @@ visible phase text and tool-call content, the live projector still anchors the
 assistant text before the owning tool block once that content is known.
 Assistant text in a tool-call message remains a text block; only provider/model
 reasoning events may create reasoning blocks.
+Tool-call assistant text may be marked as an `assistant_phase` live projection
+while the turn is active. It is a block-level projection hint inside the live
+assistant segment, not a cross-owner dedupe rule. Client reconciliation must use
+the turn and assistant segment identity described above rather than comparing
+`assistant_phase` text with later Markdown or plain-text output.
 Reasoning deltas emitted before `message_end` are live observations for the
 active assistant segment. The public runtime `message_end` payload may hide
 assistant reasoning, so absence of a reasoning block in `message_end.content[]`

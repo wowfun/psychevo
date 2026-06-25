@@ -44,8 +44,8 @@ Browser tests use Playwright against the built Workbench served by
 `pevo gateway open --no-browser --print-url`, with isolated config, SQLite
 state, and workdir by default.
 
-Live model, live skill, and ACP peer validation are opt-in. They may use the
-repo-local development home defined by
+Live model, live skill, GUI automation, and ACP peer validation are opt-in. They
+may use the repo-local development home defined by
 [060 Automation](../060-automation/spec.md), but must still set explicit
 `PSYCHEVO_CONFIG`, `PSYCHEVO_DB`, workdir, and test artifact paths when
 isolation is required. They must not print tokens or secrets.
@@ -62,7 +62,8 @@ isolation is required. They must not print tokens or secrets.
   heartbeat rows, enable/disable, run-now, delete, and open-thread behavior.
 - Automation browser validation covers desktop and narrow viewports and must
   assert that the app-level Automations surface hides composer/right inspector
-  chrome without creating horizontal overflow.
+  chrome without creating horizontal overflow, and that global New Session
+  navigation from Automations returns to the transcript draft surface.
 - Automation protocol validation covers generated schemas, typed client method
   mappings, strict draft and write payload validation, and run responses for
   accepted, busy, and failed starts.
@@ -73,6 +74,9 @@ isolation is required. They must not print tokens or secrets.
 - The reusable `live-skill` Playwright spec samples the page every three
   seconds, writes screenshots as test artifacts, and compares rendered DOM
   order against the isolated SQLite message-derived transcript.
+- GUI automation live validation creates a project automation through the
+  composer with the fastest supported interval schedule and asserts the final
+  transcript answer is not duplicated before inspecting the Automations surface.
 - Browser validation fails on Workbench render error boundaries, stale running
   reasoning rows that duplicate committed reasoning, non-monotonic committed
   row order, tool result JSON in collapsed headers, evidence header overflow,
@@ -81,14 +85,11 @@ isolation is required. They must not print tokens or secrets.
 - Inline transcript diff fixtures cover desktop and narrow viewports, including
   direct rendered-diff detail without Input/Change metadata, single-gutter
   rows, clipped long lines, and malformed-diff fallback.
-- Settings > Models tests cover provider configuration, explicit fake catalog
-  fetch, OpenCode Zen free-model warning state, independent default/title/
-  compression saves, fetched catalog propagation into assignment controls and
-  the composer selector, model-specific reasoning-effort assignment saves, no
-  manual model-id text entry, profile/global default display even when the
-  current project has its own `.psychevo/config.toml` model override,
-  default-save refresh of current Workbench controls, and preservation of
-  composer session/workdir/effective controls when a scoped override exists.
+- Settings > Models tests cover the [125 Model Config](../125-model-config/spec.md)
+  acceptance scenarios through the concrete Workbench UI, including fake
+  provider/catalog flows, OpenCode Zen free-model warning state, independent
+  assignment saves, global-vs-project scope, default-save control refresh, and
+  scoped composer override preservation.
 - Composer model-control tests cover the grouped model/reasoning selector,
   including non-selectable empty state, short model display in the closed
   control, provider-qualified hover/title metadata without visible duplicate
@@ -100,10 +101,7 @@ isolation is required. They must not print tokens or secrets.
   width adaptation, full-width popover rows without unused right gutters, and
   switching models without submitting an invalid `Select model` value.
 - Settings > Models assignment tests cover reuse of the same model/reasoning
-  selector behavior used by the composer, including provider group headings,
-  filtering, recent-model promotion, free-model badges, model-specific
-  reasoning effort lists, and independent saves for default, title generation,
-  and context compression.
+  selector behavior used by the composer.
 - Settings > Usage visual tests cover token-activity heatmap levels with
   distinct computed colors across zero and four nonzero activity levels in the
   light appearance.

@@ -190,6 +190,12 @@ Exec commands are evaluated in three layers:
 2. configured `exec_policy.rules`
 3. command safety classification for known-safe, dangerous, and unknown
 
+Background-process deny is based on shell syntax, not raw substring scanning.
+Foreground commands and heredocs whose quoted content merely contains `&` must
+not be treated as background wrappers. True background execution with `&`, and
+wrappers that detach work such as `nohup`, `setsid`, and `disown`, remain hard
+denies because Psychevo cannot track their lifecycle.
+
 `exec_policy.rules` are parsed token-prefix rules with decisions `allow`,
 `prompt`, and `deny`. A prefix token may be either a string or a list of string
 alternatives. Optional `justification` is user-facing rationale. Optional

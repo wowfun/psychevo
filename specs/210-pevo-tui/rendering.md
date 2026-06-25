@@ -92,6 +92,9 @@ code blocks, tables, links, and local file links. Raw mode renders assistant
 answer bodies and visible Thinking bodies as raw Markdown source, but remains
 display-only and must not change persisted message content, provider replay,
 `/copy`, non-terminal JSON output, row identity, or tool evidence rendering.
+Markdown tables that exceed the available terminal width render as compact,
+wrapped row blocks keyed by column header instead of unbounded pipe-table lines
+delegated to terminal soft-wrap.
 
 Timeout-only fullscreen redraws used only to advance running-state motion are
 coalesced to a bounded passive cadence. Key input, paste, resize, mouse

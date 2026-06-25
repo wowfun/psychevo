@@ -49,6 +49,12 @@ The built-in provider ids and aliases are:
 - `lmstudio`
 - `custom`
 
+OpenCode Zen's built-in registry facts are: id `opencode-zen`, aliases
+`opencode`, `opencode_zen`, and `zen`, default base URL
+`https://opencode.ai/zen/v1`, credential environment variable
+`OPENCODE_ZEN_API_KEY`, optional base-url environment variable
+`OPENCODE_ZEN_BASE_URL`, and built-in no-auth support.
+
 Provider entries define:
 
 - canonical provider id
@@ -318,6 +324,10 @@ include `pricing.cache_read`, `pricing.cached_prompt`, and
 maps to a per-request price when present. Provider-style `pricing` token values
 are interpreted as USD per token and converted to USD per one million tokens;
 the TOML `cost` object remains USD per one million tokens.
+
+OpenCode Zen free-model metadata is resolved from live catalog/pricing metadata
+when available and from documented free ids when metadata is absent. Model ids
+ending in `-free` and `big-pickle` are classified as free for this provider.
 
 Unknown capabilities are permissive. Only an explicit `false` capability may
 degrade a request projection. For example, runtime suppresses

@@ -77,16 +77,16 @@ the newest history entry.
 After a prompt has run, later prompts in the same TUI process append to the
 current session explicitly.
 
-TUI sessions have an optional display title. When a new TUI session is created
-from a user prompt and the session title is still empty, TUI attempts to
-generate a concise title with `auxiliary.title_generation` when configured,
-falling back to the selected provider/model, by using a non-persisted, no-tool
-title request. That title request must not append
-messages, tool calls, usage rows, or evidence to the session transcript. If the
-title request fails, returns empty text, or returns unusable text, TUI falls
-back to a deterministic title derived from the first user prompt. Titles are
-trimmed, internal whitespace is collapsed, and stored titles are bounded to 100
-characters.
+TUI sessions use the shared human-visible session title contract defined by the
+Gateway spec. When a new top-level TUI session is created from a user prompt and
+the session title is still empty, runtime attempts to generate a concise title
+with `auxiliary.title_generation` when configured, falling back to the selected
+provider/model, by using a non-persisted, no-tool title request. That title
+request must not append messages, tool calls, usage rows, or evidence to the
+session transcript. If the title request fails, returns empty text, or returns
+unusable text, runtime falls back to a deterministic title derived from the first
+user prompt. Titles are trimmed, internal whitespace is collapsed, and stored
+titles are bounded to 100 characters.
 
 When the first prompt explicitly selects skills with `$skill-name` markers or
 `--skill`, title generation receives compact selected-skill context

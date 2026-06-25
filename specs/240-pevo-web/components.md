@@ -220,6 +220,10 @@ typed token visibly points at.
 Slash completion rows may include a short destination label such as Panel,
 Preview, Prompt, Download, or Extension. Those labels are derived from Gateway
 command presentation metadata, not from frontend command-name allowlists.
+User-configured slash aliases returned by Gateway appear as ordinary slash
+completion rows with the alias as the visible and inserted text. Alias rows
+show `alias for <target>` as their detail and keep the target command's
+destination label.
 
 Workbench applies slash command results to the region that owns the result.
 Commands/help, sessions/history, and status commands switch the relevant
@@ -240,6 +244,17 @@ workdir switches and when the user submits new input. Successful feedback with
 no follow-up action may auto-dismiss after a short delay and may be dismissed by
 clicking outside the feedback panel. Error feedback and feedback with an action
 must remain until an explicit clear, context switch, or new input.
+
+The Settings Slash Commands section is the Workbench app-level profile
+configuration surface for TUI-compatible slash aliases and shortcuts. It edits
+only active profile/global `tui.slash_aliases`, `tui.slash_keybinds`,
+`leader_key`, and `leader_timeout_ms` through Gateway slash-settings RPCs. The
+page manages compact custom rows with target slash line, alias chips, shortcut
+chips, and edit/delete actions; it does not duplicate the full command catalog
+and does not define prompt-template commands. Saving refreshes the command
+catalog so composer slash completion and the `/commands` overlay reflect aliases
+immediately. Web v1 does not register browser-level keyboard shortcuts; shortcut
+rows configure TUI behavior only.
 
 The Settings Agents section is the Workbench app-level ACP client configuration
 surface. It shows configurable Profile-level ACP backend registrations and their

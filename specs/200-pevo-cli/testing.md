@@ -13,7 +13,7 @@ Automation vocabulary and generic validation boundaries follow
 The default deterministic gate is:
 
 ```bash
-scripts/validate.sh broad
+scripts/validate-rust.sh broad
 ```
 
 ## Init Coverage

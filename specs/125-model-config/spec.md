@@ -1,35 +1,51 @@
 ---
-name: Model Configuration UX
+name: 125. Model Config
 psychevo_self_edit: deny
 ---
 
-# Model Configuration UX
+# 125. Model Config
 
-Define the Workbench profile-level model configuration surface.
+Define the product-level model configuration UX across Workbench, TUI, Gateway,
+and shared composer state.
+
+This topic owns the user-facing boundary between saved model defaults, transient
+composer selection, provider setup, and explicit model catalog fetches. Runtime
+provider identity, TOML schema, credential resolution, provider metadata, and
+cost semantics belong to [120 Provider Registry](../120-provider-registry/spec.md).
 
 ## Scope
 
-- Settings > Models in Workbench
-- built-in and custom provider configuration from the GUI
-- explicit model catalog fetches
+- Workbench Settings > Models as the profile/global model configuration surface
+- GUI and TUI composer model pickers as current-workdir UX state
+- shared `$PSYCHEVO_HOME/model-state.json` model-selection state
+- Gateway model settings, provider save/catalog, and assignment RPC semantics
+- explicit model catalog fetch UX and immediate option propagation
 - global/profile default model assignment
 - auxiliary model assignments for title generation and context compression
 
 Out of scope:
 
-- project-local model settings in the GUI
+- runtime provider registry facts, config schema, metadata precedence, and cost
+  accounting; these belong to [120 Provider Registry](../120-provider-registry/spec.md)
+- concrete Web layout, CSS, and component composition; these belong to
+  [240 pevo Web](../240-pevo-web/spec.md)
+- concrete terminal layout, key handling, and panel rendering; these belong to
+  [210 pevo TUI](../210-pevo-tui/spec.md)
+- project-local model settings in Workbench Settings
 - hot-swapping the currently running turn
 - automatic live provider validation
 - storing provider secrets in frontend storage or TOML
 - automatic migration from legacy `tui-state.json` model fields
 
-## Behavior
+## Saved Defaults And Composer State
 
-Settings > Models is an app-level configuration page. It must not replace or
-remove the composer's session-scoped model control. Saving in Settings changes
-future default behavior and does not silently mutate an active session turn.
-The page's assignment rows are profile/global state: `model/settings/read` with
-`scope: "global"` reads the profile config only for default and auxiliary model
+Settings > Models is an app-level profile/global configuration page. It must not
+replace or remove the composer's session-scoped model control. Saving in
+Settings changes future default behavior and does not silently mutate an active
+session turn.
+
+Settings assignment rows are profile/global state. `model/settings/read` with
+`scope: "global"` reads profile config only for default and auxiliary model
 assignments. Project-local `.psychevo/config.toml` model overrides may affect
 composer/effective controls, but they must not change what Settings > Models
 shows as the saved global default.
@@ -50,23 +66,20 @@ Legacy TUI model fields are not automatically migrated at startup. A one-time
 maintenance script may read an existing `tui-state.json`, write equivalent
 `model-state.json` model fields, and leave TUI-only flags in `tui-state.json`.
 
-The page shows built-in providers, configured providers, and custom providers
-in one compact list. Each provider row exposes its display label, configured
-state, base URL, credential state, no-auth state, and model-catalog fetch
-action. Provider API keys may be typed in the page but are sent only to Gateway
-for durable `.env` writes; they are never persisted in frontend storage and are
-never written into TOML.
+## Provider Configuration UX
 
-OpenCode Zen is a built-in provider with id `opencode-zen`, aliases
-`opencode` and `zen`, base URL `https://opencode.ai/zen/v1`, optional
-`OPENCODE_ZEN_API_KEY`, and explicit public/free mode through
-`provider.opencode-zen.options.no_auth = true`.
+Settings > Models shows built-in providers, configured providers, and custom
+providers in one compact list. Each provider row exposes its display label,
+configured state, base URL, credential state, no-auth state, and model-catalog
+fetch action. Provider API keys may be typed in the page but are sent only to
+Gateway for durable `.env` writes; they are never persisted in frontend storage
+and are never written into TOML.
 
 Model catalog fetches are explicit user actions. They use runtime provider
-catalog helpers and deterministic timeouts. OpenCode Zen free models are marked
-from live catalog/pricing metadata when available and from documented free ids,
-including `*-free` ids and `big-pickle`. Free Zen selections must show a
-privacy/data-retention warning before save.
+catalog helpers and deterministic timeouts. Free OpenCode Zen selections must
+show a privacy/data-retention warning before save; the provider id, aliases,
+base URL, credential env, no-auth support, and free-model classification are
+defined by [120 Provider Registry](../120-provider-registry/spec.md).
 
 Fetched catalogs are session-visible candidate models, not persisted model
 configuration. Gateway keeps fetched catalog rows in process memory and merges
@@ -95,6 +108,8 @@ counts should not be repeated as secondary row copy.
 `compression.model` remains a legacy fallback, but new GUI writes use
 `auxiliary.compression`.
 
+## Composer Refresh
+
 After saving the default model, Workbench must refresh the current
 `settings/read.controls` view and sync the App-level composer state to the
 backend-resolved controls model and reasoning effort. This keeps the composer
@@ -117,8 +132,19 @@ All responses are camelCase, redacted, and typed in the shared protocol.
 Catalog and save failures must be bounded, user-visible errors and must not
 leave partially typed secrets in frontend state after successful save.
 
-## Testing
+## Attachments
 
-Tests must use fake providers and isolated config/env files by default. No test
-or broad validation path may require a real OpenCode Zen key or live catalog
-unless explicitly opted in.
+- [Testing](testing.md) defines deterministic and live opt-in validation.
+
+## Related Topics
+
+- [120 Provider Registry](../120-provider-registry/spec.md) defines provider
+  identity, TOML configuration, credential resolution, catalog metadata, and
+  runtime resolution.
+- [210 pevo TUI State and Models](../210-pevo-tui/state-and-models.md) defines
+  concrete TUI model picker and state behavior.
+- [240 pevo Web](../240-pevo-web/spec.md) defines concrete Workbench Settings
+  and composer UI behavior.
+- [057 Profiles](../057-profiles/spec.md) defines the active profile home that
+  owns global config and shared model state.
+- [200 pevo CLI](../200-pevo-cli/spec.md) defines CLI model and auth commands.

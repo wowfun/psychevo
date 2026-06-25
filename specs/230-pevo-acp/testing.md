@@ -99,7 +99,7 @@ Relevant narrow validation:
 
 Broad deterministic validation:
 
-- `scripts/validate.sh broad`
+- `scripts/validate-rust.sh broad`
 
 ## Validation Boundaries
 
