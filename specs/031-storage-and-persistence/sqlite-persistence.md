@@ -37,6 +37,8 @@ The default first-slice SQLite shape contains:
 - `gateway_live_snapshots`
 - `gateway_control_commands`
 - `gateway_turn_terminals`
+- `automations`
+- `automation_runs`
 
 The default first-slice SQLite shape does not create:
 - a separate per-invocation execution-root table
@@ -158,6 +160,71 @@ Required semantics include:
 Failed and interrupted terminal facts may be projected as diagnostic/status
 rows by product transcript views. They must not be stored as assistant messages
 or counted as loop-visible transcript messages.
+
+## Automations
+
+The `automations` and `automation_runs` storage shapes persist local product
+automation facts from [060 Automation](../060-automation/spec.md). They are
+coordination and inspection records, not a replacement for transcript,
+message, or Gateway activity records.
+
+`automations` stores one definition per local automation task. Required
+semantics include:
+- durable task identity
+- workdir scope
+- target kind, either project automation or thread heartbeat
+- optional target thread id for thread heartbeats
+- title and prompt text
+- structured schedule JSON
+- enabled state
+- execution policy JSON including permission mode and sandbox default
+- optional model and reasoning-effort selection
+- last-run, next-run, and bounded error projection fields
+- timestamps for creation and update
+
+The first implementation slice stores these automation columns:
+
+- `id` text primary key, UUID v7
+- `workdir` text
+- `kind` text, `project` or `thread_heartbeat`
+- `target_thread_id` text nullable
+- `title` text
+- `prompt` text
+- `schedule_json` text
+- `enabled` integer boolean
+- `execution_json` text
+- `model` text nullable
+- `reasoning_effort` text nullable
+- `source_key` text nullable
+- `created_at_ms` integer
+- `updated_at_ms` integer
+- `last_run_at_ms` integer nullable
+- `next_run_at_ms` integer nullable
+- `last_status` text nullable
+- `last_error` text nullable
+
+`automation_runs` stores bounded run coordination and result projection for one
+attempt to run a task. Required semantics include:
+- durable relationship to one automation task
+- status sufficient to distinguish running, completed, failed, skipped, and
+  interrupted
+- trigger source such as schedule or manual run
+- started/completed timestamps
+- target thread/source details when known
+- bounded error message for inspection
+
+The first implementation slice stores these run columns:
+
+- `id` text primary key, UUID v7
+- `automation_id` text foreign key
+- `trigger` text
+- `status` text
+- `started_at_ms` integer
+- `completed_at_ms` integer nullable
+- `thread_id` text nullable
+- `source_key` text nullable
+- `error` text nullable
+- `metadata_json` text nullable
 
 ## Agent Edges
 
@@ -347,7 +414,7 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 22`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 23`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)` every 50 successful writes.
 
@@ -358,6 +425,9 @@ concern, not the default high-level runtime contract. The fullscreen TUI must
 avoid idle high-frequency database polling; live agent reload checks are
 rate-limited to at most once every 250 ms while preserving immediate checks
 after session switches.
+
+The version 23 slice adds local product automation definition and run
+coordination tables.
 
 The version 22 slice adds `gateway_live_snapshots` for coalesced live transcript
 observation replay and clears retained live relay buffers when migrating from

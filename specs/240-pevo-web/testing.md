@@ -27,6 +27,9 @@ product surface and frontend platform.
   under test.
 - Workbench renders parseable update-tool diffs as default-visible inline
   transcript evidence without changing Review preview behavior.
+- Workbench exposes local Automations as an app-level surface with project
+  automation and thread-heartbeat workflows backed by Gateway RPC and durable
+  local state.
 
 ## Current Implementation Slice
 
@@ -54,6 +57,15 @@ isolation is required. They must not print tokens or secrets.
 - Composer submit, permission, clarify, command feedback, runtime controls,
   settings, files, review, terminal, status, downloads, and debug panels remain
   functional after reconnect.
+- Automations tests cover natural-language draft creation, empty state
+  templates, manual creation, template creation, project automation rows, thread
+  heartbeat rows, enable/disable, run-now, delete, and open-thread behavior.
+- Automation browser validation covers desktop and narrow viewports and must
+  assert that the app-level Automations surface hides composer/right inspector
+  chrome without creating horizontal overflow.
+- Automation protocol validation covers generated schemas, typed client method
+  mappings, strict draft and write payload validation, and run responses for
+  accepted, busy, and failed starts.
 - Desktop and narrow viewports preserve usable navigation and non-overlapping
   primary controls.
 - Generated protocol schemas and clients preserve public imports and strict

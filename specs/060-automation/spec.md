@@ -3,11 +3,16 @@ name: 060. Automation
 psychevo_self_edit: deny
 ---
 
-Define the cross-cutting foundation for Psychevo test and validation
-automation. Automation in this spec means local, CI, harness, and coding-agent
-validation of Psychevo behavior; it does not define external runtime
-orchestration, remote control APIs, product workflow automation, or provider
-catalog automation.
+Define the cross-cutting foundation for Psychevo automation. Automation in this
+spec covers two related boundaries:
+
+- local, CI, harness, and coding-agent validation of Psychevo behavior
+- local product workflow automations that schedule Psychevo turns for a project
+  or for an existing thread
+
+Automation remains local-first in this slice. It does not define hosted job
+services, external orchestration APIs, remote control APIs, provider catalog
+automation, or long-running OS-level background schedulers.
 
 ## Scope
 
@@ -17,14 +22,20 @@ catalog automation.
   projection artifacts
 - boundaries for deterministic, live opt-in, snapshot, harness, integration,
   and E2E validation categories
+- local project automations and thread heartbeats scheduled by a running
+  Gateway/Web process
+- product automation execution policy, persistence, and UI evidence boundaries
 
 Out of scope:
 - concrete validation commands, CI workflow files, artifact paths, storage
   schemas, JSON schemas, snapshot file formats, or screenshot formats
 - product-specific acceptance matrices, provider-specific live checks, TUI
   rendering test mechanics, or CLI output contracts
-- external orchestration APIs, job schedulers, hosted automation services,
-  plugin automation, or model-driven operational workflows
+- hosted automation services, remote scheduling APIs, OS cron/systemd launch
+  agents, cloud workers, plugin automation, or provider catalog automation
+- guaranteed execution while Gateway is closed
+- whole-process isolation, containerized execution, or per-automation worktree
+  creation
 
 ## Validation Vocabulary
 
@@ -121,6 +132,93 @@ API-key, or live-service validation remains live opt-in and must not enter the
 default deterministic validation path. Scripts must not automatically copy
 credentials from the user's normal home or external auth stores into this
 directory; developers must prepare any live credentials explicitly.
+
+## Product Workflow Automations
+
+Psychevo product automations are local scheduled prompts executed through the
+same Gateway turn path as ordinary Workbench turns. The first product slice
+supports:
+
+- project automations: scheduled prompts scoped to a workdir and bound to a
+  persistent automation source key
+- thread heartbeats: scheduled prompts appended to an existing thread when
+  continuity in that thread matters
+
+Project automations create or reuse their own Gateway source binding using a
+stable source key shaped like `automation:<task-id>`. A project automation must
+not rebind the ordinary Workbench workdir source. Thread heartbeats use an
+explicit target thread id and do not create a second source binding unless a
+future feature needs one for UI grouping.
+
+An automation prompt is submitted as plain user content. Slash-looking text in
+an automation prompt remains ordinary prompt text and must not go through the
+Workbench slash-command parser or a separate command scheduler.
+
+The first scheduler runs inside the local Gateway/Web process. It checks due
+tasks periodically while the process is alive. If the process is closed, missed
+work is not executed until Gateway starts again. On restart, a task may run at
+most once for the latest missed occurrence; the scheduler must not replay every
+missed interval as a backlog.
+
+Schedules are local to the execution host. The first schedule grammar supports:
+
+- interval schedules with a positive `everyMinutes` value
+- daily schedules at a local `HH:mm` time
+- weekly schedules with local weekdays and a local `HH:mm` time
+
+Schedule calculation must be deterministic under a supplied clock in tests.
+Calendar schedules should use a real local-time library rather than ad hoc date
+math. Daylight-saving and clock-shift behavior should fail gently by moving to
+the next valid local occurrence rather than creating repeated immediate runs.
+
+The scheduler must avoid overlapping runs for the same task. A manual "run
+now" request and a timed tick compete for the same task claim. If a task is
+already running, the later request should report or record a skipped/busy run
+instead of starting a second turn.
+
+Automation definitions and run records are persisted as local semantic state.
+Definitions include title, target, prompt, schedule, enabled state, optional
+model/reasoning selection, and execution policy. Run records include timing,
+status, target thread/source information when known, and bounded error text.
+The transcript remains the durable evidence for model-visible messages and tool
+results; automation run records are coordination and inspection facts, not a
+second transcript.
+
+The default execution policy is `Auto in sandbox`. It maps to prompt-approval
+auto-allow behavior while still preserving hard permission denies and sandbox
+enforcement. In the current runtime this is implemented by running automation
+turns with `bypassPermissions` plus an automation-only sandbox override:
+`enabled=true`, `mode=workspace-write`, and the usual temporary/cache roots for
+shell children. This must not mutate user configuration. Sandbox v1 does not
+confine network access; network remains governed by the current permission and
+shell-risk model from [041 Permissions](../041-permissions/spec.md) and
+[045 Sandbox](../045-sandbox/spec.md).
+
+An alternate Ask-first policy may run with ordinary permission prompts. If a
+scheduled run reaches a user approval or clarify prompt, it becomes an
+ordinary pending interaction in the owning thread/source; the scheduler must
+not invent a second approval channel.
+
+A natural-language draft flow may ask the configured model to turn a user
+description into a strict automation draft. The draft RPC is advisory: no
+automation may be persisted or run until the user confirms the resulting title,
+target, prompt, schedule, enabled state, and execution policy. The model output
+must be parsed as structured JSON, normalized through the same validation rules
+as manual creation, and rejected rather than partially saved when required
+fields are missing or invalid.
+
+Drafting should not create a separate automation definition or update an
+existing one. A failed or unavailable model draft leaves the user's original
+description available so they can revise it or continue in the manual editor.
+If a current thread id is supplied, the draft may target a thread heartbeat;
+otherwise it must target a project automation.
+
+Workbench should present automations as an app-level operational surface, not
+as Settings and not as a landing page. The first UI includes an empty state
+with templates, a natural-language draft input, a manual editor, a current task list,
+enable/disable controls, run-now, delete, and an "open thread" path for tasks
+with a known target thread. Thread heartbeat creation should be reachable when
+there is an active thread.
 
 ## Validation Boundaries
 

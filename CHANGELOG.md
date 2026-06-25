@@ -1,7 +1,14 @@
 # Changelog
 
+## 2026-06-24
+
+- Added Workbench automation drafting via `automation/draft`, returning a user
+  editable draft before save.
+
 ## 2026-06-23
 
+- Began local Automations with project automation flows, thread heartbeats,
+  Gateway scheduling, Workbench UX, and SQLite persistence contracts.
 - Expanded model management for Workbench/TUI: Settings assignment pickers,
   shared model-state synchronization, aux-model routing, fetched catalogs, and
   improved picker UX/filtering for faster selection.

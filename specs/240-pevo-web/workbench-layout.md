@@ -7,7 +7,7 @@ the same Web/Desktop tree.
 
 The desktop layout is a three-surface workbench:
 
-- left: collapse control, `New Session`, `Search`, global
+- left: collapse control, `New Session`, `Search`, `Automations`, global
   `Pinned`, project-grouped Sessions with expand/collapse and per-project new
   session actions, and a bottom utility rail for Settings. Settings is the
   persistent app-level configuration center whose left navigation lists
@@ -39,6 +39,30 @@ icon-and-label rows to open Review, Terminal, Files, and, for non-draft
 sessions, `Side chat` tabs. Rows do not carry right-side explanatory copy. Once
 any tab is open, the tab strip includes a `+` menu for creating more tabs of
 those types. Browser is not exposed in this slice.
+
+Automations is an app-level operational surface for local project automations
+and thread heartbeats defined by [060 Automation](../060-automation/spec.md).
+Like Settings, it replaces the session shell while active and hides the
+composer and right inspector, but it is not a configuration section inside
+Settings. The Automations surface includes:
+
+- a compact empty state with a natural-language draft input, template buttons,
+  and `New`
+- a task list showing enabled/running/error state, target, schedule, next run,
+  last run, run-now, open-thread, and delete actions
+- one shared create/edit flow for model drafts, templates, and manual edits
+- target controls for project automations and, when an active thread exists,
+  current-thread heartbeat automations
+- schedule controls for interval, daily, and weekly local schedules
+- an execution policy control whose default visible label is `Auto in sandbox`
+  and whose alternate first-slice option is `Ask first`
+
+Natural-language creation is a draft-and-confirm flow. Workbench sends the
+user's description to Gateway, receives a structured draft, and fills the same
+create/edit form used by templates and manual edits. The generated title,
+target, prompt, schedule, enabled state, and execution policy remain editable
+and are not saved until the user presses `Save`. If drafting fails, Workbench
+keeps the description visible and leaves the manual controls available.
 
 Workbench follows the shared thread-navigation display contract in
 [250 Thread Navigation](../250-ui-display-model/thread-navigation.md). `Side

@@ -74,7 +74,7 @@ scripts/validate.sh broad
 - TOML `reasoning_effort` uses the same validation as CLI `--variant`.
 - `none` disables lower-level reasoning effort.
 - latest-session lookup filters by canonical workdir and `source = "run"`.
-- SQLite state uses `user_version = 22`; older unsupported state databases reject with an
+- SQLite state uses `user_version = 23`; older unsupported state databases reject with an
   explicit reset/cutover instruction.
 - Reasoning is preserved locally as folded assistant content, without entering
   default visible output or cross-provider replay.
