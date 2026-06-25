@@ -90,6 +90,30 @@ fn bind_source_to_thread(
     Ok(())
 }
 
+fn ensure_turn_start_thread(
+    state: &WebState,
+    scope: &ResolvedScope,
+    requested_thread_id: Option<String>,
+) -> psychevo_runtime::Result<Option<String>> {
+    if let Some(thread_id) = requested_thread_id {
+        bind_source_to_thread(state, scope, &thread_id)?;
+        return Ok(Some(thread_id));
+    }
+    if let Some(thread_id) = state.inner.gateway.resolve_source_thread(&scope.source)? {
+        return Ok(Some(thread_id));
+    }
+
+    let thread_id = state.inner.state.store().create_session_with_metadata(
+        &scope.workdir,
+        "web",
+        "pending",
+        "pending",
+        None,
+    )?;
+    bind_source_to_thread(state, scope, &thread_id)?;
+    Ok(Some(thread_id))
+}
+
 fn user_shell_context_options(
     state: &WebState,
     scope: &ResolvedScope,

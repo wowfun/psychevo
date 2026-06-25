@@ -1,14 +1,24 @@
+struct LocalPeerSession {
+    session_id: String,
+    native_session_id: Option<String>,
+    created: bool,
+}
+
 fn ensure_local_session(
     peer: &ResolvedPeerTurn,
     options: &psychevo_runtime::RunOptions,
-) -> psychevo_runtime::Result<(String, Option<String>)> {
+) -> psychevo_runtime::Result<LocalPeerSession> {
     let store = options.state.store();
     if let Some(session_id) = &options.session {
         store.resume_session(session_id)?;
         let native = store
             .session_metadata(session_id)?
             .and_then(|metadata| peer_native_session_id(&metadata, &peer.backend.id));
-        return Ok((session_id.clone(), native));
+        return Ok(LocalPeerSession {
+            session_id: session_id.clone(),
+            native_session_id: native,
+            created: false,
+        });
     }
     let session_id = store.create_session_with_metadata(
         &options.workdir,
@@ -17,7 +27,11 @@ fn ensure_local_session(
         &format!("acp:{}", peer.backend.id),
         Some(peer_root_metadata(peer, None)),
     )?;
-    Ok((session_id, None))
+    Ok(LocalPeerSession {
+        session_id,
+        native_session_id: None,
+        created: true,
+    })
 }
 
 fn peer_session_metadata(

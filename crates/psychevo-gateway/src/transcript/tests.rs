@@ -572,6 +572,76 @@
     }
 
     #[test]
+    fn committed_turn_projection_stamps_turn_identity_and_assistant_segment_order() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::User {
+                    content: vec![UserContentBlock::text("old")],
+                    timestamp_ms: 1,
+                },
+            ),
+            summary(
+                2,
+                Message::User {
+                    content: vec![UserContentBlock::text("new prompt")],
+                    timestamp_ms: 2,
+                },
+            ),
+            summary(
+                3,
+                Message::Assistant {
+                    content: vec![AssistantBlock::Reasoning {
+                        text: "thinking".to_string(),
+                        provider_evidence: None,
+                    }],
+                    timestamp_ms: 3,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                4,
+                Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "final answer".to_string(),
+                    }],
+                    timestamp_ms: 4,
+                    finish_reason: Some("stop".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+        ];
+
+        let entries = project_committed_turn_window_entries(
+            "thread-1",
+            &summaries,
+            TurnProjectionWindow {
+                turn_id: "turn-1",
+                first_committed_seq: 2,
+            },
+        );
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| (entry.message_seq, entry.turn_id.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some(2), Some("turn-1")),
+                (Some(3), Some("turn-1")),
+                (Some(4), Some("turn-1")),
+            ]
+        );
+        assert_eq!(entries[1].metadata.as_ref().unwrap()["liveOrder"], 0);
+        assert_eq!(entries[2].metadata.as_ref().unwrap()["liveOrder"], 1);
+    }
+
+    #[test]
     fn projector_hides_side_inherited_parent_context() {
         let mut inherited = summary(
             1,

@@ -2,6 +2,7 @@ async fn download_session(
     State(state): State<WebState>,
     headers: HeaderMap,
     AxumPath((session_id, kind)): AxumPath<(String, String)>,
+    Query(query): Query<DownloadQuery>,
 ) -> impl IntoResponse {
     let Some(auth) = state.auth_from_headers(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -13,7 +14,7 @@ async fn download_session(
         )
             .into_response();
     }
-    match render_download(&state, &session_id, &kind) {
+    match render_download(&state, &session_id, &kind, &query) {
         Ok(response) => response.into_response(),
         Err(err) => (
             StatusCode::BAD_REQUEST,
@@ -27,26 +28,55 @@ fn render_download(
     state: &WebState,
     session_id: &str,
     kind: &str,
+    query: &DownloadQuery,
 ) -> psychevo_runtime::Result<Response<Body>> {
     let artifact_kind = match kind {
         "export" => SessionArtifactKind::Export,
         "share" => SessionArtifactKind::Share,
         value => return Err(Error::Message(format!("unknown download kind: {value}"))),
     };
+    let format = match query
+        .format
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => parse_session_export_format(value)
+            .ok_or_else(|| Error::Message(format!("unknown export format: {value}")))?,
+        None => SessionExportFormat::Markdown,
+    };
+    if artifact_kind == SessionArtifactKind::Share && format != SessionExportFormat::Markdown {
+        return Err(Error::Message(
+            "share artifacts support only markdown format".to_string(),
+        ));
+    }
+    let include = match query
+        .include
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => SessionExportIncludeSet::parse(value, artifact_kind)?,
+        None => SessionExportIncludeSet::default_for(artifact_kind),
+    };
     let artifact = render_session_export(
         state.inner.state.store(),
         session_id,
         SessionExportOptions {
-            format: SessionExportFormat::Markdown,
-            include: SessionExportIncludeSet::default_for(artifact_kind),
+            format,
+            include,
             artifact_kind,
         },
     )?;
-    let filename = format!("{kind}-{session_id}.md");
+    let filename = query
+        .filename
+        .as_deref()
+        .and_then(|filename| sanitize_download_filename(filename, artifact.format))
+        .unwrap_or_else(|| format!("{kind}-{session_id}.{}", artifact.format.extension()));
     let mut response = Response::new(Body::from(artifact.content));
     response.headers_mut().insert(
         CONTENT_TYPE,
-        HeaderValue::from_static("text/markdown; charset=utf-8"),
+        HeaderValue::from_static(content_type_for_export_format(artifact.format)),
     );
     response.headers_mut().insert(
         CONTENT_DISPOSITION,
@@ -54,6 +84,72 @@ fn render_download(
             .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
     );
     Ok(response)
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DownloadQuery {
+    format: Option<String>,
+    include: Option<String>,
+    filename: Option<String>,
+}
+
+fn content_type_for_export_format(format: SessionExportFormat) -> &'static str {
+    match format {
+        SessionExportFormat::Markdown => "text/markdown; charset=utf-8",
+        SessionExportFormat::Json => "application/json; charset=utf-8",
+    }
+}
+
+fn sanitize_download_filename(value: &str, format: SessionExportFormat) -> Option<String> {
+    let basename = value.rsplit(['/', '\\']).next().unwrap_or(value).trim();
+    if basename.is_empty() || basename == "." || basename == ".." {
+        return None;
+    }
+    let sanitized = basename
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches(['.', '_', '-'])
+        .chars()
+        .take(180)
+        .collect::<String>();
+    if sanitized.is_empty() {
+        return None;
+    }
+    Some(download_filename_with_format_extension(&sanitized, format))
+}
+
+fn download_filename_with_format_extension(filename: &str, format: SessionExportFormat) -> String {
+    let extension = format.extension();
+    let lower = filename.to_ascii_lowercase();
+    let stem = if let Some(stripped) = lower
+        .ends_with(".json")
+        .then(|| filename.strip_suffix(&filename[filename.len() - 5..]))
+        .flatten()
+    {
+        stripped
+    } else if let Some(stripped) = lower
+        .ends_with(".markdown")
+        .then(|| filename.strip_suffix(&filename[filename.len() - 9..]))
+        .flatten()
+    {
+        stripped
+    } else if let Some(stripped) = lower
+        .ends_with(".md")
+        .then(|| filename.strip_suffix(&filename[filename.len() - 3..]))
+        .flatten()
+    {
+        stripped
+    } else {
+        filename
+    };
+    format!("{stem}.{extension}")
 }
 
 async fn static_asset(

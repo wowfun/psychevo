@@ -48,36 +48,6 @@ impl Gateway {
                 .or(bind_source.as_ref())
                 .map(|source| source.source_key().0)
         };
-        let durable_intent = json!({
-            "kind": "turn",
-            "threadId": active_thread_id.clone(),
-            "sourceKey": durable_source_key.clone(),
-            "runtimeSource": source_name.clone(),
-            "workdir": options.workdir.to_string_lossy(),
-            "input": request.input,
-        });
-        let durable_activity = Some(
-            self.claim_durable_gateway_activity(DurableGatewayActivityClaim {
-                activity_id: &turn_id,
-                thread_id: active_thread_id.as_deref(),
-                source_key: durable_source_key.as_deref(),
-                turn_id: Some(&turn_id),
-                kind: "turn",
-                owner_surface: Some(&source_name),
-                queued_turns: 0,
-                intent: Some(durable_intent),
-            })?,
-        );
-        let _heartbeat = durable_activity
-            .clone()
-            .map(|activity| self.spawn_durable_activity_heartbeat(activity));
-        let event_sink = self.wrap_gateway_event_sink(
-            base_event_sink,
-            durable_activity.clone(),
-            Some(queue_key.to_string()),
-            Some(turn_id.clone()),
-        );
-        let event_sink_for_completion = event_sink.clone();
         let first_committed_seq = active_thread_id
             .as_deref()
             .and_then(|thread_id| {
@@ -88,6 +58,37 @@ impl Gateway {
             })
             .and_then(|summaries| summaries.last().map(|summary| summary.session_seq + 1))
             .unwrap_or(1);
+        let durable_intent = json!({
+            "kind": "turn",
+            "threadId": active_thread_id.clone(),
+            "sourceKey": durable_source_key.clone(),
+            "runtimeSource": source_name.clone(),
+            "firstCommittedSeq": first_committed_seq,
+            "workdir": options.workdir.to_string_lossy(),
+            "input": request.input,
+        });
+        let durable_activity = Some(self.claim_durable_gateway_activity(
+            DurableGatewayActivityClaim {
+                activity_id: &turn_id,
+                thread_id: active_thread_id.as_deref(),
+                source_key: durable_source_key.as_deref(),
+                turn_id: Some(&turn_id),
+                kind: "turn",
+                owner_surface: Some(&source_name),
+                queued_turns: 0,
+                intent: Some(durable_intent),
+            },
+        )?);
+        let _heartbeat = durable_activity
+            .clone()
+            .map(|activity| self.spawn_durable_activity_heartbeat(activity));
+        let event_sink = self.wrap_gateway_event_sink(
+            base_event_sink,
+            durable_activity.clone(),
+            Some(queue_key.to_string()),
+            Some(turn_id.clone()),
+        );
+        let event_sink_for_completion = event_sink.clone();
 
         if options.approval_handler.is_none()
             && let Some(event_sink) = event_sink.clone()
@@ -153,30 +154,26 @@ impl Gateway {
             control,
         };
         let backend_result = match peer {
-            Some(peer) => {
-                acp_peer::run_acp_peer_turn(peer, backend_request, turn_id.clone())
-                    .await
-                    .map(|result| {
-                        (
-                            result.run,
-                            GatewayBackendInfo {
-                                kind: BackendKind::PeerAgent,
-                                native_id: Some(result.native_session_id),
-                            },
-                        )
-                    })
-            }
-            None => {
-                self.backend.run_turn(backend_request).await.map(|result| {
+            Some(peer) => acp_peer::run_acp_peer_turn(peer, backend_request, turn_id.clone())
+                .await
+                .map(|result| {
                     (
-                        result,
+                        result.run,
                         GatewayBackendInfo {
-                            kind: self.backend.kind(),
-                            native_id: None,
+                            kind: BackendKind::PeerAgent,
+                            native_id: Some(result.native_session_id),
                         },
                     )
-                })
-            }
+                }),
+            None => self.backend.run_turn(backend_request).await.map(|result| {
+                (
+                    result,
+                    GatewayBackendInfo {
+                        kind: self.backend.kind(),
+                        native_id: None,
+                    },
+                )
+            }),
         };
         let (result, backend_info) = match backend_result {
             Ok(value) => value,
@@ -233,10 +230,13 @@ impl Gateway {
             terminal_message.as_deref(),
             durable_activity.as_ref(),
         );
-        let mut committed_entries = transcript::project_committed_turn_entries(
+        let mut committed_entries = transcript::project_committed_turn_window_entries(
             &result.session_id,
             &summaries,
-            first_committed_seq,
+            transcript::TurnProjectionWindow {
+                turn_id: &turn_id,
+                first_committed_seq,
+            },
         );
         let agent_edges = self
             .state
@@ -334,8 +334,10 @@ impl Gateway {
             completed_at_ms: Some(completed_at_ms),
         };
         if let Some(thread_id) = thread_id {
-            let _ = self.state.store().upsert_gateway_turn_terminal(
-                GatewayTurnTerminalInput {
+            let _ = self
+                .state
+                .store()
+                .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
                     turn_id,
                     thread_id,
                     status: gateway_turn_status_name(status),
@@ -346,8 +348,7 @@ impl Gateway {
                     metadata: Some(json!({
                         "source": "gateway",
                     })),
-                },
-            );
+                });
         }
         turn
     }
@@ -438,31 +439,6 @@ impl Gateway {
                 .or(bind_source.as_ref())
                 .map(|source| source.source_key().0)
         };
-        let durable_intent = json!({
-            "kind": "shell",
-            "threadId": active_thread_id.clone(),
-            "sourceKey": durable_source_key.clone(),
-            "runtimeSource": context.source.clone(),
-            "workdir": request.workdir.to_string_lossy(),
-            "command": request.command.clone(),
-        });
-        let durable_activity = if inject_into.is_none() {
-            Some(self.claim_durable_gateway_activity(DurableGatewayActivityClaim {
-                activity_id: &shell_id,
-                thread_id: active_thread_id.as_deref(),
-                source_key: durable_source_key.as_deref(),
-                turn_id: Some(&shell_id),
-                kind: "shell",
-                owner_surface: Some(&context.source),
-                queued_turns: 0,
-                intent: Some(durable_intent),
-            })?)
-        } else {
-            None
-        };
-        let _heartbeat = durable_activity
-            .clone()
-            .map(|activity| self.spawn_durable_activity_heartbeat(activity));
         let first_committed_seq = active_thread_id
             .as_deref()
             .and_then(|thread_id| {
@@ -473,6 +449,34 @@ impl Gateway {
             })
             .and_then(|summaries| summaries.last().map(|summary| summary.session_seq + 1))
             .unwrap_or(1);
+        let durable_intent = json!({
+            "kind": "shell",
+            "threadId": active_thread_id.clone(),
+            "sourceKey": durable_source_key.clone(),
+            "runtimeSource": context.source.clone(),
+            "firstCommittedSeq": first_committed_seq,
+            "workdir": request.workdir.to_string_lossy(),
+            "command": request.command.clone(),
+        });
+        let durable_activity = if inject_into.is_none() {
+            Some(
+                self.claim_durable_gateway_activity(DurableGatewayActivityClaim {
+                    activity_id: &shell_id,
+                    thread_id: active_thread_id.as_deref(),
+                    source_key: durable_source_key.as_deref(),
+                    turn_id: Some(&shell_id),
+                    kind: "shell",
+                    owner_surface: Some(&context.source),
+                    queued_turns: 0,
+                    intent: Some(durable_intent),
+                })?,
+            )
+        } else {
+            None
+        };
+        let _heartbeat = durable_activity
+            .clone()
+            .map(|activity| self.spawn_durable_activity_heartbeat(activity));
         let event_sink = self.wrap_gateway_event_sink(
             request.event_sink.clone(),
             durable_activity.clone(),
@@ -524,10 +528,13 @@ impl Gateway {
             self.bind_source_thread(source, &session_id, &backend, None)?;
         }
         let summaries = self.state.store().load_tui_message_summaries(&session_id)?;
-        let committed_entries = transcript::project_committed_turn_entries(
+        let committed_entries = transcript::project_committed_turn_window_entries(
             &session_id,
             &summaries,
-            first_committed_seq,
+            transcript::TurnProjectionWindow {
+                turn_id: &shell_event_id,
+                first_committed_seq,
+            },
         );
         if let Some(event_sink) = event_sink_for_completion {
             for entry in committed_entries.clone() {
@@ -557,7 +564,6 @@ impl Gateway {
             .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
         Ok(PathBuf::from(summary.workdir))
     }
-
 }
 
 fn persisted_gateway_activity(
@@ -575,9 +581,7 @@ fn gateway_turn_status_for_outcome(outcome: Outcome) -> GatewayTurnStatus {
     match outcome {
         Outcome::Normal => GatewayTurnStatus::Completed,
         Outcome::Failed => GatewayTurnStatus::Failed,
-        Outcome::Stopped | Outcome::Aborted => {
-            GatewayTurnStatus::Interrupted
-        }
+        Outcome::Stopped | Outcome::Aborted => GatewayTurnStatus::Interrupted,
     }
 }
 
@@ -609,9 +613,7 @@ fn terminal_message_for_result(result: &RunResult) -> Option<String> {
         .map(|reason| format!("{reason:?}"))
         .or_else(|| match result.outcome {
             Outcome::Failed => Some("The turn failed.".to_string()),
-            Outcome::Stopped | Outcome::Aborted => {
-                Some("The turn was interrupted.".to_string())
-            }
+            Outcome::Stopped | Outcome::Aborted => Some("The turn was interrupted.".to_string()),
             Outcome::Normal => None,
         })
 }

@@ -32,8 +32,12 @@ pub(crate) async fn run_acp_peer_turn(
     let options = request.options;
     let state = options.state.clone();
     let store = state.store();
-    let (session_id, existing_native_id) = ensure_local_session(&peer, &options)?;
-    let existing_native_id = existing_native_id.or(options.runtime_session_id.clone());
+    let local_session = ensure_local_session(&peer, &options)?;
+    let session_id = local_session.session_id;
+    let auto_title_new_session = local_session.created;
+    let existing_native_id = local_session
+        .native_session_id
+        .or(options.runtime_session_id.clone());
     let is_new_native_session = existing_native_id.is_none();
     let prompt = peer_prompt_text(
         &peer.agent,
@@ -154,7 +158,10 @@ pub(crate) async fn run_acp_peer_turn(
         )),
     )?;
     if let Some(title) = acp.session_title.as_deref() {
-        let _ = store.set_session_title(&session_id, title);
+        set_session_title_if_empty(store, &session_id, title);
+    } else if auto_title_new_session {
+        let title = fallback_visible_session_title(&prompt_for_history);
+        set_session_title_if_empty(store, &session_id, &title);
     }
     let assistant_content = acp.persisted_assistant_content();
     if !assistant_content.is_empty() {
@@ -222,4 +229,21 @@ pub(crate) async fn run_acp_peer_turn(
         run,
         native_session_id: acp.native_session_id,
     })
+}
+
+fn set_session_title_if_empty(
+    store: &psychevo_runtime::SqliteStore,
+    session_id: &str,
+    title: &str,
+) {
+    if store
+        .session_summary(session_id)
+        .ok()
+        .flatten()
+        .and_then(|summary| summary.title)
+        .is_some_and(|title| !title.trim().is_empty())
+    {
+        return;
+    }
+    let _ = store.set_session_title(session_id, title);
 }

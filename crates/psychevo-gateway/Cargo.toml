@@ -13,6 +13,8 @@ feishu-sdk.workspace = true
 futures.workspace = true
 http.workspace = true
 portable-pty.workspace = true
+psychevo-agent-core = { path = "../psychevo-agent-core" }
+psychevo-ai = { path = "../psychevo-ai" }
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
 psychevo-runtime = { path = "../psychevo-runtime" }
 qrcode.workspace = true
@@ -26,5 +28,4 @@ toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-psychevo-ai = { path = "../psychevo-ai" }
 tempfile.workspace = true

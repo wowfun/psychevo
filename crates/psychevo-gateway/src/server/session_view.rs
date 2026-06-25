@@ -20,6 +20,17 @@ fn thread_snapshot(
     let entries = match thread_id {
         Some(thread_id) => {
             let mut entries = state.inner.gateway.thread_transcript(thread_id)?;
+            if let Some((turn_id, first_committed_seq)) =
+                active_turn_projection_window(state, thread_id, &activity)?
+            {
+                transcript::stamp_committed_entries_for_turn_window(
+                    &mut entries,
+                    transcript::TurnProjectionWindow {
+                        turn_id: &turn_id,
+                        first_committed_seq,
+                    },
+                );
+            }
             replay_running_live_transcript_overlay(state, thread_id, &activity, &mut entries)?;
             entries
         }
@@ -63,6 +74,45 @@ fn replay_running_live_transcript_overlay(
     Ok(())
 }
 
+fn active_turn_projection_window(
+    state: &WebState,
+    thread_id: &str,
+    activity: &GatewayActivity,
+) -> psychevo_runtime::Result<Option<(String, i64)>> {
+    if !activity.running {
+        return Ok(None);
+    }
+    let Some(active_turn_id) = activity.active_turn_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(record) = state
+        .inner
+        .state
+        .store()
+        .active_gateway_activity_for_thread(thread_id)?
+    else {
+        return Ok(None);
+    };
+    if record.turn_id.as_deref() != Some(active_turn_id) {
+        return Ok(None);
+    }
+    let Some(first_committed_seq) = first_committed_seq_from_activity_intent(&record) else {
+        return Ok(None);
+    };
+    Ok(Some((active_turn_id.to_string(), first_committed_seq)))
+}
+
+fn first_committed_seq_from_activity_intent(
+    record: &psychevo_runtime::GatewayActivityRecord,
+) -> Option<i64> {
+    record
+        .intent
+        .as_ref()
+        .and_then(|intent| intent.get("firstCommittedSeq"))
+        .and_then(Value::as_i64)
+        .filter(|seq| *seq > 0)
+}
+
 fn apply_live_transcript_overlay(
     entries: &mut Vec<TranscriptEntry>,
     thread_id: &str,
@@ -97,15 +147,56 @@ fn apply_live_transcript_overlay(
         }
     }
     entry.blocks = remaining_blocks;
+    if committed_assistant_owner_exists(entries, &entry) {
+        entries.retain(|candidate| candidate.id != entry.id);
+        return;
+    }
     if !entry_has_visible_overlay(&entry) {
         entries.retain(|candidate| candidate.id != entry.id);
         return;
     }
-    if let Some(existing) = entries.iter_mut().find(|candidate| candidate.id == entry.id) {
+    if let Some(existing) = entries
+        .iter_mut()
+        .find(|candidate| candidate.id == entry.id)
+    {
         *existing = entry;
     } else {
         entries.push(entry);
     }
+}
+
+fn committed_assistant_owner_exists(
+    entries: &[TranscriptEntry],
+    live_entry: &TranscriptEntry,
+) -> bool {
+    if live_entry.source != "runtime.stream" || live_entry.role != TranscriptEntryRole::Assistant {
+        return false;
+    }
+    let Some(live_turn_id) = live_entry.turn_id.as_deref() else {
+        return false;
+    };
+    let Some(live_order) = entry_live_order(live_entry) else {
+        return false;
+    };
+    entries.iter().any(|entry| {
+        entry.source == "runtime.message"
+            && entry.role == TranscriptEntryRole::Assistant
+            && entry.turn_id.as_deref() == Some(live_turn_id)
+            && entry_live_order(entry) == Some(live_order)
+    })
+}
+
+fn entry_live_order(entry: &TranscriptEntry) -> Option<i64> {
+    entry
+        .metadata
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|metadata| {
+            metadata
+                .get("liveOrder")
+                .or_else(|| metadata.get("live_order"))
+        })
+        .and_then(Value::as_i64)
 }
 
 fn anchor_live_tool_block(

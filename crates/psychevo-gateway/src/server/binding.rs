@@ -344,9 +344,9 @@ impl WebState {
     fn run_options(&self, workdir: PathBuf, thread_id: Option<String>) -> RunOptions {
         RunOptions {
             state: self.inner.state.clone(),
-            workdir,
+            workdir: workdir.clone(),
             snapshot_root: Some(self.inner.home.join("snapshots")),
-            session: thread_id,
+            session: thread_id.clone(),
             continue_latest: false,
             prompt: String::new(),
             image_inputs: Vec::new(),
@@ -374,6 +374,11 @@ impl WebState {
             no_skills: false,
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
+            runtime_tools: automations::automation_runtime_tools(
+                self.clone(),
+                workdir.clone(),
+                thread_id.clone(),
+            ),
         }
     }
 

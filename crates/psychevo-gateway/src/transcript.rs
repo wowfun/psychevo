@@ -11,6 +11,12 @@ use crate::protocol::{
     TranscriptEntryRole, TranscriptToolResult,
 };
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TurnProjectionWindow<'a> {
+    pub(crate) turn_id: &'a str,
+    pub(crate) first_committed_seq: i64,
+}
+
 pub(crate) fn project_transcript_entries(
     thread_id: &str,
     summaries: &[TuiMessageSummary],
@@ -34,6 +40,46 @@ pub(crate) fn project_committed_turn_entries(
         .into_iter()
         .filter(|entry| entry.message_seq.is_some_and(|seq| seq >= first_seq))
         .collect()
+}
+
+pub(crate) fn project_committed_turn_window_entries(
+    thread_id: &str,
+    summaries: &[TuiMessageSummary],
+    window: TurnProjectionWindow<'_>,
+) -> Vec<TranscriptEntry> {
+    let mut entries =
+        project_committed_turn_entries(thread_id, summaries, window.first_committed_seq);
+    stamp_committed_entries_for_turn_window(&mut entries, window);
+    entries
+}
+
+pub(crate) fn stamp_committed_entries_for_turn_window(
+    entries: &mut [TranscriptEntry],
+    window: TurnProjectionWindow<'_>,
+) {
+    let mut assistant_segment = 0;
+    for entry in entries {
+        if entry
+            .message_seq
+            .is_none_or(|seq| seq < window.first_committed_seq)
+        {
+            continue;
+        }
+        entry.turn_id = Some(window.turn_id.to_string());
+        if entry.role == TranscriptEntryRole::Assistant {
+            entry.metadata = Some(metadata_with_live_order(
+                entry.metadata.take(),
+                assistant_segment,
+            ));
+            assistant_segment += 1;
+        }
+    }
+}
+
+fn metadata_with_live_order(metadata: Option<Value>, live_order: i64) -> Value {
+    let mut object = metadata_object(metadata);
+    object.insert("liveOrder".to_string(), json!(live_order));
+    Value::Object(object)
 }
 
 pub(crate) fn enrich_agent_blocks_from_edges(

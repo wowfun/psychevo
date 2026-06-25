@@ -2787,6 +2787,7 @@ dependencies = [
  "futures",
  "http",
  "portable-pty",
+ "psychevo-agent-core",
  "psychevo-ai",
  "psychevo-gateway-protocol",
  "psychevo-runtime",

@@ -1,16 +1,12 @@
 use std::path::Path;
 
 use psychevo_gateway_protocol as wire;
-use psychevo_runtime::command_registry::{
-    AvailableSlashCommand, available_slash_commands_for_surface,
-};
 use psychevo_runtime::{AgentEntrypoint, ListSkillsOptions, list_skills_value_with_options};
 use serde_json::Value;
 
 use super::{
-    ResolvedScope, WebState, command_completion_detail, discover_gateway_agents,
-    discover_gateway_skills, dynamic_slash_commands, gateway_command_capabilities,
-    web_desktop_command_visible,
+    ResolvedScope, WebState, command_item_completion_detail, command_item_matches,
+    command_list_result, discover_gateway_agents, discover_gateway_skills,
 };
 
 const MAX_COMPLETION_ITEMS: usize = 50;
@@ -92,36 +88,69 @@ fn slash_completion_items(
     let active_turn = thread_id
         .map(|thread_id| state.activity(&scope.source, Some(thread_id)).running)
         .unwrap_or_else(|| state.activity(&scope.source, None).running);
-    let dynamic = dynamic_slash_commands(state, scope)?;
-    let available = available_slash_commands_for_surface(
-        &gateway_command_capabilities(thread_id.is_some()),
+    let mut commands = command_list_result(
+        state,
+        scope,
         active_turn,
-        &dynamic,
+        thread_id.is_some(),
         MAX_COMPLETION_ITEMS,
-    );
-    Ok(available
-        .commands
+    )?
+    .commands;
+    commands.sort_by_key(|command| command_item_match_sort_key(command, query));
+    Ok(commands
         .into_iter()
-        .filter(web_desktop_command_visible)
-        .filter(|command| command_matches(command, query))
+        .filter(|command| command_item_matches(command, query))
         .map(|command| wire::CompletionItem {
             id: format!("command:{}", command.name),
             sigil: "/".to_string(),
-            label: format!("/{}", command.name),
-            insert_text: format!("/{}", command.name),
+            label: command.slash.clone(),
+            insert_text: command.slash.clone(),
             kind: "command".to_string(),
-            detail: Some(command_completion_detail(&command)),
+            detail: Some(command_item_completion_detail(&command)),
             target: None,
             sort_text: Some(format!("command:{}", command.name)),
         })
         .collect())
 }
 
-fn command_matches(command: &AvailableSlashCommand, query: &str) -> bool {
-    query.is_empty()
-        || command.name.contains(query)
-        || command.aliases.iter().any(|alias| alias.contains(query))
-        || command.summary.to_ascii_lowercase().contains(query)
+fn command_item_match_sort_key(command: &wire::CommandListItem, query: &str) -> (u8, String) {
+    if query.is_empty() {
+        return (0, command.name.clone());
+    }
+    let query = query.to_ascii_lowercase();
+    let name = command.name.to_ascii_lowercase();
+    let slash = command.slash.trim_start_matches('/').to_ascii_lowercase();
+    let expands_to = command
+        .expands_to
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let score = if name == query || slash == query {
+        0
+    } else if name.starts_with(&query) || slash.starts_with(&query) {
+        1
+    } else if command
+        .aliases
+        .iter()
+        .map(|alias| alias.trim_start_matches('/').to_ascii_lowercase())
+        .any(|alias| alias == query)
+    {
+        2
+    } else if command
+        .aliases
+        .iter()
+        .map(|alias| alias.trim_start_matches('/').to_ascii_lowercase())
+        .any(|alias| alias.starts_with(&query))
+    {
+        3
+    } else if name.contains(&query) || slash.contains(&query) {
+        4
+    } else if expands_to.contains(&query) {
+        5
+    } else {
+        6
+    };
+    (score, command.name.clone())
 }
 
 fn dollar_completion_items(

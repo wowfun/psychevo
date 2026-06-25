@@ -23,6 +23,7 @@ use psychevo_runtime::{
     AbortSignal, AgentDefinition, AssistantBlock, Error, ImageInput, Message, Outcome,
     PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest, RunResult,
     RunStreamEvent, RunStreamSink, SelectedAgent, ToolCallBlock, UserContentBlock,
+    fallback_visible_session_title,
 };
 use serde_json::{Map, Value, json};
 use tokio::process::Command;

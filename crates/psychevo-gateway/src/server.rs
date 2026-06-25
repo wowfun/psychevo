@@ -21,10 +21,14 @@ use futures::{SinkExt, StreamExt};
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::command_registry::{
     AvailableSlashCommand, CommandArgumentKind, CommandCapability, CommandPresentation,
-    DynamicSlashCommand, SlashCommandAction, SlashCommandEffect, SlashCommandParse,
-    SlashCommandSurface, available_slash_commands_for_surface, command_presentation,
-    dynamic_slash_command_effect, parse_slash_command_line, skill_prompt_marker,
-    slash_invocation_effect,
+    DynamicSlashCommand, SharedSlashAlias, SharedSlashConfig, SharedSlashKeybind,
+    SlashCommandAction, SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
+    available_slash_commands_for_surface, command_presentation, dynamic_slash_command_effect,
+    parse_key_chord_display, parse_key_sequence_display, parse_session_export_command_args,
+    parse_session_export_format, parse_shared_slash_config, parse_slash_command_line,
+    skill_prompt_marker, slash_invocation_effect, split_key_sequence_list,
+    split_slash_command_token, validate_configured_alias, validate_configured_slash_target,
+    validate_shared_slash_config,
 };
 use psychevo_runtime::{
     AgentBackendConfig, AgentCatalog, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions,
@@ -63,7 +67,7 @@ use crate::{
     GatewayEventSink, GatewayInputPart, GatewayShellResult, GatewaySource, GatewaySourceLifetime,
     GatewayThread, GatewayThreadSelector, GatewayTurnResult, PermissionDecision, SendShellRequest,
     SourceKey, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
-    TranscriptEntryRole, gateway_now_ms,
+    TranscriptEntryRole, gateway_now_ms, transcript,
 };
 #[cfg(test)]
 use crate::{GatewayTurn, GatewayTurnError, GatewayTurnStatus};
@@ -78,13 +82,13 @@ mod terminal;
 mod workspace;
 
 use agents::{
-    agent_list_result, agent_read_result, agent_status_result, backend_doctor_value,
-    backend_values_for_scope, delete_backend_config, delete_project_agent_definition,
-    write_backend_config, write_project_agent_definition,
+    active_profile_config_dir, agent_list_result, agent_read_result, agent_status_result,
+    backend_doctor_value, backend_values_for_scope, delete_backend_config,
+    delete_project_agent_definition, write_backend_config, write_project_agent_definition,
 };
 use automations::{
     automation_delete_result, automation_draft_result, automation_list_result,
-    automation_run_result, automation_write_result,
+    automation_run_result, automation_set_enabled_result, automation_write_result,
 };
 use channels::{
     channel_delete_result, channel_doctor_result_live, channel_enable_result,
@@ -93,8 +97,9 @@ use channels::{
     channel_wechat_qr_start_result,
 };
 use commands::{
-    command_completion_detail, command_execute_value, command_list_value, compact_prompt_text,
-    gateway_command_capabilities, web_desktop_command_visible,
+    command_execute_value, command_item_completion_detail, command_item_matches,
+    command_list_result, command_list_value, compact_prompt_text, slash_settings_read_value,
+    slash_settings_update_value,
 };
 #[cfg(test)]
 use completion::active_completion_token;

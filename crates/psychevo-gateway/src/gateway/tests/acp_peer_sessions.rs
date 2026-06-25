@@ -146,10 +146,17 @@ Peer instructions.
         assert_eq!(transcript.len(), 2);
         assert_eq!(transcript[0].role, TranscriptEntryRole::User);
         assert_eq!(transcript[1].role, TranscriptEntryRole::Assistant);
+        let summary = harness
+            .state
+            .store()
+            .session_summary(&first.result.session_id)
+            .expect("session summary")
+            .expect("summary");
+        assert_eq!(summary.title.as_deref(), Some("hello"));
 
         let mut second_request = request(&harness, source.clone(), "again");
         second_request.options.agent = Some("reviewer".to_string());
-        second_request.options.inherited_env = Some(env);
+        second_request.options.inherited_env = Some(env.clone());
         let second = harness
             .gateway
             .send_turn(second_request)
@@ -158,6 +165,36 @@ Peer instructions.
         assert_eq!(second.result.session_id, first.result.session_id);
         assert!(second.result.final_answer.contains("loaded:native-1"));
         assert!(!second.result.final_answer.contains("old answer from loaded history"));
+
+        let child_session = harness
+            .state
+            .store()
+            .create_child_session_with_metadata(
+                &first.result.session_id,
+                &harness.workdir,
+                "peer_agent",
+                "reviewer",
+                "acp:fake",
+                None,
+            )
+            .expect("child peer session");
+        let mut child_request = request(&harness, source, "child prompt");
+        child_request.thread_id = Some(child_session.clone());
+        child_request.options.agent = Some("reviewer".to_string());
+        child_request.options.inherited_env = Some(env);
+        let child = harness
+            .gateway
+            .send_turn(child_request)
+            .await
+            .expect("child peer turn");
+        assert_eq!(child.result.session_id, child_session);
+        let child_summary = harness
+            .state
+            .store()
+            .session_summary(&child.result.session_id)
+            .expect("child summary")
+            .expect("child");
+        assert_eq!(child_summary.title, None);
     }
     #[tokio::test]
     async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_session() {

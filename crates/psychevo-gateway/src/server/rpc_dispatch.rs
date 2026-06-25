@@ -517,6 +517,14 @@ async fn handle_rpc(
             let params = request.required_params::<wire::AutomationWriteParams>()?;
             automation_write_result(&state, &auth, params)
         }
+        "automation/pause" => {
+            let params = request.required_params::<wire::AutomationIdParams>()?;
+            automation_set_enabled_result(&state, &auth, params, false)
+        }
+        "automation/resume" => {
+            let params = request.required_params::<wire::AutomationIdParams>()?;
+            automation_set_enabled_result(&state, &auth, params, true)
+        }
         "automation/delete" => {
             let params = request.required_params::<wire::AutomationIdParams>()?;
             automation_delete_result(&state, &auth, params)
@@ -529,38 +537,46 @@ async fn handle_rpc(
             let params = request.required_params::<wire::TurnStartParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
             let input = params.input_parts()?;
-            let thread_id = match params.thread_id.clone() {
+            let requested_thread_id = match params.thread_id.clone() {
                 Some(thread_id) => {
                     authorize_thread(&state, &auth, &thread_id)?;
                     Some(thread_id)
                 }
-                None => state.inner.gateway.resolve_source_thread(&scope.source)?,
+                None => None,
             };
-            if state
-                .inner
-                .gateway
-                .resolve_source_thread(&scope.source)?
+            let mode = params
+                .mode
                 .as_deref()
-                != thread_id.as_deref()
-                && let Some(thread_id) = thread_id.as_deref()
-            {
-                bind_source_to_thread(&state, &scope, thread_id)?;
-            }
+                .map(|mode| {
+                    RunMode::parse(mode)
+                        .ok_or_else(|| Error::Message(format!("unknown mode: {mode}")))
+                })
+                .transpose()?;
+            let permission_mode = params
+                .permission_mode
+                .as_deref()
+                .map(|permission_mode| {
+                    PermissionMode::parse(permission_mode).ok_or_else(|| {
+                        Error::Message(format!("unknown permission mode: {permission_mode}"))
+                    })
+                })
+                .transpose()?;
+            let mut mention_validation = state.run_options(scope.workdir.clone(), None);
+            mention_validation.runtime_ref = params.runtime_ref.clone();
+            apply_mentions_to_run_options(&mut mention_validation, &params.mentions)?;
+
+            let thread_id = ensure_turn_start_thread(&state, &scope, requested_thread_id)?;
             let mut options = state.run_options(scope.workdir.clone(), thread_id.clone());
             options.model = params.model;
             options.reasoning_effort = params.reasoning_effort;
             options.runtime_ref = params.runtime_ref.clone();
             options.runtime_session_id = params.runtime_session_id.clone();
             options.runtime_options = params.runtime_options.clone();
-            if let Some(mode) = params.mode.as_deref() {
-                options.mode = RunMode::parse(mode)
-                    .ok_or_else(|| Error::Message(format!("unknown mode: {mode}")))?;
+            if let Some(mode) = mode {
+                options.mode = mode;
             }
-            if let Some(permission_mode) = params.permission_mode.as_deref() {
-                options.permission_mode =
-                    Some(PermissionMode::parse(permission_mode).ok_or_else(|| {
-                        Error::Message(format!("unknown permission mode: {permission_mode}"))
-                    })?);
+            if let Some(permission_mode) = permission_mode {
+                options.permission_mode = Some(permission_mode);
             }
             options.agent = params.agent_name.clone();
             apply_mentions_to_run_options(&mut options, &params.mentions)?;
@@ -979,6 +995,18 @@ async fn handle_rpc(
                 authorize_thread(&state, &auth, thread_id)?;
             }
             command_execute_value(&state, &scope, params)
+        }
+        "slash/settings/read" => {
+            let params = request.params::<wire::SlashSettingsReadParams>()?;
+            let workdir = resolve_workdir_filter(&state, &auth, params.workdir)?;
+            let scope = resolve_optional_scope(&state, &auth, None)?;
+            slash_settings_read_value(&state, &scope, &workdir)
+        }
+        "slash/settings/update" => {
+            let params = request.required_params::<wire::SlashSettingsUpdateParams>()?;
+            let workdir = resolve_workdir_filter(&state, &auth, params.workdir.clone())?;
+            let scope = resolve_optional_scope(&state, &auth, None)?;
+            slash_settings_update_value(&state, &scope, &workdir, params)
         }
         "shell/start" => {
             let params = request.required_params::<wire::ShellStartParams>()?;
