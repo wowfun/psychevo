@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-06-26
+
+- Fixed first-turn Workbench automations and transcript ownership by
+  materializing the current Web thread before model execution and making
+  completed turns replace same-owner live overlays without text heuristics.
+- Added deterministic and live Playwright coverage for composer-driven
+  automations, including transient duplicate and missing-current-thread
+  transcript sampling.
+- Fixed GUI slash aliases for `/export` and `/share` so expanded commands
+  preserve parsed download options.
+
+## 2026-06-25
+
+- Expanded Workflow Automations with concrete specs, Workbench editing and
+  lifecycle controls, one-shot schedules, model-facing management, and separated
+  pause/resume RPCs.
+- Added profile-level slash alias/keybind settings across Gateway, TUI, and
+  Workbench.
+- Reorganized model configuration docs into `specs/125-model-config/` and
+  tightened Workbench model/settings behavior.
+- Improved visible-session titles, transcript replay ownership, TUI rendering,
+  and sandbox validation for shell-only compatibility paths.
+- Improved `peval-py` input/config/report handling and Trial artifact guidance.
+- Renamed the Rust broad validation script to `scripts/validate-rust.sh` and
+  updated related docs.
+
 ## 2026-06-24
 
 - Added Workbench automation drafting via `automation/draft`, returning a user
