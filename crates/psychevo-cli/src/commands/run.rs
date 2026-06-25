@@ -130,6 +130,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
                 include_reasoning: args.include_reasoning,
                 mode: run_mode,
                 permission_mode,
+                sandbox_override: None,
                 approval_mode: None,
                 approval_handler,
                 clarify_enabled: false,

@@ -284,6 +284,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         max_context_messages: None,
         config_path: options.config_path.clone(),
         project_context_override: None,
+        sandbox_override: None,
         model: Some(format!("{}/{}", summary.provider, summary.model)),
         reasoning_effort: session_metadata
             .get("reasoning_effort")
@@ -653,6 +654,7 @@ pub(crate) fn configured_context_limit(
         max_context_messages: None,
         config_path: options.config_path.clone(),
         project_context_override: None,
+        sandbox_override: None,
         model: Some(format!("{provider}/{model}")),
         reasoning_effort: None,
         runtime_ref: None,

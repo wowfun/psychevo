@@ -423,6 +423,20 @@ pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<Lo
     if let Some(mode) = options.project_context_override {
         config.project_context.instructions = mode;
     }
+    if let Some(sandbox) = &options.sandbox_override {
+        config.sandbox = crate::sandbox::SandboxConfig {
+            enabled: sandbox.enabled,
+            mode: match sandbox.mode {
+                crate::types::RunSandboxMode::WorkspaceWrite => {
+                    crate::sandbox::SandboxMode::WorkspaceWrite
+                }
+                crate::types::RunSandboxMode::ReadOnly => crate::sandbox::SandboxMode::ReadOnly,
+            },
+            writable_roots: sandbox.writable_roots.clone(),
+            include_tmp: sandbox.include_tmp,
+            include_common_caches: sandbox.include_common_caches,
+        };
+    }
     Ok(LoadedRunConfig {
         config,
         env: loaded.env,

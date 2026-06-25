@@ -39,6 +39,7 @@ pub struct RunOptions {
     pub max_context_messages: Option<usize>,
     pub config_path: Option<PathBuf>,
     pub project_context_override: Option<ProjectContextInstructionMode>,
+    pub sandbox_override: Option<RunSandboxOverride>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub runtime_ref: Option<String>,
@@ -221,6 +222,43 @@ pub enum ProjectContextInstructionMode {
     GitRoot,
     Cwd,
     Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunSandboxMode {
+    WorkspaceWrite,
+    ReadOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunSandboxOverride {
+    pub enabled: bool,
+    pub mode: RunSandboxMode,
+    pub writable_roots: Vec<String>,
+    pub include_tmp: bool,
+    pub include_common_caches: bool,
+}
+
+impl RunSandboxOverride {
+    pub fn workspace_write() -> Self {
+        Self {
+            enabled: true,
+            mode: RunSandboxMode::WorkspaceWrite,
+            writable_roots: Vec::new(),
+            include_tmp: true,
+            include_common_caches: true,
+        }
+    }
+
+    pub fn read_only() -> Self {
+        Self {
+            enabled: true,
+            mode: RunSandboxMode::ReadOnly,
+            writable_roots: Vec::new(),
+            include_tmp: false,
+            include_common_caches: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

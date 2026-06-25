@@ -28,11 +28,13 @@ use psychevo_runtime::command_registry::{
 };
 use psychevo_runtime::{
     AgentBackendConfig, AgentCatalog, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions,
-    AgentEntrypoint, AgentRunRecord, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyResponse,
-    ClarifyResult, ConfigScope, ContextOptions, Error, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP,
-    Message as RuntimeMessage, ModelCatalogEntry, ModelCatalogProvider, ModelState,
-    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionMode, REASONING_EFFORT_VALUES,
-    RunMode, RunOptions, SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
+    AgentEntrypoint, AgentRunRecord, AutomationRunFinishInput, AutomationRunRecord,
+    AutomationSchedule, AutomationTaskInput, AutomationTaskRecord, ChildSessionSnapshotInput,
+    ClarifyAnswer, ClarifyResponse, ClarifyResult, ConfigScope, ContextOptions, Error,
+    LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP, Message as RuntimeMessage, ModelCatalogEntry,
+    ModelCatalogProvider, ModelState, PermissionApprovalDecision, PermissionApprovalOutcome,
+    PermissionMode, REASONING_EFFORT_VALUES, RunMode, RunOptions, RunSandboxOverride,
+    SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
     SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
     SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
     SessionSummary, SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions,
@@ -41,14 +43,14 @@ use psychevo_runtime::{
     agent_status_records, auth_status_value, canonicalize_workdir, config_show_value,
     configured_models, context_snapshot, custom_provider_api_key_env, discover_agents,
     discover_skills, fetch_model_catalog, format_context_total_value,
-    format_context_total_value_parts, list_skill_bundles, load_agent_backend_configs,
-    main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
-    model_catalog_entry_is_free, model_catalog_provider, normalize_provider_id,
-    normalize_reasoning_effort, redo_session, remove_config_value, render_session_export,
-    resolve_agent_definition, selected_configured_model, session_usage_summary,
-    set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value,
-    set_default_model_with_reasoning, set_provider_api_key, side_conversation_boundary_prompt,
-    undo_session, usage_read, valid_agent_name,
+    format_context_total_value_parts, latest_due_at_ms, list_skill_bundles,
+    load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
+    main_agent_metadata, model_catalog_entry_is_free, model_catalog_provider, next_run_at_ms,
+    normalize_provider_id, normalize_reasoning_effort, redo_session, remove_config_value,
+    render_session_export, resolve_agent_definition, selected_configured_model,
+    session_usage_summary, set_auxiliary_model_with_reasoning, set_channel_enabled,
+    set_config_value, set_default_model_with_reasoning, set_provider_api_key,
+    side_conversation_boundary_prompt, undo_session, usage_read, valid_agent_name,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -67,6 +69,7 @@ use crate::{
 use crate::{GatewayTurn, GatewayTurnError, GatewayTurnStatus};
 
 mod agents;
+mod automations;
 mod channel_runtime;
 mod channels;
 mod commands;
@@ -78,6 +81,10 @@ use agents::{
     agent_list_result, agent_read_result, agent_status_result, backend_doctor_value,
     backend_values_for_scope, delete_backend_config, delete_project_agent_definition,
     write_backend_config, write_project_agent_definition,
+};
+use automations::{
+    automation_delete_result, automation_draft_result, automation_list_result,
+    automation_run_result, automation_write_result,
 };
 use channels::{
     channel_delete_result, channel_doctor_result_live, channel_enable_result,
@@ -120,6 +127,7 @@ mod tests {
     include!("server/tests/session_browser.rs");
     include!("server/tests/agents_settings.rs");
     include!("server/tests/workspace_commands.rs");
+    include!("server/tests/automations.rs");
     include!("server/tests/terminal_launch.rs");
     include!("server/tests/helpers.rs");
 }

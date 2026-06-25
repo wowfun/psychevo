@@ -302,6 +302,7 @@ impl WebState {
             }),
         };
         channel_runtime::reconcile(web_state.clone());
+        automations::reconcile(web_state.clone());
         web_state
     }
 
@@ -354,6 +355,7 @@ impl WebState {
             max_context_messages: None,
             config_path: self.inner.config_path.clone(),
             project_context_override: None,
+            sandbox_override: None,
             model: None,
             reasoning_effort: None,
             runtime_ref: None,

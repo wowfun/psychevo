@@ -2,6 +2,7 @@
 
 pub(crate) mod accounting;
 pub(crate) mod agents;
+pub mod automations;
 pub mod command_registry;
 pub(crate) mod compaction;
 pub(crate) mod config;
@@ -53,6 +54,7 @@ pub use agents::{
     valid_agent_name, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
     wait_agent_mailbox,
 };
+pub use automations::{AutomationSchedule, latest_due_at_ms, next_run_at_ms};
 pub use compaction::{
     AutoCompactionCheckOptions, CompactSessionOptions, CompactionReason, CompactionResult,
     auto_compaction_due_for_snapshot, compact_session,
@@ -130,6 +132,7 @@ pub use state_runtime::StateRuntime;
 pub use stats::{session_usage_summary, usage_read, usage_stats};
 pub use store::{AgentEdgeRecord, AgentEdgeStatus};
 pub use store::{
+    AutomationRunFinishInput, AutomationRunRecord, AutomationTaskInput, AutomationTaskRecord,
     ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
     GatewayControlCommandRecord, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
@@ -153,9 +156,9 @@ pub use types::{
     PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
     ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
     ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions,
-    RunResult, RunStreamEvent, RunStreamSink, RunWarning, SanitizedMessageSummary,
-    ScopedCustomProviderInput, SelectedAgent, SessionExportMessageSummary, SessionRedoResult,
-    SessionSummary, SessionUndoOptions, SessionUndoResult, SessionUsageOptions,
+    RunResult, RunSandboxMode, RunSandboxOverride, RunStreamEvent, RunStreamSink, RunWarning,
+    SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent, SessionExportMessageSummary,
+    SessionRedoResult, SessionSummary, SessionUndoOptions, SessionUndoResult, SessionUsageOptions,
     SessionUsageSummary, SmokeControl, StatsOptions, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary,
     USER_SHELL_METADATA_KEY, UsageActivity, UsageActivityDay, UsageReadOptions, UsageReadResult,
     UsageWindowSummary, UserShellContextOptions, UserShellOptions, UserShellResult, run_control,

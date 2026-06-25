@@ -69,6 +69,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         max_context_messages: None,
         config_path: options.config_path.clone(),
         project_context_override: None,
+        sandbox_override: None,
         model: Some(format!("{}/{}", summary.provider, summary.model)),
         reasoning_effort: metadata
             .get("reasoning_effort")
@@ -309,6 +310,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         max_context_messages: None,
         config_path: options.config_path.clone(),
         project_context_override: None,
+        sandbox_override: None,
         model: options.model.clone(),
         reasoning_effort: options.reasoning_effort.clone(),
         runtime_ref: None,

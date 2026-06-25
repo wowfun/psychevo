@@ -48,6 +48,7 @@ pub(crate) fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         max_context_messages: None,
         config_path: None,
         project_context_override: None,
+        sandbox_override: None,
         model: None,
         reasoning_effort: None,
         runtime_ref: None,

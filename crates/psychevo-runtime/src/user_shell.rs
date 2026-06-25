@@ -151,6 +151,7 @@ pub(crate) fn prepare_user_shell_context(
         max_context_messages: None,
         config_path: context.config_path.clone(),
         project_context_override: None,
+        sandbox_override: None,
         model: context.model.clone(),
         reasoning_effort: context.reasoning_effort.clone(),
         runtime_ref: None,

@@ -23,7 +23,7 @@ pub(crate) use crate::types::{
     SessionSummary, TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 22;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 23;
 pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 21;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
@@ -226,6 +226,70 @@ pub struct GatewayTurnTerminalRecord {
     pub metadata: Option<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationTaskInput {
+    pub id: Option<String>,
+    pub workdir: String,
+    pub kind: String,
+    pub target_thread_id: Option<String>,
+    pub title: String,
+    pub prompt: String,
+    pub schedule: Value,
+    pub enabled: bool,
+    pub execution: Value,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub source_key: Option<String>,
+    pub next_run_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationTaskRecord {
+    pub id: String,
+    pub workdir: String,
+    pub kind: String,
+    pub target_thread_id: Option<String>,
+    pub title: String,
+    pub prompt: String,
+    pub schedule: Value,
+    pub enabled: bool,
+    pub execution: Value,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub source_key: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub last_run_at_ms: Option<i64>,
+    pub next_run_at_ms: Option<i64>,
+    pub last_status: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationRunRecord {
+    pub id: String,
+    pub automation_id: String,
+    pub trigger: String,
+    pub status: String,
+    pub started_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
+    pub thread_id: Option<String>,
+    pub source_key: Option<String>,
+    pub error: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationRunFinishInput<'a> {
+    pub run_id: &'a str,
+    pub status: &'a str,
+    pub thread_id: Option<&'a str>,
+    pub source_key: Option<&'a str>,
+    pub error: Option<&'a str>,
+    pub metadata: Option<Value>,
+    pub next_run_at_ms: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptPrefixSlotRecord {
     pub slot: String,
@@ -368,6 +432,8 @@ use store_agent_mailbox::*;
 pub(crate) mod store_compactions;
 #[allow(unused_imports)]
 use store_compactions::*;
+#[path = "store/automations.rs"]
+pub(crate) mod store_automations;
 #[path = "store/gateway_activity.rs"]
 pub(crate) mod store_gateway_activity;
 #[path = "store/gateway_bindings.rs"]

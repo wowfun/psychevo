@@ -709,6 +709,7 @@ pub(crate) fn auto_compaction_check_run_options(
         max_context_messages: None,
         config_path: options.config_path.clone(),
         project_context_override: None,
+        sandbox_override: None,
         model: options
             .model
             .clone()
@@ -752,6 +753,7 @@ pub(crate) fn compaction_run_options(
         max_context_messages: None,
         config_path: options.config_path.clone(),
         project_context_override: None,
+        sandbox_override: None,
         model: options
             .model
             .clone()

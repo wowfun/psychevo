@@ -320,6 +320,7 @@ async fn handle_rpc(
                 "turns": true,
                 "historyManagement": true,
                 "downloads": true,
+                "automations": true,
                 "settingsWrite": "structured",
                 "workspaceCreate": true,
                 "memoryResources": "status_only"
@@ -503,6 +504,26 @@ async fn handle_rpc(
                 runtime_session_id: runtime_options.native_session_id,
                 options: runtime_options.options,
             })?)
+        }
+        "automation/list" => {
+            let params = request.params::<wire::AutomationListParams>()?;
+            automation_list_result(&state, &auth, params)
+        }
+        "automation/draft" => {
+            let params = request.required_params::<wire::AutomationDraftParams>()?;
+            automation_draft_result(state, &auth, params).await
+        }
+        "automation/write" => {
+            let params = request.required_params::<wire::AutomationWriteParams>()?;
+            automation_write_result(&state, &auth, params)
+        }
+        "automation/delete" => {
+            let params = request.required_params::<wire::AutomationIdParams>()?;
+            automation_delete_result(&state, &auth, params)
+        }
+        "automation/run" => {
+            let params = request.required_params::<wire::AutomationRunParams>()?;
+            automation_run_result(state, &auth, params, out_tx)
         }
         "turn/start" => {
             let params = request.required_params::<wire::TurnStartParams>()?;

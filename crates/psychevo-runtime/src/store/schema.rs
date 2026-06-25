@@ -235,6 +235,40 @@ impl SqliteStore {
                 metadata_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS automations (
+                id TEXT PRIMARY KEY,
+                workdir TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                target_thread_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+                title TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                schedule_json TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                execution_json TEXT NOT NULL,
+                model TEXT,
+                reasoning_effort TEXT,
+                source_key TEXT,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                last_run_at_ms INTEGER,
+                next_run_at_ms INTEGER,
+                last_status TEXT,
+                last_error TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS automation_runs (
+                id TEXT PRIMARY KEY,
+                automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+                trigger TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                completed_at_ms INTEGER,
+                thread_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+                source_key TEXT,
+                error TEXT,
+                metadata_json TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
             CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
@@ -269,6 +303,12 @@ impl SqliteStore {
                 ON gateway_control_commands(owner_id, status, id);
             CREATE INDEX IF NOT EXISTS idx_gateway_turn_terminals_thread
                 ON gateway_turn_terminals(thread_id, completed_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_automations_workdir_enabled_next
+                ON automations(workdir, enabled, next_run_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_automation_runs_task
+                ON automation_runs(automation_id, started_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_automation_runs_status
+                ON automation_runs(automation_id, status, started_at_ms);
             "#,
         )?;
         if !sqlite_column_exists(&conn, "context_evidence", "provider_group")? {
@@ -285,7 +325,7 @@ impl SqliteStore {
         if !sqlite_column_exists(&conn, "gateway_live_events", "owner_id")? {
             conn.execute_batch("ALTER TABLE gateway_live_events ADD COLUMN owner_id TEXT;")?;
         }
-        if (1..SQLITE_SCHEMA_VERSION).contains(&user_version) {
+        if (1..22).contains(&user_version) {
             conn.execute_batch(
                 r#"
                 DELETE FROM gateway_live_events;

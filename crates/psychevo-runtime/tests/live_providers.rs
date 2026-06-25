@@ -52,6 +52,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         max_context_messages: None,
         config_path: None,
         project_context_override: None,
+        sandbox_override: None,
         model: Some(live_model(provider).to_string()),
         reasoning_effort: None,
         runtime_ref: None,

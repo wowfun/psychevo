@@ -23,6 +23,7 @@ impl TuiApp {
             max_context_messages: None,
             config_path: self.config_path.clone(),
             project_context_override: None,
+            sandbox_override: None,
             model: self.current_model.clone(),
             reasoning_effort: self.current_variant.clone(),
             runtime_ref: None,
