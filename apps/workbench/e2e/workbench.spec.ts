@@ -158,6 +158,45 @@ test.describe("pevo Web Workbench", () => {
     }
   });
 
+  test("renders Automations as a compact app-level surface", async ({ page, isMobile }, testInfo) => {
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      }
+      await page.getByRole("button", { name: "Automations" }).click();
+
+      const automations = page.getByRole("region", { name: "Automations" });
+      await expect(automations).toBeVisible();
+      await expect(page.locator(".composerDock")).toHaveCount(0);
+      await expect(automations.getByRole("button", { name: "Refresh" })).toBeVisible();
+      await expect(automations.getByLabel("Automation description")).toBeVisible();
+      await expect(automations.getByRole("button", { name: "Draft" })).toBeVisible();
+      await expect(automations.getByRole("button", { name: "Project check" }).first()).toBeVisible();
+      await assertNoHorizontalOverflow(page, automations);
+
+      await automations.getByRole("button", { name: "Project check" }).first().click();
+      const draft = automations.getByRole("form", { name: "Automation draft" });
+      await expect(draft).toBeVisible();
+      await draft.getByLabel("Title").fill("Morning repository check");
+      await draft.getByLabel("Prompt").fill("Review current repository state and summarize risky work.");
+      await expect(draft.getByRole("button", { name: "Auto in sandbox" })).toHaveClass(/is-selected/);
+      await expect(draft.getByRole("button", { name: "Ask first" })).toBeVisible();
+      await draft.getByRole("button", { name: "Save" }).click();
+
+      await expect(automations.getByText("Morning repository check")).toBeVisible();
+      await expect(automations.getByText("every 60m")).toBeVisible();
+      await expect(automations.locator(".automationMeta").getByText("project", { exact: true })).toBeVisible();
+      await expect(automations.getByRole("button", { name: "Run" })).toBeVisible();
+      await assertNoHorizontalOverflow(page, automations);
+      await captureWorkbench(page, testInfo, `automations-project-${isMobile ? "mobile" : "desktop"}`);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test("shows Settings as an app-level configuration center", async ({ page, isMobile }, testInfo) => {
         const server = await startPevoWeb({ live: false });
         try {
@@ -528,9 +567,12 @@ test.describe("pevo Web Workbench", () => {
       await sessionTrigger.click();
       await expect(sessionMenu).toHaveJSProperty("open", true);
       await openPanel(page, isMobile, "Transcript");
-      const transcriptBox = await page.getByRole("region", { name: "Transcript" }).boundingBox();
-      expect(transcriptBox).not.toBeNull();
-      await page.mouse.click(transcriptBox!.x + transcriptBox!.width / 2, transcriptBox!.y + 24);
+      const viewport = page.viewportSize();
+      expect(viewport).not.toBeNull();
+      await page.mouse.click(
+        viewport!.width - 24,
+        viewport!.height - 24
+      );
       await expect(sessionMenu).toHaveJSProperty("open", false);
       await openPanel(page, isMobile, "History");
       await sessionTrigger.click();

@@ -52,7 +52,8 @@ import type {
   WorkbenchBackendDoctor,
   WorkbenchChannel,
   WorkbenchChannelDoctor,
-  WorkbenchChannelSource
+  WorkbenchChannelSource,
+  MainView
 } from "./types";
 import {
   createHistoryDraftSession,
@@ -140,7 +141,7 @@ type AppActionsParams = {
   setWorkspaceChanges: Dispatch<SetStateAction<WorkspaceChangesResult | null>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   setWorkMode: Dispatch<SetStateAction<string>>;
-  updateMainView(value: "transcript" | "search" | "settings"): void;
+  updateMainView(value: MainView): void;
 };
 
 function upsertChannel(channels: WorkbenchChannel[], channel: WorkbenchChannel): WorkbenchChannel[] {

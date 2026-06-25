@@ -139,6 +139,7 @@ const gatewayMock = vi.hoisted(() => {
     ] as Array<Record<string, unknown>>,
     scope,
     sessionSummaries: [] as Array<Record<string, unknown>>,
+    automationRecords: [] as Array<Record<string, unknown>>,
     model: "xiaomi/xiaomi-token-high" as string | null,
     modelVariant: "none",
     modelOverride: null as string | null,
@@ -879,6 +880,138 @@ vi.mock("@psychevo/client", async () => {
           expiresAtMs: null
         };
       }
+      if (method === "automation/list") {
+        return { automations: gatewayMock.automationRecords };
+      }
+      if (method === "automation/draft") {
+        const record = params as {
+          request?: string;
+          scope?: { workdir?: string | null } | null;
+          currentThreadId?: string | null;
+        };
+        const threadRequested = Boolean(record.currentThreadId) && /thread|heartbeat|continue/i.test(record.request ?? "");
+        return {
+          draft: {
+            target: threadRequested
+              ? { kind: "threadHeartbeat", threadId: record.currentThreadId }
+              : { kind: "project" },
+            title: threadRequested ? "Thread follow-up" : "Morning repository check",
+            prompt: threadRequested
+              ? "Continue this thread with a concise status check."
+              : "Review current repository state and summarize risky work before standup.",
+            schedule: threadRequested
+              ? { kind: "interval", everyMinutes: 30 }
+              : { kind: "daily", time: "09:00" },
+            enabled: true,
+            execution: { policy: "autoSandbox" },
+            model: null,
+            reasoningEffort: null
+          }
+        };
+      }
+      if (method === "automation/write") {
+        const record = params as {
+          automationId?: string | null;
+          scope?: { workdir?: string | null } | null;
+          target?: { kind?: string; threadId?: string | null };
+          title?: string;
+          prompt?: string;
+          schedule?: Record<string, unknown>;
+          enabled?: boolean | null;
+          execution?: { policy?: string } | null;
+          model?: string | null;
+          reasoningEffort?: string | null;
+        };
+        const now = Date.now();
+        const id = record.automationId ?? `automation-${gatewayMock.automationRecords.length + 1}`;
+        const existing = gatewayMock.automationRecords.find((automation) => automation.id === id);
+        const kind = record.target?.kind === "threadHeartbeat" ? "threadHeartbeat" : "project";
+        const targetThreadId = kind === "threadHeartbeat" ? record.target?.threadId ?? "thread-1" : null;
+        const automation = {
+          id,
+          workdir: record.scope?.workdir ?? gatewayMock.scope.workdir,
+          kind,
+          targetThreadId,
+          title: record.title ?? "Project check",
+          prompt: record.prompt ?? "Check the project.",
+          schedule: record.schedule ?? { kind: "interval", everyMinutes: 60 },
+          enabled: record.enabled ?? true,
+          execution: record.execution ?? { policy: "autoSandbox" },
+          model: record.model ?? null,
+          reasoningEffort: record.reasoningEffort ?? null,
+          sourceKey: kind === "threadHeartbeat" ? `thread:${targetThreadId}` : `automation:${id}`,
+          createdAtMs: typeof existing?.createdAtMs === "number" ? existing.createdAtMs : now,
+          updatedAtMs: now,
+          lastRunAtMs: existing?.lastRunAtMs ?? null,
+          nextRunAtMs: now + 3_600_000,
+          lastStatus: existing?.lastStatus ?? null,
+          lastError: null,
+          runs: Array.isArray(existing?.runs) ? existing.runs : []
+        };
+        gatewayMock.automationRecords = [
+          ...gatewayMock.automationRecords.filter((item) => item.id !== id),
+          automation
+        ];
+        return { automation };
+      }
+      if (method === "automation/run") {
+        const record = params as { automationId?: string; trigger?: string | null };
+        const now = Date.now();
+        const id = record.automationId ?? "automation-1";
+        const existing = gatewayMock.automationRecords.find((automation) => automation.id === id) ?? {
+          id,
+          workdir: gatewayMock.scope.workdir,
+          kind: "project",
+          targetThreadId: null,
+          title: "Project check",
+          prompt: "Check the project.",
+          schedule: { kind: "interval", everyMinutes: 60 },
+          enabled: true,
+          execution: { policy: "autoSandbox" },
+          model: null,
+          reasoningEffort: null,
+          sourceKey: `automation:${id}`,
+          createdAtMs: now,
+          updatedAtMs: now,
+          lastRunAtMs: null,
+          nextRunAtMs: now + 3_600_000,
+          lastStatus: null,
+          lastError: null,
+          runs: []
+        };
+        const run = {
+          id: `run-${id}-${now}`,
+          automationId: id,
+          trigger: record.trigger ?? "manual",
+          status: "running",
+          startedAtMs: now,
+          completedAtMs: null,
+          threadId: existing.targetThreadId ?? "thread-automation",
+          sourceKey: existing.sourceKey ?? `automation:${id}`,
+          error: null,
+          metadata: null
+        };
+        const automation = {
+          ...existing,
+          updatedAtMs: now,
+          lastRunAtMs: now,
+          nextRunAtMs: now + 3_600_000,
+          lastStatus: "running",
+          lastError: null,
+          runs: [run, ...(Array.isArray(existing.runs) ? existing.runs : [])].slice(0, 5)
+        };
+        gatewayMock.automationRecords = [
+          ...gatewayMock.automationRecords.filter((item) => item.id !== id),
+          automation
+        ];
+        return { accepted: true, automation, run };
+      }
+      if (method === "automation/delete") {
+        const record = params as { automationId?: string };
+        const automationId = record.automationId ?? "automation-1";
+        gatewayMock.automationRecords = gatewayMock.automationRecords.filter((automation) => automation.id !== automationId);
+        return { deleted: true, automationId };
+      }
       if (method === "runtime/options") {
         const record = params as { runtimeRef?: string | null; runtimeSessionId?: string | null } | undefined;
         const runtimeRef = record?.runtimeRef?.trim() || "native";
@@ -1268,6 +1401,7 @@ afterEach(() => {
   gatewayMock.browserWorkspaces = null;
   gatewayMock.agentRecords = [];
   gatewayMock.backendRecords = [];
+  gatewayMock.automationRecords = [];
   gatewayMock.channelRecords = [
     {
       id: "release",

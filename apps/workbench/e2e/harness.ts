@@ -35,6 +35,7 @@ export async function startPevoWeb({
   mkdirSync(testRoot, { recursive: true });
   const root = mkdtempSync(path.join(testRoot, live ? "live-" : "deterministic-"));
   const resolvedWorkdir = workdir ? path.resolve(workdir) : path.join(root, "workdir");
+  const home = path.join(root, "home");
   if (!workdir) {
     mkdirSync(resolvedWorkdir, { recursive: true });
     writeWorkbenchFixtures(resolvedWorkdir);
@@ -44,7 +45,10 @@ export async function startPevoWeb({
     ? process.env.PSYCHEVO_CONFIG ?? path.join(homedir(), ".psychevo/config.toml")
     : path.join(root, "config.toml");
   if (!live) {
-    writeFileSync(configPath, `model = "${model ?? "lmstudio/noop"}"\n${configAppend ?? ""}`);
+    const configText = `model = "${model ?? "lmstudio/noop"}"\n${configAppend ?? ""}`;
+    mkdirSync(home, { recursive: true });
+    writeFileSync(configPath, configText);
+    writeFileSync(path.join(home, "config.toml"), configText);
     if (envFile) {
       writeFileSync(path.join(root, ".env"), envFile);
     }
@@ -54,7 +58,6 @@ export async function startPevoWeb({
   }
 
   const dbPath = path.join(root, "state.db");
-  const home = path.join(root, "home");
   const child = spawnPevoWeb({
     configPath,
     dbPath,

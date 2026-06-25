@@ -23,6 +23,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
     activity,
     appearance,
     archivedSessions,
+    automations,
+    automationsError,
+    automationsLoading,
     attachments,
     backendDoctor,
     backendDraft,
@@ -42,6 +45,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     currentThreadId,
     debugEnabled,
     debugEvents,
+    deleteAutomation,
     deleteArchivedSession,
     deleteBackend,
     deleteChannel,
@@ -49,6 +53,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     doctorBackend,
     doctorChannel,
     doctorChannels,
+    draftAutomation,
     endpoint,
     error,
     executeCommand,
@@ -68,6 +73,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     modelTurnBlockReason,
     openDiffPreview,
     openAgentSessionTab,
+    openAutomationThread,
     openFilePreview,
     openRightWorkspaceTab,
     onModelAssignmentSaved,
@@ -79,6 +85,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     pinnedSessions,
     planModeAvailable,
     pollWechatQrSetup,
+    refreshAutomations,
     refreshAgentSurface,
     refreshHistory,
     refreshSnapshot,
@@ -91,6 +98,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     rightWidthPx,
     runnableAgents,
     runAction,
+    runAutomation,
     runCommandAlternateAction,
     running,
     runtimeAcceptsAgentPersona,
@@ -99,6 +107,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     runtimeModeUnavailable,
     runtimeOptionsError,
     saveBackendDraft,
+    saveAutomation,
     saveFileFromEditor,
     selectedAgentName,
     selectedModel,
@@ -314,6 +323,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   props.openSettingsSection(settingsSection);
                 } else {
                   switchMainView(value);
+                  setMobilePanel("transcript");
                 }
               }}
             />
@@ -337,6 +347,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
           <div className="centerWorkspace">
             <MainSurface
               appearance={appearance}
+              automations={automations}
+              automationsError={automationsError}
+              automationsLoading={automationsLoading}
               archivedSessions={archivedSessions}
               backendDraft={backendDraft}
               backendDoctor={backendDoctor}
@@ -345,9 +358,11 @@ export function WorkbenchLayout(props: Record<string, any>) {
               channels={settings?.channels.channels ?? []}
               client={client}
               controls={controls}
+              currentThreadId={currentThreadId ?? null}
               debugEnabled={debugEnabled}
               disabled={disabled}
               mainView={mainView}
+              scope={activeScope ?? init?.scope ?? null}
               sessions={sessions}
               settingsSection={settingsSection}
               sessionBrowserWorkspaces={sessionBrowserWorkspaces}
@@ -357,6 +372,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
               workdir={activeWorkbenchWorkdir}
               loadThreadSearchText={loadThreadSearchText}
               onAppearanceChange={setAppearance}
+              onDeleteAutomation={(id) => deleteAutomation(id)}
+              onDraftAutomation={(params) => draftAutomation(params)}
               onDeleteArchivedSession={(threadId) => void runAction(async () => deleteArchivedSession(threadId))}
               onRestoreArchivedSession={(threadId) => void runAction(async () => restoreArchivedSession(threadId))}
               onDebugChange={setDebugEnabled}
@@ -388,8 +405,12 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 updateMainView("transcript");
                 setMobilePanel("transcript");
               })}
+              onOpenAutomationThread={openAutomationThread}
               onSettingsSectionChange={setSettingsSection}
               onSaveBackendDraft={(draft) => void runAction(async () => saveBackendDraft(draft))}
+              onSaveAutomation={(params) => saveAutomation(params)}
+              onRefreshAutomations={() => refreshAutomations()}
+              onRunAutomation={(id) => runAutomation(id)}
               onRefreshUsageStats={() => void runAction(async () => refreshUsageStats())}
               transcript={(
                 <TranscriptPanel

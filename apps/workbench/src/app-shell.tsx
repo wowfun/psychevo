@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { FolderPlus, Pin, Settings, X } from "lucide-react";
+import { CalendarClock, FolderPlus, Pin, Settings, X } from "lucide-react";
 import type {
   GatewayClient,
 } from "@psychevo/client";
@@ -8,9 +8,14 @@ import type {
   ChannelWechatQrPollResult,
   ChannelWechatQrStartResult,
   ModelOptionView,
+  AutomationDraftParams,
+  AutomationDraftView,
+  AutomationWriteParams,
+  GatewayRequestScope,
   SessionSummary,
   SettingsReadResult
 } from "@psychevo/protocol";
+import { AutomationsPage } from "./automations-panel";
 import { SearchPage } from "./search";
 import { SettingsPage } from "./settings-panels";
 import { shortSessionId } from "./session-utils";
@@ -22,6 +27,7 @@ import type {
   SessionBrowserWorkspaceState,
   WorkbenchBackend,
   WorkbenchBackendDoctor,
+  WorkbenchAutomation,
   WorkbenchChannel,
   WorkbenchChannelDoctor,
   WorkbenchChannelSource,
@@ -38,6 +44,7 @@ export function LeftUtilityRail({
   onChange(value: MainView): void;
 }) {
   const items: Array<{ icon: ReactNode; label: string; value: MainView }> = [
+    { icon: <CalendarClock size={16} />, label: "Automations", value: "automations" },
     { icon: <Settings size={16} />, label: "Settings", value: "settings" }
   ];
   return (
@@ -164,6 +171,9 @@ export function PinnedPanel({
 
 export function MainSurface({
   appearance,
+  automations,
+  automationsError,
+  automationsLoading,
   archivedSessions,
   backendDraft,
   backendDoctor,
@@ -174,9 +184,13 @@ export function MainSurface({
   controls,
   debugEnabled,
   disabled,
+  currentThreadId,
   loadThreadSearchText,
   mainView,
+  scope,
   onAppearanceChange,
+  onDeleteAutomation,
+  onDraftAutomation,
   onCancelBackendEdit,
   onChangeBackendDraft,
   onDebugChange,
@@ -188,6 +202,7 @@ export function MainSurface({
   onDoctorBackend,
   onEditBackend,
   onMainViewChange,
+  onOpenAutomationThread,
   onModelAssignmentSaved,
   onModelCatalogLoaded,
   onNewBackend,
@@ -196,7 +211,10 @@ export function MainSurface({
   onPollWechatQrSetup,
   onRestoreArchivedSession,
   onRefreshUsageStats,
+  onRefreshAutomations,
+  onRunAutomation,
   onSaveBackendDraft,
+  onSaveAutomation,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
   onSetChannelEnabled,
@@ -213,6 +231,9 @@ export function MainSurface({
   workdir
 }: {
   appearance: Appearance;
+  automations: WorkbenchAutomation[];
+  automationsError: string | null;
+  automationsLoading: boolean;
   archivedSessions: SessionSummary[];
   backendDraft: BackendDraft | null;
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
@@ -223,9 +244,13 @@ export function MainSurface({
   controls: SettingsReadResult["controls"];
   debugEnabled: boolean;
   disabled: boolean;
+  currentThreadId: string | null;
   loadThreadSearchText(threadId: string): Promise<string>;
   mainView: MainView;
+  scope: GatewayRequestScope | null;
   onAppearanceChange(value: Appearance): void;
+  onDeleteAutomation(id: string): Promise<void>;
+  onDraftAutomation(params: AutomationDraftParams): Promise<AutomationDraftView>;
   onCancelBackendEdit(): void;
   onChangeBackendDraft(draft: BackendDraft): void;
   onDebugChange(value: boolean): void;
@@ -237,6 +262,7 @@ export function MainSurface({
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
   onMainViewChange(value: MainView): void;
+  onOpenAutomationThread(threadId: string): void;
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
   onNewBackend(): void;
@@ -245,7 +271,10 @@ export function MainSurface({
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRestoreArchivedSession(threadId: string): void;
   onRefreshUsageStats(): void;
+  onRefreshAutomations(): Promise<void>;
+  onRunAutomation(id: string): Promise<void>;
   onSaveBackendDraft(draft: BackendDraft): void;
+  onSaveAutomation(params: AutomationWriteParams): Promise<void>;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
@@ -310,6 +339,25 @@ export function MainSurface({
         onUpdateChannel={onUpdateChannel}
         sessionBrowserWorkspaces={sessionBrowserWorkspaces}
         workdir={workdir}
+      />
+    );
+  }
+  if (mainView === "automations") {
+    return (
+      <AutomationsPage
+        automations={automations}
+        currentThreadId={currentThreadId}
+        disabled={disabled}
+        error={automationsError}
+        loading={automationsLoading}
+        scope={scope}
+        workdir={workdir}
+        onDelete={onDeleteAutomation}
+        onDraft={onDraftAutomation}
+        onOpenSession={onOpenAutomationThread}
+        onRefresh={onRefreshAutomations}
+        onRun={onRunAutomation}
+        onSave={onSaveAutomation}
       />
     );
   }

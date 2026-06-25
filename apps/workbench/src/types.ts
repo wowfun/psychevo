@@ -1,5 +1,6 @@
 import type {
   ContextReadResult,
+  AutomationTaskView,
   ChannelConfigView,
   ChannelDoctorChannelView,
   ChannelSourceBindingView,
@@ -108,9 +109,10 @@ export type RightWorkspaceTab = {
   message?: string | null;
 };
 
-export type MainView = "transcript" | "search" | "settings";
+export type MainView = "transcript" | "search" | "settings" | "automations";
 export type SettingsSection = "appearance" | "models" | "usage" | "debug" | "agents" | "channels" | "archived";
 export type WorkbenchUsageStats = UsageReadResult;
+export type WorkbenchAutomation = AutomationTaskView;
 export type Appearance = "dark" | "light" | "warm";
 export type CommandOverlay = "commands";
 export type CommandTrigger = "composer" | "commandsPanel" | "commandOverlay";

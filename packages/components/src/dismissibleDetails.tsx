@@ -30,30 +30,33 @@ export function DismissibleDetails({
   const summaryRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
-    function onPointerDown(event: MouseEvent) {
-      if (detailsRef.current?.contains(event.target as Node)) {
+    function onPointerDown(event: MouseEvent | PointerEvent) {
+      const details = detailsRef.current;
+      if (!details?.open || details.contains(event.target as Node)) {
         return;
       }
+      details.open = false;
       setOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") {
+      const details = detailsRef.current;
+      if (event.key !== "Escape" || !details?.open) {
         return;
       }
       event.preventDefault();
+      details.open = false;
       setOpen(false);
       summaryRef.current?.focus();
     }
+    document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open]);
+  }, []);
 
   return (
     <details

@@ -30,6 +30,10 @@ import {
 } from "@psychevo/host";
 import {
   GatewayEventSchema,
+  AutomationDraftResultSchema,
+  AutomationListResultSchema,
+  AutomationMutationResultSchema,
+  AutomationRunResultSchema,
   InitializeResultSchema,
   ObservabilityReadResultSchema,
   SettingsReadResultSchema,
@@ -46,6 +50,9 @@ import {
   WorkspaceFileWriteResultSchema,
   WorkspaceFilesResultSchema,
   type ContextReadResult,
+  type AutomationDraftParams,
+  type AutomationDraftView,
+  type AutomationWriteParams,
   type GatewayMention,
   type GatewayEvent,
   type GatewayInputPart,
@@ -168,6 +175,7 @@ import type {
   TerminalNotificationEvent,
   TraceState,
   WorkbenchAgent,
+  WorkbenchAutomation,
   WorkbenchBackend,
   WorkbenchBackendDoctor,
   WorkbenchChannelDoctor,
@@ -234,6 +242,17 @@ function mergeBrowserWorkspaces(
   return Array.from(byWorkdir.values());
 }
 
+function upsertAutomation(
+  current: WorkbenchAutomation[],
+  next: WorkbenchAutomation
+): WorkbenchAutomation[] {
+  const existing = current.some((automation) => automation.id === next.id);
+  if (!existing) {
+    return [next, ...current];
+  }
+  return current.map((automation) => automation.id === next.id ? next : automation);
+}
+
 export function App() {
   const [client, setClient] = useState<GatewayClient | null>(null);
   const [host, setHost] = useState<PsychevoHost | null>(null);
@@ -254,6 +273,9 @@ export function App() {
   const [backendDoctor, setBackendDoctor] = useState<Record<string, WorkbenchBackendDoctor>>({});
   const [channelDoctor, setChannelDoctor] = useState<Record<string, WorkbenchChannelDoctor>>({});
   const [commands, setCommands] = useState<WorkbenchCommand[]>([]);
+  const [automations, setAutomations] = useState<WorkbenchAutomation[]>([]);
+  const [automationsLoading, setAutomationsLoading] = useState(false);
+  const [automationsError, setAutomationsError] = useState<string | null>(null);
   const [rightTabs, setRightTabs] = useState<RightWorkspaceTab[]>([]);
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<MainView>("transcript");
@@ -574,12 +596,112 @@ export function App() {
     }
   }
 
+  function activeAutomationScope(): GatewayRequestScope {
+    return activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+  }
+
+  async function refreshAutomations(nextClient: GatewayClient | null = client) {
+    if (!nextClient) {
+      return;
+    }
+    setAutomationsLoading(true);
+    setAutomationsError(null);
+    try {
+      const result = AutomationListResultSchema.parse(
+        await nextClient.request("automation/list", {
+          scope: activeAutomationScope()
+        })
+      );
+      setAutomations(result.automations);
+    } catch (error) {
+      setAutomationsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAutomationsLoading(false);
+    }
+  }
+
+  async function saveAutomation(params: AutomationWriteParams) {
+    if (!client) {
+      return;
+    }
+    setAutomationsError(null);
+    const result = AutomationMutationResultSchema.parse(
+      await client.request("automation/write", {
+        ...params,
+        scope: params.scope ?? activeAutomationScope()
+      })
+    );
+    setAutomations((current) => upsertAutomation(current, result.automation));
+  }
+
+  async function draftAutomation(params: AutomationDraftParams): Promise<AutomationDraftView> {
+    if (!client) {
+      throw new Error("Gateway is not connected.");
+    }
+    setAutomationsError(null);
+    try {
+      const result = AutomationDraftResultSchema.parse(
+        await client.request("automation/draft", {
+          ...params,
+          scope: params.scope ?? activeAutomationScope()
+        })
+      );
+      return result.draft;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setAutomationsError(message);
+      throw error;
+    }
+  }
+
+  async function runAutomation(id: string) {
+    if (!client) {
+      return;
+    }
+    setAutomationsError(null);
+    const result = AutomationRunResultSchema.parse(
+      await client.request("automation/run", {
+        automationId: id,
+        trigger: "manual"
+      })
+    );
+    setAutomations((current) => upsertAutomation(current, result.automation));
+    window.setTimeout(() => {
+      void refreshAutomations(client);
+    }, LIVE_EVENT_REFRESH_SETTLE_MS);
+  }
+
+  async function deleteAutomation(id: string) {
+    if (!client) {
+      return;
+    }
+    setAutomationsError(null);
+    await client.request("automation/delete", { automationId: id });
+    setAutomations((current) => current.filter((automation) => automation.id !== id));
+  }
+
+  function openAutomationThread(threadId: string) {
+    void runAction(async () => {
+      const epoch = beginExplicitViewSwitch();
+      await refreshSnapshot(client, threadId, undefined, false, epoch);
+      updateMainView("transcript");
+      setMobilePanel("transcript");
+    });
+  }
+
   useEffect(() => {
     if (!client || mainView !== "settings" || settingsSection !== "usage") {
       return;
     }
     void refreshUsageStats(client);
   }, [client, mainView, settingsSection]);
+
+  useEffect(() => {
+    if (!client || mainView !== "automations") {
+      return;
+    }
+    void refreshAutomations(client);
+  }, [client, mainView, activeWorkbenchWorkdir]);
 
   useWorkbenchEffects({
     activeRightTabKind: activeRightTab?.kind ?? null,
@@ -1070,16 +1192,19 @@ export function App() {
 
   return <WorkbenchLayout {...{
     acceptWorkspaceChange, activeCommandOverlay, activeRightTab, activeRightTabId, activeScope, activeWorkbenchWorkdir,
+    automations, automationsError, automationsLoading,
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch,
     beginRightResize, changeAgentSelection, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
     channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyTranscriptText, createWorkspace, currentThreadId,
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, extraRuntimeModeValues, handleAttachment, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
     loadingOlderWorkdir, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
+    openAutomationThread,
     onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
     pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable, pollWechatQrSetup,
     refreshAgentSurface, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
     restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runnableAgents, runAction,
+    deleteAutomation, draftAutomation, refreshAutomations, runAutomation, saveAutomation,
     runCommandAlternateAction, running, runtimeAcceptsAgentPersona, runtimeBackends, runtimeModeOption,
     runtimeModeUnavailable, runtimeOptionsError, saveBackendDraft, saveFileFromEditor, selectedAgentName, selectedModel,
     selectedRuntimeMode, selectedRuntimeRef, selectedVariant, modelReady, modelTurnBlockReason, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,

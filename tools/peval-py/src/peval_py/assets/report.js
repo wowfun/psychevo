@@ -712,7 +712,7 @@ function shortText(value) {
 }
 function stepPreviewText(step) {
   if (!step) return "";
-  return shortText(valuePreview(step?.message).trim() || valuePreview(step?.reasoning_content).trim() || firstToolName(step));
+  return shortText(valuePreview(step?.message).trim() || valuePreview(step?.reasoning_content).trim());
 }
 function renderTrace() {
   const trial = metaFor(selectedKey());
