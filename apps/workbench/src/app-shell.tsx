@@ -207,17 +207,20 @@ export function MainSurface({
   onModelCatalogLoaded,
   onNewBackend,
   onOpenSession,
+  onPauseAutomation,
   onLoadChannelSources,
   onPollWechatQrSetup,
   onRestoreArchivedSession,
   onRefreshUsageStats,
   onRefreshAutomations,
+  onResumeAutomation,
   onRunAutomation,
   onSaveBackendDraft,
   onSaveAutomation,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
   onSetChannelEnabled,
+  onSlashSettingsSaved,
   onSettingsSectionChange,
   onStartWechatQrSetup,
   onUpdateChannel,
@@ -267,17 +270,20 @@ export function MainSurface({
   onModelCatalogLoaded(options: ModelOptionView[]): void;
   onNewBackend(): void;
   onOpenSession(threadId: string): void;
+  onPauseAutomation(id: string): Promise<void>;
   onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRestoreArchivedSession(threadId: string): void;
   onRefreshUsageStats(): void;
   onRefreshAutomations(): Promise<void>;
+  onResumeAutomation(id: string): Promise<void>;
   onRunAutomation(id: string): Promise<void>;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSaveAutomation(params: AutomationWriteParams): Promise<void>;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
+  onSlashSettingsSaved(): Promise<void>;
   onSettingsSectionChange(value: SettingsSection): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
   onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
@@ -335,6 +341,7 @@ export function MainSurface({
         onSetBackendEnabled={onSetBackendEnabled}
         onSetBackendEntrypoints={onSetBackendEntrypoints}
         onSetChannelEnabled={onSetChannelEnabled}
+        onSlashSettingsSaved={onSlashSettingsSaved}
         onStartWechatQrSetup={onStartWechatQrSetup}
         onUpdateChannel={onUpdateChannel}
         sessionBrowserWorkspaces={sessionBrowserWorkspaces}
@@ -351,11 +358,15 @@ export function MainSurface({
         error={automationsError}
         loading={automationsLoading}
         scope={scope}
+        sessionBrowserWorkspaces={sessionBrowserWorkspaces}
+        sessions={sessions}
         workdir={workdir}
         onDelete={onDeleteAutomation}
         onDraft={onDraftAutomation}
         onOpenSession={onOpenAutomationThread}
+        onPause={onPauseAutomation}
         onRefresh={onRefreshAutomations}
+        onResume={onResumeAutomation}
         onRun={onRunAutomation}
         onSave={onSaveAutomation}
       />

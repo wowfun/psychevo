@@ -14,6 +14,13 @@ describe("browserGatewayEndpoint", () => {
     expect(downloadUrl(endpoint, "s1", "export")).toBe(
       "http://127.0.0.1:3000/download/session/s1/export"
     );
+    expect(downloadUrl(endpoint, "s1", "export", {
+      filename: "review.json",
+      format: "json",
+      include: ["last-provider-request", "last-provider-response"]
+    })).toBe(
+      "http://127.0.0.1:3000/download/session/s1/export?format=json&include=last-provider-request%2Clast-provider-response&filename=review.json"
+    );
   });
 });
 

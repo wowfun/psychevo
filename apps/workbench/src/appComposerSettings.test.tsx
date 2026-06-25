@@ -41,6 +41,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(settingsRegion).getByRole("button", { name: "Archived sessions" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Usage" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Models" })).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Slash Commands" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Debug" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Agents" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Channels" })).toBeTruthy();
@@ -59,6 +60,69 @@ describe("Workbench settings and backend controls", () => {
 
     fireEvent.click(backButton);
     expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
+  });
+
+  it("manages profile slash aliases and shortcuts from Settings", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Slash Commands" }));
+
+    const slashPanel = await within(settingsRegion).findByRole("region", { name: "Slash Commands" });
+    expect(within(slashPanel).getByText("Profile Slash Commands")).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "slash/settings/read")).toBe(true);
+    });
+
+    const commandListRefreshesBefore = gatewayMock.requestLog.filter((entry) => entry.method === "command/list").length;
+    fireEvent.change(within(slashPanel).getByLabelText("Alias"), { target: { value: "/st" } });
+    fireEvent.change(within(slashPanel).getAllByLabelText("Target slash line")[0]!, { target: { value: "/status" } });
+    fireEvent.click(within(slashPanel).getByRole("button", { name: "Save alias" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "slash/settings/update",
+        params: expect.objectContaining({
+          aliases: [expect.objectContaining({ alias: "/st", target: "/status" })]
+        })
+      });
+    });
+    expect(await within(slashPanel).findByText("/st")).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "command/list").length).toBeGreaterThan(commandListRefreshesBefore);
+    });
+
+    fireEvent.click(within(slashPanel).getByRole("button", { name: "Edit alias /st" }));
+    fireEvent.change(within(slashPanel).getByLabelText("Alias"), { target: { value: "/stat" } });
+    fireEvent.click(within(slashPanel).getByRole("button", { name: "Save alias" }));
+    expect(await within(slashPanel).findByText("/stat")).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.slashSettings.aliases).toEqual([
+        expect.objectContaining({ alias: "/stat", target: "/status" })
+      ]);
+    });
+
+    fireEvent.click(within(slashPanel).getByRole("button", { name: "Delete alias /stat" }));
+    await waitFor(() => {
+      expect(gatewayMock.slashSettings.aliases).toEqual([]);
+    });
+    expect(within(slashPanel).queryByText("/stat")).toBeNull();
+
+    fireEvent.change(within(slashPanel).getByLabelText("Shortcut"), { target: { value: "<leader>s" } });
+    fireEvent.change(within(slashPanel).getAllByLabelText("Target slash line")[1]!, { target: { value: "/status" } });
+    fireEvent.click(within(slashPanel).getByRole("button", { name: "Save shortcut" }));
+    expect(await within(slashPanel).findByText("<leader>s")).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.slashSettings.keybinds).toEqual([
+        expect.objectContaining({ shortcut: "<leader>s", target: "/status" })
+      ]);
+    });
+
+    fireEvent.click(within(slashPanel).getByRole("button", { name: "Delete shortcut <leader>s" }));
+    await waitFor(() => {
+      expect(gatewayMock.slashSettings.keybinds).toEqual([]);
+    });
   });
 
   it("configures providers and auxiliary models in Settings Models", async () => {

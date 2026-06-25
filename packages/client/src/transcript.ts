@@ -13,6 +13,11 @@ const OPTIMISTIC_SOURCE = "client.optimistic";
 const LIVE_SOURCE = "runtime.stream";
 const OPTIMISTIC_LIVE_ORDER = -1;
 
+type LiveTranscriptObservationEvent = Extract<
+  GatewayEvent,
+  { type: "entryStarted" | "entryUpdated" | "entryCompleted" | "entryDelta" }
+>;
+
 export function applyLiveTranscriptEvent(
   snapshot: ThreadSnapshot,
   event: GatewayEvent
@@ -236,6 +241,12 @@ function eventAppliesToSnapshot(snapshot: ThreadSnapshot, event: GatewayEvent): 
   ) {
     return false;
   }
+  if (isLiveTranscriptObservation(event)) {
+    const activeTurnId = snapshot.activity.activeTurnId;
+    if (!activeTurnId || event.turnId !== activeTurnId) {
+      return false;
+    }
+  }
   if (
     "turnId" in event &&
     event.type !== "turnCompleted" &&
@@ -245,6 +256,13 @@ function eventAppliesToSnapshot(snapshot: ThreadSnapshot, event: GatewayEvent): 
     return false;
   }
   return true;
+}
+
+function isLiveTranscriptObservation(event: GatewayEvent): event is LiveTranscriptObservationEvent {
+  return event.type === "entryStarted" ||
+    event.type === "entryUpdated" ||
+    event.type === "entryCompleted" ||
+    event.type === "entryDelta";
 }
 
 function eventThreadIdForEvent(event: GatewayEvent): string | null {
@@ -865,7 +883,9 @@ function liveEntryForSnapshotReconcile(
   if (entry.source !== LIVE_SOURCE || entry.messageSeq !== null) {
     return null;
   }
-  const activeTurnId = incomingSnapshot.activity.activeTurnId ?? current.activity.activeTurnId;
+  const activeTurnId = incomingSnapshot.activity.running
+    ? incomingSnapshot.activity.activeTurnId
+    : null;
   if (!activeTurnId || entry.turnId !== activeTurnId) {
     return null;
   }
@@ -875,7 +895,10 @@ function liveEntryForSnapshotReconcile(
   if (incoming.some((candidate) => candidate.id === entry.id)) {
     return null;
   }
-  return removeSnapshotCoveredBlocks(entry, snapshotCoverage(incoming));
+  if (committedAssistantOwnerExists(incoming, entry)) {
+    return null;
+  }
+  return removeSnapshotCoveredBlocks(entry, snapshotToolCoverage(incoming));
 }
 
 function normalizeSnapshotEntries(snapshot: ThreadSnapshot): ThreadSnapshot {
@@ -1110,14 +1133,55 @@ function reconcileIncomingEntryForSnapshot(
   entries: TranscriptEntry[],
   entry: TranscriptEntry
 ): { entries: TranscriptEntry[]; entry: TranscriptEntry | null } {
+  if (isCommittedAssistantOwner(entry)) {
+    return {
+      entries: removeLiveAssistantOwnerEntries(entries, entry),
+      entry
+    };
+  }
   if (entry.source !== LIVE_SOURCE || entry.messageSeq !== null) {
     return { entries, entry };
   }
   const anchoredEntries = anchorCoveredLiveToolBlocks(entries, entry);
+  if (committedAssistantOwnerExists(anchoredEntries, entry)) {
+    return {
+      entries: anchoredEntries.filter((candidate) => candidate.id !== entry.id),
+      entry: null
+    };
+  }
   return {
     entries: anchoredEntries,
-    entry: removeSnapshotCoveredBlocks(entry, snapshotCoverage(anchoredEntries))
+    entry: removeSnapshotCoveredBlocks(entry, snapshotToolCoverage(anchoredEntries))
   };
+}
+
+function removeLiveAssistantOwnerEntries(
+  entries: TranscriptEntry[],
+  committed: TranscriptEntry
+): TranscriptEntry[] {
+  return entries.filter((entry) => !sameAssistantOwner(entry, committed));
+}
+
+function committedAssistantOwnerExists(
+  entries: TranscriptEntry[],
+  liveEntry: TranscriptEntry
+): boolean {
+  return entries.some((entry) => isCommittedAssistantOwner(entry) && sameAssistantOwner(liveEntry, entry));
+}
+
+function sameAssistantOwner(left: TranscriptEntry, right: TranscriptEntry): boolean {
+  const leftOrder = liveOrder(left);
+  const rightOrder = liveOrder(right);
+  return left.role === "assistant" &&
+    right.role === "assistant" &&
+    Boolean(left.turnId) &&
+    left.turnId === right.turnId &&
+    leftOrder !== null &&
+    leftOrder === rightOrder;
+}
+
+function isCommittedAssistantOwner(entry: TranscriptEntry): boolean {
+  return isMessageDerivedEntry(entry) && entry.role === "assistant" && liveOrder(entry) !== null;
 }
 
 function anchorCoveredLiveToolBlocks(
@@ -1182,9 +1246,9 @@ function mergeLiveToolBlockIntoMessageBlock(
 
 function removeSnapshotCoveredBlocks(
   entry: TranscriptEntry,
-  coverage: { texts: string[]; tools: Set<string> }
+  coverage: { tools: Set<string> }
 ): TranscriptEntry | null {
-  if (coverage.texts.length === 0 && coverage.tools.size === 0) {
+  if (coverage.tools.size === 0) {
     return entry;
   }
   const blocks = blocksForEntry(entry).filter((block) => (
@@ -1201,8 +1265,7 @@ function removeSnapshotCoveredBlocks(
   return next;
 }
 
-function snapshotCoverage(entries: TranscriptEntry[]): { texts: string[]; tools: Set<string> } {
-  const texts: string[] = [];
+function snapshotToolCoverage(entries: TranscriptEntry[]): { tools: Set<string> } {
   const tools = new Set<string>();
   for (const entry of entries) {
     if (!isMessageDerivedEntry(entry)) {
@@ -1219,13 +1282,9 @@ function snapshotCoverage(entries: TranscriptEntry[]): { texts: string[]; tools:
         }
         continue;
       }
-      const text = normalizedBlockText(block);
-      if (text) {
-        texts.push(text);
-      }
     }
   }
-  return { texts, tools };
+  return { tools };
 }
 
 function isMessageDerivedEntry(entry: TranscriptEntry): boolean {
@@ -1241,14 +1300,10 @@ function blockVisibleForCoverage(block: TranscriptBlock): boolean {
 
 function blockCoveredBySnapshot(
   block: TranscriptBlock,
-  coverage: { texts: string[]; tools: Set<string> }
+  coverage: { tools: Set<string> }
 ): boolean {
   const signatures = toolBlockSignatures(block);
-  if (signatures.length > 0) {
-    return signatures.some((signature) => coverage.tools.has(signature));
-  }
-  const text = normalizedBlockText(block);
-  return Boolean(text && coverage.texts.some((candidate) => textOverlaps(candidate, text)));
+  return signatures.length > 0 && signatures.some((signature) => coverage.tools.has(signature));
 }
 
 function entryStatusForBlocks(
@@ -1266,16 +1321,6 @@ function entryStatusForBlocks(
 
 function normalizedBlockText(block: TranscriptBlock): string {
   return blockText(block).trim().replace(/\s+/g, " ");
-}
-
-function textOverlaps(left: string, right: string): boolean {
-  if (!left || !right) {
-    return false;
-  }
-  if (left.length < 16 || right.length < 16) {
-    return left === right;
-  }
-  return left.includes(right) || right.includes(left);
 }
 
 function isAuthoritativeLiveBlockSnapshot(entry: TranscriptEntry): boolean {

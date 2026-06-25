@@ -19,6 +19,7 @@ import {
   asRecord,
   commandFeedbackFromResult,
   optionalStringField,
+  stringArray,
   stringField
 } from "./data";
 import {
@@ -454,7 +455,11 @@ export function createCommandActions(params: CommandActionsParams) {
           const threadId = optionalStringField(record.threadId) ?? params.snapshot.thread?.id ?? null;
           if (params.endpoint && threadId) {
             const kind = stringField(record.kind) === "share" ? "share" : "export";
-            void params.host?.open.openDownload(downloadUrl(params.endpoint, threadId, kind));
+            void params.host?.open.openDownload(downloadUrl(params.endpoint, threadId, kind, {
+              filename: optionalStringField(record.filename),
+              format: optionalStringField(record.format),
+              include: stringArray(record.include)
+            }));
           }
         }
         break;

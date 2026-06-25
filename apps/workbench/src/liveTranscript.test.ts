@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GatewayEvent, ThreadSnapshot, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 import {
   appendOptimisticPrompt,
+  applyTurnCompletionQueueBarrier,
   applyLiveTranscriptEvent,
   reconcileThreadSnapshot
 } from "./liveTranscript";
@@ -61,6 +62,95 @@ describe("applyLiveTranscriptEvent", () => {
     expect(next.activity.activeTurnId).toBeNull();
     expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:2:assistant"]);
     expect(next.entries[0]?.blocks[0]?.body).toBe("committed answer");
+  });
+
+  it("keeps committed assistant messages when stale assistant and tool updates arrive late", () => {
+    const committed = applyLiveTranscriptEvent(snapshot(), {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: completedTurn("turn-1", "thread-1"),
+      committedEntries: [
+        entry({
+          id: "message:6",
+          messageSeq: 6,
+          source: "runtime.message",
+          status: "completed",
+          blocks: [
+            block({
+              id: "message:6:text",
+              source: "runtime.message",
+              status: "completed",
+              body: "committed final answer"
+            })
+          ]
+        })
+      ]
+    });
+
+    const next = applyLiveTranscriptEvent(committed, eventWithEntry("entryUpdated", entry({
+      id: "live:turn-1:assistant:stale",
+      blocks: [
+        block({
+          id: "live:turn-1:assistant:stale:text",
+          body: "duplicated final answer"
+        }),
+        block({
+          id: "live:turn-1:tool:stale",
+          kind: "shell",
+          title: "exec_command",
+          status: "running",
+          body: "late tool output"
+        })
+      ]
+    })));
+
+    expect(committed.activity.activeTurnId).toBeNull();
+    expect(next).toBe(committed);
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:6"]);
+    expect(next.entries[0]?.blocks.map((candidate) => candidate.id)).toEqual(["message:6:text"]);
+  });
+
+  it("keeps distinct live assistant owners even when text overlaps", () => {
+    const current = {
+      ...snapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:0",
+          metadata: { projection: "assistant_segment", liveOrder: 0, streamSeq: 1 },
+          status: "completed",
+          blocks: [
+            block({
+              id: "live:turn-1:assistant:0:text:0",
+              status: "completed",
+              body: "已创建成功。自动化标题：pevo-live-engineering-tip",
+              detail: "已创建成功。自动化标题：pevo-live-engineering-tip",
+              metadata: { projection: "assistant_phase" }
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = applyLiveTranscriptEvent(current, eventWithEntry("entryCompleted", entry({
+      id: "live:turn-1:assistant:1",
+      metadata: { projection: "assistant_segment", liveOrder: 1, streamSeq: 2 },
+      status: "completed",
+      blocks: [
+        block({
+          id: "live:turn-1:assistant:1:text:0",
+          status: "completed",
+          body: "已创建成功。自动化标题：pevo-live-engineering-tip",
+          detail: "已创建成功。自动化标题：pevo-live-engineering-tip",
+          metadata: { content_array_index: 0 }
+        })
+      ]
+    })));
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "live:turn-1:assistant:0",
+      "live:turn-1:assistant:1"
+    ]);
   });
 
   it("settles failed turn completion without leaving tool rows running", () => {
@@ -418,6 +508,66 @@ describe("applyLiveTranscriptEvent", () => {
     expect(reconciled.entries.map((candidate) => candidate.id)).toEqual(["message:2"]);
   });
 
+  it("does not preserve live final text when snapshot refresh observes an inactive turn", () => {
+    const current = {
+      ...snapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:final",
+          messageSeq: null,
+          source: "runtime.stream",
+          status: "completed",
+          blocks: [
+            block({
+              id: "live:turn-1:assistant:final:text",
+              source: "runtime.stream",
+              status: "completed",
+              body: "✅ 已创建每 5 分钟 一次的喝水提醒！💧\n\n到时候会自动提醒你：\"💧 该喝水啦！\"\n\n想暂停或取消提醒随时告诉我。",
+              detail: "✅ 已创建每 5 分钟 一次的喝水提醒！💧\n\n到时候会自动提醒你：\"💧 该喝水啦！\"\n\n想暂停或取消提醒随时告诉我。"
+            })
+          ]
+        })
+      ]
+    };
+    const incoming = {
+      ...snapshot(),
+      activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      entries: [
+        entry({
+          id: "message:6",
+          messageSeq: 6,
+          turnId: "message:6",
+          source: "runtime.message",
+          status: "completed",
+          blocks: [
+            block({
+              id: "message:6:reasoning:0",
+              kind: "reasoning",
+              source: "runtime.message",
+              status: "completed",
+              body: "Done.",
+              detail: "Done.",
+              order: 0
+            }),
+            block({
+              id: "message:6:block:1",
+              source: "runtime.message",
+              status: "completed",
+              body: "✅ 已创建每 **5 分钟** 一次的喝水提醒！💧\n\n到时候会自动提醒你：**\"💧 该喝水啦！\"**\n\n想暂停或取消提醒随时告诉我。",
+              detail: "✅ 已创建每 **5 分钟** 一次的喝水提醒！💧\n\n到时候会自动提醒你：**\"💧 该喝水啦！\"**\n\n想暂停或取消提醒随时告诉我。",
+              order: 1
+            })
+          ]
+        })
+      ]
+    };
+
+    const reconciled = reconcileThreadSnapshot(current, incoming);
+
+    expect(reconciled.activity.activeTurnId).toBeNull();
+    expect(reconciled.entries.map((candidate) => candidate.id)).toEqual(["message:6"]);
+  });
+
   it("orders live entries by explicit liveOrder metadata before timestamp tie-breaks", () => {
     const current = applyLiveTranscriptEvent(
       applyLiveTranscriptEvent(
@@ -496,7 +646,7 @@ describe("applyLiveTranscriptEvent", () => {
     expect(started.activity.activeTurnId).toBe("turn-2");
   });
 
-  it("does not keep active live overlay that is covered by message-derived snapshot entries", () => {
+  it("does not keep active live overlay owned by same message-derived snapshot segment", () => {
     const current = {
       ...snapshot(),
       entries: [
@@ -562,7 +712,8 @@ describe("applyLiveTranscriptEvent", () => {
           id: "message:2",
           source: "runtime.message",
           messageSeq: 2,
-          turnId: "message:2",
+          turnId: "turn-1",
+          metadata: { liveOrder: 0 },
           blocks: [
             block({
               id: "message:2:block:0",
@@ -812,7 +963,7 @@ describe("applyLiveTranscriptEvent", () => {
     expect(next.entries[0]?.blocks[2]?.order).toBe(2);
   });
 
-  it("drops active live entries after snapshot reconciliation when message-derived text covers them", () => {
+  it("drops active live entries after snapshot reconciliation when message-derived owner matches", () => {
     const current = {
       ...snapshot(),
       entries: [
@@ -820,6 +971,7 @@ describe("applyLiveTranscriptEvent", () => {
           id: "live:turn-1:reasoning",
           messageSeq: null,
           source: "runtime.stream",
+          metadata: { liveOrder: 0 },
           blocks: [
             block({
               id: "live:turn-1:reasoning:block",
@@ -839,6 +991,8 @@ describe("applyLiveTranscriptEvent", () => {
           id: "message:8:reasoning",
           messageSeq: 8,
           source: "runtime.message",
+          turnId: "turn-1",
+          metadata: { liveOrder: 0 },
           blocks: [
             block({
               id: "message:8:reasoning:block",
@@ -857,7 +1011,7 @@ describe("applyLiveTranscriptEvent", () => {
     expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:8:reasoning"]);
   });
 
-  it("removes covered blocks from a live entry while preserving uncovered active blocks", () => {
+  it("removes covered tool blocks without text coverage when owner identity is missing", () => {
     const current = {
       ...snapshot(),
       entries: [
@@ -945,9 +1099,11 @@ describe("applyLiveTranscriptEvent", () => {
       "live:turn-1:assistant:0"
     ]);
     expect(next.entries[1]?.blocks.map((candidate) => candidate.id)).toEqual([
+      "live:turn-1:assistant:0:text:1",
       "live:turn-1:assistant:0:reasoning:tail"
     ]);
-    expect(next.entries[1]?.blocks[0]?.body).toBe("Now I am analyzing the latest output.");
+    expect(next.entries[1]?.blocks[0]?.body).toBe("好的，开始执行 X 日报流程！");
+    expect(next.entries[1]?.blocks[1]?.body).toBe("Now I am analyzing the latest output.");
   });
 
   it("removes stale running agent and wait overlays covered by committed tool ids", () => {
@@ -999,7 +1155,8 @@ describe("applyLiveTranscriptEvent", () => {
           id: "message:6",
           source: "runtime.message",
           messageSeq: 6,
-          turnId: "message:6",
+          turnId: "turn-1",
+          metadata: { liveOrder: 0 },
           status: "completed",
           blocks: [
             block({
@@ -1065,7 +1222,8 @@ describe("applyLiveTranscriptEvent", () => {
           id: "message:6",
           source: "runtime.message",
           messageSeq: 6,
-          turnId: "message:6",
+          turnId: "turn-1",
+          metadata: { liveOrder: 0 },
           status: "completed",
           blocks: [
             block({
@@ -1136,6 +1294,40 @@ describe("applyLiveTranscriptEvent", () => {
     expect(next.entries[0]?.blocks[0]?.body).toBe("好的，开始执行 X 日报流程！");
     expect(next.entries[0]?.blocks[1]?.status).toBe("running");
     expect(next.entries[0]?.blocks[1]?.body).toBe("[x-fetch] running\n");
+  });
+});
+
+describe("applyTurnCompletionQueueBarrier", () => {
+  it("drops queued live observations for the turn that just completed", () => {
+    const sameTurnEntry = eventWithEntry("entryUpdated", entry({
+      id: "live:turn-1:assistant:late",
+      blocks: [block({ id: "live:turn-1:assistant:late:text", body: "late" })]
+    }));
+    const sameTurnDelta: GatewayEvent = {
+      type: "entryDelta",
+      turnId: "turn-1",
+      entryId: "live:turn-1:assistant:late",
+      blockId: "live:turn-1:assistant:late:text",
+      delta: " stale"
+    };
+    const otherTurnEntry = eventWithEntry("entryUpdated", entry({
+      id: "live:turn-2:assistant",
+      turnId: "turn-2",
+      blocks: [block({ id: "live:turn-2:assistant:text", body: "other" })]
+    }));
+    const completion: GatewayEvent = {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: completedTurn("turn-1", "thread-1"),
+      committedEntries: []
+    };
+
+    expect(applyTurnCompletionQueueBarrier([
+      sameTurnEntry,
+      sameTurnDelta,
+      otherTurnEntry
+    ], completion)).toEqual([otherTurnEntry]);
   });
 });
 

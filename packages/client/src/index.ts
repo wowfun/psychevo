@@ -77,6 +77,9 @@ import {
   type SettingsUpdateParams,
   type ShellStartParams,
   type ShellStartResult,
+  type SlashSettingsReadParams,
+  type SlashSettingsResult,
+  type SlashSettingsUpdateParams,
   type SourceResetParams,
   type TerminalMutationResult,
   type TerminalResizeParams,
@@ -140,6 +143,8 @@ export interface GatewayRequestParams {
   "automation/delete": AutomationIdParams;
   "automation/draft": AutomationDraftParams;
   "automation/list": AutomationListParams;
+  "automation/pause": AutomationIdParams;
+  "automation/resume": AutomationIdParams;
   "automation/run": AutomationRunParams;
   "automation/write": AutomationWriteParams;
   "backend/delete": BackendDeleteParams;
@@ -174,6 +179,8 @@ export interface GatewayRequestParams {
   "settings/read": SettingsReadParams;
   "settings/update": SettingsUpdateParams;
   "shell/start": ShellStartParams;
+  "slash/settings/read": SlashSettingsReadParams;
+  "slash/settings/update": SlashSettingsUpdateParams;
   "source/reset": SourceResetParams;
   "terminal/resize": TerminalResizeParams;
   "terminal/start": TerminalStartParams;
@@ -212,6 +219,8 @@ export interface GatewayRequestResults {
   "automation/delete": AutomationDeleteResult;
   "automation/draft": AutomationDraftResult;
   "automation/list": AutomationListResult;
+  "automation/pause": AutomationMutationResult;
+  "automation/resume": AutomationMutationResult;
   "automation/run": AutomationRunResult;
   "automation/write": AutomationMutationResult;
   "backend/delete": BackendDeleteResult;
@@ -246,6 +255,8 @@ export interface GatewayRequestResults {
   "settings/read": SettingsReadResult;
   "settings/update": SettingsReadResult;
   "shell/start": ShellStartResult;
+  "slash/settings/read": SlashSettingsResult;
+  "slash/settings/update": SlashSettingsResult;
   "source/reset": ThreadSnapshot;
   "terminal/resize": TerminalMutationResult;
   "terminal/start": TerminalStartResult;

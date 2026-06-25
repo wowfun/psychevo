@@ -22,9 +22,23 @@ export function browserGatewayEndpoint(location: BrowserLocationLike): GatewayEn
 export function downloadUrl(
   endpoint: GatewayEndpoint,
   sessionId: string,
-  kind: "export" | "share"
+  kind: "export" | "share",
+  options: {
+    filename?: string | null;
+    format?: "markdown" | "json" | string | null;
+    include?: string[] | null;
+  } = {}
 ): string {
   const url = new URL(`/download/session/${encodeURIComponent(sessionId)}/${kind}`, endpoint.httpBase);
+  if (options.format) {
+    url.searchParams.set("format", options.format);
+  }
+  if (options.include && options.include.length > 0) {
+    url.searchParams.set("include", options.include.join(","));
+  }
+  if (options.filename) {
+    url.searchParams.set("filename", options.filename);
+  }
   return url.toString();
 }
 

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { CalendarClock, Pencil, Play, Plus, RefreshCw, Save, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CalendarClock, Pause, Pencil, Play, Plus, RefreshCw, Save, Sparkles, Trash2, X } from "lucide-react";
 import type {
   AutomationDraftParams,
   AutomationDraftView,
@@ -7,21 +7,25 @@ import type {
   AutomationScheduleInput,
   AutomationTaskView,
   AutomationWriteParams,
-  GatewayRequestScope
+  GatewayRequestScope,
+  SessionSummary
 } from "@psychevo/protocol";
-import type { WorkbenchAutomation } from "./types";
+import type { SessionBrowserWorkspaceState, WorkbenchAutomation } from "./types";
 
 type AutomationDraft = {
   id: string | null;
+  workdir: string;
   targetKind: "project" | "threadHeartbeat";
+  targetThreadId: string | null;
   title: string;
   prompt: string;
-  scheduleKind: "interval" | "daily" | "weekly";
+  scheduleKind: "interval" | "delay" | "once" | "daily" | "weekly";
   everyMinutes: number;
+  afterMinutes: number;
+  onceAt: string;
   time: string;
   weekdays: number[];
   executionPolicy: AutomationExecutionPolicy;
-  enabled: boolean;
 };
 
 type AutomationsPageProps = {
@@ -31,11 +35,15 @@ type AutomationsPageProps = {
   error: string | null;
   loading: boolean;
   scope: GatewayRequestScope | null;
+  sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
+  sessions: SessionSummary[];
   workdir: string;
   onDelete(id: string): Promise<void>;
   onDraft(params: AutomationDraftParams): Promise<AutomationDraftView>;
   onOpenSession(threadId: string): void;
+  onPause(id: string): Promise<void>;
   onRefresh(): Promise<void>;
+  onResume(id: string): Promise<void>;
   onRun(id: string): Promise<void>;
   onSave(params: AutomationWriteParams): Promise<void>;
 };
@@ -57,19 +65,47 @@ export function AutomationsPage({
   error,
   loading,
   scope,
+  sessionBrowserWorkspaces,
+  sessions,
   workdir,
   onDelete,
   onDraft,
   onOpenSession,
+  onPause,
   onRefresh,
+  onResume,
   onRun,
   onSave
 }: AutomationsPageProps) {
   const [draft, setDraft] = useState<AutomationDraft | null>(null);
+  const [selectedWorkdir, setSelectedWorkdir] = useState(scope?.workdir ?? workdir);
   const [requestText, setRequestText] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const sorted = useMemo(() => [...automations].sort(sortAutomations), [automations]);
+  const surfaceMode = draft ? "has-draft" : "is-list-only";
+  const workspaceOptions = useMemo(
+    () => automationWorkspaceOptions(workdir, scope?.workdir ?? null, sessionBrowserWorkspaces, sessions, automations),
+    [automations, scope?.workdir, sessionBrowserWorkspaces, sessions, workdir]
+  );
+  const selectedThreadOptions = useMemo(
+    () => automationThreadOptions(sessions, selectedWorkdir, currentThreadId),
+    [currentThreadId, selectedWorkdir, sessions]
+  );
+
+  useEffect(() => {
+    if (!workspaceOptions.includes(selectedWorkdir)) {
+      const nextWorkdir = workspaceOptions[0] ?? workdir;
+      setSelectedWorkdir(nextWorkdir);
+      setDraft((current) => current ? retargetDraft(current, nextWorkdir, preferredThreadId(sessions, nextWorkdir, currentThreadId)) : current);
+    }
+  }, [currentThreadId, selectedWorkdir, sessions, workdir, workspaceOptions]);
+
+  function selectWorkdir(nextWorkdir: string) {
+    const nextThreadId = preferredThreadId(sessions, nextWorkdir, currentThreadId);
+    setSelectedWorkdir(nextWorkdir);
+    setDraft((current) => current ? retargetDraft(current, nextWorkdir, nextThreadId) : current);
+  }
 
   async function runPending<T>(key: string, action: () => Promise<T>): Promise<T | undefined> {
     if (disabled || pendingAction) {
@@ -87,7 +123,7 @@ export function AutomationsPage({
     if (!draft) {
       return;
     }
-    const params = draftToWriteParams(draft, scope, currentThreadId);
+    const params = draftToWriteParams(draft, scope);
     await runPending("save", async () => {
       await onSave(params);
       setDraft(null);
@@ -103,11 +139,11 @@ export function AutomationsPage({
     setDraftError(null);
     try {
       const generated = await onDraft({
-        scope,
+        scope: scopeForWorkdir(scope, selectedWorkdir),
         request,
-        currentThreadId
+        currentThreadId: preferredThreadId(sessions, selectedWorkdir, currentThreadId)
       });
-      setDraft(draftFromGenerated(generated));
+      setDraft(draftFromGenerated(generated, selectedWorkdir));
     } catch (error) {
       setDraftError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -122,14 +158,26 @@ export function AutomationsPage({
           <span><CalendarClock size={18} aria-hidden /></span>
           <div>
             <h2>Automations</h2>
-            <p title={workdir}>{workdir}</p>
           </div>
         </div>
         <div className="automationToolbarActions">
+          <label className="automationWorkspaceSelect">
+            <span>Workspace</span>
+            <select
+              aria-label="Workspace"
+              disabled={disabled || Boolean(pendingAction)}
+              onChange={(event) => selectWorkdir(event.target.value)}
+              value={selectedWorkdir}
+            >
+              {workspaceOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </label>
           <button disabled={disabled || Boolean(pendingAction)} onClick={() => void runPending("refresh", onRefresh)} type="button">
             <RefreshCw size={15} aria-hidden /> Refresh
           </button>
-          <button disabled={disabled || Boolean(pendingAction)} onClick={() => setDraft(projectDraft())} type="button">
+          <button disabled={disabled || Boolean(pendingAction)} onClick={() => setDraft(projectDraft(selectedWorkdir))} type="button">
             <Plus size={15} aria-hidden /> New
           </button>
         </div>
@@ -158,17 +206,21 @@ export function AutomationsPage({
         </button>
       </form>
 
-      <div className="automationSurface">
+      <div className={`automationSurface ${surfaceMode} ${sorted.length === 0 ? "is-empty-list" : ""}`}>
         <div className="automationListPane">
           {loading ? (
             <div className="automationEmpty">Loading automations</div>
           ) : sorted.length === 0 ? (
             <div className="automationEmpty">
               <div className="automationTemplateActions">
-                <button disabled={disabled} onClick={() => setDraft(projectDraft())} type="button">
+                <button disabled={disabled} onClick={() => setDraft(projectDraft(selectedWorkdir))} type="button">
                   Project check
                 </button>
-                <button disabled={disabled || !currentThreadId} onClick={() => setDraft(threadDraft())} type="button">
+                <button
+                  disabled={disabled || selectedThreadOptions.length === 0}
+                  onClick={() => setDraft(threadDraft(selectedWorkdir, selectedThreadOptions[0]?.id ?? null))}
+                  type="button"
+                >
                   Thread heartbeat
                 </button>
               </div>
@@ -189,6 +241,7 @@ export function AutomationsPage({
                         <span>{automation.kind === "threadHeartbeat" ? "thread" : "project"}</span>
                         <span>{formatSchedule(automation.schedule)}</span>
                         <span>{automation.nextRunAtMs ? `next ${formatDateTime(automation.nextRunAtMs)}` : "no next run"}</span>
+                        <span>{automation.lastRunAtMs ? `last run ${formatDateTime(automation.lastRunAtMs)}` : "never run"}</span>
                         {automation.lastStatus && <span>{automation.lastStatus}</span>}
                       </div>
                     </div>
@@ -201,7 +254,25 @@ export function AutomationsPage({
                       <button disabled={disabled || Boolean(pendingAction)} onClick={() => void runPending(`run:${automation.id}`, () => onRun(automation.id))} type="button">
                         <Play size={14} aria-hidden /> Run
                       </button>
-                      <button disabled={disabled || Boolean(pendingAction)} onClick={() => setDraft(draftFromAutomation(automation))} type="button">
+                      <button
+                        disabled={disabled || Boolean(pendingAction)}
+                        onClick={() => void runPending(
+                          `${automation.enabled ? "pause" : "resume"}:${automation.id}`,
+                          () => automation.enabled ? onPause(automation.id) : onResume(automation.id)
+                        )}
+                        type="button"
+                      >
+                        {automation.enabled ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}
+                        {automation.enabled ? " Pause" : " Resume"}
+                      </button>
+                      <button
+                        disabled={disabled || Boolean(pendingAction)}
+                        onClick={() => {
+                          setSelectedWorkdir(automation.workdir);
+                          setDraft(draftFromAutomation(automation));
+                        }}
+                        type="button"
+                      >
                         <Pencil size={14} aria-hidden /> Edit
                       </button>
                       <button
@@ -223,15 +294,15 @@ export function AutomationsPage({
           )}
         </div>
 
-        <form
-          aria-label="Automation draft"
-          className={`automationDraft ${draft ? "" : "is-empty"}`}
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveDraft();
-          }}
-        >
-          {draft ? (
+        {draft && (
+          <form
+            aria-label="Automation draft"
+            className="automationDraft"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveDraft();
+            }}
+          >
             <>
               <header>
                 <strong>{draft.id ? "Edit automation" : "New automation"}</strong>
@@ -239,6 +310,40 @@ export function AutomationsPage({
                   <X size={15} />
                 </button>
               </header>
+              <label>
+                <span>Workspace</span>
+                <select
+                  aria-label="Draft workspace"
+                  onChange={(event) => {
+                    const nextWorkdir = event.target.value;
+                    selectWorkdir(nextWorkdir);
+                    setDraft((current) => current ? retargetDraft(current, nextWorkdir, preferredThreadId(sessions, nextWorkdir, currentThreadId)) : current);
+                  }}
+                  value={draft.workdir}
+                >
+                  {workspaceOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Bind to</span>
+                <select
+                  aria-label="Bind to"
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setDraft(value === "project"
+                      ? { ...draft, targetKind: "project", targetThreadId: null }
+                      : { ...draft, targetKind: "threadHeartbeat", targetThreadId: value });
+                  }}
+                  value={draft.targetKind === "threadHeartbeat" ? draft.targetThreadId ?? "" : "project"}
+                >
+                  <option value="project">Project</option>
+                  {automationThreadOptions(sessions, draft.workdir, currentThreadId).map((session) => (
+                    <option key={session.id} value={session.id}>{sessionLabel(session, currentThreadId)}</option>
+                  ))}
+                </select>
+              </label>
               <label>
                 <span>Title</span>
                 <input
@@ -255,21 +360,8 @@ export function AutomationsPage({
                   value={draft.prompt}
                 />
               </label>
-              <div className="automationSegments" role="group" aria-label="Target">
-                <button className={draft.targetKind === "project" ? "is-selected" : ""} onClick={() => setDraft({ ...draft, targetKind: "project" })} type="button">
-                  Project
-                </button>
-                <button
-                  className={draft.targetKind === "threadHeartbeat" ? "is-selected" : ""}
-                  disabled={!currentThreadId}
-                  onClick={() => setDraft({ ...draft, targetKind: "threadHeartbeat" })}
-                  type="button"
-                >
-                  Current thread
-                </button>
-              </div>
               <div className="automationSegments" role="group" aria-label="Schedule type">
-                {(["interval", "daily", "weekly"] as const).map((kind) => (
+                {(["interval", "delay", "once", "daily", "weekly"] as const).map((kind) => (
                   <button className={draft.scheduleKind === kind ? "is-selected" : ""} key={kind} onClick={() => setDraft({ ...draft, scheduleKind: kind })} type="button">
                     {kind}
                   </button>
@@ -286,7 +378,28 @@ export function AutomationsPage({
                   />
                 </label>
               )}
-              {draft.scheduleKind !== "interval" && (
+              {draft.scheduleKind === "delay" && (
+                <label>
+                  <span>After minutes</span>
+                  <input
+                    min={1}
+                    onChange={(event) => setDraft({ ...draft, afterMinutes: Math.max(1, Number(event.target.value) || 1) })}
+                    type="number"
+                    value={draft.afterMinutes}
+                  />
+                </label>
+              )}
+              {draft.scheduleKind === "once" && (
+                <label>
+                  <span>Run once at</span>
+                  <input
+                    onChange={(event) => setDraft({ ...draft, onceAt: event.target.value || defaultOnceAt() })}
+                    type="datetime-local"
+                    value={draft.onceAt}
+                  />
+                </label>
+              )}
+              {(draft.scheduleKind === "daily" || draft.scheduleKind === "weekly") && (
                 <label>
                   <span>Time</span>
                   <input
@@ -323,14 +436,6 @@ export function AutomationsPage({
                   Ask first
                 </button>
               </div>
-              <label className="automationCheck">
-                <input
-                  checked={draft.enabled}
-                  onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>Enabled</span>
-              </label>
               <footer>
                 <button disabled={Boolean(pendingAction)} onClick={() => setDraft(null)} type="button">
                   Cancel
@@ -340,41 +445,36 @@ export function AutomationsPage({
                 </button>
               </footer>
             </>
-          ) : (
-            <div className="automationDraftPlaceholder">
-              <button disabled={disabled} onClick={() => setDraft(projectDraft())} type="button">
-                <Plus size={15} aria-hidden /> Project check
-              </button>
-              <button disabled={disabled || !currentThreadId} onClick={() => setDraft(threadDraft())} type="button">
-                <Plus size={15} aria-hidden /> Thread heartbeat
-              </button>
-            </div>
-          )}
-        </form>
+          </form>
+        )}
       </div>
     </section>
   );
 }
 
-function projectDraft(): AutomationDraft {
+function projectDraft(workdir: string): AutomationDraft {
   return {
     id: null,
+    workdir,
     targetKind: "project",
+    targetThreadId: null,
     title: "Project check",
     prompt: "Review the current repository state and summarize anything that needs attention.",
     scheduleKind: "interval",
     everyMinutes: 60,
+    afterMinutes: 30,
+    onceAt: defaultOnceAt(),
     time: "09:00",
     weekdays: [1, 2, 3, 4, 5],
-    executionPolicy: "autoSandbox",
-    enabled: true
+    executionPolicy: "autoSandbox"
   };
 }
 
-function threadDraft(): AutomationDraft {
+function threadDraft(workdir: string, threadId: string | null): AutomationDraft {
   return {
-    ...projectDraft(),
+    ...projectDraft(workdir),
     targetKind: "threadHeartbeat",
+    targetThreadId: threadId,
     title: "Thread heartbeat",
     prompt: "Continue this thread with a concise status check.",
     everyMinutes: 30
@@ -385,57 +485,130 @@ function draftFromAutomation(automation: AutomationTaskView): AutomationDraft {
   const schedule = automation.schedule;
   return {
     id: automation.id,
+    workdir: automation.workdir,
     targetKind: automation.kind === "threadHeartbeat" ? "threadHeartbeat" : "project",
+    targetThreadId: automation.targetThreadId,
     title: automation.title,
     prompt: automation.prompt,
     scheduleKind: schedule.kind,
     everyMinutes: schedule.kind === "interval" ? schedule.everyMinutes : 60,
-    time: schedule.kind === "interval" ? "09:00" : schedule.time,
+    afterMinutes: schedule.kind === "delay" ? schedule.afterMinutes : 30,
+    onceAt: schedule.kind === "once" ? dateTimeLocalValue(schedule.at) : defaultOnceAt(),
+    time: schedule.kind === "daily" || schedule.kind === "weekly" ? schedule.time : "09:00",
     weekdays: schedule.kind === "weekly" ? schedule.weekdays : [1, 2, 3, 4, 5],
-    executionPolicy: automation.execution.policy,
-    enabled: automation.enabled
+    executionPolicy: automation.execution.policy
   };
 }
 
-function draftFromGenerated(generated: AutomationDraftView): AutomationDraft {
+function draftFromGenerated(generated: AutomationDraftView, workdir: string): AutomationDraft {
   const schedule = generated.schedule;
   return {
     id: null,
+    workdir,
     targetKind: generated.target.kind === "threadHeartbeat" ? "threadHeartbeat" : "project",
+    targetThreadId: generated.target.kind === "threadHeartbeat" ? generated.target.threadId : null,
     title: generated.title,
     prompt: generated.prompt,
     scheduleKind: schedule.kind,
     everyMinutes: schedule.kind === "interval" ? schedule.everyMinutes : 60,
-    time: schedule.kind === "interval" ? "09:00" : schedule.time,
+    afterMinutes: schedule.kind === "delay" ? schedule.afterMinutes : 30,
+    onceAt: schedule.kind === "once" ? dateTimeLocalValue(schedule.at) : defaultOnceAt(),
+    time: schedule.kind === "daily" || schedule.kind === "weekly" ? schedule.time : "09:00",
     weekdays: schedule.kind === "weekly" ? schedule.weekdays : [1, 2, 3, 4, 5],
-    executionPolicy: generated.execution.policy,
-    enabled: generated.enabled
+    executionPolicy: generated.execution.policy
   };
 }
 
 function draftToWriteParams(
   draft: AutomationDraft,
-  scope: GatewayRequestScope | null,
-  currentThreadId: string | null
+  scope: GatewayRequestScope | null
 ): AutomationWriteParams {
   return {
     automationId: draft.id,
-    scope,
-    target: draft.targetKind === "threadHeartbeat" && currentThreadId
-      ? { kind: "threadHeartbeat", threadId: currentThreadId }
+    scope: scopeForWorkdir(scope, draft.workdir),
+    target: draft.targetKind === "threadHeartbeat" && draft.targetThreadId
+      ? { kind: "threadHeartbeat", threadId: draft.targetThreadId }
       : { kind: "project" },
     title: draft.title.trim(),
     prompt: draft.prompt.trim(),
     schedule: scheduleFromDraft(draft),
-    enabled: draft.enabled,
     execution: { policy: draft.executionPolicy },
     model: null,
     reasoningEffort: null
   };
 }
 
+function scopeForWorkdir(scope: GatewayRequestScope | null, workdir: string): GatewayRequestScope | null {
+  return scope ? { ...scope, workdir } : null;
+}
+
+function retargetDraft(draft: AutomationDraft, workdir: string, threadId: string | null): AutomationDraft {
+  return {
+    ...draft,
+    workdir,
+    targetThreadId: draft.targetKind === "threadHeartbeat" ? threadId : null
+  };
+}
+
+function automationWorkspaceOptions(
+  workdir: string,
+  scopeWorkdir: string | null,
+  browserWorkspaces: SessionBrowserWorkspaceState[],
+  sessions: SessionSummary[],
+  automations: WorkbenchAutomation[]
+): string[] {
+  return uniqueNonEmpty([
+    scopeWorkdir,
+    workdir,
+    ...browserWorkspaces.map((workspace) => workspace.workdir),
+    ...sessions.map((session) => session.workdir),
+    ...automations.map((automation) => automation.workdir)
+  ]);
+}
+
+function automationThreadOptions(
+  sessions: SessionSummary[],
+  workdir: string,
+  currentThreadId: string | null
+): SessionSummary[] {
+  return [...sessions]
+    .filter((session) => session.workdir === workdir)
+    .sort((left, right) => {
+      if (left.id === currentThreadId) {
+        return -1;
+      }
+      if (right.id === currentThreadId) {
+        return 1;
+      }
+      const rightTime = right.updatedAtMs ?? right.startedAtMs ?? 0;
+      const leftTime = left.updatedAtMs ?? left.startedAtMs ?? 0;
+      return rightTime - leftTime || left.id.localeCompare(right.id);
+    });
+}
+
+function preferredThreadId(
+  sessions: SessionSummary[],
+  workdir: string,
+  currentThreadId: string | null
+): string | null {
+  return automationThreadOptions(sessions, workdir, currentThreadId)[0]?.id ?? null;
+}
+
+function sessionLabel(session: SessionSummary, currentThreadId: string | null): string {
+  const title = session.displayTitle ?? session.title ?? session.id;
+  return session.id === currentThreadId ? `${title} (current)` : title;
+}
+
+function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
+}
+
 function scheduleFromDraft(draft: AutomationDraft): AutomationScheduleInput {
   switch (draft.scheduleKind) {
+    case "delay":
+      return { kind: "delay", afterMinutes: Math.max(1, draft.afterMinutes || 1) };
+    case "once":
+      return { kind: "once", at: draft.onceAt || defaultOnceAt() };
     case "daily":
       return { kind: "daily", time: draft.time || "09:00" };
     case "weekly":
@@ -459,6 +632,12 @@ function formatSchedule(schedule: AutomationScheduleInput): string {
   if (schedule.kind === "interval") {
     return `every ${schedule.everyMinutes}m`;
   }
+  if (schedule.kind === "delay") {
+    return `after ${schedule.afterMinutes}m`;
+  }
+  if (schedule.kind === "once") {
+    return `once ${formatOnceAt(schedule.at)}`;
+  }
   if (schedule.kind === "daily") {
     return `daily ${schedule.time}`;
   }
@@ -472,4 +651,31 @@ function formatDateTime(value: number): string {
     minute: "2-digit",
     month: "short"
   }).format(new Date(value));
+}
+
+function defaultOnceAt(): string {
+  const value = new Date(Date.now() + 60 * 60_000);
+  value.setSeconds(0, 0);
+  return dateTimeLocalFromDate(value);
+}
+
+function dateTimeLocalValue(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isNaN(parsed)) {
+    return dateTimeLocalFromDate(new Date(parsed));
+  }
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) ? value : defaultOnceAt();
+}
+
+function dateTimeLocalFromDate(value: Date): string {
+  const offsetMs = value.getTimezoneOffset() * 60_000;
+  return new Date(value.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function formatOnceAt(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isNaN(parsed)) {
+    return formatDateTime(parsed);
+  }
+  return value;
 }

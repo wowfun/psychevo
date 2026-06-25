@@ -88,6 +88,7 @@ export type WorkbenchCommand = {
   aliases: string[];
   argumentKind: string;
   source: string;
+  expandsTo: string | null;
   presentationKind: string;
   destination: string | null;
   feedbackAnchor: string | null;
@@ -110,7 +111,7 @@ export type RightWorkspaceTab = {
 };
 
 export type MainView = "transcript" | "search" | "settings" | "automations";
-export type SettingsSection = "appearance" | "models" | "usage" | "debug" | "agents" | "channels" | "archived";
+export type SettingsSection = "appearance" | "models" | "slash" | "usage" | "debug" | "agents" | "channels" | "archived";
 export type WorkbenchUsageStats = UsageReadResult;
 export type WorkbenchAutomation = AutomationTaskView;
 export type Appearance = "dark" | "light" | "warm";

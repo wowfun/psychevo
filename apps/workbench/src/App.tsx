@@ -190,6 +190,7 @@ import {
   visibleHistoryDraftSession,
   type PendingDetachedShell
 } from "./viewGuard";
+import { applyTurnCompletionQueueBarrier } from "./liveTranscript";
 
 const EMPTY_SNAPSHOT: ThreadSnapshot = {
   source: { kind: "web", rawId: "pending", lifetime: "persistent", rawIdentity: null, visibleName: null },
@@ -215,8 +216,7 @@ function pacedGatewayEvent(event: GatewayEvent): boolean {
   return event.type === "entryStarted" ||
     event.type === "entryUpdated" ||
     event.type === "entryCompleted" ||
-    event.type === "entryDelta" ||
-    event.type === "turnCompleted";
+    event.type === "entryDelta";
 }
 
 function mergeSessionSummaries(current: SessionSummary[], incoming: SessionSummary[]): SessionSummary[] {
@@ -418,6 +418,15 @@ export function App() {
 
   function applyGatewayEvent(event: GatewayEvent) {
     publishGatewayEvent(event);
+    if (event.type === "turnCompleted") {
+      gatewayEventQueueRef.current = applyTurnCompletionQueueBarrier(gatewayEventQueueRef.current, event);
+      setSnapshot((current) => {
+        const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
+        selectedThreadIdRef.current = next.thread?.id ?? null;
+        return next;
+      });
+      return;
+    }
     if (!pacedGatewayEvent(event)) {
       setSnapshot((current) => {
         const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
@@ -669,6 +678,27 @@ export function App() {
     window.setTimeout(() => {
       void refreshAutomations(client);
     }, LIVE_EVENT_REFRESH_SETTLE_MS);
+  }
+
+  async function pauseAutomation(id: string) {
+    await setAutomationEnabled(id, false);
+  }
+
+  async function resumeAutomation(id: string) {
+    await setAutomationEnabled(id, true);
+  }
+
+  async function setAutomationEnabled(id: string, enabled: boolean) {
+    if (!client) {
+      return;
+    }
+    setAutomationsError(null);
+    const result = AutomationMutationResultSchema.parse(
+      await client.request(enabled ? "automation/resume" : "automation/pause", {
+        automationId: id
+      })
+    );
+    setAutomations((current) => upsertAutomation(current, result.automation));
   }
 
   async function deleteAutomation(id: string) {
@@ -1204,7 +1234,7 @@ export function App() {
     pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable, pollWechatQrSetup,
     refreshAgentSurface, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
     restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runnableAgents, runAction,
-    deleteAutomation, draftAutomation, refreshAutomations, runAutomation, saveAutomation,
+    deleteAutomation, draftAutomation, pauseAutomation, refreshAutomations, resumeAutomation, runAutomation, saveAutomation,
     runCommandAlternateAction, running, runtimeAcceptsAgentPersona, runtimeBackends, runtimeModeOption,
     runtimeModeUnavailable, runtimeOptionsError, saveBackendDraft, saveFileFromEditor, selectedAgentName, selectedModel,
     selectedRuntimeMode, selectedRuntimeRef, selectedVariant, modelReady, modelTurnBlockReason, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,

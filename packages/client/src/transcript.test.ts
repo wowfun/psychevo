@@ -111,6 +111,55 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     expect(next.entries[1]?.blocks[0]?.body).toBe("model service failed");
   });
 
+  it("ignores late live entries after a turn has committed durable messages", () => {
+    const committed = applyLiveTranscriptEvent(threadSnapshot(), {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: completedTurn("turn-1", "thread-1"),
+      committedEntries: [
+        entry({
+          id: "message:2",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: 2,
+          role: "assistant",
+          status: "completed",
+          source: "runtime.message",
+          blocks: [
+            block({
+              id: "message:2:text",
+              source: "runtime.message",
+              status: "completed",
+              body: "committed answer"
+            })
+          ]
+        })
+      ]
+    });
+
+    const next = applyLiveTranscriptEvent(committed, {
+      type: "entryUpdated",
+      turnId: "turn-1",
+      entry: entry({
+        id: "live:turn-1:assistant:stale",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        blocks: [
+          block({
+            id: "live:turn-1:assistant:stale:text",
+            body: "stale streamed answer"
+          })
+        ]
+      })
+    });
+
+    expect(committed.activity.activeTurnId).toBeNull();
+    expect(next).toBe(committed);
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:2"]);
+    expect(next.entries[0]?.blocks[0]?.body).toBe("committed answer");
+  });
+
   it("routes child-thread live entries away from the parent snapshot", () => {
     const childEvent = {
       type: "entryUpdated" as const,
@@ -244,6 +293,99 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     expect((agentBlock?.metadata as Record<string, unknown>)?.["child_thread_id"]).toBe("child-thread");
     expect(((agentBlock?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_thread_id"]).toBe("child-thread");
     expect(((agentBlock?.result?.metadata as Record<string, unknown>)?.["result"] as Record<string, unknown>)?.["child_thread_id"]).toBe("child-thread");
+  });
+
+  it("keeps distinct live assistant owners even when text overlaps", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:0",
+          metadata: { projection: "assistant_segment", liveOrder: 0, streamSeq: 1 },
+          status: "completed",
+          blocks: [
+            block({
+              id: "live:turn-1:assistant:0:text:0",
+              status: "completed",
+              body: "已创建成功。自动化标题：pevo-live-engineering-tip",
+              detail: "已创建成功。自动化标题：pevo-live-engineering-tip",
+              metadata: { projection: "assistant_phase" }
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = applyLiveTranscriptEvent(current, {
+      type: "entryCompleted",
+      turnId: "turn-1",
+      entry: entry({
+        id: "live:turn-1:assistant:1",
+        metadata: { projection: "assistant_segment", liveOrder: 1, streamSeq: 2 },
+        status: "completed",
+        blocks: [
+          block({
+            id: "live:turn-1:assistant:1:text:0",
+            status: "completed",
+            body: "已创建成功。自动化标题：pevo-live-engineering-tip",
+            detail: "已创建成功。自动化标题：pevo-live-engineering-tip",
+            metadata: { content_array_index: 0 }
+          })
+        ]
+      })
+    });
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "live:turn-1:assistant:0",
+      "live:turn-1:assistant:1"
+    ]);
+    expect(next.entries[1]?.blocks[0]?.body).toBe("已创建成功。自动化标题：pevo-live-engineering-tip");
+  });
+
+  it("drops late live assistant text owned by an active committed message snapshot", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "message:4",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: 4,
+          source: "runtime.message",
+          status: "completed",
+          metadata: { liveOrder: 1 },
+          blocks: [
+            block({
+              id: "message:4:block:1",
+              source: "runtime.message",
+              status: "completed",
+              body: "已创建成功。自动化标题：**pevo-live-engineering-tip**",
+              detail: "已创建成功。自动化标题：**pevo-live-engineering-tip**"
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = applyLiveTranscriptEvent(current, {
+      type: "entryCompleted",
+      turnId: "turn-1",
+      entry: entry({
+        id: "live:turn-1:assistant:1",
+        metadata: { projection: "assistant_segment", liveOrder: 1, streamSeq: 2 },
+        status: "completed",
+        blocks: [
+          block({
+            id: "live:turn-1:assistant:1:text:0",
+            status: "completed",
+            body: "已创建成功。自动化标题：pevo-live-engineering-tip",
+            detail: "已创建成功。自动化标题：pevo-live-engineering-tip"
+          })
+        ]
+      })
+    });
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:4"]);
   });
 
   it("preserves a live Agent child target when a later live frame omits it", () => {
@@ -569,6 +711,129 @@ describe("reconcileThreadSnapshot", () => {
       "live:turn-1:assistant:13",
       "message:15"
     ]);
+  });
+
+  it("does not keep live final text when an incoming snapshot marks the turn inactive", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:final",
+          source: "runtime.stream",
+          messageSeq: null,
+          status: "completed",
+          blocks: [
+            block({
+              id: "live:turn-1:assistant:final:text",
+              source: "runtime.stream",
+              status: "completed",
+              body: "✅ 已创建每 5 分钟 一次的喝水提醒！💧\n\n到时候会自动提醒你：\"💧 该喝水啦！\"\n\n想暂停或取消提醒随时告诉我。",
+              detail: "✅ 已创建每 5 分钟 一次的喝水提醒！💧\n\n到时候会自动提醒你：\"💧 该喝水啦！\"\n\n想暂停或取消提醒随时告诉我。"
+            })
+          ]
+        })
+      ]
+    };
+    const incoming = {
+      ...threadSnapshot(),
+      activity: {
+        running: false,
+        activeTurnId: null,
+        queuedTurns: 0
+      },
+      entries: [
+        entry({
+          id: "message:6",
+          threadId: "thread-1",
+          turnId: "message:6",
+          messageSeq: 6,
+          source: "runtime.message",
+          status: "completed",
+          blocks: [
+            block({
+              id: "message:6:reasoning:0",
+              kind: "reasoning",
+              source: "runtime.message",
+              status: "completed",
+              body: "Done.",
+              detail: "Done.",
+              order: 0
+            }),
+            block({
+              id: "message:6:block:1",
+              source: "runtime.message",
+              status: "completed",
+              body: "✅ 已创建每 **5 分钟** 一次的喝水提醒！💧\n\n到时候会自动提醒你：**\"💧 该喝水啦！\"**\n\n想暂停或取消提醒随时告诉我。",
+              detail: "✅ 已创建每 **5 分钟** 一次的喝水提醒！💧\n\n到时候会自动提醒你：**\"💧 该喝水啦！\"**\n\n想暂停或取消提醒随时告诉我。",
+              order: 1
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(current, incoming);
+
+    expect(next.activity.activeTurnId).toBeNull();
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:6"]);
+    expect(next.entries[0]?.source).toBe("runtime.message");
+  });
+
+  it("drops live assistant text when an active snapshot has the same committed owner identity", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:0",
+          source: "runtime.stream",
+          messageSeq: null,
+          status: "completed",
+          metadata: { projection: "assistant_segment", liveOrder: 0, streamSeq: 1 },
+          blocks: [
+            block({
+              id: "live:turn-1:assistant:0:text",
+              source: "runtime.stream",
+              status: "completed",
+              body: "stale live text that does not overlap",
+              detail: "stale live text that does not overlap"
+            })
+          ]
+        })
+      ]
+    };
+    const incoming = {
+      ...threadSnapshot(),
+      activity: {
+        running: true,
+        activeTurnId: "turn-1",
+        queuedTurns: 0
+      },
+      entries: [
+        entry({
+          id: "message:6",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: 6,
+          source: "runtime.message",
+          status: "completed",
+          metadata: { liveOrder: 0 },
+          blocks: [
+            block({
+              id: "message:6:block:0",
+              source: "runtime.message",
+              status: "completed",
+              body: "committed final answer",
+              detail: "committed final answer"
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(current, incoming);
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:6"]);
+    expect(next.entries[0]?.source).toBe("runtime.message");
   });
 
   it("drops side-inherited parent context from thread snapshots and live entries", () => {

@@ -84,6 +84,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     pinnedSessionIds,
     pinnedSessions,
     planModeAvailable,
+    pauseAutomation,
     pollWechatQrSetup,
     refreshAutomations,
     refreshAgentSurface,
@@ -93,6 +94,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     refreshWorkspaceSurface,
     rejectWorkspaceChange,
     restoreArchivedSession,
+    resumeAutomation,
     rightCollapsed,
     rightTabs,
     rightWidthPx,
@@ -390,6 +392,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onSetChannelEnabled={(channel, enabled) => void runAction(async () => setChannelEnabled(channel, enabled))}
               onSetBackendEnabled={(backend, enabled) => void runAction(async () => updateBackendDraftFields(backend, { enabled }))}
               onSetBackendEntrypoints={(backend, entrypoints) => void runAction(async () => updateBackendDraftFields(backend, { entrypoints }))}
+              onSlashSettingsSaved={() => refreshAgentSurface()}
               onStartWechatQrSetup={() => startWechatQrSetup()}
               onUpdateChannel={(channel, draft) => updateChannel(channel, draft)}
               onMainViewChange={switchMainView}
@@ -409,7 +412,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onSettingsSectionChange={setSettingsSection}
               onSaveBackendDraft={(draft) => void runAction(async () => saveBackendDraft(draft))}
               onSaveAutomation={(params) => saveAutomation(params)}
+              onPauseAutomation={(id) => pauseAutomation(id)}
               onRefreshAutomations={() => refreshAutomations()}
+              onResumeAutomation={(id) => resumeAutomation(id)}
               onRunAutomation={(id) => runAutomation(id)}
               onRefreshUsageStats={() => void runAction(async () => refreshUsageStats())}
               transcript={(

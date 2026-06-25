@@ -92,6 +92,43 @@ describe("Workbench command routing", () => {
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 
+  it("shows custom slash alias rows in the commands overlay and executes them", async () => {
+    gatewayMock.commandList = [
+      {
+        ...commandItem("st", "inspect", "status", "alias for /status"),
+        slash: "/st",
+        usage: "/st [args]",
+        source: "custom",
+        expandsTo: "/status"
+      }
+    ];
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: command === "/commands" ? "navigate" : "inspect",
+      feedbackAnchor: "commandsPanel",
+      action: { type: "showPanel", panel: command === "/commands" ? "commands" : "status" }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/commands" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    const overlay = await screen.findByRole("region", { name: "Commands overlay" });
+    fireEvent.click(within(overlay).getByRole("button", { name: /\/st/ }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "command/execute",
+        params: expect.objectContaining({ command: "/st" })
+      });
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
   it("opens side chat host actions as right workspace thread tabs", async () => {
     gatewayMock.commandExecute = (command: string) => ({
       accepted: true,
@@ -614,6 +651,38 @@ describe("Workbench command routing", () => {
 
     expect(await screen.findByText("Export is not available for this session.")).toBeTruthy();
     expect(gatewayMock.openDownloadLog).toEqual([]);
+  });
+
+  it("opens manual slash alias export downloads with parsed options", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "export",
+      feedbackAnchor: "trigger",
+      action: {
+        type: "downloadSession",
+        kind: "export",
+        threadId: "thread-1",
+        format: "json",
+        include: ["last-provider-request", "last-provider-response"],
+        filename: "provider-response.json"
+      }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/expr" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.openDownloadLog[0]).toContain(
+        "format=json&include=last-provider-request%2Clast-provider-response&filename=provider-response.json"
+      );
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+    expect(await screen.findByText("Export download opened.")).toBeTruthy();
   });
 
   it("routes session undo and redo without submitting transcript turns", async () => {

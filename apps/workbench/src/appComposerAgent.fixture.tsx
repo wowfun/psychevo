@@ -64,6 +64,15 @@ const gatewayMock = vi.hoisted(() => {
     }),
     completionResult: { items: [], replacement: null } as Record<string, unknown>,
     commandList: [] as Array<Record<string, unknown>>,
+    slashSettings: {
+      scope: "global",
+      workdir: scope.workdir,
+      leaderKey: "ctrl+x",
+      leaderTimeoutMs: 2000,
+      aliases: [] as Array<Record<string, unknown>>,
+      keybinds: [] as Array<Record<string, unknown>>,
+      diagnostics: [] as string[]
+    } as Record<string, unknown>,
     endpoint: { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" } as { wsUrl: string; baseUrl: string } | null,
     observabilityRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     usageRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
@@ -210,6 +219,13 @@ const gatewayMock = vi.hoisted(() => {
         providers: [...(gatewayMock.modelSettings.providers as Array<Record<string, unknown>>)],
         auxiliary: [...(gatewayMock.modelSettings.auxiliary as Array<Record<string, unknown>>)],
         modelOptions: [...(gatewayMock.modelSettings.modelOptions as Array<Record<string, unknown>>)]
+      };
+    },
+    slashSettingsResult() {
+      return {
+        ...gatewayMock.slashSettings,
+        aliases: [...(gatewayMock.slashSettings.aliases as Array<Record<string, unknown>>)],
+        keybinds: [...(gatewayMock.slashSettings.keybinds as Array<Record<string, unknown>>)]
       };
     },
     settingsResult(agent: string | null) {
@@ -460,6 +476,35 @@ vi.mock("@psychevo/client", async () => {
       }
       if (method === "model/settings/read") {
         return gatewayMock.modelSettingsResult();
+      }
+      if (method === "slash/settings/read") {
+        return gatewayMock.slashSettingsResult();
+      }
+      if (method === "slash/settings/update") {
+        const record = params as {
+          leaderKey?: string | null;
+          leaderTimeoutMs?: number | null;
+          aliases?: Array<Record<string, unknown>>;
+          keybinds?: Array<Record<string, unknown>>;
+          workdir?: string | null;
+        };
+        gatewayMock.slashSettings = {
+          ...gatewayMock.slashSettings,
+          workdir: record.workdir ?? gatewayMock.scope.workdir,
+          leaderKey: record.leaderKey ?? gatewayMock.slashSettings.leaderKey,
+          leaderTimeoutMs: record.leaderTimeoutMs ?? gatewayMock.slashSettings.leaderTimeoutMs,
+          aliases: (record.aliases ?? []).map((entry) => ({
+            alias: entry.alias,
+            target: entry.target,
+            targetSummary: entry.targetSummary ?? "show local status"
+          })),
+          keybinds: (record.keybinds ?? []).map((entry) => ({
+            shortcut: entry.shortcut,
+            target: entry.target,
+            targetSummary: entry.targetSummary ?? "show local status"
+          }))
+        };
+        return gatewayMock.slashSettingsResult();
       }
       if (method === "model/provider/catalog") {
         const record = params as { providerId?: string };
@@ -902,7 +947,6 @@ vi.mock("@psychevo/client", async () => {
             schedule: threadRequested
               ? { kind: "interval", everyMinutes: 30 }
               : { kind: "daily", time: "09:00" },
-            enabled: true,
             execution: { policy: "autoSandbox" },
             model: null,
             reasoningEffort: null
@@ -917,7 +961,6 @@ vi.mock("@psychevo/client", async () => {
           title?: string;
           prompt?: string;
           schedule?: Record<string, unknown>;
-          enabled?: boolean | null;
           execution?: { policy?: string } | null;
           model?: string | null;
           reasoningEffort?: string | null;
@@ -935,7 +978,7 @@ vi.mock("@psychevo/client", async () => {
           title: record.title ?? "Project check",
           prompt: record.prompt ?? "Check the project.",
           schedule: record.schedule ?? { kind: "interval", everyMinutes: 60 },
-          enabled: record.enabled ?? true,
+          enabled: existing?.enabled ?? true,
           execution: record.execution ?? { policy: "autoSandbox" },
           model: record.model ?? null,
           reasoningEffort: record.reasoningEffort ?? null,
@@ -943,10 +986,48 @@ vi.mock("@psychevo/client", async () => {
           createdAtMs: typeof existing?.createdAtMs === "number" ? existing.createdAtMs : now,
           updatedAtMs: now,
           lastRunAtMs: existing?.lastRunAtMs ?? null,
-          nextRunAtMs: now + 3_600_000,
+          nextRunAtMs: existing?.enabled === false ? null : now + 3_600_000,
           lastStatus: existing?.lastStatus ?? null,
           lastError: null,
           runs: Array.isArray(existing?.runs) ? existing.runs : []
+        };
+        gatewayMock.automationRecords = [
+          ...gatewayMock.automationRecords.filter((item) => item.id !== id),
+          automation
+        ];
+        return { automation };
+      }
+      if (method === "automation/pause" || method === "automation/resume") {
+        const record = params as { automationId?: string };
+        const now = Date.now();
+        const id = record.automationId ?? "automation-1";
+        const enabled = method === "automation/resume";
+        const existing = gatewayMock.automationRecords.find((automation) => automation.id === id) ?? {
+          id,
+          workdir: gatewayMock.scope.workdir,
+          kind: "project",
+          targetThreadId: null,
+          title: "Project check",
+          prompt: "Check the project.",
+          schedule: { kind: "interval", everyMinutes: 60 },
+          enabled: true,
+          execution: { policy: "autoSandbox" },
+          model: null,
+          reasoningEffort: null,
+          sourceKey: `automation:${id}`,
+          createdAtMs: now,
+          updatedAtMs: now,
+          lastRunAtMs: null,
+          nextRunAtMs: now + 3_600_000,
+          lastStatus: null,
+          lastError: null,
+          runs: []
+        };
+        const automation = {
+          ...existing,
+          enabled,
+          updatedAtMs: now,
+          nextRunAtMs: enabled ? now + 3_600_000 : null
         };
         gatewayMock.automationRecords = [
           ...gatewayMock.automationRecords.filter((item) => item.id !== id),
@@ -1235,7 +1316,23 @@ vi.mock("@psychevo/host", () => ({
     files: { pickFile: vi.fn(async () => ({ ok: false })) },
     open: { openDownload: vi.fn((url: string) => gatewayMock.openDownloadLog.push(url)) }
   }),
-  downloadUrl: () => "http://127.0.0.1/download"
+  downloadUrl: (_endpoint: unknown, threadId: string, kind: string, options: Record<string, unknown> = {}) => {
+    const hasInclude = Array.isArray(options.include) && options.include.length > 0;
+    if (!options.format && !hasInclude && !options.filename) {
+      return "http://127.0.0.1/download";
+    }
+    const url = new URL(`http://127.0.0.1/download/session/${threadId}/${kind}`);
+    if (typeof options.format === "string" && options.format) {
+      url.searchParams.set("format", options.format);
+    }
+    if (Array.isArray(options.include) && options.include.length > 0) {
+      url.searchParams.set("include", options.include.join(","));
+    }
+    if (typeof options.filename === "string" && options.filename) {
+      url.searchParams.set("filename", options.filename);
+    }
+    return url.toString();
+  }
 }));
 
 vi.mock("@xterm/xterm", () => {
@@ -1324,6 +1421,15 @@ afterEach(() => {
   });
   gatewayMock.completionResult = { items: [], replacement: null };
   gatewayMock.commandList = [];
+  gatewayMock.slashSettings = {
+    scope: "global",
+    workdir: gatewayMock.scope.workdir,
+    leaderKey: "ctrl+x",
+    leaderTimeoutMs: 2000,
+    aliases: [],
+    keybinds: [],
+    diagnostics: []
+  };
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.model = "xiaomi/xiaomi-token-high";
   gatewayMock.modelVariant = "none";
@@ -1501,6 +1607,7 @@ export function commandItem(
     aliases: [],
     argumentKind: "none",
     source: "core",
+    expandsTo: null,
     presentationKind,
     destination,
     feedbackAnchor: "commandsPanel",
@@ -1508,14 +1615,14 @@ export function commandItem(
   };
 }
 
-export function sessionSummary(id: string, title: string): Record<string, unknown> {
+export function sessionSummary(id: string, title: string, workdir = gatewayMock.scope.workdir): Record<string, unknown> {
   return {
     id,
-    workdir: gatewayMock.scope.workdir,
+    workdir,
     project: {
-      workdir: gatewayMock.scope.workdir,
-      label: "project",
-      displayPath: "/tmp/project"
+      workdir,
+      label: workdir.split("/").filter(Boolean).at(-1) ?? "project",
+      displayPath: workdir
     },
     model: null,
     provider: null,

@@ -215,6 +215,49 @@ describe("Composer completion mentions", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("accepts custom slash alias completion and submits the alias text", async () => {
+    const onCommand = vi.fn();
+    const onSubmit = vi.fn();
+    const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
+      replacement: { start: 0, end: 3 },
+      items: [
+        {
+          id: "command:st",
+          sigil: "/",
+          label: "/st",
+          insertText: "/st",
+          kind: "command",
+          detail: "Status - alias for /status",
+          sortText: "command:st",
+          target: null
+        }
+      ]
+    }));
+
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        running={false}
+        onCommand={onCommand}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "/st" } });
+
+    await waitFor(() => expect(screen.getByRole("option", { name: /\/st/ })).toBeTruthy());
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(textarea.value).toBe("/st "));
+
+    fireEvent.submit(textarea.closest("form")!);
+
+    expect(onCommand).toHaveBeenCalledWith("/st");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("ignores completion results that omit items", async () => {
     const completionProvider = vi.fn(async () => ({
       replacement: null

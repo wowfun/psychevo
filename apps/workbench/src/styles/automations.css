@@ -2,8 +2,10 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   align-content: stretch;
-  width: min(1080px, 100%);
+  justify-self: center;
+  width: min(980px, 100%);
   min-height: 0;
+  margin-inline: auto;
   gap: 10px;
   padding: 4px 0 0;
 }
@@ -14,8 +16,7 @@
 .automationRowTitle,
 .automationRowActions,
 .automationDraft header,
-.automationDraft footer,
-.automationCheck {
+.automationDraft footer {
   display: flex;
   align-items: center;
 }
@@ -44,7 +45,6 @@
 }
 
 .automationTitleBlock h2,
-.automationTitleBlock p,
 .automationRowTitle strong,
 .automationRowTitle span,
 .automationRow p,
@@ -60,23 +60,40 @@
   font-size: var(--pevo-font-size-chrome);
 }
 
-.automationTitleBlock p {
-  max-width: min(58vw, 620px);
-  margin: 1px 0 0;
-  color: var(--pevo-muted);
-  font-size: var(--pevo-font-size-small);
-}
-
 .automationToolbarActions {
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.automationWorkspaceSelect {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 280px);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+  font-weight: 650;
+}
+
+.automationWorkspaceSelect select {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 9px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 26%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-chrome);
 }
 
 .automationToolbarActions button,
 .automationNaturalDraft button,
 .automationRowActions button,
 .automationDraft footer button,
-.automationDraftPlaceholder button,
 .automationTemplateActions button {
   display: inline-flex;
   align-items: center;
@@ -101,7 +118,6 @@
 .automationNaturalDraft button:active,
 .automationRowActions button:active,
 .automationDraft footer button:active,
-.automationDraftPlaceholder button:active,
 .automationTemplateActions button:active,
 .automationSegments button:active {
   transform: scale(0.96);
@@ -111,7 +127,6 @@
 .automationNaturalDraft button:disabled,
 .automationRowActions button:disabled,
 .automationDraft footer button:disabled,
-.automationDraftPlaceholder button:disabled,
 .automationTemplateActions button:disabled,
 .automationSegments button:disabled {
   cursor: not-allowed;
@@ -124,7 +139,6 @@
   .automationNaturalDraft button:hover,
   .automationRowActions button:hover,
   .automationDraft footer button:hover,
-  .automationDraftPlaceholder button:hover,
   .automationTemplateActions button:hover {
     background: color-mix(in oklch, var(--pevo-panel-muted), white 8%);
   }
@@ -174,17 +188,34 @@
 
 .automationSurface {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.36fr);
-  gap: 14px;
+  grid-template-columns: minmax(220px, 320px) minmax(420px, 560px);
+  justify-content: center;
+  align-items: start;
+  gap: 16px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
+.automationSurface.is-list-only {
+  grid-template-columns: minmax(0, 720px);
+}
+
+.automationSurface.is-empty-list:not(.has-draft) {
+  grid-template-columns: minmax(0, 640px);
+}
+
+.automationSurface.has-draft.is-empty-list {
+  grid-template-columns: minmax(0, 640px);
+}
+
+.automationSurface.has-draft.is-empty-list .automationListPane {
+  display: none;
+}
+
 .automationListPane,
 .automationRows,
 .automationDraft,
-.automationDraftPlaceholder,
 .automationEmpty {
   min-width: 0;
   min-height: 0;
@@ -282,16 +313,14 @@
 .automationDraft {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 12px;
   overflow: auto;
-  padding: 10px;
-  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 52%);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  width: 100%;
+  padding: 16px;
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-panel-muted) 20%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
   border-radius: var(--pevo-radius);
-}
-
-.automationDraft.is-empty {
-  place-items: center;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.16);
 }
 
 .automationDraft header {
@@ -326,10 +355,11 @@
 }
 
 .automationDraft input,
+.automationDraft select,
 .automationDraft textarea {
   width: 100%;
   min-width: 0;
-  min-height: 34px;
+  min-height: 38px;
   padding: 0 9px;
   color: var(--pevo-ink);
   background: var(--pevo-panel);
@@ -340,7 +370,7 @@
 }
 
 .automationDraft textarea {
-  min-height: 98px;
+  min-height: 122px;
   padding: 8px 9px;
   line-height: 1.35;
   resize: vertical;
@@ -412,42 +442,46 @@
   box-shadow: var(--pevo-shadow-active);
 }
 
-.automationCheck {
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  min-height: 32px;
-}
-
-.automationCheck input {
-  width: 16px;
-  min-height: 16px;
-}
-
 .automationDraft footer {
   justify-content: flex-end;
   gap: 6px;
-  padding-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
 }
 
-.automationDraftPlaceholder,
 .automationEmpty {
   display: grid;
+  min-height: 120px;
   align-content: center;
-  justify-items: start;
+  justify-items: center;
   gap: 8px;
   padding: 16px;
   color: var(--pevo-muted);
 }
 
-.automationTemplateActions,
-.automationDraftPlaceholder {
-  grid-template-columns: repeat(auto-fit, minmax(144px, max-content));
+.automationTemplateActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(144px, max-content));
+  justify-content: center;
+  gap: 8px;
 }
 
 @media (max-width: 980px) {
   .automationSurface {
     grid-template-columns: minmax(0, 1fr);
     overflow: auto;
+  }
+
+  .automationSurface.is-list-only {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automationSurface.is-empty-list:not(.has-draft) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automationSurface.has-draft.is-empty-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .automationDraft {
@@ -472,7 +506,16 @@
     justify-content: start;
   }
 
+  .automationWorkspaceSelect {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
   .automationNaturalDraft {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automationTemplateActions {
     grid-template-columns: minmax(0, 1fr);
   }
 

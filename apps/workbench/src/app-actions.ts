@@ -181,6 +181,7 @@ export function createAppActions(params: AppActionsParams) {
     const epoch = params.beginExplicitViewSwitch();
     resetRuntimeSelection();
     clearSessionObservability();
+    params.updateMainView("transcript");
     params.setMobilePanel("transcript");
     const nextScope = workdir
       ? scopeForWorkdir(workdir)

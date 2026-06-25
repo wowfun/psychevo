@@ -1,4 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { PREFS_APPEARANCE_VERSION, PREFS_KEY } from "../src/storage";
@@ -171,19 +173,51 @@ test.describe("pevo Web Workbench", () => {
       const automations = page.getByRole("region", { name: "Automations" });
       await expect(automations).toBeVisible();
       await expect(page.locator(".composerDock")).toHaveCount(0);
+      await expect(automations.locator(".automationTitleBlock p")).toHaveCount(0);
       await expect(automations.getByRole("button", { name: "Refresh" })).toBeVisible();
+      await expect(automations.getByLabel("Workspace")).toBeVisible();
       await expect(automations.getByLabel("Automation description")).toBeVisible();
       await expect(automations.getByRole("button", { name: "Draft" })).toBeVisible();
-      await expect(automations.getByRole("button", { name: "Project check" }).first()).toBeVisible();
+      const projectTemplateButton = automations.getByRole("button", { name: "Project check" });
+      await expect(projectTemplateButton).toHaveCount(1);
+      await expect(automations.getByRole("button", { name: "Thread heartbeat" })).toHaveCount(1);
+      await expect(automations.getByRole("form", { name: "Automation draft" })).toHaveCount(0);
+      await expect(automations.locator(".automationDraftPlaceholder")).toHaveCount(0);
       await assertNoHorizontalOverflow(page, automations);
+      const emptyPaneCenter = await automations.locator(".automationListPane").evaluate((element) => {
+        const page = element.closest(".automationsPage");
+        const paneBox = element.getBoundingClientRect();
+        const pageBox = page?.getBoundingClientRect();
+        if (!pageBox) {
+          return null;
+        }
+        return Math.abs((paneBox.left + paneBox.width / 2) - (pageBox.left + pageBox.width / 2));
+      });
+      expect(emptyPaneCenter).not.toBeNull();
+      expect(emptyPaneCenter!).toBeLessThanOrEqual(isMobile ? 2 : 12);
+      await captureWorkbench(page, testInfo, `automations-empty-${isMobile ? "mobile" : "desktop"}`);
 
-      await automations.getByRole("button", { name: "Project check" }).first().click();
+      await projectTemplateButton.click();
       const draft = automations.getByRole("form", { name: "Automation draft" });
       await expect(draft).toBeVisible();
+      await expect(draft.getByLabel("Bind to")).toBeVisible();
+      await expect(draft.getByLabel("Draft workspace")).toBeVisible();
+      const draftCenter = await draft.evaluate((element) => {
+        const page = element.closest(".automationsPage");
+        const draftBox = element.getBoundingClientRect();
+        const pageBox = page?.getBoundingClientRect();
+        if (!pageBox) {
+          return null;
+        }
+        return Math.abs((draftBox.left + draftBox.width / 2) - (pageBox.left + pageBox.width / 2));
+      });
+      expect(draftCenter).not.toBeNull();
+      expect(draftCenter!).toBeLessThanOrEqual(isMobile ? 2 : 12);
       await draft.getByLabel("Title").fill("Morning repository check");
       await draft.getByLabel("Prompt").fill("Review current repository state and summarize risky work.");
       await expect(draft.getByRole("button", { name: "Auto in sandbox" })).toHaveClass(/is-selected/);
       await expect(draft.getByRole("button", { name: "Ask first" })).toBeVisible();
+      await captureWorkbench(page, testInfo, `automations-draft-${isMobile ? "mobile" : "desktop"}`);
       await draft.getByRole("button", { name: "Save" }).click();
 
       await expect(automations.getByText("Morning repository check")).toBeVisible();
@@ -197,9 +231,75 @@ test.describe("pevo Web Workbench", () => {
     }
   });
 
+  test("starts a new session from Automations", async ({ page, isMobile }) => {
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      }
+      await page.getByRole("button", { name: "Automations" }).click();
+      await expect(page.getByRole("region", { name: "Automations" })).toBeVisible();
+
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      }
+      await page.getByRole("button", { name: "New Session", exact: true }).click();
+
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Automations" })).toHaveCount(0);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("creates a first-turn Automations task through deterministic composer without current thread failure", async ({ page, isMobile }, testInfo) => {
+    test.skip(isMobile, "deterministic automation composer validation runs once on desktop");
+    const mockProvider = await startAutomationToolMockProvider();
+    const server = await startPevoWeb({
+      live: false,
+      model: "mock/automation",
+      configAppend: `
+[provider.mock.options]
+base_url = "${mockProvider.baseUrl}"
+api_key_env = "MOCK_PROVIDER_KEY"
+
+[provider.mock.models.automation]
+`,
+      envFile: "MOCK_PROVIDER_KEY=test-key\n"
+    });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+
+      await page.getByPlaceholder("Ask Psychevo...").fill(
+        "请创建一个自动化：每分钟发送一条最有价值的软件工程 tip。标题必须是 pevo-deterministic-engineering-tip。不要显式指定 target。"
+      );
+      await page.getByRole("button", { name: "Send message" }).click();
+
+      const finalRows = page.locator(".pevo-message.is-assistant").filter({ hasText: /pevo-deterministic-engineering-tip/ });
+      await expectNoTransientAssistantDuplicateDuring(page, testInfo, finalRows, "deterministic-automation", 60_000, 1_000);
+      await assertNoHorizontalOverflow(page, page.getByRole("region", { name: "Transcript" }));
+      await captureWorkbench(page, testInfo, "deterministic-automation-transcript");
+
+      await page.getByRole("button", { name: "Automations" }).click();
+      const automations = page.getByRole("region", { name: "Automations" });
+      await expect(automations.getByText("pevo-deterministic-engineering-tip").first()).toBeVisible();
+      await expect(automations.getByText("every 1m").first()).toBeVisible();
+      await expect(automations.locator(".automationMeta").getByText("thread", { exact: true }).first()).toBeVisible();
+      await assertNoHorizontalOverflow(page, automations);
+      await captureWorkbench(page, testInfo, "deterministic-automation-list");
+      expect(mockProvider.requests.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      await server.stop();
+      await mockProvider.close();
+    }
+  });
+
   test("shows Settings as an app-level configuration center", async ({ page, isMobile }, testInfo) => {
-        const server = await startPevoWeb({ live: false });
-        try {
+    const server = await startPevoWeb({ live: false });
+    try {
           await page.goto(server.url);
           await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
         await page.getByRole("button", { name: "Agent" }).click();
@@ -627,6 +727,37 @@ test.describe("pevo Web Workbench", () => {
     }
   });
 
+  test("creates an automation through the live GUI without duplicating the final answer @live", async ({ page, isMobile }, testInfo) => {
+    test.skip(process.env.PSYCHEVO_PLAYWRIGHT_LIVE !== "1", "live provider validation is opt-in");
+    test.skip(isMobile, "live automation validation runs once on the desktop project");
+    test.setTimeout(360_000);
+    const server = await startPevoWeb({ live: true, workdir: ensureLiveAutomationWorkdir() });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+
+      await page.getByPlaceholder("Ask Psychevo...").fill(
+        "请使用 automation 工具创建一个自动化。标题必须是 pevo-live-engineering-tip，schedule 必须是 interval everyMinutes=1（当前系统不支持秒级，使用最快支持间隔），prompt 是：每次发送一条最有价值的软件工程 tip。不要显式指定 project 或 currentThread；按当前对话的默认目标创建。请实际创建，不要等待触发，不要只说明。"
+      );
+      await page.getByRole("button", { name: "Send message" }).click();
+
+      const finalRows = page.locator(".pevo-message.is-assistant").filter({ hasText: /pevo-live-engineering-tip/ });
+      await expectNoTransientAssistantDuplicateDuring(page, testInfo, finalRows, "live-automation", 240_000, 8_000);
+      await assertNoHorizontalOverflow(page, page.getByRole("region", { name: "Transcript" }));
+      await captureWorkbench(page, testInfo, "live-automation-transcript");
+
+      await page.getByRole("button", { name: "Automations" }).click();
+      const automations = page.getByRole("region", { name: "Automations" });
+      await expect(automations).toBeVisible();
+      await expect(automations.getByText("pevo-live-engineering-tip").first()).toBeVisible({ timeout: 30_000 });
+      await expect(automations.getByText("every 1m").first()).toBeVisible();
+      await assertNoHorizontalOverflow(page, automations);
+      await captureWorkbench(page, testInfo, "live-automation-list");
+    } finally {
+      await server.stop();
+    }
+  });
+
   test("opens live translate subagent sessions from the GUI @live", async ({ page, isMobile }, testInfo) => {
     test.skip(process.env.PSYCHEVO_PLAYWRIGHT_LIVE !== "1", "live provider validation is opt-in");
     test.skip(isMobile, "live provider validation runs once on the desktop project");
@@ -685,6 +816,119 @@ const CHANNELS_VISUAL_ENV = [
 ].join("\n");
 const CHANNELS_SCREENSHOT_DIR = path.join(repoRoot, ".local/playwright/screenshots/channels");
 
+async function startAutomationToolMockProvider(): Promise<{
+  baseUrl: string;
+  close(): Promise<void>;
+  requests: unknown[];
+}> {
+  const requests: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+
+    const body = await readRequestBody(request);
+    const payload = JSON.parse(body) as {
+      messages?: Array<{ role?: string }>;
+      tools?: Array<{ function?: { name?: string }; name?: string }>;
+    };
+    requests.push(payload);
+    const hasAutomationTool = payload.tools?.some((tool) => tool.name === "automation" || tool.function?.name === "automation") ?? false;
+    const hasToolResult = payload.messages?.some((message) => message.role === "tool") ?? false;
+
+    if (hasAutomationTool && !hasToolResult) {
+      sendSse(response, [
+        {
+          id: "mock-tool-call",
+          model: "automation",
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_automation_tip",
+                    function: {
+                      name: "automation",
+                      arguments: JSON.stringify({
+                        action: "create",
+                        title: "pevo-deterministic-engineering-tip",
+                        prompt: "每次发送一条最有价值的软件工程 tip。",
+                        schedule: { kind: "interval", everyMinutes: 1 }
+                      })
+                    }
+                  }
+                ]
+              },
+              finish_reason: "tool_calls"
+            }
+          ]
+        }
+      ]);
+      return;
+    }
+
+    if (hasToolResult) {
+      sendSse(response, [
+        {
+          id: "mock-final",
+          model: "automation",
+          choices: [
+            {
+              delta: { content: "已创建 pevo-deterministic-engineering-tip。" },
+              finish_reason: "stop"
+            }
+          ]
+        }
+      ]);
+      return;
+    }
+
+    sendSse(response, [
+      {
+        id: "mock-title",
+        model: "automation",
+        choices: [
+          {
+            delta: { content: "Deterministic Automation Tip" },
+            finish_reason: "stop"
+          }
+        ]
+      }
+    ]);
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    requests
+  };
+}
+
+function readRequestBody(request: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    request.on("error", reject);
+  });
+}
+
+function sendSse(response: ServerResponse, chunks: unknown[]) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    connection: "close"
+  });
+  for (const chunk of chunks) {
+    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+  response.end("data: [DONE]\n\n");
+}
+
 function ensureLiveSubagentWorkdir(): string {
   const workdir = process.env.PSYCHEVO_PLAYWRIGHT_LIVE_SUBAGENT_WORKDIR
     ? path.resolve(process.env.PSYCHEVO_PLAYWRIGHT_LIVE_SUBAGENT_WORKDIR)
@@ -699,6 +943,15 @@ description: Translate between Chinese and English.
 Translate the assigned text between Chinese and English. Return only the translation and direction.
 `
   );
+  return workdir;
+}
+
+function ensureLiveAutomationWorkdir(): string {
+  const workdir = process.env.PSYCHEVO_PLAYWRIGHT_LIVE_AUTOMATION_WORKDIR
+    ? path.resolve(process.env.PSYCHEVO_PLAYWRIGHT_LIVE_AUTOMATION_WORKDIR)
+    : path.join(repoRoot, ".local/.psychevo-dev/live-validation/gui-automation-workdir");
+  mkdirSync(workdir, { recursive: true });
+  writeFileSync(path.join(workdir, "README.md"), "Live GUI automation validation workspace.\n");
   return workdir;
 }
 
@@ -752,6 +1005,84 @@ async function captureWorkbench(page: Page, testInfo: TestInfo, label: string) {
     fullPage: true,
     path: testInfo.outputPath(`${label}-${testInfo.project.name}.png`)
   });
+}
+
+async function expectNoTransientAssistantDuplicateDuring(
+  page: Page,
+  testInfo: TestInfo,
+  rows: Locator,
+  label: string,
+  timeoutMs: number,
+  stableAfterVisibleMs: number
+) {
+  const deadline = Date.now() + timeoutMs;
+  let stableDeadline: number | null = null;
+  const samples: Array<{
+    allRows: TranscriptRowSample[];
+    elapsedMs: number;
+    matchingRows: TranscriptRowSample[];
+  }> = [];
+  while (Date.now() < deadline) {
+    const currentRows = await transcriptRowSamples(rows);
+    const allRows = await allTranscriptRowSamples(page);
+    const elapsedMs = timeoutMs - Math.max(0, deadline - Date.now());
+    samples.push({ allRows, elapsedMs, matchingRows: currentRows });
+    if (allRows.some((row) => row.text.includes("current thread is not available"))) {
+      await captureWorkbench(page, testInfo, `${label}-current-thread-unavailable`);
+      await testInfo.attach(`${label}-current-thread-unavailable-rows.json`, {
+        body: JSON.stringify(samples, null, 2),
+        contentType: "application/json"
+      });
+      throw new Error(`${label}: automation tool reported missing current thread: ${JSON.stringify(allRows, null, 2)}`);
+    }
+    if (currentRows.length > 1) {
+      await captureWorkbench(page, testInfo, `${label}-duplicate`);
+      await testInfo.attach(`${label}-duplicate-rows.json`, {
+        body: JSON.stringify(samples, null, 2),
+        contentType: "application/json"
+      });
+      throw new Error(`${label}: duplicate assistant rows appeared transiently: ${JSON.stringify(currentRows, null, 2)}`);
+    }
+    if (currentRows.length === 1) {
+      stableDeadline ??= Date.now() + stableAfterVisibleMs;
+      if (Date.now() >= stableDeadline) {
+        await expect(rows).toHaveCount(1);
+        return;
+      }
+    } else {
+      stableDeadline = null;
+    }
+    await page.waitForTimeout(250);
+  }
+  await testInfo.attach(`${label}-rows-timeout.json`, {
+    body: JSON.stringify(samples, null, 2),
+    contentType: "application/json"
+  });
+  throw new Error(`${label}: assistant row did not become visible within ${timeoutMs}ms`);
+}
+
+type TranscriptRowSample = {
+  blockId: string | null;
+  entryId: string | null;
+  source: string | null;
+  text: string;
+  turnId: string | null;
+};
+
+async function transcriptRowSamples(rows: Locator): Promise<TranscriptRowSample[]> {
+  return rows.evaluateAll((elements) => elements.map((element) => ({
+    blockId: element.getAttribute("data-block-id"),
+    entryId: element.getAttribute("data-entry-id"),
+    source: element.getAttribute("data-source"),
+    text: (element.textContent ?? "").replace(/\s+/g, " ").trim(),
+    turnId: element.getAttribute("data-turn-id")
+  })));
+}
+
+async function allTranscriptRowSamples(page: Page): Promise<TranscriptRowSample[]> {
+  return transcriptRowSamples(
+    page.locator(".pevo-threadItems .pevo-message, .pevo-threadItems .pevo-evidence")
+  );
 }
 
 async function captureChannelsWorkbench(page: Page, testInfo: TestInfo, label: string) {

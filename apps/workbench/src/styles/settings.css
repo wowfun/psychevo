@@ -415,6 +415,146 @@
   color: color-mix(in oklch, #b27218, var(--pevo-ink) 16%);
 }
 
+.slashSettingsPanel {
+  gap: 9px;
+}
+
+.slashLeaderForm {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(98px, 0.45fr) auto;
+  gap: 8px;
+  align-items: end;
+  min-width: 0;
+}
+
+.slashLeaderForm label,
+.slashCommandEditor label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+}
+
+.slashLeaderForm input,
+.slashCommandEditor input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 9px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+}
+
+.slashLeaderForm button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 74px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.slashLeaderForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.slashCommandList {
+  min-width: 0;
+}
+
+.slashCommandRow {
+  align-items: start;
+}
+
+.slashCommandMain {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.slashCommandMain code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+
+.slashChipLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.slashChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 4px 0 7px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.slashChip.is-shortcut {
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-accent) 5%);
+}
+
+.slashChip code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slashChip button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.slashChip button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.slashEditorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.slashCommandEditor {
+  align-content: start;
+}
+
 .modelAssignmentPanel,
 .modelProvidersPanel {
   display: grid;
@@ -969,6 +1109,11 @@
 
   .modelAssignmentControls,
   .modelProviderFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .slashLeaderForm,
+  .slashEditorGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 

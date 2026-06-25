@@ -101,6 +101,7 @@ export function parseCommandList(value: unknown): WorkbenchCommand[] {
           aliases: stringArray(item.aliases),
           argumentKind: stringField(item.argumentKind),
           source: stringField(item.source),
+          expandsTo: optionalStringField(item.expandsTo),
           presentationKind: optionalStringField(item.presentationKind) ?? "control",
           destination: optionalStringField(item.destination),
           feedbackAnchor: optionalStringField(item.feedbackAnchor),
