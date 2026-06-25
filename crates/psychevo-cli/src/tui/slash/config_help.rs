@@ -475,180 +475,26 @@ pub(crate) fn configured_custom_command_row(target: &str, config: &EffectiveSlas
 }
 
 pub(crate) fn parse_effective_slash_config(root: &Value) -> Result<EffectiveSlashConfig> {
-    let Some(tui) = root.get("tui") else {
-        return Ok(EffectiveSlashConfig::default());
-    };
-    let object = tui
-        .as_object()
-        .ok_or_else(|| anyhow!("tui must be an object"))?;
-    let leader_key = match object.get("leader_key") {
-        Some(value) => parse_required_key_chord(value, "tui.leader_key")?,
-        None => EffectiveSlashConfig::default().leader_key,
-    };
-    let leader_timeout = match object.get("leader_timeout_ms") {
-        Some(value) => Duration::from_millis(
-            value
-                .as_u64()
-                .filter(|value| *value > 0)
-                .ok_or_else(|| anyhow!("tui.leader_timeout_ms must be a positive integer"))?,
-        ),
-        None => Duration::from_millis(DEFAULT_LEADER_TIMEOUT_MS),
-    };
-    let aliases = parse_configured_aliases(object.get("slash_aliases"))?;
-    let keybinds = parse_configured_keybinds(object.get("slash_keybinds"))?;
-    let config = EffectiveSlashConfig {
+    let shared = psychevo_runtime::command_registry::parse_shared_slash_config(root)?;
+    let aliases = shared.alias_map();
+    let leader_key = parse_key_chord(&shared.leader_key, "tui.leader_key")?;
+    let leader_timeout = Duration::from_millis(shared.leader_timeout_ms);
+    let keybinds = shared
+        .keybinds
+        .into_iter()
+        .map(|entry| {
+            Ok(SlashKeybind {
+                command: entry.target,
+                sequence: parse_key_sequence(&entry.shortcut, "tui.slash_keybinds")?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(EffectiveSlashConfig {
         aliases,
         keybinds,
         leader_key,
         leader_timeout,
-    };
-    validate_effective_slash_config(&config)?;
-    Ok(config)
-}
-
-pub(crate) fn parse_configured_aliases(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
-    let Some(value) = value else {
-        return Ok(BTreeMap::new());
-    };
-    let object = value
-        .as_object()
-        .ok_or_else(|| anyhow!("tui.slash_aliases must be an object"))?;
-    let mut aliases = BTreeMap::new();
-    for (target, value) in object {
-        let target = validate_configured_slash_target(target, "tui.slash_aliases")?;
-        for alias in parse_alias_values(value, &format!("tui.slash_aliases.{target}"))? {
-            if aliases.insert(alias.clone(), target.clone()).is_some() {
-                return Err(anyhow!("duplicate slash alias: {alias}"));
-            }
-        }
-    }
-    Ok(aliases)
-}
-
-pub(crate) fn parse_alias_values(value: &Value, path: &str) -> Result<Vec<String>> {
-    match value {
-        Value::String(value) => Ok(vec![validate_configured_alias(value, path)?]),
-        Value::Array(values) => values
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                let value = value
-                    .as_str()
-                    .ok_or_else(|| anyhow!("{path}[{index}] must be a string"))?;
-                validate_configured_alias(value, &format!("{path}[{index}]"))
-            })
-            .collect(),
-        _ => Err(anyhow!("{path} must be a string or array of strings")),
-    }
-}
-
-pub(crate) fn validate_configured_alias(value: &str, path: &str) -> Result<String> {
-    let alias = value.trim();
-    if alias.is_empty() || !alias.starts_with('/') || alias.chars().any(char::is_whitespace) {
-        return Err(anyhow!("{path} must be a slash alias without whitespace"));
-    }
-    if alias.starts_with(OLD_DYNAMIC_SKILL_PREFIX) {
-        return Err(anyhow!(
-            "{path} must not use the obsolete dynamic /skill: prefix"
-        ));
-    }
-    Ok(alias.to_string())
-}
-
-pub(crate) fn parse_configured_keybinds(value: Option<&Value>) -> Result<Vec<SlashKeybind>> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    let object = value
-        .as_object()
-        .ok_or_else(|| anyhow!("tui.slash_keybinds must be an object"))?;
-    let mut keybinds = Vec::new();
-    for (target, value) in object {
-        let target = validate_configured_slash_target(target, "tui.slash_keybinds")?;
-        for sequence in parse_key_sequences(value, &format!("tui.slash_keybinds.{target}"))? {
-            keybinds.push(SlashKeybind {
-                command: target.clone(),
-                sequence,
-            });
-        }
-    }
-    Ok(keybinds)
-}
-
-pub(crate) fn validate_configured_slash_target(value: &str, path: &str) -> Result<String> {
-    let target = value.trim();
-    if target.is_empty() || !target.starts_with('/') {
-        return Err(anyhow!("{path} keys must be slash command lines"));
-    }
-    let (command, _) = split_command_token(target);
-    if command.starts_with(OLD_DYNAMIC_SKILL_PREFIX) {
-        return Err(anyhow!(
-            "{path} does not support obsolete dynamic /skill: commands"
-        ));
-    }
-    if slash_command_spec(command).is_none() && command != "/side" && command != "/reload-context" {
-        return Err(anyhow!(
-            "{path} target does not support dynamic skill or bundle commands"
-        ));
-    }
-    parse_slash_command(target)
-        .map_err(|err| anyhow!("{path} target {target:?} is invalid: {err:#}"))?
-        .ok_or_else(|| anyhow!("{path} target {target:?} is not a slash command"))?;
-    Ok(target.to_string())
-}
-
-pub(crate) fn parse_required_key_chord(value: &Value, path: &str) -> Result<KeyChord> {
-    let value = value
-        .as_str()
-        .ok_or_else(|| anyhow!("{path} must be a string"))?;
-    let value = value.trim();
-    if value.eq_ignore_ascii_case("none") || value.starts_with("<leader>") {
-        return Err(anyhow!("{path} must be a single key chord"));
-    }
-    parse_key_chord(value, path)
-}
-
-pub(crate) fn parse_key_sequences(value: &Value, path: &str) -> Result<Vec<SlashKeySequence>> {
-    let raw = match value {
-        Value::String(value) => split_key_sequence_list(value),
-        Value::Array(values) => {
-            let mut items = Vec::new();
-            for (index, value) in values.iter().enumerate() {
-                let value = value
-                    .as_str()
-                    .ok_or_else(|| anyhow!("{path}[{index}] must be a string"))?;
-                items.extend(split_key_sequence_list(value));
-            }
-            items
-        }
-        Value::Bool(false) => vec!["none".to_string()],
-        _ => {
-            return Err(anyhow!(
-                "{path} must be a string, array of strings, or false"
-            ));
-        }
-    };
-    if raw.is_empty() {
-        return Err(anyhow!("{path} must include at least one shortcut"));
-    }
-    if raw.iter().any(|value| value.eq_ignore_ascii_case("none")) {
-        if raw.len() == 1 {
-            return Ok(Vec::new());
-        }
-        return Err(anyhow!("{path} uses none with other shortcuts"));
-    }
-    raw.iter()
-        .map(|value| parse_key_sequence(value, path))
-        .collect()
-}
-
-pub(crate) fn split_key_sequence_list(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
+    })
 }
 
 pub(crate) fn parse_key_sequence(value: &str, path: &str) -> Result<SlashKeySequence> {
@@ -763,82 +609,4 @@ pub(crate) fn key_code_display(code: &KeyCode) -> String {
         KeyCode::F(number) => format!("f{number}"),
         other => format!("{other:?}").to_lowercase(),
     }
-}
-
-pub(crate) fn validate_effective_slash_config(config: &EffectiveSlashConfig) -> Result<()> {
-    validate_alias_conflicts(config)?;
-    validate_keybind_conflicts(config)
-}
-
-pub(crate) fn validate_alias_conflicts(config: &EffectiveSlashConfig) -> Result<()> {
-    let mut reserved = SLASH_COMMANDS
-        .iter()
-        .flat_map(|spec| {
-            std::iter::once(spec.canonical.to_string())
-                .chain(spec.aliases.iter().map(|alias| (*alias).to_string()))
-        })
-        .collect::<BTreeSet<_>>();
-    reserved.extend(
-        OBSOLETE_SLASH_COMMAND_TOKENS
-            .iter()
-            .map(|value| (*value).to_string()),
-    );
-    let mut seen = BTreeSet::new();
-    for alias in config.aliases.keys() {
-        if reserved.contains(alias) {
-            return Err(anyhow!(
-                "slash alias conflicts with built-in command: {alias}"
-            ));
-        }
-        if alias.starts_with(OLD_DYNAMIC_SKILL_PREFIX) {
-            return Err(anyhow!(
-                "slash alias conflicts with obsolete dynamic /skill: prefix: {alias}"
-            ));
-        }
-        if !seen.insert(alias.clone()) {
-            return Err(anyhow!("duplicate slash alias: {alias}"));
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_keybind_conflicts(config: &EffectiveSlashConfig) -> Result<()> {
-    if fixed_key_chords()
-        .iter()
-        .any(|fixed| fixed == &config.leader_key)
-    {
-        return Err(anyhow!(
-            "tui.leader_key conflicts with fixed key {}",
-            config.leader_key.display
-        ));
-    }
-    let mut seen = BTreeSet::new();
-    for keybind in &config.keybinds {
-        let display = keybind.sequence.display();
-        if !seen.insert(display.clone()) {
-            return Err(anyhow!("duplicate slash shortcut: {display}"));
-        }
-        match &keybind.sequence {
-            SlashKeySequence::Chord(chord) => {
-                if fixed_key_chords().iter().any(|fixed| fixed == chord) {
-                    return Err(anyhow!(
-                        "slash shortcut conflicts with fixed key: {display}"
-                    ));
-                }
-                if chord == &config.leader_key {
-                    return Err(anyhow!(
-                        "slash shortcut conflicts with leader key: {display}"
-                    ));
-                }
-            }
-            SlashKeySequence::Leader(chord) => {
-                if fixed_key_chords().iter().any(|fixed| fixed == chord) {
-                    return Err(anyhow!(
-                        "slash shortcut conflicts with fixed key: {display}"
-                    ));
-                }
-            }
-        }
-    }
-    Ok(())
 }

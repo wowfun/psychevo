@@ -140,6 +140,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
                 no_skills: args.no_skills,
                 skill_inputs: args.skill.clone(),
                 mcp_servers: Vec::new(),
+                runtime_tools: Vec::new(),
             },
             runtime_source: Some("run".to_string()),
             continue_sources: vec!["run".to_string()],

@@ -165,7 +165,9 @@ pub(crate) fn cli_run_default_writes_claude_warning_to_stderr_only() {
 pub(crate) fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() {
     let server = MockSseServer::start(vec![
         sse_reasoning_then_text("private chain", "visible final"),
+        sse_text("Hidden run title"),
         sse_reasoning_then_text("debug chain", "debug final"),
+        sse_text("Shown run title"),
     ]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -289,7 +291,12 @@ pub(crate) fn cli_run_json_omits_metadata_only_message_updates() {
 
 #[test]
 pub(crate) fn cli_run_reads_stdin_and_appends_to_positional_prompt() {
-    let server = MockSseServer::start(vec![sse_text("stdin final"), sse_text("append final")]);
+    let server = MockSseServer::start(vec![
+        sse_text("stdin final"),
+        sse_text("Stdin title"),
+        sse_text("append final"),
+        sse_text("Append title"),
+    ]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");
@@ -343,7 +350,7 @@ pub(crate) fn cli_run_reads_stdin_and_appends_to_positional_prompt() {
 
     assert_eq!(user_contents(&server.request_json(0)), vec!["from stdin\n"]);
     assert_eq!(
-        user_contents(&server.request_json(1)),
+        user_contents(&server.request_json(2)),
         vec!["fix this\ndetails\n"]
     );
 }
@@ -558,7 +565,11 @@ pub(crate) fn cli_run_variant_overrides_reasoning_effort_and_none_suppresses_it(
 
 #[test]
 pub(crate) fn cli_run_continue_reuses_latest_matching_run_session() {
-    let server = MockSseServer::start(vec![sse_text("first"), sse_text("second")]);
+    let server = MockSseServer::start(vec![
+        sse_text("first"),
+        sse_text("First run title"),
+        sse_text("second"),
+    ]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let workdir = temp.path().join("work");

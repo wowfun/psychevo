@@ -69,7 +69,7 @@ pub(crate) fn markdown_renders_local_links_relative_to_workdir() {
 }
 
 #[test]
-pub(crate) fn markdown_renders_tables_as_boxes_with_pipe_fallback() {
+pub(crate) fn markdown_renders_tables_as_boxes_with_wrapped_overflow_fallback() {
     let temp = tempdir().expect("temp");
     let markdown = "| Name | Value |\n|---|---:|\n| alpha | 42 |";
 
@@ -81,8 +81,52 @@ pub(crate) fn markdown_renders_tables_as_boxes_with_pipe_fallback() {
 
     let narrow = render_markdown_lines(markdown, temp.path(), Some(12));
     let narrow_text = narrow.iter().map(line_text).collect::<Vec<_>>().join("\n");
-    assert!(narrow_text.contains("| Name | Value |"), "{narrow_text}");
+    assert!(narrow_text.contains("Name: alpha"), "{narrow_text}");
+    assert!(narrow_text.contains("Value: 42"), "{narrow_text}");
+    assert!(!narrow_text.contains("| Name | Value |"), "{narrow_text}");
+    assert!(!narrow_text.contains("| --- | ---: |"), "{narrow_text}");
     assert!(!narrow_text.contains("┌"), "{narrow_text}");
+}
+
+#[test]
+pub(crate) fn markdown_wraps_wide_recommendation_tables_before_paragraph_wrapping() {
+    let temp = tempdir().expect("temp");
+    let markdown = concat!(
+        "| # | Severity | Recommendation |\n",
+        "|---:|---|---|\n",
+        "| 1 | Should fix | `.psychevo/` is not listed in `.gitignore`. ",
+        "It is local agent config that will show up as untracked noise and could be ",
+        "accidentally committed. Recommend adding `.psychevo/` to `.gitignore`. |\n",
+        "| 2 | Info | The `.fixnull.c` / `.fixnull.so` files were artifacts from this ",
+        "session git workaround and have been cleaned up. |",
+    );
+
+    let width = 48;
+    let lines = render_markdown_lines(markdown, temp.path(), Some(width));
+    let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
+    let text = rendered.join("\n");
+
+    assert!(text.contains("#: 1"), "{text}");
+    assert!(text.contains("Severity: Should fix"), "{text}");
+    assert!(text.contains("Recommendation: .psychevo/ is not"), "{text}");
+    assert!(text.contains("local agent"), "{text}");
+    assert!(text.contains("config that will show up as"), "{text}");
+    assert!(text.contains("untracked noise"), "{text}");
+    assert!(text.contains("accidentally committed"), "{text}");
+    assert!(
+        !text.contains("| # | Severity | Recommendation |"),
+        "{text}"
+    );
+    assert!(
+        !rendered.iter().any(|line| line.contains("      ")),
+        "{text}"
+    );
+    assert!(
+        rendered
+            .iter()
+            .all(|line| UnicodeWidthStr::width(line.as_str()) <= usize::from(width)),
+        "{text}"
+    );
 }
 
 #[test]

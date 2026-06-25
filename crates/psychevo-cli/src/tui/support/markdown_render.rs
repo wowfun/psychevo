@@ -503,7 +503,7 @@ pub(crate) fn render_table(table: MarkdownTable, width: Option<u16>) -> Vec<Line
     let widths = table_widths(&header, &rows, col_count);
     let box_width = table_box_width(&widths);
     if width.is_some_and(|available| box_width > usize::from(available)) {
-        return render_pipe_table(&header, &rows, &table.alignments, col_count);
+        return render_wrapped_table(&header, &rows, width.unwrap_or_default());
     }
     render_box_table(&header, &rows, &table.alignments, &widths)
 }
@@ -541,6 +541,198 @@ pub(crate) fn table_widths(header: &[String], rows: &[Vec<String>], columns: usi
 
 pub(crate) fn table_box_width(widths: &[usize]) -> usize {
     1 + widths.iter().map(|width| width + 3).sum::<usize>()
+}
+
+pub(crate) fn render_wrapped_table(
+    header: &[String],
+    rows: &[Vec<String>],
+    width: u16,
+) -> Vec<Line<'static>> {
+    let width = usize::from(width).max(1);
+    let mut out = Vec::new();
+
+    if rows.is_empty() {
+        let text = header
+            .iter()
+            .map(|cell| cell.trim())
+            .filter(|cell| !cell.is_empty())
+            .collect::<Vec<_>>()
+            .join(" / ");
+        for line in wrap_table_text(&text, width) {
+            out.push(Line::from(Span::styled(line, Style::default())));
+        }
+        return out;
+    }
+
+    for (row_index, row) in rows.iter().enumerate() {
+        if row_index > 0 && !out.is_empty() {
+            out.push(Line::from(""));
+        }
+        for (column_index, cell) in row.iter().enumerate() {
+            let header = header
+                .get(column_index)
+                .map(|value| value.trim())
+                .unwrap_or_default();
+            let value = cell.trim();
+            if header.is_empty() && value.is_empty() {
+                continue;
+            }
+            let label = if header.is_empty() {
+                format!("Column {}", column_index + 1)
+            } else {
+                header.to_string()
+            };
+            push_wrapped_table_cell(&mut out, &label, value, width);
+        }
+    }
+
+    out
+}
+
+pub(crate) fn push_wrapped_table_cell(
+    out: &mut Vec<Line<'static>>,
+    label: &str,
+    value: &str,
+    width: usize,
+) {
+    let theme = tui_theme();
+    let label_style = Style::default().add_modifier(Modifier::BOLD);
+    let prefix = format!("{label}: ");
+    let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+
+    if prefix_width < width {
+        let mut wrapped = wrap_table_text(value, width.saturating_sub(prefix_width).max(1));
+        let first = wrapped.first().cloned().unwrap_or_default();
+        out.push(Line::from(vec![
+            Span::styled(prefix, label_style),
+            Span::styled(first, Style::default()),
+        ]));
+        for line in wrapped.drain(1..) {
+            out.push(table_continuation_line(line, &theme, width));
+        }
+        return;
+    }
+
+    for label_line in wrap_table_text(&format!("{label}:"), width) {
+        out.push(Line::from(Span::styled(label_line, label_style)));
+    }
+    let continuation_width = continuation_text_width(width);
+    for line in wrap_table_text(value, continuation_width) {
+        out.push(table_continuation_line(line, &theme, width));
+    }
+}
+
+pub(crate) fn continuation_text_width(width: usize) -> usize {
+    width
+        .saturating_sub(table_continuation_prefix_width(width))
+        .max(1)
+}
+
+pub(crate) fn table_continuation_prefix_width(width: usize) -> usize {
+    if width >= 3 {
+        UnicodeWidthStr::width("  ")
+    } else {
+        0
+    }
+}
+
+pub(crate) fn table_continuation_line(
+    line: String,
+    theme: &TuiTheme,
+    width: usize,
+) -> Line<'static> {
+    if table_continuation_prefix_width(width) == 0 {
+        return Line::from(Span::styled(line, Style::default()));
+    }
+    Line::from(vec![
+        Span::styled("  ".to_string(), theme.dim_style()),
+        Span::styled(line, Style::default()),
+    ])
+}
+
+pub(crate) fn wrap_table_text(value: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0;
+
+    for word in value.split_whitespace() {
+        let word_width = UnicodeWidthStr::width(word);
+        if current.is_empty() {
+            start_table_wrap_line(&mut lines, &mut current, &mut current_width, word, width);
+        } else if current_width + 1 + word_width <= width {
+            current.push(' ');
+            current.push_str(word);
+            current_width += 1 + word_width;
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current_width = 0;
+            start_table_wrap_line(&mut lines, &mut current, &mut current_width, word, width);
+        }
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+pub(crate) fn start_table_wrap_line(
+    lines: &mut Vec<String>,
+    current: &mut String,
+    current_width: &mut usize,
+    word: &str,
+    width: usize,
+) {
+    let word_width = UnicodeWidthStr::width(word);
+    if word_width <= width {
+        current.push_str(word);
+        *current_width = word_width;
+        return;
+    }
+
+    let chunks = split_table_word(word, width);
+    let last_index = chunks.len().saturating_sub(1);
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        if index == last_index {
+            *current_width = UnicodeWidthStr::width(chunk.as_str());
+            *current = chunk;
+        } else {
+            lines.push(chunk);
+        }
+    }
+}
+
+pub(crate) fn split_table_word(word: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0;
+
+    for ch in word.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if !current.is_empty() && current_width + ch_width > width {
+            chunks.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += ch_width;
+        if current_width >= width {
+            chunks.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    if chunks.is_empty() {
+        chunks.push(String::new());
+    }
+    chunks
 }
 
 pub(crate) fn render_box_table(
@@ -621,53 +813,6 @@ pub(crate) fn align_cell(
         }
         _ => format!("{value}{}", " ".repeat(padding)),
     }
-}
-
-pub(crate) fn render_pipe_table(
-    header: &[String],
-    rows: &[Vec<String>],
-    alignments: &[pulldown_cmark::Alignment],
-    columns: usize,
-) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    out.push(Line::from(Span::styled(
-        pipe_table_row(header),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
-    out.push(Line::from(Span::styled(
-        pipe_table_delimiter(alignments, columns),
-        tui_theme().dim_style(),
-    )));
-    out.extend(
-        rows.iter()
-            .map(|row| Line::from(Span::styled(pipe_table_row(row), Style::default()))),
-    );
-    out
-}
-
-pub(crate) fn pipe_table_row(row: &[String]) -> String {
-    format!("| {} |", row.join(" | "))
-}
-
-pub(crate) fn pipe_table_delimiter(
-    alignments: &[pulldown_cmark::Alignment],
-    columns: usize,
-) -> String {
-    let cells = (0..columns)
-        .map(|index| {
-            match alignments
-                .get(index)
-                .copied()
-                .unwrap_or(pulldown_cmark::Alignment::None)
-            {
-                pulldown_cmark::Alignment::Left => ":---",
-                pulldown_cmark::Alignment::Right => "---:",
-                pulldown_cmark::Alignment::Center => ":---:",
-                pulldown_cmark::Alignment::None => "---",
-            }
-        })
-        .collect::<Vec<_>>();
-    format!("| {} |", cells.join(" | "))
 }
 
 pub(crate) fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {

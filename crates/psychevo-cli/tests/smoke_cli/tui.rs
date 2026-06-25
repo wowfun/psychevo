@@ -457,8 +457,10 @@ pub(crate) fn cli_tui_model_lists_configured_entries_without_prompt() {
 pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_session() {
     let server = MockSseServer::start(vec![
         sse_text("first"),
+        sse_text("First run title"),
         sse_text("second"),
         sse_text("third"),
+        sse_text("Third tui title"),
     ]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());

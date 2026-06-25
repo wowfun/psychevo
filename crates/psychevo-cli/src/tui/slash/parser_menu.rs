@@ -1,41 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-pub(crate) fn fixed_key_chords() -> Vec<KeyChord> {
-    [
-        "enter",
-        "shift+enter",
-        "ctrl+enter",
-        "alt+enter",
-        "ctrl+j",
-        "esc",
-        "ctrl+a",
-        "ctrl+c",
-        "ctrl+d",
-        "ctrl+o",
-        "ctrl+r",
-        "ctrl+t",
-        "ctrl+b",
-        "tab",
-        "shift+tab",
-        "pageup",
-        "pagedown",
-        "up",
-        "down",
-        "home",
-        "end",
-        "shift+1",
-        "shift+left",
-        "alt+left",
-        "alt+right",
-        "alt+up",
-        "alt+p",
-    ]
-    .iter()
-    .filter_map(|value| parse_key_chord(value, "fixed").ok())
-    .collect()
-}
-
 pub(crate) fn normalize_key_code(code: &KeyCode) -> KeyCode {
     match code {
         KeyCode::Char(ch) => KeyCode::Char(ch.to_ascii_lowercase()),
@@ -238,6 +203,7 @@ pub(crate) enum TuiSlashParse {
     },
 }
 
+#[cfg(test)]
 pub(crate) fn parse_slash_command(line: &str) -> Result<Option<SlashCommand>> {
     parse_slash_command_inner(line)
 }
@@ -516,7 +482,11 @@ pub(crate) fn parse_pending_command(
 }
 
 pub(crate) fn parse_export_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
-    let parsed = parse_export_like_options(spec, rest, true, SessionArtifactKind::Export)?;
+    let parsed = parse_session_export_command_args(
+        &rest.join(" "),
+        SessionArtifactKind::Export,
+        spec.usage,
+    )?;
     Ok(SlashCommand::Export(TuiExportOptions {
         path: parsed.path,
         format: parsed.format,
@@ -525,125 +495,12 @@ pub(crate) fn parse_export_command(spec: &SlashCommandSpec, rest: &[&str]) -> Re
 }
 
 pub(crate) fn parse_share_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {
-    let parsed = parse_export_like_options(spec, rest, false, SessionArtifactKind::Share)?;
+    let parsed =
+        parse_session_export_command_args(&rest.join(" "), SessionArtifactKind::Share, spec.usage)?;
     Ok(SlashCommand::Share(TuiShareOptions {
         path: parsed.path,
         include: parsed.include,
     }))
-}
-
-pub(crate) struct ParsedExportLikeOptions {
-    pub(crate) path: Option<String>,
-    pub(crate) format: SessionExportFormat,
-    pub(crate) include: SessionExportIncludeSet,
-}
-
-pub(crate) fn parse_export_like_options(
-    spec: &SlashCommandSpec,
-    rest: &[&str],
-    allow_format: bool,
-    artifact_kind: SessionArtifactKind,
-) -> Result<ParsedExportLikeOptions> {
-    let tokens = split_slash_argument_tokens(&rest.join(" "))?;
-    let mut path = None;
-    let mut format = SessionExportFormat::Markdown;
-    let mut include = None;
-    let mut index = 0usize;
-    while index < tokens.len() {
-        let token = &tokens[index];
-        match token.as_str() {
-            "--include" | "-i" => {
-                index += 1;
-                let Some(value) = tokens.get(index) else {
-                    return Err(anyhow!("usage: {}", spec.usage));
-                };
-                include = Some(parse_include(value, artifact_kind, spec)?);
-            }
-            "--format" | "-f" if allow_format => {
-                index += 1;
-                let Some(value) = tokens.get(index) else {
-                    return Err(anyhow!("usage: {}", spec.usage));
-                };
-                format =
-                    parse_export_format(value).ok_or_else(|| anyhow!("usage: {}", spec.usage))?;
-            }
-            value if allow_format && value.starts_with("--format=") => {
-                let value = value.trim_start_matches("--format=");
-                format =
-                    parse_export_format(value).ok_or_else(|| anyhow!("usage: {}", spec.usage))?;
-            }
-            value if allow_format && value.starts_with("-f=") => {
-                let value = value.trim_start_matches("-f=");
-                format =
-                    parse_export_format(value).ok_or_else(|| anyhow!("usage: {}", spec.usage))?;
-            }
-            value if value.starts_with("--include=") => {
-                let value = value.trim_start_matches("--include=");
-                include = Some(parse_include(value, artifact_kind, spec)?);
-            }
-            value if value.starts_with('-') => return Err(anyhow!("usage: {}", spec.usage)),
-            value => {
-                if path.is_some() {
-                    return Err(anyhow!("usage: {}", spec.usage));
-                }
-                path = Some(value.to_string());
-            }
-        }
-        index += 1;
-    }
-    Ok(ParsedExportLikeOptions {
-        path,
-        format,
-        include: include.unwrap_or_else(|| SessionExportIncludeSet::default_for(artifact_kind)),
-    })
-}
-
-pub(crate) fn parse_include(
-    value: &str,
-    artifact_kind: SessionArtifactKind,
-    spec: &SlashCommandSpec,
-) -> Result<SessionExportIncludeSet> {
-    SessionExportIncludeSet::parse(value, artifact_kind)
-        .map_err(|_| anyhow!("usage: {}", spec.usage))
-}
-
-pub(crate) fn parse_export_format(value: &str) -> Option<SessionExportFormat> {
-    match value {
-        "markdown" | "md" => Some(SessionExportFormat::Markdown),
-        "json" => Some(SessionExportFormat::Json),
-        _ => None,
-    }
-}
-
-pub(crate) fn split_slash_argument_tokens(input: &str) -> Result<Vec<String>> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match (quote, ch) {
-            (Some(active), value) if value == active => quote = None,
-            (None, '"' | '\'') => quote = Some(ch),
-            (None, value) if value.is_whitespace() => {
-                if !current.is_empty() {
-                    tokens.push(std::mem::take(&mut current));
-                }
-            }
-            (_, '\\') => {
-                if let Some(next) = chars.next() {
-                    current.push(next);
-                }
-            }
-            (_, value) => current.push(value),
-        }
-    }
-    if quote.is_some() {
-        return Err(anyhow!("unterminated quoted argument"));
-    }
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    Ok(tokens)
 }
 
 pub(crate) fn parse_image_command(spec: &SlashCommandSpec, rest: &[&str]) -> Result<SlashCommand> {

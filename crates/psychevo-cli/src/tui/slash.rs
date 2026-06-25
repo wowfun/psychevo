@@ -3,6 +3,7 @@ pub(crate) use std::time::Duration;
 
 pub(crate) use anyhow::{Result, anyhow};
 pub(crate) use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+pub(crate) use psychevo_runtime::command_registry::parse_session_export_command_args;
 pub(crate) use psychevo_runtime::{
     SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, split_image_source_argument,
 };

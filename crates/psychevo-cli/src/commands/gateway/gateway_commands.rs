@@ -779,6 +779,7 @@ impl GatewayContext {
             no_skills: false,
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
+            runtime_tools: Vec::new(),
         })
     }
 }
