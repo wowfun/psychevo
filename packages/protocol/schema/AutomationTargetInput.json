@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "project"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "threadHeartbeat"
+          ],
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "threadId"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "AutomationTargetInput"
+}

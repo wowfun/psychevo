@@ -1,0 +1,189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AutomationDraftView": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "execution": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AutomationExecutionInput"
+            }
+          ],
+          "default": {
+            "policy": "autoSandbox"
+          }
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schedule": {
+          "$ref": "#/definitions/AutomationScheduleInput"
+        },
+        "target": {
+          "$ref": "#/definitions/AutomationTargetInput"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt",
+        "schedule",
+        "target",
+        "title"
+      ],
+      "type": "object"
+    },
+    "AutomationExecutionInput": {
+      "properties": {
+        "policy": {
+          "$ref": "#/definitions/AutomationExecutionPolicy"
+        }
+      },
+      "required": [
+        "policy"
+      ],
+      "type": "object"
+    },
+    "AutomationExecutionPolicy": {
+      "enum": [
+        "autoSandbox",
+        "askFirst"
+      ],
+      "type": "string"
+    },
+    "AutomationScheduleInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "everyMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "interval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "everyMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "daily"
+              ],
+              "type": "string"
+            },
+            "time": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "time"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "weekly"
+              ],
+              "type": "string"
+            },
+            "time": {
+              "type": "string"
+            },
+            "weekdays": {
+              "items": {
+                "format": "uint8",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "time",
+            "weekdays"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AutomationTargetInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "project"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "threadHeartbeat"
+              ],
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "threadId"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "draft": {
+      "$ref": "#/definitions/AutomationDraftView"
+    }
+  },
+  "required": [
+    "draft"
+  ],
+  "title": "AutomationDraftResult",
+  "type": "object"
+}

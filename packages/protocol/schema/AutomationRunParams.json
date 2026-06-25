@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "automationId": {
+      "type": "string"
+    },
+    "trigger": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "automationId"
+  ],
+  "title": "AutomationRunParams",
+  "type": "object"
+}

@@ -1,0 +1,298 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AutomationExecutionInput": {
+      "properties": {
+        "policy": {
+          "$ref": "#/definitions/AutomationExecutionPolicy"
+        }
+      },
+      "required": [
+        "policy"
+      ],
+      "type": "object"
+    },
+    "AutomationExecutionPolicy": {
+      "enum": [
+        "autoSandbox",
+        "askFirst"
+      ],
+      "type": "string"
+    },
+    "AutomationRunView": {
+      "properties": {
+        "automationId": {
+          "type": "string"
+        },
+        "completedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "metadata": {
+          "default": null
+        },
+        "sourceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trigger": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "automationId",
+        "id",
+        "startedAtMs",
+        "status",
+        "trigger"
+      ],
+      "type": "object"
+    },
+    "AutomationScheduleInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "everyMinutes": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "interval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "everyMinutes",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "daily"
+              ],
+              "type": "string"
+            },
+            "time": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "time"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "weekly"
+              ],
+              "type": "string"
+            },
+            "time": {
+              "type": "string"
+            },
+            "weekdays": {
+              "items": {
+                "format": "uint8",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "time",
+            "weekdays"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AutomationTaskKind": {
+      "enum": [
+        "project",
+        "threadHeartbeat"
+      ],
+      "type": "string"
+    },
+    "AutomationTaskView": {
+      "properties": {
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/definitions/AutomationExecutionInput"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/AutomationTaskKind"
+        },
+        "lastError": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastRunAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lastStatus": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nextRunAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runs": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/AutomationRunView"
+          },
+          "type": "array"
+        },
+        "schedule": {
+          "$ref": "#/definitions/AutomationScheduleInput"
+        },
+        "sourceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "targetThreadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "workdir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "createdAtMs",
+        "enabled",
+        "execution",
+        "id",
+        "kind",
+        "prompt",
+        "schedule",
+        "title",
+        "updatedAtMs",
+        "workdir"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "automation": {
+      "$ref": "#/definitions/AutomationTaskView"
+    },
+    "run": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AutomationRunView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "accepted",
+    "automation"
+  ],
+  "title": "AutomationRunResult",
+  "type": "object"
+}

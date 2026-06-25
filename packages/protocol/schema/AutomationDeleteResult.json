@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "automationId": {
+      "type": "string"
+    },
+    "deleted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "automationId",
+    "deleted"
+  ],
+  "title": "AutomationDeleteResult",
+  "type": "object"
+}

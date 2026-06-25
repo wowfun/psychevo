@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "automationId": {
+      "type": "string"
+    },
+    "completedAtMs": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "error": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "metadata": {
+      "default": null
+    },
+    "sourceKey": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "startedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "status": {
+      "type": "string"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "trigger": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "automationId",
+    "id",
+    "startedAtMs",
+    "status",
+    "trigger"
+  ],
+  "title": "AutomationRunView",
+  "type": "object"
+}

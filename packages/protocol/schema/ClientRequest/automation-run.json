@@ -1,0 +1,41 @@
+{
+  "$id": "ClientRequest/automation-run.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AutomationRunParams": {
+      "properties": {
+        "automationId": {
+          "type": "string"
+        },
+        "trigger": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "automationId"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "automation/run"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/AutomationRunParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest automation/run",
+  "type": "object"
+}
