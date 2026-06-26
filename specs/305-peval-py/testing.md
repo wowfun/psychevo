@@ -16,14 +16,14 @@ Define deterministic validation for the `peval-py` Python CLI.
 - session-comparison view behavior and CLI notes
 - saved-workspace `serve` state and local HTTP behavior
 - minimal peval-py serve state initialization from `peval-py init`
-- bundled `skills/peval-py` package shape and fixture-backed coverage of
-  analysis report import into Trial-cell artifacts
+- analysis report import into Trial-cell artifacts
 
 Out of scope:
 
 - live providers, ACP servers, official benchmark harnesses, Docker, remote
   network services, or browser automation against live providers
 - default Rust workspace validation changes
+- `skills/peval-py` content assertions inside `tools/peval-py/tests`
 
 ## Deterministic Coverage
 
@@ -73,6 +73,17 @@ Coverage must verify:
 - `-p/--path` can read an exported ATIF JSON trajectory object directly without
   reparsing it through a message adapter, and does not require the configured
   default adapter to be installed.
+- `-p/--path` can read a Trial cell artifact directory containing
+  `agent/trajectory.json` and `agent/trajectory_meta.json` for `view trajectory`
+  inspect/raw output and `export trajectory`. Tests cover direct unregistered
+  artifact snapshots, registered artifact paths that preserve workspace source
+  metadata, inferred workspace context from `<workspace>/runs/...`, explicit
+  `-r` conflicts with the inferred workspace, and malformed `runs/...` cell
+  directories that report the missing artifact files instead of adapter DB
+  lookup errors. Raw report output for cell directory input includes
+  `artifact_ref` while preserving the original `data_ref`; inspect v2 omits
+  provenance-only metadata, and exported ATIF trajectory output does not include
+  that metadata-only reference.
 - DB adapters can handle `-d/--db` without the generic SQLite `messages` loader.
 - OpenCode DB conversion reads current `session`, `message`, and `part` tables,
   defaults to the most recently updated session when `--session-id` is omitted,
@@ -151,6 +162,10 @@ Coverage must verify:
   multi-DB `-s dN=#M` index selectors against the adapter session list.
 - `view trajectory --list/-l` prints `#`, `session_id`, and `name` for DB
   inputs and exits without rendering a report.
+- inspect-mode tool error summaries list `step_id`, `tool_call_id`, and tool
+  name. `--step ID` adds matching `selected_steps`; `--tool-call ID` works
+  independently and adds matching `selected_tool_calls` with the corresponding
+  tool result when retained data provides one.
 - `view trajectory --list-interactive/-li` requires a TTY and exactly one DB,
   accepts comma/range input such as `1,3-4` and `all`, treats blank input as
   cancel, and renders the selected sessions.
@@ -440,6 +455,22 @@ Coverage must verify:
   scenario alias, `import analysis`, localized HTML output from
   `[defaults].locale = "zh-CN"`, and short flags including `-p`, `-a`, `-i`,
   `-n`, and `-o`.
+- `view trajectory` defaults to `-m inspect` and emits fixed
+  `inspect_schema_version: 2` JSON backed by pandas DataFrame projections.
+  `view trajectory -m raw` preserves the full JSON/HTML report behavior.
+  Inspect tests cover direct report/trajectory/trajectory_meta JSON inputs,
+  JSONL, DB sessions, saved workspace snapshots, default `--head 2` and
+  `--tail 2`, `--top`, `--source`, `--preview-chars`, `--step`,
+  independently used `--tool-call`, omitted empty fields, second-based
+  duration values, step/tool duration distributions, tool errors, and raw-mode
+  rejection for inspect-only flags. CLI tests also cover raw-only rejection for
+  `--agent-name`, `--agent-version`, `--model`, and `--no-redact` in default
+  inspect mode, plus successful use of those flags with `view trajectory -m
+  raw`.
+- CLI and config tests verify `--trajectory-id` is not exposed by `view`,
+  `export`, or `serve` help and is not parsed as a defaults override, while
+  conversion still emits a generated ATIF `trajectory_id` and existing
+  trajectory JSON IDs remain readable.
 - CLI input tests cover `view trajectory -r DIR` and
   `export trajectory -r DIR` loading an existing peval-py workspace config from
   outside the workspace, including adapter `default_db_path` expansion through
@@ -492,38 +523,10 @@ Coverage must verify:
   tool README translation exists beside `tools/peval-py/README.md`, English
   docs link to their Chinese counterparts, Chinese docs link to translated
   pages when available, and spec links still target canonical specs.
-- the repo-distributed `skills/peval-py` package validates as a skill package,
-  omits agent-specific `agents/openai.yaml`, documents the distinction between
-  reports, exports, `serve`, analysis report creation, and Trial-cell import,
-  does not instruct agents to create or validate `notes.md` because that file is
-  a human/serve note path,
-  keeps `SKILL.md` as a compact workflow router that recognizes workspace roots,
-  Trial cell/session artifact paths, and trajectory/source inputs without
-  embedding path-segment derivation rules or compiled JSON field semantics,
-  directs agents to write one analysis report by default or complementary
-  reports when both are useful, keeps analysis creation separate from
-  Trial-cell import,
-  directs agents to read `agent/trajectory.json`, `agent/trajectory_meta.json`,
-  and existing analysis artifacts when a Trial cell path or single-cell session
-  artifact path is provided, and explicitly says not to pass those artifact
-  directories to `view tr -p`,
-  directs agents to use `peval-py import analysis -r <workspace> --run-path
-  <cell-path> -p <analysis-report>` when Trial-cell import is desired,
-  leaves JSON field and tolerant `extra` details in the analysis reference,
-  and directs agents to use normal peval-py report commands when the user asks
-  to render or inspect imported analysis.
-- the skill helper script under `skills/peval-py/scripts/` validates with
-  `compileall`, uses argparse subcommands, and replaces embedded Python
-  snippets for report subject extraction. It must not provide report annotation
-  validation after import; users should rely on `peval-py import analysis`
-  output and normal peval-py report commands when they ask to render or inspect
-  a report. Subject extraction emits both raw report identities and normalized
-  path segments for the Trial cell, with optional full `analysis.json` and
-  `analysis.md` paths when a workspace is provided.
 - a fixture-backed smoke creates a temporary peval-py workspace, writes
   `runs/default/agent-a/common_session/<trial-key>/analysis.json` with a
   top-level `summary` and representative typed whitelist fields, writes sibling
-  `analysis.md`, runs `view tr` with `-r <workspace>` against
+  `analysis.md`, runs `view tr -m raw` with `-r <workspace>` against
   `tools/peval-py/tests/fixtures/common_session.jsonl` with `-a opencode
   --agent-name agent-a -f json`, and verifies the generated report contains a
   matching `annotations.analysis[]` item with both `summary` and `md_report`
@@ -531,14 +534,14 @@ Coverage must verify:
 
 ## Validation
 
-Skill package validation:
+Separate skill package validation:
 
 ```sh
 python /home/kevin/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/peval-py
 python -m compileall skills/peval-py/scripts
 ```
 
-The primary validation command is:
+The primary peval-py package validation command is:
 
 ```sh
 UV_PROJECT_ENVIRONMENT=../../.local/peval-py-venv uv run --project tools/peval-py python -m unittest discover -s tools/peval-py/tests

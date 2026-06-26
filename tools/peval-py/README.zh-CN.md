@@ -29,16 +29,17 @@ uv run --project tools/peval-py peval-py --help
 
 ## 构建本地二进制
 
-`peval-py` 默认运行路径只依赖 Python 标准库，可以打包成本地可执行文件。读取
-`.xlsx` 输入清单是可选能力，运行时需要 `openpyxl`。请在目标操作系统和 CPU 架构
-上构建。生成物建议放在 `.local/` 下，仓库会忽略这个目录。
+`peval-py` 使用 `pandas` 为 inspect 模式提供表格化分析；`uv` 会根据
+`tools/peval-py/pyproject.toml` 安装该运行时依赖。读取 `.xlsx` 输入清单是可选能力，
+运行时需要 `openpyxl`。请在目标操作系统和 CPU 架构上构建。生成物建议放在
+`.local/` 下，仓库会忽略这个目录。
 
 PyInstaller 是最简单的单文件打包方式：
 
 ```bash
 cd /path/to/psychevo
 
-uvx pyinstaller \
+uv run --project tools/peval-py --with pyinstaller pyinstaller \
   --onefile \
   --name peval-py \
   --paths tools/peval-py/src \
@@ -54,6 +55,7 @@ uvx pyinstaller \
 .local/peval-py-build/dist/peval-py --help
 
 .local/peval-py-build/dist/peval-py view tr \
+  -m raw \
   -a opencode \
   -p tools/peval-py/tests/fixtures/common_session.jsonl \
   -o .local/peval-py-build/report.json
@@ -68,6 +70,28 @@ Nuitka 也是一种选择，适合想做 compiled-Python 构建并且本机有 C
 
 用 `-a ADAPTER` 为所有输入设置默认 adapter。生成对比报告时，可以重复传入
 `-a pN=ADAPTER` 或 `-a dN=ADAPTER`，让单个 path 或 DB 输入使用不同 adapter。
+
+`view tr` 默认使用 bounded inspect 模式，适合先探索大文件：
+
+```bash
+peval-py view tr -a opencode -p session.jsonl
+```
+
+Inspect 输出是固定的紧凑 JSON digest，包含 session 身份、token totals、秒级
+active duration、step/tool duration distributions、最耗时或 token-heavy 的行，以及
+可用的 tool errors。`--head` 和 `--tail` 默认都是 2，`--top` 默认是 5；
+`--step <step_id>` 会加入指定 step 证据，`--tool-call <tool_call_id>` 可独立显示
+对应 tool call 及其匹配的 tool result。裸 `-o` 会写入带时间戳的报告文件，并在
+stdout 打印保存路径。
+
+需要完整 peval JSON 或 HTML report 时使用 `-m raw`：
+
+```bash
+peval-py view tr -m raw -a opencode -p session.jsonl -f html -o report.html
+```
+
+Raw report 模式还接受 `--agent-name`、`--agent-version`、`--model` 和
+`--no-redact` 这类转换/展示覆盖；默认 inspect 模式会拒绝这些 flags。
 
 adapter TOML 表可以设置 `default_db_path`；相对路径按定义该值的 TOML 文件解析。
 使用 `-d @adapter` 可以展开这个默认 DB 路径，并把该 DB 输入绑定到同一个 adapter。
@@ -86,7 +110,7 @@ peval-py export tr -r .local/peval-py -d @opencode -s <session-id> -o
 `-i, --input-table PATH`。表格每一行都会展开成同一份报告中的一个 session。
 直接传入的 `-p/--path` 和 `-d/--db` 会先加载，然后按文件顺序追加表格行。
 相对 `path` 和 `db` 会按清单文件所在目录解析。`.xlsx` 只在本机已安装
-`openpyxl` 时可用；如果希望保持标准库路径，请另存为 CSV。
+`openpyxl` 时可用。
 
 使用 `--source-alias N=TEXT`，或 input table 的 `alias`/`label`/`source_alias`
 列，可以给来源添加仅用于显示的名称。Alias 只提升报告可读性，不改变 session id、
@@ -130,6 +154,7 @@ runs/hermes.jsonl,,,,Hermes source,Hermes row note,跨 agent 对比,Hermes,,deep
 
 ```bash
 peval-py view tr \
+  -m raw \
   -a psychevo \
   -i inputs.csv \
   -f html \

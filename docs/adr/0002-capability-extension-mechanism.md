@@ -1,6 +1,6 @@
 ---
 name: 0002. Capability Extension Mechanism
-status: Proposed
+status: proposed
 date: 2026-05-31
 psychevo_self_edit: deny
 ---
@@ -35,7 +35,9 @@ hook loading can be debugged without reading the core runtime.
 
 This ADR does not define package installation, marketplaces, hot reload,
 external source protocols, or a stable extension ABI. It records the mechanism
-Psychevo should have before those product surfaces grow.
+Psychevo should have before those product surfaces grow. Plugin product-system
+decisions are recorded separately in ADR 0003 so this ADR can remain the
+capability contribution mechanism.
 
 ## Decision
 

@@ -29,8 +29,8 @@ uv run --project tools/peval-py peval-py --help
 
 ## Build A Local Binary
 
-`peval-py` has no default runtime dependencies outside the Python standard
-library, so you can package it as a local executable. Reading `.xlsx` input
+`peval-py` uses `pandas` for inspect-mode tabular analysis; `uv` installs that
+runtime dependency from `tools/peval-py/pyproject.toml`. Reading `.xlsx` input
 manifests is optional and requires `openpyxl` at runtime. Build on the same
 operating system and CPU architecture where you plan to run the file. Keep
 generated artifacts under `.local/`; the repository ignores that directory.
@@ -40,7 +40,7 @@ PyInstaller is the simplest single-file path:
 ```bash
 cd /path/to/psychevo
 
-uvx pyinstaller \
+uv run --project tools/peval-py --with pyinstaller pyinstaller \
   --onefile \
   --name peval-py \
   --paths tools/peval-py/src \
@@ -56,6 +56,7 @@ Run the packaged command and check a fixture-backed report:
 .local/peval-py-build/dist/peval-py --help
 
 .local/peval-py-build/dist/peval-py view tr \
+  -m raw \
   -a opencode \
   -p tools/peval-py/tests/fixtures/common_session.jsonl \
   -o .local/peval-py-build/report.json
@@ -72,6 +73,30 @@ platform before choosing it.
 Use `-a ADAPTER` to set the default adapter for all inputs. For comparison
 reports, repeat `-a` with `pN=ADAPTER` or `dN=ADAPTER` to parse individual
 path or DB inputs with different adapters.
+
+`view tr` defaults to bounded inspect mode for large-file-friendly exploration:
+
+```bash
+peval-py view tr -a opencode -p session.jsonl
+```
+
+Inspect output is a compact fixed JSON digest with session identity, token
+totals, active duration in seconds, step/tool duration distributions, top
+duration/token rows, and tool errors when available. `--head` and `--tail`
+default to 2, `--top` defaults to 5, `--step <step_id>` adds step evidence, and
+`--tool-call <tool_call_id>` independently shows a tool call with its matching
+tool result when retained data provides one. Bare `-o` writes a timestamped
+report file and prints the saved path to stdout.
+
+Use `-m raw` when you want the full peval JSON or HTML report:
+
+```bash
+peval-py view tr -m raw -a opencode -p session.jsonl -f html -o report.html
+```
+
+Raw report mode also accepts conversion/display overrides such as
+`--agent-name`, `--agent-version`, `--model`, and `--no-redact`; default inspect
+mode rejects those flags.
 
 Adapter TOML tables may set `default_db_path`; relative values resolve from
 the TOML file that defines them. Use `-d @adapter` to expand that configured
@@ -93,8 +118,7 @@ Use `-i, --input-table PATH` when the inputs are easier to maintain as a CSV,
 JSON, or `.xlsx` manifest. Each table row becomes one session in the same
 report. Direct `-p/--path` and `-d/--db` inputs are loaded first, then table
 rows are appended in file order. Relative `path` and `db` values resolve from
-the manifest directory. `.xlsx` works only when `openpyxl` is installed; save
-as CSV when you want the standard-library-only path.
+the manifest directory. `.xlsx` works only when `openpyxl` is installed.
 
 Use `--source-alias N=TEXT` or input-table `alias`/`label`/`source_alias`
 columns to add display-only source names. Aliases improve report readability
@@ -148,6 +172,7 @@ Then render one multi-session HTML report:
 
 ```bash
 peval-py view tr \
+  -m raw \
   -a psychevo \
   -i inputs.csv \
   -f html \

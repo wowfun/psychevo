@@ -47,8 +47,9 @@ Out of scope:
 The CLI lives under `tools/peval-py/` and is runnable with `uv`. Its console
 command is `peval-py`. It is a simplified Python companion to the Rust `peval`
 CLI that is lightweight enough to install and use on its own. It is
-independent from the Rust workspace and has no runtime dependencies outside the
-Python standard library.
+independent from the Rust workspace. It may use Python runtime dependencies
+declared in `tools/peval-py/pyproject.toml`; `pandas` is used for inspect-mode
+tabular analysis.
 
 The tool reads existing retained session material and produces derived files.
 It must not update Psychevo state databases, benchmark artifacts, Rust peval
@@ -67,7 +68,8 @@ It is an instruction package only: it must not add a new CLI command, execute
 agents, run live providers, mutate source databases, or install itself into
 `.agents/skills`, `.psychevo/skills`, or a global skill directory. Because the
 skill supports multiple agent surfaces, it must not include agent-specific
-`agents/openai.yaml` metadata.
+`agents/openai.yaml` metadata. Skill package structure is validated with the
+skill validator, not with the `tools/peval-py` Python package unit tests.
 
 `notes.md` remains a human/serve editing path, not an agent skill workflow. The
 skill must not instruct agents to create, import, or validate `notes.md`, and
@@ -81,13 +83,36 @@ is requested, or create both only when their contents are complementary. A
 provided Trial cell path, or a session artifact path that contains exactly one
 cell, identifies the analysis target and a possible later import target.
 Agents should read that target's `agent/trajectory.json`,
-`agent/trajectory_meta.json`, and existing analysis artifacts for evidence
-instead of generating a report to rediscover the same identity. `view tr -p`
-accepts trajectory/source inputs, not Trial cell artifact directories. The
+`agent/trajectory_meta.json`, and existing analysis artifacts for direct
+evidence when accuracy matters instead of generating a report to rediscover the
+same identity. `view tr -p <cell-dir>` and `export tr -p <cell-dir>` are
+supported convenience inputs for exact Trial cell artifact directories that
+contain the retained `agent/trajectory.json` and `agent/trajectory_meta.json`;
+session artifact directories still require choosing the target cell first. The
 top-level skill instructions must stay compact: they may include minimal
 workspace path recognition, but they should not embed Trial-cell path
 derivation rules, compiled artifact field semantics, or the JSON `extra` merge
-contract. Those details belong in references that are loaded only when needed.
+contract. They should also assume the peval-py workspace has already been
+initialized and should not present `peval-py init` as a default top-level
+workflow. Those details belong in references that are loaded only when needed.
+The top-level skill must not end with a standalone `## References` catalog.
+Reference entry points should appear inside the workflow that needs them:
+`references/view-tr.md` for detailed `view tr` inspect, listing, saved snapshot,
+selector, and raw report examples; `references/cli-workflows.md` for commands
+other than `view tr`, such as `init`, `export tr`, `import analysis`, and `serve`;
+and `references/analysis-guide.md` for deeper trajectory analysis methodology,
+report formats, and Trial-cell import guidance. Reference files should read as
+task instructions, not navigation metadata, and should avoid cross-reference-only
+redirects or dependency notes that do not change the current action.
+The top-level skill guardrails should also say that `view tr` inspect output is
+an exploration aid whose counts, timing, token/cost, and error statistics may be
+approximate or incomplete because they depend on retained trajectory format and
+adapter mapping. When accuracy matters, the skill should guide agents to narrow
+with `view tr` first, then read targeted trajectory, metadata, JSONL, or report
+evidence directly. If `peval-py` cannot satisfy a user request, the skill should
+tell agents to explain whether the gap is in CLI/report behavior, skill guidance,
+or both, and ask whether to improve that surface instead of inventing an
+unsupported workaround.
 When the user wants an existing analysis report attached to peval-py reports or
 `serve`, the skill should tell the agent to call
 `peval-py import analysis -r <workspace> --run-path <cell-path> -p
@@ -177,8 +202,11 @@ discovery when `-r/--root` is omitted.
 The command supports path and DB input sources:
 
 - `-p, --path PATH` reads one source file. By default this accepts JSONL with
-  one JSON object per line or an exported ATIF JSON trajectory object. Adapters
-  may parse other path formats directly.
+  one JSON object per line, an exported ATIF JSON trajectory object, or a Trial
+  cell artifact directory containing `agent/trajectory.json` and
+  `agent/trajectory_meta.json`. Adapters may parse other path formats directly.
+  Trial cell artifact directory input is read-only and must not refresh source
+  databases, mutate workspace state, or scan unrelated `runs/` directories.
 - `-d, --db PATH` reads an adapter-owned SQLite persistence format. `view
   trajectory` may repeat `-d` to compare sessions across adapters. `-d
   @adapter` expands to that adapter's configured `default_db_path` and binds
@@ -216,8 +244,9 @@ explicit session ids lets its adapter choose its default or latest session.
 
 The command surface follows a peval-style verb and scenario shape:
 
-- `peval-py view trajectory ...` writes a peval-compatible JSON or HTML report
-  for one or more sessions.
+- `peval-py view trajectory ...` defaults to bounded inspect JSON for one or
+  more sessions. `peval-py view trajectory -m raw ...` writes the complete
+  peval-compatible JSON or HTML report.
 - `peval-py export trajectory ...` writes a single ATIF trajectory object.
 - `peval-py import analysis ...` imports JSON or Markdown analysis reports into
   a peval-py workspace Trial cell.
@@ -237,7 +266,23 @@ Common trajectory flags use both long and short forms:
 - `-a, --adapter ADAPTER`
 - `-i, --input-table PATH`
 - `-o, --output [PATH]`
+- `-m, --mode inspect|raw` for `view trajectory`; `inspect` is the default and
+  `raw` preserves full report rendering
 - `-f, --format json|html` for `view trajectory`
+- Inspect output for `view trajectory` is a fixed `inspect_schema_version: 2`
+  JSON digest. Each source includes session, agent/model, token totals, active
+  duration in seconds, tool-call and turn totals, compact step head/tail
+  previews, step/tool duration distributions in seconds, top step durations,
+  top step tokens, tool errors, and top tool durations. `status` is emitted
+  only when it is non-empty and not `passed`; `score` is emitted only when it
+  is non-empty.
+- Inspect evidence controls for `view trajectory`: `--head N` and `--tail N`
+  default to 2, `--top N` defaults to 5, `--source N` restricts output to
+  one-based source indexes, and `--preview-chars N` bounds preview text.
+  `--step ID` adds `selected_steps` evidence for matching trajectory
+  `step_id` values. `--tool-call ID` independently adds `selected_tool_calls`
+  evidence with the matching tool call and corresponding tool result when
+  retained trajectory data provides one.
 - `-n, --note N=TEXT` for `view trajectory`, where `0` is report-level and
   positive one-based indexes attach to the ordered input sessions
 - `--source-alias N=TEXT` for `view trajectory` and `serve`, where positive
@@ -247,6 +292,19 @@ Common trajectory flags use both long and short forms:
 - `--list-interactive, -li` for `view trajectory` with exactly one `-d/--db`
   input, which prints DB sessions, prompts for a comma/range selection, and then
   renders the selected sessions
+
+Raw report override flags for `view trajectory` are available only when
+`-m raw` is selected: `--agent-name`, `--agent-version`, `--model`, and
+`--no-redact`. Passing any of those flags to the default inspect mode must fail
+with a clear diagnostic telling the user to use `-m raw`. `--max-content-chars`
+remains a general trajectory option because it bounds large source content
+before inspect or raw rendering.
+
+`--trajectory-id` is not a supported CLI or config override. Generated ATIF
+trajectory output still contains a `trajectory_id`; conversion uses the stable
+default `session:t001` when the input does not already provide one, and report
+or snapshot readers continue to preserve existing `trajectory["trajectory_id"]`
+values.
 
 `view trajectory` and `export trajectory` accept `-r, --root DIR` to select an
 existing peval-py workspace root for config discovery. The selected root is
@@ -261,7 +319,13 @@ ATIF trajectory object and does not include report annotations. Passing
 repair, or mutate the workspace. If `<root>/peval-py.toml` is missing or
 invalid, the command fails clearly and tells the user to run
 `peval-py init -r <root>`. Existing current-directory discovery remains valid
-when `-r/--root` is omitted.
+when `-r/--root` is omitted. When `view trajectory` or `export trajectory`
+receives a path input shaped like
+`<workspace>/runs/<eval>/<agent>/<session>/<cell>` and
+`<workspace>/peval-py.toml` exists, it may infer `<workspace>` as the read-only
+workspace root if `-r/--root` is omitted. If explicit `-r/--root` resolves to a
+different workspace than the inferred path workspace, the command fails with a
+clear conflict diagnostic instead of silently using either root.
 
 Workspace state DB input is a saved snapshot input only when all of these are
 true: `view` or `export` was invoked with explicit `-r <workspace>`, the `-d`
@@ -274,17 +338,43 @@ DB access remains explicit through `-d @adapter` or a real adapter DB path.
 For saved workspace snapshots, `view trajectory -r W -d W/state.db --list`
 lists saved source rows with `#`, `source_key`, `session_id`,
 `trial_key`, `active`, `kind`, `adapter`, and alias/name. `view trajectory -r W
--d W/state.db` with no `-s` renders all active saved sources by reading
-`agent/trajectory.json` and `agent/trajectory_meta.json` under each selected
-source's `artifact_dir`, then composing the report with current cell-local
-notes and analysis overlays just as `serve` does. Repeated `-s` selectors choose
-saved sources by `source_key`, `#N`, unique stored `session_id` or
+-d W/state.db` with no `-s` inspects all active saved sources by default.
+`view trajectory -m raw -r W -d W/state.db` renders all active saved sources by
+reading `agent/trajectory.json` and `agent/trajectory_meta.json` under each
+selected source's `artifact_dir`, then composing the report with current
+cell-local notes and analysis overlays just as `serve` does. Repeated `-s`
+selectors choose saved sources by `source_key`, `#N`, unique stored `session_id` or
 `trial_session_id`, or unique `trial_key`; ambiguous selectors fail and ask for
 `source_key` or `#N`. Archived sources are excluded by default but may be
 selected explicitly. `export trajectory -r W -d W/state.db -s SELECTOR` writes
 that saved source's stored `trajectory.json`. Without `-s`, saved-snapshot
 export succeeds only when exactly one active saved source exists; otherwise it
 fails with a selection diagnostic.
+
+For direct Trial cell artifact directory input, `view trajectory -p
+W/runs/E/A/S/C` and `export trajectory -p W/runs/E/A/S/C` read
+`agent/trajectory.json` and `agent/trajectory_meta.json` from that cell. If the
+cell path is under an inferred or explicit workspace and a matching
+`peval_py_sources.artifact_dir` row exists, peval-py uses that saved source row
+so source aliases, current cell-local notes, and cached analysis overlays remain
+consistent with workspace snapshot rendering. If no matching row exists, peval-py
+renders the artifact snapshot directly without requiring registration in
+workspace state. A path under `runs/...` that looks like a Trial cell but lacks
+either required agent artifact must fail with an actionable diagnostic naming
+`agent/trajectory.json` and `agent/trajectory_meta.json`.
+
+When the input was an exact Trial cell directory, the rendered report metadata
+may preserve the original `data_ref` from the retained trajectory, such as the
+source DB label. It must also add a separate `artifact_ref` object to the Trial
+metadata in raw reports so the current artifact input remains visible without
+changing the original provenance. Inspect v2 remains a minimal digest and does
+not include `artifact_ref`. `artifact_ref.kind` is `trial-cell-artifact`;
+`path` is the readable path relative to the current working directory when
+possible; `workspace_relative_path` is present when the cell belongs to a
+discovered workspace; and `source_key` is present when the cell matched
+`peval_py_sources.artifact_dir`. `export
+trajectory -p <cell-dir>` still writes only the ATIF trajectory object and does
+not include `artifact_ref`.
 
 `import analysis` accepts `-r, --root DIR`, `--run-path PATH`, repeatable
 `-p, --path PATH`, and `--json`. The root is required and must already contain
@@ -388,21 +478,27 @@ underscores. Supported manifest columns are `path`/`p`, `db`/`d`,
 Unknown or duplicate columns must fail clearly. Each non-blank row must provide
 exactly one of `path` or `db`; `session_id` is valid only for `db` rows. A DB
 with multiple selected sessions is represented by multiple manifest rows.
-Existing CLI `--agent-name`, `--agent-version`, and `--model` values are
-defaults for every session; manifest row values override those defaults only
-for that row's conversion. Manifest aliases are display-only and override only
-that row's source alias.
+Existing raw-mode CLI `--agent-name`, `--agent-version`, and `--model` values
+are defaults for every session; manifest row values override those defaults
+only for that row's conversion. Manifest aliases are display-only and override
+only that row's source alias.
 
 When `-o/--output` is omitted, commands write to stdout. When `-o/--output` is
-present without a path, the default file name includes the effective adapter and
-session identity. Single-session `export trajectory` writes
-`trajectory-<adapter>-<session>.json`. Single-session `view trajectory` writes
-`report-<adapter>-<session>.html`, or `report-<adapter>-<session>.json` when
-`--format json` is set. Multi-session `view trajectory` writes
-`report-<adapter>-sessions-<count>.<format>` when every session uses the same
-adapter, or `report-multi-adapter-sessions-<count>.<format>` when multiple
-adapters are present. Unsafe filename characters are replaced with `-`, and
-missing session ids fall back to `session`.
+present without a path, `view trajectory` uses a timestamped default file name
+and prints the saved path to stdout as `wrote report: <path>`. Inspect-mode
+`view trajectory -o` writes `inspect-YYYYMMDD-HHMMSS-ffffff.json`.
+Single-session raw-mode `view trajectory -m raw` writes
+`report-<adapter>-<session>-YYYYMMDD-HHMMSS-ffffff.html`, or the same stem with
+`.json` when `--format json` is set. Multi-session raw-mode `view trajectory -m
+raw` writes `report-<adapter>-sessions-<count>-YYYYMMDD-HHMMSS-ffffff.<format>`
+when every session uses the same adapter, or
+`report-multi-adapter-sessions-<count>-YYYYMMDD-HHMMSS-ffffff.<format>` when
+multiple adapters are present. If a generated default name already exists,
+`-2`, `-3`, and so on are appended before the suffix. Explicit output paths are
+used as provided and also print the saved path for `view trajectory`. Single
+session `export trajectory -o` without a path remains
+`trajectory-<adapter>-<session>.json`. Unsafe filename characters are replaced
+with `-`, and missing session ids fall back to `session`.
 
 `export trajectory` remains single-session only. Multiple path inputs, multiple
 DB inputs, mixed path/DB inputs, or multiple selected DB sessions must fail
@@ -1136,9 +1232,9 @@ conversion.
 ## Redaction
 
 Reports redact obvious secret-bearing keys, authorization headers, bearer
-tokens, and common provider key patterns by default. `--no-redact` disables
-redaction explicitly. Redaction applies before writing JSON and before
-embedding report data in HTML.
+tokens, and common provider key patterns by default. Raw report mode
+`--no-redact` disables redaction explicitly. Redaction applies before writing
+JSON and before embedding report data in HTML.
 
 ## Related Topics
 

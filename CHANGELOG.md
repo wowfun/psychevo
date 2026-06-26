@@ -2,14 +2,17 @@
 
 ## 2026-06-26
 
-- Fixed first-turn Workbench automations and transcript ownership by
-  materializing the current Web thread before model execution and making
-  completed turns replace same-owner live overlays without text heuristics.
-- Added deterministic and live Playwright coverage for composer-driven
-  automations, including transient duplicate and missing-current-thread
-  transcript sampling.
-- Fixed GUI slash aliases for `/export` and `/share` so expanded commands
-  preserve parsed download options.
+- Added ADR 0003 for the Psychevo plugin system, covering manifest
+  compatibility, plugin store sources, policy overlays, and capability mappings.
+- Fixed first-turn Workbench automation/thread ownership issues and added
+  deterministic + live Playwright coverage for composer-driven automation flows.
+- Reworked `peval-py` around an inspect-first trajectory workflow:
+  `view tr` is now the default bounded path with schema-stable output,
+  explicit workspace/adapter DB guidance, and direct `raw` mode/CLI report
+  paths moved to references.
+- Improved peval-py trajectory ergonomics by reorganizing skill references,
+  accepting Trial-cell paths in `view tr`/`export tr`, and clarifying output
+  artifact provenance and missing-artifact errors.
 
 ## 2026-06-25
 
