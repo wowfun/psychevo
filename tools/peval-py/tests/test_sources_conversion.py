@@ -279,7 +279,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            config = ToolConfig(adapter="psychevo", trajectory_id="trial:trace-db")
+            config = ToolConfig(adapter="psychevo")
             result = convert_db(str(db_path), "db-b", config)
             model_step = result.steps_meta[1]
             tool_meta = model_step.tool_calls[0]
@@ -453,11 +453,11 @@ class PevalPySourceConversionTests(unittest.TestCase):
         records = read_jsonl(str(FIXTURES / "psychevo_session.jsonl"))
         result = convert_records(
             records,
-            ToolConfig(adapter="psychevo", trajectory_id="trial:psychevo"),
+            ToolConfig(adapter="psychevo"),
         )
         trajectory = result.trajectory
         self.assertEqual(trajectory["schema_version"], "ATIF-v1.7")
-        self.assertEqual(trajectory["trajectory_id"], "trial:psychevo")
+        self.assertEqual(trajectory["trajectory_id"], "session:t001")
         self.assertEqual(trajectory["session_id"], "sess-psychevo")
         self.assertEqual([step["step_id"] for step in trajectory["steps"]], [1, 2, 3])
         self.assertEqual(trajectory["steps"][0]["source"], "user")
@@ -834,7 +834,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
         self.assertEqual(metadata_tool.execution_duration_source, "message_metadata")
         metadata_report = build_report(
             metadata_timing,
-            ToolConfig(adapter="psychevo", trajectory_id="trial:metadata-timing"),
+            ToolConfig(adapter="psychevo"),
             "inline",
         )
         metadata_step = metadata_report["trajectory_meta"][0]["steps"][0]
@@ -922,7 +922,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
                 metadata={"elapsed_ms": 7_000},
             ),
         ]
-        config = ToolConfig(adapter="psychevo", trajectory_id="trial:active")
+        config = ToolConfig(adapter="psychevo")
         result = convert_records(records, config)
         report = build_report(result, config, "inline")
         meta = report["trajectory_meta"][0]
@@ -955,7 +955,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
                 message={"role": "user", "content": "past cap", "timestamp_ms": 901_000}
             ),
         ]
-        config = ToolConfig(adapter="psychevo", trajectory_id="trial:fallback")
+        config = ToolConfig(adapter="psychevo")
         result = convert_records(records, config)
         report = build_report(result, config, "inline")
         meta = report["trajectory_meta"][0]
@@ -1067,7 +1067,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
         self.assertFalse(result.steps_meta[2].tool_error)
         self.assertEqual(result.warnings, [])
 
-        config = ToolConfig(adapter="psychevo", trajectory_id="trial:failure")
+        config = ToolConfig(adapter="psychevo")
         report = build_report(result, config, "inline")
         step_meta = report["trajectory_meta"][0]["steps"]
         self.assertIsNone(step_meta[1]["duration_ms"])
@@ -1112,7 +1112,7 @@ class PevalPySourceConversionTests(unittest.TestCase):
                 accounting={"billable_input_tokens": 11, "billable_output_tokens": 13},
             )
         ]
-        config = ToolConfig(adapter="psychevo", trajectory_id="trial:redaction")
+        config = ToolConfig(adapter="psychevo")
         result = convert_records(records, config)
         step = result.trajectory["steps"][0]
         args = step["tool_calls"][0]["arguments"]

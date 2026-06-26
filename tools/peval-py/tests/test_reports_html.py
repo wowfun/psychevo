@@ -67,7 +67,7 @@ def write_cached_note(
 class PevalPyReportHtmlTests(unittest.TestCase):
     def test_report_json_subset_and_html_safe_embedding(self) -> None:
         records = read_jsonl(str(FIXTURES / "psychevo_session.jsonl"))
-        config = ToolConfig(adapter="psychevo", trajectory_id="trial:html")
+        config = ToolConfig(adapter="psychevo")
         result = convert_records(records, config)
         report = build_report(result, config, "psychevo_session.jsonl")
         self.assertEqual(report["schema_version"], 19)
@@ -84,7 +84,7 @@ class PevalPyReportHtmlTests(unittest.TestCase):
         for step_meta in report["trajectory_meta"][0]["steps"]:
             self.assertNotIn("data_preview", step_meta)
         analysis = report["annotations"]["analysis"][0]
-        self.assertEqual(analysis["trial_key"], "trial:html")
+        self.assertEqual(analysis["trial_key"], "session:t001")
         self.assertEqual(analysis["status"], "computed")
         auto = analysis["analysis_metrics"]["auto"]
         self.assertNotIn("outcome", auto)
@@ -1268,7 +1268,7 @@ console.log(result);
                 metadata={"elapsed_ms": 101},
             ),
         ]
-        config = ToolConfig(adapter="psychevo", trajectory_id="trial:tool-html")
+        config = ToolConfig(adapter="psychevo")
         result = convert_records(records, config)
         report = build_report(result, config, "inline")
         html = render_html(report)

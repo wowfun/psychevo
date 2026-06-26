@@ -673,7 +673,6 @@ class ServeStateStore:
             agent_name=config.agent_name,
             agent_version=config.agent_version,
             model=config.model,
-            trajectory_id=config.trajectory_id,
             max_content_chars=config.max_content_chars,
             redact=config.redact,
             db=config.db,

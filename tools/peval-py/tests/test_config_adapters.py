@@ -24,6 +24,30 @@ class PevalPyConfigAdapterTests(unittest.TestCase):
             self.assertEqual(load_config(str(legacy_config)).adapter, "hermes")
 
 
+    def test_config_ignores_removed_trajectory_id_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "removed.toml"
+            config_path.write_text(
+                '[defaults]\ntrajectory_id = "custom-trial"\n',
+                encoding="utf-8",
+            )
+            config = load_config(str(config_path))
+            self.assertFalse(hasattr(config, "trajectory_id"))
+            result = convert_records(
+                [
+                    MessageRecord(
+                        message={
+                            "role": "user",
+                            "content": "hello",
+                            "timestamp_ms": 100,
+                        }
+                    )
+                ],
+                config,
+            )
+            self.assertEqual(result.trajectory["trajectory_id"], "session:t001")
+
+
     def test_config_locale_defaults_aliases_and_invalid_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             old_cwd = Path.cwd()

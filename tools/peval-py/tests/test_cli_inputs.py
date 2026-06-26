@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from peval_py_test_support import *
 
 
@@ -50,7 +52,519 @@ def write_peval_workspace(root: Path) -> None:
     )
 
 
+def written_report_path(stdout: str, cwd: Path) -> Path:
+    match = re.fullmatch(r"wrote report: (.+)\n", stdout)
+    if not match:
+        raise AssertionError(f"missing written report path in stdout: {stdout!r}")
+    path = Path(match.group(1))
+    return path if path.is_absolute() else cwd / path
+
+
+def write_trial_cell_artifacts(
+    cell_dir: Path,
+    *,
+    session_id: str = "artifact-session",
+    trial_key: str = "session_t001",
+    agent_id: str = "psychevo",
+    adapter: str = "psychevo",
+    tool_error: bool = False,
+) -> None:
+    agent_dir = cell_dir / "agent"
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    trajectory = {
+        "schema_version": "ATIF-v1.7",
+        "trajectory_id": trial_key,
+        "session_id": session_id,
+        "agent": {"name": agent_id, "version": "test"},
+        "steps": [
+            {
+                "step_id": 1,
+                "source": "user",
+                "message": "direct artifact prompt",
+            },
+            {
+                "step_id": 2,
+                "source": "assistant",
+                "message": "direct artifact response",
+                **(
+                    {
+                        "tool_calls": [
+                            {
+                                "tool_call_id": "call_error",
+                                "function_name": "exec_command",
+                                "arguments": {"cmd": "false"},
+                            }
+                        ],
+                        "observation": {
+                            "results": [
+                                {
+                                    "tool_call_id": "call_error",
+                                    "content": "command failed",
+                                }
+                            ]
+                        },
+                    }
+                    if tool_error
+                    else {}
+                ),
+            },
+        ],
+        "final_metrics": {
+            "total_steps": 2,
+            "extra": {
+                "total_turns": 1,
+                "total_tool_calls": 1 if tool_error else 0,
+                "total_tool_errors": 1 if tool_error else 0,
+            },
+        },
+    }
+    meta = {
+        "trial_key": trial_key,
+        "adapter": adapter,
+        "started_at_ms": 1000,
+        "finished_at_ms": 1200,
+        "wall_duration_ms": 200,
+        "duration_ms": 200,
+        "status": "passed",
+        "score": None,
+        "score_message": "",
+        "warnings": [],
+        "total_events": 2,
+        "unmapped_events": 0,
+        "prompt_unavailable": False,
+        "steps": [
+            {
+                "step_id": 1,
+                "tool_calls": [],
+                "observations": [],
+                "tool_error": False,
+                "truncated": False,
+            },
+            {
+                "step_id": 2,
+                "tool_calls": [
+                    {
+                        "tool_call_id": "call_error",
+                        "status": "error",
+                        "title": "exec_command",
+                    }
+                ]
+                if tool_error
+                else [],
+                "observations": [
+                    {
+                        "tool_call_id": "call_error",
+                        "status": "error",
+                    }
+                ]
+                if tool_error
+                else [],
+                "tool_error": tool_error,
+                "truncated": False,
+            },
+        ],
+    }
+    (agent_dir / "trajectory.json").write_text(
+        json.dumps(trajectory),
+        encoding="utf-8",
+    )
+    (agent_dir / "trajectory_meta.json").write_text(
+        json.dumps(meta),
+        encoding="utf-8",
+    )
+
+
 class PevalPyCliInputTests(unittest.TestCase):
+    def test_cli_view_inspect_is_default_fixed_digest(self) -> None:
+        from peval_py.cli import main
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(FIXTURES / "common_session.jsonl"),
+                    "--top",
+                    "1",
+                    "--preview-chars",
+                    "12",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["inspect_schema_version"], 2)
+        self.assertNotIn("mode", payload)
+        self.assertNotIn("on", payload)
+        self.assertNotIn("selection", payload)
+        source = payload["sources"][0]
+        self.assertEqual(source["session_id"], "common_session")
+        self.assertEqual(source["agent"], "opencode")
+        self.assertEqual(source["total_tokens"], 15)
+        self.assertEqual(source["active_duration"], 0.1)
+        self.assertEqual(source["total_input_tokens"], 7)
+        self.assertEqual(source["total_output_tokens"], 8)
+        self.assertEqual(source["total_tool_calls"], 1)
+        self.assertEqual(source["total_tool_errors"], 0)
+        self.assertEqual(source["total_turns"], 2)
+        self.assertNotIn("status", source)
+        self.assertEqual(len(source["steps"]["head"]), 2)
+        self.assertEqual(len(source["steps"]["tail"]), 2)
+        self.assertIn("[truncated]", source["steps"]["tail"][1]["message_preview"])
+        self.assertEqual(source["steps"]["top_tokens"][0]["step_id"], 3)
+        self.assertEqual(source["tools"]["top_durations"][0]["duration"], 0.1)
+        self.assertEqual(source["tools"]["duration_distribution"]["sum"], 0.1)
+
+    def test_cli_view_inspect_output_paths_are_reported(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.chdir(root):
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    result = main(
+                        [
+                            "view",
+                            "tr",
+                            "-a",
+                            "opencode",
+                            "-p",
+                            str(FIXTURES / "common_session.jsonl"),
+                            "-o",
+                        ]
+                    )
+                self.assertEqual(result, 0)
+                default_path = written_report_path(stdout.getvalue(), root)
+                self.assertRegex(
+                    default_path.name,
+                    r"^inspect-\d{8}-\d{6}-\d{6}\.json$",
+                )
+                payload = json.loads(default_path.read_text(encoding="utf-8"))
+                self.assertEqual(payload["inspect_schema_version"], 2)
+
+            explicit = root / "explicit-inspect.json"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-a",
+                        "opencode",
+                        "-p",
+                        str(FIXTURES / "common_session.jsonl"),
+                        "-o",
+                        str(explicit),
+                    ]
+                )
+            self.assertEqual(result, 0)
+            self.assertEqual(stdout.getvalue(), f"wrote report: {explicit}\n")
+            self.assertTrue(explicit.exists())
+
+    def test_cli_view_inspect_rejects_html_removed_flags_and_raw_only_overrides(self) -> None:
+        from peval_py.cli import main
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            html_result = main(
+                [
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(FIXTURES / "common_session.jsonl"),
+                    "-f",
+                    "html",
+                ]
+            )
+        self.assertNotEqual(html_result, 0)
+        self.assertIn("supports only JSON", stderr.getvalue())
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as cm:
+            main(
+                [
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(FIXTURES / "common_session.jsonl"),
+                    "--on",
+                    "all",
+                ]
+            )
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("unrecognized arguments: --on all", stderr.getvalue())
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as cm:
+            main(
+                [
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(FIXTURES / "common_session.jsonl"),
+                    "--errors-only",
+                ]
+            )
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("unrecognized arguments: --errors-only", stderr.getvalue())
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            raw_result = main(
+                [
+                    "view",
+                    "tr",
+                    "-m",
+                    "raw",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(FIXTURES / "common_session.jsonl"),
+                    "--head",
+                    "0",
+                    "--tool-call",
+                    "tool-1",
+                ]
+            )
+        self.assertNotEqual(raw_result, 0)
+        self.assertIn("inspect-only option(s)", stderr.getvalue())
+        self.assertIn("--tool-call", stderr.getvalue())
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            raw_only_result = main(
+                [
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(FIXTURES / "common_session.jsonl"),
+                    "--agent-name",
+                    "agent-a",
+                    "--model",
+                    "model-a",
+                    "--no-redact",
+                ]
+            )
+        self.assertNotEqual(raw_only_result, 0)
+        self.assertIn("raw-only option(s) require -m raw", stderr.getvalue())
+        self.assertIn("--agent-name", stderr.getvalue())
+        self.assertIn("--model", stderr.getvalue())
+        self.assertIn("--no-redact", stderr.getvalue())
+
+    def test_cli_view_inspect_reads_report_and_meta_json_directly(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_path = root / "report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "trajectory": [
+                            {
+                                "schema_version": "ATIF-v1.7",
+                                "session_id": "direct-session",
+                                "agent": {
+                                    "name": "direct-agent",
+                                    "model_name": "direct-model",
+                                },
+                                "steps": [
+                                    {
+                                        "step_id": 1,
+                                        "source": "user",
+                                        "message": "hello",
+                                        "metrics": {
+                                            "prompt_tokens": 3,
+                                            "completion_tokens": 2,
+                                            "cached_tokens": 1,
+                                        },
+                                    },
+                                    {
+                                        "step_id": 2,
+                                        "source": "agent",
+                                        "message": "done",
+                                        "tool_calls": [
+                                            {
+                                                "tool_call_id": "call-1",
+                                                "function_name": "shell",
+                                                "arguments": {"cmd": "false"},
+                                            }
+                                        ],
+                                        "observation": {
+                                            "results": [
+                                                {
+                                                    "source_call_id": "call-1",
+                                                    "content": "command failed",
+                                                }
+                                            ]
+                                        },
+                                        "metrics": {
+                                            "prompt_tokens": 9,
+                                            "completion_tokens": 4,
+                                            "cached_tokens": 0,
+                                        },
+                                    },
+                                ],
+                                "final_metrics": {
+                                    "total_prompt_tokens": 12,
+                                    "total_completion_tokens": 6,
+                                    "total_cached_tokens": 1,
+                                    "extra": {
+                                        "total_turns": 1,
+                                        "total_tool_calls": 1,
+                                        "total_tool_errors": 1,
+                                    },
+                                },
+                            }
+                        ],
+                        "trajectory_meta": [
+                            {
+                                "trial_key": "direct-trial",
+                                "adapter": "atif",
+                                "status": "failed",
+                                "score": 0,
+                                "duration_ms": 4000,
+                                "wall_duration_ms": 5000,
+                                "warnings": [],
+                                "steps": [
+                                    {
+                                        "step_id": 1,
+                                        "duration_ms": 1000,
+                                        "tool_calls": [],
+                                        "observations": [],
+                                    },
+                                    {
+                                        "step_id": 2,
+                                        "duration_ms": 3000,
+                                        "tool_error": True,
+                                        "tool_calls": [
+                                            {
+                                                "tool_call_id": "call-1",
+                                                "status": "error",
+                                                "title": "shell",
+                                                "execution_duration_ms": 2500,
+                                            }
+                                        ],
+                                        "observations": [],
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            meta_path = root / "trajectory_meta.json"
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "trial_key": "meta-only",
+                        "adapter": "snapshot",
+                        "status": "passed",
+                        "duration_ms": 5,
+                        "warnings": ["meta warning"],
+                        "steps": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        str(report_path),
+                        "-p",
+                        str(meta_path),
+                        "--step",
+                        "2",
+                        "--tool-call",
+                        "call-1",
+                    ]
+                )
+            tool_only_stdout = io.StringIO()
+            with contextlib.redirect_stdout(tool_only_stdout):
+                tool_only_result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        str(report_path),
+                        "--tool-call",
+                        "call-1",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["inspect_schema_version"], 2)
+        first = payload["sources"][0]
+        self.assertEqual(first["session_id"], "direct-session")
+        self.assertEqual(first["agent"], "direct-agent")
+        self.assertEqual(first["model"], "direct-model")
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["score"], 0)
+        self.assertEqual(first["active_duration"], 4)
+        self.assertEqual(first["total_tokens"], 18)
+        self.assertEqual(first["total_input_tokens"], 12)
+        self.assertEqual(first["total_output_tokens"], 6)
+        self.assertEqual(first["total_cached_tokens"], 1)
+        self.assertEqual(first["total_tool_calls"], 1)
+        self.assertEqual(first["total_tool_errors"], 1)
+        self.assertEqual(first["total_turns"], 1)
+        self.assertEqual(first["steps"]["top_durations"][0], {"step_id": 2, "duration": 3})
+        self.assertEqual(
+            first["steps"]["top_tokens"][0],
+            {"step_id": 2, "input": 9, "output": 4, "cached": 0},
+        )
+        self.assertEqual(first["steps"]["duration_distribution"]["sum"], 4)
+        self.assertEqual(
+            first["tools"]["errors"],
+            [{"step_id": 2, "tool_call_id": "call-1", "tool_name": "shell"}],
+        )
+        self.assertEqual(first["tools"]["top_durations"][0]["duration"], 2.5)
+        self.assertEqual(first["tools"]["duration_distribution"]["sum"], 2.5)
+        self.assertEqual(first["selected_steps"][0]["step_id"], 2)
+        self.assertEqual(first["selected_steps"][0]["tool_calls"][0]["tool_call_id"], "call-1")
+        self.assertEqual(
+            first["selected_steps"][0]["tool_results"][0]["content_preview"],
+            "command failed",
+        )
+        self.assertEqual(first["selected_tool_calls"][0]["tool_call_id"], "call-1")
+        self.assertEqual(
+            first["selected_tool_calls"][0]["tool_result"]["content_preview"],
+            "command failed",
+        )
+        second = payload["sources"][1]
+        self.assertEqual(second["session_id"], "meta-only")
+        self.assertEqual(second["agent"], "snapshot")
+        self.assertNotIn("status", second)
+
+        self.assertEqual(tool_only_result, 0)
+        tool_only = json.loads(tool_only_stdout.getvalue())["sources"][0]
+        self.assertNotIn("selected_steps", tool_only)
+        self.assertEqual(tool_only["selected_tool_calls"][0]["tool_call_id"], "call-1")
+        self.assertEqual(
+            tool_only["selected_tool_calls"][0]["tool_result"]["content_preview"],
+            "command failed",
+        )
+
     def test_cli_uses_custom_path_adapter_and_rejects_db_when_path_only(self) -> None:
         from peval_py.cli import main
 
@@ -99,6 +613,8 @@ label_prefix = "configured"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-c",
                         str(config_path),
                         "-p",
@@ -126,6 +642,8 @@ label_prefix = "configured"
                         [
                             "view",
                             "tr",
+                        "-m",
+                        "raw",
                             "-c",
                             str(config_path),
                             "-d",
@@ -167,6 +685,8 @@ label_prefix = "selected"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-c",
                         str(config_path),
                         "-a",
@@ -204,6 +724,8 @@ label_prefix = "selected"
                         [
                             "view",
                             "tr",
+                        "-m",
+                        "raw",
                             "-a",
                             "p1=custom",
                             "-a",
@@ -217,6 +739,8 @@ label_prefix = "selected"
                         [
                             "view",
                             "tr",
+                        "-m",
+                        "raw",
                             "-a",
                             "p2=custom",
                             "-p",
@@ -228,6 +752,8 @@ label_prefix = "selected"
                         [
                             "view",
                             "tr",
+                        "-m",
+                        "raw",
                             "-a",
                             "p1=missing",
                             "-p",
@@ -262,6 +788,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-p",
                     str(hermes_path),
                     "-p",
@@ -284,6 +812,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-p",
@@ -305,6 +835,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-d",
                     str(hermes_dir / "state.db"),
                     "-d",
@@ -351,6 +883,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-d",
                     str(hermes_db),
                     "-d",
@@ -386,6 +920,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-p",
@@ -413,6 +949,8 @@ label_prefix = "selected"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-d",
                         str(hermes_db),
                         "-d",
@@ -471,6 +1009,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-d",
                     str(hermes_db),
                     "-s",
@@ -490,6 +1030,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-d",
                     str(hermes_db),
                     "-s",
@@ -513,6 +1055,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-d",
                     str(hermes_db),
                     "-d",
@@ -555,6 +1099,8 @@ label_prefix = "selected"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-d",
                         str(hermes_db),
                         "-li",
@@ -582,6 +1128,8 @@ label_prefix = "selected"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-d",
                         str(hermes_db),
                         "-li",
@@ -605,6 +1153,8 @@ label_prefix = "selected"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-d",
                         str(hermes_db),
                         "--list-interactive",
@@ -623,6 +1173,8 @@ label_prefix = "selected"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-d",
                         str(hermes_db),
                         "--list-interactive",
@@ -652,6 +1204,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-p",
                     str(atif_path),
                     "-f",
@@ -674,6 +1228,8 @@ label_prefix = "selected"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-c",
                     str(missing_adapter_config),
                     "-p",
@@ -716,6 +1272,8 @@ label_prefix = "selected"
                     "peval_py.cli",
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-d",
                     str(db_path),
                     "-s",
@@ -749,6 +1307,8 @@ label_prefix = "selected"
                     "peval_py.cli",
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-d",
                     str(db_path),
                     "-s",
@@ -783,6 +1343,8 @@ default_db_path = "state.db"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-c",
                     str(config_path),
                     "-d",
@@ -805,6 +1367,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-c",
                         str(config_path),
                         "-d",
@@ -852,6 +1416,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-r",
                         str(workspace),
                         "-d",
@@ -888,6 +1454,8 @@ default_db_path = "state.db"
                         [
                             "view",
                             "tr",
+                        "-m",
+                        "raw",
                             "-r",
                             str(workspace),
                             "-d",
@@ -1019,6 +1587,8 @@ default_db_path = "state.db"
                         [
                             "view",
                             "tr",
+                        "-m",
+                        "raw",
                             "-r",
                             str(workspace),
                             "-d",
@@ -1038,6 +1608,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-r",
                         str(workspace),
                         "-d",
@@ -1054,6 +1626,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-r",
                         str(workspace),
                         "-d",
@@ -1072,6 +1646,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-r",
                         str(workspace),
                         "-d",
@@ -1090,6 +1666,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-r",
                         str(workspace),
                         "-d",
@@ -1108,6 +1686,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-r",
                         str(workspace),
                         "-d",
@@ -1170,6 +1750,298 @@ default_db_path = "state.db"
             self.assertEqual(export_payload["session_id"], "db-a")
             default_export_payload = json.loads(default_export_out.read_text(encoding="utf-8"))
             self.assertEqual(default_export_payload["session_id"], "db-a")
+
+    def test_cli_trial_cell_path_input_uses_workspace_source_metadata(self) -> None:
+        from peval_py.cli import main
+        from peval_py.state import open_workspace_state
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            outside = root / "outside"
+            source_db = root / "source.db"
+            workspace.mkdir()
+            outside.mkdir()
+            create_messages_db(source_db)
+            (workspace / "peval-py.toml").write_text(
+                'state_db = "state.db"\nanalysis_eval_slug = "default"\n',
+                encoding="utf-8",
+            )
+            store = open_workspace_state(str(workspace))
+            config = load_config(None, workspace_root=str(workspace))
+            keys = store.import_loaded_sources(
+                LoadedInputs(
+                    sessions=[
+                        LoadedSession(
+                            records=None,
+                            input_label="source.db:db-a",
+                            adapter_id="psychevo",
+                            input_path=str(source_db),
+                            db_path=str(source_db),
+                            session_hint="db-a",
+                            source_kind="db",
+                        )
+                    ],
+                    notes=[],
+                ),
+                config,
+            )
+            store.set_source_alias(keys[0], "Cell Path Alias")
+            source = next(
+                item for item in store.source_payload() if item["source_key"] == keys[0]
+            )
+            cell_dir = workspace / str(source["artifact_dir"])
+            write_cli_cached_analysis(
+                workspace,
+                agent_id=str(source.get("agent_name") or source.get("adapter")),
+                session_id=str(source["session_id"]),
+                cell_key=cell_dir.name,
+                summary="Cell path cached analysis.",
+            )
+            store.close()
+            source_db.unlink()
+            inspect_out = root / "inspect.json"
+            raw_out = root / "raw-report.json"
+            export_out = root / "export.json"
+
+            with contextlib.chdir(outside):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        str(cell_dir),
+                        "-o",
+                        str(inspect_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-m",
+                        "raw",
+                        "-p",
+                        str(cell_dir),
+                        "-f",
+                        "json",
+                        "-o",
+                        str(raw_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+                result = main(
+                    [
+                        "export",
+                        "tr",
+                        "-p",
+                        str(cell_dir),
+                        "-o",
+                        str(export_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+            inspect_payload = json.loads(inspect_out.read_text(encoding="utf-8"))
+            source_payload = inspect_payload["sources"][0]
+            self.assertEqual(source_payload["session_id"], "db-a")
+            self.assertNotIn("source_alias", source_payload)
+            self.assertNotIn("label", source_payload)
+            self.assertNotIn("artifact_ref", source_payload)
+            expected_ref = {
+                "kind": "trial-cell-artifact",
+                "path": os.path.relpath(cell_dir, outside),
+                "workspace_relative_path": str(source["artifact_dir"]),
+                "source_key": keys[0],
+            }
+            raw_payload = json.loads(raw_out.read_text(encoding="utf-8"))
+            self.assertEqual(raw_payload["trajectory"][0]["session_id"], "db-a")
+            self.assertEqual(
+                raw_payload["trajectory_meta"][0]["source_alias"],
+                "Cell Path Alias",
+            )
+            self.assertEqual(
+                raw_payload["trajectory_meta"][0]["artifact_ref"],
+                expected_ref,
+            )
+            self.assertEqual(
+                raw_payload["annotations"]["analysis"][0]["summary"],
+                "Cell path cached analysis.",
+            )
+            export_payload = json.loads(export_out.read_text(encoding="utf-8"))
+            self.assertEqual(export_payload["session_id"], "db-a")
+            self.assertNotIn("artifact_ref", export_payload)
+            self.assertNotIn("trajectory_meta", export_payload)
+
+    def test_cli_trial_cell_path_input_reads_unregistered_artifact_snapshot(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            outside = root / "outside"
+            outside.mkdir()
+            write_peval_workspace(workspace)
+            cell_dir = (
+                workspace
+                / "runs"
+                / "default"
+                / "psychevo"
+                / "artifact-session"
+                / "session_t001"
+            )
+            write_trial_cell_artifacts(
+                cell_dir,
+                session_id="artifact-session",
+                trial_key="session_t001",
+                tool_error=True,
+            )
+            inspect_out = root / "unregistered-inspect.json"
+            raw_out = root / "unregistered-raw.json"
+            export_out = root / "unregistered-export.json"
+
+            with contextlib.chdir(outside):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        str(cell_dir),
+                        "-o",
+                        str(inspect_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-m",
+                        "raw",
+                        "-p",
+                        str(cell_dir),
+                        "-f",
+                        "json",
+                        "-o",
+                        str(raw_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+                result = main(
+                    [
+                        "export",
+                        "tr",
+                        "-p",
+                        str(cell_dir),
+                        "-o",
+                        str(export_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+            inspect_payload = json.loads(inspect_out.read_text(encoding="utf-8"))
+            source_payload = inspect_payload["sources"][0]
+            self.assertEqual(source_payload["session_id"], "artifact-session")
+            self.assertNotIn("artifact_ref", source_payload)
+            self.assertEqual(
+                source_payload["tools"]["errors"],
+                [
+                    {
+                        "step_id": 2,
+                        "tool_call_id": "call_error",
+                        "tool_name": "exec_command",
+                    }
+                ],
+            )
+            expected_ref = {
+                "kind": "trial-cell-artifact",
+                "path": os.path.relpath(cell_dir, outside),
+                "workspace_relative_path": cell_dir.relative_to(workspace).as_posix(),
+            }
+            self.assertEqual(
+                source_payload["total_tool_errors"],
+                1,
+            )
+            raw_payload = json.loads(raw_out.read_text(encoding="utf-8"))
+            self.assertEqual(raw_payload["trajectory"][0]["session_id"], "artifact-session")
+            self.assertEqual(
+                raw_payload["trajectory_meta"][0]["artifact_ref"],
+                expected_ref,
+            )
+            export_payload = json.loads(export_out.read_text(encoding="utf-8"))
+            self.assertEqual(export_payload["session_id"], "artifact-session")
+            self.assertNotIn("artifact_ref", export_payload)
+            self.assertNotIn("trajectory_meta", export_payload)
+
+    def test_cli_trial_cell_path_root_conflict_is_clear(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            other_workspace = root / "other-workspace"
+            write_peval_workspace(workspace)
+            write_peval_workspace(other_workspace)
+            cell_dir = (
+                workspace
+                / "runs"
+                / "default"
+                / "psychevo"
+                / "artifact-session"
+                / "session_t001"
+            )
+            write_trial_cell_artifacts(cell_dir)
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-r",
+                        str(other_workspace),
+                        "-p",
+                        str(cell_dir),
+                    ]
+                )
+
+            self.assertNotEqual(result, 0)
+            self.assertIn("conflicts with inferred workspace root", stderr.getvalue())
+            self.assertIn(str(workspace), stderr.getvalue())
+            self.assertIn(str(other_workspace), stderr.getvalue())
+
+    def test_cli_trial_cell_path_malformed_directory_error_is_actionable(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            write_peval_workspace(workspace)
+            malformed = (
+                workspace
+                / "runs"
+                / "default"
+                / "psychevo"
+                / "artifact-session"
+                / "session_t001"
+            )
+            (malformed / "agent").mkdir(parents=True)
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = main(["view", "tr", "-p", str(malformed)])
+
+            message = stderr.getvalue()
+            self.assertNotEqual(result, 0)
+            self.assertIn("Trial cell artifact directory", message)
+            self.assertIn("agent/trajectory.json", message)
+            self.assertIn("agent/trajectory_meta.json", message)
+            self.assertNotIn("Psychevo DB not found", message)
 
     def test_cli_workspace_state_db_saved_snapshot_errors_are_clear(self) -> None:
         from peval_py.cli import main
@@ -1238,6 +2110,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-d",
                         str(workspace_db),
                         "--list",
@@ -1270,6 +2144,8 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
+                        "-m",
+                        "raw",
                         "-r",
                         str(workspace),
                         "-a",
@@ -1379,6 +2255,8 @@ default_db_path = "state.db"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-r",
                     str(workspace),
                     "-a",
@@ -1878,6 +2756,8 @@ default_db_path = "state.db"
                     "peval_py.cli",
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "--agent-name",
                     "global-agent",
                     "--model",
@@ -1946,6 +2826,8 @@ default_db_path = "state.db"
                 [
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-i",
                     str(table),
                     "--source-alias",
@@ -1988,6 +2870,8 @@ default_db_path = "state.db"
                             [
                                 "view",
                                 "tr",
+                        "-m",
+                        "raw",
                                 "-i",
                                 str(table),
                                 "--source-alias",
@@ -2037,6 +2921,8 @@ default_db_path = "state.db"
                     "peval_py.cli",
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-i",
                     str(table),
                     "-f",
@@ -2117,6 +3003,8 @@ default_db_path = "state.db"
                     "peval_py.cli",
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-p",
@@ -2179,6 +3067,8 @@ default_db_path = "state.db"
                     "peval_py.cli",
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-p",
@@ -2217,6 +3107,8 @@ default_db_path = "state.db"
                     "peval_py.cli",
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-p",
@@ -2266,6 +3158,8 @@ default_db_path = "state.db"
                     "peval_py.cli",
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-j",
                     str(FIXTURES / "common_session.jsonl"),
                 ],
@@ -2286,6 +3180,8 @@ default_db_path = "state.db"
                     command,
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-p",
@@ -2352,6 +3248,16 @@ default_db_path = "state.db"
                         capture_output=True,
                     )
                     self.assertEqual(result.returncode, 0)
+                    self.assertNotIn("--trajectory-id", result.stdout)
+
+            serve_help = subprocess.run(
+                [command, "serve", "--help"],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(serve_help.returncode, 0)
+            self.assertNotIn("--trajectory-id", serve_help.stdout)
 
             result = subprocess.run(
                 [command, "view", "tr", "--help"],
@@ -2365,13 +3271,23 @@ default_db_path = "state.db"
             self.assertIn("--input-table", result.stdout)
             self.assertIn("-n", result.stdout)
             self.assertIn("--note", result.stdout)
+            self.assertIn("--head", result.stdout)
+            self.assertIn("--tail", result.stdout)
+            self.assertIn("--top", result.stdout)
+            self.assertIn("--step", result.stdout)
+            self.assertIn("--tool-call", result.stdout)
+            self.assertNotIn("--on", result.stdout)
+            self.assertIn("raw report options", result.stdout)
+            self.assertIn("--agent-name", result.stdout)
+            self.assertNotIn("--trajectory-id", result.stdout)
 
-            default_report = Path(tmp) / "report-opencode-common_session.html"
             result = subprocess.run(
                 [
                     command,
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-p",
@@ -2384,6 +3300,11 @@ default_db_path = "state.db"
                 capture_output=True,
             )
             self.assertEqual(result.stderr, "")
+            default_report = written_report_path(result.stdout, Path(tmp))
+            self.assertRegex(
+                default_report.name,
+                r"^report-opencode-common_session-\d{8}-\d{6}-\d{6}\.html$",
+            )
             self.assertIn("<!doctype html>", default_report.read_text(encoding="utf-8"))
 
             zh_config = Path(tmp) / "zh.toml"
@@ -2397,6 +3318,8 @@ default_db_path = "state.db"
                     command,
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-c",
                     str(zh_config),
                     "-a",
@@ -2442,6 +3365,8 @@ default_db_path = "state.db"
                     command,
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-d",
@@ -2468,6 +3393,8 @@ default_db_path = "state.db"
                     command,
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "hermes",
                     "-d",
@@ -2503,6 +3430,8 @@ default_db_path = "state.db"
                     command,
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "psychevo",
                     "-d",
@@ -2521,12 +3450,13 @@ default_db_path = "state.db"
             self.assertEqual(payload["trajectory"][0]["session_id"], "db-b")
             self.assertEqual(payload["trajectory"][0]["steps"][0]["message"], "hello b")
 
-            default_report_json = Path(tmp) / "report-opencode-common_session.json"
             result = subprocess.run(
                 [
                     command,
                     "view",
                     "tr",
+                        "-m",
+                        "raw",
                     "-a",
                     "opencode",
                     "-p",
@@ -2541,6 +3471,11 @@ default_db_path = "state.db"
                 capture_output=True,
             )
             self.assertEqual(result.stderr, "")
+            default_report_json = written_report_path(result.stdout, Path(tmp))
+            self.assertRegex(
+                default_report_json.name,
+                r"^report-opencode-common_session-\d{8}-\d{6}-\d{6}\.json$",
+            )
             subprocess.run(
                 [sys.executable, "-m", "json.tool", str(default_report_json)],
                 check=True,

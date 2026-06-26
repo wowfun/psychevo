@@ -205,7 +205,7 @@ def trial_key_for(
     seen: dict[str, int],
 ) -> str:
     if not multi:
-        base = str(trajectory.get("trajectory_id") or config.trajectory_id or "session:t001")
+        base = str(trajectory.get("trajectory_id") or "session:t001")
     else:
         base = f"session:{safe_key_part(trajectory.get('session_id') or f's{index}')}"
     count = seen.get(base, 0) + 1

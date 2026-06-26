@@ -4,12 +4,19 @@ import argparse
 import sys
 from dataclasses import replace
 from pathlib import Path
+from textwrap import dedent
 
 from peval_py.config import apply_overrides, config_for_adapter, load_config
 from peval_py.html import render_html
-from peval_py.inputs import load_inputs, parse_adapter_assignments
+from peval_py.inputs import (
+    infer_workspace_root_from_trial_cell_paths,
+    load_inputs,
+    parse_adapter_assignments,
+    same_local_path,
+)
 from peval_py.outputs import (
     DEFAULT_OUTPUT,
+    announce_written,
     resolve_export_output,
     resolve_report_format,
     resolve_report_output,
@@ -27,6 +34,11 @@ from peval_py.session_select import (
     parse_session_selection,
 )
 
+INSPECT_EPILOG = """\
+Inspect mode emits a compact fixed JSON digest for triage. Use -m raw for the
+full peval-compatible JSON or HTML report.
+"""
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -43,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
             workspace_root = validated_workspace_root(args)
             run_import_analysis_command(args, workspace_root)
             return 0
-        workspace_root = validated_workspace_root(args)
+        workspace_root, inferred_workspace_root = workspace_root_for_args(args)
         config = apply_overrides(
             load_config(args.config, workspace_root=workspace_root),
             args,
@@ -56,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         if (
             args.command in {"view", "export"}
             and workspace_root
-            and getattr(args, "root", None)
+            and (getattr(args, "root", None) or inferred_workspace_root)
         ):
             from peval_py.state import workspace_paths
 
@@ -71,6 +83,10 @@ def main(argv: list[str] | None = None) -> int:
 
             run_serve_command(args, config, adapter_assignments)
             return 0
+        if args.command == "view" and getattr(args, "mode", "inspect") == "inspect":
+            from peval_py.inspection import validate_inspect_raw_only_args
+
+            validate_inspect_raw_only_args(args)
         if args.command == "view" and getattr(args, "list_sessions", False):
             print_session_lists(args, adapter_assignments, config)
             return 0
@@ -79,6 +95,25 @@ def main(argv: list[str] | None = None) -> int:
             if not selected:
                 return 0
             args = argparse.Namespace(**{**vars(args), "session_id": selected})
+        if args.command == "view" and getattr(args, "mode", "inspect") == "inspect":
+            from peval_py.inspection import (
+                build_inspect_payload,
+                resolve_inspect_output,
+                validate_inspect_args,
+            )
+
+            validate_inspect_args(args)
+            announce_written(
+                write_json(
+                    build_inspect_payload(args, adapter_assignments, config),
+                    resolve_inspect_output(args),
+                )
+            )
+            return 0
+        if args.command == "view" and getattr(args, "mode", "inspect") == "raw":
+            from peval_py.inspection import validate_raw_args
+
+            validate_raw_args(args)
         loaded_inputs = load_inputs(args, adapter_assignments, config=config)
         if args.command == "export":
             if len(loaded_inputs.sessions) != 1:
@@ -103,13 +138,15 @@ def main(argv: list[str] | None = None) -> int:
             getattr(args, "note", None) or [],
         )
         fmt = resolve_report_format(args)
-        output = resolve_report_output(args, fmt, report, config)
+        output = resolve_report_output(args, fmt, report, config, timestamped=True)
         if fmt == "json":
-            write_json(report, output)
+            written = write_json(report, output)
         elif fmt == "html":
-            write_text(render_html(report, locale=config.locale), output)
+            written = write_text(render_html(report, locale=config.locale), output)
         else:
             raise ValueError(f"unsupported report format: {fmt}")
+        if args.command == "view":
+            announce_written(written)
         return 0
     except Exception as exc:  # noqa: BLE001 - CLI boundary.
         print(f"peval-py: {exc}", file=sys.stderr)
@@ -155,13 +192,24 @@ def build_parser() -> argparse.ArgumentParser:
         aliases=["tr"],
         help="view one or more retained agent trajectories",
         description=(
-            "Build an offline trajectory report. Repeat -p/--path for JSONL "
-            "session comparison, repeat -d/--db for adapter-owned DB comparison, "
-            "or mix paths and DBs in one report."
+            "Inspect retained agent trajectories by default. Use -m raw only "
+            "when a full peval-compatible JSON or HTML report is needed."
         ),
+        epilog=dedent(INSPECT_EPILOG),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_shared_args(view_trajectory)
+    add_raw_report_override_args(
+        view_trajectory.add_argument_group("raw report options")
+    )
     add_root_arg(view_trajectory)
+    view_trajectory.add_argument(
+        "-m",
+        "--mode",
+        choices=["inspect", "raw"],
+        default="inspect",
+        help="view mode: inspect emits bounded JSON; raw emits a full report",
+    )
     view_trajectory.add_argument(
         "-f",
         "--format",
@@ -184,6 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_note_arg(view_trajectory)
     add_source_alias_arg(view_trajectory)
+    add_inspect_args(view_trajectory)
 
     export = verbs.add_parser(
         "export",
@@ -202,6 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_shared_args(export_trajectory)
+    add_conversion_override_args(export_trajectory)
     add_root_arg(export_trajectory)
 
     import_cmd = verbs.add_parser(
@@ -257,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_shared_args(serve, include_output=False)
+    add_conversion_override_args(serve)
     add_note_arg(serve)
     add_source_alias_arg(serve)
     serve.add_argument(
@@ -287,6 +338,27 @@ def validated_workspace_root(args: argparse.Namespace) -> str | None:
 
         return str(ensure_workspace_root(Path(root).expanduser()))
     return root
+
+
+def workspace_root_for_args(args: argparse.Namespace) -> tuple[str | None, bool]:
+    root = validated_workspace_root(args)
+    if getattr(args, "command", None) not in {"view", "export"}:
+        return root, False
+    inferred = infer_workspace_root_from_trial_cell_paths(
+        list(getattr(args, "path", None) or [])
+    )
+    if inferred is None:
+        return root, False
+    if root:
+        if not same_local_path(root, str(inferred)):
+            raise ValueError(
+                f"explicit workspace root {root} conflicts with inferred workspace "
+                f"root {inferred} from Trial cell artifact path"
+            )
+        return root, False
+    from peval_py.state import ensure_workspace_root
+
+    return str(ensure_workspace_root(inferred)), True
 
 
 def add_root_arg(parser: argparse.ArgumentParser) -> None:
@@ -341,12 +413,7 @@ def add_shared_args(
         metavar="PATH",
         help="CSV, JSON, or .xlsx input manifest; repeatable",
     )
-    parser.add_argument("--agent-name", help="override ATIF agent name")
-    parser.add_argument("--agent-version", help="override ATIF agent version")
-    parser.add_argument("--model", help="override ATIF agent model name")
-    parser.add_argument("--trajectory-id", help="override ATIF trajectory id")
     parser.add_argument("--max-content-chars", type=int, help="truncate large content")
-    parser.add_argument("--no-redact", action="store_true", help="disable secret redaction")
     if include_output:
         parser.add_argument(
             "-o",
@@ -358,6 +425,33 @@ def add_shared_args(
                 "default filename"
             ),
         )
+
+
+def add_conversion_override_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--agent-name", help="override ATIF agent name")
+    parser.add_argument("--agent-version", help="override ATIF agent version")
+    parser.add_argument("--model", help="override ATIF agent model name")
+    parser.add_argument("--no-redact", action="store_true", help="disable secret redaction")
+
+
+def add_raw_report_override_args(parser: argparse._ArgumentGroup) -> None:
+    parser.add_argument(
+        "--agent-name",
+        help="raw mode only: override ATIF agent name",
+    )
+    parser.add_argument(
+        "--agent-version",
+        help="raw mode only: override ATIF agent version",
+    )
+    parser.add_argument(
+        "--model",
+        help="raw mode only: override ATIF agent model name",
+    )
+    parser.add_argument(
+        "--no-redact",
+        action="store_true",
+        help="raw mode only: disable secret redaction",
+    )
 
 
 def add_note_arg(parser: argparse.ArgumentParser) -> None:
@@ -378,6 +472,36 @@ def add_source_alias_arg(parser: argparse.ArgumentParser) -> None:
         default=[],
         metavar="N=TEXT",
         help="display alias for a one-based input session; repeatable",
+    )
+
+
+def add_inspect_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--head", type=int, help="inspect first N steps per source; defaults to 2")
+    parser.add_argument("--tail", type=int, help="inspect last N steps per source; defaults to 2")
+    parser.add_argument("--top", type=int, help="inspect top N ranked rows per source; defaults to 5")
+    parser.add_argument(
+        "--step",
+        action="append",
+        metavar="ID",
+        help="include compact evidence for a trajectory step_id; repeatable",
+    )
+    parser.add_argument(
+        "--tool-call",
+        action="append",
+        metavar="ID",
+        help="include a tool call and its matching result by tool_call_id; repeatable",
+    )
+    parser.add_argument(
+        "--source",
+        action="append",
+        type=int,
+        metavar="N",
+        help="inspect only a one-based source index; repeatable",
+    )
+    parser.add_argument(
+        "--preview-chars",
+        type=int,
+        help="maximum characters per preview field in inspect output",
     )
 
 

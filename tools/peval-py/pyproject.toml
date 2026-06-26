@@ -3,7 +3,9 @@ name = "peval-py"
 version = "0.1.0"
 description = "Offline agent session message to ATIF trajectory converter"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pandas>=2.2",
+]
 
 [project.scripts]
 peval-py = "peval_py.cli:main"

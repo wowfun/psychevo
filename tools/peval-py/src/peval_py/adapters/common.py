@@ -72,10 +72,9 @@ class CommonMessageAdapter:
         started = first_timestamp(meta)
         finished = last_timestamp(meta)
         final_metrics = final_metrics_from_records(records, steps, meta)
-        trajectory_id = config.trajectory_id or "session:t001"
         trajectory = {
             "schema_version": "ATIF-v1.7",
-            "trajectory_id": trajectory_id,
+            "trajectory_id": "session:t001",
             "agent": {
                 "name": config.agent_name or self.default_agent_name,
                 "version": config.agent_version,

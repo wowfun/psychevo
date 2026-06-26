@@ -42,7 +42,6 @@ class ToolConfig:
     agent_name: str | None = None
     agent_version: str = "0.1.0"
     model: str | None = None
-    trajectory_id: str | None = None
     max_content_chars: int = 128 * 1024
     redact: bool = True
     db: DbMapping = DbMapping()
@@ -140,8 +139,6 @@ def apply_toml_config(
             updates["locale"] = normalize_locale(defaults.get("locale"))
         if "model" in defaults:
             updates["model"] = _optional_string(defaults.get("model"))
-        if "trajectory_id" in defaults:
-            updates["trajectory_id"] = _optional_string(defaults.get("trajectory_id"))
         if "max_content_chars" in defaults:
             updates["max_content_chars"] = int(defaults.get("max_content_chars"))
         if "redact" in defaults:
@@ -200,7 +197,6 @@ def apply_overrides(config: ToolConfig, args: Any) -> ToolConfig:
         "agent_name",
         "agent_version",
         "model",
-        "trajectory_id",
         "max_content_chars",
     ]:
         value = getattr(args, field, None)
