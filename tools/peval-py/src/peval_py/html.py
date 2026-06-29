@@ -15,6 +15,19 @@ ASSET_PACKAGE = "peval_py.assets"
 ECHARTS_VERSION = "6.0.0"
 ECHARTS_LOCAL_SRC = f"/assets/echarts/{ECHARTS_VERSION}/echarts.min.js"
 ECHARTS_CDN_SRC = f"https://cdn.jsdelivr.net/npm/echarts@{ECHARTS_VERSION}/dist/echarts.min.js"
+ASSET_BUNDLES = {
+    "report.css": [
+        "report_css/00-shell.css",
+        "report_css/10-trace-analysis-timeline.css",
+        "report_css/20-serve-source-drawer.css",
+    ],
+    "report.js": [
+        "report_js/00-core.js",
+        "report_js/10-trajectory-serve.js",
+        "report_js/20-analysis.js",
+        "report_js/30-timeline.js",
+    ],
+}
 
 
 def render_html(
@@ -396,6 +409,8 @@ def serve_sources(report: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def load_asset_text(name: str) -> str:
+    if name in ASSET_BUNDLES:
+        return "\n".join(load_asset_text(part) for part in ASSET_BUNDLES[name])
     return files(ASSET_PACKAGE).joinpath(name).read_text(encoding="utf-8")
 
 

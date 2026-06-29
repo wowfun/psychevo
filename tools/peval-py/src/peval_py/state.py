@@ -1,24 +1,15 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import math
 import os
-import shutil
 import sqlite3
 import time
 import tomllib
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from peval_py.analysis import (
-    MERGEABLE_ANALYSIS_LIST_FIELDS,
-    cached_analysis_report,
-    cached_note_report,
-    write_note_file,
-)
+from peval_py.analysis import write_note_file
 from peval_py.atif import convert_atif_trajectory, is_atif_trajectory
 from peval_py.config import ToolConfig, config_for_adapter, default_workspace_config_text
 from peval_py.inputs import AdapterAssignments, LoadedInputs, LoadedSession, load_inputs
@@ -30,14 +21,45 @@ from peval_py.report import (
     empty_report,
 )
 from peval_py.sources import read_jsonl_text
+from peval_py._state.annotations import (
+    is_report_json,
+    matching_annotation_items,
+    meta_with_source_alias,
+    merged_analysis_json,
+    merged_analysis_markdown,
+    merged_note_markdown,
+    optional_int,
+    optional_str,
+    parsed_object,
+    source_report_with_current_annotations,
+    uniquify_trial_keys,
+)
+from peval_py._state.artifacts import (
+    AGENT_DIR,
+    DEFAULT_ANALYSIS_EVAL_SLUG,
+    TRAJECTORY_FILENAME,
+    TRAJECTORY_META_FILENAME,
+    TrialArtifacts,
+    normalized_optional_path,
+    read_json_object,
+    relative_to_root,
+    remove_artifact_dir,
+    source_key_for_trial,
+    trial_artifacts,
+    trial_cell_dir,
+    workspace_analysis_eval_slug,
+    write_json_file,
+    write_text_file,
+)
+from peval_py._state.sources import (
+    loaded_session_from_source,
+    source_row_for_session,
+    trial_payload_from_report,
+)
 
 PEVAL_PY_CONFIG = "peval-py.toml"
 PEVAL_ROOT_ENV = "PEVAL_ROOT"
 STATE_SCHEMA_VERSION = 3
-DEFAULT_ANALYSIS_EVAL_SLUG = "default"
-AGENT_DIR = "agent"
-TRAJECTORY_FILENAME = "trajectory.json"
-TRAJECTORY_META_FILENAME = "trajectory_meta.json"
 UPLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 REFRESH_LOG_LIMIT = 200
 
@@ -47,12 +69,6 @@ class WorkspacePaths:
     root: Path
     config_path: Path
     state_db_path: Path
-
-
-@dataclass(frozen=True)
-class TrialArtifacts:
-    trajectory_path: Path
-    meta_path: Path
 
 
 def now_ms() -> int:
@@ -875,435 +891,3 @@ def load_serve_inputs(
     config: ToolConfig | None = None,
 ) -> LoadedInputs:
     return load_inputs(args, adapter_assignments, require_sources=False, config=config)
-
-
-def loaded_session_from_source(source: dict[str, Any]) -> LoadedSession:
-    return LoadedSession(
-        records=None,
-        input_label=str(source["label"]),
-        adapter_id=str(source["adapter"]),
-        input_path=source.get("input_path") or source.get("db_path"),
-        db_path=source.get("db_path"),
-        session_hint=source.get("session_id"),
-        agent_name=source.get("agent_name"),
-        agent_version=source.get("agent_version"),
-        model=source.get("model"),
-        source_alias=source.get("source_alias"),
-        source_kind=str(source["kind"]),
-    )
-
-
-def source_row_for_session(session: LoadedSession) -> dict[str, Any]:
-    return {
-        "kind": session.source_kind,
-        "adapter": session.adapter_id,
-        "label": session.input_label,
-        "input_path": normalized_optional_path(session.input_path),
-        "db_path": normalized_optional_path(session.db_path),
-        "session_id": session.session_hint,
-        "source_alias": session.source_alias,
-        "agent_name": session.agent_name,
-        "agent_version": session.agent_version,
-        "model": session.model,
-    }
-
-
-def trial_payload_from_report(
-    report: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    trajectories = report.get("trajectory") or []
-    metas = report.get("trajectory_meta") or []
-    if len(trajectories) != 1 or len(metas) != 1:
-        raise ValueError("source refresh must produce exactly one Trial")
-    trajectory = trajectories[0]
-    meta = metas[0]
-    if not isinstance(trajectory, dict) or not isinstance(meta, dict):
-        raise ValueError("source refresh produced non-object Trial data")
-    return trajectory, meta
-
-
-def source_key_for_trial(
-    eval_slug: str,
-    source: dict[str, Any],
-    trajectory: dict[str, Any],
-    meta: dict[str, Any],
-) -> str:
-    payload = trial_cell_components(
-        eval_slug=eval_slug,
-        source=source,
-        trajectory=trajectory,
-        meta=meta,
-    )
-    return "cell_" + hashlib.sha256(
-        json.dumps(payload, sort_keys=True).encode("utf-8")
-    ).hexdigest()[:20]
-
-
-def trial_cell_components(
-    *,
-    eval_slug: str,
-    source: dict[str, Any],
-    trajectory: dict[str, Any],
-    meta: dict[str, Any],
-) -> dict[str, str]:
-    agent = trajectory.get("agent")
-    trajectory_agent = agent.get("name") if isinstance(agent, dict) else None
-    return {
-        "eval_slug": artifact_segment(eval_slug, DEFAULT_ANALYSIS_EVAL_SLUG),
-        "agent_id": artifact_segment(
-            source.get("agent_name")
-            or trajectory_agent
-            or meta.get("adapter")
-            or source.get("adapter"),
-            "unknown-agent",
-        ),
-        "session_id": artifact_segment(
-            trajectory.get("session_id")
-            or source.get("session_id")
-            or meta.get("trial_key"),
-            "unknown-session",
-        ),
-        "cell_key": required_artifact_segment(meta.get("trial_key"), "trial_key"),
-    }
-
-
-def normalized_optional_path(path: str | None) -> str | None:
-    if not path:
-        return None
-    return str(Path(path).expanduser().resolve())
-
-
-def workspace_analysis_eval_slug(paths: WorkspacePaths) -> str:
-    if not paths.config_path.is_file():
-        return DEFAULT_ANALYSIS_EVAL_SLUG
-    try:
-        data = tomllib.loads(paths.config_path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:
-        return DEFAULT_ANALYSIS_EVAL_SLUG
-    value = data.get("analysis_eval_slug")
-    return artifact_segment(value, DEFAULT_ANALYSIS_EVAL_SLUG)
-
-
-def trial_cell_dir(
-    root: Path,
-    *,
-    eval_slug: str,
-    source: dict[str, Any],
-    trajectory: dict[str, Any],
-    meta: dict[str, Any],
-) -> Path:
-    components = trial_cell_components(
-        eval_slug=eval_slug,
-        source=source,
-        trajectory=trajectory,
-        meta=meta,
-    )
-    return (
-        root
-        / "runs"
-        / components["eval_slug"]
-        / components["agent_id"]
-        / components["session_id"]
-        / components["cell_key"]
-    )
-
-
-def trial_artifacts(artifact_dir: Path) -> TrialArtifacts:
-    agent_dir = artifact_dir / AGENT_DIR
-    return TrialArtifacts(
-        trajectory_path=agent_dir / TRAJECTORY_FILENAME,
-        meta_path=agent_dir / TRAJECTORY_META_FILENAME,
-    )
-
-
-def artifact_segment(value: Any, fallback: str) -> str:
-    text = str(value or "").strip()
-    safe = "".join(
-        char if char.isalnum() or char in {"-", "_", "."} else "_"
-        for char in text
-    ).strip("._")
-    return safe or fallback
-
-
-def required_artifact_segment(value: Any, label: str) -> str:
-    text = str(value or "").strip()
-    safe = "".join(
-        char if char.isalnum() or char in {"-", "_", "."} else "_"
-        for char in text
-    ).strip("._")
-    if not safe:
-        raise ValueError(f"{label} is required for Trial cell artifacts")
-    return safe
-
-
-def relative_to_root(root: Path, path: Path) -> str:
-    try:
-        return path.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return str(path.resolve())
-
-
-def write_json_file(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    tmp.replace(path)
-
-
-def write_text_file(path: Path, value: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(value, encoding="utf-8")
-    tmp.replace(path)
-
-
-def read_json_object(path: Path) -> dict[str, Any]:
-    return json_object(path.read_text(encoding="utf-8"), str(path))
-
-
-def json_object(value: str, label: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"failed to parse {label}: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise ValueError(f"{label} must contain a JSON object")
-    return parsed
-
-
-def remove_artifact_dir(root: Path, artifact_dir: Path) -> None:
-    resolved_root = root.resolve()
-    resolved_artifact = artifact_dir.resolve()
-    if resolved_artifact == resolved_root or resolved_root not in resolved_artifact.parents:
-        raise ValueError(
-            f"refusing to remove artifact directory outside workspace: {artifact_dir}"
-        )
-    if resolved_artifact.is_dir():
-        shutil.rmtree(resolved_artifact)
-
-
-def matching_annotation_items(
-    annotations: dict[str, Any],
-    key: str,
-    trial_key: str,
-) -> list[dict[str, Any]]:
-    return [
-        deepcopy(item)
-        for item in annotations.get(key) or []
-        if isinstance(item, dict) and str(item.get("trial_key") or "") == trial_key
-    ]
-
-
-def merged_note_markdown(notes: list[dict[str, Any]]) -> str | None:
-    sections: list[str] = []
-    for index, note in enumerate(notes, start=1):
-        markdown = optional_str(note.get("markdown"))
-        if not markdown or not markdown.strip():
-            continue
-        label = optional_str(note.get("label"))
-        source = optional_str(note.get("source"))
-        if label or source:
-            heading = label or f"Note {index}"
-            lines = [f"## {heading}"]
-            if source:
-                lines.extend(["", f"Source: {source}"])
-            lines.extend(["", markdown.strip()])
-            sections.append("\n".join(lines))
-        else:
-            sections.append(markdown.strip())
-    if not sections:
-        return None
-    return "\n\n".join(sections) + "\n"
-
-
-def merged_analysis_json(analyses: list[dict[str, Any]]) -> dict[str, Any] | None:
-    if not analyses:
-        return None
-    summaries = [
-        summary.strip()
-        for summary in (optional_str(item.get("summary")) for item in analyses)
-        if summary and summary.strip()
-    ]
-    payload: dict[str, Any] = {
-        "summary": "\n\n".join(summaries) if summaries else "",
-        "items": deepcopy(analyses),
-    }
-    for key in MERGEABLE_ANALYSIS_LIST_FIELDS:
-        values: list[Any] = []
-        for item in analyses:
-            value = item.get(key)
-            if isinstance(value, list) and value:
-                values.extend(deepcopy(value))
-        if values:
-            payload[key] = values
-    for source_key, target_key in (
-        ("analysis_status", "status"),
-        ("subject", "subject"),
-        ("analysis_metrics", "metrics"),
-        ("confidence", "confidence"),
-    ):
-        value = unique_analysis_value(analyses, source_key)
-        if value is not None:
-            payload[target_key] = value
-    return payload
-
-
-def unique_analysis_value(items: list[dict[str, Any]], key: str) -> Any:
-    values: list[Any] = []
-    for item in items:
-        if key not in item:
-            continue
-        value = item[key]
-        if key == "analysis_status":
-            if isinstance(value, str) and value.strip():
-                values.append(value)
-        elif key in {"subject", "analysis_metrics"}:
-            if isinstance(value, dict) and value:
-                values.append(deepcopy(value))
-        elif key == "confidence":
-            if isinstance(value, str) and value.strip():
-                values.append(value)
-            elif (
-                isinstance(value, (int, float))
-                and not isinstance(value, bool)
-                and math.isfinite(float(value))
-            ):
-                values.append(value)
-    unique_values: list[Any] = []
-    for value in values:
-        if not any(value == existing for existing in unique_values):
-            unique_values.append(value)
-    if len(unique_values) == 1:
-        return unique_values[0]
-    return None
-
-
-def merged_analysis_markdown(analyses: list[dict[str, Any]]) -> str | None:
-    sections = [
-        markdown.strip()
-        for markdown in (optional_str(item.get("md_report")) for item in analyses)
-        if markdown and markdown.strip()
-    ]
-    if not sections:
-        return None
-    return "\n\n".join(sections) + "\n"
-
-
-def is_report_json(value: Any) -> bool:
-    return (
-        isinstance(value, dict)
-        and isinstance(value.get("trajectory"), list)
-        and isinstance(value.get("trajectory_meta"), list)
-        and value.get("schema_version") is not None
-    )
-
-
-def uniquify_trial_keys(metas: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: dict[str, int] = {}
-    out: list[dict[str, Any]] = []
-    for meta in metas:
-        copy = dict(meta)
-        base = str(copy.get("trial_key") or "trial")
-        count = seen.get(base, 0) + 1
-        seen[base] = count
-        if count > 1:
-            copy["trial_key"] = f"{base}:{count}"
-        out.append(copy)
-    return out
-
-
-def meta_with_source_alias(meta: dict[str, Any], alias: Any) -> dict[str, Any]:
-    if alias:
-        copy = dict(meta)
-        copy["source_alias"] = str(alias)
-        return copy
-    if "source_alias" in meta:
-        copy = dict(meta)
-        copy.pop("source_alias", None)
-        return copy
-    return meta
-
-
-def source_report_with_current_annotations(
-    source: dict[str, Any],
-    trajectory: dict[str, Any],
-    meta: dict[str, Any],
-    config: ToolConfig | None,
-) -> dict[str, Any]:
-    if config is None:
-        return {}
-
-    trial_key = str(meta.get("trial_key") or "")
-    session_id = (
-        optional_str(trajectory.get("session_id"))
-        or source.get("session_id")
-        or optional_str(meta.get("trial_key"))
-    )
-    agent_id = annotation_agent_id(source, trajectory)
-    current_note = cached_note_report(
-        workspace_root=config.workspace_root,
-        eval_slug=config.analysis_eval_slug,
-        agent_id=agent_id,
-        session_id=session_id,
-        trial_key=trial_key,
-    )
-    current_analysis = cached_analysis_report(
-        workspace_root=config.workspace_root,
-        eval_slug=config.analysis_eval_slug,
-        agent_id=agent_id,
-        session_id=session_id,
-        trial_key=trial_key,
-    )
-    notes: list[dict[str, Any]] = []
-    if current_note is not None:
-        notes.append(current_note)
-
-    next_annotations: dict[str, Any] = {
-        "report_notes": [],
-        "notes": notes,
-    }
-    if current_analysis is not None:
-        next_annotations["analysis"] = [current_analysis]
-
-    if (
-        next_annotations["report_notes"]
-        or next_annotations["notes"]
-        or next_annotations.get("analysis")
-    ):
-        return {"annotations": next_annotations}
-    return {}
-
-
-def annotation_agent_id(source: dict[str, Any], trajectory: dict[str, Any]) -> str | None:
-    agent = trajectory.get("agent")
-    trajectory_agent = agent.get("name") if isinstance(agent, dict) else None
-    return (
-        optional_str(source.get("agent_name"))
-        or optional_str(trajectory_agent)
-        or optional_str(source.get("adapter"))
-    )
-
-
-def parsed_object(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if not isinstance(value, str):
-        return {}
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def optional_str(value: Any) -> str | None:
-    return None if value is None else str(value)
-
-
-def optional_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    return int(value)

@@ -554,10 +554,10 @@ and inspect generated JSON with:
 python -m json.tool <output.json>
 ```
 
-The repository Rust validation script remains separate from peval-py Python
+The repository Rust broad gate remains separate from peval-py Python
 validation. Do not add Python package execution to
-`scripts/validate-rust.sh broad`, and do not use that Rust gate as the default
-validation path for peval-py-only changes.
+`cargo xtask ci run --profile rust-broad`, and do not use that Rust gate as the
+default validation path for peval-py-only changes.
 
 ## Related Topics
 

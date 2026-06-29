@@ -122,7 +122,7 @@ def create_messages_db(path: Path) -> None:
             id TEXT PRIMARY KEY,
             source TEXT NOT NULL,
             parent_session_id TEXT,
-            workdir TEXT NOT NULL,
+            cwd TEXT NOT NULL,
             model TEXT NOT NULL,
             provider TEXT NOT NULL,
             started_at_ms INTEGER NOT NULL,
@@ -154,7 +154,7 @@ def create_messages_db(path: Path) -> None:
     conn.executemany(
         """
         INSERT INTO sessions
-        (id, source, parent_session_id, workdir, model, provider,
+        (id, source, parent_session_id, cwd, model, provider,
          started_at_ms, updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
          message_count, tool_call_count, title, metadata_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
