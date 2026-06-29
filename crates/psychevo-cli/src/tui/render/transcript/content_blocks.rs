@@ -220,14 +220,14 @@ pub(crate) fn answer_lines(
     selected: bool,
     compact_trailing: bool,
     width: u16,
-    workdir: &Path,
+    cwd: &Path,
     raw_visible: bool,
 ) -> Vec<Line<'static>> {
     let body_style = style_for_body(row.kind, row.failed);
     let mut out = if raw_visible {
         raw_markdown_source_lines(row.expandable_text(), body_style)
     } else {
-        render_markdown_lines(row.expandable_text(), workdir, Some(width))
+        render_markdown_lines(row.expandable_text(), cwd, Some(width))
     };
     if out.is_empty() {
         out.extend(

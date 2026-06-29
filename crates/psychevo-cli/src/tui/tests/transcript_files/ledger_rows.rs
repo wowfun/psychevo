@@ -176,7 +176,7 @@ pub(crate) fn command_row_defaults_open_and_toggles_details() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Command,
         "/status",
-        "workdir: /repo\nmodel: mock/model",
+        "cwd: /repo\nmodel: mock/model",
     );
 
     assert!(row.is_expandable());
@@ -185,7 +185,7 @@ pub(crate) fn command_row_defaults_open_and_toggles_details() {
         .map(line_text)
         .collect::<Vec<_>>();
     assert_eq!(open[0], "> /status ▾ collapse");
-    assert!(open.iter().any(|line| line.contains("workdir: /repo")));
+    assert!(open.iter().any(|line| line.contains("cwd: /repo")));
 
     toggle_transcript_row_details(&mut row);
     assert!(row.details_collapsed);
@@ -211,7 +211,7 @@ pub(crate) fn command_row_defaults_open_and_toggles_details() {
 #[test]
 pub(crate) fn command_rows_do_not_count_as_visible_messages() {
     let rows = vec![
-        TranscriptRow::with_title(TranscriptKind::Command, "/status", "workdir: /repo"),
+        TranscriptRow::with_title(TranscriptKind::Command, "/status", "cwd: /repo"),
         TranscriptRow::with_title(TranscriptKind::Prompt, "", "hello"),
         TranscriptRow::with_title(TranscriptKind::Answer, "", "hi"),
     ];
@@ -762,7 +762,7 @@ pub(crate) fn selected_answer_uses_single_line_focus_marker() {
         "first line\nsecond line\nthird line",
     );
 
-    let rendered = answer_lines(&row, true, true, 80, &app.workdir, false)
+    let rendered = answer_lines(&row, true, true, 80, &app.cwd, false)
         .iter()
         .map(line_text)
         .collect::<Vec<_>>();

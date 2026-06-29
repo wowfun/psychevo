@@ -194,7 +194,7 @@ pub(crate) fn available_agent_use_as_main_is_session_scoped_and_clearable() {
     write_tui_agent(&app, "translate", "Translate user messages");
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -239,8 +239,8 @@ pub(crate) fn available_agent_use_as_main_is_session_scoped_and_clearable() {
     let status = bottom_status_context_for_width(&app, &ui, 80).expect("status");
     assert!(!status.contains("translate"), "{status}");
     assert_eq!(app.session_identity_label().as_deref(), Some("translate"));
-    assert!(ui.bottom_panel.is_none());
-    assert!(!app.workdir.join(".psychevo/config.toml").exists());
+    assert!(ui.bottom_panel.is_none(), "{:?}", ui.bottom_panel);
+    assert!(!app.cwd.join(".psychevo/config.toml").exists());
 
     let panel = app.agent_panel();
     let translate = panel
@@ -280,7 +280,7 @@ pub(crate) fn available_agent_use_as_main_is_session_scoped_and_clearable() {
         .expect("metadata value");
     assert_eq!(metadata["main_agent"]["mode"], "default");
     assert!(!app.status_text().contains("agent: translate"));
-    assert!(!app.workdir.join(".psychevo/config.toml").exists());
+    assert!(!app.cwd.join(".psychevo/config.toml").exists());
 }
 
 #[test]
@@ -315,12 +315,12 @@ pub(crate) fn child_session_identity_separator_uses_child_agent_default() {
     write_tui_agent(&app, "review", "Review code changes");
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
     let child = store
         .create_child_session_with_metadata(
             &parent,
-            &app.workdir,
+            &app.cwd,
             "agent",
             "mock-model",
             "mock",
@@ -347,7 +347,7 @@ pub(crate) fn child_session_identity_separator_uses_child_agent_default() {
                 "review",
                 "review",
                 AgentSource::Project,
-                Some(&app.workdir.join(".psychevo/agents/review.md")),
+                Some(&app.cwd.join(".psychevo/agents/review.md")),
             )),
         )
         .expect("child review main");
@@ -382,10 +382,10 @@ pub(crate) fn session_switch_restores_each_sessions_main_agent() {
     write_tui_agent(&app, "translate", "Translate user messages");
     let store = SqliteStore::open(&app.db_path).expect("store");
     let first = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("second");
     store
         .set_session_metadata_field(
@@ -395,7 +395,7 @@ pub(crate) fn session_switch_restores_each_sessions_main_agent() {
                 "translate",
                 "translate",
                 AgentSource::Project,
-                Some(&app.workdir.join(".psychevo/agents/translate.md")),
+                Some(&app.cwd.join(".psychevo/agents/translate.md")),
             )),
         )
         .expect("first main");
@@ -416,7 +416,7 @@ pub(crate) fn session_switch_restores_each_sessions_main_agent() {
     assert!(app.current_agent_explicit_default);
 
     let third = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("third");
     app.switch_session_no_print(&third).expect("switch third");
     assert_eq!(app.current_agent.as_deref(), Some("general"));
@@ -430,7 +430,7 @@ pub(crate) async fn running_turn_blocks_main_agent_switching() {
     write_tui_agent(&app, "translate", "Translate user messages");
     let session = SqliteStore::open(&app.db_path)
         .expect("store")
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session);
     let mut ui = FullscreenUi::new(&app);
@@ -491,7 +491,7 @@ pub(crate) async fn running_turn_blocks_main_agent_switching() {
 pub(crate) fn available_agents_surface_definition_diagnostics() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
-    let dir = app.workdir.join(".psychevo/agents");
+    let dir = app.cwd.join(".psychevo/agents");
     std::fs::create_dir_all(&dir).expect("agent dir");
     std::fs::write(dir.join("broken.md"), "---\ndescription: broken\n").expect("broken agent");
 
@@ -532,17 +532,10 @@ pub(crate) fn child_status_line_keeps_compact_parent_hint() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child");
     store
         .upsert_agent_edge(

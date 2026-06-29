@@ -18,11 +18,11 @@ pub(crate) struct TuiState {
     #[serde(default)]
     pub(crate) sidebar_visible: bool,
     #[serde(default)]
-    pub(crate) workdirs: BTreeMap<String, TuiWorkdirState>,
+    pub(crate) cwds: BTreeMap<String, TuiCwdState>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct TuiWorkdirState {
+pub(crate) struct TuiCwdState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -36,7 +36,7 @@ impl Default for TuiState {
             thinking_visible: true,
             raw_visible: false,
             sidebar_visible: false,
-            workdirs: BTreeMap::new(),
+            cwds: BTreeMap::new(),
         }
     }
 }
@@ -59,25 +59,23 @@ impl TuiState {
         Ok(())
     }
 
-    pub(crate) fn mode_for(&self, workdir: &str) -> Option<String> {
-        self.workdirs
-            .get(workdir)
-            .and_then(|entry| entry.mode.clone())
+    pub(crate) fn mode_for(&self, cwd: &str) -> Option<String> {
+        self.cwds.get(cwd).and_then(|entry| entry.mode.clone())
     }
 
-    pub(crate) fn permission_mode_for(&self, workdir: &str) -> Option<String> {
-        self.workdirs
-            .get(workdir)
+    pub(crate) fn permission_mode_for(&self, cwd: &str) -> Option<String> {
+        self.cwds
+            .get(cwd)
             .and_then(|entry| entry.permission_mode.clone())
     }
 
-    pub(crate) fn set_mode(&mut self, workdir: &str, mode: String) {
-        self.workdirs.entry(workdir.to_string()).or_default().mode = Some(mode);
+    pub(crate) fn set_mode(&mut self, cwd: &str, mode: String) {
+        self.cwds.entry(cwd.to_string()).or_default().mode = Some(mode);
     }
 
-    pub(crate) fn set_permission_mode(&mut self, workdir: &str, mode: String) {
-        self.workdirs
-            .entry(workdir.to_string())
+    pub(crate) fn set_permission_mode(&mut self, cwd: &str, mode: String) {
+        self.cwds
+            .entry(cwd.to_string())
             .or_default()
             .permission_mode = Some(mode);
     }
@@ -109,7 +107,7 @@ pub(crate) mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn state_round_trips_per_workdir_mode_and_permission() {
+    fn state_round_trips_per_cwd_mode_and_permission() {
         let temp = tempdir().expect("temp");
         let path = temp.path().join("tui-state.json");
         let mut state = TuiState::default();
@@ -141,7 +139,7 @@ pub(crate) mod tests {
             r#"{
               "version": 99,
               "recent_models": ["a/1","b/2"],
-              "workdirs": {
+              "cwds": {
                 "/repo": {
                   "model": "mock/model",
                   "variant": "high",

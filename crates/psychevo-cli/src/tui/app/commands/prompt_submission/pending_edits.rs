@@ -154,7 +154,7 @@ impl TuiApp {
         let message = prompt_message_from_inputs_with_options(
             &prompt,
             &image_inputs,
-            &self.workdir,
+            &self.cwd,
             &metadata,
             false,
         )?

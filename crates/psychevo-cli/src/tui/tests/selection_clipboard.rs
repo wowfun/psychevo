@@ -183,7 +183,7 @@ pub(crate) fn sidebar_omits_context_section_and_footer_chrome() {
     assert!(text.contains("Modified Files"));
     for omitted in [
         "Context",
-        "workdir:",
+        "cwd:",
         "branch:",
         "messages:",
         "tool calls:",

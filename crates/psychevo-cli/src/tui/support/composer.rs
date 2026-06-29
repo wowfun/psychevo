@@ -353,7 +353,7 @@ pub(crate) fn prompt_file_path(path: &str) -> String {
     }
 }
 
-pub(crate) fn search_workdir_files(
+pub(crate) fn search_cwd_files(
     root: &Path,
     query: &str,
     cancel: &AtomicBool,

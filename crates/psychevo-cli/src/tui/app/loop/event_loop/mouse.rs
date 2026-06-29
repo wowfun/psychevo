@@ -58,7 +58,7 @@ impl TuiApp {
                     ui.clear_selection();
                     ui.set_file_popup_selection(index);
                     ui.insert_selected_file_path();
-                    ui.sync_file_popup(&self.workdir);
+                    ui.sync_file_popup(&self.cwd);
                     self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                 } else if let Some(index) = ui.skill_popup_hit(mouse.column, mouse.row) {

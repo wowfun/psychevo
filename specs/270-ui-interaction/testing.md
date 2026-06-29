@@ -28,8 +28,8 @@ interaction semantics.
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 Shared interaction validation should assert behavior at the command/result,
 thread/source, request, and transcript projection boundaries before checking

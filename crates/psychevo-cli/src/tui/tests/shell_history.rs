@@ -163,7 +163,7 @@ pub(crate) fn historical_unfinished_prompt_without_live_work_does_not_show_runni
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     let prompt_ms = wall_now_ms() - 12_500;
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -463,7 +463,7 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
     app.current_session = None;
     let session_id = SqliteStore::open(&app.db_path)
         .expect("store")
-        .create_session_with_metadata(&app.workdir, "tui", "mock/model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock/model", "mock", None)
         .expect("session");
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
@@ -534,10 +534,10 @@ pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_
     let mut app = test_app(&temp);
     let session_id = SqliteStore::open(&app.db_path)
         .expect("store")
-        .create_session_with_metadata(&app.workdir, "tui", "mock/model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock/model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
-    let marker = app.workdir.join("should-not-exist");
+    let marker = app.cwd.join("should-not-exist");
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {

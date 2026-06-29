@@ -173,7 +173,7 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
             terminal_reason: None,
             final_answer: "All done.".to_string(),
             db_path: temp.path().join("state.db"),
-            workdir: temp.path().to_path_buf(),
+            cwd: temp.path().to_path_buf(),
             provider: "mock".to_string(),
             model: "mock-model".to_string(),
             base_url: "http://127.0.0.1".to_string(),
@@ -363,7 +363,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
         terminal_reason: None,
         final_answer: "hi".to_string(),
         db_path: app.db_path.clone(),
-        workdir: app.workdir.clone(),
+        cwd: app.cwd.clone(),
         provider: "mock".to_string(),
         model: "mock-model".to_string(),
         base_url: "http://127.0.0.1".to_string(),
@@ -486,7 +486,7 @@ pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "tui",
             "mimo-v2-omni",
             "xiaomi-token-plan",

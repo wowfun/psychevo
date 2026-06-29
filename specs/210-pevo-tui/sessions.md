@@ -20,9 +20,9 @@ first prompt is submitted, then creates a `source = "tui"` session.
 
 When TUI starts with a current session, it loads that session's sanitized
 history into the transcript before accepting input. If that session belongs to
-a different stored workdir than the launch directory, TUI switches its active
-workdir, Gateway source, project context, file/completion scope, sidebar state,
-and subsequent turn options to the stored workdir. Switching sessions inside
+a different stored cwd than the launch directory, TUI switches its active
+cwd, Gateway source, project context, file/completion scope, sidebar state,
+and subsequent turn options to the stored cwd. Switching sessions inside
 fullscreen TUI follows the same rule, then replaces the displayed transcript
 with the selected session's sanitized history. Folded reasoning remains hidden
 or folded according to TUI rendering rules and must not leak provider replay
@@ -111,8 +111,8 @@ Fullscreen `/sessions`, `/resume`, and `/continue` expose active and archived
 global session views in the shared bottom selection pane. Active sessions are
 the default view. Archived sessions are hidden from the default view, from
 default TUI startup resume, and from latest-session resolution until restored.
-Rows show compact project/workdir context and are searchable by session id,
-title, project, workdir, provider, and model. Runtime `source` remains an
+Rows show compact project/cwd context and are searchable by session id,
+title, project, cwd, provider, and model. Runtime `source` remains an
 internal classification, not a user-facing search, grouping, or visibility
 boundary. Non-terminal scripted `/sessions`, `/resume`, and `/continue`
 continue to print only active sessions, using the same global human-visible

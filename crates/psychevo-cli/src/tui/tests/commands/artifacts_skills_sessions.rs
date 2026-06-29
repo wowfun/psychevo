@@ -252,7 +252,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "tui",
             "mock-model",
             "mock",
@@ -321,7 +321,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     .await
     .expect("export");
 
-    let export_path = app.workdir.join("exports/session.md");
+    let export_path = app.cwd.join("exports/session.md");
     let content = fs::read_to_string(&export_path).expect("export content");
     assert!(content.contains("export this prompt"));
     assert!(content.contains("exported answer"));
@@ -347,7 +347,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     .await
     .expect("export last request json");
 
-    let last_export_path = app.workdir.join("exports/session.json");
+    let last_export_path = app.cwd.join("exports/session.json");
     let content = fs::read_to_string(&last_export_path).expect("last request export content");
     let value: Value = serde_json::from_str(&content).expect("last request export json");
     assert_eq!(
@@ -377,7 +377,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     .await
     .expect("export last response json");
 
-    let response_export_path = app.workdir.join("exports/response.json");
+    let response_export_path = app.cwd.join("exports/response.json");
     let content = fs::read_to_string(&response_export_path).expect("last response export content");
     let value: Value = serde_json::from_str(&content).expect("last response export json");
     assert!(value.get("messages").is_none());
@@ -410,7 +410,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     .await
     .expect("share");
 
-    let share_path = app.workdir.join("share.md");
+    let share_path = app.cwd.join("share.md");
     let content = fs::read_to_string(&share_path).expect("share content");
     assert!(content.contains("exported answer"));
     assert!(ui.transcript.iter().any(|row| {
@@ -425,7 +425,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
 pub(crate) async fn fullscreen_skills_command_lists_dynamic_entries_and_submits_dynamic_slash() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    fs::create_dir_all(app.workdir.join(".git")).expect("git marker");
+    fs::create_dir_all(app.cwd.join(".git")).expect("git marker");
     let skill_dir = app.home.join("skills").join("helper");
     fs::create_dir_all(&skill_dir).expect("skill dir");
     fs::write(
@@ -512,7 +512,7 @@ pub(crate) async fn fullscreen_skills_command_lists_dynamic_entries_and_submits_
     .await
     .expect("skills local install");
     assert!(
-        app.workdir
+        app.cwd
             .join(".psychevo/skills/local-helper/SKILL.md")
             .exists()
     );
@@ -577,7 +577,7 @@ pub(crate) async fn fullscreen_skills_command_lists_dynamic_entries_and_submits_
 pub(crate) async fn enter_on_dynamic_slash_menu_item_submits_without_skill_marker_rewrite() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    fs::create_dir_all(app.workdir.join(".git")).expect("git marker");
+    fs::create_dir_all(app.cwd.join(".git")).expect("git marker");
     let skill_dir = app.home.join("skills").join("helper");
     fs::create_dir_all(&skill_dir).expect("skill dir");
     fs::write(
@@ -687,18 +687,18 @@ pub(crate) async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript
     assert!(
         std::process::Command::new("git")
             .arg("-C")
-            .arg(&app.workdir)
+            .arg(&app.cwd)
             .arg("init")
             .output()
             .expect("git init")
             .status
             .success()
     );
-    let file = app.workdir.join("tracked.txt");
+    let file = app.cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
 

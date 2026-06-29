@@ -3,7 +3,7 @@ impl<'a> FullscreenUi<'a> {
     pub(crate) fn new(app: &TuiApp) -> Self {
         let mut ui = Self {
             textarea: new_textarea(),
-            workdir: app.workdir.clone(),
+            cwd: app.cwd.clone(),
             transcript: Vec::new(),
             assistant_row: None,
             assistant_preamble_row: None,
@@ -174,7 +174,7 @@ impl<'a> FullscreenUi<'a> {
     }
 
     pub(crate) fn refresh_sidebar(&mut self, app: &TuiApp) {
-        let git = git_snapshot(&app.workdir);
+        let git = git_snapshot(&app.cwd);
         self.sidebar = SidebarSnapshot {
             title: app.session_sidebar_title(),
             session: app

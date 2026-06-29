@@ -61,7 +61,7 @@ impl TuiApp {
 
     pub(crate) fn current_agent_display_name(&self, input: &str) -> Option<String> {
         let catalog = self.current_agent_catalog()?;
-        resolve_agent_definition(&catalog, input, &self.workdir, &self.env_map)
+        resolve_agent_definition(&catalog, input, &self.cwd, &self.env_map)
             .ok()
             .map(|agent| agent.name)
             .or_else(|| Some(input.to_string()))
@@ -71,7 +71,7 @@ impl TuiApp {
         let catalog = self
             .current_agent_catalog()
             .ok_or_else(|| anyhow!("agents are disabled"))?;
-        let agent = resolve_agent_definition(&catalog, input, &self.workdir, &self.env_map)?;
+        let agent = resolve_agent_definition(&catalog, input, &self.cwd, &self.env_map)?;
         Ok(main_agent_metadata(
             input,
             &agent.name,
@@ -115,7 +115,7 @@ impl TuiApp {
     pub(crate) fn switch_session_no_print(&mut self, reference: &str) -> Result<String> {
         let id = self.resolve_session_ref(reference)?;
         let summary = self.session_summary_required(&id)?;
-        self.adopt_session_workdir(&summary)?;
+        self.adopt_session_cwd(&summary)?;
         self.state_runtime.store().resume_session(&id)?;
         self.current_session = Some(id.clone());
         self.reset_live_agent_reload_poll();
@@ -147,7 +147,7 @@ impl TuiApp {
             edge.child_session_id
         };
         let summary = self.session_summary_required(&child_session_id)?;
-        self.adopt_session_workdir(&summary)?;
+        self.adopt_session_cwd(&summary)?;
         self.detach_running_for_session_switch(ui, Some(child_session_id.clone()));
         self.current_session = Some(child_session_id.clone());
         self.reset_live_agent_reload_poll();
@@ -287,7 +287,7 @@ impl TuiApp {
         session_id: &str,
     ) -> Result<()> {
         let summary = self.session_summary_required(session_id)?;
-        self.adopt_session_workdir(&summary)?;
+        self.adopt_session_cwd(&summary)?;
         self.detach_running_for_session_switch(ui, None);
         self.state_runtime.store().resume_session(session_id)?;
         self.current_session = Some(session_id.to_string());
@@ -431,7 +431,7 @@ impl TuiApp {
             self.current_model = Some(model.clone());
             self.current_variant = normalize_reasoning_effort(reasoning_effort.clone());
             self.model_state
-                .set_model(&self.workdir_key, model.clone(), reasoning_effort);
+                .set_model(&self.cwd_key, model.clone(), reasoning_effort);
             self.model_state.save(&self.model_state_path)?;
             self.persist_current_session_model_selection()?;
             self.refresh_selected_model();
@@ -447,7 +447,7 @@ impl TuiApp {
         }
         let value = set_default_model_with_reasoning(
             &self.home,
-            &self.workdir,
+            &self.cwd,
             global,
             &model,
             reasoning_effort.as_deref(),
@@ -477,7 +477,7 @@ impl TuiApp {
                 .is_some_and(|effective| effective != model)
         {
             Ok(format!(
-                "global model saved: {model}{reasoning}  path: {path}  current workdir still uses local model: {}",
+                "global model saved: {model}{reasoning}  path: {path}  current cwd still uses local model: {}",
                 effective.unwrap()
             ))
         } else {
@@ -492,7 +492,7 @@ impl TuiApp {
         let reasoning_effort = normalize_reasoning_effort(Some(variant));
         self.current_variant = reasoning_effort.clone();
         self.model_state
-            .set_reasoning_effort(&self.workdir_key, reasoning_effort);
+            .set_reasoning_effort(&self.cwd_key, reasoning_effort);
         self.model_state.save(&self.model_state_path)?;
         self.persist_current_session_model_selection()?;
         self.refresh_selected_model();
@@ -539,9 +539,9 @@ impl TuiApp {
         self.current_mode = run_mode;
         self.current_permission_mode = permission_mode;
         self.state
-            .set_mode(&self.workdir_key, run_mode.as_str().to_string());
+            .set_mode(&self.cwd_key, run_mode.as_str().to_string());
         self.state
-            .set_permission_mode(&self.workdir_key, permission_mode.as_str().to_string());
+            .set_permission_mode(&self.cwd_key, permission_mode.as_str().to_string());
         self.state.save(&self.state_path)?;
         Ok(())
     }
@@ -578,7 +578,7 @@ impl TuiApp {
         };
         Ok(SessionUndoOptions {
             state: self.state_runtime.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             snapshot_root: self.home.join("snapshots"),
             session_id,
         })
@@ -660,17 +660,17 @@ impl TuiApp {
             .ok_or_else(|| anyhow!("session not found: {session_id}"))
     }
 
-    pub(crate) fn adopt_session_workdir(&mut self, summary: &SessionSummary) -> Result<()> {
-        let next_workdir = canonicalize_workdir(Path::new(&summary.workdir))?;
-        if next_workdir == self.workdir {
+    pub(crate) fn adopt_session_cwd(&mut self, summary: &SessionSummary) -> Result<()> {
+        let next_cwd = canonicalize_cwd(Path::new(&summary.cwd))?;
+        if next_cwd == self.cwd {
             return Ok(());
         }
-        self.workdir = next_workdir;
-        self.workdir_key = self.workdir.to_string_lossy().to_string();
+        self.cwd = next_cwd;
+        self.cwd_key = self.cwd.to_string_lossy().to_string();
         self.slash_config = load_effective_tui_slash_config(
             &self.env_map,
             self.state_runtime.clone(),
-            self.workdir.clone(),
+            self.cwd.clone(),
             self.config_path.clone(),
         )?;
         self.refresh_selected_model();
@@ -787,8 +787,8 @@ pub(crate) fn tui_sessions_for_store(
         let messages = store.load_tui_message_summaries(&summary.id)?;
         let visible_message_count = visible_tui_message_count(&messages)?;
         visible.push(TuiSessionDisplaySummary {
-            project_label: session_project_label(&summary.workdir),
-            project_display_path: session_project_display_path(&summary.workdir),
+            project_label: session_project_label(&summary.cwd),
+            project_display_path: session_project_display_path(&summary.cwd),
             summary,
             visible_message_count,
         });
@@ -801,17 +801,17 @@ pub(crate) fn human_visible_tui_session_summary(summary: &SessionSummary) -> boo
         && !TUI_INTERNAL_SESSION_SOURCES.contains(&summary.source.as_str())
 }
 
-pub(crate) fn session_project_label(workdir: &str) -> String {
-    Path::new(workdir)
+pub(crate) fn session_project_label(cwd: &str) -> String {
+    Path::new(cwd)
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
-        .unwrap_or("workdir")
+        .unwrap_or("cwd")
         .to_string()
 }
 
-pub(crate) fn session_project_display_path(workdir: &str) -> String {
-    Path::new(workdir).display().to_string()
+pub(crate) fn session_project_display_path(cwd: &str) -> String {
+    Path::new(cwd).display().to_string()
 }
 
 pub(crate) fn session_context_limit_with_parent_fallback(

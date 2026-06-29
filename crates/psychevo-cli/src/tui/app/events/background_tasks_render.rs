@@ -107,7 +107,7 @@ impl TuiApp {
         let session = self.current_session.clone().expect("checked session");
         let options = AutoCompactionCheckOptions {
             state: self.state_runtime.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             session,
             config_path: self.config_path.clone(),
             model: self.current_model.clone(),

@@ -7,10 +7,10 @@ pub(crate) async fn running_session_switch_buffers_stream_until_return() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let first = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
         .expect("second");
     app.current_session = Some(first.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -206,10 +206,10 @@ pub(crate) async fn background_session_completion_does_not_steal_current_session
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let first = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
         .expect("second");
     app.current_session = Some(first.clone());
 
@@ -256,18 +256,18 @@ pub(crate) async fn background_session_completion_does_not_steal_current_session
 }
 
 #[test]
-pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_workdir() {
+pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_cwd() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let config_path = app.home.join("config.toml");
     fs::write(&config_path, "\n").expect("config");
     app.config_path = Some(config_path);
-    let other_workdir = temp.path().join("other-work");
-    fs::create_dir_all(&other_workdir).expect("other workdir");
-    let other_workdir = other_workdir.canonicalize().expect("other canonical");
+    let other_cwd = temp.path().join("other-work");
+    fs::create_dir_all(&other_cwd).expect("other cwd");
+    let other_cwd = other_cwd.canonicalize().expect("other canonical");
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&other_workdir, "web", "mock-model", "mock", None)
+        .create_session_with_metadata(&other_cwd, "web", "mock-model", "mock", None)
         .expect("session");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -292,7 +292,7 @@ pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_workdir(
         .find(|row| matches!(&row.value, BottomSelectionValue::Session(id) if id == &session_id))
         .expect("global session row");
     assert_eq!(row.group.as_deref(), Some("other-work"));
-    let expected_description = format!("{}  mock/mock-model  messages=1", other_workdir.display());
+    let expected_description = format!("{}  mock/mock-model  messages=1", other_cwd.display());
     assert_eq!(
         row.description.as_deref(),
         Some(expected_description.as_str())
@@ -304,7 +304,7 @@ pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_workdir(
         .expect("open global session");
 
     assert_eq!(app.current_session.as_deref(), Some(session_id.as_str()));
-    assert_eq!(app.workdir, other_workdir);
+    assert_eq!(app.cwd, other_cwd);
     assert!(
         ui.transcript
             .iter()
@@ -318,11 +318,11 @@ pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
     let app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
     let side = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             TUI_SIDE_CONVERSATION_SESSION_SOURCE,
             "mock-model",
             "mock",
@@ -330,14 +330,7 @@ pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
         )
         .expect("side");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "tui",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "tui", "mock-model", "mock", None)
         .expect("child");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     for (index, session_id) in [&parent, &side, &child].into_iter().enumerate() {
@@ -372,7 +365,7 @@ pub(crate) async fn new_session_does_not_receive_previous_running_output() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let first = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
     app.current_session = Some(first.clone());
 
@@ -423,10 +416,10 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let first = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
         .expect("second");
     app.current_session = Some(first.clone());
 
@@ -511,10 +504,10 @@ pub(crate) async fn sessions_panel_selection_does_not_reorder_by_view_time() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let older = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("older");
     let newer = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
         .expect("newer");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     conn.execute(
@@ -538,7 +531,7 @@ pub(crate) async fn sessions_panel_selection_does_not_reorder_by_view_time() {
     };
     assert_eq!(session_panel_ids(panel), vec![newer.clone()]);
     assert!(panel.rows.iter().any(
-        |row| matches!(&row.value, BottomSelectionValue::LoadOlderSessions(workdir) if workdir == app.workdir.to_string_lossy().as_ref())
+        |row| matches!(&row.value, BottomSelectionValue::LoadOlderSessions(cwd) if cwd == app.cwd.to_string_lossy().as_ref())
     ));
 
     for ch in "load older".chars() {
@@ -602,10 +595,10 @@ pub(crate) async fn sessions_panel_up_down_wraps_between_first_and_last_rows() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
     store
-        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
         .expect("second");
     app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
@@ -642,7 +635,7 @@ pub(crate) async fn sessions_panel_action_mode_archives_current_and_restores_fro
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("session");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -720,7 +713,7 @@ pub(crate) async fn sessions_panel_delete_requires_repeat_action_and_can_cancel(
     app.current_session = None;
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("session");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -817,7 +810,7 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -890,7 +883,7 @@ pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -999,7 +992,7 @@ pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
         [format!(
             "{} {} mock/mock-model messages=2",
             short_session(&session_id),
-            session_project_label(&app.workdir.to_string_lossy())
+            session_project_label(&app.cwd.to_string_lossy())
         )]
     );
     let panel = app
@@ -1010,7 +1003,7 @@ pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
         .iter()
         .find(|row| matches!(&row.value, BottomSelectionValue::Session(id) if id == &session_id))
         .expect("session row");
-    let expected_description = format!("{}  mock/mock-model  messages=2", app.workdir.display());
+    let expected_description = format!("{}  mock/mock-model  messages=2", app.cwd.display());
     assert_eq!(
         row.description.as_deref(),
         Some(expected_description.as_str())

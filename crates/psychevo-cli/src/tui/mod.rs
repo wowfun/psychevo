@@ -46,18 +46,18 @@ pub(crate) use psychevo_runtime::{
     TUI_DISPLAY_METADATA_KEY, TUI_SIDE_CONVERSATION_SESSION_SOURCE, TerminalReason,
     ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, TuiMessageSummary,
     USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, WorkspaceDiff,
-    agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot, canonicalize_workdir,
+    agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot, canonicalize_cwd,
     collect_workspace_diff, compact_session, config_show_value, configured_models,
     context_snapshot, create_scoped_custom_provider, custom_provider_api_key_env,
-    default_session_export_filename, discover_agents, discover_skills, fetch_model_catalog,
-    format_context_snapshot_text_with_options, format_context_total_value,
-    format_context_total_value_parts, install_skill, list_skill_bundles,
-    main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
-    model_catalog_providers, model_metadata_explicitly_disallows_image_input,
+    default_session_export_filename, discover_agents, discover_skills,
+    fetch_and_cache_model_catalog, format_context_snapshot_text_with_options,
+    format_context_total_value, format_context_total_value_parts, install_skill,
+    list_skill_bundles, main_agent_default_metadata, main_agent_from_session_metadata,
+    main_agent_metadata, model_catalog_providers, model_metadata_explicitly_disallows_image_input,
     normalize_context_bar_width, normalize_reasoning_effort, permission_rules_value,
-    prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path, redo_session,
-    refresh_model_metadata_cache, reload_session_context, remove_installed_skill,
-    resolve_agent_definition, resolve_image_source, run_control,
+    prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path,
+    read_cached_model_catalog, redo_session, refresh_model_metadata_cache, reload_session_context,
+    remove_installed_skill, resolve_agent_definition, resolve_image_source, run_control,
     run_user_shell_command_streaming_controlled, scan_skill_path, selected_configured_model,
     session_base_agent_name_from_metadata, session_usage_summary, set_agent_spawn_paused,
     set_default_model_with_reasoning, set_local_toolset_enabled, set_provider_api_key,
@@ -113,18 +113,18 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let state_runtime = StateRuntime::open(&db_path)?;
-    let workdir = match &args.dir {
+    let cwd = match &args.dir {
         Some(dir) => resolve_explicit_path(dir, &env_map, &cwd)?,
         None => cwd,
     };
-    let workdir = canonicalize_workdir(&workdir)?;
+    let cwd = canonicalize_cwd(&cwd)?;
     let slash_config = load_effective_tui_slash_config(
         &env_map,
         state_runtime.clone(),
-        workdir.clone(),
+        cwd.clone(),
         config_path.clone(),
     )?;
-    let workdir_key = workdir.to_string_lossy().to_string();
+    let cwd_key = cwd.to_string_lossy().to_string();
     let state_path = home.join("tui-state.json");
     let state = TuiState::load(&state_path)?;
     let model_state_path = ModelState::path_for_home(&home);
@@ -132,13 +132,13 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let current_model = args
         .model
         .clone()
-        .or_else(|| model_state.model_for(&workdir_key));
+        .or_else(|| model_state.model_for(&cwd_key));
     let current_variant = args
         .variant
         .map(|variant| variant.as_str().to_string())
-        .or_else(|| model_state.reasoning_effort_for(&workdir_key));
+        .or_else(|| model_state.reasoning_effort_for(&cwd_key));
     let current_mode = state
-        .mode_for(&workdir_key)
+        .mode_for(&cwd_key)
         .and_then(|value| RunMode::parse(&value))
         .unwrap_or_default();
     let current_permission_mode = args
@@ -146,7 +146,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         .map(|mode| mode.permission_mode())
         .or_else(|| {
             state
-                .permission_mode_for(&workdir_key)
+                .permission_mode_for(&cwd_key)
                 .and_then(|value| PermissionMode::parse(&value))
         })
         .unwrap_or_default();
@@ -183,8 +183,8 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         gateway,
         db_path,
         config_path,
-        workdir,
-        workdir_key,
+        cwd,
+        cwd_key,
         current_session,
         current_session_title: None,
         force_new_once: args.new_session,
@@ -234,12 +234,12 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
 pub(crate) fn load_effective_tui_slash_config(
     env_map: &BTreeMap<String, String>,
     state: StateRuntime,
-    workdir: PathBuf,
+    cwd: PathBuf,
     config_path: Option<PathBuf>,
 ) -> Result<EffectiveSlashConfig> {
     let options = RunOptions {
         state,
-        workdir,
+        cwd,
         snapshot_root: None,
         session: None,
         continue_latest: false,

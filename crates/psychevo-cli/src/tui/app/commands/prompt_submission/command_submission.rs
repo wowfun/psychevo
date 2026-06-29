@@ -221,7 +221,7 @@ impl TuiApp {
                 }
             },
             SlashCommand::Image { source, prompt } => {
-                match resolve_image_source(&source, &self.workdir) {
+                match resolve_image_source(&source, &self.cwd) {
                     Ok(image) => {
                         let placeholder = ui.add_pending_image(image);
                         let prompt = prompt.trim();

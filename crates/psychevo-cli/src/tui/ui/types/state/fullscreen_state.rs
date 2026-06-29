@@ -1,6 +1,6 @@
 pub(crate) struct FullscreenUi<'a> {
     pub(crate) textarea: TextArea<'a>,
-    pub(crate) workdir: PathBuf,
+    pub(crate) cwd: PathBuf,
     pub(crate) transcript: Vec<TranscriptRow>,
     pub(crate) assistant_row: Option<usize>,
     pub(crate) assistant_preamble_row: Option<usize>,

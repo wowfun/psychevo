@@ -883,7 +883,7 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
     );
     assert_eq!(app.current_variant, None);
     assert_eq!(
-        app.model_state.model_for(&app.workdir_key).as_deref(),
+        app.model_state.model_for(&app.cwd_key).as_deref(),
         Some("xiaomi-token-plan-cn/remote-model")
     );
     let selected_model = app.selected_model.as_ref().expect("selected model");
@@ -891,7 +891,7 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
     assert_eq!(selected_model.model, "remote-model");
     let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
     assert!(!config.contains("model = \"xiaomi-token-plan-cn/remote-model\""));
-    let local_config_path = app.workdir.join(".psychevo/config.toml");
+    let local_config_path = app.cwd.join(".psychevo/config.toml");
     if local_config_path.exists() {
         let local_config = fs::read_to_string(local_config_path).expect("local config");
         assert!(!local_config.contains("model = \"xiaomi-token-plan-cn/remote-model\""));
@@ -996,7 +996,7 @@ pub(crate) async fn fetched_model_selection_writes_local_default_model() {
     assert_eq!(app.current_model.as_deref(), Some("mock/remote-model"));
     assert_eq!(app.current_variant, None);
     assert_eq!(
-        app.model_state.model_for(&app.workdir_key).as_deref(),
+        app.model_state.model_for(&app.cwd_key).as_deref(),
         Some("mock/remote-model")
     );
     assert!(
@@ -1004,7 +1004,7 @@ pub(crate) async fn fetched_model_selection_writes_local_default_model() {
             .recent_model_values()
             .contains(&"mock/remote-model".to_string())
     );
-    let local_config_path = app.workdir.join(".psychevo/config.toml");
+    let local_config_path = app.cwd.join(".psychevo/config.toml");
     if local_config_path.exists() {
         let local_config = fs::read_to_string(local_config_path).expect("local config");
         assert!(!local_config.contains("model = \"mock/remote-model\""));
@@ -1050,7 +1050,7 @@ pub(crate) async fn model_global_picker_writes_global_default_model() {
     assert!(global_config.contains("id = \"mock/other-model\""));
     assert!(global_config.contains("reasoning_effort = \"high\""));
     let local_config =
-        fs::read_to_string(app.workdir.join(".psychevo/config.toml")).expect("local config");
+        fs::read_to_string(app.cwd.join(".psychevo/config.toml")).expect("local config");
     assert!(local_config.contains("model = \"mock/mock-model\""));
 }
 

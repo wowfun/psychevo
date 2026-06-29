@@ -19,28 +19,28 @@ The state file stores:
 - global `thinking_visible`
 - global `raw_visible`
 - global `sidebar_visible`
-- current `mode` per canonical workdir
+- current `mode` per canonical cwd
 
 `thinking_visible` defaults to `true`. `raw_visible` defaults to `false`.
-Per-workdir `mode` defaults to `default`. `sidebar_visible` defaults to
+Per-cwd `mode` defaults to `default`. `sidebar_visible` defaults to
 `false`, preserving the hidden sidebar startup behavior unless the user has
 explicitly toggled it in fullscreen TUI.
 
 `$PSYCHEVO_HOME/model-state.json` is the shared GUI/TUI composer model state
 file. It stores current model and optional reasoning effort per canonical
-workdir plus a bounded global recent-model list. It must not store raw API keys,
+cwd plus a bounded global recent-model list. It must not store raw API keys,
 provider credentials, full prompts, transcripts, reasoning text, tool results,
 provider payloads, or fetched model catalog payloads.
 
 Startup model and variant precedence is:
 
 1. `pevo tui` CLI flags for the current process
-2. per-workdir `model-state.json`
+2. per-cwd `model-state.json`
 3. existing provider config and environment resolution
 
-Psychevo does not automatically migrate legacy model fields from
-`tui-state.json` during normal startup. A one-time maintenance script may convert
-an existing user state file to `model-state.json` when explicitly run.
+Psychevo does not migrate legacy model fields from `tui-state.json`. Pre-release
+development state should use fresh profile state or `pevo init --reset-state`
+instead of carrying forward old model selections.
 
 Fullscreen `/model` opens an interactive model picker. It starts from local
 configured models and never fetches remote model catalogs until the user
@@ -55,11 +55,11 @@ saves upsert global provider options instead of creating a custom provider, so
 they can reuse canonical built-in ids. Completing Add Provider saves the global
 provider configuration and starts one explicit fetch for that provider.
 Selecting a model then opens a variant picker. Bare `/model` updates
-`model-state.json` for the current workdir and affects later prompts in the
+`model-state.json` for the current cwd and affects later prompts in the
 current composer/session scope. `/model -g` and `/model --global` open the same
 picker in global-config mode and write `$PSYCHEVO_HOME/config.toml`.
 `/variant <none|minimal|low|medium|high|xhigh|max>` continues to update only
-the per-workdir variant override. Bare `/variant` is not a display command and
+the per-cwd variant override. Bare `/variant` is not a display command and
 returns a bounded usage error. Obsolete `/variant set <value>` input is not a
 compatibility command. These TUI state changes affect later prompts in the
 current process and do not edit TOML provider configuration.
@@ -69,7 +69,7 @@ list, and rebuild selected model metadata from effective configuration. They do
 not write provider credentials, provider catalog metadata, provider
 `models.<id>` entries, or TOML defaults, and they do not contact provider
 catalogs. If a global write is shadowed by local configuration, TUI reports that
-the global default was saved while the current workdir remains governed by local
+the global default was saved while the current cwd remains governed by local
 config.
 
 `/show-thinking` toggles global thinking visibility and persists it. It is a
@@ -90,9 +90,9 @@ status row for raw visibility changes. `/show-raw on` and `/show-raw off` set
 the value explicitly. `/raw` is not a compatibility command.
 
 `/mode` is scoped to the current runtime. With native Psychevo runtime, `/mode
-<plan|default>` updates the per-workdir native mode and persists it. With an
+<plan|default>` updates the per-cwd native mode and persists it. With an
 ACP peer runtime, `/mode <value>` updates that peer runtime's session mode
-option for the current session and does not rewrite native per-workdir mode.
+option for the current session and does not rewrite native per-cwd mode.
 Bare `/mode` opens the current runtime mode picker in fullscreen or prints the
 current mode and selectable values in scripted mode. Obsolete `/mode set
 <value>` input is not a compatibility command. Mode changes during a running
@@ -103,12 +103,12 @@ turn affect the next submitted prompt.
 Runtime mode is explicit and enforceable by the tool surface.
 
 `default` is the default for `pevo run` and for `pevo tui` when TUI state has no
-per-workdir mode. Default mode exposes the current full coding-core tools plus
+per-cwd mode. Default mode exposes the current full coding-core tools plus
 the default-enabled read-only `web` toolset unless configuration disables it.
 
 `plan` withholds file mutation tools and exposes only:
 
-- `read`: read a file under the selected workdir
+- `read`: read a file under the selected cwd
 - `exec_command`: run bounded shell commands for read-only exploration
 - `write_stdin`: poll or interact with a yielded `exec_command` session
 - `web_fetch`: fetch known `http(s)` URLs when the `web` toolset is enabled

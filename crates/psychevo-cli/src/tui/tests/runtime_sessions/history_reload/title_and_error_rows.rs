@@ -8,7 +8,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
     let mut ui = FullscreenUi::new(&app);
     let session_id = SqliteStore::open(&app.db_path)
         .expect("store")
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(RunStreamEvent::Event(serde_json::json!({
@@ -27,7 +27,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
     .expect("send agent end");
 
     let db_path = app.db_path.clone();
-    let workdir = app.workdir.clone();
+    let cwd = app.cwd.clone();
     let task_session_id = session_id.clone();
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
@@ -39,7 +39,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
             terminal_reason: None,
             final_answer: "done".to_string(),
             db_path,
-            workdir,
+            cwd,
             provider: "mock".to_string(),
             model: "mock-model".to_string(),
             base_url: "http://127.0.0.1".to_string(),
@@ -98,7 +98,7 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
         terminal_reason: None,
         final_answer: String::new(),
         db_path: app.db_path.clone(),
-        workdir: app.workdir.clone(),
+        cwd: app.cwd.clone(),
         provider: "mock".to_string(),
         model: "mock-model".to_string(),
         base_url: "http://127.0.0.1".to_string(),
@@ -264,7 +264,7 @@ pub(crate) async fn completed_normal_task_with_tool_failures_does_not_mark_tui_e
         terminal_reason: None,
         final_answer: "handled failure".to_string(),
         db_path: app.db_path.clone(),
-        workdir: app.workdir.clone(),
+        cwd: app.cwd.clone(),
         provider: "mock".to_string(),
         model: "mock-model".to_string(),
         base_url: "http://127.0.0.1".to_string(),
@@ -314,7 +314,7 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
         }),
         final_answer: String::new(),
         db_path: app.db_path.clone(),
-        workdir: app.workdir.clone(),
+        cwd: app.cwd.clone(),
         provider: "mock".to_string(),
         model: "mock-model".to_string(),
         base_url: "http://127.0.0.1".to_string(),
@@ -362,7 +362,7 @@ pub(crate) fn fullscreen_loads_current_session_history() {
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "tui",
             "mock-model",
             "mock",

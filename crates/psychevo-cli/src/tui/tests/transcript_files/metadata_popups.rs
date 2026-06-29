@@ -236,7 +236,7 @@ pub(crate) fn file_token_replacement_quotes_paths_with_spaces() {
 }
 
 #[test]
-pub(crate) fn file_search_returns_workdir_relative_paths_and_respects_gitignore() {
+pub(crate) fn file_search_returns_cwd_relative_paths_and_respects_gitignore() {
     let temp = tempdir().expect("temp");
     let root = temp.path();
     fs::create_dir_all(root.join("src")).expect("src dir");
@@ -248,7 +248,7 @@ pub(crate) fn file_search_returns_workdir_relative_paths_and_respects_gitignore(
     fs::write(root.join(".git/config"), "private\n").expect("git config");
     let cancel = AtomicBool::new(false);
 
-    let src_matches = search_workdir_files(root, "src", &cancel);
+    let src_matches = search_cwd_files(root, "src", &cancel);
     assert_eq!(
         src_matches.first(),
         Some(&FileSearchMatch {
@@ -258,14 +258,14 @@ pub(crate) fn file_search_returns_workdir_relative_paths_and_respects_gitignore(
     );
     assert!(src_matches.iter().any(|entry| entry.path == "src/main.rs"));
 
-    let ignored_matches = search_workdir_files(root, "ignored", &cancel);
+    let ignored_matches = search_cwd_files(root, "ignored", &cancel);
     assert!(ignored_matches.is_empty(), "{ignored_matches:#?}");
 
-    let hidden_matches = search_workdir_files(root, "hidden", &cancel);
+    let hidden_matches = search_cwd_files(root, "hidden", &cancel);
     assert_eq!(hidden_matches.len(), 1);
     assert_eq!(hidden_matches[0].path, ".hidden.rs");
 
-    let git_matches = search_workdir_files(root, "config", &cancel);
+    let git_matches = search_cwd_files(root, "config", &cancel);
     assert!(
         git_matches
             .iter()

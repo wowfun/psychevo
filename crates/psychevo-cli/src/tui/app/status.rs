@@ -12,7 +12,7 @@ impl TuiApp {
     ) -> RunOptions {
         RunOptions {
             state: self.state_runtime.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             snapshot_root: Some(self.home.join("snapshots")),
             session: self.current_session.clone(),
             continue_latest: self.current_session.is_none() && !self.force_new_once,
@@ -200,7 +200,7 @@ impl TuiApp {
 
     pub(crate) fn status_lines(&self) -> Vec<String> {
         vec![
-            format!("workdir: {}", self.workdir.display()),
+            format!("cwd: {}", self.cwd.display()),
             format!("home: {}", self.home.display()),
             format!("db: {}", self.db_path.display()),
             format!(

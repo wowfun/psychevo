@@ -23,7 +23,7 @@ impl TuiApp {
         let (_control_handle, control) = run_control();
         let result = run_user_shell_command_streaming_controlled(
             UserShellOptions {
-                workdir: self.workdir.clone(),
+                cwd: self.cwd.clone(),
                 command,
                 context: Some(self.user_shell_context_options()),
                 inject_into: None,
@@ -78,7 +78,7 @@ impl TuiApp {
         });
         let (control_handle, control) = run_control();
         let mut options = self.run_options_with_images(prompt, image_inputs);
-        options.prompt_display = prompt_display_metadata(display_prompt, &images, &self.workdir);
+        options.prompt_display = prompt_display_metadata(display_prompt, &images, &self.cwd);
         let gateway = self.gateway.clone();
         let source = self.gateway_source();
         let bind_source = self.canonical_gateway_source();
@@ -142,7 +142,7 @@ impl TuiApp {
         });
         let (control_handle, control) = run_control();
         let options = UserShellOptions {
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             command,
             context: Some(self.user_shell_context_options()),
             inject_into: None,
@@ -182,7 +182,7 @@ impl TuiApp {
         });
         let (control_handle, control) = run_control();
         let options = UserShellOptions {
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             command,
             context: Some(self.user_shell_context_options()),
             inject_into: Some(inject_into),
@@ -262,7 +262,7 @@ impl TuiApp {
         };
         let options = CompactSessionOptions {
             state: self.state_runtime.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             session: session_id.clone(),
             config_path: self.config_path.clone(),
             model: self.current_model.clone(),
@@ -298,7 +298,7 @@ impl TuiApp {
             .ok_or_else(|| anyhow!("no session context yet"))?;
         let result = compact_session(CompactSessionOptions {
             state: self.state_runtime.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             session,
             config_path: self.config_path.clone(),
             model: self.current_model.clone(),

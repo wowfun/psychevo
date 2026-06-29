@@ -1,156 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 impl<'a> FullscreenUi<'a> {
-    pub(crate) fn insert_transcript_row(&mut self, index: usize, row: TranscriptRow) -> usize {
-        let index = index.min(self.transcript.len());
-        self.transcript.insert(index, row);
-        increment_row_index(&mut self.assistant_row, index);
-        increment_row_index(&mut self.assistant_preamble_row, index);
-        increment_row_index(&mut self.reasoning_row, index);
-        increment_row_index(&mut self.meta_row, index);
-        increment_row_index(&mut self.selected_row, index);
-        for row_index in self.gateway_item_rows.values_mut() {
-            if *row_index >= index {
-                *row_index += 1;
-            }
-        }
-        for row_index in self.tool_rows.values_mut() {
-            if *row_index >= index {
-                *row_index += 1;
-            }
-        }
-        for row_index in self.exec_session_rows.values_mut() {
-            if *row_index >= index {
-                *row_index += 1;
-            }
-        }
-        index
-    }
-
-    pub(crate) fn remove_transcript_row(&mut self, index: usize) {
-        if index >= self.transcript.len() {
-            return;
-        }
-        self.transcript.remove(index);
-        decrement_row_index(&mut self.assistant_row, index);
-        decrement_row_index(&mut self.assistant_preamble_row, index);
-        decrement_row_index(&mut self.reasoning_row, index);
-        decrement_row_index(&mut self.meta_row, index);
-        decrement_row_index(&mut self.selected_row, index);
-        self.gateway_item_rows
-            .retain(|_, row_index| *row_index != index);
-        for row_index in self.gateway_item_rows.values_mut() {
-            if *row_index > index {
-                *row_index -= 1;
-            }
-        }
-        self.tool_rows.retain(|_, row_index| *row_index != index);
-        for row_index in self.tool_rows.values_mut() {
-            if *row_index > index {
-                *row_index -= 1;
-            }
-        }
-        self.exec_session_rows
-            .retain(|_, row_index| *row_index != index);
-        for row_index in self.exec_session_rows.values_mut() {
-            if *row_index > index {
-                *row_index -= 1;
-            }
-        }
-    }
-
-    pub(crate) fn insert_evidence_row(&mut self, row: TranscriptRow) -> usize {
-        let index = if let Some(assistant_row) = self.assistant_row
-            && self.transcript.get(assistant_row).is_some_and(|row| {
-                row.kind == TranscriptKind::Answer && !row.text.trim().is_empty()
-            }) {
-            assistant_row.saturating_add(1)
-        } else {
-            self.assistant_row
-                .or(self.meta_row)
-                .unwrap_or(self.transcript.len())
-        };
-        self.insert_transcript_row(index, row)
-    }
-
-    pub(crate) fn insert_answer_row(&mut self, row: TranscriptRow) -> usize {
-        let index = self.meta_row.unwrap_or(self.transcript.len());
-        self.insert_transcript_row(index, row)
-    }
-
-    pub(crate) fn append_thinking_text(&mut self, index: usize, text: &str) {
-        let Some(row) = self.transcript.get_mut(index) else {
-            return;
-        };
-        if row.kind != TranscriptKind::Thinking {
-            row.text.push_str(text);
-            return;
-        }
-        let mut full = row
-            .full_text
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| row.text.clone());
-        full.push_str(text);
-        row.set_evidence_body_text(full);
-    }
-
-    pub(crate) fn thinking_full_text(&self, index: usize) -> String {
-        self.transcript
-            .get(index)
-            .and_then(|row| row.full_text.as_ref().or(Some(&row.text)))
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn finish_thinking_row(&mut self, index: usize) {
-        let Some(row) = self.transcript.get_mut(index) else {
-            return;
-        };
-        if row.kind != TranscriptKind::Thinking {
-            return;
-        }
-        if let Some(started) = row.tool_started.take() {
-            row.tool_elapsed = Some(started.elapsed());
-        }
-    }
-
-    pub(crate) fn apply_assistant_preamble_text(&mut self, text: String, completed: bool) {
-        if let Some(idx) = self.reasoning_row.take() {
-            self.finish_thinking_row(idx);
-        }
-        let idx = self
-            .assistant_preamble_row
-            .or_else(|| self.assistant_row.take())
-            .unwrap_or_else(|| {
-                let mut row =
-                    TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", String::new());
-                if !completed {
-                    row.tool_started = Some(Instant::now());
-                }
-                let idx = self.insert_evidence_row(row);
-                self.assistant_preamble_row = Some(idx);
-                idx
-            });
-        let Some(row) = self.transcript.get_mut(idx) else {
-            self.assistant_preamble_row = None;
-            return;
-        };
-        row.kind = TranscriptKind::Thinking;
-        row.title = "Thinking".to_string();
-        row.set_evidence_body_text(text);
-        if !completed && row.tool_started.is_none() {
-            row.tool_started = Some(Instant::now());
-        }
-        self.assistant_preamble_row = Some(idx);
-        self.turn_had_reasoning = true;
-        self.remove_turn_meta();
-        if completed {
-            self.finish_thinking_row(idx);
-            self.assistant_preamble_row = None;
-        }
-    }
-
     pub(crate) fn apply_stream_event(
         &mut self,
         event: RunStreamEvent,
@@ -213,53 +63,6 @@ impl<'a> FullscreenUi<'a> {
         let result = self.apply_stream_event(event, thinking_visible, debug);
         self.active_event_session_id = previous;
         result
-    }
-
-    pub(crate) fn open_clarify_panel(&mut self, request: ClarifyRequestEvent) {
-        self.clarify_tool_args.insert(
-            request.call_id.clone(),
-            clarify_request_args_value(&request),
-        );
-        let previous_panel = match self.bottom_panel.take() {
-            Some(BottomPanel::Clarify(mut panel)) => panel.restore_panel(),
-            other => other,
-        };
-        self.bottom_panel = Some(BottomPanel::Clarify(ClarifyPanel::new(
-            request,
-            previous_panel,
-        )));
-    }
-
-    pub(crate) fn apply_clarify_resolved(&mut self, event: ClarifyResolvedEvent) {
-        let Some(BottomPanel::Clarify(mut panel)) = self.bottom_panel.take() else {
-            return;
-        };
-        if panel.request.call_id != event.call_id {
-            self.bottom_panel = Some(BottomPanel::Clarify(panel));
-            return;
-        }
-        self.bottom_panel = panel.restore_panel();
-    }
-
-    pub(crate) fn value_with_cached_clarify_args(
-        &self,
-        value: &Value,
-        tool_call_id: &str,
-    ) -> Value {
-        let args_missing = value.get("args").is_none_or(|args| {
-            args.is_null() || args.as_object().is_some_and(|obj| obj.is_empty())
-        });
-        if !args_missing {
-            return value.clone();
-        }
-        let Some(args) = self.clarify_tool_args.get(tool_call_id) else {
-            return value.clone();
-        };
-        let mut merged = value.clone();
-        if let Some(object) = merged.as_object_mut() {
-            object.insert("args".to_string(), args.clone());
-        }
-        merged
     }
 
     pub(crate) fn apply_value_event(&mut self, value: &Value, debug: bool) -> bool {
@@ -793,148 +596,6 @@ impl<'a> FullscreenUi<'a> {
             _ => false,
         }
     }
-
-    pub(crate) fn apply_streaming_tool_calls(&mut self, value: &Value) -> bool {
-        let Some(event_type) = assistant_message_stream_event_type(value) else {
-            return false;
-        };
-        let calls = streaming_tool_calls_from_event(value)
-            .into_iter()
-            .filter(|call| call.tool_name != "clarify")
-            .collect::<Vec<_>>();
-        let reuse_last_scope = event_type == "tool_call_pending"
-            && !self.streaming_tool_message_open
-            && calls.iter().any(|call| {
-                self.tool_rows.contains_key(&scoped_tool_position_key(
-                    self.streaming_tool_message_seq,
-                    &call.position_key,
-                ))
-            });
-        if !self.streaming_tool_message_open && !reuse_last_scope {
-            self.streaming_tool_message_seq = self.streaming_tool_message_seq.saturating_add(1);
-        }
-        self.streaming_tool_message_open = true;
-        let message_scope = self.streaming_tool_message_seq;
-        let mut active_tool_frame_requested = false;
-        for mut call in calls {
-            call.position_key = scoped_tool_position_key(message_scope, &call.position_key);
-            active_tool_frame_requested |= self.upsert_streaming_tool_call(call);
-        }
-        if event_type == "message_end" {
-            self.streaming_tool_message_open = false;
-        }
-        active_tool_frame_requested
-    }
-
-    pub(crate) fn apply_visible_tool_intent(&mut self, _text: &str) -> bool {
-        false
-    }
-
-    pub(crate) fn apply_agent_session_start(&mut self, value: &Value) {
-        let Some(child_session_id) = value
-            .get("child_session_id")
-            .or_else(|| value.get("child_thread_id"))
-            .or_else(|| value.get("session_id"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            return;
-        };
-        let tool_call_id = value
-            .get("tool_call_id")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|id| !id.is_empty());
-        let index = tool_call_id
-            .and_then(|id| self.tool_rows.get(&tool_id_key(id)).copied())
-            .or_else(|| self.completed_agent_invocation_index(value, tool_call_id))
-            .unwrap_or_else(|| {
-                let mut row = TranscriptRow::with_title(
-                    evidence_kind("spawn_agent"),
-                    agent_session_start_title(value).unwrap_or_else(|| "spawn_agent".to_string()),
-                    agent_child_status_text("Running", 0, None),
-                );
-                row.tool_name = Some("spawn_agent".to_string());
-                row.tool_call_id = tool_call_id.map(str::to_string);
-                row.agent_target = Some(child_session_id.to_string());
-                row.tool_started = Some(Instant::now());
-                self.insert_evidence_row(row)
-            });
-        let row = &mut self.transcript[index];
-        row.tool_name = Some("spawn_agent".to_string());
-        row.agent_target = Some(child_session_id.to_string());
-        row.tool_call_id = tool_call_id.map(str::to_string);
-        if let Some(title) = agent_session_start_title(value) {
-            row.title = title;
-        }
-        if let Some(tool_call_id) = tool_call_id {
-            self.tool_rows.insert(tool_id_key(tool_call_id), index);
-        }
-        self.remove_duplicate_agent_placeholders(index, value);
-    }
-
-    pub(crate) fn apply_agent_child_preview_event(
-        &mut self,
-        child_session_id: &str,
-        event: &RunStreamEvent,
-    ) -> bool {
-        let Some(row) = self
-            .transcript
-            .iter_mut()
-            .find(|row| row.agent_target.as_deref() == Some(child_session_id))
-        else {
-            return false;
-        };
-        let mut changed = false;
-        match event {
-            RunStreamEvent::ReasoningDelta { text } => {
-                if append_agent_child_live_fragment(
-                    &mut row.agent_child_live_text,
-                    "Thinking",
-                    text,
-                ) {
-                    changed = true;
-                }
-            }
-            RunStreamEvent::ReasoningEnd => {}
-            RunStreamEvent::ClarifyRequest(_) | RunStreamEvent::ClarifyResolved(_) => {}
-            RunStreamEvent::Event(value) => {
-                changed |= apply_agent_child_value_preview(row, value);
-            }
-            RunStreamEvent::Scoped { .. } => {}
-        }
-        if changed {
-            refresh_agent_child_preview(row);
-        }
-        changed
-    }
-
-    pub(crate) fn remove_provisional_tool_intent(&mut self, tool: &str) {
-        let key = tool_intent_key(tool);
-        let Some(index) = self.tool_rows.remove(&key) else {
-            return;
-        };
-        let Some(row) = self.transcript.get(index) else {
-            return;
-        };
-        if row.tool_call_id.is_none() && row.tool_started.is_some() && row.tool_elapsed.is_none() {
-            self.remove_transcript_row(index);
-        }
-    }
-
-    pub(crate) fn remove_unmatched_provisional_tool_intents(&mut self, matched_tools: &[String]) {
-        let tools = self
-            .tool_rows
-            .keys()
-            .filter_map(|key| key.strip_prefix("intent:"))
-            .filter(|tool| !matched_tools.iter().any(|matched| matched == *tool))
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        for tool in tools {
-            self.remove_provisional_tool_intent(&tool);
-        }
-    }
 }
 
 fn value_with_args(value: &Value, args: Value) -> Value {
@@ -945,7 +606,7 @@ fn value_with_args(value: &Value, args: Value) -> Value {
     merged
 }
 
-fn event_scoped_tool_position_key(message_scope: u64, value: &Value) -> Option<String> {
+pub(super) fn event_scoped_tool_position_key(message_scope: u64, value: &Value) -> Option<String> {
     let content_index = value
         .get("content_index")
         .or_else(|| value.get("content_array_index"))
@@ -956,3 +617,12 @@ fn event_scoped_tool_position_key(message_scope: u64, value: &Value) -> Option<S
         &tool_position_key(content_index, call_index),
     ))
 }
+
+#[path = "stream_events/agent_preview.rs"]
+mod agent_preview;
+#[path = "stream_events/clarify.rs"]
+mod clarify;
+#[path = "stream_events/streaming_tool_calls.rs"]
+mod streaming_tool_calls;
+#[path = "stream_events/transcript_rows.rs"]
+mod transcript_rows;

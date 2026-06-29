@@ -50,7 +50,7 @@ pub(crate) fn motion_uses_shared_activity_spinner_frames() {
 }
 
 #[test]
-pub(crate) fn markdown_renders_local_links_relative_to_workdir() {
+pub(crate) fn markdown_renders_local_links_relative_to_cwd() {
     let temp = tempdir().expect("temp");
     let file = temp.path().join("src/main.rs");
     let markdown = format!("See [ignored label]({}:42) and `inline`.", file.display());

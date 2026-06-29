@@ -148,7 +148,7 @@ impl TuiApp {
                 if !source.is_empty()
                     && !pasted.contains('\n')
                     && let Ok(ImageInput::LocalPath(path)) =
-                        resolve_image_source(source, &self.workdir)
+                        resolve_image_source(source, &self.cwd)
                 {
                     let placeholder = ui.add_pending_image(ImageInput::LocalPath(path));
                     ui.textarea.insert_str(&placeholder);
@@ -159,7 +159,7 @@ impl TuiApp {
                 ui.absorb_shell_escape_prefix();
                 ui.sync_pending_images_with_textarea();
                 ui.clear_slash_menu_dismissal();
-                ui.sync_file_popup(&self.workdir);
+                ui.sync_file_popup(&self.cwd);
                 self.sync_agent_popup(ui);
                 self.sync_skill_popup(ui);
                 Ok(FullscreenEventOutcome {

@@ -51,10 +51,10 @@ pub(crate) async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut Fulls
 
 pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::create_dir_all(&workdir).expect("workdir");
-    let workdir = workdir.canonicalize().expect("canonical");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let cwd = cwd.canonicalize().expect("canonical");
     let mut env_map = BTreeMap::new();
     env_map.insert(
         "HOME".to_string(),
@@ -79,8 +79,8 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         gateway,
         db_path,
         config_path: None,
-        workdir: workdir.clone(),
-        workdir_key: workdir.display().to_string(),
+        cwd: cwd.clone(),
+        cwd_key: cwd.display().to_string(),
         current_session: Some("1234567890abcdef".to_string()),
         current_session_title: Some("Review sidebar polish".to_string()),
         force_new_once: false,
@@ -202,7 +202,7 @@ pub(crate) fn fixture_ui<'a>(app: &TuiApp, kind: FixtureKind) -> FullscreenUi<'a
         }
         FixtureKind::RichMarkdown => {
             ui.transcript.clear();
-            push_rich_markdown_turn(&mut ui, &app.workdir);
+            push_rich_markdown_turn(&mut ui, &app.cwd);
         }
         FixtureKind::ActiveWriteAfterAnswer => {
             ui.transcript.clear();
@@ -497,9 +497,9 @@ pub(crate) fn long_tool_output() -> String {
         .join("\n")
 }
 
-pub(crate) fn push_rich_markdown_turn(ui: &mut FullscreenUi<'_>, workdir: &Path) {
+pub(crate) fn push_rich_markdown_turn(ui: &mut FullscreenUi<'_>, cwd: &Path) {
     ui.push_user("Render a markdown answer.".to_string());
-    let path = workdir.join("crates/psychevo-cli/src/tui/render/transcript.rs");
+    let path = cwd.join("crates/psychevo-cli/src/tui/render/transcript.rs");
     ui.transcript.push(TranscriptRow::with_title(
         TranscriptKind::Answer,
         "",

@@ -584,14 +584,14 @@ pub(crate) fn transcript_line_count(
     rows: &[TranscriptRow],
     width: u16,
     thinking_visible: bool,
-    workdir: &Path,
+    cwd: &Path,
 ) -> usize {
     rows.iter()
         .enumerate()
         .filter(|(_, row)| row_visible(row, thinking_visible))
         .map(|(index, row)| {
             let compact_trailing = compact_trailing_for(rows, index, row, thinking_visible);
-            let lines = transcript_lines(row, false, compact_trailing, width, workdir, false);
+            let lines = transcript_lines(row, false, compact_trailing, width, cwd, false);
             wrapped_line_count(&lines, width)
         })
         .sum()

@@ -86,7 +86,7 @@ Command results are applied by destination:
 - export and share commands use host download/share paths
 - unsupported or stale results become bounded display-only feedback
 
-Display-only command feedback is scoped to the current session/workdir and is
+Display-only command feedback is scoped to the current session/cwd and is
 cleared on session switches, new input, or product-specific dismissal. Command
 feedback must not count as user prompt text, visible assistant message,
 durable session message, or provider-context input.

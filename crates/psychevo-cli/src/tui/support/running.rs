@@ -215,7 +215,7 @@ pub(crate) fn normalize_prompt_text(text: &str) -> String {
 
 pub(crate) fn attachment_metadata_text(
     attachments: &[PendingImageAttachment],
-    workdir: &Path,
+    cwd: &Path,
 ) -> Option<String> {
     if attachments.is_empty() {
         return None;
@@ -225,16 +225,16 @@ pub(crate) fn attachment_metadata_text(
         lines.push(format!(
             "image {}: {}",
             index + 1,
-            display_image_source(&attachment.image, workdir)
+            display_image_source(&attachment.image, cwd)
         ));
     }
     Some(lines.join("\n"))
 }
 
-pub(crate) fn display_image_source(image: &ImageInput, workdir: &Path) -> String {
+pub(crate) fn display_image_source(image: &ImageInput, cwd: &Path) -> String {
     match image {
         ImageInput::LocalPath(path) => path
-            .strip_prefix(workdir)
+            .strip_prefix(cwd)
             .map(|path| path.display().to_string())
             .unwrap_or_else(|_| path.display().to_string()),
         ImageInput::ImageUrl(url) => url.clone(),
@@ -244,7 +244,7 @@ pub(crate) fn display_image_source(image: &ImageInput, workdir: &Path) -> String
 pub(crate) fn prompt_display_metadata(
     content_text: String,
     attachments: &[PendingImageAttachment],
-    workdir: &Path,
+    cwd: &Path,
 ) -> Option<PromptDisplayMetadata> {
     (!attachments.is_empty()).then(|| PromptDisplayMetadata {
         content_text,
@@ -253,7 +253,7 @@ pub(crate) fn prompt_display_metadata(
             .map(|attachment| PromptAttachmentDisplay {
                 kind: "image".to_string(),
                 placeholder: attachment.placeholder.clone(),
-                source: display_image_source(&attachment.image, workdir),
+                source: display_image_source(&attachment.image, cwd),
             })
             .collect(),
     })

@@ -29,8 +29,8 @@ command and shared workspace diff model.
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 Deterministic tests should use temporary git repositories and local fixtures.
 They should not depend on the caller's worktree, global git configuration,

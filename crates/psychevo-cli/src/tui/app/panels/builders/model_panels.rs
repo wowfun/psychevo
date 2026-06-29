@@ -297,14 +297,30 @@ impl TuiApp {
             .map(|provider| provider.provider.clone())
             .collect::<Vec<_>>();
         for provider in providers {
+            let cached = read_cached_model_catalog(&self.home, &provider);
             self.model_catalog
                 .providers
                 .entry(provider.provider.clone())
-                .and_modify(|state| state.provider = provider.clone())
-                .or_insert_with(|| ModelProviderCatalogState {
-                    provider,
-                    status: ModelCatalogStatus::NotFetched,
-                    fetched: Vec::new(),
+                .and_modify(|state| {
+                    state.provider = provider.clone();
+                    if !matches!(state.status, ModelCatalogStatus::Fetching)
+                        && state.fetched.is_empty()
+                        && let Some(models) = cached.clone()
+                    {
+                        state.fetched = models;
+                        state.status = ModelCatalogStatus::Fetched;
+                    }
+                })
+                .or_insert_with(|| {
+                    let (status, fetched) = match cached {
+                        Some(models) => (ModelCatalogStatus::Fetched, models),
+                        None => (ModelCatalogStatus::NotFetched, Vec::new()),
+                    };
+                    ModelProviderCatalogState {
+                        provider,
+                        status,
+                        fetched,
+                    }
                 });
         }
         self.model_catalog

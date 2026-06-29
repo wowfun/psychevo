@@ -94,7 +94,7 @@ impl FileSearchState {
         let tx = self.tx.clone();
         let root = root.to_path_buf();
         std::thread::spawn(move || {
-            let matches = search_workdir_files(&root, &query, &cancel);
+            let matches = search_cwd_files(&root, &query, &cancel);
             if !cancel.load(Ordering::Relaxed) {
                 let _ = tx.send(FileSearchResult {
                     generation,

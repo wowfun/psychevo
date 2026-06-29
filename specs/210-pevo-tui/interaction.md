@@ -102,7 +102,7 @@ result below it as display-only material.
 ## Completion, Selection, And Mouse Routing
 
 Typing an `@` token in the fullscreen composer opens a file path completion
-popup for the selected workdir. Valid tokens start at the beginning of the
+popup for the selected cwd. Valid tokens start at the beginning of the
 current line or after whitespace. The popup is hidden while a bottom selection
 pane is open. Shell mode reuses the same `@` file path completion popup; image
 paths selected this way remain plain shell text and do not create attachments.

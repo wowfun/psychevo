@@ -241,7 +241,7 @@ pub(crate) async fn configured_slash_alias_and_leader_shortcut_dispatch_commands
         .expect("alias enter");
 
     assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Command && row.title == "/expr" && row.text.contains("workdir:")
+        row.kind == TranscriptKind::Command && row.title == "/expr" && row.text.contains("cwd:")
     }));
 
     let mut ui = FullscreenUi::new(&app);
@@ -260,9 +260,7 @@ pub(crate) async fn configured_slash_alias_and_leader_shortcut_dispatch_commands
 
     assert!(ui.history.is_empty());
     assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Command
-            && row.title == "/status"
-            && row.text.contains("workdir:")
+        row.kind == TranscriptKind::Command && row.title == "/status" && row.text.contains("cwd:")
     }));
 }
 
@@ -327,7 +325,7 @@ pub(crate) async fn fullscreen_status_uses_single_multiline_command_row() {
         .collect::<Vec<_>>();
     assert_eq!(status_rows.len(), 1);
     assert_eq!(status_rows[0].title, "/status");
-    assert!(status_rows[0].text.contains("workdir:"));
+    assert!(status_rows[0].text.contains("cwd:"));
     assert!(status_rows[0].text.contains("\nmodel: mock/model\n"));
     assert!(status_rows[0].text.contains("\nvariant: high\n"));
     assert!(!status_rows[0].text.contains("\nthinking:"));
@@ -505,7 +503,7 @@ pub(crate) fn usage_panel_groups_persisted_stats_rows() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     store
@@ -690,7 +688,7 @@ pub(crate) async fn fullscreen_compact_queues_behind_running_turn() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session = store
-        .create_session_with_metadata(&app.workdir, "tui", "model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
         .expect("session");
     app.current_session = Some(session.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -843,8 +841,8 @@ pub(crate) async fn pending_preview_shows_steer_and_queue_above_composer_without
 pub(crate) async fn diff_command_opens_overlay_and_renders_untracked_diff_without_transcript_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    init_git_repo_for_diff_test(&app.workdir);
-    fs::write(app.workdir.join("notes.txt"), "hello from diff\n").expect("write");
+    init_git_repo_for_diff_test(&app.cwd);
+    fs::write(app.cwd.join("notes.txt"), "hello from diff\n").expect("write");
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Diff)
@@ -877,7 +875,7 @@ pub(crate) async fn diff_command_opens_overlay_and_renders_untracked_diff_withou
 pub(crate) async fn diff_command_shows_empty_message_for_clean_workspace() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    init_git_repo_for_diff_test(&app.workdir);
+    init_git_repo_for_diff_test(&app.cwd);
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Diff)

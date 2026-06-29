@@ -8,12 +8,12 @@ impl TuiApp {
         let mut groups: BTreeMap<String, Vec<TuiSessionDisplaySummary>> = BTreeMap::new();
         for session in self.tui_sessions(view)? {
             groups
-                .entry(session.summary.workdir.clone())
+                .entry(session.summary.cwd.clone())
                 .or_default()
                 .push(session);
         }
         let mut rows = Vec::new();
-        for (workdir, mut sessions) in groups {
+        for (cwd, mut sessions) in groups {
             sessions.sort_by(|left, right| {
                 right
                     .summary
@@ -23,7 +23,7 @@ impl TuiApp {
             });
             let limit = self
                 .session_browser_limits
-                .get(&workdir)
+                .get(&cwd)
                 .copied()
                 .unwrap_or(20);
             let mut visible_count = 0usize;
@@ -32,7 +32,7 @@ impl TuiApp {
             let project_label = sessions
                 .first()
                 .map(|session| session.project_label.clone())
-                .unwrap_or_else(|| session_project_label(&workdir));
+                .unwrap_or_else(|| session_project_label(&cwd));
             for session in sessions {
                 let is_current = current_session.is_some_and(|id| id == session.summary.id);
                 let in_recent_window = session.summary.updated_at_ms >= recent_since_ms;
@@ -54,12 +54,12 @@ impl TuiApp {
                     description: Some("Show 20 more sessions in this workspace".to_string()),
                     detail: Some(format!("{hidden_count} hidden")),
                     group: Some(project_label),
-                    search_text: format!("load older sessions {workdir}"),
+                    search_text: format!("load older sessions {cwd}"),
                     is_current: false,
                     is_default: false,
                     style: BottomRowStyle::Action,
                     footer: Some("Enter load  Esc close  Type search".to_string()),
-                    value: BottomSelectionValue::LoadOlderSessions(workdir),
+                    value: BottomSelectionValue::LoadOlderSessions(cwd),
                 });
             }
         }
@@ -290,7 +290,7 @@ impl TuiApp {
     pub(crate) fn stats_panel(&self) -> Result<BottomSelectionPanel> {
         let report = usage_stats(StatsOptions {
             state: self.state_runtime.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             all: false,
             days: None,
             limit: 8,

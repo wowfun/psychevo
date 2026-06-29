@@ -400,7 +400,7 @@ pub(crate) fn render_block_lines(
         selected,
         compact_trailing,
         width,
-        &ui.workdir,
+        &ui.cwd,
         ui.raw_visible,
     )
 }
@@ -464,14 +464,14 @@ pub(crate) fn transcript_lines(
     selected: bool,
     compact_trailing: bool,
     width: u16,
-    workdir: &Path,
+    cwd: &Path,
     raw_visible: bool,
 ) -> Vec<Line<'static>> {
     if row.kind == TranscriptKind::Prompt {
         return prompt_lines(row, selected, compact_trailing, width);
     }
     if row.kind == TranscriptKind::Answer {
-        return answer_lines(row, selected, compact_trailing, width, workdir, raw_visible);
+        return answer_lines(row, selected, compact_trailing, width, cwd, raw_visible);
     }
     if row.kind == TranscriptKind::Thinking {
         return thinking_lines(row, selected, compact_trailing, width);

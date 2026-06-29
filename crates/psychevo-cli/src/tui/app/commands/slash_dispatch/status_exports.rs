@@ -142,7 +142,7 @@ impl TuiApp {
     pub(crate) fn stats_status_text(&self) -> Result<String> {
         let report = usage_stats(StatsOptions {
             state: self.state_runtime.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             all: false,
             days: None,
             limit: 5,
@@ -219,7 +219,7 @@ impl TuiApp {
         session_id: &str,
     ) -> PathBuf {
         let path = path.map(PathBuf::from).unwrap_or_else(|| {
-            self.workdir.join(default_session_export_filename(
+            self.cwd.join(default_session_export_filename(
                 session_id,
                 format,
                 artifact_kind,
@@ -228,7 +228,7 @@ impl TuiApp {
         if path.is_absolute() {
             path
         } else {
-            self.workdir.join(path)
+            self.cwd.join(path)
         }
     }
 
@@ -248,7 +248,7 @@ impl TuiApp {
             .ok_or_else(|| anyhow!("no session context yet"))?;
         Ok(context_snapshot(ContextOptions {
             state: self.state_runtime.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             session,
             config_path: self.config_path.clone(),
             inherited_env: Some(self.env_map.clone()),

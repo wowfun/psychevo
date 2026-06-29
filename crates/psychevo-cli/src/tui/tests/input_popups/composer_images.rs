@@ -637,7 +637,7 @@ pub(crate) async fn paste_event_inserts_full_path_without_dropping_chars() {
 pub(crate) async fn standalone_pasted_image_source_adds_pending_attachment() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let image = app.workdir.join("image.png");
+    let image = app.cwd.join("image.png");
     fs::write(&image, [1, 2, 3]).expect("image");
     let mut ui = FullscreenUi::new(&app);
 
@@ -680,7 +680,7 @@ pub(crate) async fn standalone_pasted_url_remains_text() {
 pub(crate) async fn pasted_prompt_with_embedded_image_path_remains_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let image = app.workdir.join("img1.avif");
+    let image = app.cwd.join("img1.avif");
     fs::write(&image, [1, 2, 3]).expect("image");
     let mut ui = FullscreenUi::new(&app);
     let pasted = format!("描述这张图片的内容：{}\r\n", image.display());
@@ -703,7 +703,7 @@ pub(crate) async fn pasted_prompt_with_embedded_image_path_remains_text() {
 pub(crate) async fn missing_standalone_image_paste_is_inserted_as_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let missing = app.workdir.join("missing.avif");
+    let missing = app.cwd.join("missing.avif");
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_event(
@@ -738,7 +738,7 @@ pub(crate) async fn cjk_prompt_with_relative_image_name_pastes_as_text() {
 pub(crate) async fn image_slash_command_adds_attachment_and_restores_prompt() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let image = app.workdir.join("image one.png");
+    let image = app.cwd.join("image one.png");
     fs::write(&image, [1, 2, 3]).expect("image");
     let mut ui = FullscreenUi::new(&app);
     let command = format!("/image \"{}\" describe it", image.display());
@@ -786,7 +786,7 @@ pub(crate) async fn image_slash_command_error_uses_command_row() {
 pub(crate) async fn leading_absolute_image_path_submits_as_prompt_not_slash_command() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    let image = app.workdir.join("image.avif");
+    let image = app.cwd.join("image.avif");
     fs::write(&image, [1, 2, 3]).expect("image");
     let mut ui = FullscreenUi::new(&app);
     let prompt = format!("{} 描述该图片", image.display());
@@ -821,11 +821,7 @@ pub(crate) async fn leading_absolute_image_path_submits_as_prompt_not_slash_comm
 pub(crate) async fn leading_absolute_markdown_path_submits_as_prompt_not_slash_command() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    let path = app
-        .workdir
-        .join("docs")
-        .join("evaluation")
-        .join("README.md");
+    let path = app.cwd.join("docs").join("evaluation").join("README.md");
     fs::create_dir_all(path.parent().expect("parent")).expect("docs dir");
     fs::write(&path, "# Evaluation\n").expect("markdown");
     let mut ui = FullscreenUi::new(&app);
@@ -938,7 +934,7 @@ pub(crate) async fn known_slash_command_argument_errors_remain_command_errors() 
 pub(crate) async fn embedded_absolute_image_path_submits_as_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    let image = app.workdir.join("img1.png");
+    let image = app.cwd.join("img1.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
     let prompt = format!("描述这张图片的内容：{}", image.display());
@@ -976,7 +972,7 @@ pub(crate) async fn embedded_absolute_image_path_submits_as_text() {
 pub(crate) async fn image_only_submit_uses_pending_attachment_and_clears_composer() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    let image = app.workdir.join("image.png");
+    let image = app.cwd.join("image.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
     let placeholder = ui.add_pending_image(ImageInput::LocalPath(image.clone()));

@@ -24,7 +24,7 @@ pub(crate) fn summary(id: &str) -> SessionSummary {
         id: id.to_string(),
         source: "tui".to_string(),
         parent_session_id: None,
-        workdir: "/repo".to_string(),
+        cwd: "/repo".to_string(),
         model: "model".to_string(),
         provider: "provider".to_string(),
         started_at_ms: 1,
@@ -134,7 +134,7 @@ pub(crate) fn insert_tui_message_with_metadata(
 }
 
 pub(crate) fn test_track_snapshot(app: &TuiApp, _session_id: &str) -> String {
-    let workspace_id = psychevo_runtime::workspace_snapshot_id(&app.workdir).expect("workspace id");
+    let workspace_id = psychevo_runtime::workspace_snapshot_id(&app.cwd).expect("workspace id");
     let git_dir = app
         .home
         .join("snapshots")
@@ -145,7 +145,7 @@ pub(crate) fn test_track_snapshot(app: &TuiApp, _session_id: &str) -> String {
         assert!(
             std::process::Command::new("git")
                 .env("GIT_DIR", &git_dir)
-                .env("GIT_WORK_TREE", &app.workdir)
+                .env("GIT_WORK_TREE", &app.cwd)
                 .arg("init")
                 .output()
                 .expect("snapshot init")
@@ -158,7 +158,7 @@ pub(crate) fn test_track_snapshot(app: &TuiApp, _session_id: &str) -> String {
             .arg("--git-dir")
             .arg(&git_dir)
             .arg("--work-tree")
-            .arg(&app.workdir)
+            .arg(&app.cwd)
             .args(["add", "--all", "--", "."])
             .output()
             .expect("snapshot add")
@@ -169,7 +169,7 @@ pub(crate) fn test_track_snapshot(app: &TuiApp, _session_id: &str) -> String {
         .arg("--git-dir")
         .arg(&git_dir)
         .arg("--work-tree")
-        .arg(&app.workdir)
+        .arg(&app.cwd)
         .arg("write-tree")
         .output()
         .expect("snapshot tree");
@@ -224,8 +224,8 @@ pub(crate) fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
     app.env_map
         .insert("TEST_PROVIDER_KEY".to_string(), "test-key".to_string());
     let config_path = write_tui_model_config(temp);
-    std::fs::create_dir_all(app.workdir.join(".psychevo")).expect("local config dir");
-    std::fs::copy(&config_path, app.workdir.join(".psychevo/config.toml")).expect("local config");
+    std::fs::create_dir_all(app.cwd.join(".psychevo")).expect("local config dir");
+    std::fs::copy(&config_path, app.cwd.join(".psychevo/config.toml")).expect("local config");
     app.config_path = Some(config_path);
     app.current_model = Some("mock/mock-model".to_string());
     app.current_variant = None;

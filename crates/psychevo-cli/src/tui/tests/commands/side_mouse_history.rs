@@ -7,7 +7,7 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
     insert_tui_message_with_metadata(
         &app.db_path,
@@ -97,7 +97,7 @@ pub(crate) async fn fullscreen_btw_detaches_running_parent() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -129,12 +129,12 @@ pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
     let mut app = test_app_with_models(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
     let side = store
         .create_child_session_with_metadata(
             &parent,
-            &app.workdir,
+            &app.cwd,
             TUI_SIDE_CONVERSATION_SESSION_SOURCE,
             "mock-model",
             "mock",

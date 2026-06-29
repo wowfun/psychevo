@@ -13,8 +13,8 @@ pub(crate) struct TuiApp {
     pub(crate) gateway: Gateway,
     pub(crate) db_path: PathBuf,
     pub(crate) config_path: Option<PathBuf>,
-    pub(crate) workdir: PathBuf,
-    pub(crate) workdir_key: String,
+    pub(crate) cwd: PathBuf,
+    pub(crate) cwd_key: String,
     pub(crate) current_session: Option<String>,
     pub(crate) current_session_title: Option<String>,
     pub(crate) force_new_once: bool,
@@ -85,7 +85,7 @@ impl TuiApp {
         self.reset_live_agent_reload_poll();
         self.current_session_title = None;
         self.force_new_once = true;
-        self.draft_source_raw_id = Some(new_tui_draft_source_raw_id(&self.workdir_key));
+        self.draft_source_raw_id = Some(new_tui_draft_source_raw_id(&self.cwd_key));
     }
 
     pub(crate) fn clear_new_session_draft(&mut self) {
@@ -94,7 +94,7 @@ impl TuiApp {
     }
 
     pub(crate) fn canonical_gateway_source(&self) -> GatewaySource {
-        self.gateway_source_for_raw_id(self.workdir_key.clone(), "TUI")
+        self.gateway_source_for_raw_id(self.cwd_key.clone(), "TUI")
     }
 
     pub(crate) fn gateway_source(&self) -> GatewaySource {
@@ -113,18 +113,19 @@ impl TuiApp {
             .with_visible_name(visible_name)
             .with_raw_identity(serde_json::json!({
                 "kind": "tui",
-                "cwd": self.workdir.display().to_string(),
-                "canonicalRawId": self.workdir_key.clone(),
+                "cwd": self.cwd.display().to_string(),
+                "canonicalRawId": self.cwd_key.clone(),
             }))
     }
 
     pub(crate) fn current_skill_catalog(&self) -> Option<SkillCatalog> {
         discover_skills(&SkillDiscoveryOptions {
             home: self.home.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             config_path: self.config_path.clone(),
             env: self.env_map.clone(),
             explicit_inputs: self.skill_inputs.clone(),
+            additional_roots: Vec::new(),
             no_skills: self.no_skills,
         })
         .ok()
@@ -136,7 +137,7 @@ impl TuiApp {
         }
         discover_agents(&AgentDiscoveryOptions {
             home: self.home.clone(),
-            workdir: self.workdir.clone(),
+            cwd: self.cwd.clone(),
             env: self.env_map.clone(),
             explicit_inputs: self.current_agent.iter().cloned().collect(),
             no_agents: self.no_agents,
@@ -148,7 +149,7 @@ impl TuiApp {
         if self.no_skills {
             return Vec::new();
         }
-        list_skill_bundles(&self.home, &self.workdir).unwrap_or_default()
+        list_skill_bundles(&self.home, &self.cwd).unwrap_or_default()
     }
 
     pub(crate) fn slash_items(&self) -> Vec<SlashMenuItem> {
@@ -283,9 +284,9 @@ impl TuiApp {
     }
 }
 
-fn new_tui_draft_source_raw_id(workdir_key: &str) -> String {
+fn new_tui_draft_source_raw_id(cwd_key: &str) -> String {
     let sequence = NEXT_TUI_DRAFT_SOURCE.fetch_add(1, Ordering::Relaxed);
-    format!("{workdir_key}:draft:{sequence}")
+    format!("{cwd_key}:draft:{sequence}")
 }
 
 pub(crate) fn skill_match_rank(name: &str, description: &str, query: &str) -> Option<(u8, usize)> {

@@ -20,7 +20,7 @@ pub(crate) async fn fullscreen_thinking_toggle_hides_existing_blocks_without_sta
 
     assert!(!ui.thinking_visible);
     assert_eq!(
-        transcript_line_count(&ui.transcript, 80, ui.thinking_visible, &ui.workdir),
+        transcript_line_count(&ui.transcript, 80, ui.thinking_visible, &ui.cwd),
         0
     );
     assert!(
@@ -33,7 +33,7 @@ pub(crate) async fn fullscreen_thinking_toggle_hides_existing_blocks_without_sta
         .await
         .expect("thinking on");
     assert!(ui.thinking_visible);
-    assert!(transcript_line_count(&ui.transcript, 80, ui.thinking_visible, &ui.workdir) > 0);
+    assert!(transcript_line_count(&ui.transcript, 80, ui.thinking_visible, &ui.cwd) > 0);
     assert!(
         ui.transcript
             .iter()
@@ -85,7 +85,7 @@ pub(crate) fn finished_run_result(app: &TuiApp) -> psychevo_runtime::RunResult {
         terminal_reason: None,
         final_answer: "done".to_string(),
         db_path: app.db_path.clone(),
-        workdir: app.workdir.clone(),
+        cwd: app.cwd.clone(),
         provider: "mock".to_string(),
         model: "mock-model".to_string(),
         base_url: "http://127.0.0.1".to_string(),
@@ -234,7 +234,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
             terminal_reason: None,
             final_answer: "I can continue with the remaining data.".to_string(),
             db_path: temp.path().join("state.db"),
-            workdir: temp.path().to_path_buf(),
+            cwd: temp.path().to_path_buf(),
             provider: "xiaomi-token-plan".to_string(),
             model: "mimo-v2.5-pro".to_string(),
             base_url: "http://127.0.0.1".to_string(),

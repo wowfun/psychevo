@@ -37,8 +37,8 @@ transcript projection contract.
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 This topic is implemented across Gateway projection, Workbench transcript
 rendering, TUI rendering, and ACP/Web adapters. The default validation path

@@ -9,11 +9,11 @@ pub(crate) fn cli_tui_initial_prompt_shows_thinking_by_default() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo tui");
     assert!(
@@ -32,18 +32,13 @@ pub(crate) fn cli_tui_bang_shell_rejects_missing_provider_config_before_executio
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
-    let marker = workdir.join("marker");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let marker = cwd.join("marker");
     let config = temp.path().join("missing-config.toml");
 
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args([
-            "tui",
-            "--dir",
-            workdir.to_str().expect("workdir"),
-            "!touch marker",
-        ])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "!touch marker"])
         .output()
         .expect("pevo tui shell");
 
@@ -60,15 +55,15 @@ pub(crate) fn cli_tui_bang_shell_persists_context_with_config() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
         .args([
             "tui",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "!printf shell-cli-ok",
         ])
         .output()
@@ -112,7 +107,7 @@ pub(crate) fn cli_tui_debug_shows_usage_metadata_summary() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
@@ -120,7 +115,7 @@ pub(crate) fn cli_tui_debug_shows_usage_metadata_summary() {
             "tui",
             "--debug",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "hello",
         ])
         .output()
@@ -146,11 +141,11 @@ pub(crate) fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -183,7 +178,7 @@ pub(crate) fn cli_tui_status_shows_configured_default_variant() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config_with_reasoning(
         &temp.path().join("config"),
         "http://127.0.0.1:9",
@@ -191,7 +186,7 @@ pub(crate) fn cli_tui_status_shows_configured_default_variant() {
     );
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -215,8 +210,8 @@ pub(crate) fn cli_tui_status_shows_configured_default_variant() {
     assert!(stdout.contains("model: mock/mock-model"));
     assert!(stdout.contains("variant: xhigh"));
     let expected_status = format!(
-        "workdir: {}\nhome: {}\ndb: {}\nsession: (none)\nmodel: mock/mock-model\nvariant: xhigh\nmode: default\npermission_mode: default\nagent: (default)\nagents: on\ndebug: off",
-        workdir.display(),
+        "cwd: {}\nhome: {}\ndb: {}\nsession: (none)\nmodel: mock/mock-model\nvariant: xhigh\nmode: default\npermission_mode: default\nagent: (default)\nagents: on\ndebug: off",
+        cwd.display(),
         home.display(),
         db.display()
     );
@@ -231,11 +226,11 @@ pub(crate) fn cli_tui_help_prints_commands_from_registry() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -270,11 +265,11 @@ pub(crate) fn cli_tui_new_is_silent_until_next_prompt() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -302,12 +297,12 @@ pub(crate) fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     assert!(
         Command::new("git")
             .arg("-C")
-            .arg(&workdir)
+            .arg(&cwd)
             .arg("init")
             .output()
             .expect("git init")
@@ -317,7 +312,7 @@ pub(crate) fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -347,11 +342,11 @@ pub(crate) fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -426,11 +421,11 @@ pub(crate) fn cli_tui_model_lists_configured_entries_without_prompt() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_multi_model_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -465,11 +460,11 @@ pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_se
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let run = isolated_run_cmd(temp.path(), &config, &db)
-        .args(["run", "--dir", workdir.to_str().expect("workdir"), "first"])
+        .args(["run", "--dir", cwd.to_str().expect("cwd"), "first"])
         .output()
         .expect("pevo run");
     assert!(
@@ -479,7 +474,7 @@ pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_se
     );
 
     let continued = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir"), "second"])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "second"])
         .output()
         .expect("pevo tui continue");
     assert!(
@@ -499,13 +494,7 @@ pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_se
     assert_eq!(messages, 4);
 
     let new_session = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args([
-            "tui",
-            "--dir",
-            workdir.to_str().expect("workdir"),
-            "--new",
-            "third",
-        ])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "--new", "third"])
         .output()
         .expect("pevo tui new");
     assert!(
@@ -537,12 +526,12 @@ pub(crate) fn cli_tui_sessions_lists_sessions_and_unknown_slash_falls_back_to_pr
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config_dir = temp.path().join("config");
     let config = write_run_config(&config_dir, &initial_server.base_url);
 
     let first = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo tui");
     assert!(
@@ -557,7 +546,7 @@ pub(crate) fn cli_tui_sessions_lists_sessions_and_unknown_slash_falls_back_to_pr
     ]);
     let config = write_run_config(&config_dir, &fallback_server.base_url);
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -589,11 +578,11 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_lists_sessions() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let first = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo tui");
     assert!(
@@ -603,7 +592,7 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_lists_sessions() {
     );
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -632,11 +621,11 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let first = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo tui");
     assert!(
@@ -649,7 +638,7 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
         .expect("archive");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", workdir.to_str().expect("workdir")])
+        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

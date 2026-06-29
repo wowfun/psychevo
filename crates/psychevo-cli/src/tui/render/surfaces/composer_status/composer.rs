@@ -664,11 +664,11 @@ pub(crate) fn bottom_status_context_for_width(
     ui: &FullscreenUi<'_>,
     available_width: usize,
 ) -> Option<String> {
-    const STATUS_WORKDIR_MIN_WIDTH: usize = 8;
+    const STATUS_CWD_MIN_WIDTH: usize = 8;
     const SEP_WIDTH: usize = 3;
 
     let home = home_dir_for_display(app);
-    let full_workdir = directory_display_value(&app.workdir, home.as_deref());
+    let full_cwd = directory_display_value(&app.cwd, home.as_deref());
     let branch = bottom_status_branch(&ui.sidebar.branch);
     let context = bottom_status_context_usage(ui);
     let usage_segments = bottom_status_session_usage_segments(ui);
@@ -685,7 +685,7 @@ pub(crate) fn bottom_status_context_for_width(
         if let Some(profile) = profile.as_deref() {
             segments.push(profile);
         }
-        segments.push(full_workdir.as_str());
+        segments.push(full_cwd.as_str());
         if let Some(branch) = branch.as_deref() {
             segments.push(branch);
         }
@@ -704,7 +704,7 @@ pub(crate) fn bottom_status_context_for_width(
             if let Some(profile) = profile.as_deref() {
                 segments.push(profile);
             }
-            segments.push(full_workdir.as_str());
+            segments.push(full_cwd.as_str());
             if let Some(value) = joined_segments_if_fits(&segments, available_width) {
                 return Some(value);
             }
@@ -718,27 +718,27 @@ pub(crate) fn bottom_status_context_for_width(
         }
         if let Some(profile) = profile.as_deref()
             && let Some(value) =
-                joined_segments_if_fits(&[context, profile, full_workdir.as_str()], available_width)
+                joined_segments_if_fits(&[context, profile, full_cwd.as_str()], available_width)
         {
             return Some(value);
         }
         if let Some(value) =
-            joined_segments_if_fits(&[context, full_workdir.as_str()], available_width)
+            joined_segments_if_fits(&[context, full_cwd.as_str()], available_width)
         {
             return Some(value);
         }
         let context_width = UnicodeWidthStr::width(context);
         if available_width > context_width.saturating_add(SEP_WIDTH) {
-            let workdir_width = available_width
+            let cwd_width = available_width
                 .saturating_sub(context_width)
                 .saturating_sub(SEP_WIDTH);
-            if workdir_width >= STATUS_WORKDIR_MIN_WIDTH {
-                let workdir = format_directory_display_with_home(
-                    &app.workdir,
+            if cwd_width >= STATUS_CWD_MIN_WIDTH {
+                let cwd = format_directory_display_with_home(
+                    &app.cwd,
                     home.as_deref(),
-                    workdir_width,
+                    cwd_width,
                 );
-                return Some(format!("{context} · {workdir}"));
+                return Some(format!("{context} · {cwd}"));
             }
         }
         if context_width <= available_width {
@@ -750,7 +750,7 @@ pub(crate) fn bottom_status_context_for_width(
     if let Some(profile) = profile.as_deref() {
         segments.push(profile);
     }
-    segments.push(full_workdir.as_str());
+    segments.push(full_cwd.as_str());
     if let Some(branch) = branch.as_deref() {
         segments.push(branch);
     }
@@ -762,22 +762,22 @@ pub(crate) fn bottom_status_context_for_width(
     }
 
     if let Some(agent_hint) = agent_hint.as_deref() {
-        if available_width > STATUS_WORKDIR_MIN_WIDTH.saturating_add(SEP_WIDTH) {
+        if available_width > STATUS_CWD_MIN_WIDTH.saturating_add(SEP_WIDTH) {
             let mut compact_segments = Vec::new();
             let branch_width = branch.as_deref().map(UnicodeWidthStr::width).unwrap_or(0);
             let hint_width = UnicodeWidthStr::width(agent_hint);
             let fixed_width = hint_width
                 .saturating_add(branch_width)
                 .saturating_add(usize::from(branch.is_some()).saturating_add(1) * SEP_WIDTH);
-            let workdir_width = available_width.saturating_sub(fixed_width);
-            if workdir_width >= STATUS_WORKDIR_MIN_WIDTH {
-                let compact_workdir = format_directory_display_with_home(
-                    &app.workdir,
+            let cwd_width = available_width.saturating_sub(fixed_width);
+            if cwd_width >= STATUS_CWD_MIN_WIDTH {
+                let compact_cwd = format_directory_display_with_home(
+                    &app.cwd,
                     home.as_deref(),
-                    workdir_width,
+                    cwd_width,
                 );
-                if !compact_workdir.is_empty() {
-                    compact_segments.push(compact_workdir.as_str());
+                if !compact_cwd.is_empty() {
+                    compact_segments.push(compact_cwd.as_str());
                     if let Some(branch) = branch.as_deref() {
                         compact_segments.push(branch);
                     }
@@ -794,12 +794,12 @@ pub(crate) fn bottom_status_context_for_width(
         }
     }
 
-    if available_width < STATUS_WORKDIR_MIN_WIDTH {
+    if available_width < STATUS_CWD_MIN_WIDTH {
         return None;
     }
-    let workdir =
-        format_directory_display_with_home(&app.workdir, home.as_deref(), available_width);
-    (!workdir.is_empty()).then_some(workdir)
+    let cwd =
+        format_directory_display_with_home(&app.cwd, home.as_deref(), available_width);
+    (!cwd.is_empty()).then_some(cwd)
 }
 
 pub(crate) fn bottom_status_branch(branch: &str) -> Option<String> {

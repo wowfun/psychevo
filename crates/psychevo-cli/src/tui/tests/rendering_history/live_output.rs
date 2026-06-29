@@ -87,7 +87,7 @@ pub(crate) fn yielded_exec_session_stays_active_and_merges_live_poll_output() {
             "session_id": 42,
             "tool_call_id": "call_exec",
             "cmd": "printf start; sleep 1; printf done",
-            "workdir": app.workdir.display().to_string(),
+            "cwd": app.cwd.display().to_string(),
             "started_at_ms": 1
         })),
         true,

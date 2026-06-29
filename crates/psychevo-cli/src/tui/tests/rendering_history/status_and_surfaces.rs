@@ -168,7 +168,7 @@ pub(crate) fn bottom_context_usage_stays_visible_while_model_answers_without_usa
 }
 
 #[test]
-pub(crate) fn bottom_status_line_renders_minimal_workdir_branch_and_context() {
+pub(crate) fn bottom_status_line_renders_minimal_cwd_branch_and_context() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -182,7 +182,7 @@ pub(crate) fn bottom_status_line_renders_minimal_workdir_branch_and_context() {
         text.contains("mock/model  high  ~50/100 (50.0%) estimated · ~/work · main"),
         "{text}"
     );
-    assert!(!text.contains("workdir:"), "{text}");
+    assert!(!text.contains("cwd:"), "{text}");
     assert!(!text.contains("context:"), "{text}");
 }
 

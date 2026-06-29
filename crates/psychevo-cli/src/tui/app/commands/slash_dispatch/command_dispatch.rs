@@ -65,7 +65,7 @@ impl TuiApp {
                 Ok(())
             }
             SlashCommand::Diff => {
-                let diff = collect_workspace_diff(&self.workdir)?;
+                let diff = collect_workspace_diff(&self.cwd)?;
                 println!("{}", workspace_diff_plain_text(&diff));
                 Ok(())
             }
@@ -90,8 +90,8 @@ impl TuiApp {
                     "reloaded context: {} v{}; side cleanup deleted {}",
                     result.prefix_hash,
                     result.version,
-                    self.state_runtime.delete_sessions_for_workdir_with_source(
-                        &self.workdir,
+                    self.state_runtime.delete_sessions_for_cwd_with_source(
+                        &self.cwd,
                         TUI_SIDE_CONVERSATION_SESSION_SOURCE,
                     )?
                 );
@@ -448,7 +448,7 @@ impl TuiApp {
         };
         let result = install_skill(
             &self.home,
-            &self.workdir,
+            &self.cwd,
             InstallOptions {
                 source: (*source).to_string(),
                 target,
@@ -471,7 +471,7 @@ impl TuiApp {
         };
         format_skill_mutation_result(remove_installed_skill(
             &self.home,
-            &self.workdir,
+            &self.cwd,
             target,
             name,
         ))
@@ -493,7 +493,7 @@ impl TuiApp {
                 };
                 format_skill_mutation_result(set_skill_enabled(
                     &self.home,
-                    &self.workdir,
+                    &self.cwd,
                     target,
                     name,
                     *action == "enable",
@@ -512,7 +512,7 @@ impl TuiApp {
                     .unwrap_or_else(|_| Value::String(filtered[2].to_string()));
                 format_skill_mutation_result(set_skill_config_value(
                     &self.home,
-                    &self.workdir,
+                    &self.cwd,
                     target,
                     filtered[1],
                     value,

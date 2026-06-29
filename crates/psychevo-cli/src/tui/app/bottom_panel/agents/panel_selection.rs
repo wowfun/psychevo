@@ -394,7 +394,7 @@ impl TuiApp {
                 }
                 self.open_session_direct(ui, &session_id)?;
             }
-            Some(BottomSelectionValue::LoadOlderSessions(workdir)) => {
+            Some(BottomSelectionValue::LoadOlderSessions(cwd)) => {
                 let view = ui
                     .bottom_panel
                     .as_ref()
@@ -402,16 +402,16 @@ impl TuiApp {
                     .unwrap_or(SessionListView::Active);
                 let next_limit = self
                     .session_browser_limits
-                    .get(&workdir)
+                    .get(&cwd)
                     .copied()
                     .unwrap_or(20)
                     .saturating_add(20);
                 self.session_browser_limits
-                    .insert(workdir.clone(), next_limit);
+                    .insert(cwd.clone(), next_limit);
                 self.rebuild_session_panel(
                     ui,
                     view,
-                    Some(format!("sessions:load-older:{workdir}")),
+                    Some(format!("sessions:load-older:{cwd}")),
                     Some("loaded older sessions"),
                 )?;
                 if let Some(BottomPanel::Sessions(panel)) = ui.bottom_panel.as_mut() {
@@ -526,7 +526,7 @@ impl TuiApp {
                     return Ok(());
                 }
                 set_local_toolset_enabled(
-                    self.workdir.join(".psychevo"),
+                    self.cwd.join(".psychevo"),
                     self.current_mode,
                     &name,
                     !enabled,

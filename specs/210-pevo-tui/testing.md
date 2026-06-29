@@ -35,8 +35,8 @@ Define acceptance expectations and validation scenarios for the concrete
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 Relevant narrow validation:
 
@@ -45,15 +45,22 @@ Relevant narrow validation:
 - `cargo test -p psychevo-runtime`
 - `cargo test -p psychevo-cli`
 
-Rust broad validation remains `scripts/validate-rust.sh`. Documentation-only
-changes to this topic do not require code tests unless executable examples,
-generated artifacts, or validation instructions change.
+Rust broad validation remains `cargo xtask ci run --profile rust-broad`.
+Documentation-only changes to this topic do not require code tests unless
+executable examples, generated artifacts, or validation instructions change.
+
+Deterministic TUI/VHS visual diagnostics run through:
+
+- `cargo xtask ci run --profile visual`
+
+This workflow uses a fake local provider and writes reviewable artifacts under
+the CI artifact root.
 
 Manual real-provider validation is opt-in only.
 
 ## Scenario Matrix
 
-- TUI state read/write, version tolerance, per-workdir model and variant
+- TUI state read/write, version tolerance, per-cwd model and variant
   precedence, mode persistence, thinking/raw/sidebar visibility persistence,
   configured alias/shortcut parsing, and startup rejection for invalid
   keybinding configuration.
@@ -90,7 +97,7 @@ Manual real-provider validation is opt-in only.
 - Rendering tests may use terminal snapshots and VHS captures, but should avoid
   brittle full-screen snapshots when structured row facts are available.
 - TUI tests must use fake or test providers and isolated `PSYCHEVO_HOME`,
-  config, SQLite state, workdir, timers, sockets, and terminal fixtures.
+  config, SQLite state, cwd, timers, sockets, and terminal fixtures.
 - TUI Add Provider tests should drive provider-preset, provider-wizard, and
   model-catalog fetch behavior with fake local `/models` endpoints and must
   assert that raw API keys are not rendered or written to TOML.

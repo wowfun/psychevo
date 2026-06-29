@@ -12,17 +12,10 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
     );
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -109,17 +102,10 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -213,17 +199,10 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -289,17 +268,10 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -482,17 +454,10 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -559,17 +524,10 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -615,17 +573,10 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -696,17 +647,10 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let parent = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
     let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.workdir,
-            "agent",
-            "mock-model",
-            "mock",
-            None,
-        )
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
         .expect("child session");
     store
         .upsert_agent_edge(

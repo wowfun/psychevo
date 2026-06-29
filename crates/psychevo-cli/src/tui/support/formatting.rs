@@ -55,7 +55,7 @@ pub(crate) fn resolve_session_ref_from_summaries(
         return sessions
             .first()
             .map(|session| session.id.clone())
-            .ok_or_else(|| anyhow!("no latest session for this workdir"));
+            .ok_or_else(|| anyhow!("no latest session for this cwd"));
     }
     if let Some(session) = sessions.iter().find(|session| session.id == reference) {
         return Ok(session.id.clone());

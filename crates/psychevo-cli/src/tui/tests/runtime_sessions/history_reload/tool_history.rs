@@ -4,7 +4,7 @@ pub(crate) fn load_history_omits_bottom_context_usage_without_context_limit() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -90,7 +90,7 @@ pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result(
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "tui",
             "mimo-v2.5-pro",
             "xiaomi-token-plan",
@@ -189,7 +189,7 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "tui",
             "mimo-v2.5-pro",
             "xiaomi-token-plan",
@@ -267,7 +267,7 @@ pub(crate) fn load_history_keeps_unfinished_tool_call_active_with_foreign_gatewa
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "web",
             "mimo-v2.5-pro",
             "xiaomi-token-plan",
@@ -305,7 +305,7 @@ pub(crate) fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "web",
             "mimo-v2.5-pro",
             "xiaomi-token-plan",
@@ -338,7 +338,7 @@ pub(crate) fn current_foreign_gateway_activity_interrupt_routes_control_command(
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "web",
             "mimo-v2.5-pro",
             "xiaomi-token-plan",
@@ -373,7 +373,7 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "web",
             "mimo-v2.5-pro",
             "xiaomi-token-plan",
@@ -381,7 +381,7 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
         )
         .expect("session");
     let unrelated_session = store
-        .create_session_with_metadata(&app.workdir, "web", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "web", "mock-model", "mock", None)
         .expect("unrelated session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -483,7 +483,7 @@ pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &app.workdir,
+            &app.cwd,
             "tui",
             "mimo-v2.5-pro",
             "xiaomi-token-plan",
@@ -550,7 +550,7 @@ pub(crate) fn message_history_orders_reasoning_before_assistant_text() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -595,7 +595,7 @@ pub(crate) fn message_history_orders_assistant_preamble_before_tool_after_reload
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");

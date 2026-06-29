@@ -4,7 +4,7 @@ pub(crate) fn message_history_completed_assistant_restores_turn_meta() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     insert_tui_message_with_metadata(
@@ -53,7 +53,7 @@ pub(crate) fn message_history_merges_write_stdin_into_exec_command_row() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -268,10 +268,10 @@ pub(crate) async fn sessions_panel_switches_without_status_row() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let first = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-a", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&app.workdir, "tui", "model-b", "mock", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
         .expect("second");
     app.current_session = Some(first.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");

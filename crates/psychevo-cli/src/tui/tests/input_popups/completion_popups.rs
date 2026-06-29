@@ -5,7 +5,7 @@ pub(crate) use super::*;
 pub(crate) async fn deleted_image_placeholder_unbinds_pending_attachment() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    let image = app.workdir.join("image.png");
+    let image = app.cwd.join("image.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
     ui.add_pending_image(ImageInput::LocalPath(image));
@@ -39,7 +39,7 @@ pub(crate) async fn deleted_image_placeholder_unbinds_pending_attachment() {
 pub(crate) fn adding_image_after_deleted_placeholder_keeps_placeholder_unique() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
-    let image = app.workdir.join("image.png");
+    let image = app.cwd.join("image.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
     let first = ui.add_pending_image(ImageInput::LocalPath(image.clone()));
@@ -65,7 +65,7 @@ pub(crate) fn adding_image_after_deleted_placeholder_keeps_placeholder_unique() 
 pub(crate) async fn new_command_clears_pending_images_and_ephemeral_status() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let image = app.workdir.join("image.png");
+    let image = app.cwd.join("image.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
     let placeholder = ui.add_pending_image(ImageInput::LocalPath(image));
@@ -317,11 +317,11 @@ pub(crate) async fn file_popup_esc_dismisses_until_token_changes() {
         .await
         .expect("esc");
     assert!(ui.file_search.popup.is_none());
-    ui.sync_file_popup(&app.workdir);
+    ui.sync_file_popup(&app.cwd);
     assert!(ui.file_search.popup.is_none());
 
     ui.textarea = textarea_with_text("read @s");
-    ui.sync_file_popup(&app.workdir);
+    ui.sync_file_popup(&app.cwd);
     assert!(ui.file_search.popup.is_some());
 }
 
@@ -424,7 +424,7 @@ pub(crate) async fn agent_popup_keyboard_selection_inserts_marker_without_submit
     write_tui_agent(&app, "helper", "Helps with delegated code work");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use @he");
-    ui.sync_file_popup(&app.workdir);
+    ui.sync_file_popup(&app.cwd);
     app.sync_agent_popup(&mut ui);
 
     assert!(ui.agent_popup_visible());
@@ -668,7 +668,7 @@ pub(crate) fn write_tui_skill(app: &TuiApp, name: &str, description: &str) {
 }
 
 pub(crate) fn write_tui_agent(app: &TuiApp, name: &str, description: &str) {
-    let dir = app.workdir.join(".psychevo").join("agents");
+    let dir = app.cwd.join(".psychevo").join("agents");
     std::fs::create_dir_all(&dir).expect("agent dir");
     std::fs::write(
         dir.join(format!("{name}.md")),

@@ -7,7 +7,7 @@ pub(crate) async fn fullscreen_rename_updates_session_title_and_sidebar() {
     let mut app = test_app(&temp);
     let store = SqliteStore::open(&app.db_path).expect("store");
     let session_id = store
-        .create_session_with_metadata(&app.workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&app.cwd, "tui", "model", "provider", None)
         .expect("session");
     app.current_session = Some(session_id.clone());
     app.current_session_title = None;

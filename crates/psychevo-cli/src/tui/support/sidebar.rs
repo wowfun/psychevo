@@ -5,10 +5,10 @@ pub(crate) struct GitSnapshot {
     pub(crate) changed_files: Vec<String>,
 }
 
-pub(crate) fn git_snapshot(workdir: &PathBuf) -> GitSnapshot {
+pub(crate) fn git_snapshot(cwd: &PathBuf) -> GitSnapshot {
     let branch = StdCommand::new("git")
         .arg("-C")
-        .arg(workdir)
+        .arg(cwd)
         .args(["branch", "--show-current"])
         .output()
         .ok()
@@ -22,7 +22,7 @@ pub(crate) fn git_snapshot(workdir: &PathBuf) -> GitSnapshot {
         .unwrap_or_else(|| "(none)".to_string());
     let changed_files = StdCommand::new("git")
         .arg("-C")
-        .arg(workdir)
+        .arg(cwd)
         .args(["status", "--short"])
         .output()
         .ok()

@@ -153,7 +153,7 @@ accounting and keeps the latest context-window estimate separate. The bottom
 status line renders a compact, width-aware sequence with context first, then
 cache-read percent, session tokens, and cost only when space permits.
 
-`/usage` shows a current-session summary above the existing workdir/global
+`/usage` shows a current-session summary above the existing cwd/global
 stats. The session summary must respect the same session and revert visibility
 boundaries as history reload, treat missing accounting as unknown/zero display
 data, and avoid rendering raw prompt, message, tool argument, or provider

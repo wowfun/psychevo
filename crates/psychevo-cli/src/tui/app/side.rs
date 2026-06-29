@@ -31,7 +31,7 @@ impl TuiApp {
         let side_thread_id =
             store.create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
                 parent_session_id: &parent_session,
-                workdir: &self.workdir,
+                cwd: &self.cwd,
                 source: TUI_SIDE_CONVERSATION_SESSION_SOURCE,
                 model: &model,
                 provider: &provider,
@@ -161,15 +161,15 @@ impl TuiApp {
     pub(crate) fn restore_parent_tui_state(&mut self) -> Result<()> {
         if let Some(model) = self.current_model.clone() {
             self.model_state
-                .set_model(&self.workdir_key, model, self.current_variant.clone());
+                .set_model(&self.cwd_key, model, self.current_variant.clone());
         } else {
-            self.model_state.clear_workdir_model(&self.workdir_key);
+            self.model_state.clear_cwd_model(&self.cwd_key);
         }
         self.model_state.save(&self.model_state_path)?;
         self.state
-            .set_mode(&self.workdir_key, self.current_mode.as_str().to_string());
+            .set_mode(&self.cwd_key, self.current_mode.as_str().to_string());
         self.state.set_permission_mode(
-            &self.workdir_key,
+            &self.cwd_key,
             self.current_permission_mode.as_str().to_string(),
         );
         self.state.save(&self.state_path)?;
@@ -181,13 +181,10 @@ impl TuiApp {
             return false;
         }
         let state = self.state_runtime.clone();
-        let workdir = self.workdir.clone();
+        let cwd = self.cwd.clone();
         let task = tokio::spawn(async move {
             state
-                .delete_sessions_for_workdir_with_source(
-                    &workdir,
-                    TUI_SIDE_CONVERSATION_SESSION_SOURCE,
-                )
+                .delete_sessions_for_cwd_with_source(&cwd, TUI_SIDE_CONVERSATION_SESSION_SOURCE)
                 .map_err(|err| err.to_string())
         });
         self.side_cleanup_task = Some(SideCleanupTask { task });

@@ -127,9 +127,9 @@ impl TuiApp {
         if let Some(task) = self.diff_task.take() {
             task.task.abort();
         }
-        let workdir = self.workdir.clone();
+        let cwd = self.cwd.clone();
         let task = tokio::task::spawn_blocking(move || {
-            collect_workspace_diff(&workdir).map_err(|err| err.to_string())
+            collect_workspace_diff(&cwd).map_err(|err| err.to_string())
         });
         self.diff_task = Some(DiffTask { task });
     }
@@ -240,7 +240,7 @@ impl TuiApp {
         let message = prompt_message_from_inputs_with_options(
             &prompt,
             &image_inputs,
-            &self.workdir,
+            &self.cwd,
             &metadata,
             false,
         )?
@@ -289,7 +289,7 @@ impl TuiApp {
         let message = prompt_message_from_inputs_with_options(
             &prompt,
             &image_inputs,
-            &self.workdir,
+            &self.cwd,
             &metadata,
             false,
         )?

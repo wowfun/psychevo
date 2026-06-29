@@ -9,7 +9,7 @@ pub use live_output::*;
 mod exec_history_layout;
 #[allow(unused_imports)]
 pub use exec_history_layout::*;
-#[path = "rendering_history/live_tool_reconciliation.rs"]
+#[path = "rendering_history/live_tool_reconciliation/mod.rs"]
 mod live_tool_reconciliation;
 #[allow(unused_imports)]
 pub use live_tool_reconciliation::*;

@@ -166,14 +166,14 @@ impl TuiApp {
                 }
                 KeyCode::Tab => {
                     ui.insert_selected_file_path();
-                    ui.sync_file_popup(&self.workdir);
+                    ui.sync_file_popup(&self.cwd);
                     self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                     return Ok(false);
                 }
                 KeyCode::Enter if ui.selected_file_path().is_some() => {
                     ui.insert_selected_file_path();
-                    ui.sync_file_popup(&self.workdir);
+                    ui.sync_file_popup(&self.cwd);
                     self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                     return Ok(false);
@@ -416,7 +416,7 @@ impl TuiApp {
             }
         }
         ui.sync_pending_images_with_textarea();
-        ui.sync_file_popup(&self.workdir);
+        ui.sync_file_popup(&self.cwd);
         self.sync_agent_popup(ui);
         self.sync_skill_popup(ui);
         Ok(false)
