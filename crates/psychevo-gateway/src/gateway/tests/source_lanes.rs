@@ -559,3 +559,145 @@ model = "lmstudio/test-model"
             .expect("running task")
             .expect("running result");
     }
+
+    #[tokio::test]
+    async fn durable_activity_does_not_rebind_parent_turn_to_scoped_child_turn_started() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend);
+        let turn_id = "turn-parent";
+        let parent_thread = harness
+            .state
+            .store()
+            .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
+            .expect("parent session");
+        let child_thread = harness
+            .state
+            .store()
+            .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
+            .expect("child session");
+
+        let activity = harness
+            .gateway
+            .claim_durable_gateway_activity(DurableGatewayActivityClaim {
+                activity_id: turn_id,
+                thread_id: None,
+                source_key: Some("web:test"),
+                turn_id: Some(turn_id),
+                kind: "turn",
+                owner_surface: Some("web"),
+                queued_turns: 0,
+                intent: Some(json!({
+                    "kind": "turn",
+                    "threadId": parent_thread.clone(),
+                })),
+            })
+            .expect("claim activity");
+        assert!(
+            harness
+                .state
+                .store()
+                .update_gateway_activity_thread(
+                    &activity.activity_id,
+                    &activity.owner_id,
+                    activity.generation,
+                    &parent_thread,
+                    gateway_now_ms() + 30_000,
+                )
+                .expect("parent turn started")
+        );
+        assert!(
+            !harness
+                .state
+                .store()
+                .update_gateway_activity_thread(
+                    &activity.activity_id,
+                    &activity.owner_id,
+                    activity.generation,
+                    &child_thread,
+                    gateway_now_ms() + 30_000,
+                )
+                .expect("scoped child turn started")
+        );
+
+        let record = harness
+            .state
+            .store()
+            .gateway_activity(turn_id)
+            .expect("activity lookup")
+            .expect("activity");
+        assert_eq!(record.thread_id.as_deref(), Some(parent_thread.as_str()));
+    }
+
+    #[tokio::test]
+    async fn gateway_event_sink_does_not_alias_scoped_child_thread_to_parent_activity() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend);
+        let turn_id = "turn-parent";
+        let queue_key = "source:web:test";
+        let parent_thread = harness
+            .state
+            .store()
+            .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
+            .expect("parent session");
+        let child_thread = harness
+            .state
+            .store()
+            .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
+            .expect("child session");
+
+        harness.gateway.register_active(
+            queue_key,
+            turn_id.to_string(),
+            None,
+            ActiveActivityKind::Turn,
+        );
+        let activity = harness
+            .gateway
+            .claim_durable_gateway_activity(DurableGatewayActivityClaim {
+                activity_id: turn_id,
+                thread_id: None,
+                source_key: Some("web:test"),
+                turn_id: Some(turn_id),
+                kind: "turn",
+                owner_surface: Some("web"),
+                queued_turns: 0,
+                intent: Some(json!({
+                    "kind": "turn",
+                    "threadId": parent_thread.clone(),
+                })),
+            })
+            .expect("claim activity");
+        let sink = harness
+            .gateway
+            .wrap_gateway_event_sink(
+                None,
+                Some(activity),
+                Some(queue_key.to_string()),
+                Some(turn_id.to_string()),
+            )
+            .expect("event sink");
+
+        sink(GatewayEvent::TurnStarted {
+            thread_id: Some(parent_thread.clone()),
+            turn_id: turn_id.to_string(),
+            selected_skills: Vec::new(),
+        });
+        sink(GatewayEvent::TurnStarted {
+            thread_id: Some(child_thread.clone()),
+            turn_id: turn_id.to_string(),
+            selected_skills: Vec::new(),
+        });
+
+        assert!(
+            harness
+                .gateway
+                .activity_for_selector(GatewayThreadSelector::thread_id(&parent_thread))
+                .running
+        );
+        assert!(
+            !harness
+                .gateway
+                .activity_for_selector(GatewayThreadSelector::thread_id(&child_thread))
+                .running
+        );
+    }

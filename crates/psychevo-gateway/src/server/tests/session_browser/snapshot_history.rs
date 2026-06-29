@@ -231,6 +231,89 @@ fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
     assert_eq!(entries[0]["blocks"][0]["body"], "Committed **answer**.");
 }
 
+#[test]
+fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
+    let (_temp, state) = web_state();
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let store = state.inner.state.store();
+    let parent_session_id = store
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "web",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("parent session");
+    let child_session_id = store
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "agent",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("child session");
+    store
+        .append_message(
+            &parent_session_id,
+            &RuntimeMessage::Assistant {
+                content: vec![psychevo_runtime::AssistantBlock::Text {
+                    text: "Committed **prefix**.".to_string(),
+                }],
+                timestamp_ms: 10,
+                finish_reason: Some("tool_calls".to_string()),
+                outcome: psychevo_runtime::Outcome::Normal,
+                model: Some("fake-model".to_string()),
+                provider: Some("fake-provider".to_string()),
+            },
+        )
+        .expect("append committed assistant");
+
+    let turn_id = "turn-running";
+    let activity = store
+        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+            activity_id: turn_id,
+            thread_id: Some(&parent_session_id),
+            source_key: None,
+            turn_id: Some(turn_id),
+            kind: "turn",
+            owner_id: state.inner.gateway.owner_id(),
+            owner_surface: Some("web"),
+            lease_expires_at_ms: gateway_now_ms() + 30_000,
+            queued_turns: 0,
+            superseded_activity_id: None,
+            intent: Some(json!({"kind": "turn", "firstCommittedSeq": 1})),
+        })
+        .expect("claim running activity");
+    store
+        .update_gateway_activity_thread(
+            &activity.activity_id,
+            &activity.owner_id,
+            activity.generation,
+            &child_session_id,
+            gateway_now_ms() + 30_000,
+        )
+        .expect("scoped child turn started");
+
+    append_assistant_live_text_update(
+        &state,
+        &activity.activity_id,
+        &parent_session_id,
+        turn_id,
+        "Committed prefix.",
+    );
+
+    let snapshot = thread_snapshot(&state, &scope, Some(&parent_session_id)).expect("snapshot");
+    let entries = snapshot["entries"].as_array().expect("entries");
+    assert_eq!(snapshot["activity"]["running"], true, "{snapshot:#}");
+    assert_eq!(entries.len(), 1, "{snapshot:#}");
+    assert_eq!(entries[0]["source"], "runtime.message");
+    assert_eq!(entries[0]["turnId"], turn_id);
+    assert_eq!(entries[0]["metadata"]["liveOrder"], 0);
+    assert_eq!(entries[0]["blocks"][0]["body"], "Committed **prefix**.");
+}
+
 fn append_exec_live_update(
     state: &WebState,
     activity_id: &str,

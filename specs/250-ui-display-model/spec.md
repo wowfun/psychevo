@@ -54,6 +54,11 @@ Gateway transcript projection materializes the completed turn from durable
 messages; clients discard live overlay state for that turn and replace it with
 those committed entries. Client-local optimistic prompt rows are part of the
 same live overlay and must be replaced by the committed user entry for the turn.
+Live assistant `message_update` observations carry the current assistant
+segment snapshot. Gateway must not treat them as additive block deltas: when
+the current snapshot changes block positions, removed or moved provisional
+text, reasoning, and tool blocks must not remain visible beside the current
+snapshot.
 Committed entries emitted for a turn completion or for an active-turn snapshot
 must carry the real turn identity. Assistant entries from the same turn must
 also carry the same assistant segment ordinal used by live assistant entries.
@@ -86,6 +91,13 @@ short-lived delivery buffer. That buffer does not change transcript fact
 ownership: committed runtime `messages` are still the only ordinary durable
 transcript source, and live entries must still be discarded or reconciled when
 committed entries arrive.
+The owning Gateway activity for a Web turn is rooted in the parent transcript
+thread. Scoped child-agent live observations keep their own child thread ids for
+child-thread inspection, but they must not rebind the parent turn's durable
+activity thread or active queue alias. Parent transcript snapshots depend on
+that root ownership to stamp committed in-progress messages with the active
+turn id and assistant segment ordinal before replaying any remaining live
+overlay.
 Workbench and TUI both consume retained boundary events and latest-entry
 snapshots for sessions they display. A foreign live observation is applied only
 when its thread identity matches the visible session or an explicitly tracked
@@ -164,6 +176,11 @@ visible phase text and tool-call content, the live projector still anchors the
 assistant text before the owning tool block once that content is known.
 Assistant text in a tool-call message remains a text block; only provider/model
 reasoning events may create reasoning blocks.
+For assistant message snapshots, render order follows the actual
+`message.content[]` order in the current snapshot. Provider `content_index` and
+`call_index` remain tool-call assembly and identity metadata, but they must not
+act as transcript text block identity or override visual ordering for the
+current assistant snapshot.
 Tool-call assistant text may be marked as an `assistant_phase` live projection
 while the turn is active. It is a block-level projection hint inside the live
 assistant segment, not a cross-owner dedupe rule. Client reconciliation must use

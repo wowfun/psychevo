@@ -57,12 +57,20 @@ validation.
 - Tool execution observations that arrive before final assistant message
   content are reconciled into the same ordered assistant segment once final
   content is known.
+- Running assistant `message_update` snapshots replace the current live
+  assistant segment block set, so a visible text block that moves after a
+  reasoning block or tool call does not leave a stale duplicate text block
+  visible until `message_end`.
 - Reasoning deltas before `message_end` remain visible and are completed when
   the assistant segment closes.
 - Hidden assistant messages, including `write_stdin` polls, close the current
   assistant segment and do not absorb later reasoning into the wrong segment.
 - Snapshot refresh during an active turn removes covered live overlay rows while
   retaining only uncovered active material.
+- Scoped child-agent `TurnStarted` observations do not rebind the parent turn's
+  Gateway activity or active queue alias; a parent snapshot taken mid-turn still
+  stamps committed prefix entries with the parent turn id and removes same-owner
+  live overlay text.
 - Reconnect or resume replaces optimistic prompt rows with the committed user
   message for the turn.
 - Empty reasoning-completion observations close existing reasoning blocks

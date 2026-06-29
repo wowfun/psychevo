@@ -409,3 +409,91 @@ fn live_projector_authoritative_message_end_preserves_runtime_reasoning() {
         Some("exec_command python fetch.py")
     );
 }
+
+#[test]
+fn live_projector_replaces_running_message_update_snapshot_when_content_positions_shift() {
+    let mut projector = GatewayLiveProjector::default();
+    let table = "3 个翻译 Agent 已并发启动 ✅，等待它们返回结果：\n\n| # | 任务 | Agent ID | 状态 |\n|---|------|----------|------|\n| 1 | 中→英 | `translate_cn_to_en` | 🔄 运行中 |\n| 2 | 英→中 | `translate_en_to_cn` | 🔄 运行中 |\n| 3 | 日→中 | `translate_ja_to_cn` | 🔄 运行中 |\n\n正在等待所有 Agent 完成...";
+
+    let first_update = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::Event(json!({
+                "type": "message_update",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": table}
+                    ],
+                    "finish_reason": null,
+                    "outcome": "normal"
+                }
+            })),
+        )
+        .expect("first update");
+    assert_eq!(
+        gateway_entry(&first_update)
+            .blocks
+            .iter()
+            .map(|block| block.kind)
+            .collect::<Vec<_>>(),
+        vec![TranscriptBlockKind::Text]
+    );
+
+    let shifted_update = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::Event(json!({
+                "type": "message_update",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "reasoning",
+                            "text": "All three agents have been spawned and are running concurrently."
+                        },
+                        {"type": "text", "text": table},
+                        {
+                            "type": "tool_call",
+                            "id": "call_wait_agent",
+                            "name": "wait_agent",
+                            "arguments": {"timeout_ms": 30000},
+                            "arguments_json": "{\"timeout_ms\":30000}",
+                            "content_index": 0,
+                            "call_index": 0
+                        }
+                    ],
+                    "finish_reason": null,
+                    "outcome": "normal"
+                }
+            })),
+        )
+        .expect("shifted update");
+
+    let entry = gateway_entry(&shifted_update);
+    assert_eq!(entry.id, "live:turn-1:assistant:0");
+    assert_eq!(
+        entry
+            .blocks
+            .iter()
+            .map(|block| (block.kind, block.body.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                TranscriptBlockKind::Reasoning,
+                Some("All three agents have been spawned and are running concurrently.")
+            ),
+            (TranscriptBlockKind::Text, Some(table)),
+            (TranscriptBlockKind::ToolCall, None),
+        ]
+    );
+    assert_eq!(
+        entry
+            .blocks
+            .iter()
+            .filter(|block| block.kind == TranscriptBlockKind::Text && block.body.as_deref() == Some(table))
+            .count(),
+        1
+    );
+    assert_eq!(entry.blocks[2].title.as_deref(), Some("wait_agent"));
+}

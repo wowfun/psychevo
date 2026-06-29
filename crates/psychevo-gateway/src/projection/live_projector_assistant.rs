@@ -65,48 +65,21 @@ impl GatewayLiveProjector {
         let message = value.get("message")?;
         let segment = self.assistant_segment;
         let is_tool_call_turn = assistant_message_is_tool_call_turn(Some(message));
-        let mut visible = false;
         let content = message.get("content").and_then(Value::as_array);
-        if let Some(content) = content {
-            if completed {
-                visible = self.replace_assistant_content_blocks(
-                    turn_id,
-                    value,
-                    content,
-                    segment,
-                    status,
-                    is_tool_call_turn,
-                );
-            } else {
-                for (index, content_block) in content.iter().enumerate() {
-                    visible |= self.project_assistant_content_block(AssistantContentProjection {
-                        turn_id,
-                        event_value: value,
-                        content_block,
-                        index,
-                        segment,
-                        status,
-                        is_tool_call_turn,
-                    });
-                }
-            }
-        }
+        let visible = content.is_some_and(|content| {
+            self.replace_assistant_content_blocks(
+                turn_id,
+                value,
+                content,
+                segment,
+                status,
+                is_tool_call_turn,
+            )
+        });
         if !visible {
             return None;
         }
-        Some(self.emit_entry_event(turn_id, segment, completed, completed))
-    }
-
-    fn project_assistant_content_block(
-        &mut self,
-        projection: AssistantContentProjection<'_>,
-    ) -> bool {
-        let segment = projection.segment;
-        let Some(block) = self.build_assistant_content_block(projection) else {
-            return false;
-        };
-        self.upsert_block(segment, block);
-        true
+        Some(self.emit_entry_event(turn_id, segment, completed, true))
     }
 
     fn replace_assistant_content_blocks(
@@ -119,12 +92,22 @@ impl GatewayLiveProjector {
         is_tool_call_turn: bool,
     ) -> bool {
         let mut blocks = BTreeMap::new();
+        let mut text_ordinal = 0usize;
         for (index, content_block) in content.iter().enumerate() {
+            let text_ordinal_for_block =
+                if content_block.get("type").and_then(Value::as_str) == Some("text") {
+                    let ordinal = text_ordinal;
+                    text_ordinal += 1;
+                    Some(ordinal)
+                } else {
+                    None
+                };
             let Some(block) = self.build_assistant_content_block(AssistantContentProjection {
                 turn_id,
                 event_value,
                 content_block,
                 index,
+                text_ordinal: text_ordinal_for_block,
                 segment,
                 status,
                 is_tool_call_turn,
@@ -160,6 +143,7 @@ impl GatewayLiveProjector {
             event_value,
             content_block,
             index,
+            text_ordinal,
             segment,
             status,
             is_tool_call_turn,
@@ -181,7 +165,7 @@ impl GatewayLiveProjector {
                 set_metadata_field(&mut metadata, "content_array_index", json!(index));
                 set_metadata_field(&mut metadata, "liveOrder", json!(order));
                 Some(live_block(
-                    live_text_block_id(turn_id, segment, index),
+                    live_text_block_id(turn_id, segment, text_ordinal.unwrap_or(index)),
                     TranscriptBlockKind::Text,
                     status,
                     order,

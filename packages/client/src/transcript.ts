@@ -7,6 +7,7 @@ import type {
 
 import { enrichCommittedAgentTargetsFromLive } from "./transcript/agent-targets";
 import {
+  LIVE_SOURCE,
   OPTIMISTIC_LIVE_ORDER,
   OPTIMISTIC_SOURCE,
   artifactIdsForBlock,
@@ -26,6 +27,7 @@ import {
   removeEmptyLiveOverlayForTurn,
   sortBlocks,
   sortTranscriptEntries,
+  streamSeq,
   threadForTurn
 } from "./transcript/common";
 import {
@@ -58,6 +60,9 @@ export function applyLiveTranscriptEvent(
     case "entryUpdated":
     case "entryCompleted": {
       const nextEntry = entryForSnapshot(snapshot, event.entry);
+      if (isOlderSameEntryLiveUpdate(snapshot.entries, nextEntry)) {
+        return snapshot;
+      }
       if (isHiddenTranscriptEntry(nextEntry)) {
         return {
           ...snapshot,
@@ -283,6 +288,22 @@ function eventAppliesToSnapshot(snapshot: ThreadSnapshot, event: GatewayEvent): 
     return false;
   }
   return true;
+}
+
+function isOlderSameEntryLiveUpdate(entries: TranscriptEntry[], next: TranscriptEntry): boolean {
+  if (next.source !== LIVE_SOURCE) {
+    return false;
+  }
+  const nextSeq = streamSeq(next);
+  if (nextSeq === null) {
+    return false;
+  }
+  const current = entries.find((entry) => entry.id === next.id && entry.source === LIVE_SOURCE);
+  if (!current) {
+    return false;
+  }
+  const currentSeq = streamSeq(current);
+  return currentSeq !== null && nextSeq < currentSeq;
 }
 
 function isLiveTranscriptObservation(event: GatewayEvent): event is LiveTranscriptObservationEvent {

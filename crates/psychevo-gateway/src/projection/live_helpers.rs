@@ -324,12 +324,8 @@ fn tool_position_key(segment: usize, value: &Value) -> Option<String> {
     Some(format!("{segment}:{content_index}:{call_index}"))
 }
 
-fn content_block_order(block: &Value, _index: usize, fallback: i64) -> i64 {
-    block
-        .get("content_index")
-        .or_else(|| block.get("content_array_index"))
-        .and_then(Value::as_i64)
-        .unwrap_or(fallback)
+fn content_block_order(_block: &Value, index: usize, _fallback: i64) -> i64 {
+    index as i64
 }
 
 fn tool_message_block_metadata(block: &Value, index: usize) -> Option<(String, String, Value)> {

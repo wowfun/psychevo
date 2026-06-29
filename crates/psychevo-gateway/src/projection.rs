@@ -47,6 +47,7 @@ struct AssistantContentProjection<'a> {
     event_value: &'a Value,
     content_block: &'a Value,
     index: usize,
+    text_ordinal: Option<usize>,
     segment: usize,
     status: TranscriptBlockStatus,
     is_tool_call_turn: bool,

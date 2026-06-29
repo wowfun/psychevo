@@ -23,6 +23,11 @@ struct DurableGatewayActivityClaim<'a> {
     intent: Option<Value>,
 }
 
+#[derive(Default)]
+struct PersistGatewayEventResult {
+    accepted_thread_id: Option<String>,
+}
+
 impl Gateway {
     fn claim_durable_gateway_activity(
         &self,
@@ -96,16 +101,15 @@ impl Gateway {
         }
         let gateway = self.clone();
         Some(Arc::new(move |event: GatewayEvent| {
-            if let GatewayEvent::TurnStarted {
-                thread_id: Some(thread_id),
-                ..
-            } = &event
+            let accepted_thread_id = activity.as_ref().and_then(|activity| {
+                gateway
+                    .persist_gateway_event(activity, &event, default_turn_id.as_deref())
+                    .accepted_thread_id
+            });
+            if let Some(thread_id) = accepted_thread_id.as_deref()
                 && let Some(queue_key) = queue_key.as_deref()
             {
                 gateway.register_active_thread_alias(queue_key, thread_id);
-            }
-            if let Some(activity) = activity.as_ref() {
-                gateway.persist_gateway_event(activity, &event, default_turn_id.as_deref());
             }
             if let Some(event_sink) = event_sink.as_ref() {
                 event_sink(event);
@@ -118,19 +122,25 @@ impl Gateway {
         activity: &DurableGatewayActivity,
         event: &GatewayEvent,
         default_turn_id: Option<&str>,
-    ) {
+    ) -> PersistGatewayEventResult {
+        let mut result = PersistGatewayEventResult::default();
         if let GatewayEvent::TurnStarted {
             thread_id: Some(thread_id),
             ..
         } = event
+            && self
+                .state
+                .store()
+                .update_gateway_activity_thread(
+                    &activity.activity_id,
+                    &activity.owner_id,
+                    activity.generation,
+                    thread_id,
+                    gateway_now_ms() + GATEWAY_ACTIVITY_LEASE_MS,
+                )
+                .unwrap_or(false)
         {
-            let _ = self.state.store().update_gateway_activity_thread(
-                &activity.activity_id,
-                &activity.owner_id,
-                activity.generation,
-                thread_id,
-                gateway_now_ms() + GATEWAY_ACTIVITY_LEASE_MS,
-            );
+            result.accepted_thread_id = Some(thread_id.clone());
         }
 
         if matches!(event, GatewayEvent::TurnCompleted { .. }) {
@@ -138,7 +148,7 @@ impl Gateway {
         }
 
         let Ok(event_value) = serde_json::to_value(event) else {
-            return;
+            return result;
         };
         if should_append_gateway_live_event(activity, event) {
             let _ = self.state.store().append_gateway_live_event(
@@ -157,6 +167,7 @@ impl Gateway {
                 event_value,
             );
         }
+        result
     }
 
     fn retain_gateway_live_snapshot(

@@ -166,6 +166,7 @@ impl SqliteStore {
                 UPDATE gateway_activities
                 SET thread_id = ?4, updated_at_ms = ?5, lease_expires_at_ms = ?6
                 WHERE activity_id = ?1 AND owner_id = ?2 AND generation = ?3
+                  AND (thread_id IS NULL OR thread_id = ?4)
                 "#,
                 params![
                     activity_id,

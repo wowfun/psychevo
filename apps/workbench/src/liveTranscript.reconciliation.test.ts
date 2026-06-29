@@ -238,6 +238,62 @@ describe("applyLiveTranscriptEvent", () => {
     ]);
   });
 
+  it("ignores older same-entry live updates after a newer snapshot", () => {
+    const current = applyLiveTranscriptEvent(
+      snapshot(),
+      eventWithEntry("entryUpdated", entry({
+        id: "live:turn-1:assistant:0",
+        metadata: { projection: "assistant_segment", liveOrder: 0, streamSeq: 2, authoritativeBlocks: true },
+        blocks: [
+          block({
+            id: "live:turn-1:assistant:0:text:0",
+            kind: "text",
+            body: "current answer",
+            detail: "current answer",
+            order: 0
+          }),
+          block({
+            id: "live:turn-1:tool:call_wait_agent",
+            kind: "toolCall",
+            title: "wait_agent",
+            status: "pending",
+            order: 1,
+            metadata: {
+              projection: "tool",
+              tool_name: "wait_agent",
+              tool_call_id: "call_wait_agent"
+            }
+          })
+        ]
+      }))
+    );
+
+    const next = applyLiveTranscriptEvent(
+      current,
+      eventWithEntry("entryUpdated", entry({
+        id: "live:turn-1:assistant:0",
+        metadata: { projection: "assistant_segment", liveOrder: 0, streamSeq: 1 },
+        blocks: [
+          block({
+            id: "live:turn-1:assistant:0:text:0",
+            kind: "text",
+            body: "stale answer",
+            detail: "stale answer",
+            order: 0
+          })
+        ]
+      }))
+    );
+
+    expect(next.entries).toHaveLength(1);
+    expect(next.entries[0]?.metadata).toMatchObject({ streamSeq: 2 });
+    expect(next.entries[0]?.blocks.map((candidate) => candidate.id)).toEqual([
+      "live:turn-1:assistant:0:text:0",
+      "live:turn-1:tool:call_wait_agent"
+    ]);
+    expect(next.entries[0]?.blocks[0]?.body).toBe("current answer");
+  });
+
   it("keeps an optimistic prompt before same-turn live assistant and tool rows", () => {
     const idleSnapshot = {
       ...snapshot(),
