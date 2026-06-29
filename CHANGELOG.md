@@ -1,9 +1,76 @@
 # Changelog
 
+## 2026-06-29
+
+- Completed the production large-file cleanup by splitting Rust runtime,
+  Gateway, CLI/TUI, Workbench, protocol, and `peval-py` monoliths into focused
+  modules while preserving public interfaces and behavior.
+- Kept hook/plugin runtimes, channel/IM adapters, live and committed transcript
+  projectors, settings/observability, automations, session views, RPC dispatch,
+  and generated protocol schemas on stable public surfaces after the split.
+- Split Workbench and shared transcript code/tests into narrower runtime,
+  settings, automation, transcript, e2e, and tool-detail modules, and fixed
+  shared live validation registration after the e2e split.
+- Split TUI state, rendering, and tests for turn lifecycle, markdown, evidence
+  ledger, stream events, composer/popups, model/session panels, and live tool
+  reconciliation without changing TUI behavior.
+- Split `peval-py` state, inspection, input/report assets, tests, and specs
+  into focused modules and normative detail docs while preserving CLI/report
+  behavior.
+- Documented `cargo xtask doctor large-files` remediation expectations so
+  future large-file work follows semantic module boundaries.
+
+## 2026-06-28
+
+- Added local-first `cargo xtask ci`, `live`, `init dev-env`, and `doctor`
+  workflows for deterministic checks, live validation planning, repo-local
+  state, dependency diagnostics, artifact cleanup, visual capture, and
+  large-file inventory.
+- Replaced legacy live, visual, dependency, and large-file shell helpers with
+  repo-owned `xtask` commands while keeping `scripts/install.sh` as the
+  standalone product installer.
+- Made browser sessions profile-global, replaced internal/wire `workdir`
+  naming with `cwd`, and kept Settings, Models, Slash settings, and
+  Automations as global management surfaces while execution paths carry an
+  explicit cwd; old development state is reset with `pevo init --reset-state`
+  rather than migrated.
+- Fixed Workflow Automations stale `running` recovery so Gateway startup,
+  scheduler ticks, and manual run-now recover expired claims to terminal failed
+  runs, recompute scheduling, and preserve historical thread evidence.
+- Separated Workbench automation lifecycle display from last-run status and
+  restored Open Thread fallback to the newest non-empty run thread.
+- Added a persistent provider `/models` picker cache under
+  `$PSYCHEVO_HOME/cache/provider_models_cache.json` for explicit catalog fetches
+  from CLI and Workbench, with credential fingerprints, raw metadata stripping,
+  and Settings reads that do not contact providers.
+- Added deterministic provider-cache coverage plus opt-in live validation for
+  Xiaomi Token Plan catalog fetch and automation execution.
+
+## 2026-06-27
+
+- Implemented the shared hook runtime and `pevo hooks` review commands with
+  normalized declarations, profile trust, concurrent command hooks,
+  prompt/worker handlers, plugin hook loading, permission feedback, and
+  deterministic/live validation.
+- Fixed hook inheritance, output truncation, and trust-key stability issues;
+  ADR 0004 and the hook/plugin specs now document the review and execution
+  contract without external decision-record dependencies.
+- Fixed prompt image routing so ordinary HTTP(S) links remain text, text-only
+  image capability metadata degrades image blocks before provider calls, and
+  OpenAI-compatible providers retry once with text-only image fallbacks.
+
 ## 2026-06-26
 
 - Added ADR 0003 for the Psychevo plugin system, covering manifest
   compatibility, plugin store sources, policy overlays, and capability mappings.
+- Implemented the first plugin runtime slice with native/compat manifest
+  loading, path-safe local/Git installs, scoped plugin stores, policy overlay
+  parsing, `pevo plugin`, shared hook execution, worker tool adapters, and a
+  migrated disk-cleanup plugin fixture.
+- Hardened plugin install and worker behavior by rejecting package symlinks,
+  bounding worker JSON-RPC waits, passing effective env into worker discovery,
+  allowing project-local policy for profile-installed plugins, and aligning
+  plugin testing specs with behavior-focused acceptance coverage.
 - Fixed first-turn Workbench automation/thread ownership issues and added
   deterministic + live Playwright coverage for composer-driven automation flows.
 - Reworked `peval-py` around an inspect-first trajectory workflow:
@@ -26,8 +93,8 @@
 - Improved visible-session titles, transcript replay ownership, TUI rendering,
   and sandbox validation for shell-only compatibility paths.
 - Improved `peval-py` input/config/report handling and Trial artifact guidance.
-- Renamed the Rust broad validation script to `scripts/validate-rust.sh` and
-  updated related docs.
+- Moved the Rust broad validation gate under the repo-owned CI workflow runner
+  and updated related docs.
 
 ## 2026-06-24
 
@@ -202,7 +269,7 @@
   cloneable setup, local aliases, profile-local managed Gateway state, and
   status display across CLI/TUI/Workbench.
 - Added profile-scoped workspace roots and GUI workspace creation through
-  Gateway, protocol, and Workbench while keeping runtime scopes workdir-based.
+  Gateway, protocol, and Workbench while keeping runtime scopes cwd-based.
 - Polished Workbench Sessions/search/files language and spacing around
   workspace semantics, including the icon-only workspace creation action.
 
@@ -270,7 +337,7 @@
   Workbench lists sessions across projects with project grouping and persistent
   pin/unpin controls, Gateway/TUI hide internal child/side threads instead of
   partitioning by source, and cross-project resume switches the active scope to
-  the session's stored workdir.
+  the session's stored cwd.
 
 ## 2026-06-05
 
@@ -414,7 +481,7 @@
 ## 2026-05-29
 
 - Added configurable pevo project context discovery, `pevo run` overrides, and
-  shared runtime prompt workdir handling across CLI, TUI, agents, compaction,
+  shared runtime prompt cwd handling across CLI, TUI, agents, compaction,
   and ACP paths.
 - Added ACP-profile evaluation adapters, a Rust-native Docker Compose runner
   for Harbor/Terminal-Bench tasks, and a `peval init` template built around host
@@ -497,7 +564,7 @@
   bounded fake/live smoke validation.
 - Added ACP setup docs, testing specs for clarify/compaction/ACP packaging, and
   a README refresh for the current CLI/TUI/ACP surfaces.
-- Made scoped config writes workdir-local by default, with `-g`/`--global` for
+- Made scoped config writes cwd-local by default, with `-g`/`--global` for
   global writes, and removed legacy project-scope aliases.
 - Fixed the `psychevo-eval` HTML report lint failure under broad validation.
 - Cleaned active spec attachment links, retired archived 130-permissions docs,

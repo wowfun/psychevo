@@ -153,8 +153,8 @@ An experience-impacting change should be accepted only when:
   observation, completion, and control-signal semantics.
 - [025 CLI](../025-cli/spec.md) defines command-line interface foundation
   semantics.
-- [060 Automation](../060-automation/spec.md) defines validation vocabulary,
-  evidence principles, and deterministic validation boundaries.
+- [065 CI/CD](../065-ci-cd/spec.md) defines validation vocabulary, evidence
+  principles, and deterministic validation boundaries.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product
   CLI.
 - [210 pevo TUI](../210-pevo-tui/spec.md) defines the concrete fullscreen TUI
