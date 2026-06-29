@@ -5,7 +5,7 @@ import {
   appendOptimisticPrompt,
   applyLiveTranscriptEvent,
   parseThreadSnapshot,
-  scopeForWorkdir
+  scopeForCwd
 } from "@psychevo/client";
 import type { GatewayClient } from "@psychevo/client";
 import type {
@@ -245,7 +245,7 @@ export function ThreadPanel({
 function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
   return {
     source: { kind: "web", rawId: "right-thread", lifetime: "persistent", rawIdentity: null, visibleName: null },
-    scope: scopeForWorkdir(""),
+    scope: scopeForCwd(""),
     thread: threadId
       ? { id: threadId, backend: { kind: "psychevo", nativeId: threadId }, sourceKey: null }
       : null,

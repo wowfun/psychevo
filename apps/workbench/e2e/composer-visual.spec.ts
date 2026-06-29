@@ -36,7 +36,7 @@ test.describe("Workbench composer visual contract", () => {
 
       const composer = page.locator(".pevo-composer");
       await expect(composer).toBeVisible();
-      const agentControl = page.getByRole("button", { name: "Agent" });
+      const agentControl = page.getByRole("button", { name: "Agent", exact: true });
       await expect(agentControl).toBeVisible();
       await expect(agentControl).toContainText("Default Agent");
       await agentControl.click();
@@ -441,7 +441,7 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   const input = page.locator(".pevo-composerInput");
   const footer = page.locator(".pevo-composerFooter");
   const action = page.locator(".pevo-sendButton");
-  const agent = page.getByRole("button", { name: "Agent" });
+  const agent = page.getByRole("button", { name: "Agent", exact: true });
   const model = page.getByRole("button", { name: "Model" });
   const context = page.getByRole("button", { name: "Context usage" });
   const chip = page.locator(".pevo-planChip");

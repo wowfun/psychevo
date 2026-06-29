@@ -449,7 +449,7 @@ function execCommandSections(
     sections.push({ code: true, kind: "text", text: command, title: "Command" });
   }
   const inputRows = visibleRowsFromKeys(argsRecord, [
-    ["workdir", "workdir"],
+    ["cwd", "cwd"],
     ["yield_time_ms", "yield"],
     ["max_output_tokens", "output limit"],
     ["sandbox_permissions", "sandbox"],

@@ -1,0 +1,313 @@
+.settingsRows {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
+  gap: 6px;
+  padding: 4px 0 0;
+}
+
+.settingsPage {
+  align-content: stretch;
+  width: min(1040px, 100%);
+  min-height: 0;
+}
+
+.settingsShell {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.28fr) minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 0 0;
+}
+
+.settingsNav {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 12px 0 0;
+  border-right: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.settingsNavTop {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settingsBackButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 7px;
+  color: var(--pevo-muted);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-chrome);
+  font-weight: 600;
+}
+
+.settingsSearch {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 52%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.settingsSearch input {
+  min-width: 0;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font: inherit;
+  font-size: var(--pevo-font-size-chrome);
+}
+
+.settingsSearch input::placeholder {
+  color: var(--pevo-muted);
+}
+
+.settingsNavGroups {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.settingsNavFooter {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settingsNavGroups button,
+.settingsNavFooter button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 7px;
+  color: var(--pevo-nav-text);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-chrome);
+  font-weight: 600;
+  transition-duration: 140ms;
+  transition-property: background-color, color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settingsNavGroups button:active,
+.settingsNavFooter button:active,
+.settingsBackButton:active {
+  transform: scale(0.96);
+}
+
+.settingsNavGroups button > svg,
+.settingsNavFooter button > svg {
+  justify-self: center;
+}
+
+.settingsNavGroups button > span,
+.settingsNavFooter button > span,
+.settingsBackButton > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsNavGroups button.is-selected,
+.settingsNavFooter button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 18%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.settingsNavEmpty {
+  margin: 6px 7px;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+@media (hover: hover) {
+  .settingsBackButton:hover,
+  .settingsNavGroups button:hover,
+  .settingsNavFooter button:hover {
+    color: var(--pevo-ink);
+    background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 48%);
+  }
+}
+
+.settingsContent {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settingsContentInner {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.settingsSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.settingsSectionHeader > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 50%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 44%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.settingsSectionHeader > div {
+  min-width: 0;
+}
+
+.settingsSectionHeader h3 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-chrome);
+}
+
+.settingsRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.settingsRow strong,
+.settingsRow span {
+  display: block;
+}
+
+.settingsRow span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+}
+
+.settingsContentInner > .agentSurfacePanel,
+.settingsContentInner > .archivedSessionsPanel {
+  align-self: start;
+  align-content: start;
+  min-height: 0;
+  overflow: visible;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.archivedSessionsPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.archivedSessionsPanel > p {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+}
+
+.archivedSessionList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.archivedSessionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 7px 8px;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.archivedSessionRow > div:first-child {
+  min-width: 0;
+}
+
+.archivedSessionRow strong,
+.archivedSessionRow span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archivedSessionRow strong {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-session);
+  font-weight: 650;
+}
+
+.archivedSessionRow span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.archivedSessionActions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.archivedSessionActions button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}

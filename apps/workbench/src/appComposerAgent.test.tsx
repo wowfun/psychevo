@@ -198,7 +198,7 @@ describe("Workbench layout and workspace panels", () => {
 
   it("renders Markdown file previews from the shared Markdown component", async () => {
     gatewayMock.workspaceFilesResult = {
-      root: gatewayMock.scope.workdir,
+      root: gatewayMock.scope.cwd,
       entries: [
         { path: "docs", name: "docs", kind: "directory", depth: 0 },
         { path: "docs/README.md", name: "README.md", kind: "file", depth: 1 },
@@ -232,7 +232,7 @@ describe("Workbench layout and workspace panels", () => {
 
   it("saves text edits manually without entering the Review queue", async () => {
     gatewayMock.workspaceFilesResult = {
-      root: gatewayMock.scope.workdir,
+      root: gatewayMock.scope.cwd,
       entries: [
         { path: "docs", name: "docs", kind: "directory", depth: 0 },
         { path: "docs/README.md", name: "README.md", kind: "file", depth: 1 }
@@ -280,7 +280,7 @@ describe("Workbench layout and workspace panels", () => {
 
   it("renders code previews with absolute paths, syntax tokens, and escaped source text", async () => {
     gatewayMock.workspaceFilesResult = {
-      root: gatewayMock.scope.workdir,
+      root: gatewayMock.scope.cwd,
       entries: [
         { path: "src", name: "src", kind: "directory", depth: 0 },
         { path: "src/main.py", name: "main.py", kind: "file", depth: 1 }

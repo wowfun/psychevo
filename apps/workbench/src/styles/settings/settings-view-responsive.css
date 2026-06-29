@@ -1,0 +1,183 @@
+.appShell[data-main-view="settings"] {
+  padding: 4px;
+}
+
+.appShell[data-main-view="settings"] .mobileTabs,
+.appShell[data-main-view="settings"] .historyColumn,
+.appShell[data-main-view="settings"] .statusColumn,
+.appShell[data-main-view="settings"] .conversationChrome,
+.appShell[data-main-view="settings"] .composerDock {
+  display: none;
+}
+
+.appShell[data-main-view="settings"] .workbench,
+.appShell[data-main-view="settings"] .workbench.is-leftCollapsed,
+.appShell[data-main-view="settings"] .workbench.is-rightCollapsed,
+.appShell[data-main-view="settings"] .workbench.is-leftCollapsed.is-rightCollapsed {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .conversationColumn {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .centerWorkspace {
+  min-height: 0;
+}
+
+.appShell[data-main-view="settings"] .settingsPage {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+}
+
+.appShell[data-main-view="settings"] .settingsShell {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+
+.appShell[data-main-view="settings"] .settingsNav {
+  padding: 24px 14px 16px 12px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
+  border-right: 1px solid color-mix(in oklch, var(--pevo-border), transparent 46%);
+}
+
+.appShell[data-main-view="settings"] .settingsContent {
+  justify-self: stretch;
+  width: 100%;
+  padding: 24px 32px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.appShell[data-main-view="settings"] .settingsContentInner {
+  width: min(980px, 100%);
+  margin: 0 auto;
+}
+
+@media (max-width: 860px) {
+  .settingsShell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .settingsNav {
+    padding: 0 0 10px;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  }
+
+  .settingsNavGroups {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 1px;
+  }
+
+  .settingsNavGroups button {
+    flex: 0 0 auto;
+    min-width: 126px;
+  }
+
+  .settingsNavFooter {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .settingsNavFooter button {
+    flex: 0 0 auto;
+    min-width: 150px;
+  }
+
+  .appShell[data-main-view="settings"] {
+    padding: 10px;
+  }
+
+  .appShell[data-main-view="settings"] .settingsPage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .appShell[data-main-view="settings"] .settingsShell {
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .appShell[data-main-view="settings"] .settingsNav {
+    padding: 0 0 10px;
+    background: transparent;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  }
+
+  .appShell[data-main-view="settings"] .settingsContent {
+    width: 100%;
+    padding: 0;
+  }
+
+  .appShell[data-main-view="settings"] .settingsContentInner {
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .settingsRow {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .usageWindowGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agentBackendRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modelAssignmentRow,
+  .modelProviderRow {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .modelAssignmentControls,
+  .modelProviderFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .slashLeaderForm,
+  .slashEditorGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modelProviderActions {
+    justify-content: flex-start;
+  }
+
+  .agentBackendSide {
+    justify-items: stretch;
+  }
+
+  .agentBackendControls,
+  .agentBackendActions {
+    justify-content: flex-start;
+  }
+
+  .backendDialogGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

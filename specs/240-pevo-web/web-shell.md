@@ -13,11 +13,11 @@ paths, `PSYCHEVO_WEB_DIST`, the build command, and the install command instead
 of only echoing one missing cwd-derived path.
 
 The Web Shell source kind is `web`. Source identity is derived from source kind
-plus canonical workdir unless the client provides an explicit `rawId`. Multiple
-managed browser clients for the same workdir share one source/thread, active
+plus canonical cwd unless the client provides an explicit `rawId`. Multiple
+managed browser clients for the same cwd share one source/thread, active
 queue, event stream, and control surface.
 
-Gateway request scopes remain workdir-scoped and do not carry profile
+Gateway request scopes remain cwd-scoped and do not carry profile
 selectors. Workbench may display the profile reported by `initialize`, but the
 first-slice browser UI does not switch profiles inside an existing Gateway
 process. Launching another profile requires a separate `pevo -p <name> web` or
@@ -25,11 +25,11 @@ equivalent process.
 
 Workspace-management RPCs are UI conveniences, not a second execution scope.
 `workspace/create` accepts a display name, creates a direct child directory
-under the configured workspace root, returns the canonical workdir and matching
+under the configured workspace root, returns the canonical cwd and matching
 `GatewayRequestScope`, and updates the browser session to that scope. It must
 reject empty names, path separators, `.`/`..`, and names that resolve outside
-the workspace root. The created workdir then behaves exactly like any other
-workdir for sessions, files, diff, skills, agents, and `.psychevo` overlays.
+the workspace root. The created cwd then behaves exactly like any other
+cwd for sessions, files, diff, skills, agents, and `.psychevo` overlays.
 
 The Web Shell uses the same Gateway agent and command APIs as TUI. Its Agents
 panel lists local, generated peer, Markdown-shadowed peer, invalid, and
@@ -39,9 +39,9 @@ execute `/agent:command` namespaced peer slash commands.
 Gateway exposes agent and backend management as typed RPCs rather than
 Workbench-only JSON shapes. Agent RPCs cover list/read/write/delete/status.
 Backend RPCs cover list/write/delete/doctor and always resolve against the
-request scope's workdir plus the active profile home. Backend writes must name
+request scope's cwd plus the active profile home. Backend writes must name
 an explicit target, `project` or `profile`; project writes update
-`<workdir>/.psychevo/config.toml`, while profile writes update the active
+`<cwd>/.psychevo/config.toml`, while profile writes update the active
 profile config, normally `$PSYCHEVO_HOME/config.toml` and the explicit
 `PSYCHEVO_CONFIG` file when that environment override is active. Workbench GUI backend forms are embedded in
 Settings > Agents and only submit Profile-level writes or deletes; they do not
@@ -49,8 +49,8 @@ expose the backend target selector. `backend/write` treats blank label and
 description as absent optional metadata, while backend views still expose an
 effective label that falls back to the backend id for display. Blank CWD writes
 the internal `invocation` sentinel; ACP peer launch resolves empty or
-`invocation` CWD to the active request scope workdir, relative CWD values under
-that workdir, and absolute values as entered. Workbench exposes backend enabled
+`invocation` CWD to the active request scope cwd, relative CWD values under
+that cwd, and absolute values as entered. Workbench exposes backend enabled
 state and `peer`/`subagent` entrypoint selection as row-level controls in
 Settings > Agents and persists them with the same Profile-level backend write
 path. Workbench may present Command, Args, and Env as one JSON editor for
@@ -350,7 +350,7 @@ switches.
 
 `usage/read` returns a display-only historical usage projection for Settings >
 Usage. It reads the local state database selected by the running Gateway and
-defaults to all persisted history across workdirs. It does not use the active
+defaults to all persisted history across cwds. It does not use the active
 Workbench request scope as a filter, does not contact providers or public model
 catalogs, and must not return prompt text, message bodies, tool arguments,
 provider payloads, or trace records. The result includes:
@@ -384,9 +384,9 @@ explicit `source/reset`, archive action, or delete action may remove a thread
 from the active history list.
 
 Workbench history is a global session browser. `thread/browser` returns grouped
-human-visible sessions from the local state database; the stored session workdir
+human-visible sessions from the local state database; the stored session cwd
 is used for grouping and for the target scope on resume. Rows are grouped by
-workdir, with the current workdir first and all other workdirs ordered by latest
+cwd, with the current cwd first and all other cwds ordered by latest
 session activity. Runtime `source` may appear in diagnostics but must not appear
 in history rows/search or decide whether GUI, TUI, ACP, Web, or Desktop
 sessions are visible by default.
@@ -399,16 +399,16 @@ next 20 rows for that workspace and preserves the existing group collapse
 state. Browsing, expanding, pinning, and selecting rows must not update session
 recency.
 
-When Workbench resumes a session from another workdir, it switches the active
-scope to that session's stored workdir before accepting more input. The file
+When Workbench resumes a session from another cwd, it switches the active
+scope to that session's stored cwd before accepting more input. The file
 tree, `@` completion, diff/status panes, agents, skills, and subsequent turns
-refresh against the resumed workdir. Cross-workdir resume must not splice the
-old session's transcript into the launch workdir. Archiving, restoring,
+refresh against the resumed cwd. Cross-cwd resume must not splice the
+old session's transcript into the launch cwd. Archiving, restoring,
 renaming, and deleting sessions operate from the same global list and must
 respect running/current-session guards across every source.
-Starting a new session from another workdir group switches the active browser
-scope to that stored workdir and returns an empty source snapshot for that
-workdir, without first requiring the user to resume an older session.
+Starting a new session from another cwd group switches the active browser
+scope to that stored cwd and returns an empty source snapshot for that
+cwd, without first requiring the user to resume an older session.
 
 The left Sessions browser owns the session-history controls. It has one
 compact header with the history icon to the left of `Sessions`; it does not
@@ -445,9 +445,9 @@ The Web Shell uses Gateway `completion/list` for `/`, `$`, and `@` composer
 completion. `$` completion resolves skills, local agents, and ACP capability
 mentions; accepted entries keep the visible `$name` text and send structured
 Gateway mentions on submission. `@` completion resolves subagent-capable agent
-names alongside workdir-scoped file references; accepted agent entries keep the
+names alongside cwd-scoped file references; accepted agent entries keep the
 visible `@agent-name` text and send structured Gateway agent mentions on
-submission. Workdir file completion remains scoped to the launched workdir and
+submission. Cwd file completion remains scoped to the launched cwd and
 must not let the browser read arbitrary host files directly. When the selected
 runtime is a peer backend that cannot orchestrate Psychevo agents, `@`
 completion omits Psychevo agent candidates but keeps file-reference completion;
@@ -457,7 +457,7 @@ Ctrl+P/Ctrl+N update the active option and keep it visible inside the popover
 without moving focus out of the composer textarea.
 
 The Web Shell `Search` action opens a center-surface search view. The first
-slice searches the current workdir's known session ids, session titles, and
+slice searches the current cwd's known session ids, session titles, and
 visible message text from `thread/read` snapshots. Search results resume the
 matching session in the transcript surface; they do not create a right-side
 utility tab and do not search arbitrary host files.
@@ -473,7 +473,7 @@ Web must not carry a separate hard-coded slash inventory beyond applying typed
 host actions returned by Gateway. Unknown slash-looking input, including
 absolute-path-looking input, is returned as prompt passthrough instead of a
 local command error. Gateway reads the effective slash alias configuration for
-the requested workdir before serving `command/list`, `completion/list`, or
+the requested cwd before serving `command/list`, `completion/list`, or
 `command/execute`. Alias rows returned to Web carry `source: "custom"` and
 `expandsTo`; executing the alias expands to the target line before normal
 shared parsing while preserving the original alias line as display text.
@@ -527,7 +527,7 @@ visible. Composer-triggered inspect feedback may be mirrored near the composer
 while the destination panel is revealed. Queue actions preserve the original
 slash line as their display text when they submit expanded prompt text through
 `turn/start`. Display-only command feedback and overlays are transient to the
-current session/workdir and are cleared on session switches and new input.
+current session/cwd and are cleared on session switches and new input.
 Successful display-only feedback with no follow-up action may auto-dismiss after
 a short delay and may be dismissed by clicking outside its panel. Error feedback
 and feedback with follow-up actions must remain until explicit dismissal or a
@@ -535,9 +535,9 @@ normal transient clear.
 
 Composer model persistence semantics are defined by
 [125 Model Config](../125-model-config/spec.md). Workbench implements them
-through Gateway model-state RPCs for the active workdir. After Settings > Models
+through Gateway model-state RPCs for the active cwd. After Settings > Models
 saves the global default model, Workbench refreshes `settings/read.controls`;
-active session or workdir composer overrides continue to display instead of the
+active session or cwd composer overrides continue to display instead of the
 new global default.
 
 Workbench observes accepted-turn settlement through Gateway live events and
@@ -557,7 +557,7 @@ source binding.
 
 Workbench refreshes `observability/read` after `thread/resume`, `thread/read`,
 turn completion, undo/redo workspace refresh, and explicit session switches,
-including same-workdir resume where the file tree and diff may not otherwise
+including same-cwd resume where the file tree and diff may not otherwise
 need to change. New detached drafts or no-active-session states clear stale
 session usage metrics, and delayed observability responses from a previous
 selected thread or view epoch must not reapply to the current Status panel.

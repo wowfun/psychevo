@@ -44,7 +44,7 @@ export function RightWorkspace({
   terminalEvents,
   trace,
   truncated,
-  workdir,
+  cwd,
   workspaceChanges,
   workspaceDiff,
   onActivate,
@@ -86,7 +86,7 @@ export function RightWorkspace({
   terminalEvents: TerminalNotificationEvent[];
   trace: TraceState;
   truncated: boolean;
-  workdir: string;
+  cwd: string;
   workspaceChanges: WorkspaceChangesResult | null;
   workspaceDiff: WorkspaceDiffResult | null;
   onActivate(tabId: string): void;
@@ -143,10 +143,10 @@ export function RightWorkspace({
                 changes={workspaceChanges}
                 context={context}
                 diff={tab.diff ?? workspaceDiff}
-                root={root || workdir}
+                root={root || cwd}
                 sessionId={sessionId}
                 status={status}
-                workdir={workdir}
+                cwd={cwd}
                 onAcceptChange={onAcceptChange}
                 onChangedFile={onChangedFile}
                 onRejectChange={onRejectChange}
@@ -174,7 +174,7 @@ export function RightWorkspace({
                 client={client}
                 scope={scope}
                 terminalEvents={terminalEvents}
-                workdir={workdir}
+                cwd={cwd}
               />
             )}
             {tab.kind === "debug" && debugEnabled && (

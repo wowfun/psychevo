@@ -1,0 +1,40 @@
+@media (max-width: 620px) {
+  .channelSettingsToolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .channelSettingsToolbar > span {
+    width: 100%;
+  }
+
+  .channelToolbarActions,
+  .channelDetailActions {
+    justify-content: flex-start;
+  }
+
+  .channelSurfaceRow,
+  .channelSetupCardConnected,
+  .channelSetupCardPending,
+  .channelSetupCardReconnect,
+  .channelSetupCardWechat,
+  .channelDetailHeader,
+  .channelDetailSummary,
+  .channelDoctorResult,
+  .channelFormRow,
+  .channelTextareaPair,
+  .channelReadonlyGrid,
+  .channelRunnerGrid,
+  .channelSourceItem dl,
+  .channelDangerSection {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .channelWechatQrBox {
+    width: min(100%, 220px);
+  }
+
+  .channelPlatformPicker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -1,7 +1,7 @@
 import { type CSSProperties } from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
 import { Composer, HistoryPanel, TranscriptPanel } from "@psychevo/components";
-import { appendOptimisticPrompt, scopeForWorkdir } from "@psychevo/client";
+import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
 import { downloadUrl } from "@psychevo/host";
 import { WorkspaceCreateDialog, LeftUtilityRail, MainSurface, PinnedPanel } from "./app-shell";
 import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
@@ -19,7 +19,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     activeRightTab,
     activeRightTabId,
     activeScope,
-    activeWorkbenchWorkdir,
+    activeWorkbenchCwd,
     activity,
     appearance,
     archivedSessions,
@@ -63,7 +63,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     init,
     leftCollapsed,
     latestGatewayEvent,
-    loadingOlderWorkdir,
+    loadingOlderCwd,
     loadChannelSources,
     loadOlderSessions,
     loadThreadSearchText,
@@ -262,7 +262,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   draftSession={null}
                   pinnedSessionIds={pinnedSessionIds}
                   browserWorkspaces={sessionBrowserWorkspaces}
-                  loadingOlderWorkdir={loadingOlderWorkdir}
+                  loadingOlderCwd={loadingOlderCwd}
                   sessions={sessions}
                   onArchive={(threadId) => void runAction(async () => {
                     setDraftSession(null);
@@ -285,10 +285,10 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     await startNewThread();
                   })}
                   onCreateWorkspace={() => props.setWorkspaceDialogOpen(true)}
-                  onNewInWorkdir={(workdir) => void runAction(async () => {
-                    await startNewThread(workdir);
+                  onNewInCwd={(cwd) => void runAction(async () => {
+                    await startNewThread(cwd);
                   })}
-                  onLoadOlderSessions={(workdir) => void runAction(async () => loadOlderSessions(workdir))}
+                  onLoadOlderSessions={(cwd) => void runAction(async () => loadOlderSessions(cwd))}
                   onTogglePinned={togglePinnedSession}
                   onRename={(threadId, title) => void runAction(async () => {
                     await client?.request("thread/rename", { threadId, title });
@@ -371,7 +371,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               usageStats={usageStats}
               usageStatsError={usageStatsError}
               usageStatsLoading={usageStatsLoading}
-              workdir={activeWorkbenchWorkdir}
+              cwd={activeWorkbenchCwd}
               loadThreadSearchText={loadThreadSearchText}
               onAppearanceChange={setAppearance}
               onDeleteAutomation={(id) => deleteAutomation(id)}
@@ -448,7 +448,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
             <Composer
               attachments={attachments}
               completionProvider={async (text, cursor) => {
-                const scope = activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
+                const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? window.location.pathname);
                 const result = await client?.request("completion/list", {
                   cursor,
                   scope,
@@ -592,7 +592,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
             <ComposerStatusLine
               branch={settings?.project?.branch ?? null}
               controls={controls}
-              path={settings?.project?.displayPath ?? settings?.workdir ?? ""}
+              path={settings?.project?.displayPath ?? settings?.cwd ?? ""}
               permissionMode={permissionMode}
               profile={init?.profile ?? null}
               onBranchClick={() => {
@@ -628,7 +628,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               debugEvents={debugEvents}
               files={workspaceFiles?.entries ?? []}
               latestGatewayEvent={latestGatewayEvent}
-              root={workspaceFiles?.root ?? settings?.workdir ?? ""}
+              root={workspaceFiles?.root ?? settings?.cwd ?? ""}
               scope={activeScope ?? init?.scope ?? null}
               sessionId={snapshot.thread?.id ?? null}
               status={props.status}
@@ -639,7 +639,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               terminalEvents={terminalEvents}
               trace={traceState}
               truncated={workspaceFiles?.truncated ?? false}
-              workdir={settings?.project?.displayPath ?? settings?.workdir ?? ""}
+              cwd={settings?.project?.displayPath ?? settings?.cwd ?? ""}
               workspaceChanges={workspaceChanges}
               workspaceDiff={workspaceDiff}
               onActivate={setActiveRightTabId}

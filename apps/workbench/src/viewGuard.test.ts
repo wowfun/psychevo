@@ -28,7 +28,7 @@ describe("view snapshot guards", () => {
   it("creates a local new-session draft and hides it in archived history", () => {
     const draft = createHistoryDraftSession(4, "/tmp/project", 100);
 
-    expect(draft).toEqual({ id: "draft:4", title: "New session", createdAtMs: 100, workdir: "/tmp/project" });
+    expect(draft).toEqual({ id: "draft:4", title: "New session", createdAtMs: 100, cwd: "/tmp/project" });
     expect(visibleHistoryDraftSession(draft, false)).toBe(draft);
     expect(visibleHistoryDraftSession(draft, true)).toBeNull();
   });
@@ -44,7 +44,7 @@ function detachedSnapshot(): ThreadSnapshot {
       visibleName: null
     },
     scope: {
-      workdir: "/tmp/project",
+      cwd: "/tmp/project",
       source: {
         kind: "web",
         rawId: "test",

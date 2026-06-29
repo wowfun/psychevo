@@ -1,0 +1,654 @@
+.channelDetailHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+.channelDetailHeader > button,
+.channelDetailActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+}
+
+.channelDetailHeader > button:hover,
+.channelDetailActions button:hover {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 38%);
+}
+
+.channelDetailTitle {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.channelDetailTitle strong,
+.channelDetailTitle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelDetailTitle strong {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-session);
+}
+
+.channelDetailTitle span,
+.channelDetailSummaryItem span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelDetailActions,
+.channelDoctorResult {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.channelDetailSave:not(:disabled) {
+  color: var(--pevo-accent-ink);
+  background: var(--pevo-accent);
+  border-color: color-mix(in oklch, var(--pevo-accent), black 12%);
+}
+
+.channelDiscardNotice,
+.channelSavedNotice,
+.channelDetailError {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 10px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-warning, var(--pevo-danger)), transparent 91%);
+  border: 1px solid color-mix(in oklch, var(--pevo-warning, var(--pevo-danger)), transparent 56%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelDiscardNotice,
+.channelDetailError {
+  background: color-mix(in oklch, var(--pevo-danger), transparent 91%);
+  border-color: color-mix(in oklch, var(--pevo-danger), transparent 58%);
+}
+
+.channelSavedNotice {
+  background: color-mix(in oklch, var(--pevo-success, var(--pevo-accent)), transparent 91%);
+  border-color: color-mix(in oklch, var(--pevo-success, var(--pevo-accent)), transparent 56%);
+}
+
+.channelDiscardNotice strong,
+.channelSavedNotice,
+.channelDetailError {
+  color: var(--pevo-ink);
+}
+
+.channelDiscardNotice button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+.settingsContentInner > .channelDetailPage {
+  align-self: start;
+  align-content: start;
+  min-height: 0;
+  overflow: visible;
+}
+
+.channelHealthSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 56%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 38%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelHealthItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 8px;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: 999px;
+  font-size: var(--pevo-font-size-xsmall);
+  white-space: nowrap;
+}
+
+.channelHealthItem span,
+.channelHealthItem strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelHealthItem strong {
+  color: var(--pevo-ink);
+  font-weight: 700;
+}
+
+.channelHealthItem.is-ok {
+  border-color: color-mix(in oklch, var(--pevo-success, var(--pevo-accent)), var(--pevo-border) 62%);
+}
+
+.channelHealthItem.is-ok strong {
+  color: var(--pevo-success, var(--pevo-accent));
+}
+
+.channelHealthItem.is-warning {
+  border-color: color-mix(in oklch, var(--pevo-warning, var(--pevo-danger)), var(--pevo-border) 58%);
+}
+
+.channelHealthItem.is-warning strong {
+  color: var(--pevo-warning, var(--pevo-danger));
+}
+
+.channelHealthItem.is-danger {
+  border-color: color-mix(in oklch, var(--pevo-danger), var(--pevo-border) 58%);
+}
+
+.channelHealthItem.is-danger strong {
+  color: var(--pevo-danger);
+}
+
+.channelDoctorResult {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-content: stretch;
+  gap: 7px;
+}
+
+.channelDoctorCheck {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 42%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelDoctorCheck span,
+.channelDoctorCheck strong,
+.channelDoctorCheck small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelDoctorCheck span {
+  color: var(--pevo-muted);
+}
+
+.channelDoctorCheck strong {
+  color: var(--pevo-muted);
+}
+
+.channelDoctorCheck small {
+  grid-column: 1 / -1;
+  color: var(--pevo-muted);
+}
+
+.channelDoctorCheck.is-ok strong {
+  color: var(--pevo-success, var(--pevo-accent));
+}
+
+.channelDoctorCheck.is-warning strong {
+  color: var(--pevo-warning, var(--pevo-danger));
+}
+
+.channelDoctorCheck.is-danger strong {
+  color: var(--pevo-danger);
+}
+
+.channelDetailsForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.channelDetailSection {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 56%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 38%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelDetailSection h4 {
+  margin: 0;
+  min-height: 38px;
+  padding: 10px 12px;
+  color: var(--pevo-ink);
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 52%);
+  font-size: var(--pevo-font-size-small);
+  font-weight: 650;
+}
+
+.channelFormRow {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.32fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.channelDetailSection h4 + .channelFormRow {
+  border-top: 0;
+}
+
+.channelFormCopy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.channelFormCopy strong {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 700;
+}
+
+.channelFormCopy span,
+.channelInlineToggle,
+.channelRunnerGrid dt,
+.channelCredentialStatus,
+.channelReadOnlyValue span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.25;
+}
+
+.channelControl,
+.channelCredentialControl {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.channelControl input,
+.channelControl select,
+.channelTextareaPair textarea,
+.channelCredentialControl input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+}
+
+.channelTextareaPair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.channelTextareaPair textarea {
+  min-height: 88px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  resize: vertical;
+}
+
+.channelControl input:disabled,
+.channelControl select:disabled,
+.channelTextareaPair textarea:disabled,
+.channelCredentialControl input:disabled {
+  color: color-mix(in oklch, var(--pevo-muted), var(--pevo-ink) 12%);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
+}
+
+.channelReadonlyGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.channelReadOnlyValue {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.channelReadOnlyValue strong {
+  min-width: 0;
+  min-height: 32px;
+  padding: 7px 8px;
+  overflow-wrap: anywhere;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 36%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 45%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-small);
+  font-weight: 500;
+}
+
+.channelInlineToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelInlineToggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.channelSegmentedControl {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px;
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 25%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelSegmentedControl button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 9px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--pevo-radius-sm) - 2px);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  line-height: 1.15;
+  white-space: normal;
+}
+
+.channelSegmentedControl button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 18%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--pevo-border), transparent 36%);
+}
+
+.channelCredentialLine {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 7px 8px;
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelCredentialLine code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelCredentialStatus {
+  width: fit-content;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: 999px;
+  font-weight: 650;
+}
+
+.channelCredentialStatus.is-ok {
+  color: var(--pevo-success, var(--pevo-accent));
+  border-color: color-mix(in oklch, var(--pevo-success, var(--pevo-accent)), transparent 50%);
+}
+
+.channelCredentialStatus.is-danger {
+  color: var(--pevo-danger);
+  border-color: color-mix(in oklch, var(--pevo-danger), transparent 50%);
+}
+
+.channelCredentialStatus.is-warning {
+  color: var(--pevo-warning, var(--pevo-danger));
+  border-color: color-mix(in oklch, var(--pevo-warning, var(--pevo-danger)), transparent 50%);
+}
+
+.channelRunnerGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+}
+
+.channelRunnerGrid > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 45%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelRunnerGrid dt,
+.channelRunnerGrid dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelRunnerGrid dd {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelSourceEmpty {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelSourceList {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.channelSourceItem {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 45%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelSourceItem > div,
+.channelSourceItem dl,
+.channelSourceItem dl > div {
+  min-width: 0;
+}
+
+.channelSourceItem > div {
+  display: grid;
+  gap: 2px;
+}
+
+.channelSourceItem strong,
+.channelSourceItem span,
+.channelSourceItem dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelSourceItem span,
+.channelSourceItem dt {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelSourceItem dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.channelSourceItem dt,
+.channelSourceItem dd {
+  margin: 0;
+}
+
+.channelSourceItem dd {
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelAdvancedDiagnostics {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 68%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 52%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelAdvancedDiagnostics summary {
+  min-height: 34px;
+  padding: 9px 12px;
+  cursor: pointer;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  list-style-position: inside;
+}
+
+.channelAdvancedDiagnostics[open] summary {
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.channelAdvancedDiagnostics .channelFormRow:first-of-type {
+  border-top: 0;
+}
+
+.channelDangerSection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-danger), transparent 94%);
+  border: 1px solid color-mix(in oklch, var(--pevo-danger), transparent 58%);
+  border-left: 3px solid var(--pevo-danger);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.channelDangerSection h4 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+  font-weight: 700;
+}
+
+.channelDangerSection > div > span {
+  display: block;
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.channelDangerSection button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--pevo-danger);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-danger), transparent 58%);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+}
+
+.channelDangerActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}

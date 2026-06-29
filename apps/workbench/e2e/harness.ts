@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 
 export const repoRoot = path.resolve(import.meta.dirname, "../../..");
@@ -12,64 +11,75 @@ export interface PevoWebServer {
   env: NodeJS.ProcessEnv;
   root: string;
   url: string;
-  workdir: string;
+  cwd: string;
   stop(): Promise<void>;
 }
 
 export async function startPevoWeb({
   configAppend,
+  configPath: explicitConfigPath,
+  dbPath: explicitDbPath,
   envFile,
+  home: explicitHome,
   live,
   model,
-  workdir
+  pevoBin,
+  cwd
 }: {
   configAppend?: string;
+  configPath?: string;
+  dbPath?: string;
   envFile?: string;
+  home?: string;
   live: boolean;
   model?: string;
-  workdir?: string;
+  pevoBin?: string;
+  cwd?: string;
 }): Promise<PevoWebServer> {
   if (!existsSync(staticDir)) {
     throw new Error(`Workbench dist is missing: ${staticDir}`);
   }
   mkdirSync(testRoot, { recursive: true });
   const root = mkdtempSync(path.join(testRoot, live ? "live-" : "deterministic-"));
-  const resolvedWorkdir = workdir ? path.resolve(workdir) : path.join(root, "workdir");
-  const home = path.join(root, "home");
-  if (!workdir) {
-    mkdirSync(resolvedWorkdir, { recursive: true });
-    writeWorkbenchFixtures(resolvedWorkdir);
+  const resolvedCwd = cwd ? path.resolve(cwd) : path.join(root, "cwd");
+  const home = explicitHome ? path.resolve(explicitHome) : path.join(root, "home");
+  if (!cwd) {
+    mkdirSync(resolvedCwd, { recursive: true });
+    writeWorkbenchFixtures(resolvedCwd);
   }
 
-  const configPath = live
-    ? process.env.PSYCHEVO_CONFIG ?? path.join(homedir(), ".psychevo/config.toml")
-    : path.join(root, "config.toml");
+  const configPath = live ? explicitConfigPath : path.join(root, "config.toml");
+  if (!configPath) {
+    throw new Error("live Workbench validation requires an xtask live context configPath");
+  }
+  const resolvedConfigPath = configPath;
   if (!live) {
     const configText = `model = "${model ?? "lmstudio/noop"}"\n${configAppend ?? ""}`;
     mkdirSync(home, { recursive: true });
-    writeFileSync(configPath, configText);
+    writeFileSync(resolvedConfigPath, configText);
     writeFileSync(path.join(home, "config.toml"), configText);
     if (envFile) {
       writeFileSync(path.join(root, ".env"), envFile);
     }
   }
-  if (live && !existsSync(configPath)) {
-    throw new Error(`live config not found: ${configPath}`);
+  if (live && !existsSync(resolvedConfigPath)) {
+    throw new Error(`live config not found: ${resolvedConfigPath}`);
   }
 
-  const dbPath = path.join(root, "state.db");
+  const dbPath = explicitDbPath ? path.resolve(explicitDbPath) : path.join(root, "state.db");
   const child = spawnPevoWeb({
-    configPath,
+    configPath: resolvedConfigPath,
     dbPath,
     live,
+    pevoBin,
     staticDir,
-    workdir: resolvedWorkdir,
+    cwd: resolvedCwd,
     home
   });
-  const env = gatewayEnv(configPath, dbPath, home, live);
+  const env = gatewayEnv(resolvedConfigPath, dbPath, home, live);
   const url = modelUrl(
     await waitForServerUrl(child),
-    live ? process.env.PSYCHEVO_PLAYWRIGHT_MODEL : undefined
+    live ? model : undefined
   );
 
   return {
@@ -77,20 +87,20 @@ export async function startPevoWeb({
     env,
     root,
     url,
-    workdir: resolvedWorkdir,
+    cwd: resolvedCwd,
     async stop() {
-      await stopManagedGateway(env);
+      await stopManagedGateway(env, pevoBin);
       rmSync(root, { force: true, recursive: true });
     }
   };
 }
 
-function writeWorkbenchFixtures(workdir: string) {
-  const srcDir = path.join(workdir, "src");
+function writeWorkbenchFixtures(cwd: string) {
+  const srcDir = path.join(cwd, "src");
   mkdirSync(srcDir, { recursive: true });
   writeFileSync(path.join(srcDir, "main.rs"), "fn main() {}\n");
 
-  const skillDir = path.join(workdir, ".psychevo", "skills", "reviewer");
+  const skillDir = path.join(cwd, ".psychevo", "skills", "reviewer");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(
     path.join(skillDir, "SKILL.md"),
@@ -102,7 +112,7 @@ Review the current change and call out concrete risks.
 `
   );
 
-  const agentDir = path.join(workdir, ".psychevo", "agents");
+  const agentDir = path.join(cwd, ".psychevo", "agents");
   mkdirSync(agentDir, { recursive: true });
   writeFileSync(
     path.join(agentDir, "translate.md"),
@@ -128,19 +138,19 @@ function spawnPevoWeb(options: {
   dbPath: string;
   home: string;
   live: boolean;
+  pevoBin?: string;
   staticDir: string;
-  workdir: string;
+  cwd: string;
 }): ChildProcessWithoutNullStreams {
-  const pevoBin = process.env.PEVO_BIN;
-  const command = pevoBin ?? "cargo";
-  const args = pevoBin
+  const command = options.pevoBin ?? "cargo";
+  const args = options.pevoBin
     ? [
         "gateway",
         "open",
         "--no-browser",
         "--print-url",
         "--dir",
-        options.workdir
+        options.cwd
       ]
     : [
         "run",
@@ -152,7 +162,7 @@ function spawnPevoWeb(options: {
         "--no-browser",
         "--print-url",
         "--dir",
-        options.workdir
+        options.cwd
       ];
 
   return spawn(command, args, {
@@ -205,9 +215,8 @@ function gatewayEnv(configPath: string, dbPath: string, home: string, live: bool
   };
 }
 
-function stopManagedGateway(env: NodeJS.ProcessEnv): Promise<void> {
+function stopManagedGateway(env: NodeJS.ProcessEnv, pevoBin?: string): Promise<void> {
   return new Promise((resolve) => {
-    const pevoBin = process.env.PEVO_BIN;
     const command = pevoBin ?? "cargo";
     const args = pevoBin
       ? ["gateway", "stop"]

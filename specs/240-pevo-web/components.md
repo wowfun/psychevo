@@ -200,7 +200,7 @@ the OpenCode mode selector open.
 
 Completion popovers are shared controlled components. `/` lists Gateway slash
 commands, `$` lists skills, local agents, and ACP capability mentions, and `@`
-lists workdir file references plus subagent-capable agent names. Accepted `@`
+lists cwd file references plus subagent-capable agent names. Accepted `@`
 agent entries keep visible `@agent-name` text and submit structured Gateway
 agent mentions while still allowing the runtime's text scanner to recognize
 the same prompt form as TUI when the current runtime can orchestrate Psychevo
@@ -240,7 +240,7 @@ surface. GUI `/agents` is not exposed by Web/Desktop discovery, completion, or
 panel routing; current-session agent selection belongs to the composer agent
 selector. Other command feedback is display-only, session-scoped transient UI
 and must not become ordinary transcript history; it is cleared on session or
-workdir switches and when the user submits new input. Successful feedback with
+cwd switches and when the user submits new input. Successful feedback with
 no follow-up action may auto-dismiss after a short delay and may be dismissed by
 clicking outside the feedback panel. Error feedback and feedback with an action
 must remain until an explicit clear, context switch, or new input.
@@ -284,8 +284,8 @@ editor treats Label and Description as optional metadata, so only backend ID and
 a JSON `command` string are required to save. The CWD field presents the default
 workspace as an empty value with a `Defaults to workspace` placeholder and no
 resolved-path helper. Empty CWD and the internal `invocation` sentinel resolve
-to the active Gateway request scope workdir; relative CWD values resolve under
-that workdir, and absolute values resolve as entered.
+to the active Gateway request scope cwd; relative CWD values resolve under
+that cwd, and absolute values resolve as entered.
 
 Ordinary transcript components consume typed transcript entries/blocks and typed
 Gateway events. They must not display raw runtime event names such as

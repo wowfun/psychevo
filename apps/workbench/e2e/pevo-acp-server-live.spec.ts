@@ -29,8 +29,8 @@ test.describe("Psychevo ACP server live validation", () => {
     const mockServer = await startMockOpenAiServer();
     const process = spawnPevoAcp(root, mockServer.baseUrl);
     const rpc = new JsonRpcLineClient(process);
-    const workdir = path.join(root, "workdir");
-    mkdirSync(workdir, { recursive: true });
+    const cwd = path.join(root, "cwd");
+    mkdirSync(cwd, { recursive: true });
 
     try {
       const initialize = await rpc.request("initialize", {
@@ -45,7 +45,7 @@ test.describe("Psychevo ACP server live validation", () => {
       expect(initialize.protocolVersion).toBe(2);
 
       const session = await rpc.request("session/new", {
-        cwd: workdir,
+        cwd: cwd,
         mcpServers: []
       });
       const sessionId = readString(session, "sessionId");

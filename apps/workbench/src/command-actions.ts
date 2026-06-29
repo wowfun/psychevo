@@ -1,7 +1,7 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
   appendOptimisticPrompt,
-  scopeForWorkdir,
+  scopeForCwd,
   type GatewayClient
 } from "@psychevo/client";
 import {
@@ -83,7 +83,7 @@ type CommandActionsParams = {
   openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch?: Partial<RightWorkspaceTab>, forceNew?: boolean): void;
   patchComposerDraft(text: string): void;
   openCommandOverlay(kind: CommandOverlay): void;
-  refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, workdir?: string | null): Promise<SessionSummary[]>;
+  refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<SessionSummary[]>;
   refreshRevertedThreadSnapshot(nextClient: GatewayClient | null, threadId: string | null): Promise<void>;
   refreshSnapshot: RefreshSnapshot;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
@@ -102,7 +102,7 @@ type CommandActionsParams = {
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
   setWorkMode: Dispatch<SetStateAction<string>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
-  startNewThread(workdir?: string): Promise<void>;
+  startNewThread(cwd?: string): Promise<void>;
   submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]): Promise<void>;
   submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null): Promise<void>;
   updateMainView(value: MainView): void;
@@ -112,7 +112,7 @@ export function createCommandActions(params: CommandActionsParams) {
   function commandScope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForWorkdir(params.settings?.workdir ?? window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd ?? window.location.pathname);
   }
 
   function revealCommandsPanel(_trigger: CommandTrigger = "commandsPanel") {

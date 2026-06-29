@@ -293,12 +293,17 @@
   font-variant-numeric: tabular-nums;
 }
 
-.automationRow[data-status="failed"] .automationRowTitle span {
+.automationRow[data-lifecycle="paused"] .automationRowTitle span {
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 35%);
+}
+
+.automationMeta span[data-run-status="failed"] {
   color: var(--pevo-danger);
   background: color-mix(in oklch, var(--pevo-danger), transparent 88%);
 }
 
-.automationRow[data-status="running"] .automationRowTitle span {
+.automationMeta span[data-run-status="running"] {
   color: var(--pevo-caution);
   background: var(--pevo-brass-soft);
 }

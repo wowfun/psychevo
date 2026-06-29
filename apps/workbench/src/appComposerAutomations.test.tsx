@@ -42,15 +42,15 @@ describe("Workbench automations", () => {
     gatewayMock.sessionSummaries = [projectThread, opsThread];
     gatewayMock.browserWorkspaces = [
       {
-        workdir: "/tmp/project",
-        project: { workdir: "/tmp/project", label: "project", displayPath: "/tmp/project" },
+        cwd: "/tmp/project",
+        project: { cwd: "/tmp/project", label: "project", displayPath: "/tmp/project" },
         sessions: [projectThread],
         hiddenCount: 0,
         nextCursor: null
       },
       {
-        workdir: "/tmp/ops",
-        project: { workdir: "/tmp/ops", label: "ops", displayPath: "/tmp/ops" },
+        cwd: "/tmp/ops",
+        project: { cwd: "/tmp/ops", label: "ops", displayPath: "/tmp/ops" },
         sessions: [opsThread],
         hiddenCount: 0,
         nextCursor: null
@@ -76,7 +76,7 @@ describe("Workbench automations", () => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "automation/write",
         params: expect.objectContaining({
-          scope: expect.objectContaining({ workdir: "/tmp/ops" }),
+          scope: expect.objectContaining({ cwd: "/tmp/ops" }),
           target: { kind: "threadHeartbeat", threadId: "thread-ops" },
           title: "Ops heartbeat"
         })
@@ -102,7 +102,7 @@ describe("Workbench automations", () => {
         params: expect.objectContaining({
           request,
           currentThreadId: null,
-          scope: expect.objectContaining({ workdir: "/tmp/project" })
+          scope: expect.objectContaining({ cwd: "/tmp/project" })
         })
       });
     });
@@ -148,7 +148,7 @@ describe("Workbench automations", () => {
           target: { kind: "project" },
           schedule: { kind: "interval", everyMinutes: 60 },
           execution: { policy: "autoSandbox" },
-          scope: expect.objectContaining({ workdir: "/tmp/project" })
+          scope: expect.objectContaining({ cwd: "/tmp/project" })
         })
       });
     });
@@ -183,7 +183,7 @@ describe("Workbench automations", () => {
     gatewayMock.automationRecords = [
       {
         id: "automation-1",
-        workdir: "/tmp/project",
+        cwd: "/tmp/project",
         kind: "project",
         targetThreadId: null,
         title: "Morning check",
@@ -225,6 +225,106 @@ describe("Workbench automations", () => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "automation/resume",
         params: { automationId: "automation-1" }
+      });
+    });
+  });
+
+  it("keeps paused lifecycle separate from a running last status", async () => {
+    gatewayMock.automationRecords = [
+      {
+        id: "automation-1",
+        cwd: "/tmp/project",
+        kind: "project",
+        targetThreadId: null,
+        title: "Paused running check",
+        prompt: "Review stale run state.",
+        schedule: { kind: "interval", everyMinutes: 60 },
+        enabled: false,
+        execution: { policy: "autoSandbox" },
+        model: null,
+        reasoningEffort: null,
+        sourceKey: "automation:automation-1",
+        createdAtMs: Date.UTC(2026, 5, 24, 8, 0),
+        updatedAtMs: Date.UTC(2026, 5, 24, 8, 0),
+        lastRunAtMs: Date.UTC(2026, 5, 24, 9, 30),
+        nextRunAtMs: null,
+        lastStatus: "running",
+        lastError: null,
+        runs: []
+      }
+    ];
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Automations" }));
+    const page = await screen.findByRole("region", { name: "Automations" });
+    const row = (await within(page).findByText("Paused running check")).closest(".automationRow");
+    expect(row?.getAttribute("data-lifecycle")).toBe("paused");
+    expect(row?.querySelector(".automationRowTitle span")?.textContent).toBe("paused");
+    expect(row?.querySelector(".automationMeta span[data-run-status=\"running\"]")?.textContent).toBe("running");
+  });
+
+  it("opens the newest non-empty run thread when the latest run has no thread", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-old", "Older automation run")];
+    gatewayMock.automationRecords = [
+      {
+        id: "automation-1",
+        cwd: "/tmp/project",
+        kind: "project",
+        targetThreadId: null,
+        title: "Project heartbeat",
+        prompt: "Continue project work.",
+        schedule: { kind: "interval", everyMinutes: 60 },
+        enabled: true,
+        execution: { policy: "autoSandbox" },
+        model: null,
+        reasoningEffort: null,
+        sourceKey: "automation:automation-1",
+        createdAtMs: Date.UTC(2026, 5, 24, 8, 0),
+        updatedAtMs: Date.UTC(2026, 5, 24, 8, 0),
+        lastRunAtMs: Date.UTC(2026, 5, 24, 9, 30),
+        nextRunAtMs: Date.UTC(2026, 5, 24, 10, 30),
+        lastStatus: "running",
+        lastError: null,
+        runs: [
+          {
+            id: "run-latest",
+            automationId: "automation-1",
+            trigger: "scheduler",
+            status: "running",
+            startedAtMs: Date.UTC(2026, 5, 24, 9, 30),
+            completedAtMs: null,
+            threadId: null,
+            sourceKey: null,
+            error: null,
+            metadata: null
+          },
+          {
+            id: "run-old",
+            automationId: "automation-1",
+            trigger: "scheduler",
+            status: "completed",
+            startedAtMs: Date.UTC(2026, 5, 24, 9, 0),
+            completedAtMs: Date.UTC(2026, 5, 24, 9, 1),
+            threadId: "thread-old",
+            sourceKey: "automation:automation-1",
+            error: null,
+            metadata: null
+          }
+        ]
+      }
+    ];
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Automations" }));
+    const page = await screen.findByRole("region", { name: "Automations" });
+    fireEvent.click(await within(page).findByRole("button", { name: "Open thread" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "thread-old" })
       });
     });
   });

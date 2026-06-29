@@ -1,0 +1,387 @@
+.segmentedControl {
+  display: inline-flex;
+  gap: 2px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.segmentedControl button,
+.switchControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 6px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+  font-size: var(--pevo-font-size-chrome);
+}
+
+.segmentedControl button.is-selected {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.switchControl {
+  background: transparent;
+  border: 0;
+}
+
+.switchControl input {
+  margin: 0;
+}
+
+.modelsSettingsPanel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.modelSettingsToolbar,
+.modelAssignmentRow,
+.modelProviderRow {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.modelSettingsToolbar {
+  display: flex;
+  justify-content: flex-end;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.modelSettingsToolbar button,
+.modelProviderActions button,
+.modelAssignmentControls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.modelSettingsToolbar button:disabled,
+.modelProviderActions button:disabled,
+.modelAssignmentControls button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.modelSettingsMessage {
+  min-width: 0;
+  padding: 7px 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+}
+
+.modelSettingsMessage.is-error {
+  color: var(--pevo-danger);
+}
+
+.modelSettingsMessage.is-warning {
+  color: color-mix(in oklch, #b27218, var(--pevo-ink) 16%);
+}
+
+.slashSettingsPanel {
+  gap: 9px;
+}
+
+.slashLeaderForm {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(98px, 0.45fr) auto;
+  gap: 8px;
+  align-items: end;
+  min-width: 0;
+}
+
+.slashLeaderForm label,
+.slashCommandEditor label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+}
+
+.slashLeaderForm input,
+.slashCommandEditor input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 9px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+}
+
+.slashLeaderForm button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 74px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.slashLeaderForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.slashCommandList {
+  min-width: 0;
+}
+
+.slashCommandRow {
+  align-items: start;
+}
+
+.slashCommandMain {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.slashCommandMain code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+
+.slashChipLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.slashChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 4px 0 7px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.slashChip.is-shortcut {
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-accent) 5%);
+}
+
+.slashChip code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slashChip button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.slashChip button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.slashEditorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.slashCommandEditor {
+  align-content: start;
+}
+
+.modelAssignmentPanel,
+.modelProvidersPanel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.modelAssignmentRow {
+  grid-template-columns: minmax(180px, 0.32fr) minmax(0, 1fr);
+  min-height: 42px;
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.modelAssignmentRow strong,
+.modelProviderIdentity strong {
+  display: block;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-session);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelAssignmentRow span,
+.modelProviderIdentity > span {
+  display: block;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelAssignmentControls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.modelAssignmentControls .modelReasoningSelector {
+  width: 100%;
+}
+
+.modelAssignmentControls .modelReasoningButton {
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+}
+
+.modelAssignmentControls .modelReasoningButton:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.modelProviderRow {
+  grid-template-columns: minmax(160px, 0.28fr) minmax(0, 1fr) auto;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.modelProviderIdentity,
+.modelProviderFields,
+.modelProviderActions {
+  min-width: 0;
+}
+
+.modelProviderBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 5px;
+}
+
+.modelProviderBadges span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 5px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 42%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
+  border-radius: var(--pevo-radius-xs);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.modelProviderFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.modelProviderFields label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.modelProviderFields label > span {
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelProviderFields input {
+  min-width: 0;
+  width: 100%;
+  min-height: 30px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+}
+
+.modelProviderFields input {
+  padding: 0 8px;
+}
+
+.modelNoAuthToggle {
+  align-self: end;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  min-height: 30px;
+}
+
+.modelProviderActions {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 5px;
+}

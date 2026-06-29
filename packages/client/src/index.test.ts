@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseThreadSnapshot, scopeForWorkdir } from "./index";
+import { parseThreadSnapshot, scopeForCwd } from "./index";
 
-describe("scopeForWorkdir", () => {
+describe("scopeForCwd", () => {
   it("creates a persistent web source scope", () => {
-    expect(scopeForWorkdir("/tmp/project")).toEqual({
-      workdir: "/tmp/project",
+    expect(scopeForCwd("/tmp/project")).toEqual({
+      cwd: "/tmp/project",
       source: {
         kind: "web",
         rawId: null,
@@ -21,7 +21,7 @@ describe("parseThreadSnapshot", () => {
     expect(() => parseThreadSnapshot({
       source: {
         kind: "web",
-        rawId: "workdir:abc",
+        rawId: "cwd:abc",
         lifetime: "persistent",
         rawIdentity: null,
         visibleName: "psychevo"
@@ -34,7 +34,7 @@ describe("parseThreadSnapshot", () => {
     const parsed = parseThreadSnapshot({
       source: {
         kind: "web",
-        rawId: "workdir:abc",
+        rawId: "cwd:abc",
         lifetime: "persistent",
         rawIdentity: null,
         visibleName: "psychevo"
@@ -53,7 +53,7 @@ describe("parseThreadSnapshot", () => {
     const parsed = parseThreadSnapshot({
       source: {
         kind: "web",
-        rawId: "workdir:abc",
+        rawId: "cwd:abc",
         lifetime: "persistent",
         rawIdentity: null,
         visibleName: "psychevo"
@@ -90,7 +90,7 @@ describe("parseThreadSnapshot", () => {
     const parsed = parseThreadSnapshot({
       source: {
         kind: "web",
-        rawId: "workdir:abc",
+        rawId: "cwd:abc",
         lifetime: "persistent",
         rawIdentity: null,
         visibleName: "psychevo"
@@ -98,7 +98,7 @@ describe("parseThreadSnapshot", () => {
       thread: {
         id: "thread-1",
         backend: { kind: "psychevo", nativeId: "thread-1" },
-        sourceKey: "web:workdir:abc"
+        sourceKey: "web:cwd:abc"
       },
       entries: [
         {

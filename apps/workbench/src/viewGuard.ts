@@ -41,14 +41,14 @@ export function shouldAdoptDetachedShellResult(
 
 export function createHistoryDraftSession(
   epoch: number,
-  workdir: string,
+  cwd: string,
   now = Date.now()
 ): HistoryDraftSession {
   return {
     id: `draft:${epoch}`,
     title: "New session",
     createdAtMs: now,
-    workdir
+    cwd
   };
 }
 

@@ -491,7 +491,7 @@ describe("Workbench settings and backend controls", () => {
       id: "release",
       label: "Release Ops",
       enabled: false,
-      workdir: "/tmp/channel-workspace",
+      cwd: "/tmp/channel-workspace",
       model: "openai/gpt-4o",
       permissionMode: "bypassPermissions",
       requireMention: false,
@@ -568,7 +568,7 @@ describe("Workbench settings and backend controls", () => {
         enabled: true,
         label: "WeChat Ops",
         transport: "polling",
-        workdir: null,
+        cwd: null,
         model: null,
         permissionMode: null,
         requireMention: true,
@@ -622,15 +622,15 @@ describe("Workbench settings and backend controls", () => {
   it("saves Channel workspace picker choices while keeping manual paths available", async () => {
     gatewayMock.browserWorkspaces = [
       {
-        workdir: "/tmp/project",
-        project: { workdir: "/tmp/project", label: "project", displayPath: "/tmp/project" },
+        cwd: "/tmp/project",
+        project: { cwd: "/tmp/project", label: "project", displayPath: "/tmp/project" },
         sessions: [],
         hiddenCount: 0,
         nextCursor: null
       },
       {
-        workdir: "/tmp/recent-ops",
-        project: { workdir: "/tmp/recent-ops", label: "recent-ops", displayPath: "/tmp/recent-ops" },
+        cwd: "/tmp/recent-ops",
+        project: { cwd: "/tmp/recent-ops", label: "recent-ops", displayPath: "/tmp/recent-ops" },
         sessions: [],
         hiddenCount: 0,
         nextCursor: null
@@ -659,7 +659,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(detailPage).getByText("Next message will start in the new workspace.")).toBeTruthy();
     expect(gatewayMock.requestLog.find((entry) => entry.method === "channel/update")?.params).toEqual(expect.objectContaining({
       id: "release",
-      workdir: "/tmp/recent-ops"
+      cwd: "/tmp/recent-ops"
     }));
 
     await waitFor(() => {
@@ -673,7 +673,7 @@ describe("Workbench settings and backend controls", () => {
     });
     expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").at(-1)?.params).toEqual(expect.objectContaining({
       id: "release",
-      workdir: ""
+      cwd: ""
     }));
 
     await waitFor(() => {
@@ -688,7 +688,7 @@ describe("Workbench settings and backend controls", () => {
     });
     expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").at(-1)?.params).toEqual(expect.objectContaining({
       id: "release",
-      workdir: "/tmp/manual-channel"
+      cwd: "/tmp/manual-channel"
     }));
   });
 
@@ -728,7 +728,7 @@ describe("Workbench settings and backend controls", () => {
         enabled: true,
         label: "WeChat",
         transport: "polling",
-        workdir: null,
+        cwd: null,
         model: null,
         permissionMode: null,
         requireMention: true,
@@ -770,7 +770,7 @@ describe("Workbench settings and backend controls", () => {
         enabled: true,
         label: "WeChat",
         transport: "polling",
-        workdir: null,
+        cwd: null,
         model: null,
         permissionMode: null,
         requireMention: true,
@@ -888,7 +888,7 @@ describe("Workbench settings and backend controls", () => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "model/state/set",
         params: expect.objectContaining({
-          workdir: "/tmp/project",
+          cwd: "/tmp/project",
           model: "openai/gpt-4o",
           reasoningEffort: null
         })
@@ -902,7 +902,7 @@ describe("Workbench settings and backend controls", () => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "model/state/set",
         params: expect.objectContaining({
-          workdir: "/tmp/project",
+          cwd: "/tmp/project",
           model: "xiaomi/xiaomi-token-low",
           reasoningEffort: "medium"
         })
@@ -1088,7 +1088,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(form).queryByLabelText("Command")).toBeNull();
     expect(within(form).queryByLabelText("Args")).toBeNull();
     expect(within(form).queryByLabelText("Env")).toBeNull();
-    const cwd = within(form).getByLabelText("CWD") as HTMLInputElement;
+    const cwd = within(form).getByLabelText("Backend workspace") as HTMLInputElement;
     expect(cwd.value).toBe("");
     expect(cwd.placeholder).toBe("Defaults to workspace");
     expect(within(form).getByLabelText("Label").closest("label")?.textContent).toContain("Optional");

@@ -14,7 +14,7 @@ export function ReviewPanel({
   root,
   sessionId,
   status,
-  workdir,
+  cwd,
   onAcceptChange,
   onChangedFile,
   onRejectChange,
@@ -28,7 +28,7 @@ export function ReviewPanel({
   root: string;
   sessionId: string | null;
   status: string;
-  workdir: string;
+  cwd: string;
   onAcceptChange(turnId: string, path: string): void;
   onChangedFile(path: string): void;
   onRejectChange(turnId: string, path: string): void;
@@ -44,7 +44,7 @@ export function ReviewPanel({
         <GitPullRequest size={17} />
         <div>
           <h2>Review</h2>
-          <p>{workdir || "workspace"}</p>
+          <p>{cwd || "workspace"}</p>
         </div>
         <div className="rightPanelActions">
           <button

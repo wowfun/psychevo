@@ -38,7 +38,7 @@ that, session rows stay smaller than workspace labels, and small metadata never
 falls below the shared extra-small token except for compact badges. Theme
 switching must not change font size, line height, or row density.
 
-Desktop uses a persistent left history/workdir pane, center
+Desktop uses a persistent left history/cwd pane, center
 transcript/composer, and a resizable right workspace. On Web startup, Workbench
 creates a local detached draft for the launch scope, falling back to the most
 recent project scope and then the initialized default scope. The draft is
@@ -54,7 +54,7 @@ override a later user-selected mobile Workbench panel such as Status.
 
 When revealed without an active tab, the right workspace shows a
 status/navigation home. The home summarizes current connection, session,
-workdir, context, and changed-file state, then offers compact bordered rows for
+cwd, context, and changed-file state, then offers compact bordered rows for
 Review, Terminal, and Files. Those rows use icon plus label only, with no
 right-side explanatory copy. Selecting a row creates and activates a tab of
 that type. After one tab exists, the right workspace shows a compact tab strip
@@ -94,7 +94,7 @@ plain `<pre>` output. Diff file headers use a compact Codex-style identifier:
 status marker, workspace-relative path, and addition/deletion counts. They do
 not show the raw `diff --git`, `index`, `---`, or `+++` metadata block as
 visible header copy, and absolute paths are reserved for title/tooltip text
-when the active workdir can be joined with the changed file path. Files
+when the active cwd can be joined with the changed file path. Files
 previews render text files as syntax-highlighted code and Markdown files
 through the shared transcript Markdown renderer, with raw HTML escaped. The
 Files tab header keeps only the tab title; the selected file absolute path
@@ -116,7 +116,7 @@ the user confirms discarding them. If the file revision has changed since it
 was opened, saving is blocked and the user can inspect the conflict, reload, or
 force overwrite.
 Terminal tabs are real
-interactive local terminal sessions scoped to the active project workdir.
+interactive local terminal sessions scoped to the active project cwd.
 Terminal output is UI-only and is not transcript history or model-visible
 context. Terminal tabs keep the xterm viewport primary and do not render a
 persistent project title, path, or running badge above it. Apart from the
@@ -144,16 +144,16 @@ Markdown/remark processing, syntax highlighting, terminal rendering, icons,
 schema validation, generated protocol schemas, and local workspace packages may
 be split independently so production builds stay inspectable without raising
 the default chunk-size warning threshold.
-Workdir-group ordering in the Sessions pane is based on actual session or
+Cwd-group ordering in the Sessions pane is based on actual session or
 local draft recency, with label as a deterministic tie-breaker. Selecting or
-resuming a session in a lower workdir marks that row active but must not lift
-the workdir group to the top of the Sessions pane. Collapsed workdir groups
+resuming a session in a lower cwd marks that row active but must not lift
+the cwd group to the top of the Sessions pane. Collapsed cwd groups
 remain a compact top-stacked list with stable row spacing; empty available space
 belongs below the list and must not be distributed between collapsed projects.
-Workdir group labels set the hierarchy for the Sessions list; session titles
-must not render larger or visually heavier than their workdir label. Active
+Cwd group labels set the hierarchy for the Sessions list; session titles
+must not render larger or visually heavier than their cwd label. Active
 session rows use a quiet background step for selection instead of oversized
-typography. Session titles are visually nested under their workdir group label
+typography. Session titles are visually nested under their cwd group label
 with a minimal child-row indent instead of starting to the left of the group
 label; the indent should clarify ownership without making the list feel
 stair-stepped.
@@ -175,18 +175,18 @@ the menu, close on Escape with focus restored to the trigger, and remain open
 when the user clicks inert space inside the menu. This outside-click behavior
 applies to menu popovers, not slash, skill, or file completion listboxes.
 Workbench chrome uses `Psychevo` as the visible product name. Project identity
-belongs in the workdir/session grouping and settings detail surfaces, not as a
+belongs in the cwd/session grouping and settings detail surfaces, not as a
 subtitle under the product brand. The Workbench browser tab title is
 `Psychevo`, and the tab favicon uses the shared Psychevo logo mark rather than
 a generic browser or globe icon. GUI-created workspaces and opened projects
-are both ordinary workdirs; UI may show project affordances such as Git branch
-only when the current workdir supports them. Creating a GUI workspace is an
+are both ordinary cwds; UI may show project affordances such as Git branch
+only when the current cwd supports them. Creating a GUI workspace is an
 icon-only Sessions header action immediately to the left of the
 expand/collapse-all Sessions control, not a standalone primary left-nav item.
 The Settings center page exposes an explicit return control at the top of its
 own left navigation, followed by a settings search field. It does not show a
 separate top Settings header, top-right close button, or current
-project/workdir path. Settings is a compact app-level configuration center
+project/cwd path. Settings is a compact app-level configuration center
 rather than a single-column preference list or an embedded session panel. When
 Settings is active, it replaces the Workbench session shell: the session list,
 composer, mobile Workbench panel tabs, and right inspector are hidden. The

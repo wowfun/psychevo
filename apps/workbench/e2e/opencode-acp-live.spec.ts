@@ -3,20 +3,23 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { repoRoot, startPevoWeb } from "./harness";
+import { liveContextFor, screenshotRoot } from "./liveContext";
 
-const screenshotDir = path.join(repoRoot, ".local/playwright/screenshots/opencode-acp-live");
+let screenshotDir = path.join(repoRoot, ".local/playwright/screenshots/opencode-acp-live");
 
 test.describe("Workbench OpenCode ACP live visual validation", () => {
   test("creates and uses OpenCode ACP from the GUI @live", async ({ page, isMobile }, testInfo) => {
-    test.skip(
-      process.env.PSYCHEVO_PLAYWRIGHT_OPENCODE_ACP_LIVE !== "1",
-      "OpenCode ACP live GUI validation is opt-in"
-    );
+    const context = liveContextFor("opencode-acp-gui-live");
+    if (!context) {
+      test.skip(true, "run through cargo xtask live");
+      return;
+    }
     test.skip(isMobile, "OpenCode ACP live validation runs once on the desktop project");
-    test.setTimeout(numericEnv("PSYCHEVO_PLAYWRIGHT_OPENCODE_ACP_TIMEOUT_MS", 360_000));
+    test.setTimeout(context.timeoutMs);
+    screenshotDir = screenshotRoot(context, "opencode-acp-live");
     mkdirSync(screenshotDir, { recursive: true });
 
-    const server = await startPevoWeb({ live: false });
+    const server = await startPevoWeb({ live: false, pevoBin: context.pevoBin });
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
@@ -62,7 +65,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await capture(page, testInfo, "04-opencode-doctor");
 
       await settings.getByRole("button", { name: "Back to app" }).click();
-      await page.getByRole("button", { name: "Agent" }).click();
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
       const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
       const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
       await expect(agentGroup.getByRole("radio", { name: "opencode" })).toBeHidden();
@@ -107,15 +110,24 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
   });
 
   test("delegates @opencode through the native runtime @live", async ({ page, isMobile }, testInfo) => {
-    test.skip(
-      process.env.PSYCHEVO_PLAYWRIGHT_OPENCODE_ACP_DELEGATE_LIVE !== "1",
-      "OpenCode ACP delegate live validation is opt-in"
-    );
+    const context = liveContextFor("opencode-acp-delegate-live");
+    if (!context) {
+      test.skip(true, "run through cargo xtask live");
+      return;
+    }
     test.skip(isMobile, "OpenCode ACP delegate live validation runs once on the desktop project");
-    test.setTimeout(numericEnv("PSYCHEVO_PLAYWRIGHT_OPENCODE_ACP_TIMEOUT_MS", 540_000));
+    test.setTimeout(context.timeoutMs);
+    screenshotDir = screenshotRoot(context, "opencode-acp-live");
     mkdirSync(screenshotDir, { recursive: true });
 
-    const server = await startPevoWeb({ live: true });
+    const server = await startPevoWeb({
+      live: true,
+      model: context.model,
+      configPath: context.configPath,
+      dbPath: context.dbPath,
+      home: context.home,
+      pevoBin: context.pevoBin
+    });
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
@@ -123,7 +135,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await ensureOpenCodeBackend(agentsPanel);
       await page.getByRole("button", { name: "Back to app" }).click();
 
-      await page.getByRole("button", { name: "Agent" }).click();
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
       const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
       await expect(
         agentPopover.getByRole("radiogroup", { name: "Runtime" }).getByRole("radio", { name: "Native Runtime" })
@@ -339,13 +351,4 @@ async function assertNoWorkbenchRenderError(page: Page) {
   if (alertText?.includes("Workbench render failed")) {
     throw new Error(alertText);
   }
-}
-
-function numericEnv(name: string, fallback: number): number {
-  const value = process.env[name];
-  if (!value) {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

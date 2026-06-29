@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { repoRoot, startPevoWeb } from "./harness";
+import { liveContextFor, screenshotRoot } from "./liveContext";
 
 type DomRow = {
   blockId: string | null;
@@ -27,25 +28,37 @@ type DurableRow = {
   text: string;
 };
 
-const defaultSkillWorkdir = path.resolve(repoRoot, "../feedgarden");
+const defaultSkillCwd = path.resolve(repoRoot, "../feedgarden");
 
 test.describe("pevo Web live skill validation", () => {
   test("runs x-daily with sampled transcript assertions @live", async ({ page, isMobile }, testInfo) => {
-    test.skip(process.env.PSYCHEVO_PLAYWRIGHT_LIVE_SKILL !== "1", "live skill validation is opt-in");
+    const context = liveContextFor("web-skill-live");
+    if (!context) {
+      test.skip(true, "run through cargo xtask live");
+      return;
+    }
     test.skip(isMobile, "live skill validation runs once on the desktop project");
-    const timeoutMs = numericEnv("PSYCHEVO_PLAYWRIGHT_SKILL_TIMEOUT_MS", 900_000);
-    const intervalMs = numericEnv("PSYCHEVO_PLAYWRIGHT_SKILL_INTERVAL_MS", 3_000);
+    const timeoutMs = context.timeoutMs;
+    const intervalMs = context.intervalMs;
     test.setTimeout(timeoutMs + 120_000);
 
-    const workdir = process.env.PSYCHEVO_PLAYWRIGHT_SKILL_WORKDIR ?? defaultSkillWorkdir;
-    if (!existsSync(workdir)) {
-      throw new Error(`live skill workdir not found: ${workdir}`);
+    const cwd = context.cwd ?? defaultSkillCwd;
+    if (!existsSync(cwd)) {
+      throw new Error(`live skill cwd not found: ${cwd}`);
     }
-    const prompt = process.env.PSYCHEVO_PLAYWRIGHT_SKILL_PROMPT ?? "$x-daily";
-    const screenshotDir = testInfo.outputPath("live-skill-screens");
+    const prompt = context.prompt ?? "$x-daily";
+    const screenshotDir = screenshotRoot(context, "live-skill");
     mkdirSync(screenshotDir, { recursive: true });
 
-    const server = await startPevoWeb({ live: true, workdir });
+    const server = await startPevoWeb({
+      live: true,
+      model: context.model,
+      configPath: context.configPath,
+      dbPath: context.dbPath,
+      home: context.home,
+      pevoBin: context.pevoBin,
+      cwd
+    });
     let sample = 0;
     try {
       await page.goto(server.url);
@@ -368,7 +381,10 @@ function assertDurableDomOrder(rows: DomRow[], durableRows: DurableRow[], sample
 }
 
 async function liveSkillCompleted(page: Page): Promise<boolean> {
-  const runningRows = await page.locator(".is-running, .is-streaming").count();
+  const transcript = page.getByRole("region", { name: "Transcript" });
+  const runningRows = await transcript.locator(
+    ".pevo-message.is-streaming, .pevo-reasoning.is-streaming, .pevo-evidence.is-running"
+  ).count();
   const assistantText = normalize(await page.locator(".pevo-message.is-assistant").last().textContent().catch(() => "") ?? "");
   return runningRows === 0 && /(x-daily|日报|daily).*(执行完成|已生成|生成|完成|all done|complete)/.test(assistantText);
 }
@@ -378,15 +394,6 @@ async function assertNoCompletionPopover(page: Page, sample: number) {
   if (popovers > 0) {
     throw new Error(`sample ${sample}: completion popover remained visible after submission`);
   }
-}
-
-function numericEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) {
-    return fallback;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function textOverlaps(left: string, right: string): boolean {

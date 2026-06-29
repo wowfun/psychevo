@@ -1,12 +1,12 @@
-import { scopeForWorkdir } from "@psychevo/client";
+import { scopeForCwd } from "@psychevo/client";
 import type { GatewayRequestScope, SessionSummary, ThreadSnapshot } from "@psychevo/protocol";
 
 export function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSummary[]): GatewayRequestScope {
-  if (launchScope.workdir?.trim()) {
+  if (launchScope.cwd?.trim()) {
     return launchScope;
   }
-  const recentWorkdir = sessions.find((session) => session.workdir?.trim())?.workdir;
-  return scopeForWorkdir(recentWorkdir?.trim() || window.location.pathname);
+  const recentCwd = sessions.find((session) => session.cwd?.trim())?.cwd;
+  return scopeForCwd(recentCwd?.trim() || window.location.pathname);
 }
 
 export function shortSessionId(id: string): string {

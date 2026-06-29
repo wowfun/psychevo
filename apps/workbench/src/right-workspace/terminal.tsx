@@ -10,13 +10,13 @@ export function TerminalPanel({
   client,
   scope,
   terminalEvents,
-  workdir
+  cwd
 }: {
   appearance: Appearance;
   client: GatewayClient | null;
   scope: GatewayRequestScope | null;
   terminalEvents: TerminalNotificationEvent[];
-  workdir: string;
+  cwd: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTermTerminal | null>(null);
@@ -119,7 +119,7 @@ export function TerminalPanel({
         void client.request("terminal/terminate", { terminalId: id }).catch(() => {});
       }
     };
-  }, [client, scope?.workdir]);
+  }, [client, scope?.cwd]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

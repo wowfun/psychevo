@@ -43,7 +43,7 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await settings.getByRole("button", { name: "Back to app" }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openPanel(page, isMobile, "Transcript");
-      await page.getByRole("button", { name: "Agent" }).click();
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
       const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
       const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
       await expect(agentGroup.getByRole("radio", { name: "visual-acp" })).toBeHidden();

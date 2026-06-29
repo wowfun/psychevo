@@ -1,61 +1,16 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { HistoryDraftSession } from "@psychevo/components";
 import {
-  AlertTriangle,
-  GripVertical,
-  MessageSquare,
-  PanelLeft,
-  PanelRight,
-  Search
-} from "lucide-react";
-import {
-  Composer,
-  HistoryPanel,
-  TranscriptPanel,
-  type TranscriptAgentSession,
-  type HistoryDraftSession
-} from "@psychevo/components";
-import {
-  appendOptimisticPrompt,
-  applyLiveTranscriptEvent,
   GatewayClient,
-  parseThreadSnapshot,
-  reconcileThreadSnapshot,
-  scopeForWorkdir
+  scopeForCwd
 } from "@psychevo/client";
+import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
-  createBrowserHost,
-  downloadUrl,
-  type GatewayEndpoint,
-  type PsychevoHost
-} from "@psychevo/host";
-import {
-  GatewayEventSchema,
-  AutomationDraftResultSchema,
-  AutomationListResultSchema,
-  AutomationMutationResultSchema,
-  AutomationRunResultSchema,
-  InitializeResultSchema,
-  ObservabilityReadResultSchema,
   SettingsReadResultSchema,
-  TerminalExitedPayloadSchema,
-  TerminalOutputPayloadSchema,
   ThreadBrowserResultSchema,
-  ThreadTraceResultSchema,
   UsageReadResultSchema,
-  WorkspaceChangeMutationResultSchema,
-  WorkspaceChangesResultSchema,
-  WorkspaceDiffResultSchema,
-  WorkspaceCreateResultSchema,
-  WorkspaceFileReadResultSchema,
-  WorkspaceFileWriteResultSchema,
-  WorkspaceFilesResultSchema,
   type ContextReadResult,
-  type AutomationDraftParams,
-  type AutomationDraftView,
-  type AutomationWriteParams,
   type GatewayMention,
-  type GatewayEvent,
-  type GatewayInputPart,
   type GatewayRequestScope,
   type InitializeResult,
   type ModelOptionView,
@@ -64,33 +19,26 @@ import {
   type SessionSummary,
   type SettingsReadResult,
   type ThreadSnapshot,
-  type ThreadTraceResult,
   type UsageReadResult,
   type WorkspaceChangesResult,
   type WorkspaceDiffResult,
-  type WorkspaceFileReadResult,
-  type WorkspaceFileWriteResult,
   type WorkspaceFilesResult
 } from "@psychevo/protocol";
-import { attachmentFromFile } from "./attachments";
 import {
-  asOptionalRecord,
   asRecord,
-  commandFeedbackAutoDismissable,
   optionalStringField,
-  parseAgentList,
-  parseBackendDoctor,
-  parseBackendList,
-  parseCommandList,
-  prettyJson,
-  stringArray,
-  traceEventLabel,
-  traceEventSeq,
-  traceEventTime
+  stringArray
 } from "./data";
 import { createCommandActions } from "./command-actions";
 import { createAppActions } from "./app-actions";
 import { useWorkbenchEffects } from "./app-effects";
+import { useAutomations } from "./app-automations";
+import { EMPTY_SNAPSHOT } from "./app-constants";
+import { useGatewayLiveEvents } from "./app-live-events";
+import {
+  mergeModelCatalogOptionsIntoSettings,
+  modelTurnBlockReasonForControls
+} from "./app-model-state";
 import {
   createSurfaceActions,
   sessionsFromThreadBrowser,
@@ -98,126 +46,48 @@ import {
 } from "./surface-actions";
 import { WorkbenchLayout } from "./workbench-layout";
 import {
-  LeftUtilityRail,
-  MainSurface,
-  PinnedPanel,
-  WorkspaceCreateDialog
-} from "./app-shell";
-import {
-  CommandFeedbackView,
-  CommandOverlayView
-} from "./command-overlay";
-import {
-  ComposerRequests,
-  ComposerStatusLine,
-  ComposerSubmitControls
-} from "./composer-controls";
-import {
-  RightWorkspace,
-  createRightTabId,
-  fileBasename,
-  isUnsupportedPreviewFile,
-  rightWorkspaceTabVisibleForSession,
-  rightWorkspaceDefaultTitle,
-  rightWorkspaceTabLabel
+  rightWorkspaceTabVisibleForSession
 } from "./right-workspace";
 import {
-  EMPTY_BACKEND_DRAFT,
-  backendDraftFromBackend,
-  parseBackendCommandJson
-} from "./settings-panels";
-import {
-  ComposerRuntimeControls,
-  agentOptionValue,
-  formatRuntimeModeValues,
   isComposerRunnableAgent,
   isComposerRuntimeBackend,
   isRuntimeModeOption,
-  normalizeRequestedRuntimeMode,
   projectRuntimeModeOption,
   resolvePeerRuntimeMode,
-  runtimeModeCommandValues,
   runtimeSupportsAgentPersona
 } from "./runtime-controls";
 import {
-  idleActivity,
-  multilineList,
   normalizeActivity,
-  normalizeSessionSummary,
-  normalizeSnapshot,
-  startupDraftScope
 } from "./session-utils";
-import { transcriptSearchText } from "./search";
 import {
-  DEFAULT_RIGHT_WIDTH_PX,
-  PINNED_SESSIONS_KEY,
-  PREFS_KEY,
-  clampRightWidth,
   readPinnedSessionIds,
-  readPinnedSessionIdsFromStorage,
   readWorkbenchPrefs
 } from "./storage";
+import { createRightWorkspaceActions } from "./right-workspace-actions";
 import type {
   Appearance,
   BackendDraft,
-  CommandAlternateAction,
   CommandFeedback,
   CommandOverlay,
-  CommandTrigger,
   DebugEvent,
   GatewayEventFeed,
   MainView,
   PendingAttachment,
   RightWorkspaceTab,
-  RightWorkspaceTabKind,
   SessionBrowserWorkspaceState,
   SettingsSection,
   TerminalNotificationEvent,
   TraceState,
   WorkbenchAgent,
-  WorkbenchAutomation,
   WorkbenchBackend,
   WorkbenchBackendDoctor,
   WorkbenchChannelDoctor,
-  WorkbenchCommand,
-  WorkbenchDiagnostic,
-  WorkbenchPrefs
+  WorkbenchCommand
 } from "./types";
 import {
-  createHistoryDraftSession,
-  shouldApplyReadOnlySnapshot,
-  shouldAdoptDetachedShellResult,
   visibleHistoryDraftSession,
   type PendingDetachedShell
 } from "./viewGuard";
-import { applyTurnCompletionQueueBarrier } from "./liveTranscript";
-
-const EMPTY_SNAPSHOT: ThreadSnapshot = {
-  source: { kind: "web", rawId: "pending", lifetime: "persistent", rawIdentity: null, visibleName: null },
-  scope: scopeForWorkdir(""),
-  thread: null,
-  entries: [],
-  activity: idleActivity(),
-  pendingPermissions: [],
-  pendingClarifies: []
-};
-
-const COMMAND_FEEDBACK_AUTO_DISMISS_MS = 3_000;
-const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
-const LIVE_EVENT_REFRESH_SETTLE_MS = 650;
-let terminalEventSeq = 0;
-
-function nextTerminalEventSeq(): number {
-  terminalEventSeq += 1;
-  return terminalEventSeq;
-}
-
-function pacedGatewayEvent(event: GatewayEvent): boolean {
-  return event.type === "entryStarted" ||
-    event.type === "entryUpdated" ||
-    event.type === "entryCompleted" ||
-    event.type === "entryDelta";
-}
 
 function mergeSessionSummaries(current: SessionSummary[], incoming: SessionSummary[]): SessionSummary[] {
   const byId = new Map(current.map((session) => [session.id, session]));
@@ -235,22 +105,11 @@ function mergeBrowserWorkspaces(
   current: SessionBrowserWorkspaceState[],
   incoming: SessionBrowserWorkspaceState[]
 ): SessionBrowserWorkspaceState[] {
-  const byWorkdir = new Map(current.map((workspace) => [workspace.workdir, workspace]));
+  const byCwd = new Map(current.map((workspace) => [workspace.cwd, workspace]));
   for (const workspace of incoming) {
-    byWorkdir.set(workspace.workdir, workspace);
+    byCwd.set(workspace.cwd, workspace);
   }
-  return Array.from(byWorkdir.values());
-}
-
-function upsertAutomation(
-  current: WorkbenchAutomation[],
-  next: WorkbenchAutomation
-): WorkbenchAutomation[] {
-  const existing = current.some((automation) => automation.id === next.id);
-  if (!existing) {
-    return [next, ...current];
-  }
-  return current.map((automation) => automation.id === next.id ? next : automation);
+  return Array.from(byCwd.values());
 }
 
 export function App() {
@@ -263,7 +122,7 @@ export function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [sessionBrowserWorkspaces, setSessionBrowserWorkspaces] = useState<SessionBrowserWorkspaceState[]>([]);
-  const [loadingOlderWorkdir, setLoadingOlderWorkdir] = useState<string | null>(null);
+  const [loadingOlderCwd, setLoadingOlderCwd] = useState<string | null>(null);
   const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(readPinnedSessionIds);
   const [draftSession, setDraftSession] = useState<HistoryDraftSession | null>(null);
   const [settings, setSettings] = useState<SettingsReadResult | undefined>();
@@ -273,9 +132,6 @@ export function App() {
   const [backendDoctor, setBackendDoctor] = useState<Record<string, WorkbenchBackendDoctor>>({});
   const [channelDoctor, setChannelDoctor] = useState<Record<string, WorkbenchChannelDoctor>>({});
   const [commands, setCommands] = useState<WorkbenchCommand[]>([]);
-  const [automations, setAutomations] = useState<WorkbenchAutomation[]>([]);
-  const [automationsLoading, setAutomationsLoading] = useState(false);
-  const [automationsError, setAutomationsError] = useState<string | null>(null);
   const [rightTabs, setRightTabs] = useState<RightWorkspaceTab[]>([]);
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<MainView>("transcript");
@@ -331,9 +187,6 @@ export function App() {
   const detachedShellTokenRef = useRef(0);
   const pendingDetachedShellRef = useRef<PendingDetachedShell | null>(null);
   const skipNextPinnedPersistRef = useRef(false);
-  const gatewayEventQueueRef = useRef<GatewayEvent[]>([]);
-  const gatewayEventRafRef = useRef<number | null>(null);
-  const gatewayEventSeqRef = useRef(0);
 
   const activity = normalizeActivity(snapshot.activity);
   const transcriptEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
@@ -345,8 +198,8 @@ export function App() {
   const visibleDraftSession = visibleHistoryDraftSession(draftSession, false);
   const hasSelectedSession = Boolean(currentThreadId || visibleDraftSession);
   const showSessionChrome = mainView === "transcript" && hasSelectedSession;
-  const commandContextKey = `${activeScope?.workdir ?? ""}:${currentThreadId ?? visibleDraftSession?.id ?? "none"}`;
-  const activeWorkbenchWorkdir = activeScope?.workdir ?? init?.scope.workdir ?? settings?.workdir ?? window.location.pathname;
+  const commandContextKey = `${activeScope?.cwd ?? ""}:${currentThreadId ?? visibleDraftSession?.id ?? "none"}`;
+  const activeWorkbenchCwd = activeScope?.cwd ?? init?.scope.cwd ?? settings?.cwd ?? window.location.pathname;
   const activeRightTab = rightTabs.find((tab) =>
     tab.id === activeRightTabId && rightWorkspaceTabVisibleForSession(tab, currentThreadId ?? null)
   ) ?? null;
@@ -388,70 +241,6 @@ export function App() {
     && runtimeModeValues.length === 0;
   const runtimeAcceptsAgentPersona = runtimeSupportsAgentPersona(selectedRuntimeRef);
 
-  function scheduleGatewayEventFlush() {
-    if (gatewayEventRafRef.current !== null) {
-      return;
-    }
-    gatewayEventRafRef.current = window.requestAnimationFrame(() => {
-      gatewayEventRafRef.current = null;
-      const event = gatewayEventQueueRef.current.shift();
-      if (event) {
-        setSnapshot((current) => {
-          const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
-          selectedThreadIdRef.current = next.thread?.id ?? null;
-          return next;
-        });
-      }
-      if (gatewayEventQueueRef.current.length > 0) {
-        scheduleGatewayEventFlush();
-      }
-    });
-  }
-
-  function publishGatewayEvent(event: GatewayEvent) {
-    gatewayEventSeqRef.current += 1;
-    setLatestGatewayEvent({
-      event,
-      seq: gatewayEventSeqRef.current
-    });
-  }
-
-  function applyGatewayEvent(event: GatewayEvent) {
-    publishGatewayEvent(event);
-    if (event.type === "turnCompleted") {
-      gatewayEventQueueRef.current = applyTurnCompletionQueueBarrier(gatewayEventQueueRef.current, event);
-      setSnapshot((current) => {
-        const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
-        selectedThreadIdRef.current = next.thread?.id ?? null;
-        return next;
-      });
-      return;
-    }
-    if (!pacedGatewayEvent(event)) {
-      setSnapshot((current) => {
-        const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
-        selectedThreadIdRef.current = next.thread?.id ?? null;
-        return next;
-      });
-      return;
-    }
-    gatewayEventQueueRef.current.push(event);
-    scheduleGatewayEventFlush();
-  }
-
-  function scheduleSnapshotRefreshAfterLiveSettle(
-    nextClient: GatewayClient,
-    threadId: string | null,
-    epoch = viewEpochRef.current
-  ) {
-    window.setTimeout(() => {
-      if (threadId) {
-        void refreshSnapshot(nextClient, threadId, undefined, true, epoch);
-      } else {
-        void refreshSnapshot(nextClient);
-      }
-    }, LIVE_EVENT_REFRESH_SETTLE_MS);
-  }
   const controls = settings?.controls ?? null;
   const modelReady = Boolean(selectedModel?.trim());
   const modelTurnBlockReason = modelTurnBlockReasonForControls(controls);
@@ -460,30 +249,7 @@ export function App() {
     if (options.length === 0) {
       return;
     }
-    setSettings((current) => {
-      if (!current?.controls) {
-        return current;
-      }
-      const modelDetails = new Map<string, ModelOptionView>();
-      for (const option of current.controls.modelDetails ?? []) {
-        modelDetails.set(option.value, option);
-      }
-      for (const option of options) {
-        modelDetails.set(option.value, option);
-      }
-      const modelOptions = new Set(current.controls.modelOptions ?? []);
-      for (const option of options) {
-        modelOptions.add(option.value);
-      }
-      return {
-        ...current,
-        controls: {
-          ...current.controls,
-          modelOptions: [...modelOptions].sort(),
-          modelDetails: [...modelDetails.values()].sort((left, right) => left.value.localeCompare(right.value))
-        }
-      };
-    });
+    setSettings((current) => mergeModelCatalogOptionsIntoSettings(current, options));
   }
 
   async function refreshWorkbenchControls() {
@@ -493,7 +259,7 @@ export function App() {
     await runAction(async () => {
       const nextSettings = SettingsReadResultSchema.parse(await client.request("settings/read", {
         threadId: currentThreadId ?? null,
-        workdir: activeWorkbenchWorkdir
+        cwd: activeWorkbenchCwd
       }));
       setSettings(nextSettings);
       const nextControls = nextSettings.controls;
@@ -560,15 +326,54 @@ export function App() {
     setWorkspaceFiles
   });
 
-  async function loadOlderSessions(workdir: string) {
+  const {
+    applyGatewayEvent,
+    gatewayEventQueueRef,
+    gatewayEventRafRef,
+    scheduleSnapshotRefreshAfterLiveSettle
+  } = useGatewayLiveEvents({
+    refreshSnapshot,
+    selectedThreadIdRef,
+    setLatestGatewayEvent,
+    setSnapshot,
+    viewEpochRef
+  });
+
+  const {
+    automations,
+    automationsError,
+    automationsLoading,
+    deleteAutomation,
+    draftAutomation,
+    openAutomationThread,
+    pauseAutomation,
+    refreshAutomations,
+    resumeAutomation,
+    runAutomation,
+    saveAutomation
+  } = useAutomations({
+    activeScope,
+    activeWorkbenchCwd,
+    client,
+    initScope: init?.scope ?? null,
+    mainView,
+    settingsCwd: settings?.cwd,
+    beginExplicitViewSwitch,
+    refreshSnapshot,
+    runAction,
+    setMobilePanel,
+    updateMainView
+  });
+
+  async function loadOlderSessions(cwd: string) {
     if (!client) {
       return;
     }
-    const cursor = sessionBrowserWorkspaces.find((workspace) => workspace.workdir === workdir)?.nextCursor;
-    if (!cursor || loadingOlderWorkdir) {
+    const cursor = sessionBrowserWorkspaces.find((workspace) => workspace.cwd === cwd)?.nextCursor;
+    if (!cursor || loadingOlderCwd) {
       return;
     }
-    setLoadingOlderWorkdir(workdir);
+    setLoadingOlderCwd(cwd);
     try {
       const result = ThreadBrowserResultSchema.parse(
         await client.request("thread/browser", {
@@ -577,13 +382,13 @@ export function App() {
           includeSessionIds: [currentThreadId ?? null, ...pinnedSessionIds].filter((id): id is string => Boolean(id)),
           limit: 20,
           recentDays: 7,
-          workdir
+          cwd: cwd
         })
       );
       setSessions((current) => mergeSessionSummaries(current, sessionsFromThreadBrowser(result)));
       setSessionBrowserWorkspaces((current) => mergeBrowserWorkspaces(current, workspacesFromThreadBrowser(result)));
     } finally {
-      setLoadingOlderWorkdir(null);
+      setLoadingOlderCwd(null);
     }
   }
 
@@ -605,133 +410,12 @@ export function App() {
     }
   }
 
-  function activeAutomationScope(): GatewayRequestScope {
-    return activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname);
-  }
-
-  async function refreshAutomations(nextClient: GatewayClient | null = client) {
-    if (!nextClient) {
-      return;
-    }
-    setAutomationsLoading(true);
-    setAutomationsError(null);
-    try {
-      const result = AutomationListResultSchema.parse(
-        await nextClient.request("automation/list", {
-          scope: activeAutomationScope()
-        })
-      );
-      setAutomations(result.automations);
-    } catch (error) {
-      setAutomationsError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAutomationsLoading(false);
-    }
-  }
-
-  async function saveAutomation(params: AutomationWriteParams) {
-    if (!client) {
-      return;
-    }
-    setAutomationsError(null);
-    const result = AutomationMutationResultSchema.parse(
-      await client.request("automation/write", {
-        ...params,
-        scope: params.scope ?? activeAutomationScope()
-      })
-    );
-    setAutomations((current) => upsertAutomation(current, result.automation));
-  }
-
-  async function draftAutomation(params: AutomationDraftParams): Promise<AutomationDraftView> {
-    if (!client) {
-      throw new Error("Gateway is not connected.");
-    }
-    setAutomationsError(null);
-    try {
-      const result = AutomationDraftResultSchema.parse(
-        await client.request("automation/draft", {
-          ...params,
-          scope: params.scope ?? activeAutomationScope()
-        })
-      );
-      return result.draft;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setAutomationsError(message);
-      throw error;
-    }
-  }
-
-  async function runAutomation(id: string) {
-    if (!client) {
-      return;
-    }
-    setAutomationsError(null);
-    const result = AutomationRunResultSchema.parse(
-      await client.request("automation/run", {
-        automationId: id,
-        trigger: "manual"
-      })
-    );
-    setAutomations((current) => upsertAutomation(current, result.automation));
-    window.setTimeout(() => {
-      void refreshAutomations(client);
-    }, LIVE_EVENT_REFRESH_SETTLE_MS);
-  }
-
-  async function pauseAutomation(id: string) {
-    await setAutomationEnabled(id, false);
-  }
-
-  async function resumeAutomation(id: string) {
-    await setAutomationEnabled(id, true);
-  }
-
-  async function setAutomationEnabled(id: string, enabled: boolean) {
-    if (!client) {
-      return;
-    }
-    setAutomationsError(null);
-    const result = AutomationMutationResultSchema.parse(
-      await client.request(enabled ? "automation/resume" : "automation/pause", {
-        automationId: id
-      })
-    );
-    setAutomations((current) => upsertAutomation(current, result.automation));
-  }
-
-  async function deleteAutomation(id: string) {
-    if (!client) {
-      return;
-    }
-    setAutomationsError(null);
-    await client.request("automation/delete", { automationId: id });
-    setAutomations((current) => current.filter((automation) => automation.id !== id));
-  }
-
-  function openAutomationThread(threadId: string) {
-    void runAction(async () => {
-      const epoch = beginExplicitViewSwitch();
-      await refreshSnapshot(client, threadId, undefined, false, epoch);
-      updateMainView("transcript");
-      setMobilePanel("transcript");
-    });
-  }
-
   useEffect(() => {
     if (!client || mainView !== "settings" || settingsSection !== "usage") {
       return;
     }
     void refreshUsageStats(client);
   }, [client, mainView, settingsSection]);
-
-  useEffect(() => {
-    if (!client || mainView !== "automations") {
-      return;
-    }
-    void refreshAutomations(client);
-  }, [client, mainView, activeWorkbenchWorkdir]);
 
   useWorkbenchEffects({
     activeRightTabKind: activeRightTab?.kind ?? null,
@@ -767,7 +451,7 @@ export function App() {
     selectedRuntimeRef,
     selectedThreadIdRef,
     settingsSection,
-    settingsWorkdir: settings?.workdir,
+    settingsCwd: settings?.cwd,
     showSessionChrome,
     skipNextPinnedPersistRef,
     snapshot,
@@ -870,120 +554,32 @@ export function App() {
     setMobilePanel("history");
   }
 
-  function revealRightWorkspace(tabId: string | null = activeRightTabId) {
-    setActiveCommandOverlay(null);
-    setRightCollapsed(false);
-    setActiveRightTabId(tabId);
-    setMobilePanel("status");
-  }
-
-  function openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch: Partial<RightWorkspaceTab> = {}, forceNew = false) {
-    if (kind === "debug" && !debugEnabled) {
-      return;
-    }
-    const reusable = kind === "review" || kind === "files" || kind === "debug";
-    const threadReusable = kind === "agentSession" && patch.threadId;
-    const existingThreadTab = threadReusable
-      ? rightTabs.find((tab) => tab.kind === kind && tab.threadId === patch.threadId)
-      : null;
-    const nextId = existingThreadTab?.id
-      ?? (reusable && !forceNew ? rightTabs.find((tab) => tab.kind === kind)?.id ?? createRightTabId(kind) : createRightTabId(kind));
-    const nextTab: RightWorkspaceTab = {
-      id: nextId,
-      kind,
-      title: patch.title ?? rightWorkspaceDefaultTitle(kind),
-      threadId: patch.threadId ?? null,
-      parentThreadId: patch.parentThreadId ?? null,
-      pendingPrompt: patch.pendingPrompt ?? null,
-      path: patch.path ?? null,
-      diff: patch.diff ?? null,
-      file: patch.file ?? null,
-      message: patch.message ?? null
-    };
-    setRightTabs((current) => {
-      const existing = current.find((tab) => tab.id === nextId);
-      if (!existing) {
-        return [...current, nextTab];
-      }
-      return current.map((tab) => (
-        tab.id === nextId
-          ? { ...tab, ...nextTab, id: tab.id, kind: tab.kind }
-          : tab
-      ));
-    });
-    revealRightWorkspace(nextId);
-  }
-
-  function clearRightWorkspaceTabPendingPrompt(tabId: string) {
-    setRightTabs((current) => current.map((tab) => (
-      tab.id === tabId ? { ...tab, pendingPrompt: null } : tab
-    )));
-  }
-
-  function closeRightWorkspaceTab(tabId: string) {
-    if (dirtyRightTabs[tabId] && !window.confirm("Discard unsaved file edits?")) {
-      return;
-    }
-    const closingTab = rightTabs.find((tab) => tab.id === tabId) ?? null;
-    if (closingTab?.kind === "sideConversation" && closingTab.threadId) {
-      const threadId = closingTab.threadId;
-      void runAction(async () => {
-        await client?.request("turn/interrupt", { threadId });
-        await client?.request("thread/delete", { threadId });
-      });
-    }
-    setRightTabs((current) => current.filter((tab) => tab.id !== tabId));
-    setDirtyRightTabs((current) => {
-      const next = { ...current };
-      delete next[tabId];
-      return next;
-    });
-    setActiveRightTabId((current) => {
-      if (current !== tabId) {
-        return current;
-      }
-      const remaining = rightTabs.filter((tab) => tab.id !== tabId);
-      return remaining.at(-1)?.id ?? null;
-    });
-  }
-
-  function openReviewTab(diff: WorkspaceDiffResult, path?: string | null) {
-    const selectedPath = diff.selectedPath ?? path ?? null;
-    openRightWorkspaceTab("review", {
-      diff,
-      path: selectedPath,
-      title: selectedPath ? fileBasename(selectedPath) : "Review"
-    });
-  }
-
-  function openAgentSessionTab(session: TranscriptAgentSession) {
-    openRightWorkspaceTab("agentSession", {
-      parentThreadId: session.parentSessionId ?? currentThreadId ?? null,
-      threadId: session.childSessionId,
-      title: session.taskName ?? session.agentName ?? session.title ?? "Agent"
-    });
-  }
-
-  function beginRightResize(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (window.matchMedia("(max-width: 780px)").matches) {
-      return;
-    }
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = rightWidthPx;
-    const pointerId = event.pointerId;
-    event.currentTarget.setPointerCapture(pointerId);
-    function onPointerMove(moveEvent: PointerEvent) {
-      const nextWidth = clampRightWidth(startWidth + startX - moveEvent.clientX);
-      setRightWidthPx(nextWidth);
-    }
-    function onPointerUp() {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    }
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp, { once: true });
-  }
+  const {
+    beginRightResize,
+    clearRightWorkspaceTabPendingPrompt,
+    closeRightWorkspaceTab,
+    openAgentSessionTab,
+    openReviewTab,
+    openRightWorkspaceTab,
+    revealRightWorkspace
+  } = createRightWorkspaceActions({
+    activeRightTabId,
+    client,
+    currentThreadId: currentThreadId ?? null,
+    debugEnabled,
+    dirtyRightTabs,
+    rightTabs,
+    rightWidthPx,
+    runAction,
+    setActiveCommandOverlay,
+    setActiveRightTabId,
+    setDirtyRightTabs,
+    setMobilePanel,
+    setRightCollapsed,
+    setRightTabs,
+    setRightWidthPx,
+    updateMainView
+  });
 
   const {
     acceptWorkspaceChange,
@@ -1115,7 +711,7 @@ export function App() {
       runtimeOptions,
       runtimeRef: selectedRuntimeRef,
       runtimeSessionId,
-      scope: activeScope ?? init?.scope ?? scopeForWorkdir(settings?.workdir ?? window.location.pathname),
+      scope: activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? window.location.pathname),
       threadId,
       text: null
     });
@@ -1179,7 +775,7 @@ export function App() {
     }
     void runAction(async () => {
       const result = asRecord(await client.request("model/state/set", {
-        workdir: activeWorkbenchWorkdir,
+        cwd: activeWorkbenchCwd,
         threadId: currentThreadId ?? null,
         model,
         reasoningEffort: nextVariant === "none" ? null : nextVariant
@@ -1221,14 +817,14 @@ export function App() {
   }
 
   return <WorkbenchLayout {...{
-    acceptWorkspaceChange, activeCommandOverlay, activeRightTab, activeRightTabId, activeScope, activeWorkbenchWorkdir,
+    acceptWorkspaceChange, activeCommandOverlay, activeRightTab, activeRightTabId, activeScope, activeWorkbenchCwd,
     automations, automationsError, automationsLoading,
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch,
     beginRightResize, changeAgentSelection, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
     channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyTranscriptText, createWorkspace, currentThreadId,
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, extraRuntimeModeValues, handleAttachment, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
-    loadingOlderWorkdir, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
+    loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
     openAutomationThread,
     onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
     pendingClarifies, pendingPermissions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable, pollWechatQrSetup,
@@ -1247,11 +843,4 @@ export function App() {
     togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateChannel, updateMainView, viewEpochRef, workMode,
     workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;
-}
-
-function modelTurnBlockReasonForControls(controls: SettingsReadResult["controls"]): string {
-  if (controls?.modelStatus === "error" && controls.modelError?.trim()) {
-    return `Model unavailable: ${controls.modelError.trim()}`;
-  }
-  return "Select a provider/model before starting a conversation.";
 }

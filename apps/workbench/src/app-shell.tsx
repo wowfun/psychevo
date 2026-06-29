@@ -231,7 +231,7 @@ export function MainSurface({
   usageStatsLoading,
   sessions,
   transcript,
-  workdir
+  cwd
 }: {
   appearance: Appearance;
   automations: WorkbenchAutomation[];
@@ -294,7 +294,7 @@ export function MainSurface({
   usageStatsLoading: boolean;
   sessions: SessionSummary[];
   transcript: ReactNode;
-  workdir: string;
+  cwd: string;
 }) {
   if (mainView === "transcript") {
     return <>{transcript}</>;
@@ -345,7 +345,7 @@ export function MainSurface({
         onStartWechatQrSetup={onStartWechatQrSetup}
         onUpdateChannel={onUpdateChannel}
         sessionBrowserWorkspaces={sessionBrowserWorkspaces}
-        workdir={workdir}
+        cwd={cwd}
       />
     );
   }
@@ -360,7 +360,7 @@ export function MainSurface({
         scope={scope}
         sessionBrowserWorkspaces={sessionBrowserWorkspaces}
         sessions={sessions}
-        workdir={workdir}
+        cwd={cwd}
         onDelete={onDeleteAutomation}
         onDraft={onDraftAutomation}
         onOpenSession={onOpenAutomationThread}

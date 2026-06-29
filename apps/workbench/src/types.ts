@@ -147,7 +147,7 @@ export type TraceState = {
 };
 
 export type SessionBrowserWorkspaceState = {
-  workdir: string;
+  cwd: string;
   hiddenCount: number;
   nextCursor: ThreadBrowserCursor | null;
 };

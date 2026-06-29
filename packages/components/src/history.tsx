@@ -27,15 +27,15 @@ export interface HistoryPanelProps {
   draftSession?: HistoryDraftSession | null;
   pinnedSessionIds?: string[];
   browserWorkspaces?: HistoryBrowserWorkspace[];
-  loadingOlderWorkdir?: string | null;
+  loadingOlderCwd?: string | null;
   sessions: SessionSummary[];
   onArchive(sessionId: string): void;
   onDelete(sessionId: string): void;
   onExport(sessionId: string): void;
   onNew(): void;
   onCreateWorkspace?(): void;
-  onLoadOlderSessions?(workdir: string): void;
-  onNewInWorkdir?(workdir: string): void;
+  onLoadOlderSessions?(cwd: string): void;
+  onNewInCwd?(cwd: string): void;
   onTogglePinned?(sessionId: string): void;
   onRename(sessionId: string, title: string): void;
   onRestore(sessionId: string): void;
@@ -48,11 +48,11 @@ export interface HistoryDraftSession {
   id: string;
   title: string;
   createdAtMs: number;
-  workdir: string;
+  cwd: string;
 }
 
 export interface HistoryBrowserWorkspace {
-  workdir: string;
+  cwd: string;
   hiddenCount: number;
 }
 
@@ -66,21 +66,21 @@ export function HistoryPanel(props: HistoryPanelProps) {
   const sessions = Array.isArray(props.sessions) ? props.sessions : [];
   const draftSession = props.archived ? null : props.draftSession ?? null;
   const pinnedSessionIds = new Set(props.pinnedSessionIds ?? []);
-  const browserByWorkdir = useMemo(
-    () => new Map((props.browserWorkspaces ?? []).map((workspace) => [workspace.workdir, workspace])),
+  const browserByCwd = useMemo(
+    () => new Map((props.browserWorkspaces ?? []).map((workspace) => [workspace.cwd, workspace])),
     [props.browserWorkspaces]
   );
   const groupedSessions = useMemo(
     () => groupSessionsByProject(sessions, draftSession),
     [draftSession, sessions]
   );
-  const groupSignature = groupedSessions.map((group) => group.workdir).join("\n");
-  const hasCollapsedProjects = groupedSessions.some((group) => collapsedProjects.has(group.workdir));
+  const groupSignature = groupedSessions.map((group) => group.cwd).join("\n");
+  const hasCollapsedProjects = groupedSessions.some((group) => collapsedProjects.has(group.cwd));
 
   useEffect(() => {
-    const visibleWorkdirs = new Set(groupedSessions.map((group) => group.workdir));
+    const visibleCwds = new Set(groupedSessions.map((group) => group.cwd));
     setCollapsedProjects((current) => {
-      const next = new Set([...current].filter((workdir) => visibleWorkdirs.has(workdir)));
+      const next = new Set([...current].filter((cwd) => visibleCwds.has(cwd)));
       return next.size === current.size ? current : next;
     });
   }, [groupSignature, groupedSessions]);
@@ -93,21 +93,21 @@ export function HistoryPanel(props: HistoryPanelProps) {
     return () => window.clearInterval(timer);
   }, [sessions]);
 
-  function startProjectSession(workdir: string) {
-    if (props.onNewInWorkdir) {
-      props.onNewInWorkdir(workdir);
+  function startProjectSession(cwd: string) {
+    if (props.onNewInCwd) {
+      props.onNewInCwd(cwd);
       return;
     }
     props.onNew();
   }
 
-  function toggleProject(workdir: string) {
+  function toggleProject(cwd: string) {
     setCollapsedProjects((current) => {
       const next = new Set(current);
-      if (next.has(workdir)) {
-        next.delete(workdir);
+      if (next.has(cwd)) {
+        next.delete(cwd);
       } else {
-        next.add(workdir);
+        next.add(cwd);
       }
       return next;
     });
@@ -116,7 +116,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
   function toggleAllProjects() {
     setCollapsedProjects(hasCollapsedProjects
       ? new Set()
-      : new Set(groupedSessions.map((group) => group.workdir)));
+      : new Set(groupedSessions.map((group) => group.cwd)));
   }
 
   return (
@@ -142,15 +142,15 @@ export function HistoryPanel(props: HistoryPanelProps) {
           <div className="pevo-empty">No sessions</div>
         ) : (
           groupedSessions.map((group) => {
-            const collapsed = collapsedProjects.has(group.workdir);
-            const groupDraftSession = draftSession?.workdir === group.workdir ? draftSession : null;
-            const browser = browserByWorkdir.get(group.workdir);
+            const collapsed = collapsedProjects.has(group.cwd);
+            const groupDraftSession = draftSession?.cwd === group.cwd ? draftSession : null;
+            const browser = browserByCwd.get(group.cwd);
             return (
-              <section className={`pevo-sessionGroup ${collapsed ? "is-collapsed" : ""}`} key={group.workdir}>
+              <section className={`pevo-sessionGroup ${collapsed ? "is-collapsed" : ""}`} key={group.cwd}>
                 <header className="pevo-sessionGroupHeader">
                   <button
                     className="pevo-sessionGroupToggle"
-                    onClick={() => toggleProject(group.workdir)}
+                    onClick={() => toggleProject(group.cwd)}
                     type="button"
                   >
                     {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
@@ -159,7 +159,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
                   <IconButton
                     className="pevo-sessionProjectNew"
                     title={`New session in ${group.label}`}
-                    onClick={() => startProjectSession(group.workdir)}
+                    onClick={() => startProjectSession(group.cwd)}
                     disabled={props.disabled}
                   >
                     <Plus size={15} />
@@ -350,12 +350,12 @@ export function HistoryPanel(props: HistoryPanelProps) {
                 {!collapsed && !props.archived && browser && browser.hiddenCount > 0 && (
                   <button
                     className="pevo-sessionOlderRow"
-                    disabled={props.disabled || props.loadingOlderWorkdir === group.workdir || !props.onLoadOlderSessions}
-                    onClick={() => props.onLoadOlderSessions?.(group.workdir)}
+                    disabled={props.disabled || props.loadingOlderCwd === group.cwd || !props.onLoadOlderSessions}
+                    onClick={() => props.onLoadOlderSessions?.(group.cwd)}
                     type="button"
                   >
                     <span>Older sessions</span>
-                    <span>{props.loadingOlderWorkdir === group.workdir ? "Loading" : `${browser.hiddenCount}`}</span>
+                    <span>{props.loadingOlderCwd === group.cwd ? "Loading" : `${browser.hiddenCount}`}</span>
                   </button>
                 )}
               </section>
@@ -368,7 +368,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
 }
 
 type SessionProjectGroup = {
-  workdir: string;
+  cwd: string;
   label: string;
   latestAt: number;
   sessions: SessionSummary[];
@@ -380,16 +380,16 @@ function groupSessionsByProject(
 ): SessionProjectGroup[] {
   const groups = new Map<string, SessionProjectGroup>();
   for (const session of sessions) {
-    const workdir = session.project?.workdir || session.workdir || "";
-    const label = session.project?.label || projectLabelFromWorkdir(workdir);
+    const cwd = session.project?.cwd || session.cwd || "";
+    const label = session.project?.label || projectLabelFromCwd(cwd);
     const updatedAt = session.updatedAtMs ?? session.startedAtMs ?? 0;
-    const existing = groups.get(workdir);
+    const existing = groups.get(cwd);
     if (existing) {
       existing.sessions.push(session);
       existing.latestAt = Math.max(existing.latestAt, updatedAt);
     } else {
-      groups.set(workdir, {
-        workdir,
+      groups.set(cwd, {
+        cwd,
         label,
         latestAt: updatedAt,
         sessions: [session]
@@ -397,14 +397,14 @@ function groupSessionsByProject(
     }
   }
   if (draftSession) {
-    const workdir = draftSession.workdir;
-    const existing = groups.get(workdir);
+    const cwd = draftSession.cwd;
+    const existing = groups.get(cwd);
     if (existing) {
       existing.latestAt = Math.max(existing.latestAt, draftSession.createdAtMs);
     } else {
-      groups.set(workdir, {
-        workdir,
-        label: projectLabelFromWorkdir(workdir),
+      groups.set(cwd, {
+        cwd,
+        label: projectLabelFromCwd(cwd),
         latestAt: draftSession.createdAtMs,
         sessions: []
       });
@@ -422,8 +422,8 @@ function sessionTime(session: SessionSummary): number {
   return session.updatedAtMs ?? session.startedAtMs ?? 0;
 }
 
-function projectLabelFromWorkdir(workdir: string): string {
-  const parts = workdir.split(/[\\/]/).filter(Boolean);
+function projectLabelFromCwd(cwd: string): string {
+  const parts = cwd.split(/[\\/]/).filter(Boolean);
   return parts.at(-1) ?? "workspace";
 }
 

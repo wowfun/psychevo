@@ -291,9 +291,9 @@ export type GatewayRequestInit<M extends GatewayMethod> =
   | GatewayRequestParams[M]
   | Partial<GatewayRequestParams[M]>;
 
-export function scopeForWorkdir(workdir: string): GatewayRequestScope {
+export function scopeForCwd(cwd: string): GatewayRequestScope {
   return {
-    workdir,
+    cwd: cwd,
     source: {
       kind: "web",
       rawId: null,
@@ -424,7 +424,7 @@ function withThreadSnapshotDefaults(value: unknown): unknown {
 function defaultScopeFromSource(value: unknown): GatewayRequestScope {
   const source = asRecord(value);
   return {
-    workdir: "",
+    cwd: "",
     source: {
       kind: typeof source?.kind === "string" ? source.kind : "web",
       rawId: typeof source?.rawId === "string" ? source.rawId : null,

@@ -14,9 +14,9 @@ afterEach(() => {
 function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     id: "session-1234567890",
-    workdir: "/work/chat",
+    cwd: "/work/chat",
     project: {
-      workdir: "/work/chat",
+      cwd: "/work/chat",
       label: "chat",
       displayPath: "/work/chat"
     },
@@ -111,7 +111,7 @@ describe("HistoryPanel", () => {
           }
         })
       ],
-      browserWorkspaces: [{ workdir: "/work/chat", hiddenCount: 7 }],
+      browserWorkspaces: [{ cwd: "/work/chat", hiddenCount: 7 }],
       onLoadOlderSessions
     });
 

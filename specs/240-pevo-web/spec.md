@@ -186,13 +186,13 @@ Frontend validation uses deterministic local harnesses by default. Unit tests
 cover generated protocol validators, client reconnect/pending request behavior,
 host storage, and component rendering. Browser tests use Playwright against the
 built Workbench served by `pevo gateway open --no-browser --print-url`, with
-isolated config, SQLite state, and workdir by default. They cover desktop and
+isolated config, SQLite state, and cwd by default. They cover desktop and
 narrow viewport layout, Gateway connection, source/thread startup, history
 management, composer submission, permission/clarify surfaces, and download
 flows.
 
 Live provider browser validation is opt-in only. It may reuse the user's real
-Psychevo config and credentials, but must still use an isolated workdir and
+Psychevo config and credentials, but must still use an isolated cwd and
 repo-local test state unless the caller explicitly chooses otherwise.
 Long-running live skill validation uses a reusable Playwright spec that samples
 the page every three seconds, stores screenshots, and checks each sampled

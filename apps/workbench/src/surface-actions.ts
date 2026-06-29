@@ -2,7 +2,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
   parseThreadSnapshot,
   reconcileThreadSnapshot,
-  scopeForWorkdir,
+  scopeForCwd,
   type GatewayClient
 } from "@psychevo/client";
 import {
@@ -90,7 +90,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
   function defaultScope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForWorkdir(params.settings?.workdir ?? window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd ?? window.location.pathname);
   }
 
   async function refreshSnapshot(
@@ -174,22 +174,22 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
 
   async function adoptSnapshotScope(nextClient: GatewayClient, nextSnapshot: ThreadSnapshot) {
     const scope = nextSnapshot.scope;
-    if (!scope?.workdir) {
+    if (!scope?.cwd) {
       return;
     }
     const previous = params.scopeRef.current;
     params.scopeRef.current = scope;
     params.setActiveScope(scope);
     const threadId = nextSnapshot.thread?.id ?? null;
-    if (previous?.workdir === scope.workdir) {
-      const nextSettings = SettingsReadResultSchema.parse(await nextClient.request("settings/read", { threadId, workdir: scope.workdir }));
+    if (previous?.cwd === scope.cwd) {
+      const nextSettings = SettingsReadResultSchema.parse(await nextClient.request("settings/read", { threadId, cwd: scope.cwd }));
       params.setSettings(nextSettings);
       applyInitialControls(nextSettings);
       await refreshObservability(nextClient, scope, threadId);
       return;
     }
     const [settingsValue] = await Promise.all([
-      nextClient.request("settings/read", { threadId, workdir: scope.workdir }),
+      nextClient.request("settings/read", { threadId, cwd: scope.cwd }),
       refreshAgentSurface(nextClient, scope),
       refreshWorkspaceSurface(nextClient, scope, threadId)
     ]);
@@ -198,7 +198,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     applyInitialControls(nextSettings);
   }
 
-  async function refreshHistory(nextClient = params.client, includeArchived = false, workdir: string | null = null): Promise<SessionSummary[]> {
+  async function refreshHistory(nextClient = params.client, includeArchived = false, cwd: string | null = null): Promise<SessionSummary[]> {
     if (!nextClient) {
       return [];
     }
@@ -210,7 +210,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
           includeSessionIds: browserIncludeSessionIds(),
           limit: 20,
           recentDays: 7,
-          workdir: workdir ?? null
+          cwd: cwd ?? null
         })
       );
       const nextSessions = sessionsFromThreadBrowser(result);
@@ -219,7 +219,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return nextSessions;
     }
     const result = ThreadListResultSchema.parse(
-      await nextClient.request("thread/list", { archived: includeArchived, limit: 100, workdir: workdir ?? null })
+      await nextClient.request("thread/list", { archived: includeArchived, limit: 100, cwd: cwd ?? null })
     );
     const nextSessions = result.sessions.map(normalizeSessionSummary);
     if (includeArchived) {
@@ -314,7 +314,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return false;
     }
     const currentScope = params.scopeRef.current ?? params.activeScope ?? params.initScope ?? null;
-    return !currentScope?.workdir || currentScope.workdir === scope.workdir;
+    return !currentScope?.cwd || currentScope.cwd === scope.cwd;
   }
 
   function applyObservability(value: unknown) {
@@ -427,7 +427,7 @@ export function sessionsFromThreadBrowser(result: ThreadBrowserResult): SessionS
 
 export function workspacesFromThreadBrowser(result: ThreadBrowserResult): SessionBrowserWorkspaceState[] {
   return result.workspaces.map((workspace) => ({
-    workdir: workspace.workdir,
+    cwd: workspace.cwd,
     hiddenCount: workspace.hiddenCount,
     nextCursor: workspace.nextCursor
   }));

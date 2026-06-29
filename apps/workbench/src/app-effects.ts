@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, type MutableRefObject } from "react";
 import {
   GatewayClient,
   parseThreadSnapshot,
-  scopeForWorkdir
+  scopeForCwd
 } from "@psychevo/client";
 import { createBrowserHost, type GatewayEndpoint, type PsychevoHost } from "@psychevo/host";
 import {
@@ -108,7 +108,7 @@ type AppEffectsParams = {
   selectedAgentName: string;
   selectedRuntimeRef: string;
   settingsSection: string;
-  settingsWorkdir: string | undefined;
+  settingsCwd: string | undefined;
   showSessionChrome: boolean;
   skipNextPinnedPersistRef: MutableRefObject<boolean>;
   snapshot: ThreadSnapshot;
@@ -123,7 +123,7 @@ type AppEffectsParams = {
   clearCommandTransientUi(): void;
   pushDebugEvent(method: string, payload: unknown): void;
   refreshAgentSurface(nextClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
-  refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, workdir?: string | null): Promise<SessionSummary[]>;
+  refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<SessionSummary[]>;
   refreshSnapshot: RefreshSnapshot;
   refreshTrace(nextClient?: GatewayClient | null, threadId?: string | null): Promise<void>;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
@@ -185,7 +185,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     }
     const scope = params.activeScope
       ?? params.initScope
-      ?? scopeForWorkdir(params.settingsWorkdir ?? window.location.pathname);
+      ?? scopeForCwd(params.settingsCwd ?? window.location.pathname);
     let cancelled = false;
     params.setRuntimeOptionsLoading(true);
     params.setRuntimeOptionsError(null);
@@ -229,7 +229,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     return () => {
       cancelled = true;
     };
-  }, [params.activeScope, params.client, params.initScope, params.runtimeSessionId, params.selectedRuntimeRef, params.settingsWorkdir, params.snapshot.thread?.id]);
+  }, [params.activeScope, params.client, params.initScope, params.runtimeSessionId, params.selectedRuntimeRef, params.settingsCwd, params.snapshot.thread?.id]);
 
   useEffect(() => {
     if (params.selectedRuntimeRef !== "native" && params.runtimeModeOption && !params.runtimeModeProjection.supportsPlan && params.workMode === "plan") {
@@ -507,7 +507,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         const normalized = normalizeSnapshot(nextSnapshot);
         params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
         params.setSnapshot(normalized);
-        params.setDraftSession(createHistoryDraftSession(epoch, startupScope.workdir));
+        params.setDraftSession(createHistoryDraftSession(epoch, startupScope.cwd));
         if (params.mainViewRef.current === "transcript") {
           params.updateMainView("transcript");
         }

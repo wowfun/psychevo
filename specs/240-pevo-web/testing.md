@@ -33,8 +33,8 @@ product surface and frontend platform.
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 Frontend validation uses deterministic local harnesses by default. Unit tests
 cover generated protocol validators, client reconnect/pending request behavior,
@@ -42,13 +42,13 @@ host storage, and component rendering.
 
 Browser tests use Playwright against the built Workbench served by
 `pevo gateway open --no-browser --print-url`, with isolated config, SQLite
-state, and workdir by default.
+state, and cwd by default.
 
-Live model, live skill, GUI automation, and ACP peer validation are opt-in. They
-may use the repo-local development home defined by
-[060 Automation](../060-automation/spec.md), but must still set explicit
-`PSYCHEVO_CONFIG`, `PSYCHEVO_DB`, workdir, and test artifact paths when
-isolation is required. They must not print tokens or secrets.
+Live model, live skill, GUI automation, and ACP peer validation are opt-in and
+selected through `cargo xtask live`. They may use the repo-local development
+home defined by [065 CI/CD](../065-ci-cd/spec.md), but `xtask` must own explicit
+`PSYCHEVO_CONFIG`, `PSYCHEVO_DB`, cwd, and test artifact paths when isolation is
+required. They must not print tokens or secrets.
 
 ## Scenario Matrix
 
@@ -71,9 +71,10 @@ isolation is required. They must not print tokens or secrets.
   primary controls.
 - Generated protocol schemas and clients preserve public imports and strict
   validation behavior.
-- The reusable `live-skill` Playwright spec samples the page every three
-  seconds, writes screenshots as test artifacts, and compares rendered DOM
-  order against the isolated SQLite message-derived transcript.
+- The reusable `live-skill` Playwright check is selected by
+  `cargo xtask live run --suite skill`, samples the page every three seconds,
+  writes screenshots under the live check artifact root, and compares rendered
+  DOM order against the isolated SQLite message-derived transcript.
 - GUI automation live validation creates a project automation through the
   composer with the fastest supported interval schedule and asserts the final
   transcript answer is not duplicated before inspecting the Automations surface.

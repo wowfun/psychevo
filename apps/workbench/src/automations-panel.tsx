@@ -14,7 +14,7 @@ import type { SessionBrowserWorkspaceState, WorkbenchAutomation } from "./types"
 
 type AutomationDraft = {
   id: string | null;
-  workdir: string;
+  cwd: string;
   targetKind: "project" | "threadHeartbeat";
   targetThreadId: string | null;
   title: string;
@@ -37,7 +37,7 @@ type AutomationsPageProps = {
   scope: GatewayRequestScope | null;
   sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   sessions: SessionSummary[];
-  workdir: string;
+  cwd: string;
   onDelete(id: string): Promise<void>;
   onDraft(params: AutomationDraftParams): Promise<AutomationDraftView>;
   onOpenSession(threadId: string): void;
@@ -67,7 +67,7 @@ export function AutomationsPage({
   scope,
   sessionBrowserWorkspaces,
   sessions,
-  workdir,
+  cwd,
   onDelete,
   onDraft,
   onOpenSession,
@@ -78,33 +78,33 @@ export function AutomationsPage({
   onSave
 }: AutomationsPageProps) {
   const [draft, setDraft] = useState<AutomationDraft | null>(null);
-  const [selectedWorkdir, setSelectedWorkdir] = useState(scope?.workdir ?? workdir);
+  const [selectedCwd, setSelectedCwd] = useState(scope?.cwd ?? cwd);
   const [requestText, setRequestText] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const sorted = useMemo(() => [...automations].sort(sortAutomations), [automations]);
   const surfaceMode = draft ? "has-draft" : "is-list-only";
   const workspaceOptions = useMemo(
-    () => automationWorkspaceOptions(workdir, scope?.workdir ?? null, sessionBrowserWorkspaces, sessions, automations),
-    [automations, scope?.workdir, sessionBrowserWorkspaces, sessions, workdir]
+    () => automationWorkspaceOptions(cwd, scope?.cwd ?? null, sessionBrowserWorkspaces, sessions, automations),
+    [automations, cwd, scope?.cwd, sessionBrowserWorkspaces, sessions]
   );
   const selectedThreadOptions = useMemo(
-    () => automationThreadOptions(sessions, selectedWorkdir, currentThreadId),
-    [currentThreadId, selectedWorkdir, sessions]
+    () => automationThreadOptions(sessions, selectedCwd, currentThreadId),
+    [currentThreadId, selectedCwd, sessions]
   );
 
   useEffect(() => {
-    if (!workspaceOptions.includes(selectedWorkdir)) {
-      const nextWorkdir = workspaceOptions[0] ?? workdir;
-      setSelectedWorkdir(nextWorkdir);
-      setDraft((current) => current ? retargetDraft(current, nextWorkdir, preferredThreadId(sessions, nextWorkdir, currentThreadId)) : current);
+    if (!workspaceOptions.includes(selectedCwd)) {
+      const nextCwd = workspaceOptions[0] ?? cwd;
+      setSelectedCwd(nextCwd);
+      setDraft((current) => current ? retargetDraft(current, nextCwd, preferredThreadId(sessions, nextCwd, currentThreadId)) : current);
     }
-  }, [currentThreadId, selectedWorkdir, sessions, workdir, workspaceOptions]);
+  }, [currentThreadId, cwd, selectedCwd, sessions, workspaceOptions]);
 
-  function selectWorkdir(nextWorkdir: string) {
-    const nextThreadId = preferredThreadId(sessions, nextWorkdir, currentThreadId);
-    setSelectedWorkdir(nextWorkdir);
-    setDraft((current) => current ? retargetDraft(current, nextWorkdir, nextThreadId) : current);
+  function selectCwd(nextCwd: string) {
+    const nextThreadId = preferredThreadId(sessions, nextCwd, currentThreadId);
+    setSelectedCwd(nextCwd);
+    setDraft((current) => current ? retargetDraft(current, nextCwd, nextThreadId) : current);
   }
 
   async function runPending<T>(key: string, action: () => Promise<T>): Promise<T | undefined> {
@@ -139,11 +139,11 @@ export function AutomationsPage({
     setDraftError(null);
     try {
       const generated = await onDraft({
-        scope: scopeForWorkdir(scope, selectedWorkdir),
+        scope: scopeForCwd(scope, selectedCwd),
         request,
-        currentThreadId: preferredThreadId(sessions, selectedWorkdir, currentThreadId)
+        currentThreadId: preferredThreadId(sessions, selectedCwd, currentThreadId)
       });
-      setDraft(draftFromGenerated(generated, selectedWorkdir));
+      setDraft(draftFromGenerated(generated, selectedCwd));
     } catch (error) {
       setDraftError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -166,8 +166,8 @@ export function AutomationsPage({
             <select
               aria-label="Workspace"
               disabled={disabled || Boolean(pendingAction)}
-              onChange={(event) => selectWorkdir(event.target.value)}
-              value={selectedWorkdir}
+              onChange={(event) => selectCwd(event.target.value)}
+              value={selectedCwd}
             >
               {workspaceOptions.map((option) => (
                 <option key={option} value={option}>{option}</option>
@@ -177,7 +177,7 @@ export function AutomationsPage({
           <button disabled={disabled || Boolean(pendingAction)} onClick={() => void runPending("refresh", onRefresh)} type="button">
             <RefreshCw size={15} aria-hidden /> Refresh
           </button>
-          <button disabled={disabled || Boolean(pendingAction)} onClick={() => setDraft(projectDraft(selectedWorkdir))} type="button">
+          <button disabled={disabled || Boolean(pendingAction)} onClick={() => setDraft(projectDraft(selectedCwd))} type="button">
             <Plus size={15} aria-hidden /> New
           </button>
         </div>
@@ -213,12 +213,12 @@ export function AutomationsPage({
           ) : sorted.length === 0 ? (
             <div className="automationEmpty">
               <div className="automationTemplateActions">
-                <button disabled={disabled} onClick={() => setDraft(projectDraft(selectedWorkdir))} type="button">
+                <button disabled={disabled} onClick={() => setDraft(projectDraft(selectedCwd))} type="button">
                   Project check
                 </button>
                 <button
                   disabled={disabled || selectedThreadOptions.length === 0}
-                  onClick={() => setDraft(threadDraft(selectedWorkdir, selectedThreadOptions[0]?.id ?? null))}
+                  onClick={() => setDraft(threadDraft(selectedCwd, selectedThreadOptions[0]?.id ?? null))}
                   type="button"
                 >
                   Thread heartbeat
@@ -228,9 +228,14 @@ export function AutomationsPage({
           ) : (
             <div className="automationRows">
               {sorted.map((automation) => {
-                const threadId = automation.targetThreadId ?? automation.runs[0]?.threadId ?? null;
+                const threadId = automationOpenThreadId(automation);
                 return (
-                  <article className="automationRow" data-status={automation.lastStatus ?? "idle"} key={automation.id}>
+                  <article
+                    className="automationRow"
+                    data-last-status={automation.lastStatus ?? "idle"}
+                    data-lifecycle={automation.enabled ? "enabled" : "paused"}
+                    key={automation.id}
+                  >
                     <div className="automationRowMain">
                       <div className="automationRowTitle">
                         <strong>{automation.title}</strong>
@@ -242,7 +247,7 @@ export function AutomationsPage({
                         <span>{formatSchedule(automation.schedule)}</span>
                         <span>{automation.nextRunAtMs ? `next ${formatDateTime(automation.nextRunAtMs)}` : "no next run"}</span>
                         <span>{automation.lastRunAtMs ? `last run ${formatDateTime(automation.lastRunAtMs)}` : "never run"}</span>
-                        {automation.lastStatus && <span>{automation.lastStatus}</span>}
+                        {automation.lastStatus && <span data-run-status={automation.lastStatus}>{automation.lastStatus}</span>}
                       </div>
                     </div>
                     <div className="automationRowActions">
@@ -268,7 +273,7 @@ export function AutomationsPage({
                       <button
                         disabled={disabled || Boolean(pendingAction)}
                         onClick={() => {
-                          setSelectedWorkdir(automation.workdir);
+                          setSelectedCwd(automation.cwd);
                           setDraft(draftFromAutomation(automation));
                         }}
                         type="button"
@@ -315,11 +320,11 @@ export function AutomationsPage({
                 <select
                   aria-label="Draft workspace"
                   onChange={(event) => {
-                    const nextWorkdir = event.target.value;
-                    selectWorkdir(nextWorkdir);
-                    setDraft((current) => current ? retargetDraft(current, nextWorkdir, preferredThreadId(sessions, nextWorkdir, currentThreadId)) : current);
+                    const nextCwd = event.target.value;
+                    selectCwd(nextCwd);
+                    setDraft((current) => current ? retargetDraft(current, nextCwd, preferredThreadId(sessions, nextCwd, currentThreadId)) : current);
                   }}
-                  value={draft.workdir}
+                  value={draft.cwd}
                 >
                   {workspaceOptions.map((option) => (
                     <option key={option} value={option}>{option}</option>
@@ -339,7 +344,7 @@ export function AutomationsPage({
                   value={draft.targetKind === "threadHeartbeat" ? draft.targetThreadId ?? "" : "project"}
                 >
                   <option value="project">Project</option>
-                  {automationThreadOptions(sessions, draft.workdir, currentThreadId).map((session) => (
+                  {automationThreadOptions(sessions, draft.cwd, currentThreadId).map((session) => (
                     <option key={session.id} value={session.id}>{sessionLabel(session, currentThreadId)}</option>
                   ))}
                 </select>
@@ -452,10 +457,10 @@ export function AutomationsPage({
   );
 }
 
-function projectDraft(workdir: string): AutomationDraft {
+function projectDraft(cwd: string): AutomationDraft {
   return {
     id: null,
-    workdir,
+    cwd,
     targetKind: "project",
     targetThreadId: null,
     title: "Project check",
@@ -470,9 +475,9 @@ function projectDraft(workdir: string): AutomationDraft {
   };
 }
 
-function threadDraft(workdir: string, threadId: string | null): AutomationDraft {
+function threadDraft(cwd: string, threadId: string | null): AutomationDraft {
   return {
-    ...projectDraft(workdir),
+    ...projectDraft(cwd),
     targetKind: "threadHeartbeat",
     targetThreadId: threadId,
     title: "Thread heartbeat",
@@ -485,7 +490,7 @@ function draftFromAutomation(automation: AutomationTaskView): AutomationDraft {
   const schedule = automation.schedule;
   return {
     id: automation.id,
-    workdir: automation.workdir,
+    cwd: automation.cwd,
     targetKind: automation.kind === "threadHeartbeat" ? "threadHeartbeat" : "project",
     targetThreadId: automation.targetThreadId,
     title: automation.title,
@@ -500,11 +505,11 @@ function draftFromAutomation(automation: AutomationTaskView): AutomationDraft {
   };
 }
 
-function draftFromGenerated(generated: AutomationDraftView, workdir: string): AutomationDraft {
+function draftFromGenerated(generated: AutomationDraftView, cwd: string): AutomationDraft {
   const schedule = generated.schedule;
   return {
     id: null,
-    workdir,
+    cwd,
     targetKind: generated.target.kind === "threadHeartbeat" ? "threadHeartbeat" : "project",
     targetThreadId: generated.target.kind === "threadHeartbeat" ? generated.target.threadId : null,
     title: generated.title,
@@ -525,7 +530,7 @@ function draftToWriteParams(
 ): AutomationWriteParams {
   return {
     automationId: draft.id,
-    scope: scopeForWorkdir(scope, draft.workdir),
+    scope: scopeForCwd(scope, draft.cwd),
     target: draft.targetKind === "threadHeartbeat" && draft.targetThreadId
       ? { kind: "threadHeartbeat", threadId: draft.targetThreadId }
       : { kind: "project" },
@@ -538,41 +543,41 @@ function draftToWriteParams(
   };
 }
 
-function scopeForWorkdir(scope: GatewayRequestScope | null, workdir: string): GatewayRequestScope | null {
-  return scope ? { ...scope, workdir } : null;
+function scopeForCwd(scope: GatewayRequestScope | null, cwd: string): GatewayRequestScope | null {
+  return scope ? { ...scope, cwd } : null;
 }
 
-function retargetDraft(draft: AutomationDraft, workdir: string, threadId: string | null): AutomationDraft {
+function retargetDraft(draft: AutomationDraft, cwd: string, threadId: string | null): AutomationDraft {
   return {
     ...draft,
-    workdir,
+    cwd,
     targetThreadId: draft.targetKind === "threadHeartbeat" ? threadId : null
   };
 }
 
 function automationWorkspaceOptions(
-  workdir: string,
-  scopeWorkdir: string | null,
+  cwd: string,
+  scopeCwd: string | null,
   browserWorkspaces: SessionBrowserWorkspaceState[],
   sessions: SessionSummary[],
   automations: WorkbenchAutomation[]
 ): string[] {
   return uniqueNonEmpty([
-    scopeWorkdir,
-    workdir,
-    ...browserWorkspaces.map((workspace) => workspace.workdir),
-    ...sessions.map((session) => session.workdir),
-    ...automations.map((automation) => automation.workdir)
+    scopeCwd,
+    cwd,
+    ...browserWorkspaces.map((workspace) => workspace.cwd),
+    ...sessions.map((session) => session.cwd),
+    ...automations.map((automation) => automation.cwd)
   ]);
 }
 
 function automationThreadOptions(
   sessions: SessionSummary[],
-  workdir: string,
+  cwd: string,
   currentThreadId: string | null
 ): SessionSummary[] {
   return [...sessions]
-    .filter((session) => session.workdir === workdir)
+    .filter((session) => session.cwd === cwd)
     .sort((left, right) => {
       if (left.id === currentThreadId) {
         return -1;
@@ -588,10 +593,14 @@ function automationThreadOptions(
 
 function preferredThreadId(
   sessions: SessionSummary[],
-  workdir: string,
+  cwd: string,
   currentThreadId: string | null
 ): string | null {
-  return automationThreadOptions(sessions, workdir, currentThreadId)[0]?.id ?? null;
+  return automationThreadOptions(sessions, cwd, currentThreadId)[0]?.id ?? null;
+}
+
+function automationOpenThreadId(automation: AutomationTaskView): string | null {
+  return automation.targetThreadId ?? automation.runs.find((run) => run.threadId)?.threadId ?? null;
 }
 
 function sessionLabel(session: SessionSummary, currentThreadId: string | null): string {

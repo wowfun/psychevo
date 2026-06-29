@@ -892,7 +892,7 @@ function detachedSnapshot(): ThreadSnapshot {
       visibleName: null
     },
     scope: {
-      workdir: "/tmp/project",
+      cwd: "/tmp/project",
       source: {
         kind: "web",
         rawId: "test",

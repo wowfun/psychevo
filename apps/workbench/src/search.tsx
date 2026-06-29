@@ -36,7 +36,7 @@ export function SearchPage({
         for (const session of sessions) {
           const title = session.displayTitle?.trim() || session.title?.trim() || shortSessionId(session.id);
           const workspace = session.project?.label ?? "";
-          const summaryHaystack = normalizeSearchText(`${session.id} ${title} ${session.preview ?? ""} ${workspace} ${session.workdir}`);
+          const summaryHaystack = normalizeSearchText(`${session.id} ${title} ${session.preview ?? ""} ${workspace} ${session.cwd}`);
           if (summaryHaystack.includes(needle)) {
             next.push({
               excerpt: session.id,

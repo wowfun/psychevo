@@ -2,7 +2,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
   appendOptimisticPrompt,
   parseThreadSnapshot,
-  scopeForWorkdir,
+  scopeForCwd,
   type GatewayClient
 } from "@psychevo/client";
 import {
@@ -114,7 +114,7 @@ type AppActionsParams = {
   openReviewTab(diff: WorkspaceDiffResult, path?: string | null): void;
   openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch?: Partial<RightWorkspaceTab>, forceNew?: boolean): void;
   refreshAgentSurface(nextClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
-  refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, workdir?: string | null): Promise<unknown>;
+  refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<unknown>;
   refreshSnapshot: RefreshSnapshot;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
   setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
@@ -156,7 +156,7 @@ export function createAppActions(params: AppActionsParams) {
   function scope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForWorkdir(params.settings?.workdir ?? window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd ?? window.location.pathname);
   }
 
   function resetRuntimeSelection() {
@@ -174,7 +174,7 @@ export function createAppActions(params: AppActionsParams) {
     params.setTraceState({ error: null, loading: false, result: null, threadId: null });
   }
 
-  async function startNewThread(workdir?: string) {
+  async function startNewThread(cwd?: string) {
     if (!params.client) {
       return;
     }
@@ -183,15 +183,15 @@ export function createAppActions(params: AppActionsParams) {
     clearSessionObservability();
     params.updateMainView("transcript");
     params.setMobilePanel("transcript");
-    const nextScope = workdir
-      ? scopeForWorkdir(workdir)
+    const nextScope = cwd
+      ? scopeForCwd(cwd)
       : scope();
     const nextSnapshot = parseThreadSnapshot(await params.client.request("thread/start", { scope: nextScope }));
     if (params.viewEpochRef.current === epoch) {
       const normalized = normalizeSnapshot(nextSnapshot);
       params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
       params.setSnapshot(normalized);
-      params.setDraftSession(createHistoryDraftSession(epoch, nextScope.workdir));
+      params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
       await params.adoptSnapshotScope(params.client, nextSnapshot);
     }
     await params.refreshHistory(params.client);
@@ -210,7 +210,7 @@ export function createAppActions(params: AppActionsParams) {
       const normalized = normalizeSnapshot(nextSnapshot);
       params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
       params.setSnapshot(normalized);
-      params.setDraftSession(createHistoryDraftSession(epoch, created.workdir));
+      params.setDraftSession(createHistoryDraftSession(epoch, created.cwd));
       await params.adoptSnapshotScope(params.client, nextSnapshot);
     }
     await params.refreshHistory(params.client);

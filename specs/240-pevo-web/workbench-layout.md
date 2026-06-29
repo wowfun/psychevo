@@ -34,14 +34,15 @@ or an explicit file/diff action.
 
 When the right workspace is revealed without an active tab, its home is a
 navigation and status page. It shows connection, current session or draft
-state, workdir, context usage, and changed-file summary, then offers bordered
+state, cwd, context usage, and changed-file summary, then offers bordered
 icon-and-label rows to open Review, Terminal, Files, and, for non-draft
 sessions, `Side chat` tabs. Rows do not carry right-side explanatory copy. Once
 any tab is open, the tab strip includes a `+` menu for creating more tabs of
 those types. Browser is not exposed in this slice.
 
 Automations is an app-level operational surface for local project automations
-and thread heartbeats defined by [060 Automation](../060-automation/spec.md).
+and thread heartbeats defined by
+[400 Workflow Automations](../400-workflow-automations/spec.md).
 Like Settings, it replaces the session shell while active and hides the
 composer and right inspector, but it is not a configuration section inside
 Settings. The Automations surface includes:
@@ -98,7 +99,7 @@ use theme-adapted surfaces so light and warm appearances do not retain dark
 diff panels. Diff file headers are compact UI identifiers, not raw Git
 metadata:
 they show status marker, workspace-relative path, and addition/deletion counts,
-while absolute paths are reserved for tooltip text when the active workdir is
+while absolute paths are reserved for tooltip text when the active cwd is
 available. Unsupported preview formats and Gateway binary/unreadable file
 responses stay in the Files tab as unavailable preview states instead of
 opening a center preview.
@@ -145,7 +146,7 @@ from composer shell mode and does not create transcript entries. The methods
 are:
 
 - `terminal/start`: accepts `scope`, optional `cwd`, terminal `cols`, and
-  terminal `rows`; validates the requested workdir against the same scope rules
+  terminal `rows`; validates the requested cwd against the same scope rules
   as workspace reads; spawns a PTY shell in that directory; returns
   `terminalId`, resolved `cwd`, and optional process id.
 - `terminal/write`: accepts `terminalId` and a base64 data chunk to write to
@@ -166,7 +167,7 @@ When active, it replaces the Workbench session shell and hides the session
 list, composer, mobile Workbench panel tabs, and right inspector. It does not
 show a separate top Settings header or top-right close button; its return
 control sits at the top of the Settings left navigation, followed by a settings
-search field, and the current project/workdir path is not repeated there. The
+search field, and the current project/cwd path is not repeated there. The
 internal left navigation lists `Appearance`, `Debug`, and `Agents` directly,
 with `Archived sessions` pinned to the bottom.
 `Appearance` includes a local appearance control with `dark`, `light`, and
