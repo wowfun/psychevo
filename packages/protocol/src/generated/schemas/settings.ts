@@ -4,14 +4,14 @@ export const settingsSchemas = {
   SettingsReadParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
-    "threadId": {
+    "cwd": {
       "default": null,
       "type": [
         "string",
         "null"
       ]
     },
-    "workdir": {
+    "threadId": {
       "default": null,
       "type": [
         "string",
@@ -27,16 +27,16 @@ export const settingsSchemas = {
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },
@@ -182,6 +182,13 @@ export const settingsSchemas = {
         "credential": {
           "$ref": "#/definitions/ChannelCredentialView"
         },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "domain": {
           "default": null,
           "type": [
@@ -223,13 +230,6 @@ export const settingsSchemas = {
         },
         "transport": {
           "type": "string"
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -553,6 +553,9 @@ export const settingsSchemas = {
       ],
       "default": null
     },
+    "cwd": {
+      "type": "string"
+    },
     "memoryResources": {
       "additionalProperties": true,
       "type": "object"
@@ -571,15 +574,12 @@ export const settingsSchemas = {
     "secrets": {
       "additionalProperties": true,
       "type": "object"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
+    "cwd",
     "memoryResources",
-    "secrets",
-    "workdir"
+    "secrets"
   ],
   "title": "SettingsReadResult",
   "type": "object"

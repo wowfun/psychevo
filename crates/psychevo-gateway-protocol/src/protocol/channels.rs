@@ -33,7 +33,7 @@ pub struct ChannelUpdateParams {
     #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -152,7 +152,7 @@ pub struct ChannelSourceBindingView {
     pub thread_id: String,
     #[serde(default)]
     pub thread_title: Option<String>,
-    pub workdir: String,
+    pub cwd: String,
     pub activity_status: String,
     pub queued_turns: usize,
     pub updated_at_ms: i64,
@@ -169,7 +169,7 @@ pub struct ChannelConfigView {
     pub label: String,
     pub transport: String,
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default, rename = "permissionMode")]

@@ -21,6 +21,9 @@
     "connectionId": {
       "type": "string"
     },
+    "cwd": {
+      "type": "string"
+    },
     "domain": {
       "default": null,
       "type": [
@@ -66,20 +69,17 @@
         "string",
         "null"
       ]
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
     "activityStatus",
     "connectionId",
+    "cwd",
     "platform",
     "queuedTurns",
     "sourceKey",
     "threadId",
-    "updatedAtMs",
-    "workdir"
+    "updatedAtMs"
   ],
   "title": "ChannelSourceBindingView",
   "type": "object"

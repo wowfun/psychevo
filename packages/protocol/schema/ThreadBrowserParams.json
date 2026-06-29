@@ -3,18 +3,18 @@
   "definitions": {
     "ThreadBrowserCursor": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "offset": {
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "offset",
-        "workdir"
+        "cwd",
+        "offset"
       ],
       "type": "object"
     }
@@ -38,6 +38,13 @@
       ],
       "default": null
     },
+    "cwd": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "includeSessionIds": {
       "default": [],
       "items": {
@@ -59,13 +66,6 @@
       "format": "int64",
       "type": [
         "integer",
-        "null"
-      ]
-    },
-    "workdir": {
-      "default": null,
-      "type": [
-        "string",
         "null"
       ]
     }

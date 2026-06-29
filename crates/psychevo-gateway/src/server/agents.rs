@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn write_project_agent_definition(
-    workdir: &Path,
+    cwd: &Path,
     params: wire::AgentWriteParams,
 ) -> psychevo_runtime::Result<Value> {
     if !valid_agent_name(&params.name) {
@@ -33,7 +33,7 @@ pub(super) fn write_project_agent_definition(
         })?;
         entrypoints.push(parsed.as_str().to_string());
     }
-    let path = project_agent_definition_path(workdir, &params.name);
+    let path = project_agent_definition_path(cwd, &params.name);
     let mut frontmatter = serde_yaml::Mapping::new();
     frontmatter.insert(
         serde_yaml::Value::String("name".to_string()),
@@ -110,13 +110,13 @@ pub(super) fn write_project_agent_definition(
 }
 
 pub(super) fn delete_project_agent_definition(
-    workdir: &Path,
+    cwd: &Path,
     name: &str,
 ) -> psychevo_runtime::Result<Value> {
     if !valid_agent_name(name) {
         return Err(Error::Message(format!("invalid agent name: {name}")));
     }
-    let path = project_agent_definition_path(workdir, name);
+    let path = project_agent_definition_path(cwd, name);
     let deleted = match std::fs::remove_file(&path) {
         Ok(()) => true,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
@@ -129,9 +129,8 @@ pub(super) fn delete_project_agent_definition(
     })?)
 }
 
-fn project_agent_definition_path(workdir: &Path, name: &str) -> PathBuf {
-    workdir
-        .join(".psychevo")
+fn project_agent_definition_path(cwd: &Path, name: &str) -> PathBuf {
+    cwd.join(".psychevo")
         .join("agents")
         .join(format!("{name}.md"))
 }
@@ -289,20 +288,14 @@ pub(super) fn write_backend_config(
         return Err(Error::Message(format!("invalid backend id: {}", params.id)));
     }
     ensure_profile_config_for_backend_write(state, scope, params.target)?;
-    let existing_backends = load_agent_backend_configs(
-        &state.inner.home,
-        &scope.workdir,
-        &state.inner.inherited_env,
-    )?;
+    let existing_backends =
+        load_agent_backend_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     let value = backend_config_json(&params, existing_backends.get(&params.id))?;
     let target = params.target;
     let config_dir = backend_config_dir(state, scope, target)?;
     let result = set_config_value(config_dir, &format!("agents.backends.{}", params.id), value)?;
-    let backends = load_agent_backend_configs(
-        &state.inner.home,
-        &scope.workdir,
-        &state.inner.inherited_env,
-    )?;
+    let backends =
+        load_agent_backend_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     let backend = backends
         .get(&params.id)
         .ok_or_else(|| Error::Message(format!("backend write did not reload: {}", params.id)))?;
@@ -344,7 +337,7 @@ fn backend_config_dir(
     target: wire::BackendConfigTarget,
 ) -> psychevo_runtime::Result<PathBuf> {
     match target {
-        wire::BackendConfigTarget::Project => Ok(scope.workdir.join(".psychevo")),
+        wire::BackendConfigTarget::Project => Ok(scope.cwd.join(".psychevo")),
         wire::BackendConfigTarget::Profile => Ok(active_profile_config_dir(state, scope)),
     }
 }
@@ -403,7 +396,7 @@ fn resolve_gateway_env_path(value: &str, state: &WebState, scope: &ResolvedScope
     if path.is_absolute() {
         path
     } else {
-        scope.workdir.join(path)
+        scope.cwd.join(path)
     }
 }
 
@@ -562,7 +555,7 @@ fn backend_exists_in_scope(
 ) -> psychevo_runtime::Result<bool> {
     let config_dir = match config_scope {
         ConfigScope::Global => active_profile_config_dir(state, scope),
-        ConfigScope::Local => scope.workdir.join(".psychevo"),
+        ConfigScope::Local => scope.cwd.join(".psychevo"),
         ConfigScope::Effective => {
             return Err(Error::Config(
                 "backend source target checks require a concrete config scope".to_string(),

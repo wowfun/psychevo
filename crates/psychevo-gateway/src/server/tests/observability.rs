@@ -6,9 +6,9 @@
         inherited_env: BTreeMap<String, String>,
     ) -> (tempfile::TempDir, WebState) {
         let temp = tempfile::tempdir().expect("tempdir");
-        let workdir = temp.path().join("work");
+        let cwd = temp.path().join("work");
         let home = temp.path().join("home");
-        std::fs::create_dir_all(&workdir).expect("workdir");
+        std::fs::create_dir_all(&cwd).expect("cwd");
         let mut env = BTreeMap::from([
             (
                 "HOME".to_string(),
@@ -25,7 +25,7 @@
         let config = GatewayWebServerConfig::new(
             gateway,
             home,
-            workdir,
+            cwd,
             None,
             env,
             temp.path().join("static"),
@@ -47,7 +47,7 @@
     #[test]
     fn peer_runtime_rejects_structured_self_agent_mention() {
         let (_temp, state) = web_state();
-        let mut options = state.run_options(state.inner.workdir.clone(), None);
+        let mut options = state.run_options(state.inner.cwd.clone(), None);
         options.runtime_ref = Some("opencode".to_string());
         let err = apply_mentions_to_run_options(
             &mut options,
@@ -69,7 +69,7 @@
     #[test]
     fn peer_runtime_allows_literal_agent_text_without_structured_mention() {
         let (_temp, state) = web_state();
-        let mut options = state.run_options(state.inner.workdir.clone(), None);
+        let mut options = state.run_options(state.inner.cwd.clone(), None);
         options.runtime_ref = Some("opencode".to_string());
         apply_mentions_to_run_options(&mut options, &[]).expect("literal text is not inspected");
         assert!(options.skill_inputs.is_empty());
@@ -144,9 +144,9 @@
     #[tokio::test]
     async fn bind_gateway_web_server_falls_back_from_used_port() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let workdir = temp.path().join("work");
+        let cwd = temp.path().join("work");
         let static_dir = temp.path().join("static");
-        std::fs::create_dir_all(&workdir).expect("workdir");
+        std::fs::create_dir_all(&cwd).expect("cwd");
         std::fs::create_dir_all(&static_dir).expect("static dir");
         let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
         let gateway = Gateway::new(state);
@@ -155,7 +155,7 @@
         let mut config = GatewayWebServerConfig::new(
             gateway,
             temp.path().join("home"),
-            workdir,
+            cwd,
             None,
             BTreeMap::new(),
             static_dir,
@@ -205,7 +205,7 @@
             .state
             .store()
             .create_session_with_metadata(
-                &state.inner.workdir,
+                &state.inner.cwd,
                 "web",
                 "fake-model",
                 "fake-provider",
@@ -264,7 +264,7 @@
             .state
             .store()
             .create_session_with_metadata(
-                &state.inner.workdir,
+                &state.inner.cwd,
                 "peer_agent",
                 "opencode",
                 "acp:opencode",
@@ -319,7 +319,7 @@
             .state
             .store()
             .create_session_with_metadata(
-                &state.inner.workdir,
+                &state.inner.cwd,
                 "web",
                 "fake-model",
                 "fake-provider",
@@ -374,17 +374,17 @@
     }
 
     #[tokio::test]
-    async fn browser_observability_read_authorizes_cross_workdir_thread() {
+    async fn browser_observability_read_authorizes_cross_cwd_thread() {
         let (temp, state) = web_state();
-        let other_workdir = temp.path().join("other-work");
-        std::fs::create_dir_all(&other_workdir).expect("other workdir");
-        let other_workdir = canonicalize_workdir(&other_workdir).expect("other canonical");
+        let other_cwd = temp.path().join("other-work");
+        std::fs::create_dir_all(&other_cwd).expect("other cwd");
+        let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
         let session_id = state
             .inner
             .state
             .store()
             .create_session_with_metadata(
-                &other_workdir,
+                &other_cwd,
                 "web",
                 "fake-model",
                 "fake-provider",
@@ -401,7 +401,7 @@
             .insert(
                 browser_session_id.clone(),
                 BrowserSession {
-                    workdir: state.inner.workdir.clone(),
+                    cwd: state.inner.cwd.clone(),
                     source: state.inner.source.clone(),
                 },
             );
@@ -447,7 +447,7 @@
                 .inner
                 .state
                 .store()
-                .list_sessions_for_workdir_with_sources(&state.inner.workdir, &[])
+                .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
                 .expect("sessions")
                 .len(),
             0
@@ -472,7 +472,7 @@
             .state
             .store()
             .create_session_with_metadata(
-                &state.inner.workdir,
+                &state.inner.cwd,
                 "web",
                 "fake-model",
                 "fake-provider",
@@ -496,7 +496,7 @@
             .inner
             .state
             .store()
-            .list_sessions_for_workdir_with_sources(&state.inner.workdir, &[])
+            .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
             .expect("active sessions")
             .into_iter()
             .map(|session| session.id)

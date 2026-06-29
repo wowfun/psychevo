@@ -199,6 +199,9 @@
       "format": "int64",
       "type": "integer"
     },
+    "cwd": {
+      "type": "string"
+    },
     "enabled": {
       "type": "boolean"
     },
@@ -288,13 +291,11 @@
     "updatedAtMs": {
       "format": "int64",
       "type": "integer"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
     "createdAtMs",
+    "cwd",
     "enabled",
     "execution",
     "id",
@@ -302,8 +303,7 @@
     "prompt",
     "schedule",
     "title",
-    "updatedAtMs",
-    "workdir"
+    "updatedAtMs"
   ],
   "title": "AutomationTaskView",
   "type": "object"

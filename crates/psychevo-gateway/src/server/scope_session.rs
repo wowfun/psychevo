@@ -15,14 +15,14 @@ fn gateway_profile_value(state: &WebState) -> Value {
 
 #[derive(Debug, Clone)]
 struct ResolvedScope {
-    workdir: PathBuf,
+    cwd: PathBuf,
     source: GatewaySource,
 }
 
 impl ResolvedScope {
     fn to_wire_scope(&self) -> wire::GatewayRequestScope {
         wire::GatewayRequestScope {
-            workdir: self.workdir.display().to_string(),
+            cwd: self.cwd.display().to_string(),
             source: wire::GatewaySourceInput {
                 kind: self.source.kind.clone(),
                 raw_id: Some(self.source.raw_id.clone()),
@@ -48,11 +48,11 @@ fn detached_draft_scope(scope: &ResolvedScope, auth: &AuthContext) -> ResolvedSc
         "kind": source.kind.clone(),
         "rawId": source.raw_id.clone(),
         "canonicalRawId": scope.source.raw_id.clone(),
-        "workdir": scope.workdir.display().to_string(),
+        "cwd": scope.cwd.display().to_string(),
         "draft": true,
     }));
     ResolvedScope {
-        workdir: scope.workdir.clone(),
+        cwd: scope.cwd.clone(),
         source,
     }
 }
@@ -104,7 +104,7 @@ fn ensure_turn_start_thread(
     }
 
     let thread_id = state.inner.state.store().create_session_with_metadata(
-        &scope.workdir,
+        &scope.cwd,
         "web",
         "pending",
         "pending",
@@ -169,13 +169,13 @@ fn default_resolved_scope(
 ) -> psychevo_runtime::Result<ResolvedScope> {
     match auth {
         AuthContext::Bearer => Ok(ResolvedScope {
-            workdir: state.inner.workdir.clone(),
+            cwd: state.inner.cwd.clone(),
             source: state.inner.source.clone(),
         }),
         AuthContext::Browser { .. } => {
             let session = current_browser_session(state, auth)?;
             Ok(ResolvedScope {
-                workdir: session.workdir.clone(),
+                cwd: session.cwd.clone(),
                 source: session.source.clone(),
             })
         }
@@ -194,63 +194,59 @@ fn resolve_optional_scope(
 }
 
 fn resolve_required_scope(
-    state: &WebState,
-    auth: &AuthContext,
+    _state: &WebState,
+    _auth: &AuthContext,
     scope: wire::GatewayRequestScope,
 ) -> psychevo_runtime::Result<ResolvedScope> {
-    let workdir = canonicalize_workdir(Path::new(&scope.workdir))?;
-    authorize_workdir(state, auth, &workdir)?;
+    let cwd = canonicalize_cwd(Path::new(&scope.cwd))?;
     Ok(ResolvedScope {
         source: source_from_input(
             Some(scope.source),
-            &workdir,
+            &cwd,
             wire::GatewaySourceLifetime::Persistent,
         ),
-        workdir,
+        cwd,
     })
 }
 
 fn resolve_start_scope(
-    state: &WebState,
-    auth: &AuthContext,
+    _state: &WebState,
+    _auth: &AuthContext,
     scope: wire::GatewayRequestScope,
 ) -> psychevo_runtime::Result<ResolvedScope> {
-    let workdir = canonicalize_workdir(Path::new(&scope.workdir))?;
-    authorize_start_workdir(state, auth, &workdir)?;
+    let cwd = canonicalize_cwd(Path::new(&scope.cwd))?;
     Ok(ResolvedScope {
         source: source_from_input(
             Some(scope.source),
-            &workdir,
+            &cwd,
             wire::GatewaySourceLifetime::Persistent,
         ),
-        workdir,
+        cwd,
     })
 }
 
-fn resolve_workdir_filter(
+fn resolve_cwd_filter(
     state: &WebState,
     auth: &AuthContext,
-    workdir: Option<String>,
+    cwd: Option<String>,
 ) -> psychevo_runtime::Result<PathBuf> {
-    let workdir = match workdir {
-        Some(workdir) => canonicalize_workdir(Path::new(&workdir))?,
-        None => default_resolved_scope(state, auth)?.workdir,
+    let cwd = match cwd {
+        Some(cwd) => canonicalize_cwd(Path::new(&cwd))?,
+        None => default_resolved_scope(state, auth)?.cwd,
     };
-    authorize_workdir(state, auth, &workdir)?;
-    Ok(workdir)
+    Ok(cwd)
 }
 
-fn resolve_session_workdir_filter(
-    state: &WebState,
-    auth: &AuthContext,
-    workdir: Option<String>,
+fn resolve_session_cwd_filter(
+    _state: &WebState,
+    _auth: &AuthContext,
+    cwd: Option<String>,
 ) -> psychevo_runtime::Result<Option<PathBuf>> {
-    let Some(workdir) = workdir else {
+    let Some(cwd) = cwd else {
         return Ok(None);
     };
-    let workdir = canonicalize_workdir(Path::new(&workdir))?;
-    authorize_workdir(state, auth, &workdir)?;
-    Ok(Some(workdir))
+    let cwd = canonicalize_cwd(Path::new(&cwd))?;
+    Ok(Some(cwd))
 }
 
 fn resolved_scope_for_thread(
@@ -263,10 +259,10 @@ fn resolved_scope_for_thread(
         .store()
         .session_summary(thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
-    let workdir = PathBuf::from(summary.workdir);
+    let cwd = PathBuf::from(summary.cwd);
     Ok(ResolvedScope {
-        source: workdir_source(&workdir),
-        workdir,
+        source: cwd_source(&cwd),
+        cwd,
     })
 }
 
@@ -282,7 +278,7 @@ fn update_browser_session_scope(state: &WebState, auth: &AuthContext, scope: &Re
         .insert(
             session_id.clone(),
             BrowserSession {
-                workdir: scope.workdir.clone(),
+                cwd: scope.cwd.clone(),
                 source: scope.source.clone(),
             },
         );

@@ -25,7 +25,7 @@ struct RuntimeChannelConfigRow {
     enabled: bool,
     label: String,
     transport: String,
-    workdir: Option<String>,
+    cwd: Option<String>,
     model: Option<String>,
     permission_mode: Option<String>,
     require_mention: bool,
@@ -73,14 +73,14 @@ pub(super) fn channel_list_result_for_scope(
     state: &WebState,
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<wire::ChannelListResult> {
-    channel_list_result_for_workdir(state, &scope.workdir)
+    channel_list_result_for_cwd(state, &scope.cwd)
 }
 
-pub(super) fn channel_list_result_for_workdir(
+pub(super) fn channel_list_result_for_cwd(
     state: &WebState,
-    workdir: &Path,
+    cwd: &Path,
 ) -> psychevo_runtime::Result<wire::ChannelListResult> {
-    let options = state.run_options(workdir.to_path_buf(), None);
+    let options = state.run_options(cwd.to_path_buf(), None);
     let value = psychevo_runtime::channel_list_value(&options)?;
     channel_list_result_from_value(state, value)
 }
@@ -90,7 +90,7 @@ pub(super) fn channel_show_result(
     scope: &ResolvedScope,
     id: &str,
 ) -> psychevo_runtime::Result<wire::ChannelEnableResult> {
-    let options = state.run_options(scope.workdir.clone(), None);
+    let options = state.run_options(scope.cwd.clone(), None);
     let value = psychevo_runtime::channel_show_value(&options, id)?;
     let row = value
         .get("channel")
@@ -118,13 +118,9 @@ pub(super) fn channel_update_result(
     params: wire::ChannelUpdateParams,
 ) -> psychevo_runtime::Result<wire::ChannelEnableResult> {
     let config_dir = active_profile_config_dir(state, scope);
-    let requested_workdir = params.workdir.clone();
-    let previous_workdir = if requested_workdir.is_some() {
-        Some(
-            channel_show_result(state, scope, &params.id)?
-                .channel
-                .workdir,
-        )
+    let requested_cwd = params.cwd.clone();
+    let previous_cwd = if requested_cwd.is_some() {
+        Some(channel_show_result(state, scope, &params.id)?.channel.cwd)
     } else {
         None
     };
@@ -133,7 +129,7 @@ pub(super) fn channel_update_result(
         id: params.id.clone(),
         label: params.label,
         enabled: params.enabled,
-        workdir: params.workdir,
+        cwd: params.cwd,
         model: params.model,
         permission_mode: params.permission_mode,
         require_mention: params.require_mention,
@@ -144,8 +140,8 @@ pub(super) fn channel_update_result(
         allow_users: params.allow_users,
         allow_groups: params.allow_groups,
     })?;
-    if let Some(workdir) = requested_workdir
-        && previous_workdir.flatten() != normalized_channel_update_text(&workdir)
+    if let Some(cwd) = requested_cwd
+        && previous_cwd.flatten() != normalized_channel_update_text(&cwd)
     {
         state
             .inner
@@ -225,9 +221,9 @@ pub(super) fn channel_source_list_result(
         }
         .to_string();
         let thread_title = summary.as_ref().and_then(|summary| summary.title.clone());
-        let workdir = summary
+        let cwd = summary
             .as_ref()
-            .map(|summary| summary.workdir.clone())
+            .map(|summary| summary.cwd.clone())
             .unwrap_or_default();
         let visible_name = Some(redacted_channel_source_name(
             &platform,
@@ -246,7 +242,7 @@ pub(super) fn channel_source_list_result(
             visible_name,
             thread_id: binding.thread_id,
             thread_title,
-            workdir,
+            cwd,
             activity_status,
             queued_turns: activity.queued_turns,
             updated_at_ms: binding.updated_at_ms,
@@ -296,7 +292,7 @@ pub(super) async fn channel_doctor_result_live(
     scope: &ResolvedScope,
     params: wire::ChannelDoctorParams,
 ) -> psychevo_runtime::Result<wire::ChannelDoctorResult> {
-    let options = state.run_options(scope.workdir.clone(), None);
+    let options = state.run_options(scope.cwd.clone(), None);
     let live = params.live.unwrap_or(false);
     let value = psychevo_runtime::channel_doctor_value(&options, params.id.as_deref(), live)?;
     let mut result = channel_doctor_result_from_value(state, value)?;
@@ -561,8 +557,8 @@ async fn enrich_wechat_live_doctor(
     id: Option<&str>,
     result: &mut wire::ChannelDoctorResult,
 ) -> psychevo_runtime::Result<()> {
-    let options = state.run_options(scope.workdir.clone(), None);
-    let connections = psychevo_runtime::channel_runtime_connections(&options, &scope.workdir)?;
+    let options = state.run_options(scope.cwd.clone(), None);
+    let connections = psychevo_runtime::channel_runtime_connections(&options, &scope.cwd)?;
     let client = reqwest::Client::new();
     for connection in connections
         .into_iter()
@@ -635,7 +631,7 @@ fn channel_config_view_from_runtime(
         enabled: row.enabled,
         label: row.label,
         transport: row.transport,
-        workdir: row.workdir,
+        cwd: row.cwd,
         model: row.model,
         permission_mode: row.permission_mode,
         require_mention: row.require_mention,

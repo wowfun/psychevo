@@ -2,7 +2,7 @@
 #[serde(rename_all = "camelCase")]
 pub struct SettingsReadParams {
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
     pub thread_id: Option<String>,
 }
@@ -19,7 +19,7 @@ pub struct SettingsUpdateParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsReadResult {
-    pub workdir: String,
+    pub cwd: String,
     #[serde(default)]
     pub project: Option<WorkbenchProjectView>,
     #[serde(default)]
@@ -94,7 +94,7 @@ pub struct ModelSettingsReadParams {
     #[serde(default)]
     pub scope: ModelSettingsScope,
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -122,14 +122,14 @@ pub struct ModelProviderCatalogParams {
     #[serde(default)]
     pub refresh: bool,
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStateReadParams {
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
     pub thread_id: Option<String>,
 }
@@ -138,7 +138,7 @@ pub struct ModelStateReadParams {
 #[serde(rename_all = "camelCase")]
 pub struct ModelStateSetParams {
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
     pub thread_id: Option<String>,
     pub model: String,
@@ -149,7 +149,7 @@ pub struct ModelStateSetParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStateResult {
-    pub workdir: String,
+    pub cwd: String,
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
@@ -185,7 +185,7 @@ pub struct ModelAssignmentSetParams {
 #[serde(rename_all = "camelCase")]
 pub struct ModelSettingsResult {
     pub scope: ModelSettingsScope,
-    pub workdir: String,
+    pub cwd: String,
     pub default_model: Option<String>,
     #[serde(default)]
     pub default_reasoning_effort: Option<String>,
@@ -278,7 +278,7 @@ pub struct WorkspaceCreateParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCreateResult {
-    pub workdir: String,
+    pub cwd: String,
     pub scope: GatewayRequestScope,
 }
 

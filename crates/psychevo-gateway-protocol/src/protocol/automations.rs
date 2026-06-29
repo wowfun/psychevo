@@ -71,7 +71,7 @@ impl Default for AutomationExecutionInput {
 #[serde(rename_all = "camelCase")]
 pub struct AutomationListParams {
     #[serde(default)]
-    pub scope: Option<GatewayRequestScope>,
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -136,7 +136,7 @@ pub struct AutomationRunParams {
 #[serde(rename_all = "camelCase")]
 pub struct AutomationTaskView {
     pub id: String,
-    pub workdir: String,
+    pub cwd: String,
     pub kind: AutomationTaskKind,
     #[serde(default)]
     pub target_thread_id: Option<String>,

@@ -24,16 +24,16 @@ export const gatewayBackendConfigSchemas = {
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },
@@ -113,16 +113,16 @@ export const gatewayBackendConfigSchemas = {
     },
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },
@@ -282,16 +282,16 @@ export const gatewayBackendConfigSchemas = {
     },
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },

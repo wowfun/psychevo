@@ -6,6 +6,13 @@ export const clientRequestModelStateSetSchema = {
   "definitions": {
     "ModelStateSetParams": {
       "properties": {
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "model": {
           "type": "string"
         },
@@ -17,13 +24,6 @@ export const clientRequestModelStateSetSchema = {
           ]
         },
         "threadId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "workdir": {
           "default": null,
           "type": [
             "string",

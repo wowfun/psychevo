@@ -52,6 +52,13 @@
             "null"
           ]
         },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "enabled": {
           "default": null,
           "type": [
@@ -100,13 +107,6 @@
             }
           ],
           "default": null
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -116,16 +116,16 @@
     },
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },

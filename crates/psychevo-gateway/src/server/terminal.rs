@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use psychevo_gateway_protocol as wire;
-use psychevo_runtime::{Error, canonicalize_workdir};
+use psychevo_runtime::{Error, canonicalize_cwd};
 use serde_json::json;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -34,7 +34,7 @@ impl TerminalManager {
         inherited_env: &BTreeMap<String, String>,
         out_tx: mpsc::UnboundedSender<String>,
     ) -> psychevo_runtime::Result<wire::TerminalStartResult> {
-        let cwd = resolve_terminal_cwd(&scope.workdir, params.cwd.as_deref())?;
+        let cwd = resolve_terminal_cwd(&scope.cwd, params.cwd.as_deref())?;
         let rows = params.rows.clamp(4, 200);
         let cols = params.cols.clamp(20, 400);
         let pty_system = portable_pty::native_pty_system();
@@ -261,7 +261,7 @@ fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> psychevo_runtime::Res
     } else {
         root.join(raw)
     };
-    let canonical = canonicalize_workdir(&candidate)?;
+    let canonical = canonicalize_cwd(&candidate)?;
     if !canonical.starts_with(root) {
         return Err(Error::Message(
             "terminal cwd is outside the workspace".to_string(),

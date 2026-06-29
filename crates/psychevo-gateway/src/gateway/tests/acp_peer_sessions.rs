@@ -76,7 +76,7 @@ client_capabilities = ["fs.read"]
             ),
         )
         .expect("config");
-        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        let agents_dir = harness.cwd.join(".psychevo").join("agents");
         std::fs::create_dir_all(&agents_dir).expect("agents dir");
         std::fs::write(
             agents_dir.join("reviewer.md"),
@@ -171,7 +171,7 @@ Peer instructions.
             .store()
             .create_child_session_with_metadata(
                 &first.result.session_id,
-                &harness.workdir,
+                &harness.cwd,
                 "peer_agent",
                 "reviewer",
                 "acp:fake",
@@ -204,7 +204,7 @@ Peer instructions.
             .state
             .store()
             .create_session_with_metadata(
-                &harness.workdir,
+                &harness.cwd,
                 "peer_agent",
                 "opencode",
                 "acp:opencode",
@@ -328,7 +328,7 @@ client_capabilities = ["fs.read"]
             ),
         )
         .expect("config");
-        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        let agents_dir = harness.cwd.join(".psychevo").join("agents");
         std::fs::create_dir_all(&agents_dir).expect("agents dir");
         std::fs::write(
             agents_dir.join("reviewer.md"),

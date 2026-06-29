@@ -14,7 +14,7 @@ pub(crate) struct AcpPeerRuntimeOptions {
 
 #[derive(Clone)]
 struct AcpClientContext {
-    workdir: PathBuf,
+    cwd: PathBuf,
     fs_read: bool,
     fs_write: bool,
     approval_handler: Option<Arc<dyn psychevo_runtime::ApprovalHandler>>,
@@ -47,7 +47,7 @@ pub(crate) async fn run_acp_peer_turn(
     );
     let prompt_for_history = prompt_history_text(&options.prompt, &options.image_inputs);
     let acp_context = AcpPeerTurnContext {
-        workdir: options.workdir.clone(),
+        cwd: options.cwd.clone(),
         local_session_id: session_id.clone(),
         native_session_id: existing_native_id,
         prompt,
@@ -96,7 +96,7 @@ pub(crate) async fn run_acp_peer_turn(
                 terminal_reason: None,
                 final_answer: String::new(),
                 db_path: state.db_path().to_path_buf(),
-                workdir: options.workdir,
+                cwd: options.cwd,
                 provider: format!("acp:{}", peer.backend.id),
                 model: peer.agent.name.clone(),
                 base_url: String::new(),
@@ -207,7 +207,7 @@ pub(crate) async fn run_acp_peer_turn(
         terminal_reason: None,
         final_answer: acp.final_answer,
         db_path: state.db_path().to_path_buf(),
-        workdir: options.workdir,
+        cwd: options.cwd,
         provider: format!("acp:{}", peer.backend.id),
         model: peer.agent.name.clone(),
         base_url: String::new(),

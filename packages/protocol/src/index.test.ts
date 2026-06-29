@@ -6,16 +6,16 @@ describe("ThreadSnapshotSchema", () => {
     const parsed = ThreadSnapshotSchema.parse({
       source: {
         kind: "web",
-        rawId: "workdir:abc",
+        rawId: "cwd:abc",
         lifetime: "persistent",
         rawIdentity: null,
         visibleName: "psychevo"
       },
       scope: {
-        workdir: "/tmp/project",
+        cwd: "/tmp/project",
         source: {
           kind: "web",
-          rawId: "workdir:abc",
+          rawId: "cwd:abc",
           lifetime: "persistent",
           rawIdentity: null,
           visibleName: "psychevo"
@@ -24,7 +24,7 @@ describe("ThreadSnapshotSchema", () => {
       thread: {
         id: "s1",
         backend: { kind: "psychevo", nativeId: "s1" },
-        sourceKey: "web:workdir:abc"
+        sourceKey: "web:cwd:abc"
       },
       entries: [
         {

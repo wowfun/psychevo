@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::{GatewayImageInput, GatewayInputPart, GatewaySource, GatewaySourceLifetime};
 
-#[path = "im_adapters.rs"]
+#[path = "im_adapters/mod.rs"]
 pub mod adapters;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

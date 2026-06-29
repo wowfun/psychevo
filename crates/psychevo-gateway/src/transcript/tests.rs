@@ -506,7 +506,7 @@
         user.metadata = Some(json!({
             "user_shell": {
                 "command": "printf ok",
-                "workdir": "/tmp/work",
+                "cwd": "/tmp/work",
                 "outcome": "normal",
                 "is_error": false,
                 "exit_code": 0,

@@ -63,6 +63,13 @@ export const clientRequestSlashSettingsUpdateSchema = {
           },
           "type": "array"
         },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "keybinds": {
           "default": [],
           "items": {
@@ -88,13 +95,6 @@ export const clientRequestSlashSettingsUpdateSchema = {
         },
         "scope": {
           "$ref": "#/definitions/ModelSettingsScope"
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [

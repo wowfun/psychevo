@@ -1,11 +1,11 @@
     #[tokio::test]
     async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
         let (_temp, state) = web_state();
-        let src = state.inner.workdir.join("src");
+        let src = state.inner.cwd.join("src");
         std::fs::create_dir_all(&src).expect("src");
         std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
         for skipped in [".git", ".local", "target", "node_modules"] {
-            let dir = state.inner.workdir.join(skipped);
+            let dir = state.inner.cwd.join(skipped);
             std::fs::create_dir_all(&dir).expect("skipped dir");
             std::fs::write(dir.join("hidden.txt"), skipped).expect("hidden");
         }
@@ -85,17 +85,17 @@
     #[tokio::test]
     async fn workspace_diff_rpc_returns_selected_file_diff_preview() {
         let (_temp, state) = web_state();
-        git(&state.inner.workdir, ["init"]);
+        git(&state.inner.cwd, ["init"]);
         git(
-            &state.inner.workdir,
+            &state.inner.cwd,
             ["config", "user.email", "test@example.com"],
         );
-        git(&state.inner.workdir, ["config", "user.name", "Test User"]);
-        let src = state.inner.workdir.join("src");
+        git(&state.inner.cwd, ["config", "user.name", "Test User"]);
+        let src = state.inner.cwd.join("src");
         std::fs::create_dir_all(&src).expect("src");
         std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
-        git(&state.inner.workdir, ["add", "."]);
-        git(&state.inner.workdir, ["commit", "-m", "initial"]);
+        git(&state.inner.cwd, ["add", "."]);
+        git(&state.inner.cwd, ["commit", "-m", "initial"]);
         std::fs::write(src.join("main.rs"), "fn main() {}\nfn changed() {}\n").expect("main");
         let scope = default_resolved_scope(&state, &AuthContext::Bearer)
             .expect("scope")
@@ -134,7 +134,7 @@
     #[tokio::test]
     async fn workspace_file_write_rejects_revision_conflicts_and_allows_force() {
         let (_temp, state) = web_state();
-        let src = state.inner.workdir.join("src");
+        let src = state.inner.cwd.join("src");
         std::fs::create_dir_all(&src).expect("src");
         std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
         let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -212,22 +212,22 @@
     #[tokio::test]
     async fn workspace_change_reject_restores_pre_turn_dirty_content() {
         let (_temp, state) = web_state();
-        git(&state.inner.workdir, ["init"]);
+        git(&state.inner.cwd, ["init"]);
         git(
-            &state.inner.workdir,
+            &state.inner.cwd,
             ["config", "user.email", "test@example.com"],
         );
-        git(&state.inner.workdir, ["config", "user.name", "Test User"]);
-        let path = state.inner.workdir.join("notes.txt");
+        git(&state.inner.cwd, ["config", "user.name", "Test User"]);
+        let path = state.inner.cwd.join("notes.txt");
         std::fs::write(&path, "base\n").expect("base");
-        git(&state.inner.workdir, ["add", "."]);
-        git(&state.inner.workdir, ["commit", "-m", "initial"]);
+        git(&state.inner.cwd, ["add", "."]);
+        git(&state.inner.cwd, ["commit", "-m", "initial"]);
         std::fs::write(&path, "user dirty\n").expect("dirty");
 
         state
             .inner
             .review
-            .begin_turn("turn-1", Some("thread-1".to_string()), &state.inner.workdir);
+            .begin_turn("turn-1", Some("thread-1".to_string()), &state.inner.cwd);
         std::fs::write(&path, "agent changed\n").expect("agent");
         state.inner.review.complete_turn("turn-1");
 
@@ -418,7 +418,7 @@
             .state
             .store()
             .create_session_with_metadata(
-                &state.inner.workdir,
+                &state.inner.cwd,
                 "web",
                 "fake-model",
                 "fake-provider",
@@ -517,15 +517,15 @@
     #[tokio::test]
     async fn command_execute_undo_redo_restores_session_snapshot() {
         let (_temp, state) = web_state();
-        git(&state.inner.workdir, ["init"]);
-        let file = state.inner.workdir.join("tracked.txt");
+        git(&state.inner.cwd, ["init"]);
+        let file = state.inner.cwd.join("tracked.txt");
         std::fs::write(&file, "base\n").expect("base");
         let session_id = state
             .inner
             .state
             .store()
             .create_session_with_metadata(
-                &state.inner.workdir,
+                &state.inner.cwd,
                 "web",
                 "fake-model",
                 "fake-provider",
@@ -533,7 +533,7 @@
             )
             .expect("session");
         let snapshot_root = state.inner.home.join("snapshots");
-        let before_first = track_snapshot(&snapshot_root, &state.inner.workdir);
+        let before_first = track_snapshot(&snapshot_root, &state.inner.cwd);
         state
             .inner
             .state
@@ -551,7 +551,7 @@
             .store()
             .append_message(&session_id, &runtime_assistant_message("first answer", 2))
             .expect("first assistant");
-        let before_second = track_snapshot(&snapshot_root, &state.inner.workdir);
+        let before_second = track_snapshot(&snapshot_root, &state.inner.cwd);
         state
             .inner
             .state
@@ -683,21 +683,21 @@
         assert!(no_thread["action"].is_null(), "{no_thread:#}");
         assert_eq!(no_thread["message"], "no current session to undo");
 
-        let other_workdir = temp.path().join("other");
-        std::fs::create_dir_all(&other_workdir).expect("other workdir");
+        let other_cwd = temp.path().join("other");
+        std::fs::create_dir_all(&other_cwd).expect("other cwd");
         let other_session = state
             .inner
             .state
             .store()
             .create_session_with_metadata(
-                &other_workdir,
+                &other_cwd,
                 "web",
                 "fake-model",
                 "fake-provider",
                 None,
             )
             .expect("other session");
-        let cross_workdir = handle_rpc(
+        let cross_cwd = handle_rpc(
             state,
             AuthContext::Bearer,
             tx,
@@ -713,14 +713,14 @@
             },
         )
         .await
-        .expect("command/execute cross workdir");
-        assert_eq!(cross_workdir["accepted"], false, "{cross_workdir:#}");
-        assert_eq!(cross_workdir["known"], true, "{cross_workdir:#}");
-        assert!(cross_workdir["action"].is_null(), "{cross_workdir:#}");
+        .expect("command/execute cross cwd");
+        assert_eq!(cross_cwd["accepted"], false, "{cross_cwd:#}");
+        assert_eq!(cross_cwd["known"], true, "{cross_cwd:#}");
+        assert!(cross_cwd["action"].is_null(), "{cross_cwd:#}");
         assert!(
-            cross_workdir["message"]
+            cross_cwd["message"]
                 .as_str()
                 .is_some_and(|message| message.contains("does not belong")),
-            "{cross_workdir:#}"
+            "{cross_cwd:#}"
         );
     }

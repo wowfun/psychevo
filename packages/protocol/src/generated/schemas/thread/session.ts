@@ -69,20 +69,20 @@ export const threadSessionSchemas = {
   SessionProjectView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "cwd": {
+      "type": "string"
+    },
     "displayPath": {
       "type": "string"
     },
     "label": {
       "type": "string"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
+    "cwd",
     "displayPath",
-    "label",
-    "workdir"
+    "label"
   ],
   "title": "SessionProjectView",
   "type": "object"
@@ -155,20 +155,20 @@ export const threadSessionSchemas = {
     },
     "SessionProjectView": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "displayPath": {
           "type": "string"
         },
         "label": {
           "type": "string"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
+        "cwd",
         "displayPath",
-        "label",
-        "workdir"
+        "label"
       ],
       "type": "object"
     }
@@ -193,6 +193,9 @@ export const threadSessionSchemas = {
         "integer",
         "null"
       ]
+    },
+    "cwd": {
+      "type": "string"
     },
     "displayTitle": {
       "default": null,
@@ -276,19 +279,16 @@ export const threadSessionSchemas = {
       "format": "uint",
       "minimum": 0.0,
       "type": "integer"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
+    "cwd",
     "id",
     "messageCount",
     "project",
     "startedAtMs",
     "toolCallCount",
-    "visibleEntryCount",
-    "workdir"
+    "visibleEntryCount"
   ],
   "title": "SessionSummaryView",
   "type": "object"

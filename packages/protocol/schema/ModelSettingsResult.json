@@ -172,6 +172,9 @@
       },
       "type": "array"
     },
+    "cwd": {
+      "type": "string"
+    },
     "defaultModel": {
       "type": [
         "string",
@@ -199,17 +202,14 @@
     },
     "scope": {
       "$ref": "#/definitions/ModelSettingsScope"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
     "auxiliary",
+    "cwd",
     "modelOptions",
     "providers",
-    "scope",
-    "workdir"
+    "scope"
   ],
   "title": "ModelSettingsResult",
   "type": "object"

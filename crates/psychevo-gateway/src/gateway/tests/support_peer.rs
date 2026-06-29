@@ -9,7 +9,7 @@
     struct FakeRun {
         prompt: String,
         session: Option<String>,
-        workdir: PathBuf,
+        cwd: PathBuf,
     }
 
     #[derive(Debug, Clone)]
@@ -88,7 +88,7 @@
                     runs.push(FakeRun {
                         prompt: request.options.prompt.clone(),
                         session: request.options.session.clone(),
-                        workdir: request.options.workdir.clone(),
+                        cwd: request.options.cwd.clone(),
                     });
                 }
 
@@ -126,7 +126,7 @@
                     session_id
                 } else {
                     request.options.state.store().create_session_with_metadata(
-                        &request.options.workdir,
+                        &request.options.cwd,
                         &request.runtime_source,
                         "fake-model",
                         "fake-provider",
@@ -140,7 +140,7 @@
                     terminal_reason: None,
                     final_answer: format!("answer {run_number}"),
                     db_path: request.options.state.db_path().to_path_buf(),
-                    workdir: request.options.workdir,
+                    cwd: request.options.cwd,
                     provider: "fake-provider".to_string(),
                     model: "fake-model".to_string(),
                     base_url: String::new(),
@@ -160,20 +160,20 @@
 
     struct Harness {
         _temp: tempfile::TempDir,
-        workdir: PathBuf,
+        cwd: PathBuf,
         state: StateRuntime,
         gateway: Gateway,
     }
 
     fn harness(backend: Arc<FakeBackend>) -> Harness {
         let temp = tempfile::tempdir().expect("tempdir");
-        let workdir = temp.path().join("work");
-        std::fs::create_dir_all(&workdir).expect("workdir");
+        let cwd = temp.path().join("work");
+        std::fs::create_dir_all(&cwd).expect("cwd");
         let state = StateRuntime::open(temp.path().join("state.db")).expect("state runtime");
         let gateway = Gateway::with_backend(state.clone(), backend);
         Harness {
             _temp: temp,
-            workdir,
+            cwd,
             state,
             gateway,
         }
@@ -182,7 +182,7 @@
     fn run_options(harness: &Harness, prompt: &str) -> RunOptions {
         RunOptions {
             state: harness.state.clone(),
-            workdir: harness.workdir.clone(),
+            cwd: harness.cwd.clone(),
             snapshot_root: None,
             session: None,
             continue_latest: false,
@@ -251,7 +251,7 @@ entrypoints = ["subagent"]
 "#,
         )
         .expect("config");
-        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        let agents_dir = harness.cwd.join(".psychevo").join("agents");
         std::fs::create_dir_all(&agents_dir).expect("agents dir");
         std::fs::write(
             agents_dir.join("opencode.md"),

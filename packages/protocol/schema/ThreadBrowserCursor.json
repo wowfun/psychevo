@@ -1,18 +1,18 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "cwd": {
+      "type": "string"
+    },
     "offset": {
       "format": "uint",
       "minimum": 0.0,
       "type": "integer"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
-    "offset",
-    "workdir"
+    "cwd",
+    "offset"
   ],
   "title": "ThreadBrowserCursor",
   "type": "object"

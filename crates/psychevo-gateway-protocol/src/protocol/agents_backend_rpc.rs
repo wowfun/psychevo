@@ -315,7 +315,7 @@ pub struct ReadyzResult {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateLaunchParams {
-    pub workdir: String,
+    pub cwd: String,
     #[serde(default)]
     pub source: Option<GatewaySourceInput>,
 }

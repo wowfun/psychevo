@@ -12,7 +12,7 @@ Define the concrete `pevo serve` headless local API server.
 - foreground headless Gateway API server behavior
 - loopback binding, readiness, authentication, and stdout contract
 - strict WebSocket JSON-RPC 2.0 transport contract
-- request-scoped source/workdir inputs for multi-workdir clients
+- request-scoped source/cwd inputs for multi-cwd clients
 
 Out of scope:
 
@@ -54,14 +54,14 @@ Fields are camelCase. Methods use singular resource-oriented names such as
 
 ## Request Scope
 
-Source-selecting methods carry `params.scope`, which includes `workdir` and
+Source-selecting methods carry `params.scope`, which includes `cwd` and
 source intent. `source.kind` is an open namespace string. `rawId` may be
-omitted; the server derives it from kind plus canonical workdir. Derived source
+omitted; the server derives it from kind plus canonical cwd. Derived source
 keys avoid exposing raw local paths.
 
 `thread/start`, source-default `thread/resume`, and `turn/start` require
 `params.scope`. Thread-id anchored read/write/control methods authorize through
-the stored thread/workdir binding. `thread/list` uses an explicit workdir
+the stored thread/cwd binding. `thread/list` uses an explicit cwd
 filter.
 
 ## Attachments

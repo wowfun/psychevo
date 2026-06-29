@@ -1,303 +1,4 @@
-async fn readyz() -> impl IntoResponse {
-    Json(wire::ReadyzResult {
-        ok: true,
-        server: "psychevo-gateway".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    })
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LaunchQuery {
-    open_token: String,
-}
-
-async fn ws_handler(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    let Some(auth) = state.auth_from_headers(&headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    ws.on_upgrade(move |socket| handle_socket(socket, state, auth))
-}
-
-async fn create_launch(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    Json(params): Json<wire::CreateLaunchParams>,
-) -> impl IntoResponse {
-    if !state
-        .auth_from_headers(&headers)
-        .is_some_and(|auth| auth.is_bearer())
-    {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let workdir = match canonicalize_workdir(Path::new(&params.workdir)) {
-        Ok(workdir) => workdir,
-        Err(err) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": {"message": err.to_string()}})),
-            )
-                .into_response();
-        }
-    };
-    let source = source_from_input(
-        params.source,
-        &workdir,
-        wire::GatewaySourceLifetime::Persistent,
-    );
-    let launch_id = Uuid::now_v7().to_string();
-    let open_token = Uuid::now_v7().to_string();
-    let expires_at_ms = now_ms() + 30_000;
-    state
-        .inner
-        .launches
-        .lock()
-        .expect("web launches poisoned")
-        .insert(
-            launch_id.clone(),
-            LaunchEntry {
-                open_token: open_token.clone(),
-                expires_at_ms,
-                workdir,
-                source,
-            },
-        );
-    let host = headers
-        .get("host")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("127.0.0.1");
-    let open_url = format!("http://{host}/_gateway/launch/{launch_id}?openToken={open_token}");
-    Json(wire::CreateLaunchResult {
-        launch_id,
-        expires_at_ms,
-        open_url,
-    })
-    .into_response()
-}
-
-async fn consume_launch(
-    State(state): State<WebState>,
-    AxumPath(launch_id): AxumPath<String>,
-    Query(query): Query<LaunchQuery>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    let entry = {
-        let mut launches = state.inner.launches.lock().expect("web launches poisoned");
-        let Some(entry) = launches.remove(&launch_id) else {
-            if state.auth_from_headers(&headers).is_some() {
-                return shell_redirect().into_response();
-            }
-            return launch_expired_page(StatusCode::NOT_FOUND).into_response();
-        };
-        entry
-    };
-    if entry.expires_at_ms < now_ms() || entry.open_token != query.open_token {
-        if state.auth_from_headers(&headers).is_some() {
-            return shell_redirect().into_response();
-        }
-        return launch_expired_page(StatusCode::UNAUTHORIZED).into_response();
-    }
-    let session_id = Uuid::now_v7().to_string();
-    state
-        .inner
-        .browser_sessions
-        .lock()
-        .expect("web browser sessions poisoned")
-        .insert(
-            session_id.clone(),
-            BrowserSession {
-                workdir: entry.workdir,
-                source: entry.source,
-            },
-        );
-    let mut response = shell_redirect();
-    let secure = headers
-        .get("x-forwarded-proto")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|proto| proto == "https");
-    let cookie = if secure {
-        format!("psychevo_gateway_session={session_id}; Path=/; HttpOnly; SameSite=Lax; Secure")
-    } else {
-        format!("psychevo_gateway_session={session_id}; Path=/; HttpOnly; SameSite=Lax")
-    };
-    if let Ok(value) = HeaderValue::from_str(&cookie) {
-        response.headers_mut().insert(SET_COOKIE, value);
-    }
-    response.into_response()
-}
-
-fn shell_redirect() -> Response<Body> {
-    let mut response = Response::new(Body::empty());
-    *response.status_mut() = StatusCode::SEE_OTHER;
-    response
-        .headers_mut()
-        .insert(LOCATION, HeaderValue::from_static("/"));
-    response
-}
-
-async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
-    let (mut sender, mut receiver) = socket.split();
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
-    let relay = tokio::spawn(spawn_gateway_live_event_relay(
-        state.clone(),
-        out_tx.clone(),
-    ));
-    let writer = tokio::spawn(async move {
-        while let Some(message) = out_rx.recv().await {
-            if sender.send(WsMessage::Text(message.into())).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    while let Some(message) = receiver.next().await {
-        let Ok(message) = message else {
-            break;
-        };
-        match message {
-            WsMessage::Text(text) => {
-                let response = handle_rpc_text(&state, &auth, out_tx.clone(), text.as_str()).await;
-                if let Some(response) = response {
-                    let _ = out_tx.send(response);
-                }
-            }
-            WsMessage::Close(_) => break,
-            _ => {}
-        }
-    }
-    relay.abort();
-    drop(out_tx);
-    let _ = relay.await;
-    let _ = writer.await;
-}
-
-async fn spawn_gateway_live_event_relay(state: WebState, out_tx: mpsc::UnboundedSender<String>) {
-    let mut last_seq = state
-        .inner
-        .state
-        .store()
-        .latest_gateway_live_event_seq()
-        .unwrap_or_default();
-    let mut snapshot_revisions: HashMap<String, i64> = HashMap::new();
-    let mut last_cleanup_ms = gateway_now_ms();
-    let mut tick = tokio::time::interval(Duration::from_millis(250));
-    loop {
-        tick.tick().await;
-        let events = match state
-            .inner
-            .state
-            .store()
-            .list_gateway_live_events_after(last_seq, 100)
-        {
-            Ok(events) => events,
-            Err(_) => continue,
-        };
-        for record in events {
-            last_seq = last_seq.max(record.seq);
-            if record.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
-                continue;
-            }
-            let Ok(event) = serde_json::from_value::<GatewayEvent>(record.event.clone()) else {
-                continue;
-            };
-            let context = state.pending_context_for_live_event(&record);
-            state.record_event_with_context(&event, context.clone());
-            let display_event = state.event_with_pending_context(event, &context);
-            if out_tx
-                .send(rpc_notification("gateway/event", json!(display_event)))
-                .is_err()
-            {
-                return;
-            }
-        }
-        let now = gateway_now_ms();
-        let snapshots = match state.inner.state.store().list_gateway_live_snapshots(1000) {
-            Ok(snapshots) => snapshots,
-            Err(_) => continue,
-        };
-        for snapshot in snapshots {
-            if snapshot.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
-                continue;
-            }
-            if snapshot_revisions
-                .get(&snapshot.snapshot_key)
-                .is_some_and(|revision| *revision >= snapshot.revision)
-            {
-                continue;
-            }
-            if let Some(activity_id) = snapshot.activity_id.as_deref() {
-                let Ok(Some(activity)) = state.inner.state.store().gateway_activity(activity_id)
-                else {
-                    continue;
-                };
-                if !matches!(activity.status.as_str(), "running" | "queued")
-                    || activity.lease_expires_at_ms < now
-                {
-                    continue;
-                }
-            }
-            let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event.clone()) else {
-                continue;
-            };
-            snapshot_revisions.insert(snapshot.snapshot_key, snapshot.revision);
-            state.record_event_with_context(&event, PendingInteractionContext::default());
-            if out_tx
-                .send(rpc_notification("gateway/event", json!(event)))
-                .is_err()
-            {
-                return;
-            }
-        }
-        if now.saturating_sub(last_cleanup_ms) > 60_000 {
-            let _ = state
-                .inner
-                .state
-                .store()
-                .cleanup_gateway_live_events_before(now - 10 * 60_000);
-            let _ = state
-                .inner
-                .state
-                .store()
-                .cleanup_gateway_live_snapshots_before(now - 10 * 60_000);
-            last_cleanup_ms = now;
-        }
-    }
-}
-
-async fn handle_rpc_text(
-    state: &WebState,
-    auth: &AuthContext,
-    out_tx: mpsc::UnboundedSender<String>,
-    text: &str,
-) -> Option<String> {
-    let request = match serde_json::from_str::<RpcRequest>(text) {
-        Ok(request) => request,
-        Err(err) => {
-            return Some(rpc_error(
-                Value::Null,
-                -32700,
-                format!("invalid json: {err}"),
-            ));
-        }
-    };
-    if request.jsonrpc != wire::JSONRPC_VERSION {
-        return Some(rpc_error(
-            request.id.clone().unwrap_or(Value::Null),
-            -32600,
-            "invalid JSON-RPC version".to_string(),
-        ));
-    }
-    let id = request.id.clone()?;
-    let result = handle_rpc(state.clone(), auth.clone(), out_tx, request).await;
-    Some(match result {
-        Ok(value) => rpc_result(id, value),
-        Err(err) => rpc_error(id, -32000, err.to_string()),
-    })
-}
+include!("rpc_dispatch/transport.rs");
 
 async fn handle_rpc(
     state: WebState,
@@ -311,7 +12,7 @@ async fn handle_rpc(
             Ok(json!({
             "server": "psychevo-gateway",
             "version": env!("CARGO_PKG_VERSION"),
-            "cwd": scope.workdir,
+            "cwd": scope.cwd,
             "scope": scope.to_wire_scope(),
             "source": scope.source,
             "profile": gateway_profile_value(&state),
@@ -379,18 +80,18 @@ async fn handle_rpc(
         "thread/list" => {
             let params = request.params::<wire::ThreadListParams>()?;
             let limit = params.limit.unwrap_or(50).clamp(1, 200);
-            let workdir = resolve_session_workdir_filter(&state, &auth, params.workdir)?;
+            let cwd = resolve_session_cwd_filter(&state, &auth, params.cwd)?;
             let store = state.inner.state.store();
             let sessions = if params.archived.unwrap_or(false) {
-                match workdir.as_ref() {
-                    Some(workdir) => {
-                        store.list_archived_sessions_for_workdir_with_sources(workdir, &[])?
+                match cwd.as_ref() {
+                    Some(cwd) => {
+                        store.list_archived_sessions_for_cwd_with_sources(cwd, &[])?
                     }
                     None => store.list_archived_sessions_with_sources(&[])?,
                 }
             } else {
-                match workdir.as_ref() {
-                    Some(workdir) => store.list_sessions_for_workdir_with_sources(workdir, &[])?,
+                match cwd.as_ref() {
+                    Some(cwd) => store.list_sessions_for_cwd_with_sources(cwd, &[])?,
                     None => store.list_sessions_with_sources(&[])?,
                 }
             };
@@ -405,12 +106,12 @@ async fn handle_rpc(
         }
         "thread/browser" => {
             let params = request.params::<wire::ThreadBrowserParams>()?;
-            let requested_workdir = params
-                .workdir
+            let requested_cwd = params
+                .cwd
                 .clone()
-                .or_else(|| params.cursor.as_ref().map(|cursor| cursor.workdir.clone()));
-            let workdir = resolve_session_workdir_filter(&state, &auth, requested_workdir)?;
-            thread_browser_value(&state, params, workdir)
+                .or_else(|| params.cursor.as_ref().map(|cursor| cursor.cwd.clone()));
+            let cwd = resolve_session_cwd_filter(&state, &auth, requested_cwd)?;
+            thread_browser_value(&state, params, cwd)
         }
         "thread/rename" => {
             let params = request.required_params::<wire::ThreadRenameParams>()?;
@@ -488,14 +189,14 @@ async fn handle_rpc(
                 })?);
             }
 
-            let mut options = state.run_options(scope.workdir.clone(), params.thread_id.clone());
+            let mut options = state.run_options(scope.cwd.clone(), params.thread_id.clone());
             options.runtime_ref = Some(runtime_ref.to_string());
             options.runtime_session_id = params.runtime_session_id.clone();
             let peer = crate::resolve_peer_turn(&options)?
                 .ok_or_else(|| Error::Message(format!("unknown ACP runtime: {runtime_ref}")))?;
             let runtime_options = crate::acp_peer::read_acp_peer_runtime_options(
                 peer,
-                scope.workdir.clone(),
+                scope.cwd.clone(),
                 params.runtime_session_id.clone(),
             )
             .await?;
@@ -561,12 +262,12 @@ async fn handle_rpc(
                     })
                 })
                 .transpose()?;
-            let mut mention_validation = state.run_options(scope.workdir.clone(), None);
+            let mut mention_validation = state.run_options(scope.cwd.clone(), None);
             mention_validation.runtime_ref = params.runtime_ref.clone();
             apply_mentions_to_run_options(&mut mention_validation, &params.mentions)?;
 
             let thread_id = ensure_turn_start_thread(&state, &scope, requested_thread_id)?;
-            let mut options = state.run_options(scope.workdir.clone(), thread_id.clone());
+            let mut options = state.run_options(scope.cwd.clone(), thread_id.clone());
             options.model = params.model;
             options.reasoning_effort = params.reasoning_effort;
             options.runtime_ref = params.runtime_ref.clone();
@@ -587,18 +288,18 @@ async fn handle_rpc(
                 .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
             let event_thread_id = thread_id.clone();
             let event_state = state.clone();
-            let review_workdir = scope.workdir.clone();
+            let review_cwd = scope.cwd.clone();
             let event_tx = out_tx.clone();
             let event_sink: GatewayEventSink = Arc::new(move |event| {
                 let context = event_state
                     .pending_context_for_selector(&event_selector, event_thread_id.as_deref());
                 event_state.record_event_with_context(&event, context.clone());
-                event_state.record_review_event(&event, &review_workdir);
+                event_state.record_review_event(&event, &review_cwd);
                 let display_event = event_state.event_with_pending_context(event, &context);
                 let _ = event_tx.send(rpc_notification("gateway/event", json!(display_event)));
             });
             let gateway = state.inner.gateway.clone();
-            let bind_source = workdir_source(&scope.workdir);
+            let bind_source = cwd_source(&scope.cwd);
             let requested_thread_id = thread_id.clone();
             tokio::spawn(async move {
                 let result = gateway
@@ -843,7 +544,7 @@ async fn handle_rpc(
             let agent = resolve_agent_definition(
                 &catalog,
                 &params.name,
-                &scope.workdir,
+                &scope.cwd,
                 &state.inner.inherited_env,
             )?;
             Ok(serde_json::to_value(agent_read_result(&agent))?)
@@ -851,12 +552,12 @@ async fn handle_rpc(
         "agent/write" => {
             let params = request.required_params::<wire::AgentWriteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            write_project_agent_definition(&scope.workdir, params)
+            write_project_agent_definition(&scope.cwd, params)
         }
         "agent/delete" => {
             let params = request.required_params::<wire::AgentDeleteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            delete_project_agent_definition(&scope.workdir, &params.name)
+            delete_project_agent_definition(&scope.cwd, &params.name)
         }
         "agent/status" => {
             let params = request.params::<wire::AgentStatusParams>()?;
@@ -881,7 +582,7 @@ async fn handle_rpc(
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let backends = load_agent_backend_configs(
                 &state.inner.home,
-                &scope.workdir,
+                &scope.cwd,
                 &state.inner.inherited_env,
             )?;
             Ok(serde_json::to_value(wire::BackendListResult {
@@ -893,7 +594,7 @@ async fn handle_rpc(
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let backends = load_agent_backend_configs(
                 &state.inner.home,
-                &scope.workdir,
+                &scope.cwd,
                 &state.inner.inherited_env,
             )?;
             let backend = backends
@@ -998,15 +699,15 @@ async fn handle_rpc(
         }
         "slash/settings/read" => {
             let params = request.params::<wire::SlashSettingsReadParams>()?;
-            let workdir = resolve_workdir_filter(&state, &auth, params.workdir)?;
+            let cwd = resolve_cwd_filter(&state, &auth, params.cwd)?;
             let scope = resolve_optional_scope(&state, &auth, None)?;
-            slash_settings_read_value(&state, &scope, &workdir)
+            slash_settings_read_value(&state, &scope, &cwd)
         }
         "slash/settings/update" => {
             let params = request.required_params::<wire::SlashSettingsUpdateParams>()?;
-            let workdir = resolve_workdir_filter(&state, &auth, params.workdir.clone())?;
+            let cwd = resolve_cwd_filter(&state, &auth, params.cwd.clone())?;
             let scope = resolve_optional_scope(&state, &auth, None)?;
-            slash_settings_update_value(&state, &scope, &workdir, params)
+            slash_settings_update_value(&state, &scope, &cwd, params)
         }
         "shell/start" => {
             let params = request.required_params::<wire::ShellStartParams>()?;
@@ -1055,8 +756,8 @@ async fn handle_rpc(
             let context = user_shell_context_options(&state, &scope, thread_id.clone());
             let gateway = state.inner.gateway.clone();
             let source = scope.source.clone();
-            let bind_source = workdir_source(&scope.workdir);
-            let workdir = scope.workdir.clone();
+            let bind_source = cwd_source(&scope.cwd);
+            let cwd = scope.cwd.clone();
             let result_thread_id = thread_id.clone();
             tokio::spawn(async move {
                 let result = gateway
@@ -1064,7 +765,7 @@ async fn handle_rpc(
                         thread_id: result_thread_id.clone(),
                         source: Some(source),
                         bind_source: Some(bind_source),
-                        workdir,
+                        cwd,
                         command,
                         context,
                         stream: None,
@@ -1115,7 +816,7 @@ async fn handle_rpc(
         }
         "settings/read" => {
             let params = request.params::<wire::SettingsReadParams>()?;
-            let (workdir, thread_id) = if let Some(thread_id) = params.thread_id {
+            let (cwd, thread_id) = if let Some(thread_id) = params.thread_id {
                 authorize_thread(&state, &auth, &thread_id)?;
                 let summary = state
                     .inner
@@ -1123,11 +824,11 @@ async fn handle_rpc(
                     .store()
                     .session_summary(&thread_id)?
                     .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
-                (PathBuf::from(summary.workdir), Some(thread_id))
+                (PathBuf::from(summary.cwd), Some(thread_id))
             } else {
-                (resolve_workdir_filter(&state, &auth, params.workdir)?, None)
+                (resolve_cwd_filter(&state, &auth, params.cwd)?, None)
             };
-            settings_read_value(&state, &workdir, thread_id.as_deref())
+            settings_read_value(&state, &cwd, thread_id.as_deref())
         }
         "settings/update" => {
             let params = request.required_params::<wire::SettingsUpdateParams>()?;
@@ -1139,63 +840,46 @@ async fn handle_rpc(
                 &params.thread_id,
                 params.agent.as_deref(),
             )?;
-            settings_read_value(&state, &scope.workdir, Some(&params.thread_id))
+            settings_read_value(&state, &scope.cwd, Some(&params.thread_id))
         }
         "model/settings/read" => {
             let params = request.params::<wire::ModelSettingsReadParams>()?;
-            let workdir = resolve_workdir_filter(&state, &auth, params.workdir)?;
-            model_settings_value(&state, &workdir)
+            let cwd = resolve_cwd_filter(&state, &auth, params.cwd)?;
+            model_settings_value(&state, &cwd)
         }
         "model/provider/save" => {
             let params = request.required_params::<wire::ModelProviderSaveParams>()?;
-            let workdir = default_resolved_scope(&state, &auth)?.workdir;
-            model_provider_save_value(&state, &workdir, params)
+            let cwd = default_resolved_scope(&state, &auth)?.cwd;
+            model_provider_save_value(&state, &cwd, params)
         }
         "model/provider/catalog" => {
             let params = request.required_params::<wire::ModelProviderCatalogParams>()?;
-            let workdir = resolve_workdir_filter(&state, &auth, params.workdir.clone())?;
-            model_provider_catalog_value(&state, &workdir, params).await
+            let cwd = resolve_cwd_filter(&state, &auth, params.cwd.clone())?;
+            model_provider_catalog_value(&state, &cwd, params).await
         }
         "model/state/read" => {
             let params = request.params::<wire::ModelStateReadParams>()?;
-            let (workdir, thread_id) =
-                resolve_model_state_request_scope(&state, &auth, params.workdir, params.thread_id)?;
-            model_state_read_value(&state, &workdir, thread_id.as_deref())
+            let (cwd, thread_id) =
+                resolve_model_state_request_scope(&state, &auth, params.cwd, params.thread_id)?;
+            model_state_read_value(&state, &cwd, thread_id.as_deref())
         }
         "model/state/set" => {
             let params = request.required_params::<wire::ModelStateSetParams>()?;
-            let (workdir, thread_id) = resolve_model_state_request_scope(
+            let (cwd, thread_id) = resolve_model_state_request_scope(
                 &state,
                 &auth,
-                params.workdir.clone(),
+                params.cwd.clone(),
                 params.thread_id.clone(),
             )?;
-            model_state_set_value(&state, &workdir, thread_id.as_deref(), params)
+            model_state_set_value(&state, &cwd, thread_id.as_deref(), params)
         }
         "model/assignment/set" => {
             let params = request.required_params::<wire::ModelAssignmentSetParams>()?;
-            let workdir = default_resolved_scope(&state, &auth)?.workdir;
-            model_assignment_set_value(&state, &workdir, params)
+            let cwd = default_resolved_scope(&state, &auth)?.cwd;
+            model_assignment_set_value(&state, &cwd, params)
         }
         method => Err(Error::Message(format!("method not found: {method}"))),
     }
 }
 
-fn resolve_model_state_request_scope(
-    state: &WebState,
-    auth: &AuthContext,
-    workdir: Option<String>,
-    thread_id: Option<String>,
-) -> psychevo_runtime::Result<(PathBuf, Option<String>)> {
-    if let Some(thread_id) = thread_id {
-        authorize_thread(state, auth, &thread_id)?;
-        let summary = state
-            .inner
-            .state
-            .store()
-            .session_summary(&thread_id)?
-            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
-        return Ok((PathBuf::from(summary.workdir), Some(thread_id)));
-    }
-    Ok((resolve_workdir_filter(state, auth, workdir)?, None))
-}
+include!("rpc_dispatch/model_scope.rs");

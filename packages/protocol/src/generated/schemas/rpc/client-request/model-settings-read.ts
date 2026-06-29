@@ -6,6 +6,13 @@ export const clientRequestModelSettingsReadSchema = {
   "definitions": {
     "ModelSettingsReadParams": {
       "properties": {
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "scope": {
           "allOf": [
             {
@@ -13,13 +20,6 @@ export const clientRequestModelSettingsReadSchema = {
             }
           ],
           "default": "global"
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "type": "object"

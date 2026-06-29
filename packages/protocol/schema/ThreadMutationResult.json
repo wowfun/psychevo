@@ -66,20 +66,20 @@
     },
     "SessionProjectView": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "displayPath": {
           "type": "string"
         },
         "label": {
           "type": "string"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
+        "cwd",
         "displayPath",
-        "label",
-        "workdir"
+        "label"
       ],
       "type": "object"
     },
@@ -104,6 +104,9 @@
             "integer",
             "null"
           ]
+        },
+        "cwd": {
+          "type": "string"
         },
         "displayTitle": {
           "default": null,
@@ -187,19 +190,16 @@
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
+        "cwd",
         "id",
         "messageCount",
         "project",
         "startedAtMs",
         "toolCallCount",
-        "visibleEntryCount",
-        "workdir"
+        "visibleEntryCount"
       ],
       "type": "object"
     }

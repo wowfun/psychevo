@@ -207,7 +207,7 @@ pub struct SendShellRequest {
     pub thread_id: Option<String>,
     pub source: Option<GatewaySource>,
     pub bind_source: Option<GatewaySource>,
-    pub workdir: PathBuf,
+    pub cwd: PathBuf,
     pub command: String,
     pub context: UserShellContextOptions,
     pub stream: Option<RunStreamSink>,
@@ -222,7 +222,7 @@ impl fmt::Debug for SendShellRequest {
             .field("thread_id", &self.thread_id)
             .field("source", &self.source)
             .field("bind_source", &self.bind_source)
-            .field("workdir", &self.workdir)
+            .field("cwd", &self.cwd)
             .field("command", &self.command)
             .field("context", &self.context)
             .field("has_stream", &self.stream.is_some())

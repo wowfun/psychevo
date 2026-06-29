@@ -19,16 +19,16 @@ export const workspaceFileSchemas = {
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },
@@ -81,16 +81,16 @@ export const workspaceFileSchemas = {
     }
   },
   "properties": {
+    "cwd": {
+      "type": "string"
+    },
     "scope": {
       "$ref": "#/definitions/GatewayRequestScope"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
-    "scope",
-    "workdir"
+    "cwd",
+    "scope"
   ],
   "title": "WorkspaceCreateResult",
   "type": "object"
@@ -145,16 +145,16 @@ export const workspaceFileSchemas = {
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },
@@ -280,16 +280,16 @@ export const workspaceFileSchemas = {
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },
@@ -424,16 +424,16 @@ export const workspaceFileSchemas = {
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },

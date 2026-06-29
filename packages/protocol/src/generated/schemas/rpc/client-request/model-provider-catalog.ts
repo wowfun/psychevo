@@ -6,6 +6,13 @@ export const clientRequestModelProviderCatalogSchema = {
   "definitions": {
     "ModelProviderCatalogParams": {
       "properties": {
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "providerId": {
           "type": "string"
         },
@@ -20,13 +27,6 @@ export const clientRequestModelProviderCatalogSchema = {
             }
           ],
           "default": "global"
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [

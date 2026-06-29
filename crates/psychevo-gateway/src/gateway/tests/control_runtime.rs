@@ -3,7 +3,7 @@
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
         let harness = harness(backend);
-        let source = GatewaySource::new("tui", "workdir").process();
+        let source = GatewaySource::new("tui", "cwd").process();
         let selector = GatewayThreadSelector::source(source.source_key());
 
         let (handle, control) = run_control();
@@ -65,7 +65,7 @@
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
         let harness = harness(backend.clone());
-        let source = GatewaySource::new("tui", "workdir").process();
+        let source = GatewaySource::new("tui", "cwd").process();
 
         let (handle, control) = run_control();
         let mut first_request = request(&harness, source.clone(), "first");
@@ -159,7 +159,7 @@ client_capabilities = ["fs.read"]
 "#,
         )
         .expect("config");
-        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        let agents_dir = harness.cwd.join(".psychevo").join("agents");
         std::fs::create_dir_all(&agents_dir).expect("agents dir");
         std::fs::write(
             agents_dir.join("translate.md"),

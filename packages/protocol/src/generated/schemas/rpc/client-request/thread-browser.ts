@@ -6,18 +6,18 @@ export const clientRequestThreadBrowserSchema = {
   "definitions": {
     "ThreadBrowserCursor": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "offset": {
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "offset",
-        "workdir"
+        "cwd",
+        "offset"
       ],
       "type": "object"
     },
@@ -41,6 +41,13 @@ export const clientRequestThreadBrowserSchema = {
           ],
           "default": null
         },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "includeSessionIds": {
           "default": [],
           "items": {
@@ -62,13 +69,6 @@ export const clientRequestThreadBrowserSchema = {
           "format": "int64",
           "type": [
             "integer",
-            "null"
-          ]
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
             "null"
           ]
         }

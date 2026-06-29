@@ -373,7 +373,7 @@ pub struct ThreadSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionProjectView {
-    pub workdir: String,
+    pub cwd: String,
     pub label: String,
     pub display_path: String,
 }
@@ -382,7 +382,7 @@ pub struct SessionProjectView {
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummaryView {
     pub id: String,
-    pub workdir: String,
+    pub cwd: String,
     pub project: SessionProjectView,
     #[serde(default)]
     pub model: Option<String>,

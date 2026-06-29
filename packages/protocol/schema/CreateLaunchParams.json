@@ -50,6 +50,9 @@
     }
   },
   "properties": {
+    "cwd": {
+      "type": "string"
+    },
     "source": {
       "anyOf": [
         {
@@ -60,13 +63,10 @@
         }
       ],
       "default": null
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
-    "workdir"
+    "cwd"
   ],
   "title": "CreateLaunchParams",
   "type": "object"

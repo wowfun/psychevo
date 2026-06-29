@@ -4,6 +4,13 @@
   "definitions": {
     "ModelProviderCatalogParams": {
       "properties": {
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "providerId": {
           "type": "string"
         },
@@ -18,13 +25,6 @@
             }
           ],
           "default": "global"
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [

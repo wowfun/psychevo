@@ -17,6 +17,12 @@ normal `~/.psychevo`.
 Live provider, API-key, or cloud-service validation is opt-in only. It is not
 part of this topic's default gate.
 
+When explicitly requested, live automation validation may create a temporary
+home/state/cwd, use an already configured provider such as
+`xiaomi-token-plan`, create a project automation, manually trigger it, and
+assert the run reaches a terminal completed state with a persisted thread. Live
+checks must not mutate the user's normal automation database.
+
 ## Required Narrow Validation
 
 Schedule/runtime changes:
@@ -62,17 +68,32 @@ Gateway tests cover `automation/list`, `automation/write`,
 `automation` tool actions: `list`, `create`, `update`, `pause`, `resume`,
 `run`, and `remove`.
 
+Gateway tests should cover profile-global browser authorization: a browser
+session launched from one cwd may list, create, pause, resume, delete, and run
+automations for another canonical cwd. The selected cwd is a target/filter, not
+an authorization boundary.
+
 Gateway tests should assert that `automation/write` preserves existing lifecycle
 state and that pause/resume are the only RPCs that toggle `enabled`.
+Gateway and runtime tests should assert that expired `running` run claims are
+recovered to a failed terminal state before startup reconcile, scheduled ticks,
+and manual run-now claim checks, while non-expired Gateway activity still
+prevents overlapping automation turns.
 
 Gateway tests also cover the recursion boundary: automation draft turns and
 automation-triggered turns must not expose the model-facing `automation` tool.
 
 Workbench tests cover draft workspace/thread selection, title area with no
-current workdir path, last-run display, pause/resume controls using
+current cwd path, last-run display, pause/resume controls using
 `automation/pause` and `automation/resume`, a single empty-state creation
 surface with no duplicate template actions or empty draft placeholder, centered
 editor layout, and no horizontal overflow on desktop or mobile.
+Workbench tests should also cover paused lifecycle styling when the latest run
+status is `running`, and transcript opening when the newest run has no
+`threadId` but an older run does.
+Workbench tests should cover selecting a historical workspace/cwd that differs
+from the launch cwd and completing Automation CRUD without an unauthorized
+state.
 
 E2E visual validation captures desktop and mobile Automations screenshots for
 both the initial empty state and an open draft after the Workbench build. These
@@ -86,7 +107,7 @@ When changes touch shared Rust runtime, Gateway protocol, persistence, or
 permission/sandbox behavior beyond the automation feature boundary, run:
 
 ```sh
-scripts/validate-rust.sh broad
+cargo xtask ci run --profile rust-broad
 ```
 
 Do not run multiple broad validation commands concurrently in the same worktree
@@ -96,7 +117,9 @@ unless the underlying harness explicitly supports isolation.
 
 - [400 Workflow Automations](./spec.md) defines the product behavior under
   test.
-- [060 Automation](../060-automation/spec.md) defines shared automation
-  evidence and validation principles.
+- [060 Automation](../060-automation/spec.md) defines shared product-automation
+  foundations.
+- [065 CI/CD](../065-ci-cd/spec.md) defines validation, evidence, and live
+  opt-in boundaries.
 - [240 Pevo Web Testing](../240-pevo-web/testing.md) owns broader Workbench
   validation expectations.

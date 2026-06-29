@@ -7,19 +7,18 @@ Define Psychevo's product workflow automations: user-managed scheduled turns
 that can be created from natural language in a thread, edited in Workbench, and
 executed by the local Gateway scheduler. This spec is the concrete source of
 truth for workflow automation behavior. [060 Automation](../060-automation/spec.md)
-keeps the cross-cutting automation principles for evidence, isolation, local
-scheduling, and run policy.
+keeps shared product-automation principles for local scheduling and run policy.
 
 ## Scope
 
 This topic owns:
 
-- project automations bound to a workspace/workdir
+- project automations bound to a workspace/cwd
 - thread-bound automations appended to an existing thread
 - natural-language CRUD through the model-facing `automation` tool
 - Workbench automation configuration UX
 - scheduler persistence, run records, last-run visibility, and run-now behavior
-- compatibility for existing GUI automation RPCs
+- Gateway and Workbench automation RPCs and views
 
 Out of scope:
 
@@ -38,9 +37,9 @@ optional model/reasoning selection, and execution policy. Run records include
 timing, status, target thread/source information when known, and bounded error
 text.
 
-Project automations are scoped to a workspace/workdir and use a stable Gateway
+Project automations are scoped to a workspace/cwd and use a stable Gateway
 source key shaped like `automation:<task-id>`. They must not rebind the ordinary
-Workbench workdir source.
+Workbench cwd source.
 
 Thread-bound automations target an explicit existing thread id. They are used
 when scheduled work should continue an established conversation. A thread target
@@ -63,11 +62,12 @@ tool must not manufacture a current thread id itself; it only consumes the
 thread identity supplied by Gateway.
 
 Outside a thread, creation defaults to the selected/current workspace as a
-project automation. Workbench may only offer workspace and thread targets that
-are already known to the current local Gateway session.
+project automation. The workspace is carried as an explicit `cwd` target. The
+Workbench Automations surface is profile-global, so the selected `cwd` is a
+filter or creation target, not a browser-session authorization boundary.
 
-The Workbench Automations page itself is not bound to the current workdir. It
-must not show the current workdir path as page-level context. Workspace context
+The Workbench Automations page itself is not bound to the current cwd. It
+must not show the current cwd path as page-level context. Workspace context
 belongs to draft controls, automation binding controls, and automation rows.
 
 ## Schedules
@@ -102,6 +102,13 @@ request and a timed tick compete for the same task claim. If a task is already
 running, the later request should report or record a skipped/busy run instead of
 starting a second turn.
 
+Gateway startup, scheduled ticks, and manual run-now must recover stale run
+claims before deciding a task is busy. A `running` automation run is stale when
+it is older than the recovery threshold and there is no non-expired Gateway
+activity for the run's thread/source or task source. Recovery marks the run as
+failed with bounded diagnostic text, recomputes the next scheduled run from the
+current clock, and preserves the run record.
+
 Pausing and resuming only toggle the automation's enabled state. They must not
 delete the definition, target binding, prompt, schedule, or run history. Resuming
 a recurring automation recomputes its next run from the current clock and prior
@@ -135,6 +142,14 @@ normalization rules used by natural-language creation. `automation/write`
 creates and edits automation definitions; it does not change lifecycle state.
 Pause and resume are explicit lifecycle mutations through `automation/pause`
 and `automation/resume`.
+
+Automation JSON-RPC parameters use `cwd` for workspace targets and filters.
+`automation/list` treats `cwd` as an optional filter; missing or `null` lists
+the profile's human-visible automation set across all known cwds. Mutations by
+automation id require profile-level browser authorization and the persisted
+automation record; they do not require the target cwd to match the browser
+launch directory. `automation/run` executes with the automation's persisted cwd
+or target thread binding.
 
 Natural-language actions map to Gateway RPCs as follows:
 
@@ -183,7 +198,7 @@ editing, and creating real automations without marketing copy.
 
 The draft/editor area should be centered in the available space and avoid large
 unused right-side whitespace. The page title must not display the current
-workdir path. Workspace and thread selection belong inside the draft and binding
+cwd path. Workspace and thread selection belong inside the draft and binding
 controls.
 
 When no automations exist and no draft is open, the page should show one
@@ -199,14 +214,23 @@ when thread binding is selected and there are known threads for the selected
 workspace.
 
 Automation rows show title, target, schedule, enabled/paused state, next run
-when known, and last run time when known. Rows for tasks that have never run
-should say so. Existing automations expose pause/resume, run-now, edit, and
-delete without hiding the target or schedule context.
+when known, and last run time when known. Lifecycle state is separate from last
+run status: a paused automation remains visually paused even when its latest run
+status is `running` or `failed`. Rows for tasks that have never run should say
+so. Existing automations expose pause/resume, run-now, edit, and delete without
+hiding the target or schedule context.
+
+Opening a transcript from an automation row uses the task's explicit
+`targetThreadId` first. If the task has no target thread, Workbench falls back
+to the newest run with a non-empty `threadId`; a newer stale or in-flight run
+with no `threadId` must not hide older valid transcript history.
 
 ## Related Topics
 
-- [060 Automation](../060-automation/spec.md) defines cross-cutting automation
-  principles and local-first validation boundaries.
+- [060 Automation](../060-automation/spec.md) defines shared product-automation
+  foundations.
+- [065 CI/CD](../065-ci-cd/spec.md) defines validation and live opt-in
+  boundaries.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines the model-facing tool
   contract style used by the `automation` tool.
 - [021 Gateway](../021-gateway/spec.md) defines Gateway responsibilities for

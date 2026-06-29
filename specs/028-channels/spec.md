@@ -42,7 +42,7 @@ Out of scope:
 `ChannelConnection` is a profile-local platform connection and default runtime
 policy. It records a stable connection id, channel kind, optional domain,
 transport, label, requested enablement, credential references, allowlists, and
-defaults such as workdir, model, and permission mode.
+defaults such as cwd, model, and permission mode.
 
 `User entrypoint` is the product concept for a place where a user interacts
 with Psychevo. CLI, TUI, Workbench, ACP, and each configured Channel are user
@@ -59,9 +59,9 @@ answers "which remote conversation is this?".
 thread id. Resetting or starting a new conversation may rotate the local thread
 while keeping the same remote source lane.
 
-`Thread` is the local durable conversation. It owns the actual workdir,
+`Thread` is the local durable conversation. It owns the actual cwd,
 transcript, runtime history, snapshots, and execution continuity. Channel
-connections do not rewrite an existing thread's workdir or history.
+connections do not rewrite an existing thread's cwd or history.
 
 `DeliveryCapabilities` describe what an entrypoint can render or accept,
 including text, markdown, image and file attachments, voice, typing, edit
@@ -80,7 +80,7 @@ Channel configuration lives in the active profile config under `[channels]` and
 - `enabled`: requested runtime enablement
 - `label`: user-visible connection name
 - `transport`: `polling`, `webhook`, or `long_connection`
-- `workdir`, `model`, and `permission_mode`: defaults for new channel threads
+- `cwd`, `model`, and `permission_mode`: defaults for new channel threads
 - `require_mention`: group-chat gating
 - credential, account, app, and base URL env names, never secret values
 - direct-user and group/chat allowlists
@@ -102,14 +102,14 @@ reason strings and timestamps.
 
 ## Workspace And Thread Rules
 
-A channel connection's `workdir` is the default workspace for new local threads
-created from that connection. Blank workdir means the profile or Gateway default
-workdir.
+A channel connection's `cwd` is the default workspace for new local threads
+created from that connection. Blank cwd means the profile or Gateway default
+cwd.
 
-Changing a channel connection's workdir must not migrate existing local
-threads. Existing threads keep their stored workdir and transcript. The product
+Changing a channel connection's cwd must not migrate existing local
+threads. Existing threads keep their stored cwd and transcript. The product
 may invalidate existing Channel source bindings for that connection so the next
-ordinary inbound turn starts a fresh local thread in the new default workdir.
+ordinary inbound turn starts a fresh local thread in the new default cwd.
 This is a binding rotation, not a thread migration.
 
 This rule keeps the model stable:
@@ -117,7 +117,7 @@ This rule keeps the model stable:
 - `ChannelConnection` answers "what defaults should new channel threads use?"
 - `RemoteSource` answers "which remote conversation sent this?"
 - `ThreadBinding` answers "which local thread continues this lane?"
-- `Thread` answers "which workdir and history does this conversation own?"
+- `Thread` answers "which cwd and history does this conversation own?"
 
 ## Inbound Turns
 
@@ -200,12 +200,12 @@ must not alter the underlying local thread transcript.
   profile `.env` values.
 - Source-key hashing is deterministic for the remote lane and excludes raw
   local paths.
-- A channel connection workdir is used only when creating a new local thread.
+- A channel connection cwd is used only when creating a new local thread.
   An already-bound remote source must execute against the bound thread's stored
-  workdir until that binding is explicitly reset, rotated, or rebound.
+  cwd until that binding is explicitly reset, rotated, or rebound.
 - Reset or new-thread flows can bind the same remote source lane to a new local
   thread according to Gateway session rules.
-- Updating a channel connection workdir can rotate that connection's existing
+- Updating a channel connection cwd can rotate that connection's existing
   Channel source bindings for the next ordinary inbound turn without
   interrupting currently running work.
 - Channel input goes through the shared Gateway ingress/router path before

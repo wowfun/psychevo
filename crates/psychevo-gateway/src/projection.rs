@@ -75,6 +75,10 @@ struct LiveToolBlockBuild<'a> {
 }
 
 include!("projection/live_projector.rs");
+include!("projection/live_projector_agents.rs");
+include!("projection/live_projector_assistant.rs");
+include!("projection/live_projector_state.rs");
+include!("projection/live_projector_tools.rs");
 include!("projection/live_helpers.rs");
 include!("projection/runtime_events.rs");
 include!("projection/tool_helpers.rs");

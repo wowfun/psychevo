@@ -12,6 +12,13 @@ export const clientRequestSlashSettingsReadSchema = {
     },
     "SlashSettingsReadParams": {
       "properties": {
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "scope": {
           "anyOf": [
             {
@@ -22,13 +29,6 @@ export const clientRequestSlashSettingsReadSchema = {
             }
           ],
           "default": null
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "type": "object"

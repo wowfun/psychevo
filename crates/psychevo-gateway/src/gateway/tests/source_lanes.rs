@@ -30,7 +30,7 @@
     async fn process_source_reuses_only_within_gateway_instance() {
         let backend = Arc::new(FakeBackend::default());
         let harness = harness(backend.clone());
-        let source = GatewaySource::new("tui", "workdir").process();
+        let source = GatewaySource::new("tui", "cwd").process();
 
         let first = harness
             .gateway
@@ -73,7 +73,7 @@
             harness
                 .state
                 .store()
-                .list_sessions_for_workdir_with_sources(&harness.workdir, &["test"])
+                .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
                 .expect("initial sessions")
                 .len(),
             0
@@ -100,7 +100,7 @@
             harness
                 .state
                 .store()
-                .list_sessions_for_workdir_with_sources(&harness.workdir, &["test"])
+                .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
                 .expect("sessions")
                 .len(),
             1
@@ -118,16 +118,16 @@
     }
 
     #[tokio::test]
-    async fn bound_thread_uses_stored_workdir_over_request_default() {
+    async fn bound_thread_uses_stored_cwd_over_request_default() {
         let backend = Arc::new(FakeBackend::default());
         let harness = harness(backend.clone());
         let source = GatewaySource::new("im.wechat", "remote-lane").persistent();
         let changed_default = harness
-            .workdir
+            .cwd
             .parent()
             .expect("temp root")
             .join("changed-default");
-        std::fs::create_dir_all(&changed_default).expect("changed default workdir");
+        std::fs::create_dir_all(&changed_default).expect("changed default cwd");
 
         let first = harness
             .gateway
@@ -135,7 +135,7 @@
             .await
             .expect("first turn");
         let mut second_request = request(&harness, source, "second");
-        second_request.options.workdir = changed_default.clone();
+        second_request.options.cwd = changed_default.clone();
         let second = harness
             .gateway
             .send_turn(second_request)
@@ -145,13 +145,13 @@
         assert_eq!(first.result.session_id, second.result.session_id);
         let runs = backend.runs();
         assert_eq!(runs[1].session.as_deref(), Some(first.result.session_id.as_str()));
-        assert_eq!(runs[0].workdir, harness.workdir);
-        assert_eq!(runs[1].workdir, harness.workdir);
-        assert_ne!(runs[1].workdir, changed_default);
+        assert_eq!(runs[0].cwd, harness.cwd);
+        assert_eq!(runs[1].cwd, harness.cwd);
+        assert_ne!(runs[1].cwd, changed_default);
     }
 
     #[tokio::test]
-    async fn channel_connection_rotation_starts_next_turn_in_changed_default_workdir() {
+    async fn channel_connection_rotation_starts_next_turn_in_changed_default_cwd() {
         let backend = Arc::new(FakeBackend::default());
         let harness = harness(backend.clone());
         let source = GatewaySource::new("im.wechat", "remote-lane")
@@ -167,11 +167,11 @@
                 "chatId": "remote-lane",
             }));
         let changed_default = harness
-            .workdir
+            .cwd
             .parent()
             .expect("temp root")
             .join("changed-default");
-        std::fs::create_dir_all(&changed_default).expect("changed default workdir");
+        std::fs::create_dir_all(&changed_default).expect("changed default cwd");
 
         let first = harness
             .gateway
@@ -222,7 +222,7 @@
         assert!(old_summary.archived_at_ms.is_some());
 
         let mut second_request = request(&harness, source.clone(), "second");
-        second_request.options.workdir = changed_default.clone();
+        second_request.options.cwd = changed_default.clone();
         let second = harness
             .gateway
             .send_turn(second_request)
@@ -230,7 +230,7 @@
             .expect("second turn");
 
         assert_ne!(first.result.session_id, second.result.session_id);
-        assert_eq!(backend.runs().last().expect("last run").workdir, changed_default);
+        assert_eq!(backend.runs().last().expect("last run").cwd, changed_default);
         assert_eq!(
             harness
                 .state
@@ -254,11 +254,11 @@
                 "chatId": "remote-lane",
             }));
         let changed_default = harness
-            .workdir
+            .cwd
             .parent()
             .expect("temp root")
             .join("changed-default");
-        std::fs::create_dir_all(&changed_default).expect("changed default workdir");
+        std::fs::create_dir_all(&changed_default).expect("changed default cwd");
 
         let first = harness
             .gateway
@@ -281,8 +281,8 @@
         );
 
         let third_gateway = harness.gateway.clone();
-        let mut third_request = request(&harness, source.clone(), "third-new-workdir");
-        third_request.options.workdir = changed_default.clone();
+        let mut third_request = request(&harness, source.clone(), "third-new-cwd");
+        third_request.options.cwd = changed_default.clone();
         let third = tokio::spawn(async move { third_gateway.send_turn(third_request).await });
 
         tokio::task::yield_now().await;
@@ -302,8 +302,8 @@
         assert_eq!(first.result.session_id, second.result.session_id);
         assert_ne!(first.result.session_id, third.result.session_id);
         let runs = backend.runs();
-        assert_eq!(runs[1].workdir, harness.workdir);
-        assert_eq!(runs[2].workdir, changed_default);
+        assert_eq!(runs[1].cwd, harness.cwd);
+        assert_eq!(runs[2].cwd, changed_default);
         assert_eq!(
             harness
                 .state
@@ -320,8 +320,8 @@
     async fn first_shell_without_bound_source_creates_and_binds_runtime_session() {
         let backend = Arc::new(FakeBackend::default());
         let harness = harness(backend);
-        let source = GatewaySource::new("web", "workdir").persistent();
-        let root = harness.workdir.parent().expect("temp root");
+        let source = GatewaySource::new("web", "cwd").persistent();
+        let root = harness.cwd.parent().expect("temp root");
         let home = root.join("home");
         std::fs::create_dir_all(&home).expect("home");
         std::fs::write(
@@ -340,7 +340,7 @@ model = "lmstudio/test-model"
                 thread_id: None,
                 source: Some(source.clone()),
                 bind_source: None,
-                workdir: harness.workdir.clone(),
+                cwd: harness.cwd.clone(),
                 command: "printf shell-ok".to_string(),
                 context: UserShellContextOptions {
                     state: harness.state.clone(),
@@ -384,7 +384,7 @@ model = "lmstudio/test-model"
             harness
                 .state
                 .store()
-                .list_sessions_for_workdir_with_sources(&harness.workdir, &["web"])
+                .list_sessions_for_cwd_with_sources(&harness.cwd, &["web"])
                 .expect("sessions")
                 .len(),
             1
@@ -396,7 +396,7 @@ model = "lmstudio/test-model"
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
         let harness = harness(backend.clone());
-        let source = GatewaySource::new("tui", "workdir").process();
+        let source = GatewaySource::new("tui", "cwd").process();
 
         let first_gateway = harness.gateway.clone();
         let first_request = request(&harness, source.clone(), "first");
@@ -436,8 +436,8 @@ model = "lmstudio/test-model"
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
         let harness = harness(backend.clone());
-        let canonical = GatewaySource::new("web", "workdir").persistent();
-        let draft = GatewaySource::new("web", "workdir:draft:test").persistent();
+        let canonical = GatewaySource::new("web", "cwd").persistent();
+        let draft = GatewaySource::new("web", "cwd:draft:test").persistent();
 
         let first_gateway = harness.gateway.clone();
         let first_request = request(&harness, canonical.clone(), "first");
@@ -497,16 +497,16 @@ model = "lmstudio/test-model"
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
         let harness = harness(backend);
-        let source = GatewaySource::new("web", "workdir").persistent();
+        let source = GatewaySource::new("web", "cwd").persistent();
         let first = harness
             .state
             .store()
-            .create_session_with_metadata(&harness.workdir, "web", "model", "provider", None)
+            .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
             .expect("first session");
         let second = harness
             .state
             .store()
-            .create_session_with_metadata(&harness.workdir, "web", "model", "provider", None)
+            .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
             .expect("second session");
         harness
             .gateway

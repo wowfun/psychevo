@@ -28,7 +28,7 @@ pub(crate) fn resolve_peer_turn(
         .inherited_env
         .clone()
         .unwrap_or_else(|| std::env::vars().collect());
-    let agents_home = resolve_skills_home(&env, &options.workdir)?;
+    let agents_home = resolve_skills_home(&env, &options.cwd)?;
     let explicit_inputs = match (agent_input, runtime_ref) {
         (Some(agent), Some(runtime)) if agent != runtime => {
             vec![agent.clone(), runtime.to_string()]
@@ -39,17 +39,17 @@ pub(crate) fn resolve_peer_turn(
     };
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home.clone(),
-        workdir: options.workdir.clone(),
+        cwd: options.cwd.clone(),
         env: env.clone(),
         explicit_inputs,
         no_agents: false,
     })?;
     let agent = match (agent_input, runtime_ref) {
         (Some(agent_input), _) => {
-            resolve_agent_definition(&catalog, agent_input, &options.workdir, &env)?
+            resolve_agent_definition(&catalog, agent_input, &options.cwd, &env)?
         }
         (None, Some(runtime)) => {
-            resolve_agent_definition(&catalog, runtime, &options.workdir, &env)?
+            resolve_agent_definition(&catalog, runtime, &options.cwd, &env)?
         }
         (None, None) => return Ok(None),
     };
@@ -82,7 +82,7 @@ pub(crate) fn resolve_peer_turn(
             agent.name, backend_ref.name
         )));
     }
-    let backends = load_agent_backend_configs(&agents_home, &options.workdir, &env)?;
+    let backends = load_agent_backend_configs(&agents_home, &options.cwd, &env)?;
     let backend = backends
         .get(&backend_ref.name)
         .cloned()

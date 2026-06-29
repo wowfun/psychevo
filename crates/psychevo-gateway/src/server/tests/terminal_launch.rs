@@ -220,7 +220,7 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
         .state
         .store()
         .create_session_with_metadata(
-            &state.inner.workdir,
+            &state.inner.cwd,
             "web",
             "fake-model",
             "fake-provider",
@@ -730,7 +730,7 @@ async fn turn_start_empty_input_rejects_before_creating_session() {
             .inner
             .state
             .store()
-            .list_sessions_for_workdir_with_sources(&state.inner.workdir, &[])
+            .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
             .expect("sessions")
             .len(),
         0
@@ -837,7 +837,7 @@ async fn static_shell_with_browser_session_serves_workbench_index() {
         .insert(
             session_id.clone(),
             BrowserSession {
-                workdir: state.inner.workdir.clone(),
+                cwd: state.inner.cwd.clone(),
                 source: state.inner.source.clone(),
             },
         );
@@ -864,7 +864,7 @@ async fn download_session_honors_export_query_options() {
         .state
         .store()
         .create_session_with_metadata(
-            &state.inner.workdir,
+            &state.inner.cwd,
             "web",
             "fake-model",
             "fake-provider",
@@ -923,7 +923,7 @@ async fn download_session_defaults_to_markdown_artifact() {
         .state
         .store()
         .create_session_with_metadata(
-            &state.inner.workdir,
+            &state.inner.cwd,
             "web",
             "fake-model",
             "fake-provider",
@@ -1003,7 +1003,7 @@ async fn consumed_launch_with_browser_session_redirects_to_clean_shell() {
         .insert(
             session_id.clone(),
             BrowserSession {
-                workdir: state.inner.workdir.clone(),
+                cwd: state.inner.cwd.clone(),
                 source: state.inner.source.clone(),
             },
         );

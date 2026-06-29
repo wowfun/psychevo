@@ -273,16 +273,16 @@ export const clientRequestTurnStartSchema = {
     },
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },

@@ -6,13 +6,13 @@ use std::sync::{Arc, Mutex};
 
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::{
-    Error, WorkspaceDiffFile, WorkspaceDiffFileStatus, canonicalize_workdir,
-    collect_workspace_diff, resolve_workspace_root,
+    Error, WorkspaceDiffFile, WorkspaceDiffFileStatus, canonicalize_cwd, collect_workspace_diff,
+    resolve_workspace_root,
 };
 use serde_json::Value;
 
 use super::{
-    AuthContext, ResolvedScope, WebState, now_ms, update_browser_session_scope, workdir_source,
+    AuthContext, ResolvedScope, WebState, cwd_source, now_ms, update_browser_session_scope,
 };
 
 const MAX_WORKSPACE_FILE_DEPTH: usize = 8;
@@ -33,7 +33,7 @@ struct WorkspaceReviewInner {
 #[derive(Clone)]
 struct PendingReviewTurn {
     thread_id: Option<String>,
-    workdir: PathBuf,
+    cwd: PathBuf,
     baseline: WorkspaceBaseline,
     created_at_ms: i64,
 }
@@ -47,7 +47,7 @@ struct WorkspaceBaseline {
 struct WorkspaceReviewGroup {
     turn_id: String,
     thread_id: Option<String>,
-    workdir: PathBuf,
+    cwd: PathBuf,
     created_at_ms: i64,
     completed_at_ms: i64,
     files: Vec<WorkspaceReviewFile>,
@@ -86,15 +86,15 @@ impl ReviewBaseline {
 }
 
 impl WorkspaceReviewState {
-    pub(super) fn begin_turn(&self, turn_id: &str, thread_id: Option<String>, workdir: &Path) {
-        let baseline = capture_workspace_baseline(workdir);
+    pub(super) fn begin_turn(&self, turn_id: &str, thread_id: Option<String>, cwd: &Path) {
+        let baseline = capture_workspace_baseline(cwd);
         let mut inner = self.inner.lock().expect("workspace review state poisoned");
         inner
             .pending
             .entry(turn_id.to_string())
             .or_insert_with(|| PendingReviewTurn {
                 thread_id,
-                workdir: workdir.to_path_buf(),
+                cwd: cwd.to_path_buf(),
                 baseline,
                 created_at_ms: now_ms(),
             });
@@ -108,7 +108,7 @@ impl WorkspaceReviewState {
         let Some(pending) = pending else {
             return;
         };
-        let files = build_review_files(&pending.workdir, &pending.baseline).unwrap_or_default();
+        let files = build_review_files(&pending.cwd, &pending.baseline).unwrap_or_default();
         if files.is_empty() {
             return;
         }
@@ -119,7 +119,7 @@ impl WorkspaceReviewState {
             WorkspaceReviewGroup {
                 turn_id: turn_id.to_string(),
                 thread_id: pending.thread_id,
-                workdir: pending.workdir,
+                cwd: pending.cwd,
                 created_at_ms: pending.created_at_ms,
                 completed_at_ms: now_ms(),
                 files,
@@ -134,7 +134,7 @@ impl WorkspaceReviewState {
             groups: inner
                 .groups
                 .iter()
-                .filter(|group| group.workdir == scope.workdir)
+                .filter(|group| group.cwd == scope.cwd)
                 .map(review_group_to_wire)
                 .collect(),
         }
@@ -153,7 +153,7 @@ impl WorkspaceReviewState {
             if let Some(file) = inner
                 .groups
                 .iter_mut()
-                .find(|group| group.workdir == scope.workdir && group.turn_id == turn_id)
+                .find(|group| group.cwd == scope.cwd && group.turn_id == turn_id)
                 .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
             {
                 file.review_status = wire::WorkspaceChangeReviewStatusView::Accepted;
@@ -179,7 +179,7 @@ impl WorkspaceReviewState {
             inner
                 .groups
                 .iter()
-                .find(|group| group.workdir == scope.workdir && group.turn_id == turn_id)
+                .find(|group| group.cwd == scope.cwd && group.turn_id == turn_id)
                 .and_then(|group| group.files.iter().find(|file| file.path == path))
                 .cloned()
         };
@@ -195,7 +195,7 @@ impl WorkspaceReviewState {
                 changes: self.changes_for_scope(scope),
             });
         }
-        let current_revision = workspace_path_revision(&scope.workdir, &path)?;
+        let current_revision = workspace_path_revision(&scope.cwd, &path)?;
         if current_revision != file.post_revision {
             self.mark_conflict(scope, turn_id, &path, "File changed after this turn.");
             return Ok(wire::WorkspaceChangeMutationResult {
@@ -203,13 +203,13 @@ impl WorkspaceReviewState {
                 changes: self.changes_for_scope(scope),
             });
         }
-        restore_review_baseline(&scope.workdir, &path, &file.baseline)?;
+        restore_review_baseline(&scope.cwd, &path, &file.baseline)?;
         {
             let mut inner = self.inner.lock().expect("workspace review state poisoned");
             if let Some(file) = inner
                 .groups
                 .iter_mut()
-                .find(|group| group.workdir == scope.workdir && group.turn_id == turn_id)
+                .find(|group| group.cwd == scope.cwd && group.turn_id == turn_id)
                 .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
             {
                 file.review_status = wire::WorkspaceChangeReviewStatusView::Rejected;
@@ -227,7 +227,7 @@ impl WorkspaceReviewState {
         if let Some(file) = inner
             .groups
             .iter_mut()
-            .find(|group| group.workdir == scope.workdir && group.turn_id == turn_id)
+            .find(|group| group.cwd == scope.cwd && group.turn_id == turn_id)
             .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
         {
             file.review_status = wire::WorkspaceChangeReviewStatusView::Conflict;
@@ -239,15 +239,9 @@ impl WorkspaceReviewState {
 pub(super) fn workspace_files_value(scope: &ResolvedScope) -> psychevo_runtime::Result<Value> {
     let mut entries = Vec::new();
     let mut truncated = false;
-    collect_workspace_file_entries(
-        &scope.workdir,
-        &scope.workdir,
-        0,
-        &mut entries,
-        &mut truncated,
-    );
+    collect_workspace_file_entries(&scope.cwd, &scope.cwd, 0, &mut entries, &mut truncated);
     Ok(serde_json::to_value(wire::WorkspaceFilesResult {
-        root: scope.workdir.display().to_string(),
+        root: scope.cwd.display().to_string(),
         entries,
         truncated,
     })?)
@@ -259,21 +253,21 @@ pub(super) fn workspace_create_value(
     params: wire::WorkspaceCreateParams,
 ) -> psychevo_runtime::Result<Value> {
     let dir_name = workspace_dir_name(&params.name)?;
-    let options = state.run_options(state.inner.workdir.clone(), None);
-    let root = canonicalize_workdir(&resolve_workspace_root(&options, &state.inner.workdir)?)?;
-    let workdir = canonicalize_workdir(&root.join(&dir_name))?;
-    if !workdir.starts_with(&root) {
+    let options = state.run_options(state.inner.cwd.clone(), None);
+    let root = canonicalize_cwd(&resolve_workspace_root(&options, &state.inner.cwd)?)?;
+    let cwd = canonicalize_cwd(&root.join(&dir_name))?;
+    if !cwd.starts_with(&root) {
         return Err(Error::Message(
             "workspace path is outside the configured workspace root".to_string(),
         ));
     }
     let scope = ResolvedScope {
-        source: workdir_source(&workdir),
-        workdir,
+        source: cwd_source(&cwd),
+        cwd,
     };
     update_browser_session_scope(state, auth, &scope);
     Ok(serde_json::to_value(wire::WorkspaceCreateResult {
-        workdir: scope.workdir.display().to_string(),
+        cwd: scope.cwd.display().to_string(),
         scope: scope.to_wire_scope(),
     })?)
 }
@@ -366,9 +360,9 @@ pub(super) fn workspace_file_read_value(
     scope: &ResolvedScope,
     path: &str,
 ) -> psychevo_runtime::Result<Value> {
-    let resolved = resolve_workspace_relative_path(&scope.workdir, path)?;
+    let resolved = resolve_workspace_relative_path(&scope.cwd, path)?;
     let display_path =
-        path_from_root(&scope.workdir, &resolved).unwrap_or_else(|| normalize_workspace_path(path));
+        path_from_root(&scope.cwd, &resolved).unwrap_or_else(|| normalize_workspace_path(path));
     let snapshot = match read_workspace_text_snapshot(&resolved) {
         Ok(snapshot) => snapshot,
         Err(err) => {
@@ -415,10 +409,10 @@ pub(super) fn workspace_file_write_value(
             "workspace file content must be text".to_string(),
         ));
     }
-    let resolved = resolve_workspace_write_path(&scope.workdir, &params.path)?;
-    let path = path_from_root(&scope.workdir, &resolved)
+    let resolved = resolve_workspace_write_path(&scope.cwd, &params.path)?;
+    let path = path_from_root(&scope.cwd, &resolved)
         .unwrap_or_else(|| normalize_workspace_path(&params.path));
-    let current_revision = workspace_path_revision(&scope.workdir, &path)?;
+    let current_revision = workspace_path_revision(&scope.cwd, &path)?;
     if !params.force
         && let Some(expected) = params.expected_revision.as_deref()
         && expected != current_revision
@@ -426,7 +420,7 @@ pub(super) fn workspace_file_write_value(
         return Err(Error::Message("workspace file changed on disk".to_string()));
     }
     std::fs::write(&resolved, params.content.as_bytes())?;
-    let revision = workspace_path_revision(&scope.workdir, &path)?;
+    let revision = workspace_path_revision(&scope.cwd, &path)?;
     Ok(serde_json::to_value(wire::WorkspaceFileWriteResult {
         path,
         revision,
@@ -592,7 +586,7 @@ pub(super) fn workspace_diff_result(
     scope: &ResolvedScope,
     path: Option<&str>,
 ) -> psychevo_runtime::Result<wire::WorkspaceDiffResult> {
-    let diff = collect_workspace_diff(&scope.workdir)?;
+    let diff = collect_workspace_diff(&scope.cwd)?;
     let selected = path
         .map(|path| {
             let raw = Path::new(path);
@@ -658,9 +652,9 @@ fn workspace_diff_status(status: WorkspaceDiffFileStatus) -> wire::WorkspaceDiff
     }
 }
 
-fn capture_workspace_baseline(workdir: &Path) -> WorkspaceBaseline {
+fn capture_workspace_baseline(cwd: &Path) -> WorkspaceBaseline {
     let mut baseline = WorkspaceBaseline::default();
-    if let Ok(diff) = collect_workspace_diff(workdir) {
+    if let Ok(diff) = collect_workspace_diff(cwd) {
         for file in diff.files {
             baseline
                 .files
@@ -695,10 +689,10 @@ fn baseline_from_pre_turn_file(file: &WorkspaceDiffFile) -> ReviewBaseline {
 }
 
 fn build_review_files(
-    workdir: &Path,
+    cwd: &Path,
     baseline: &WorkspaceBaseline,
 ) -> psychevo_runtime::Result<Vec<WorkspaceReviewFile>> {
-    let diff = collect_workspace_diff(workdir)?;
+    let diff = collect_workspace_diff(cwd)?;
     let mut post_by_path = HashMap::new();
     let mut candidates = HashSet::new();
     for file in diff.files {
@@ -712,7 +706,7 @@ fn build_review_files(
     for path in candidates {
         let pre = baseline.files.get(&path);
         if let Some(pre) = pre
-            && baseline_matches_current(workdir, &path, pre)?
+            && baseline_matches_current(cwd, &path, pre)?
         {
             continue;
         }
@@ -726,7 +720,7 @@ fn build_review_files(
         if post.is_none() && matches!(review_baseline, ReviewBaseline::Unsupported { .. }) {
             continue;
         }
-        let post_revision = workspace_path_revision(workdir, &path)?;
+        let post_revision = workspace_path_revision(cwd, &path)?;
         let status = post
             .map(|file| workspace_diff_status(file.status))
             .unwrap_or(wire::WorkspaceDiffFileStatusView::Modified);
@@ -783,11 +777,11 @@ fn baseline_from_post_diff(file: &WorkspaceDiffFile) -> Option<ReviewBaseline> {
 }
 
 fn baseline_matches_current(
-    workdir: &Path,
+    cwd: &Path,
     path: &str,
     baseline: &ReviewBaseline,
 ) -> psychevo_runtime::Result<bool> {
-    let resolved = resolve_workspace_write_path(workdir, path)?;
+    let resolved = resolve_workspace_write_path(cwd, path)?;
     match baseline {
         ReviewBaseline::Text { content } => {
             if !resolved.exists() {
@@ -802,11 +796,11 @@ fn baseline_matches_current(
 }
 
 fn restore_review_baseline(
-    workdir: &Path,
+    cwd: &Path,
     path: &str,
     baseline: &ReviewBaseline,
 ) -> psychevo_runtime::Result<()> {
-    let resolved = resolve_workspace_write_path(workdir, path)?;
+    let resolved = resolve_workspace_write_path(cwd, path)?;
     match baseline {
         ReviewBaseline::Text { content } => {
             std::fs::write(resolved, content.as_bytes())?;

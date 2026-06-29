@@ -39,7 +39,7 @@ impl fmt::Debug for GatewayExternalAgentDelegate {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("GatewayExternalAgentDelegate")
-            .field("workdir", &self.base_options.workdir)
+            .field("cwd", &self.base_options.cwd)
             .field("has_stream", &self.stream.is_some())
             .finish_non_exhaustive()
     }
@@ -126,15 +126,15 @@ fn resolve_peer_delegate(
         .inherited_env
         .clone()
         .unwrap_or_else(|| std::env::vars().collect());
-    let agents_home = resolve_skills_home(&env, &options.workdir)?;
+    let agents_home = resolve_skills_home(&env, &options.cwd)?;
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home.clone(),
-        workdir: options.workdir.clone(),
+        cwd: options.cwd.clone(),
         env: env.clone(),
         explicit_inputs: vec![request.agent_name.clone()],
         no_agents: false,
     })?;
-    let agent = resolve_agent_definition(&catalog, &request.agent_name, &options.workdir, &env)?;
+    let agent = resolve_agent_definition(&catalog, &request.agent_name, &options.cwd, &env)?;
     let Some(backend_ref) = agent.backend.as_ref() else {
         return Err(Error::Message(format!(
             "agent `{}` is not backed by an ACP backend",
@@ -153,7 +153,7 @@ fn resolve_peer_delegate(
             agent.name, backend_ref.name
         )));
     }
-    let backends = load_agent_backend_configs(&agents_home, &options.workdir, &env)?;
+    let backends = load_agent_backend_configs(&agents_home, &options.cwd, &env)?;
     let backend = backends
         .get(&backend_ref.name)
         .cloned()

@@ -59,8 +59,8 @@ fn rpc_notification(method: &str, params: Value) -> String {
     .expect("json rpc notification serializes")
 }
 
-fn workdir_source(workdir: &Path) -> GatewaySource {
-    source_from_input(None, workdir, GatewaySourceLifetime::Persistent)
+fn cwd_source(cwd: &Path) -> GatewaySource {
+    source_from_input(None, cwd, GatewaySourceLifetime::Persistent)
 }
 
 fn stable_hash_hex(value: &str) -> String {

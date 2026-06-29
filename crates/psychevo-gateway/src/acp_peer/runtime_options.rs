@@ -1,13 +1,13 @@
 pub(crate) async fn read_acp_peer_runtime_options(
     peer: ResolvedPeerTurn,
-    workdir: PathBuf,
+    cwd: PathBuf,
     native_session_id: Option<String>,
 ) -> psychevo_runtime::Result<AcpPeerRuntimeOptions> {
-    match read_acp_peer_runtime_options_v2(&peer, workdir.clone(), native_session_id.clone()).await
+    match read_acp_peer_runtime_options_v2(&peer, cwd.clone(), native_session_id.clone()).await
     {
         Ok(result) => Ok(result),
         Err(v2_error) => {
-            match read_acp_peer_runtime_options_v1(&peer, workdir, native_session_id).await {
+            match read_acp_peer_runtime_options_v1(&peer, cwd, native_session_id).await {
                 Ok(result) => Ok(result),
                 Err(v1_error) => Err(Error::Message(format!(
                     "ACP peer `{}` runtime options failed: {}; v1 fallback failed: {}",
@@ -20,7 +20,7 @@ pub(crate) async fn read_acp_peer_runtime_options(
 
 async fn read_acp_peer_runtime_options_v2(
     peer: &ResolvedPeerTurn,
-    workdir: PathBuf,
+    cwd: PathBuf,
     native_session_id: Option<String>,
 ) -> Result<AcpPeerRuntimeOptions, AcpProtocolAttemptError> {
     let command = peer
@@ -36,7 +36,7 @@ async fn read_acp_peer_runtime_options_v2(
                 peer.backend.id
             )),
         })?;
-    let cwd = backend_cwd(&peer.backend.cwd, &workdir);
+    let cwd = backend_cwd(&peer.backend.cwd, &cwd);
     let mut child = Command::new(command);
     child
         .args(&peer.backend.args)
@@ -87,14 +87,14 @@ async fn read_acp_peer_runtime_options_v2(
                     let loaded = cx
                         .send_request(acp_v2::LoadSessionRequest::new(
                             native_session_id.clone(),
-                            &workdir,
+                            &cwd,
                         ))
                         .block_task()
                         .await?;
                     (native_session_id, loaded.config_options.unwrap_or_default())
                 } else {
                     let created = cx
-                        .send_request(acp_v2::NewSessionRequest::new(&workdir))
+                        .send_request(acp_v2::NewSessionRequest::new(&cwd))
                         .block_task()
                         .await?;
                     (
@@ -122,7 +122,7 @@ async fn read_acp_peer_runtime_options_v2(
 
 async fn read_acp_peer_runtime_options_v1(
     peer: &ResolvedPeerTurn,
-    workdir: PathBuf,
+    cwd: PathBuf,
     native_session_id: Option<String>,
 ) -> psychevo_runtime::Result<AcpPeerRuntimeOptions> {
     let command = peer
@@ -137,7 +137,7 @@ async fn read_acp_peer_runtime_options_v1(
                 peer.backend.id
             ))
         })?;
-    let cwd = backend_cwd(&peer.backend.cwd, &workdir);
+    let cwd = backend_cwd(&peer.backend.cwd, &cwd);
     let mut child = Command::new(command);
     child
         .args(&peer.backend.args)
@@ -183,13 +183,13 @@ async fn read_acp_peer_runtime_options_v1(
             let (native_session_id, config_options) =
                 if let Some(native_session_id) = native_session_id {
                     let loaded = cx
-                        .send_request(LoadSessionRequest::new(native_session_id.clone(), &workdir))
+                        .send_request(LoadSessionRequest::new(native_session_id.clone(), &cwd))
                         .block_task()
                         .await?;
                     (native_session_id, loaded.config_options.unwrap_or_default())
                 } else {
                     let created = cx
-                        .send_request(NewSessionRequest::new(&workdir))
+                        .send_request(NewSessionRequest::new(&cwd))
                         .block_task()
                         .await?;
                     (

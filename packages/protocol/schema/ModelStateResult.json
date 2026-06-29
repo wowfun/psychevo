@@ -1,6 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "cwd": {
+      "type": "string"
+    },
     "model": {
       "default": null,
       "type": [
@@ -28,13 +31,10 @@
         "string",
         "null"
       ]
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
-    "workdir"
+    "cwd"
   ],
   "title": "ModelStateResult",
   "type": "object"

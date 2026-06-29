@@ -70,6 +70,13 @@
         "credential": {
           "$ref": "#/definitions/ChannelCredentialView"
         },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "domain": {
           "default": null,
           "type": [
@@ -111,13 +118,6 @@
         },
         "transport": {
           "type": "string"
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -441,6 +441,9 @@
       ],
       "default": null
     },
+    "cwd": {
+      "type": "string"
+    },
     "memoryResources": {
       "additionalProperties": true,
       "type": "object"
@@ -459,15 +462,12 @@
     "secrets": {
       "additionalProperties": true,
       "type": "object"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
+    "cwd",
     "memoryResources",
-    "secrets",
-    "workdir"
+    "secrets"
   ],
   "title": "SettingsReadResult",
   "type": "object"

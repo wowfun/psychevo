@@ -8,7 +8,7 @@ export type GatewaySource = { kind: string, rawId: string, lifetime: GatewaySour
 
 export type GatewaySourceInput = { kind: string, rawId: string | null, lifetime: GatewaySourceLifetime | null, rawIdentity: unknown | null, visibleName: string | null, };
 
-export type GatewayRequestScope = { workdir: string, source: GatewaySourceInput, };
+export type GatewayRequestScope = { cwd: string, source: GatewaySourceInput, };
 
 export type GatewayThreadSelector = { "type": "threadId", threadId: string, } | { "type": "source", sourceKey: SourceKey, };
 
@@ -60,9 +60,9 @@ export type PendingClarifyView = { requestId: string, raw: unknown, threadId?: s
 
 export type ThreadSnapshot = { source: GatewaySource, scope: GatewayRequestScope, thread: GatewayThread | null, entries: Array<TranscriptEntry>, activity: GatewayActivityView, pendingPermissions: Array<PendingPermissionView>, pendingClarifies: Array<PendingClarifyView>, };
 
-export type SessionProjectView = { workdir: string, label: string, displayPath: string, };
+export type SessionProjectView = { cwd: string, label: string, displayPath: string, };
 
-export type SessionSummaryView = { id: string, workdir: string, project: SessionProjectView, model: string | null, provider: string | null, startedAtMs: number, updatedAtMs: number | null, endedAtMs: number | null, endReason: string | null, archivedAtMs: number | null, messageCount: number, toolCallCount: number, visibleEntryCount: number, activity: GatewayActivityView, title: string | null, displayTitle: string | null, preview: string | null, };
+export type SessionSummaryView = { id: string, cwd: string, project: SessionProjectView, model: string | null, provider: string | null, startedAtMs: number, updatedAtMs: number | null, endedAtMs: number | null, endReason: string | null, archivedAtMs: number | null, messageCount: number, toolCallCount: number, visibleEntryCount: number, activity: GatewayActivityView, title: string | null, displayTitle: string | null, preview: string | null, };
 
 export type InitializeParams = Record<string, never>;
 
@@ -80,15 +80,15 @@ export type ThreadTraceParams = { threadId: string, afterSeq: number | null, lim
 
 export type ThreadTraceResult = { threadId: string, available: boolean, events: Array<Record<string, unknown>>, warnings: Array<string>, truncated: boolean, nextAfterSeq: number | null, };
 
-export type ThreadListParams = { workdir: string | null, archived: boolean | null, limit: number | null, };
+export type ThreadListParams = { cwd: string | null, archived: boolean | null, limit: number | null, };
 
-export type ThreadBrowserParams = { workdir: string | null, archived: boolean | null, cursor: ThreadBrowserCursor | null, includeSessionIds: Array<string>, recentDays: number | null, limit: number | null, };
+export type ThreadBrowserParams = { cwd: string | null, archived: boolean | null, cursor: ThreadBrowserCursor | null, includeSessionIds: Array<string>, recentDays: number | null, limit: number | null, };
 
-export type ThreadBrowserCursor = { workdir: string, offset: number, };
+export type ThreadBrowserCursor = { cwd: string, offset: number, };
 
 export type ThreadBrowserResult = { workspaces: Array<ThreadBrowserWorkspace>, };
 
-export type ThreadBrowserWorkspace = { workdir: string, project: SessionProjectView, sessions: Array<SessionSummaryView>, hiddenCount: number, nextCursor: ThreadBrowserCursor | null, };
+export type ThreadBrowserWorkspace = { cwd: string, project: SessionProjectView, sessions: Array<SessionSummaryView>, hiddenCount: number, nextCursor: ThreadBrowserCursor | null, };
 
 export type ThreadIdParams = { threadId: string, };
 
@@ -120,15 +120,15 @@ export type CommandExecuteParams = { scope: GatewayRequestScope, threadId: strin
 
 export type CommandExecuteResult = { accepted: boolean, command: string, known: boolean | null, presentationKind: string | null, feedbackAnchor: string | null, alternateAction: CommandAlternateAction | null, message: string | null, action: unknown | null, };
 
-export type SlashSettingsReadParams = { scope: ModelSettingsScope | null, workdir: string | null, };
+export type SlashSettingsReadParams = { scope: ModelSettingsScope | null, cwd: string | null, };
 
-export type SlashSettingsUpdateParams = { scope: ModelSettingsScope, workdir: string | null, leaderKey: string | null, leaderTimeoutMs: number | null, aliases: Array<SlashAliasSetting>, keybinds: Array<SlashKeybindSetting>, };
+export type SlashSettingsUpdateParams = { scope: ModelSettingsScope, cwd: string | null, leaderKey: string | null, leaderTimeoutMs: number | null, aliases: Array<SlashAliasSetting>, keybinds: Array<SlashKeybindSetting>, };
 
 export type SlashAliasSetting = { alias: string, target: string, targetSummary: string | null, };
 
 export type SlashKeybindSetting = { shortcut: string, target: string, targetSummary: string | null, };
 
-export type SlashSettingsResult = { scope: ModelSettingsScope, workdir: string, leaderKey: string, leaderTimeoutMs: number, aliases: Array<SlashAliasSetting>, keybinds: Array<SlashKeybindSetting>, diagnostics: Array<string>, };
+export type SlashSettingsResult = { scope: ModelSettingsScope, cwd: string, leaderKey: string, leaderTimeoutMs: number, aliases: Array<SlashAliasSetting>, keybinds: Array<SlashKeybindSetting>, diagnostics: Array<string>, };
 
 export type AgentListParams = { scope: GatewayRequestScope | null, };
 
@@ -192,7 +192,7 @@ export type ChannelIdParams = { id: string, scope: GatewayRequestScope | null, }
 
 export type ChannelEnableParams = { id: string, enabled: boolean, scope: GatewayRequestScope | null, };
 
-export type ChannelUpdateParams = { id: string, scope: GatewayRequestScope | null, label: string | null, enabled: boolean | null, workdir: string | null, model: string | null, permissionMode: string | null, requireMention: boolean | null, allowUsers: Array<string> | null, allowGroups: Array<string> | null, credentialEnv: string | null, accountEnv: string | null, baseUrlEnv: string | null, appIdEnv: string | null, };
+export type ChannelUpdateParams = { id: string, scope: GatewayRequestScope | null, label: string | null, enabled: boolean | null, cwd: string | null, model: string | null, permissionMode: string | null, requireMention: boolean | null, allowUsers: Array<string> | null, allowGroups: Array<string> | null, credentialEnv: string | null, accountEnv: string | null, baseUrlEnv: string | null, appIdEnv: string | null, };
 
 export type ChannelDoctorParams = { id: string | null, live: boolean | null, scope: GatewayRequestScope | null, };
 
@@ -208,7 +208,7 @@ export type ChannelCredentialView = { env: string | null, status: string, };
 
 export type ChannelAllowlistView = { users: Array<string>, groups: Array<string>, status: string, };
 
-export type ChannelConfigView = { id: string, channel: string, domain: string | null, enabled: boolean, label: string, transport: string, workdir: string | null, model: string | null, permissionMode: string | null, requireMention: boolean, credential: ChannelCredentialView, account: ChannelCredentialView | null, baseUrl: ChannelCredentialView | null, appId: ChannelCredentialView | null, allowlist: ChannelAllowlistView, runtimeStatus: string, runner: ChannelRunnerView, };
+export type ChannelConfigView = { id: string, channel: string, domain: string | null, enabled: boolean, label: string, transport: string, cwd: string | null, model: string | null, permissionMode: string | null, requireMention: boolean, credential: ChannelCredentialView, account: ChannelCredentialView | null, baseUrl: ChannelCredentialView | null, appId: ChannelCredentialView | null, allowlist: ChannelAllowlistView, runtimeStatus: string, runner: ChannelRunnerView, };
 
 export type ChannelRunnerView = { state: string, reason: string | null, lastPollAtMs: number | null, lastHealthyPollAtMs: number | null, lastInboundAtMs: number | null, lastOutboundAtMs: number | null, lastIlinkErrcode: number | null, lastError: string | null, };
 
@@ -216,7 +216,7 @@ export type ChannelListResult = { channels: Array<ChannelConfigView>, };
 
 export type ChannelEnableResult = { channel: ChannelConfigView, };
 
-export type ChannelSourceBindingView = { sourceKey: string, connectionId: string, platform: string, domain: string | null, chatType: string | null, chatLabel: string | null, userLabel: string | null, visibleName: string | null, threadId: string, threadTitle: string | null, workdir: string, activityStatus: string, queuedTurns: number, updatedAtMs: number, };
+export type ChannelSourceBindingView = { sourceKey: string, connectionId: string, platform: string, domain: string | null, chatType: string | null, chatLabel: string | null, userLabel: string | null, visibleName: string | null, threadId: string, threadTitle: string | null, cwd: string, activityStatus: string, queuedTurns: number, updatedAtMs: number, };
 
 export type ChannelSourceListResult = { sources: Array<ChannelSourceBindingView>, };
 
@@ -272,7 +272,7 @@ export type AutomationExecutionPolicy = "autoSandbox" | "askFirst";
 
 export type AutomationExecutionInput = { policy: AutomationExecutionPolicy, };
 
-export type AutomationListParams = { scope: GatewayRequestScope | null, };
+export type AutomationListParams = { cwd: string | null, };
 
 export type AutomationDraftParams = { scope: GatewayRequestScope | null, request: string, currentThreadId: string | null, };
 
@@ -284,7 +284,7 @@ export type AutomationIdParams = { automationId: string, };
 
 export type AutomationRunParams = { automationId: string, trigger: string | null, };
 
-export type AutomationTaskView = { id: string, workdir: string, kind: AutomationTaskKind, targetThreadId: string | null, title: string, prompt: string, schedule: AutomationScheduleInput, enabled: boolean, execution: AutomationExecutionInput, model: string | null, reasoningEffort: string | null, sourceKey: string | null, createdAtMs: number, updatedAtMs: number, lastRunAtMs: number | null, nextRunAtMs: number | null, lastStatus: string | null, lastError: string | null, runs: Array<AutomationRunView>, };
+export type AutomationTaskView = { id: string, cwd: string, kind: AutomationTaskKind, targetThreadId: string | null, title: string, prompt: string, schedule: AutomationScheduleInput, enabled: boolean, execution: AutomationExecutionInput, model: string | null, reasoningEffort: string | null, sourceKey: string | null, createdAtMs: number, updatedAtMs: number, lastRunAtMs: number | null, nextRunAtMs: number | null, lastStatus: string | null, lastError: string | null, runs: Array<AutomationRunView>, };
 
 export type AutomationRunView = { id: string, automationId: string, trigger: string, status: string, startedAtMs: number, completedAtMs: number | null, threadId: string | null, sourceKey: string | null, error: string | null, metadata: Record<string, unknown> | null, };
 
@@ -322,11 +322,11 @@ export type InteractionRespondResult = { accepted: boolean, };
 
 export type SourceResetParams = { scope: GatewayRequestScope, };
 
-export type SettingsReadParams = { workdir: string | null, threadId: string | null, };
+export type SettingsReadParams = { cwd: string | null, threadId: string | null, };
 
 export type SettingsUpdateParams = { scope: GatewayRequestScope, threadId: string, agent: string | null, };
 
-export type SettingsReadResult = { workdir: string, project: WorkbenchProjectView | null, channels: ChannelListResult, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, controls: WorkbenchControlsView | null, };
+export type SettingsReadResult = { cwd: string, project: WorkbenchProjectView | null, channels: ChannelListResult, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, controls: WorkbenchControlsView | null, };
 
 export type WorkbenchProjectView = { path: string, displayPath: string, branch: string | null, };
 
@@ -336,23 +336,23 @@ export type WorkbenchControlsView = { permissionMode: string, mode: string, runt
 
 export type ModelSettingsScope = "global";
 
-export type ModelSettingsReadParams = { scope: ModelSettingsScope, workdir: string | null, };
+export type ModelSettingsReadParams = { scope: ModelSettingsScope, cwd: string | null, };
 
 export type ModelProviderSaveParams = { scope: ModelSettingsScope, providerId: string, label: string, baseUrl: string, apiKeyEnv: string | null, apiKey: string | null, noAuth: boolean, };
 
-export type ModelProviderCatalogParams = { scope: ModelSettingsScope, providerId: string, refresh: boolean, workdir: string | null, };
+export type ModelProviderCatalogParams = { scope: ModelSettingsScope, providerId: string, refresh: boolean, cwd: string | null, };
 
-export type ModelStateReadParams = { workdir: string | null, threadId: string | null, };
+export type ModelStateReadParams = { cwd: string | null, threadId: string | null, };
 
-export type ModelStateSetParams = { workdir: string | null, threadId: string | null, model: string, reasoningEffort: string | null, };
+export type ModelStateSetParams = { cwd: string | null, threadId: string | null, model: string, reasoningEffort: string | null, };
 
-export type ModelStateResult = { workdir: string, threadId: string | null, model: string | null, reasoningEffort: string | null, recentModels: Array<string>, };
+export type ModelStateResult = { cwd: string, threadId: string | null, model: string | null, reasoningEffort: string | null, recentModels: Array<string>, };
 
 export type ModelAssignmentTarget = "default" | "auxiliary";
 
 export type ModelAssignmentSetParams = { scope: ModelSettingsScope, target: ModelAssignmentTarget, task: string | null, provider: string, model: string, reasoningEffort: string | null, };
 
-export type ModelSettingsResult = { scope: ModelSettingsScope, workdir: string, defaultModel: string | null, defaultReasoningEffort: string | null, providers: Array<ModelProviderView>, auxiliary: Array<AuxiliaryModelAssignmentView>, modelOptions: Array<ModelOptionView>, };
+export type ModelSettingsResult = { scope: ModelSettingsScope, cwd: string, defaultModel: string | null, defaultReasoningEffort: string | null, providers: Array<ModelProviderView>, auxiliary: Array<AuxiliaryModelAssignmentView>, modelOptions: Array<ModelOptionView>, };
 
 export type ModelProviderView = { id: string, label: string, builtIn: boolean, configured: boolean, baseUrl: string | null, apiKeyEnv: string | null, credentialStatus: ModelCredentialStatus, noAuth: boolean, canFetchModels: boolean, unavailableReason: string | null, };
 
@@ -368,7 +368,7 @@ export type ModelAssignmentSetResult = { ok: boolean, target: ModelAssignmentTar
 
 export type WorkspaceCreateParams = { name: string, };
 
-export type WorkspaceCreateResult = { workdir: string, scope: GatewayRequestScope, };
+export type WorkspaceCreateResult = { cwd: string, scope: GatewayRequestScope, };
 
 export type WorkspaceFileKind = "file" | "directory";
 
@@ -434,7 +434,7 @@ export type UsageReadResult = { generatedAtMs: number, windows: Array<UsageWindo
 
 export type ReadyzResult = { ok: boolean, server: string, version: string, };
 
-export type CreateLaunchParams = { workdir: string, source: GatewaySourceInput | null, };
+export type CreateLaunchParams = { cwd: string, source: GatewaySourceInput | null, };
 
 export type CreateLaunchResult = { launchId: string, expiresAtMs: number, openUrl: string, };
 

@@ -20,7 +20,7 @@ Define acceptance expectations and validation scenarios for the managed
   address, and active profile compatibility.
 - Default managed binds prefer `127.0.0.1:58080` and may fall back through the
   managed range; explicit binds are strict.
-- Launch URLs carry opaque one-time material only, never raw absolute workdirs,
+- Launch URLs carry opaque one-time material only, never raw absolute cwds,
   and establish browser-session authorization before redirecting to the clean
   Web Shell URL.
 - Direct visits to the managed base URL without a valid browser session show a
@@ -28,11 +28,11 @@ Define acceptance expectations and validation scenarios for the managed
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 The deterministic managed-lifecycle validation path uses isolated
-`PSYCHEVO_HOME`, managed state, config, SQLite state, and workdir. Workbench UI
+`PSYCHEVO_HOME`, managed state, config, SQLite state, and cwd. Workbench UI
 behavior belongs to [240 pevo Web Testing](../240-pevo-web/testing.md).
 
 Manual real-provider validation is not required for this lifecycle topic.

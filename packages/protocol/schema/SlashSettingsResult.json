@@ -59,6 +59,9 @@
       },
       "type": "array"
     },
+    "cwd": {
+      "type": "string"
+    },
     "diagnostics": {
       "default": [],
       "items": {
@@ -82,18 +85,15 @@
     },
     "scope": {
       "$ref": "#/definitions/ModelSettingsScope"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
     "aliases",
+    "cwd",
     "keybinds",
     "leaderKey",
     "leaderTimeoutMs",
-    "scope",
-    "workdir"
+    "scope"
   ],
   "title": "SlashSettingsResult",
   "type": "object"

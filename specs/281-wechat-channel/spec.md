@@ -62,7 +62,7 @@ probes are runtime and Doctor diagnostics, not a pre-persistence gate.
 
 QR reconnect upserts the existing WeChat connection id instead of failing on
 duplicates. It updates credential, account, base URL env names and secret
-values while preserving existing workdir, model, permission mode, requested
+values while preserving existing cwd, model, permission mode, requested
 enablement, and allowlists unless iLink returns an explicit new DM user id.
 
 Manual fallback setup may accept `--credential-stdin`, `--account-id`,

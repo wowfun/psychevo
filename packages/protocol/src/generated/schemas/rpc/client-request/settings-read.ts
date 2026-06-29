@@ -6,14 +6,14 @@ export const clientRequestSettingsReadSchema = {
   "definitions": {
     "SettingsReadParams": {
       "properties": {
-        "threadId": {
+        "cwd": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "workdir": {
+        "threadId": {
           "default": null,
           "type": [
             "string",

@@ -153,6 +153,13 @@
     "credential": {
       "$ref": "#/definitions/ChannelCredentialView"
     },
+    "cwd": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "domain": {
       "default": null,
       "type": [
@@ -194,13 +201,6 @@
     },
     "transport": {
       "type": "string"
-    },
-    "workdir": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [

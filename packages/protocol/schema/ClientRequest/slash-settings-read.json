@@ -10,6 +10,13 @@
     },
     "SlashSettingsReadParams": {
       "properties": {
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "scope": {
           "anyOf": [
             {
@@ -20,13 +27,6 @@
             }
           ],
           "default": null
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "type": "object"

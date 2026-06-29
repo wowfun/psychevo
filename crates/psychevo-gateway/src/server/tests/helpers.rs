@@ -1,7 +1,7 @@
     fn write_project_skill(state: &WebState, name: &str, description: &str) {
         let dir = state
             .inner
-            .workdir
+            .cwd
             .join(".psychevo")
             .join("skills")
             .join(name);
@@ -33,14 +33,14 @@
         }
     }
 
-    fn track_snapshot(root: &Path, workdir: &Path) -> String {
-        let workspace_id = psychevo_runtime::workspace_snapshot_id(workdir).expect("workspace id");
+    fn track_snapshot(root: &Path, cwd: &Path) -> String {
+        let workspace_id = psychevo_runtime::workspace_snapshot_id(cwd).expect("workspace id");
         let git_dir = root.join("workspaces").join(workspace_id);
         std::fs::create_dir_all(&git_dir).expect("snapshot git dir");
         if !git_dir.join("HEAD").exists() {
             let init = std::process::Command::new("git")
                 .env("GIT_DIR", &git_dir)
-                .env("GIT_WORK_TREE", workdir)
+                .env("GIT_WORK_TREE", cwd)
                 .arg("init")
                 .output()
                 .expect("snapshot init");
@@ -54,7 +54,7 @@
             .arg("--git-dir")
             .arg(&git_dir)
             .arg("--work-tree")
-            .arg(workdir)
+            .arg(cwd)
             .args(["add", "--all", "--", "."])
             .output()
             .expect("snapshot add");
@@ -67,7 +67,7 @@
             .arg("--git-dir")
             .arg(&git_dir)
             .arg("--work-tree")
-            .arg(workdir)
+            .arg(cwd)
             .arg("write-tree")
             .output()
             .expect("snapshot write-tree");
@@ -81,14 +81,14 @@
         hash
     }
 
-    fn git<I, S>(workdir: &Path, args: I)
+    fn git<I, S>(cwd: &Path, args: I)
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
         let output = std::process::Command::new("git")
             .args(args)
-            .current_dir(workdir)
+            .current_dir(cwd)
             .output()
             .expect("git");
         assert!(

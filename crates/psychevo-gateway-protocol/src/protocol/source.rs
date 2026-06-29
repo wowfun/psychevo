@@ -85,7 +85,7 @@ pub struct GatewaySourceInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayRequestScope {
-    pub workdir: String,
+    pub cwd: String,
     pub source: GatewaySourceInput,
 }
 

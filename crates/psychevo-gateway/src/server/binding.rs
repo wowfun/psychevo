@@ -3,7 +3,7 @@ const INTERNAL_SESSION_SOURCES: &[&str] = SIDE_CONVERSATION_SESSION_SOURCES;
 pub struct GatewayWebServerConfig {
     pub gateway: Gateway,
     pub home: PathBuf,
-    pub workdir: PathBuf,
+    pub cwd: PathBuf,
     pub config_path: Option<PathBuf>,
     pub inherited_env: BTreeMap<String, String>,
     pub static_dir: Option<PathBuf>,
@@ -17,7 +17,7 @@ impl GatewayWebServerConfig {
     pub fn new(
         gateway: Gateway,
         home: PathBuf,
-        workdir: PathBuf,
+        cwd: PathBuf,
         config_path: Option<PathBuf>,
         inherited_env: BTreeMap<String, String>,
         static_dir: PathBuf,
@@ -25,7 +25,7 @@ impl GatewayWebServerConfig {
         Self {
             gateway,
             home,
-            workdir,
+            cwd,
             config_path,
             inherited_env,
             static_dir: Some(static_dir),
@@ -39,7 +39,7 @@ impl GatewayWebServerConfig {
     pub fn headless(
         gateway: Gateway,
         home: PathBuf,
-        workdir: PathBuf,
+        cwd: PathBuf,
         config_path: Option<PathBuf>,
         inherited_env: BTreeMap<String, String>,
         token: String,
@@ -47,7 +47,7 @@ impl GatewayWebServerConfig {
         Self {
             gateway,
             home,
-            workdir,
+            cwd,
             config_path,
             inherited_env,
             static_dir: None,
@@ -225,7 +225,7 @@ struct WebStateInner {
     gateway: Gateway,
     state: StateRuntime,
     home: PathBuf,
-    workdir: PathBuf,
+    cwd: PathBuf,
     config_path: Option<PathBuf>,
     inherited_env: BTreeMap<String, String>,
     static_dir: Option<PathBuf>,
@@ -237,14 +237,13 @@ struct WebStateInner {
     review: WorkspaceReviewState,
     pending_permissions: Mutex<HashMap<String, PendingPermissionView>>,
     pending_clarifies: Mutex<HashMap<String, PendingClarifyView>>,
-    model_catalog_cache: Mutex<HashMap<String, CachedModelCatalog>>,
     wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
 }
 
 #[derive(Debug, Clone)]
 struct BrowserSession {
-    workdir: PathBuf,
+    cwd: PathBuf,
     source: GatewaySource,
 }
 
@@ -252,7 +251,7 @@ struct BrowserSession {
 struct LaunchEntry {
     open_token: String,
     expires_at_ms: i64,
-    workdir: PathBuf,
+    cwd: PathBuf,
     source: GatewaySource,
 }
 
@@ -260,12 +259,6 @@ struct LaunchEntry {
 enum AuthContext {
     Bearer,
     Browser { session_id: String },
-}
-
-#[derive(Debug, Clone)]
-struct CachedModelCatalog {
-    provider: ModelCatalogProvider,
-    models: Vec<ModelCatalogEntry>,
 }
 
 impl AuthContext {
@@ -277,14 +270,14 @@ impl AuthContext {
 impl WebState {
     fn new(config: GatewayWebServerConfig) -> Self {
         let state = config.gateway.state().clone();
-        let source = workdir_source(&config.workdir);
+        let source = cwd_source(&config.cwd);
         let channel_runtime = channel_runtime::ChannelRuntimeState::new(&config.home);
         let web_state = Self {
             inner: Arc::new(WebStateInner {
                 gateway: config.gateway,
                 state,
                 home: config.home,
-                workdir: config.workdir,
+                cwd: config.cwd,
                 config_path: config.config_path,
                 inherited_env: config.inherited_env,
                 static_dir: config.static_dir,
@@ -296,7 +289,6 @@ impl WebState {
                 review: WorkspaceReviewState::default(),
                 pending_permissions: Mutex::new(HashMap::new()),
                 pending_clarifies: Mutex::new(HashMap::new()),
-                model_catalog_cache: Mutex::new(HashMap::new()),
                 wechat_qr_sessions: Mutex::new(HashMap::new()),
                 channel_runtime,
             }),
@@ -341,10 +333,10 @@ impl WebState {
         }
     }
 
-    fn run_options(&self, workdir: PathBuf, thread_id: Option<String>) -> RunOptions {
+    fn run_options(&self, cwd: PathBuf, thread_id: Option<String>) -> RunOptions {
         RunOptions {
             state: self.inner.state.clone(),
-            workdir: workdir.clone(),
+            cwd: cwd.clone(),
             snapshot_root: Some(self.inner.home.join("snapshots")),
             session: thread_id.clone(),
             continue_latest: false,
@@ -376,7 +368,7 @@ impl WebState {
             mcp_servers: Vec::new(),
             runtime_tools: automations::automation_runtime_tools(
                 self.clone(),
-                workdir.clone(),
+                cwd.clone(),
                 thread_id.clone(),
             ),
         }
@@ -627,14 +619,14 @@ impl WebState {
             });
     }
 
-    fn record_review_event(&self, event: &GatewayEvent, workdir: &Path) {
+    fn record_review_event(&self, event: &GatewayEvent, cwd: &Path) {
         match event {
             GatewayEvent::TurnStarted {
                 thread_id, turn_id, ..
             } => {
                 self.inner
                     .review
-                    .begin_turn(turn_id, thread_id.clone(), workdir);
+                    .begin_turn(turn_id, thread_id.clone(), cwd);
             }
             GatewayEvent::TurnCompleted { turn_id, .. } => {
                 self.inner.review.complete_turn(turn_id);

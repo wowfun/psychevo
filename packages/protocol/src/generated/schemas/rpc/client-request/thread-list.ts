@@ -13,19 +13,19 @@ export const clientRequestThreadListSchema = {
             "null"
           ]
         },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "limit": {
           "default": null,
           "format": "uint",
           "minimum": 0.0,
           "type": [
             "integer",
-            "null"
-          ]
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
             "null"
           ]
         }

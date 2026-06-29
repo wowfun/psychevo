@@ -6,16 +6,16 @@ export const threadControlSchemas = {
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },
@@ -83,16 +83,16 @@ export const threadControlSchemas = {
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },
@@ -190,19 +190,19 @@ export const threadControlSchemas = {
         "null"
       ]
     },
+    "cwd": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "limit": {
       "default": null,
       "format": "uint",
       "minimum": 0.0,
       "type": [
         "integer",
-        "null"
-      ]
-    },
-    "workdir": {
-      "default": null,
-      "type": [
-        "string",
         "null"
       ]
     }
@@ -215,18 +215,18 @@ export const threadControlSchemas = {
   "definitions": {
     "ThreadBrowserCursor": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "offset": {
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "offset",
-        "workdir"
+        "cwd",
+        "offset"
       ],
       "type": "object"
     }
@@ -249,6 +249,13 @@ export const threadControlSchemas = {
         }
       ],
       "default": null
+    },
+    "cwd": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "includeSessionIds": {
       "default": [],
@@ -273,13 +280,6 @@ export const threadControlSchemas = {
         "integer",
         "null"
       ]
-    },
-    "workdir": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "title": "ThreadBrowserParams",
@@ -288,18 +288,18 @@ export const threadControlSchemas = {
   ThreadBrowserCursor: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "cwd": {
+      "type": "string"
+    },
     "offset": {
       "format": "uint",
       "minimum": 0.0,
       "type": "integer"
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
-    "offset",
-    "workdir"
+    "cwd",
+    "offset"
   ],
   "title": "ThreadBrowserCursor",
   "type": "object"

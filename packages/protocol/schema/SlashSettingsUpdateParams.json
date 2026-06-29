@@ -60,6 +60,13 @@
       },
       "type": "array"
     },
+    "cwd": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "keybinds": {
       "default": [],
       "items": {
@@ -85,13 +92,6 @@
     },
     "scope": {
       "$ref": "#/definitions/ModelSettingsScope"
-    },
-    "workdir": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [

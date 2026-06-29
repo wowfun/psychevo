@@ -50,7 +50,7 @@ Script mode uses:
 - optional `--json` for secret-free structured output
 
 Default setup checks are local and deterministic: config parseability,
-credential presence, allowlist presence, selected transport, model/workdir
+credential presence, allowlist presence, selected transport, model/cwd
 resolution, and Gateway/channel runner status. Real platform API checks remain
 explicit live opt-in checks.
 
@@ -98,7 +98,7 @@ machinery:
 - allow groups
 - group-mention requirement
 - model
-- workdir
+- cwd
 - permission mode
 
 The page keeps operational hierarchy compact with a header, one concise health
@@ -124,16 +124,16 @@ workspace groups from `thread/browser`.
 
 The picker offers:
 
-- `Profile default`, saved as a blank workdir
-- recent workdirs from stored human-visible sessions
+- `Profile default`, saved as a blank cwd
+- recent cwds from stored human-visible sessions
 - manual path entry for paths not present in recent sessions
 
 The picker is not a full `workspaces.root` directory listing and does not
 promise to show empty workspaces with no session history.
 
-Saving a changed channel workdir starts fresh channel threads on the next
+Saving a changed channel cwd starts fresh channel threads on the next
 ordinary IM message for that connection. Current running work is not
-interrupted, and existing threads keep the workdir and history they already
+interrupted, and existing threads keep the cwd and history they already
 own, as defined by [028 Channels](../028-channels/spec.md).
 
 ## Credentials And Deletion
@@ -155,7 +155,7 @@ Workbench channel configuration writes use existing RPCs:
 
 Workbench may omit advanced env-name fields from `channel/update` when they
 are not visible in the UI. Omitted fields preserve existing TOML values. Blank
-`workdir`, `model`, and `permissionMode` mean profile defaults. Blank
+`cwd`, `model`, and `permissionMode` mean profile defaults. Blank
 credential env fields normalize back to the platform default env name rather
 than removing the credential boundary.
 
@@ -218,7 +218,7 @@ runtime sees them. When a platform cannot upload or download a media kind, the
 fallback is a bounded explanation, not a raw platform URL or leaked local path.
 
 Workbench Channel diagnostics may show recent remote lanes bound to local
-threads, including workdir and running/queued state. The default Settings page
+threads, including cwd and running/queued state. The default Settings page
 stays focused on runtime policy; source/thread diagnostics live behind an
 advanced or diagnostic affordance.
 
@@ -235,7 +235,7 @@ explicit confirmation behavior.
   thread, turn, and interaction semantics.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines command spelling.
 - [240 pevo Web](../240-pevo-web/spec.md) defines Workbench product behavior.
-- [060 Automation](../060-automation/spec.md) defines repo-local validation and
+- [065 CI/CD](../065-ci-cd/spec.md) defines repo-local validation and
   live opt-in boundaries.
 
 ## Attachments

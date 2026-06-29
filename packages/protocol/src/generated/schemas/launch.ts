@@ -53,6 +53,9 @@ export const launchSchemas = {
     }
   },
   "properties": {
+    "cwd": {
+      "type": "string"
+    },
     "source": {
       "anyOf": [
         {
@@ -63,13 +66,10 @@ export const launchSchemas = {
         }
       ],
       "default": null
-    },
-    "workdir": {
-      "type": "string"
     }
   },
   "required": [
-    "workdir"
+    "cwd"
   ],
   "title": "CreateLaunchParams",
   "type": "object"

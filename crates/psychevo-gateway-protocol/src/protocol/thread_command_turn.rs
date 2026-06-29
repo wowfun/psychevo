@@ -48,7 +48,7 @@ pub struct ThreadReadParams {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadListParams {
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
     pub archived: Option<bool>,
     #[serde(default)]
@@ -78,7 +78,7 @@ pub struct ThreadListResult {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadBrowserParams {
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
     pub archived: Option<bool>,
     #[serde(default)]
@@ -94,7 +94,7 @@ pub struct ThreadBrowserParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadBrowserCursor {
-    pub workdir: String,
+    pub cwd: String,
     pub offset: usize,
 }
 
@@ -107,7 +107,7 @@ pub struct ThreadBrowserResult {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadBrowserWorkspace {
-    pub workdir: String,
+    pub cwd: String,
     pub project: SessionProjectView,
     pub sessions: Vec<SessionSummaryView>,
     #[serde(default)]
@@ -277,7 +277,7 @@ pub struct SlashSettingsReadParams {
     #[serde(default)]
     pub scope: Option<ModelSettingsScope>,
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -285,7 +285,7 @@ pub struct SlashSettingsReadParams {
 pub struct SlashSettingsUpdateParams {
     pub scope: ModelSettingsScope,
     #[serde(default)]
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
     pub leader_key: Option<String>,
     #[serde(default)]
@@ -318,7 +318,7 @@ pub struct SlashKeybindSetting {
 #[serde(rename_all = "camelCase")]
 pub struct SlashSettingsResult {
     pub scope: ModelSettingsScope,
-    pub workdir: String,
+    pub cwd: String,
     pub leader_key: String,
     pub leader_timeout_ms: u64,
     pub aliases: Vec<SlashAliasSetting>,

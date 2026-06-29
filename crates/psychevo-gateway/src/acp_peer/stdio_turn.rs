@@ -1,6 +1,6 @@
 #[derive(Clone)]
 struct AcpPeerTurnContext {
-    workdir: PathBuf,
+    cwd: PathBuf,
     local_session_id: String,
     native_session_id: Option<String>,
     prompt: String,
@@ -190,7 +190,7 @@ async fn run_acp_stdio_turn_v2(
                 peer.backend.id
             )),
         })?;
-    let cwd = backend_cwd(&peer.backend.cwd, &turn.workdir);
+    let cwd = backend_cwd(&peer.backend.cwd, &turn.cwd);
     let mut child = Command::new(command);
     child
         .args(&peer.backend.args)
@@ -222,12 +222,12 @@ async fn run_acp_stdio_turn_v2(
     })?;
     let transport = ByteStreams::new(stdin.compat_write(), stdout.compat());
     let client_context = Arc::new(AcpClientContext {
-        workdir: turn.workdir.clone(),
+        cwd: turn.cwd.clone(),
         fs_read: peer_allows_fs_read(peer),
         fs_write: peer_allows_fs_write(peer),
         approval_handler: turn.approval_handler.clone(),
     });
-    let workdir = turn.workdir.clone();
+    let cwd = turn.cwd.clone();
     let prompt_sent = Arc::new(AtomicBool::new(false));
     let prompt_sent_for_result = Arc::clone(&prompt_sent);
     let (notification_tx, notification_rx) = mpsc::unbounded::<acp_v2::SessionNotification>();
@@ -301,13 +301,13 @@ async fn run_acp_stdio_turn_v2(
             let (native_session_id, mut config_options) = if let Some(native_session_id) = turn_native_session_id {
                 let loaded = cx.send_request(acp_v2::LoadSessionRequest::new(
                     native_session_id.clone(),
-                    &workdir,
+                    &cwd,
                 ))
                 .block_task()
                 .await?;
                 (native_session_id, loaded.config_options.unwrap_or_default())
             } else {
-                let created = cx.send_request(acp_v2::NewSessionRequest::new(&workdir))
+                let created = cx.send_request(acp_v2::NewSessionRequest::new(&cwd))
                     .block_task()
                     .await?;
                 (
@@ -472,7 +472,7 @@ async fn run_acp_stdio_turn_v1(
                 peer.backend.id
             ))
         })?;
-    let cwd = backend_cwd(&peer.backend.cwd, &turn.workdir);
+    let cwd = backend_cwd(&peer.backend.cwd, &turn.cwd);
     let mut child = Command::new(command);
     child
         .args(&peer.backend.args)
@@ -501,12 +501,12 @@ async fn run_acp_stdio_turn_v1(
     })?;
     let transport = ByteStreams::new(stdin.compat_write(), stdout.compat());
     let context = Arc::new(AcpClientContext {
-        workdir: turn.workdir.clone(),
+        cwd: turn.cwd.clone(),
         fs_read: peer_allows_fs_read(peer),
         fs_write: peer_allows_fs_write(peer),
         approval_handler: turn.approval_handler.clone(),
     });
-    let workdir = turn.workdir.clone();
+    let cwd = turn.cwd.clone();
     let turn_stream = turn.stream.clone();
     let turn_local_session_id = turn.local_session_id.clone();
     let turn_native_session_id = turn.native_session_id.clone();
@@ -570,7 +570,7 @@ async fn run_acp_stdio_turn_v1(
 
             let mut session = if let Some(native_session_id) = turn_native_session_id {
                 let loaded = cx
-                    .send_request(LoadSessionRequest::new(native_session_id.clone(), &workdir))
+                    .send_request(LoadSessionRequest::new(native_session_id.clone(), &cwd))
                     .block_task()
                     .await?;
                 cx.attach_session(
@@ -580,7 +580,7 @@ async fn run_acp_stdio_turn_v1(
                     Vec::new(),
                 )?
             } else {
-                cx.build_session(&workdir)
+                cx.build_session(&cwd)
                     .block_task()
                     .start_session()
                     .await?

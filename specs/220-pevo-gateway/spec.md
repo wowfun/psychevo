@@ -35,7 +35,7 @@ shells, and automation can parse them without scraping human text.
 `pevo web` is a top-level convenience alias for `pevo gateway open`. It keeps
 the same JSON-only stdout contract and defaults to opening the current working
 directory. GUI or desktop-shell no-project entrypoints may request the default
-workspace workdir instead of the launcher cwd.
+workspace cwd instead of the launcher cwd.
 
 Managed state lives under `$PSYCHEVO_HOME/gateway/`:
 
@@ -85,28 +85,28 @@ because it still exists.
 
 ## Launch Bootstrap
 
-`pevo gateway open --dir <dir>` canonicalizes the workdir, ensures the managed
+`pevo gateway open --dir <dir>` canonicalizes the cwd, ensures the managed
 server is running, records a launch entry, and opens the browser unless
 `--no-browser` is set. `pevo gateway open --default-workspace` resolves the
 configured workspace root, creates `<root>/general` on demand, and launches it
-as an ordinary workdir. `--print-url` prints the one-time launch URL and expiry
+as an ordinary cwd. `--print-url` prints the one-time launch URL and expiry
 metadata in the JSON response for Playwright and desktop shells.
 
 The launch URL carries only opaque launch material. It must not contain the raw
-absolute workdir. Launch entries are in-memory, single-use, and expire after 30
+absolute cwd. Launch entries are in-memory, single-use, and expire after 30
 seconds. A successful launch sets an HttpOnly SameSite=Lax browser-session
 cookie and redirects to a clean Web Shell URL. Reopening a consumed launch URL
 with a valid browser-session cookie redirects to the clean shell. Reopening it
 without a valid browser-session cookie returns a launch-expired diagnostic page
 with the recovery command.
 
-The managed cookie authorizes workdirs granted by a launch/open flow in the
-current server process, workdirs created by browser workspace-management RPCs,
-and workdirs explicitly adopted from human-visible global session groups. A
-browser session may adopt another workdir by resuming a stored session or by
-starting a new draft from that workdir group in the Sessions browser, but it
-may not request arbitrary workdirs that have no visible stored session. Direct
-Bearer API clients may request any local workdir accessible to the Psychevo
+The managed cookie authorizes cwds granted by a launch/open flow in the
+current server process, cwds created by browser workspace-management RPCs,
+and cwds explicitly adopted from human-visible global session groups. A
+browser session may adopt another cwd by resuming a stored session or by
+starting a new draft from that cwd group in the Sessions browser, but it
+may not request arbitrary cwds that have no visible stored session. Direct
+Bearer API clients may request any local cwd accessible to the Psychevo
 process.
 
 Direct browser visits to the managed base URL without a valid browser-session

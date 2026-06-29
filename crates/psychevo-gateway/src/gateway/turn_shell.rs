@@ -32,7 +32,7 @@ impl Gateway {
             .or(mapped_thread_id)
             .or_else(|| options.session.clone());
         if let Some(thread_id) = active_thread_id.clone() {
-            options.workdir = self.thread_workdir(&thread_id)?;
+            options.cwd = self.thread_cwd(&thread_id)?;
             options.session = Some(thread_id);
             options.continue_latest = false;
         }
@@ -64,7 +64,7 @@ impl Gateway {
             "sourceKey": durable_source_key.clone(),
             "runtimeSource": source_name.clone(),
             "firstCommittedSeq": first_committed_seq,
-            "workdir": options.workdir.to_string_lossy(),
+            "cwd": options.cwd.to_string_lossy(),
             "input": request.input,
         });
         let durable_activity = Some(self.claim_durable_gateway_activity(
@@ -426,8 +426,8 @@ impl Gateway {
                     .and_then(|source| self.lookup_source_thread(source).ok().flatten())
             });
         if let Some(thread_id) = active_thread_id.clone() {
-            let workdir = self.thread_workdir(&thread_id)?;
-            request.workdir = workdir;
+            let cwd = self.thread_cwd(&thread_id)?;
+            request.cwd = cwd;
             context.session = Some(thread_id);
             context.continue_latest = false;
         }
@@ -455,7 +455,7 @@ impl Gateway {
             "sourceKey": durable_source_key.clone(),
             "runtimeSource": context.source.clone(),
             "firstCommittedSeq": first_committed_seq,
-            "workdir": request.workdir.to_string_lossy(),
+            "cwd": request.cwd.to_string_lossy(),
             "command": request.command.clone(),
         });
         let durable_activity = if inject_into.is_none() {
@@ -494,7 +494,7 @@ impl Gateway {
         let stream = stream.unwrap_or_else(|| Arc::new(|_| {}));
         let result = run_user_shell_command_streaming_controlled(
             UserShellOptions {
-                workdir: request.workdir,
+                cwd: request.cwd,
                 command: request.command,
                 context: Some(context),
                 inject_into,
@@ -556,13 +556,13 @@ impl Gateway {
         })
     }
 
-    fn thread_workdir(&self, thread_id: &str) -> psychevo_runtime::Result<PathBuf> {
+    fn thread_cwd(&self, thread_id: &str) -> psychevo_runtime::Result<PathBuf> {
         let summary = self
             .state
             .store()
             .session_summary(thread_id)?
             .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
-        Ok(PathBuf::from(summary.workdir))
+        Ok(PathBuf::from(summary.cwd))
     }
 }
 

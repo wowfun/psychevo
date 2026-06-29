@@ -21,7 +21,7 @@ fn ensure_local_session(
         });
     }
     let session_id = store.create_session_with_metadata(
-        &options.workdir,
+        &options.cwd,
         "peer_agent",
         &peer.agent.name,
         &format!("acp:{}", peer.backend.id),
@@ -179,7 +179,7 @@ async fn read_text_file_content(
     if !context.fs_read {
         return Err(agent_client_protocol::Error::invalid_request().data("fs.read is not allowed"));
     }
-    let path = guarded_existing_path(&context.workdir, path)?;
+    let path = guarded_existing_path(&context.cwd, path)?;
     let text = tokio::fs::read_to_string(&path)
         .await
         .map_err(acp_internal_error)?;
@@ -221,7 +221,7 @@ async fn write_text_file_content(
     if matches!(decision.outcome, PermissionApprovalOutcome::Deny) {
         return Err(agent_client_protocol::Error::invalid_request().data("permission denied"));
     }
-    let path = guarded_writable_path(&context.workdir, path)?;
+    let path = guarded_writable_path(&context.cwd, path)?;
     tokio::fs::write(&path, content)
         .await
         .map_err(acp_internal_error)?;
@@ -381,16 +381,16 @@ fn permission_option_id_v2(
 }
 
 fn guarded_existing_path(
-    workdir: &Path,
+    cwd: &Path,
     path: &Path,
 ) -> Result<PathBuf, agent_client_protocol::Error> {
     let path = path
         .canonicalize()
         .map_err(|err| agent_client_protocol::Error::invalid_request().data(err.to_string()))?;
-    let workdir = workdir
+    let cwd = cwd
         .canonicalize()
         .map_err(|err| agent_client_protocol::Error::internal_error().data(err.to_string()))?;
-    if !path.starts_with(&workdir) {
+    if !path.starts_with(&cwd) {
         return Err(agent_client_protocol::Error::invalid_request()
             .data("path is outside the ACP peer workspace"));
     }
@@ -398,7 +398,7 @@ fn guarded_existing_path(
 }
 
 fn guarded_writable_path(
-    workdir: &Path,
+    cwd: &Path,
     path: &Path,
 ) -> Result<PathBuf, agent_client_protocol::Error> {
     if !path.is_absolute() {
@@ -412,10 +412,10 @@ fn guarded_writable_path(
     let parent = parent
         .canonicalize()
         .map_err(|err| agent_client_protocol::Error::invalid_request().data(err.to_string()))?;
-    let workdir = workdir
+    let cwd = cwd
         .canonicalize()
         .map_err(|err| agent_client_protocol::Error::internal_error().data(err.to_string()))?;
-    if !parent.starts_with(&workdir) {
+    if !parent.starts_with(&cwd) {
         return Err(agent_client_protocol::Error::invalid_request()
             .data("path is outside the ACP peer workspace"));
     }
@@ -435,16 +435,16 @@ fn apply_line_window(text: String, line: Option<u32>, limit: Option<u32>) -> Str
         .join("\n")
 }
 
-fn backend_cwd(value: &str, workdir: &Path) -> PathBuf {
+fn backend_cwd(value: &str, cwd: &Path) -> PathBuf {
     let value = value.trim();
     if value.is_empty() || value == "invocation" {
-        return workdir.to_path_buf();
+        return cwd.to_path_buf();
     }
     let path = PathBuf::from(value);
     if path.is_absolute() {
         path
     } else {
-        workdir.join(path)
+        cwd.join(path)
     }
 }
 

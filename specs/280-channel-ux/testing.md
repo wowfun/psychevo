@@ -48,7 +48,7 @@ Playwright desktop/mobile coverage. Channel runtime invariants are owned by
 - Selecting a configured channel opens the independent settings page, and Back
   returns to the list.
 - Channel detail renders editable staged controls for label, enablement,
-  allowlists, group mention, model, workdir, and permission mode.
+  allowlists, group mention, model, cwd, and permission mode.
 - Channel detail visual checks assert a single-column open section stack with
   row-style label/help copy on the left and controls on the right.
 - Channel detail default-surface checks assert that internal WeChat env names
@@ -71,12 +71,12 @@ Playwright desktop/mobile coverage. Channel runtime invariants are owned by
   Lark.
 - Channel detail renders recent workspace options from session-browser
   workspace groups.
-- Selecting a recent workspace and saving sends that `workdir` through
+- Selecting a recent workspace and saving sends that `cwd` through
   `channel/update`.
-- Selecting `Profile default` and saving sends a blank `workdir`.
+- Selecting `Profile default` and saving sends a blank `cwd`.
 - Manual path entry saves paths that are not present in recent workspace
   options.
-- Changing a channel workdir does not present itself as migrating existing
+- Changing a channel cwd does not present itself as migrating existing
   channel threads.
 - QR setup renders direct QR images when provided and generated SVG fallback
   otherwise.
@@ -107,7 +107,7 @@ Playwright desktop/mobile coverage. Channel runtime invariants are owned by
 - Native IM image and file attachments are represented as validated Gateway
   input or bounded context; unsupported media produces a bounded explanation.
 - Advanced diagnostics can show recent remote source lanes, local thread ids,
-  workdirs, and running/queued state without exposing raw secrets.
+  cwds, and running/queued state without exposing raw secrets.
 - Desktop and mobile Playwright checks assert no horizontal overflow.
 
 ## Validation Boundaries
@@ -116,5 +116,5 @@ Playwright desktop/mobile coverage. Channel runtime invariants are owned by
 - CLI setup tests cover setup or status UX changes.
 - Workbench unit and Playwright tests cover Settings UI changes.
 - Generated protocol checks are required when Rust protocol schemas change.
-- Before handoff, run `scripts/validate-rust.sh broad` unless the change is
-  documentation-only or a host prerequisite blocks it.
+- Before handoff, run `cargo xtask ci run --profile rust-broad` unless the
+  change is documentation-only or a host prerequisite blocks it.

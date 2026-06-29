@@ -126,7 +126,7 @@ client_capabilities = ["fs.read"]
             ),
         )
         .expect("config");
-        let agents_dir = harness.workdir.join(".psychevo").join("agents");
+        let agents_dir = harness.cwd.join(".psychevo").join("agents");
         std::fs::create_dir_all(&agents_dir).expect("agents dir");
         std::fs::write(
             agents_dir.join("reviewer.md"),
@@ -361,7 +361,7 @@ tools: [read]
         let backend = Arc::new(FakeBackend::default());
         backend.request_permission();
         let harness = harness(backend);
-        let source = GatewaySource::new("tui", "workdir").process();
+        let source = GatewaySource::new("tui", "cwd").process();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let mut request = request(&harness, source.clone(), "permission");
         request.event_sink = Some(Arc::new(move |event| {
@@ -401,7 +401,7 @@ tools: [read]
         let backend = Arc::new(FakeBackend::default());
         backend.request_permission();
         let harness = harness(backend);
-        let source = GatewaySource::new("tui", "workdir").process();
+        let source = GatewaySource::new("tui", "cwd").process();
         let source_queue_key = source_key_key(&source.source_key());
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let mut request = request(&harness, source.clone(), "permission");

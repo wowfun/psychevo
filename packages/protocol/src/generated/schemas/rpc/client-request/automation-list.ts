@@ -6,62 +6,7 @@ export const clientRequestAutomationListSchema = {
   "definitions": {
     "AutomationListParams": {
       "properties": {
-        "scope": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/GatewayRequestScope"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "type": "object"
-    },
-    "GatewayRequestScope": {
-      "properties": {
-        "source": {
-          "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "source",
-        "workdir"
-      ],
-      "type": "object"
-    },
-    "GatewaySourceInput": {
-      "properties": {
-        "kind": {
-          "type": "string"
-        },
-        "lifetime": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/GatewaySourceLifetime"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "rawId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "rawIdentity": {
-          "default": null
-        },
-        "visibleName": {
+        "cwd": {
           "default": null,
           "type": [
             "string",
@@ -69,18 +14,7 @@ export const clientRequestAutomationListSchema = {
           ]
         }
       },
-      "required": [
-        "kind"
-      ],
       "type": "object"
-    },
-    "GatewaySourceLifetime": {
-      "enum": [
-        "invocation",
-        "process",
-        "persistent"
-      ],
-      "type": "string"
     }
   },
   "properties": {

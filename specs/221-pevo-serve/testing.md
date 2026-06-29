@@ -21,16 +21,16 @@ headless `pevo serve` API server.
 - WebSocket transport follows strict JSON-RPC 2.0 request, response, error, and
   notification shapes with camelCase fields.
 - Source-selecting requests carry explicit scope, and thread-id anchored
-  methods authorize through stored thread/workdir binding.
+  methods authorize through stored thread/cwd binding.
 - Derived source keys avoid exposing raw local paths.
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 The default validation path should use local loopback sockets, temporary config
-and database paths, temporary workdirs, and fake or test providers. It should
+and database paths, temporary cwds, and fake or test providers. It should
 not read browser-managed Gateway state or user credentials.
 
 Live provider validation is not part of this topic's default path. If a serve

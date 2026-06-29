@@ -316,7 +316,7 @@ are not supported.
 Mobile, and other GUI clients. It accepts `scope`, optional `threadId`, `text`,
 and `cursor`, and returns ranked completion items plus the text range to
 replace. The first slice recognizes `/` for shared slash commands, `@` for
-workdir-local file references, and `$` for skills, local agents, and ACP
+cwd-local file references, and `$` for skills, local agents, and ACP
 capability mentions. Completion responses are transport data only; accepting an
 item does not execute a command or start a turn.
 
@@ -342,41 +342,43 @@ binding is committed, Gateway must make pending interaction requests recoverable
 through the materialized thread/activity context instead of requiring clients to
 rediscover them via source-default `thread/resume`.
 
-For Web and future shell clients, the persistent source key is derived from the
-canonical workdir rather than from a browser tab or device profile. Multiple
-authenticated local clients for the same workdir share the same source/thread,
-queue, event stream, and control surface. Client connection ids are transport
-state and do not affect source continuity.
+For Web and future shell clients, browser-session authorization proves access
+to the active profile and Gateway process. It is not scoped to the directory
+from which the browser was launched. The launch directory is only the default
+current working directory (`cwd`) for execution RPCs and project filters.
+Multiple authenticated local clients may select different `cwd` values on the
+same profile-global session; client connection ids are transport state and do
+not affect source continuity.
 
 Gateway thread ids remain Psychevo-local identifiers. Peer backends store their
 native session id in backend metadata and may expose a display handle such as
 `acp:<backend-id>:<native-session-id>` for imported sessions, debugging, and
 search. Public control APIs continue to use `GatewayThreadSelector`.
 
-Source keys should avoid exposing raw local paths. A workdir source key uses a
-stable hash of the canonical workdir, while raw identity metadata may retain
+Source keys should avoid exposing raw local paths. A cwd source key uses a
+stable hash of the canonical cwd, while raw identity metadata may retain
 canonical and display paths for local diagnostics and UI display.
 
 Transport requests that introduce or select a source carry a request-scoped
-`scope` object inside `params`. The scope contains `workdir` plus source intent.
+`scope` object inside `params`. The scope contains `cwd` plus source intent.
 `source.kind` is an open namespace string such as `web`, `desktop`,
 `im.platform`, or `agent.peer`. `rawId` may be omitted; Gateway derives a stable
-raw id from source kind plus canonical workdir. `thread/start`,
+raw id from source kind plus canonical cwd. `thread/start`,
 source-default `thread/resume`, `turn/start`, and completion requests require
 `params.scope`. Methods anchored by a thread id or active selector authorize
-through the stored thread/workdir binding.
+through the stored thread/cwd binding.
 
 Session history is global across interactive surfaces. `thread/list` accepts
-an optional workdir filter: a concrete workdir returns only that project's
-sessions, while a missing or `null` workdir returns the human-visible session
-set across all workdirs in the local state database. Runtime `source` is an
+an optional `cwd` filter: a concrete cwd returns only that project's sessions,
+while a missing or `null` cwd returns the human-visible session set across all
+cwds in the local state database. Runtime `source` is an
 internal persistence/runtime classification and is not part of the user-facing
 session summary. Human-facing lists include top-level sessions, exclude
 internal/noisy sessions such as `tui-side-conversation`, and keep empty top-level sessions
 manageable instead of using message count as a visibility gate. They also
 include per-session activity so multi-client shells can show background
 running state. A `SessionSummaryView` carries enough display projection for
-every surface to render the same row: stable id, workdir/project metadata,
+every surface to render the same row: stable id, cwd/project metadata,
 title, fallback display title, preview, visible-entry count, persisted counts,
 archive timestamp, and activity.
 
@@ -400,19 +402,30 @@ explicitly included session ids remain visible even when they fall outside the
 default window. Each cursor fetch returns 20 additional sessions for that
 workspace without mutating session recency.
 
-Explicit `thread/resume` may target a session from a different workdir than
+Explicit `thread/resume` may target a session from a different cwd than
 the caller's current scope. In that case Gateway rebinds the caller's source to
 the target session and returns a snapshot whose scope/project is the session's
-stored workdir. Subsequent turns, completion, diff, files, agents, skills, and
-context operations run in that resumed workdir. Browser-session authorization
-must observe that scope adoption immediately for later RPCs on the same
-WebSocket connection; it must not keep using a stale browser-session workdir
-captured when the socket was opened. Clients must not append an old project's
+stored cwd. Subsequent turns, completion, diff, files, agents, skills, and
+context operations run in that resumed cwd. Browser-session authorization does
+not change because it is profile-global; only the default execution scope for
+that client changes. Clients must not append an old project's
 history while continuing to operate in the launch directory.
-Browser clients may also call `thread/start` for a workdir that appears as a
-human-visible project in the global session list; Gateway treats that explicit
-project-group action as scope adoption for the browser session. This does not
-authorize arbitrary workdirs that have no visible stored session.
+Browser clients may also call `thread/start` for any canonicalizable cwd. Gateway
+treats that explicit project-group action as default-scope adoption for the
+client, not as a security grant. Invalid or inaccessible cwd values fail during
+canonicalization or runtime safety checks rather than browser-session ACL.
+
+Global management RPCs such as Settings, model provider catalogs, slash
+settings, automation management, and session browsing are profile-level
+surfaces. They may accept an optional `cwd` as a target or filter, but must not
+reject a request merely because the requested cwd differs from the browser
+launch directory. Execution RPCs continue to carry explicit cwd/scope and remain
+bounded by runtime permission, sandbox, and tool-policy enforcement.
+
+Gateway protocol naming follows Codex and Hermes reference products: machine
+and wire fields use `cwd` for current working directory. Workbench may continue
+to label the same concept as "Workspace" for humans. The old `workdir` name is not accepted
+as a JSON-RPC compatibility alias because this product surface has not shipped.
 
 The transport protocol is generated from Rust-owned Gateway wire types. Clients
 should consume generated TypeScript types and JSON Schema rather than

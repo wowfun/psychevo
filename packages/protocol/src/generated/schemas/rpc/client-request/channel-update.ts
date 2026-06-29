@@ -54,6 +54,13 @@ export const clientRequestChannelUpdateSchema = {
             "null"
           ]
         },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "enabled": {
           "default": null,
           "type": [
@@ -102,13 +109,6 @@ export const clientRequestChannelUpdateSchema = {
             }
           ],
           "default": null
-        },
-        "workdir": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -118,16 +118,16 @@ export const clientRequestChannelUpdateSchema = {
     },
     "GatewayRequestScope": {
       "properties": {
+        "cwd": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/GatewaySourceInput"
-        },
-        "workdir": {
-          "type": "string"
         }
       },
       "required": [
-        "source",
-        "workdir"
+        "cwd",
+        "source"
       ],
       "type": "object"
     },

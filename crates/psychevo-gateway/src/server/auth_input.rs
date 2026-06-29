@@ -17,57 +17,6 @@ fn current_browser_session(
         .ok_or_else(|| Error::Message("browser session is no longer active".to_string()))
 }
 
-fn authorize_workdir(
-    state: &WebState,
-    auth: &AuthContext,
-    workdir: &Path,
-) -> psychevo_runtime::Result<()> {
-    match auth {
-        AuthContext::Bearer => Ok(()),
-        AuthContext::Browser { .. } if current_browser_session(state, auth)?.workdir == workdir => {
-            Ok(())
-        }
-        AuthContext::Browser { .. } => Err(Error::Message(
-            "browser session is not authorized for this workdir".to_string(),
-        )),
-    }
-}
-
-fn authorize_start_workdir(
-    state: &WebState,
-    auth: &AuthContext,
-    workdir: &Path,
-) -> psychevo_runtime::Result<()> {
-    match auth {
-        AuthContext::Bearer => Ok(()),
-        AuthContext::Browser { .. } if current_browser_session(state, auth)?.workdir == workdir => {
-            Ok(())
-        }
-        AuthContext::Browser { .. } if browser_known_session_project(state, workdir)? => Ok(()),
-        AuthContext::Browser { .. } => Err(Error::Message(
-            "browser session is not authorized for this workdir".to_string(),
-        )),
-    }
-}
-
-fn browser_known_session_project(
-    state: &WebState,
-    workdir: &Path,
-) -> psychevo_runtime::Result<bool> {
-    let store = state.inner.state.store();
-    let active = store.list_sessions_for_workdir_with_sources(workdir, &[])?;
-    if active
-        .iter()
-        .any(|session| human_visible_session(state, session))
-    {
-        return Ok(true);
-    }
-    let archived = store.list_archived_sessions_for_workdir_with_sources(workdir, &[])?;
-    Ok(archived
-        .iter()
-        .any(|session| human_visible_session(state, session)))
-}
-
 fn authorize_thread(
     state: &WebState,
     auth: &AuthContext,
@@ -131,15 +80,15 @@ fn selector_from_interaction_context(
 
 fn source_from_input(
     input: Option<wire::GatewaySourceInput>,
-    workdir: &Path,
+    cwd: &Path,
     default_lifetime: wire::GatewaySourceLifetime,
 ) -> GatewaySource {
-    let canonical = workdir.to_string_lossy().to_string();
+    let canonical = cwd.to_string_lossy().to_string();
     let hash = stable_hash_hex(&canonical);
-    let display = workdir
+    let display = cwd
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("workdir")
+        .unwrap_or("cwd")
         .to_string();
     let input = input.unwrap_or(wire::GatewaySourceInput {
         kind: "web".to_string(),
@@ -148,7 +97,7 @@ fn source_from_input(
         raw_identity: None,
         visible_name: None,
     });
-    let raw_id = input.raw_id.unwrap_or_else(|| format!("workdir:{hash}"));
+    let raw_id = input.raw_id.unwrap_or_else(|| format!("cwd:{hash}"));
     let mut source = GatewaySource::new(input.kind, raw_id);
     source.lifetime = input.lifetime.unwrap_or(default_lifetime);
     source.visible_name = input.visible_name.or(Some(display.clone()));
@@ -159,7 +108,7 @@ fn source_from_input(
         json!({
             "kind": source_kind,
             "rawId": source_raw_id,
-            "workdirHash": hash,
+            "cwdHash": hash,
             "displayName": display,
             "lifetime": source_lifetime,
         })

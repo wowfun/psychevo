@@ -44,17 +44,18 @@ use psychevo_runtime::{
     SessionSummary, SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions,
     SkillDiscoveryOptions, StateRuntime, UsageReadOptions, UserContentBlock,
     UserShellContextOptions, WEB_SIDE_CONVERSATION_SESSION_SOURCE, agent_spawn_paused,
-    agent_status_records, auth_status_value, canonicalize_workdir, config_show_value,
+    agent_status_records, auth_status_value, canonicalize_cwd, config_show_value,
     configured_models, context_snapshot, custom_provider_api_key_env, discover_agents,
-    discover_skills, fetch_model_catalog, format_context_total_value,
+    discover_skills, fetch_and_cache_model_catalog, format_context_total_value,
     format_context_total_value_parts, latest_due_at_ms, list_skill_bundles,
     load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
-    main_agent_metadata, model_catalog_entry_is_free, model_catalog_provider, next_run_at_ms,
-    normalize_provider_id, normalize_reasoning_effort, redo_session, remove_config_value,
-    render_session_export, resolve_agent_definition, selected_configured_model,
-    session_usage_summary, set_auxiliary_model_with_reasoning, set_channel_enabled,
-    set_config_value, set_default_model_with_reasoning, set_provider_api_key,
-    side_conversation_boundary_prompt, undo_session, usage_read, valid_agent_name,
+    main_agent_metadata, model_catalog_entry_is_free, model_catalog_provider,
+    model_catalog_providers, next_run_at_ms, normalize_provider_id, normalize_reasoning_effort,
+    read_cached_model_catalog, redo_session, remove_config_value, render_session_export,
+    resolve_agent_definition, selected_configured_model, session_usage_summary,
+    set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value,
+    set_default_model_with_reasoning, set_provider_api_key, side_conversation_boundary_prompt,
+    undo_session, usage_read, valid_agent_name,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -92,7 +93,7 @@ use automations::{
 };
 use channels::{
     channel_delete_result, channel_doctor_result_live, channel_enable_result,
-    channel_list_result_for_scope, channel_list_result_for_workdir, channel_show_result,
+    channel_list_result_for_cwd, channel_list_result_for_scope, channel_show_result,
     channel_source_list_result, channel_update_result, channel_wechat_qr_poll_result,
     channel_wechat_qr_start_result,
 };

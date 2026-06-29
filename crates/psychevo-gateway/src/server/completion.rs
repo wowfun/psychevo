@@ -224,7 +224,7 @@ fn at_completion_items(
 ) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
     let mut items =
         agent_completion_items(state, scope, query, '@', Some(AgentEntrypoint::Subagent))?;
-    items.extend(file_completion_items(&scope.workdir, query)?);
+    items.extend(file_completion_items(&scope.cwd, query)?);
     Ok(items)
 }
 
@@ -302,11 +302,11 @@ fn completion_sort_text(query: &str, name: &str, description: Option<&str>, kind
 }
 
 fn file_completion_items(
-    workdir: &Path,
+    cwd: &Path,
     query: &str,
 ) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
     let mut items = Vec::new();
-    collect_file_completion_items(workdir, workdir, query, 0, &mut items);
+    collect_file_completion_items(cwd, cwd, query, 0, &mut items);
     items.sort_by(|left, right| left.label.cmp(&right.label));
     items.truncate(MAX_FILE_COMPLETION_ITEMS);
     Ok(items)

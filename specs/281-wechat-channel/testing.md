@@ -34,7 +34,7 @@ fallbacks, and any confirmed media item shapes.
   persistence.
 - QR reconnect tests cover existing connection upsert: ordinary setup still
   rejects duplicate ids, while reconnect updates env-backed credentials and
-  preserves workdir, model, permission mode, enablement, and existing
+  preserves cwd, model, permission mode, enablement, and existing
   allowlists unless iLink returns a new DM user id.
 - Manual fallback tests cover `--credential-stdin`, `--account-id`,
   `--account-env`, `--ilink-base-url`, and `--json`.
