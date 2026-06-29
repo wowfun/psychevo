@@ -6,12 +6,18 @@ from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 
-from peval_py.config import apply_overrides, config_for_adapter, load_config
+from peval_py.config import (
+    apply_overrides,
+    config_for_adapter,
+    is_windows_absolute_like_path,
+    load_config,
+)
 from peval_py.html import render_html
 from peval_py.inputs import (
     infer_workspace_root_from_trial_cell_paths,
     load_inputs,
     parse_adapter_assignments,
+    resolved_local_path,
     same_local_path,
 )
 from peval_py.outputs import (
@@ -336,7 +342,13 @@ def validated_workspace_root(args: argparse.Namespace) -> str | None:
     if root and getattr(args, "command", None) in {"view", "export", "import"}:
         from peval_py.state import ensure_workspace_root
 
-        return str(ensure_workspace_root(Path(root).expanduser()))
+        root_text = str(root).strip()
+        root_path = resolved_local_path(root_text)
+        if root_path is None:
+            if is_windows_absolute_like_path(root_text):
+                raise ValueError(f"workspace root is not accessible: {root_text}")
+            root_path = Path(root_text).expanduser()
+        return str(ensure_workspace_root(root_path))
     return root
 
 

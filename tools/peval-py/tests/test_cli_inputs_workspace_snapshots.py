@@ -364,6 +364,72 @@ default_db_path = "state.db"
             default_export_payload = json.loads(default_export_out.read_text(encoding="utf-8"))
             self.assertEqual(default_export_payload["session_id"], "db-a")
 
+    def test_cli_workspace_state_db_accepts_windows_drive_paths_with_wsl_mapping(self) -> None:
+        from peval_py.cli import main
+        from peval_py.state import open_workspace_state
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mount_root = root / "mnt"
+            workspace = mount_root / "c" / "Users" / "kevin" / "workspace"
+            outside = root / "outside"
+            source_db = root / "source.db"
+            workspace.mkdir(parents=True)
+            outside.mkdir()
+            create_messages_db(source_db)
+            (workspace / "peval-py.toml").write_text(
+                'state_db = "state.db"\n',
+                encoding="utf-8",
+            )
+            store = open_workspace_state(str(workspace))
+            config = load_config(None, workspace_root=str(workspace))
+            store.import_loaded_sources(
+                LoadedInputs(
+                    sessions=[
+                        LoadedSession(
+                            records=None,
+                            input_label="source.db:db-a",
+                            adapter_id="psychevo",
+                            input_path=str(source_db),
+                            db_path=str(source_db),
+                            session_hint="db-a",
+                            source_kind="db",
+                        )
+                    ],
+                    notes=[],
+                ),
+                config,
+            )
+            store.close()
+            source_db.unlink()
+            view_out = root / "windows-workspace-state.json"
+
+            with (
+                patch("peval_py.config.WINDOWS_DRIVE_MOUNT_ROOT", mount_root),
+                contextlib.chdir(outside),
+            ):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-m",
+                        "raw",
+                        "-r",
+                        "C:/Users/kevin/workspace",
+                        "-d",
+                        "C:/Users/kevin/workspace/state.db",
+                        "-f",
+                        "json",
+                        "-o",
+                        str(view_out),
+                    ]
+                )
+            self.assertEqual(result, 0)
+
+            payload = json.loads(view_out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["trajectory"][0]["session_id"], "db-a")
+            self.assertEqual(payload["trajectory_meta"][0]["adapter"], "psychevo")
+
     def test_cli_trial_cell_path_input_uses_workspace_source_metadata(self) -> None:
         from peval_py.cli import main
         from peval_py.state import open_workspace_state
@@ -590,6 +656,75 @@ default_db_path = "state.db"
             self.assertEqual(export_payload["session_id"], "artifact-session")
             self.assertNotIn("artifact_ref", export_payload)
             self.assertNotIn("trajectory_meta", export_payload)
+
+    def test_cli_trial_cell_path_accepts_windows_drive_path_with_wsl_mapping(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mount_root = root / "mnt"
+            workspace = mount_root / "c" / "Users" / "kevin" / "workspace"
+            outside = root / "outside"
+            outside.mkdir()
+            write_peval_workspace(workspace)
+            cell_dir = (
+                workspace
+                / "runs"
+                / "default"
+                / "psychevo"
+                / "windows-artifact"
+                / "session_t001"
+            )
+            write_trial_cell_artifacts(
+                cell_dir,
+                session_id="windows-artifact",
+                trial_key="session_t001",
+            )
+            raw_out = root / "windows-artifact-raw.json"
+
+            with (
+                patch("peval_py.config.WINDOWS_DRIVE_MOUNT_ROOT", mount_root),
+                contextlib.chdir(outside),
+            ):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-m",
+                        "raw",
+                        "-p",
+                        "C:/Users/kevin/workspace/runs/default/psychevo/windows-artifact/session_t001",
+                        "-f",
+                        "json",
+                        "-o",
+                        str(raw_out),
+                    ]
+                )
+            self.assertEqual(result, 0)
+
+            payload = json.loads(raw_out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["trajectory"][0]["session_id"], "windows-artifact")
+            self.assertEqual(
+                payload["trajectory_meta"][0]["artifact_ref"]["workspace_relative_path"],
+                "runs/default/psychevo/windows-artifact/session_t001",
+            )
+
+    def test_unmapped_windows_paths_are_not_resolved_under_cwd(self) -> None:
+        from peval_py._inputs.workspace_snapshots import resolved_local_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cwd = root / "cwd"
+            mount_root = root / "empty-mnt"
+            fake_windows_path = cwd / "C:" / "Users" / "kevin" / "workspace"
+            fake_windows_path.mkdir(parents=True)
+            with (
+                patch("peval_py.config.WINDOWS_DRIVE_MOUNT_ROOT", mount_root),
+                contextlib.chdir(cwd),
+            ):
+                self.assertIsNone(resolved_local_path("C:/Users/kevin/workspace"))
+                self.assertIsNone(resolved_local_path(r"C:\Users\kevin\workspace"))
+                self.assertIsNone(resolved_local_path(r"\\server\share\workspace"))
 
     def test_cli_trial_cell_path_root_conflict_is_clear(self) -> None:
         from peval_py.cli import main

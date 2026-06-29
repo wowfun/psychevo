@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from peval_py.config import is_windows_absolute_like_path
+import peval_py.config as path_config
 from peval_py._inputs.types import LoadedSession
 
 TRIAL_TRAJECTORY_RELATIVE_PATH = Path("agent") / "trajectory.json"
@@ -182,7 +182,7 @@ def row_artifact_path(row: dict[str, Any], workspace_root: object) -> Path | Non
     if not raw_artifact_dir:
         return None
     artifact_path = Path(str(raw_artifact_dir)).expanduser()
-    if not artifact_path.is_absolute() and not is_windows_absolute_like_path(
+    if not artifact_path.is_absolute() and not path_config.is_windows_absolute_like_path(
         str(raw_artifact_dir)
     ):
         artifact_path = Path(str(workspace_root)).expanduser() / artifact_path
@@ -449,12 +449,27 @@ def same_local_path(left: str, right: str) -> bool:
 
 def resolved_local_path(value: str) -> Path | None:
     text = str(value).strip()
-    if not text or is_windows_absolute_like_path(text):
+    if not text:
         return None
+    if path_config.is_windows_absolute_like_path(text):
+        return resolved_windows_absolute_like_path(text)
     path = Path(text).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
     return path.resolve()
+
+
+def resolved_windows_absolute_like_path(text: str) -> Path | None:
+    resolved = path_config.resolve_windows_absolute_like_path(text)
+    if os.name == "nt":
+        return Path(resolved).expanduser().resolve()
+    mapped = path_config.windows_drive_mount_path(
+        text,
+        path_config.WINDOWS_DRIVE_MOUNT_ROOT,
+    )
+    if mapped is None or not mapped.exists():
+        return None
+    return mapped.resolve()
 
 
 def is_peval_py_state_db_input(raw_db: str) -> bool:

@@ -34,6 +34,14 @@ path, DB session, or manifest row becomes one Trial in the report. `export
 trajectory` remains single-session only and must fail clearly when the effective
 input set contains more than one session.
 
+CLI path resolution treats POSIX absolute paths, Windows drive paths, and UNC
+paths as absolute-like inputs. On native Windows those paths resolve normally.
+On POSIX or WSL, an accessible Windows drive path may resolve through the
+existing `/mnt/<drive>/...` mapping; otherwise peval-py leaves it unresolved
+instead of interpreting `C:\...` or `C:/...` as a current-directory relative
+path. UNC paths remain absolute-like and are not prefixed with the workspace
+root or current directory.
+
 `-s, --session-id` is valid only when at least one `-d, --db` input is present.
 With one DB input, bare `-s ID` remains valid and may be repeated to compare
 multiple sessions from that DB in `view trajectory`. With multiple DB inputs,
@@ -126,9 +134,11 @@ when `-r/--root` is omitted. When `view trajectory` or `export trajectory`
 receives a path input shaped like
 `<workspace>/runs/<eval>/<agent>/<session>/<cell>` and
 `<workspace>/peval-py.toml` exists, it may infer `<workspace>` as the read-only
-workspace root if `-r/--root` is omitted. If explicit `-r/--root` resolves to a
-different workspace than the inferred path workspace, the command fails with a
-clear conflict diagnostic instead of silently using either root.
+workspace root if `-r/--root` is omitted. The same inference applies when an
+accessible Windows drive path maps to that local cell path. If explicit
+`-r/--root` resolves to a different workspace than the inferred path workspace,
+the command fails with a clear conflict diagnostic instead of silently using
+either root.
 
 Workspace state DB input is a saved snapshot input only when all of these are
 true: `view` or `export` was invoked with explicit `-r <workspace>`, the `-d`

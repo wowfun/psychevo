@@ -62,6 +62,9 @@ Python-owned files required by `peval-py serve`: `<workspace>/peval-py.toml`
 and `peval_py_*` tables inside `<workspace>/state.db`. `serve` startup must not
 depend on unrelated Rust peval workspace files such as `peval.toml`, `runs/`,
 `datasets/`, `scripts/`, eval templates, or `$PSYCHEVO_HOME/peval-config.toml`.
+CLI path input resolution treats Windows drive paths and UNC paths as
+absolute-like values so Git Bash and WSL users can paste accessible Windows
+paths without peval-py joining them to the current working directory.
 
 ## Normative Detail Files
 

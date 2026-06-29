@@ -80,10 +80,13 @@ Coverage must verify:
   metadata, inferred workspace context from `<workspace>/runs/...`, explicit
   `-r` conflicts with the inferred workspace, and malformed `runs/...` cell
   directories that report the missing artifact files instead of adapter DB
-  lookup errors. Raw report output for cell directory input includes
-  `artifact_ref` while preserving the original `data_ref`; inspect v2 omits
-  provenance-only metadata, and exported ATIF trajectory output does not include
-  that metadata-only reference.
+  lookup errors. Git Bash and WSL coverage includes accessible `C:/...` Trial
+  cell artifact paths mapped through `/mnt/<drive>/...`, workspace state DB
+  snapshot reads with Windows drive `-r` and `-d` arguments, and unmapped Windows
+  absolute-like paths not being resolved under the current directory. Raw report
+  output for cell directory input includes `artifact_ref` while preserving the
+  original `data_ref`; inspect v2 omits provenance-only metadata, and exported
+  ATIF trajectory output does not include that metadata-only reference.
 - DB adapters can handle `-d/--db` without the generic SQLite `messages` loader.
 - OpenCode DB conversion reads current `session`, `message`, and `part` tables,
   defaults to the most recently updated session when `--session-id` is omitted,
