@@ -262,7 +262,7 @@ pub(crate) fn v4a_add_content(op: &V4aOperation) -> String {
 }
 
 pub(crate) fn snapshot_lsp_baseline(
-    tool: &WorkdirTool,
+    tool: &CwdTool,
     path: &Path,
     pre_content: Option<&str>,
 ) -> Option<LspBaseline> {
@@ -276,7 +276,7 @@ pub(crate) fn snapshot_lsp_baseline(
 }
 
 pub(crate) fn lsp_diagnostics_after(
-    tool: &WorkdirTool,
+    tool: &CwdTool,
     path: &Path,
     _pre_content: Option<&str>,
     post_content: &str,
@@ -313,7 +313,7 @@ pub(crate) fn lsp_diagnostics_after(
 }
 
 pub(crate) fn run_lsp_diagnostics(
-    tool: &WorkdirTool,
+    tool: &CwdTool,
     path: &Path,
     content: &str,
 ) -> Result<Vec<Value>> {
@@ -407,7 +407,7 @@ impl LspManager {
 
     pub(crate) fn diagnostics(
         self: &Arc<Self>,
-        tool: &WorkdirTool,
+        tool: &CwdTool,
         path: &Path,
         content: &str,
     ) -> Result<LspDiagnosticRun> {
@@ -456,7 +456,7 @@ impl LspManager {
         };
         let key = LspClientKey {
             server_id: server.id.clone(),
-            workspace_root: tool.workdir().to_path_buf(),
+            workspace_root: tool.cwd().to_path_buf(),
         };
         if self
             .state
@@ -510,7 +510,7 @@ impl LspManager {
 
     pub(crate) fn client_for(
         self: &Arc<Self>,
-        tool: &WorkdirTool,
+        tool: &CwdTool,
         server: LspServerCommand,
         key: &LspClientKey,
         timeout: Duration,
@@ -527,7 +527,7 @@ impl LspManager {
         }
         let client = Arc::new(LspClient::start(
             server,
-            tool.workdir().to_path_buf(),
+            tool.cwd().to_path_buf(),
             timeout,
         )?);
         self.state
@@ -555,7 +555,7 @@ impl LspManager {
 
     pub(crate) fn schedule_install(
         self: &Arc<Self>,
-        tool: &WorkdirTool,
+        tool: &CwdTool,
         server_match: &LspServerMatch,
     ) {
         let Some(package) = server_match.definition.npm_package else {
@@ -685,7 +685,7 @@ pub(crate) fn default_lsp_installer() -> LspInstaller {
 
 pub(crate) struct LspClient {
     command: LspServerCommand,
-    workdir: PathBuf,
+    cwd: PathBuf,
     child: Mutex<Option<std::process::Child>>,
     stdin: Mutex<Option<std::process::ChildStdin>>,
     rx: Mutex<Receiver<Value>>,

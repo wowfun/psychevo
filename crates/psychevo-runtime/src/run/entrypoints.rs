@@ -42,7 +42,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         .session_summary(&options.session)?
         .ok_or_else(|| Error::Message(format!("session not found: {}", options.session)))?;
     let metadata = store.session_metadata(&summary.id)?.unwrap_or(json!({}));
-    let workdir = canonical_workdir(std::path::Path::new(&summary.workdir))?;
+    let cwd = canonical_cwd(std::path::Path::new(&summary.cwd))?;
     let mode = options
         .mode
         .or_else(|| {
@@ -58,7 +58,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         .unwrap_or_else(|| std::env::vars().collect());
     let project_context_options = RunOptions {
         state: options.state.clone(),
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         snapshot_root: None,
         session: Some(summary.id.clone()),
         continue_latest: false,
@@ -93,42 +93,46 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         mcp_servers: Vec::new(),
         runtime_tools: Vec::new(),
     };
+    let (plugin_policy, plugin_env, home) =
+        load_plugin_policy_config_lenient(&project_context_options, &cwd)?;
+    let plugin_assembly =
+        crate::plugins::load_enabled_plugin_contributions(&home, &cwd, &plugin_env, &plugin_policy);
     let project_context_mode =
-        load_project_context_instruction_mode(&project_context_options, &workdir)?;
-    let agents_home = resolve_agents_home(&env, &workdir)?;
+        load_project_context_instruction_mode(&project_context_options, &cwd)?;
+    let agents_home = resolve_agents_home(&env, &cwd)?;
     let agent_input =
         main_agent_input_from_sources(options.no_agents, options.agent.as_deref(), Some(&metadata));
+    let mut agent_explicit_inputs = agent_input.iter().cloned().collect::<Vec<_>>();
+    agent_explicit_inputs.extend(plugin_assembly.agent_inputs.clone());
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         env: env.clone(),
-        explicit_inputs: agent_input.iter().cloned().collect(),
+        explicit_inputs: agent_explicit_inputs,
         no_agents: options.no_agents,
     })?;
     let selected_agent = match &agent_input {
-        Some(input) if !options.no_agents => Some(resolve_agent_definition(
-            &agent_catalog,
-            input,
-            &workdir,
-            &env,
-        )?),
+        Some(input) if !options.no_agents => {
+            Some(resolve_agent_definition(&agent_catalog, input, &cwd, &env)?)
+        }
         _ => None,
     };
-    let skills_home = resolve_skills_home(&env, &workdir)?;
+    let skills_home = resolve_skills_home(&env, &cwd)?;
     let mut explicit_skill_inputs = Vec::new();
     if let Some(agent) = &selected_agent {
         explicit_skill_inputs.extend(agent.skills.clone());
     }
     let skill_options = SkillDiscoveryOptions {
         home: skills_home,
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         config_path: options.config_path.clone(),
         env: env.clone(),
         explicit_inputs: explicit_skill_inputs,
+        additional_roots: plugin_assembly.skill_inputs.clone(),
         no_skills: options.no_skills,
     };
     let skill_catalog = discover_skills(&skill_options)?;
-    let project_instructions = load_project_instructions(&workdir, project_context_mode)?;
+    let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let model_metadata = session_model_metadata(&metadata);
     let agent_tools = if !options.no_agents {
         let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
@@ -164,7 +168,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             generation_metadata: json!({
                 "model_metadata": model_metadata.public_json(),
             }),
-            workdir: workdir.clone(),
+            cwd: cwd.clone(),
             mode,
             project_context_mode,
             permission_config: PermissionConfig::default(),
@@ -199,8 +203,13 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     } else {
         None
     };
+    let extension_tools = plugin_assembly
+        .runtime_tools
+        .iter()
+        .map(|tool| tool.binding())
+        .collect();
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         task_id: summary.id.clone(),
         mode,
         lsp: Default::default(),
@@ -214,12 +223,19 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         custom_toolsets: BTreeMap::new(),
         clarify: ClarifyToolSurface::Disabled,
         skills: (!options.no_skills).then_some(skill_options),
-        extension_tools: Vec::new(),
+        extension_tools,
         agents: agent_tools,
     });
     let mut tools = tool_surface.tools;
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), mode);
-    tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
+    let hook_config = crate::hooks::HookRuntimeConfig::default();
+    tools = apply_runtime_hooks(
+        tools,
+        selected_agent.as_ref(),
+        plugin_assembly.hook_sources.clone(),
+        hook_config,
+        &cwd,
+    );
     let effective_tool_names = effective_tool_names(&tools);
     let prompt_agents = if options.no_agents {
         Vec::new()
@@ -243,7 +259,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
     let assembly = assemble_main_prompt_prefix(MainPromptPrefixInput {
         mode,
-        workdir: &workdir,
+        cwd: &cwd,
         selected_agent: selected_agent.as_ref(),
         agents: &prompt_agents,
         skills: &prompt_skills,
@@ -272,7 +288,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             "project_context": {
                 "instructions": project_context_mode.as_str(),
             },
-            "workdir": workdir.display().to_string(),
+            "cwd": cwd.display().to_string(),
         })),
     });
     let record = store.upsert_session_prompt_prefix(record)?;
@@ -294,13 +310,13 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
 }
 
 pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentSpawnResult> {
-    let workdir = canonical_workdir(&options.workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
     if options.prompt.trim().is_empty() {
         return Err(Error::Message("agent message is empty".to_string()));
     }
     let run_options = RunOptions {
         state: options.state.clone(),
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         snapshot_root: None,
         session: options.parent_session.clone(),
         continue_latest: false,
@@ -332,7 +348,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         mcp_servers: options.mcp_servers.clone(),
         runtime_tools: Vec::new(),
     };
-    let loaded = load_run_config(&run_options, &workdir)?;
+    let loaded = load_run_config(&run_options, &cwd)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
     let approval_mode = options.approval_mode.unwrap_or({
         match loaded.config.permissions.approvals_reviewer {
@@ -340,10 +356,10 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             crate::types::ApprovalsReviewer::Smart => crate::types::ApprovalMode::Smart,
         }
     });
-    let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
+    let agents_home = resolve_agents_home(&loaded.env, &cwd)?;
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         env: loaded.env.clone(),
         explicit_inputs: options.selected_parent_agent.iter().cloned().collect(),
         no_agents: false,
@@ -352,15 +368,14 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         Some(input) => Some(resolve_agent_definition(
             &agent_catalog,
             input,
-            &workdir,
+            &cwd,
             &loaded.env,
         )?),
         None => None,
     };
     let permission_mode =
         narrow_permission_mode_for_agent(permission_mode, selected_parent_agent.as_ref());
-    let child_agent =
-        resolve_agent_definition(&agent_catalog, &options.agent, &workdir, &loaded.env)?;
+    let child_agent = resolve_agent_definition(&agent_catalog, &options.agent, &cwd, &loaded.env)?;
     if selected_parent_agent
         .as_ref()
         .is_some_and(|agent| !agent_policy_allows_agent_spawn(agent))
@@ -412,7 +427,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         session_id
     } else {
         store.create_session_with_metadata(
-            &workdir,
+            &cwd,
             "tui",
             &resolved.model,
             &resolved.provider,
@@ -429,7 +444,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
                 "project_context": {
                     "instructions": loaded.config.project_context.instructions.as_str(),
                 },
-                "workdir": workdir.display().to_string(),
+                "cwd": cwd.display().to_string(),
                 "selected_agent": selected_parent_summary,
             })),
         )?
@@ -452,7 +467,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             "model_metadata": resolved.metadata.public_json(),
             "reasoning_effort": resolved.reasoning_effort.clone(),
         }),
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         mode: options.mode,
         project_context_mode: loaded.config.project_context.instructions,
         permission_config: loaded.config.permissions.clone(),
@@ -472,7 +487,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         path_prefixes: managed_tools.path_prefixes.clone(),
         sandbox_policy: crate::sandbox::SandboxPolicy::from_config(
             &loaded.config.sandbox,
-            &workdir,
+            &cwd,
             options.mode,
             &loaded.env,
         )?,

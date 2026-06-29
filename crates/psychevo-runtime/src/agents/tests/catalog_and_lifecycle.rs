@@ -54,7 +54,7 @@ Coordinate.
             reasoning_effort: None,
             context_limit: None,
             generation_metadata: json!({}),
-            workdir: tmp.path().to_path_buf(),
+            cwd: tmp.path().to_path_buf(),
             mode: RunMode::Default,
             project_context_mode: Default::default(),
             permission_config: PermissionConfig::default(),
@@ -173,17 +173,17 @@ pub(crate) fn unknown_tool_names_are_preserved_with_diagnostics() {
 pub(crate) fn recursively_discovers_agent_markdown_files() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
-    let workdir = tmp.path().join("repo");
-    fs::create_dir_all(workdir.join(".psychevo/agents/nested")).expect("dirs");
+    let cwd = tmp.path().join("repo");
+    fs::create_dir_all(cwd.join(".psychevo/agents/nested")).expect("dirs");
     fs::write(
-        workdir.join(".psychevo/agents/nested/reviewer.md"),
+        cwd.join(".psychevo/agents/nested/reviewer.md"),
         "---\ndescription: Nested reviewer\n---\nReview.",
     )
     .expect("write");
 
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home,
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         env: env(tmp.path()),
         explicit_inputs: Vec::new(),
         no_agents: false,
@@ -196,16 +196,16 @@ pub(crate) fn recursively_discovers_agent_markdown_files() {
 pub(crate) fn project_agent_wins_over_built_in() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
-    let workdir = tmp.path().join("repo");
-    fs::create_dir_all(workdir.join(".psychevo/agents")).expect("dirs");
+    let cwd = tmp.path().join("repo");
+    fs::create_dir_all(cwd.join(".psychevo/agents")).expect("dirs");
     fs::write(
-        workdir.join(".psychevo/agents/general.md"),
+        cwd.join(".psychevo/agents/general.md"),
         "---\ndescription: Project general\n---\nProject instructions.",
     )
     .expect("write");
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home,
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         env: env(tmp.path()),
         explicit_inputs: Vec::new(),
         no_agents: false,
@@ -223,7 +223,7 @@ pub(crate) fn project_agent_wins_over_built_in() {
 pub(crate) fn backend_config_generates_peer_agent_definition() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
-    let workdir = tmp.path().join("repo");
+    let cwd = tmp.path().join("repo");
     fs::create_dir_all(&home).expect("home");
     fs::write(
         home.join("config.toml"),
@@ -243,7 +243,7 @@ command = "minimal-agent"
 
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home,
-        workdir,
+        cwd,
         env: env(tmp.path()),
         explicit_inputs: Vec::new(),
         no_agents: false,
@@ -283,9 +283,9 @@ command = "minimal-agent"
 pub(crate) fn markdown_agent_shadows_generated_backend_agent() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
-    let workdir = tmp.path().join("repo");
+    let cwd = tmp.path().join("repo");
     fs::create_dir_all(&home).expect("home");
-    fs::create_dir_all(workdir.join(".psychevo/agents")).expect("agents");
+    fs::create_dir_all(cwd.join(".psychevo/agents")).expect("agents");
     fs::write(
         home.join("config.toml"),
         r#"[agents.backends.cursor]
@@ -296,7 +296,7 @@ command = "cursor-agent"
     )
     .expect("config");
     fs::write(
-        workdir.join(".psychevo/agents/cursor.md"),
+        cwd.join(".psychevo/agents/cursor.md"),
         r#"---
 description: Project Cursor wrapper.
 backend:
@@ -310,7 +310,7 @@ Use project-specific review instructions.
 
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home,
-        workdir,
+        cwd,
         env: env(tmp.path()),
         explicit_inputs: Vec::new(),
         no_agents: false,
@@ -336,10 +336,10 @@ Use project-specific review instructions.
 pub(crate) fn command_bearing_markdown_agent_surfaces_catalog_diagnostic() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
-    let workdir = tmp.path().join("repo");
-    fs::create_dir_all(workdir.join(".psychevo/agents")).expect("agents");
+    let cwd = tmp.path().join("repo");
+    fs::create_dir_all(cwd.join(".psychevo/agents")).expect("agents");
     fs::write(
-        workdir.join(".psychevo/agents/cursor.md"),
+        cwd.join(".psychevo/agents/cursor.md"),
         r#"---
 description: Invalid Cursor wrapper.
 command: cursor-agent
@@ -351,7 +351,7 @@ Invalid.
 
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home,
-        workdir,
+        cwd,
         env: env(tmp.path()),
         explicit_inputs: Vec::new(),
         no_agents: false,
@@ -389,11 +389,11 @@ pub(crate) fn selected_agent_instruction_includes_description_and_body() {
 pub(crate) fn duplicate_agents_are_available_as_shadowed_definitions() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
-    let workdir = tmp.path().join("repo");
-    fs::create_dir_all(workdir.join(".psychevo/agents")).expect("project dirs");
+    let cwd = tmp.path().join("repo");
+    fs::create_dir_all(cwd.join(".psychevo/agents")).expect("project dirs");
     fs::create_dir_all(home.join("agents")).expect("global dirs");
     fs::write(
-        workdir.join(".psychevo/agents/review.md"),
+        cwd.join(".psychevo/agents/review.md"),
         "---\ndescription: Project review\n---\nProject instructions.",
     )
     .expect("write project");
@@ -405,7 +405,7 @@ pub(crate) fn duplicate_agents_are_available_as_shadowed_definitions() {
 
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home,
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         env: env(tmp.path()),
         explicit_inputs: Vec::new(),
         no_agents: false,

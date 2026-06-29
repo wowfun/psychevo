@@ -19,8 +19,8 @@ Define acceptance expectations and validation scenarios for the built-in `coding
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 There is currently no required validation command for this capability because
 this repository slice is specification-only. When code exists, this topic's

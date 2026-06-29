@@ -76,24 +76,21 @@ impl Default for ToolRuntimeContext {
 }
 
 #[cfg(test)]
-pub(crate) fn coding_core_tools(workdir: &Path) -> Vec<Arc<dyn ToolBinding>> {
-    coding_core_tools_for_mode(workdir, RunMode::Default)
+pub(crate) fn coding_core_tools(cwd: &Path) -> Vec<Arc<dyn ToolBinding>> {
+    coding_core_tools_for_mode(cwd, RunMode::Default)
 }
 
-pub(crate) fn coding_core_tools_for_mode(
-    workdir: &Path,
-    mode: RunMode,
-) -> Vec<Arc<dyn ToolBinding>> {
-    coding_core_tools_for_mode_with_context(workdir, mode, ToolRuntimeContext::default())
+pub(crate) fn coding_core_tools_for_mode(cwd: &Path, mode: RunMode) -> Vec<Arc<dyn ToolBinding>> {
+    coding_core_tools_for_mode_with_context(cwd, mode, ToolRuntimeContext::default())
 }
 
 pub(crate) fn coding_core_tools_for_mode_with_context(
-    workdir: &Path,
+    cwd: &Path,
     mode: RunMode,
     context: ToolRuntimeContext,
 ) -> Vec<Arc<dyn ToolBinding>> {
     coding_core_tools_for_mode_with_selection(
-        workdir,
+        cwd,
         mode,
         context,
         &ToolSelectionConfig::default(),
@@ -102,7 +99,7 @@ pub(crate) fn coding_core_tools_for_mode_with_context(
 }
 
 pub(crate) fn coding_core_tools_for_mode_with_selection(
-    workdir: &Path,
+    cwd: &Path,
     mode: RunMode,
     context: ToolRuntimeContext,
     selection: &ToolSelectionConfig,
@@ -110,7 +107,7 @@ pub(crate) fn coding_core_tools_for_mode_with_selection(
 ) -> Vec<Arc<dyn ToolBinding>> {
     effective_tool_names_for_mode_with_config(mode, selection, custom_toolsets)
         .into_iter()
-        .filter_map(|name| tool_by_name(&name, workdir, context.clone()))
+        .filter_map(|name| tool_by_name(&name, cwd, context.clone()))
         .collect()
 }
 
@@ -315,17 +312,14 @@ pub(crate) fn push_tool_name(
 
 pub(crate) fn tool_by_name(
     name: &str,
-    workdir: &Path,
+    cwd: &Path,
     context: ToolRuntimeContext,
 ) -> Option<Arc<dyn ToolBinding>> {
     match name {
-        "read" => Some(Arc::new(ReadTool::new(workdir.to_path_buf(), context))),
-        "write" => Some(Arc::new(WriteTool::new(workdir.to_path_buf(), context))),
-        "edit" => Some(Arc::new(EditTool::new(workdir.to_path_buf(), context))),
-        "exec_command" => Some(Arc::new(ExecCommandTool::new(
-            workdir.to_path_buf(),
-            context,
-        ))),
+        "read" => Some(Arc::new(ReadTool::new(cwd.to_path_buf(), context))),
+        "write" => Some(Arc::new(WriteTool::new(cwd.to_path_buf(), context))),
+        "edit" => Some(Arc::new(EditTool::new(cwd.to_path_buf(), context))),
+        "exec_command" => Some(Arc::new(ExecCommandTool::new(cwd.to_path_buf(), context))),
         "write_stdin" => Some(Arc::new(WriteStdinTool::new())),
         "web_fetch" => Some(Arc::new(WebFetchTool::new())),
         _ => None,
@@ -353,10 +347,10 @@ pub(crate) fn mode_instruction_for_tool_availability(
 }
 
 // Tool implementations are split by tool family and included in this module.
-#[path = "workdir.rs"]
-pub(crate) mod workdir;
+#[path = "cwd.rs"]
+pub(crate) mod cwd;
 #[allow(unused_imports)]
-pub(crate) use workdir::*;
+pub(crate) use cwd::*;
 #[path = "file_state.rs"]
 pub(crate) mod file_state;
 #[allow(unused_imports)]

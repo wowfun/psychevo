@@ -85,9 +85,9 @@ include_common_caches = true
 
 `enabled = false` is the default and preserves existing behavior.
 
-`mode = "workspace-write"` makes the canonical workdir writable for built-in
+`mode = "workspace-write"` makes the canonical cwd writable for built-in
 writers and shell children. `writable_roots` adds extra writable roots. Each
-entry may be absolute or workdir-relative.
+entry may be absolute or cwd-relative.
 
 `mode = "read-only"` makes writer tools fail with a sandbox denial and runs
 shell children with no writable roots. It is a hard sandbox mode in Psychevo
@@ -181,7 +181,7 @@ surface; v1 does not add new RPC request fields.
 
 - Default config keeps sandbox disabled and preserves existing behavior.
 - Invalid sandbox modes fail config loading with a clear diagnostic.
-- Effective policy canonicalizes workdir, writable roots, tmp roots, and cache
+- Effective policy canonicalizes cwd, writable roots, tmp roots, and cache
   roots without creating missing paths.
 - Built-in writers allow writes inside effective writer roots and deny writes
   outside them, including parent escape, symlink escape, sibling prefix

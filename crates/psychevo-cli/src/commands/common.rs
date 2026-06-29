@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::{RunMode, RunOptions, StateRuntime, canonicalize_workdir};
+use psychevo_runtime::{RunMode, RunOptions, StateRuntime, canonicalize_cwd};
 use serde_json::json;
 
 use crate::env::{env_path, resolve_state_db};
@@ -27,7 +27,7 @@ pub(crate) fn base_run_options(
     let db_path = resolve_state_db(env_map, home, cwd)?;
     Ok(RunOptions {
         state: StateRuntime::open(&db_path)?,
-        workdir: cwd.to_path_buf(),
+        cwd: cwd.to_path_buf(),
         snapshot_root: None,
         session: None,
         continue_latest: false,
@@ -63,7 +63,7 @@ pub(crate) fn base_run_options(
 
 pub(crate) fn config_scope_dir(home: &Path, cwd: &Path, local: bool) -> Result<PathBuf> {
     if local {
-        Ok(canonicalize_workdir(cwd)?.join(".psychevo"))
+        Ok(canonicalize_cwd(cwd)?.join(".psychevo"))
     } else {
         Ok(home.to_path_buf())
     }

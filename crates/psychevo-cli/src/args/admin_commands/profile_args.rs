@@ -81,7 +81,7 @@ pub(crate) struct SessionArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SessionCommand {
-    #[command(about = "List sessions for the current workdir")]
+    #[command(about = "List sessions for the current cwd")]
     List(SessionListArgs),
     #[command(about = "Show one session summary")]
     Show(SessionIdArgs),
@@ -124,7 +124,7 @@ pub(crate) struct SessionListArgs {
 pub(crate) struct SessionIdArgs {
     #[arg(
         value_name = "SESSION_OR_LATEST",
-        help = "Exact session id or latest for this workdir"
+        help = "Exact session id or latest for this cwd"
     )]
     pub(crate) session: String,
     #[arg(long, help = "Emit structured JSON instead of human text")]
@@ -135,7 +135,7 @@ pub(crate) struct SessionIdArgs {
 pub(crate) struct SessionRenameArgs {
     #[arg(
         value_name = "SESSION_OR_LATEST",
-        help = "Exact session id or latest for this workdir"
+        help = "Exact session id or latest for this cwd"
     )]
     pub(crate) session: String,
     #[arg(required = true, num_args = 1.., value_name = "TITLE", help = "New session title; words are joined with spaces")]
@@ -148,7 +148,7 @@ pub(crate) struct SessionRenameArgs {
 pub(crate) struct SessionExportArgs {
     #[arg(
         value_name = "SESSION_OR_LATEST",
-        help = "Exact session id or latest for this workdir"
+        help = "Exact session id or latest for this cwd"
     )]
     pub(crate) session: String,
     #[arg(short = 'f', long, value_enum, value_name = "FORMAT", default_value_t = SessionExportFormatArg::Markdown, help = "Artifact format to write")]
@@ -168,7 +168,7 @@ pub(crate) struct SessionExportArgs {
 pub(crate) struct SessionShareArgs {
     #[arg(
         value_name = "SESSION_OR_LATEST",
-        help = "Exact session id or latest for this workdir"
+        help = "Exact session id or latest for this cwd"
     )]
     pub(crate) session: String,
     #[arg(
@@ -201,7 +201,7 @@ pub(crate) enum ModelCommand {
     Current(ModelJsonArgs),
     #[command(
         about = "Set the default model in scoped config",
-        long_about = "Set the default provider-qualified model in config TOML. Without a scope flag, this writes the current workdir .psychevo config; use -g/--global to write the global Psychevo home config. This command does not contact providers."
+        long_about = "Set the default provider-qualified model in config TOML. Without a scope flag, this writes the current cwd .psychevo config; use -g/--global to write the global Psychevo home config. This command does not contact providers."
     )]
     Set(ModelSetArgs),
     #[command(
@@ -256,7 +256,7 @@ pub(crate) struct ModelSetArgs {
     #[arg(
         long,
         conflicts_with = "global",
-        help = "Write to the current workdir .psychevo config"
+        help = "Write to the current cwd .psychevo config"
     )]
     pub(crate) local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
@@ -312,7 +312,7 @@ pub(crate) struct ConfigJsonArgs {
 pub(crate) struct ConfigShowArgs {
     #[arg(short = 'g', long = "global", conflicts_with_all = ["local", "effective"], help = "Read the global Psychevo home config")]
     pub(crate) global: bool,
-    #[arg(long, conflicts_with_all = ["global", "effective"], help = "Read the current workdir .psychevo config")]
+    #[arg(long, conflicts_with_all = ["global", "effective"], help = "Read the current cwd .psychevo config")]
     pub(crate) local: bool,
     #[arg(long, conflicts_with_all = ["global", "local"], help = "Show the effective merged configuration")]
     pub(crate) effective: bool,
@@ -325,7 +325,7 @@ pub(crate) struct ConfigEditArgs {
     #[arg(
         short = 'g',
         long = "global",
-        help = "Edit the global Psychevo home config instead of the current workdir config"
+        help = "Edit the global Psychevo home config instead of the current cwd config"
     )]
     pub(crate) global: bool,
 }
@@ -345,7 +345,7 @@ pub(crate) struct ConfigSetArgs {
     #[arg(
         short = 'g',
         long = "global",
-        help = "Write the global config instead of the current workdir config"
+        help = "Write the global config instead of the current cwd config"
     )]
     pub(crate) global: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
@@ -441,7 +441,7 @@ pub(crate) struct ConfigProviderAddArgs {
     #[arg(
         long,
         conflicts_with = "global",
-        help = "Write to the current workdir .psychevo scope"
+        help = "Write to the current cwd .psychevo scope"
     )]
     pub(crate) local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
@@ -536,7 +536,7 @@ pub(crate) struct AuthSetArgs {
     #[arg(
         long,
         conflicts_with = "global",
-        help = "Write to the current workdir .psychevo/.env"
+        help = "Write to the current cwd .psychevo/.env"
     )]
     pub(crate) local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]

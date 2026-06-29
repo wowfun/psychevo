@@ -23,7 +23,7 @@ use crate::types::{McpServerInput, McpTransportInput, RunWarning};
 
 pub(crate) async fn mcp_tool_bindings(
     inputs: &[McpServerInput],
-    workdir: &Path,
+    cwd: &Path,
     permission_runtime: Option<&PermissionRuntime>,
 ) -> (Vec<Arc<dyn ToolBinding>>, Vec<RunWarning>) {
     let mut tools = Vec::<Arc<dyn ToolBinding>>::new();
@@ -53,7 +53,7 @@ pub(crate) async fn mcp_tool_bindings(
             continue;
         }
 
-        let service = match connect_mcp_server(input, workdir).await {
+        let service = match connect_mcp_server(input, cwd).await {
             Ok(service) => service,
             Err(err) => {
                 warnings.push(mcp_warning(format!(
@@ -167,12 +167,12 @@ pub(crate) fn sanitize_mcp_identifier(value: &str, fallback: &str) -> String {
 
 pub(crate) async fn connect_mcp_server(
     input: &McpServerInput,
-    workdir: &Path,
+    cwd: &Path,
 ) -> Result<RunningService<RoleClient, ()>, String> {
     match &input.transport {
         McpTransportInput::Stdio { command, args, env } => {
             let mut cmd = Command::new(command);
-            cmd.args(args).envs(env).current_dir(workdir);
+            cmd.args(args).envs(env).current_dir(cwd);
             let transport = TokioChildProcess::new(cmd).map_err(|err| err.to_string())?;
             ().serve(transport).await.map_err(|err| err.to_string())
         }

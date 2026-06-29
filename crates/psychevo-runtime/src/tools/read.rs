@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-pub(crate) struct ReadTool(WorkdirTool);
+pub(crate) struct ReadTool(CwdTool);
 
 impl ReadTool {
-    pub(crate) fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
-        Self(WorkdirTool::with_context(workdir, context))
+    pub(crate) fn new(cwd: PathBuf, context: ToolRuntimeContext) -> Self {
+        Self(CwdTool::with_context(cwd, context))
     }
 }
 
@@ -62,7 +62,7 @@ impl ToolBinding for ReadTool {
     }
 }
 
-pub(crate) fn read_tool_output(tool: WorkdirTool, args: Value) -> ToolOutput {
+pub(crate) fn read_tool_output(tool: CwdTool, args: Value) -> ToolOutput {
     match read_tool_impl(tool, args) {
         Ok(value) if value_reports_error(&value) => ToolOutput {
             json: value,
@@ -82,7 +82,7 @@ pub(crate) fn value_reports_error(value: &Value) -> bool {
         .is_some_and(|error| !error.is_empty())
 }
 
-pub(crate) fn read_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn read_tool_impl(tool: CwdTool, args: Value) -> Result<Value> {
     let path = required_string(&args, "path")?;
     let offset = optional_i64(&args, "offset")?.unwrap_or(1).max(1) as usize;
     let limit =
@@ -195,7 +195,7 @@ pub(crate) fn read_hint(
     }
 }
 
-pub(crate) fn missing_read_result(tool: &WorkdirTool, path: &str) -> Value {
+pub(crate) fn missing_read_result(tool: &CwdTool, path: &str) -> Value {
     json!({
         "path": path,
         "error": format!("file not found: {path}"),
@@ -203,7 +203,7 @@ pub(crate) fn missing_read_result(tool: &WorkdirTool, path: &str) -> Value {
     })
 }
 
-pub(crate) fn similar_files(tool: &WorkdirTool, path: &str) -> Vec<String> {
+pub(crate) fn similar_files(tool: &CwdTool, path: &str) -> Vec<String> {
     let target = tool.resolve_raw(path);
     let Some(parent) = target.parent() else {
         return Vec::new();
@@ -299,8 +299,8 @@ pub(crate) mod read_tool_tests {
     use std::fs;
     use tempfile::tempdir;
 
-    fn workdir_tool(path: &std::path::Path) -> WorkdirTool {
-        WorkdirTool::new(path.canonicalize().expect("canonical workdir"))
+    fn cwd_tool(path: &std::path::Path) -> CwdTool {
+        CwdTool::new(path.canonicalize().expect("canonical cwd"))
     }
 
     fn numbered_lines(count: usize) -> String {
@@ -342,7 +342,7 @@ pub(crate) mod read_tool_tests {
         fs::write(temp.path().join("sample.txt"), numbered_lines(5)).expect("write");
 
         let value = read_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({"path": "sample.txt", "offset": 0, "limit": 0}),
         )
         .expect("read");
@@ -364,7 +364,7 @@ pub(crate) mod read_tool_tests {
         .expect("write");
 
         let value = read_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({"path": "large.txt", "limit": READ_MAX_LINES + 100}),
         )
         .expect("read");
@@ -385,7 +385,7 @@ pub(crate) mod read_tool_tests {
         .expect("write");
 
         let value =
-            read_tool_impl(workdir_tool(temp.path()), json!({"path": "large.txt"})).expect("read");
+            read_tool_impl(cwd_tool(temp.path()), json!({"path": "large.txt"})).expect("read");
 
         assert_eq!(value["output_lines"], json!(READ_MAX_LINES));
         assert_eq!(value["shown_start_line"], 1);
@@ -403,11 +403,8 @@ pub(crate) mod read_tool_tests {
             .join("\n");
         fs::write(temp.path().join("large-bytes.txt"), content).expect("write");
 
-        let value = read_tool_impl(
-            workdir_tool(temp.path()),
-            json!({"path": "large-bytes.txt"}),
-        )
-        .expect("read");
+        let value = read_tool_impl(cwd_tool(temp.path()), json!({"path": "large-bytes.txt"}))
+            .expect("read");
 
         assert_eq!(value["truncated_by"], "bytes");
         assert_eq!(value["first_line_exceeds_limit"], false);
@@ -424,8 +421,8 @@ pub(crate) mod read_tool_tests {
         let content = format!("{}\nsmall", "x".repeat(READ_MAX_BYTES + 1));
         fs::write(temp.path().join("long-line.txt"), content).expect("write");
 
-        let value = read_tool_impl(workdir_tool(temp.path()), json!({"path": "long-line.txt"}))
-            .expect("read");
+        let value =
+            read_tool_impl(cwd_tool(temp.path()), json!({"path": "long-line.txt"})).expect("read");
 
         assert_eq!(value["content"], "");
         assert_eq!(value["output_lines"], 0);
@@ -443,7 +440,7 @@ pub(crate) mod read_tool_tests {
         fs::write(temp.path().join("config.toml"), "name = \"test\"\n").expect("write");
         fs::write(temp.path().join("notes.txt"), "notes\n").expect("write");
 
-        let output = read_tool_output(workdir_tool(temp.path()), json!({"path": "config.yml"}));
+        let output = read_tool_output(cwd_tool(temp.path()), json!({"path": "config.yml"}));
 
         assert!(output.is_error);
         assert!(

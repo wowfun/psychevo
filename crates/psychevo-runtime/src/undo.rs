@@ -12,7 +12,7 @@ pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
         .snapshot
         .clone()
         .ok_or_else(|| Error::Message("undo snapshot is unavailable".to_string()))?;
-    let snapshots = SnapshotStore::new(options.snapshot_root, options.workdir);
+    let snapshots = SnapshotStore::new(options.snapshot_root, options.cwd);
     let original_snapshot = match store.session_revert_state(&options.session_id)? {
         Some(revert) => revert.original_snapshot,
         None => snapshots
@@ -40,7 +40,7 @@ pub fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
     let revert = store
         .session_revert_state(&options.session_id)?
         .ok_or_else(|| Error::Message("nothing to redo".to_string()))?;
-    let snapshots = SnapshotStore::new(options.snapshot_root, options.workdir);
+    let snapshots = SnapshotStore::new(options.snapshot_root, options.cwd);
     if let Some(target) = store.next_redo_target(&options.session_id)? {
         let snapshot = target
             .snapshot

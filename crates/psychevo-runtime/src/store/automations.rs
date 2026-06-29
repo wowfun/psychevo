@@ -14,12 +14,12 @@ impl SqliteStore {
             conn.execute(
                 r#"
                 INSERT INTO automations (
-                    id, workdir, kind, target_thread_id, title, prompt, schedule_json,
+                    id, cwd, kind, target_thread_id, title, prompt, schedule_json,
                     enabled, execution_json, model, reasoning_effort, source_key,
                     created_at_ms, updated_at_ms, next_run_at_ms
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14)
                 ON CONFLICT(id) DO UPDATE SET
-                    workdir = excluded.workdir,
+                    cwd = excluded.cwd,
                     kind = excluded.kind,
                     target_thread_id = excluded.target_thread_id,
                     title = excluded.title,
@@ -35,7 +35,7 @@ impl SqliteStore {
                 "#,
                 params![
                     id,
-                    input.workdir,
+                    input.cwd,
                     input.kind,
                     input.target_thread_id,
                     input.title,
@@ -67,16 +67,23 @@ impl SqliteStore {
         .map_err(Into::into)
     }
 
-    pub fn automation_tasks_for_workdir(&self, workdir: &str) -> Result<Vec<AutomationTaskRecord>> {
+    pub fn automation_tasks_for_cwd(&self, cwd: &str) -> Result<Vec<AutomationTaskRecord>> {
+        self.automation_tasks_for_optional_cwd(Some(cwd))
+    }
+
+    pub fn automation_tasks_for_optional_cwd(
+        &self,
+        cwd: Option<&str>,
+    ) -> Result<Vec<AutomationTaskRecord>> {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             automation_task_select_sql(
-                "WHERE workdir = ?1
+                "WHERE (?1 IS NULL OR cwd = ?1)
                  ORDER BY enabled DESC, next_run_at_ms IS NULL, next_run_at_ms ASC, updated_at_ms DESC",
             )
             .as_str(),
         )?;
-        let rows = stmt.query_map(params![workdir], automation_task_from_row)?;
+        let rows = stmt.query_map(params![cwd], automation_task_from_row)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(Into::into)
     }
@@ -183,6 +190,53 @@ impl SqliteStore {
             .map_err(Into::into)
     }
 
+    pub fn stale_automation_runs_for_recovery(
+        &self,
+        now_ms: i64,
+        stale_after_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<AutomationRunRecoveryCandidate>> {
+        let stale_before_ms = now_ms.saturating_sub(stale_after_ms);
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                a.id, a.cwd, a.kind, a.target_thread_id, a.title, a.prompt,
+                a.schedule_json, a.enabled, a.execution_json, a.model,
+                a.reasoning_effort, a.source_key, a.created_at_ms, a.updated_at_ms,
+                a.last_run_at_ms, a.next_run_at_ms, a.last_status, a.last_error,
+                r.id, r.automation_id, r.trigger, r.status, r.started_at_ms,
+                r.completed_at_ms, r.thread_id, r.source_key, r.error, r.metadata_json
+            FROM automation_runs r
+            INNER JOIN automations a ON a.id = r.automation_id
+            WHERE r.status = 'running'
+              AND r.started_at_ms <= ?1
+              AND NOT EXISTS (
+                SELECT 1
+                FROM gateway_activities g
+                WHERE g.status IN ('running', 'queued')
+                  AND g.lease_expires_at_ms >= ?2
+                  AND (
+                    (r.thread_id IS NOT NULL AND g.thread_id = r.thread_id)
+                    OR (r.source_key IS NOT NULL AND g.source_key = r.source_key)
+                    OR (a.target_thread_id IS NOT NULL AND g.thread_id = a.target_thread_id)
+                    OR (a.source_key IS NOT NULL AND g.source_key = a.source_key)
+                  )
+              )
+            ORDER BY r.started_at_ms ASC
+            LIMIT ?3
+            "#,
+        )?;
+        let rows = stmt.query_map(params![stale_before_ms, now_ms, limit as i64], |row| {
+            Ok(AutomationRunRecoveryCandidate {
+                task: automation_task_from_row(row)?,
+                run: automation_run_from_row_at(row, 18)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
     pub fn finish_automation_run(
         &self,
         input: AutomationRunFinishInput<'_>,
@@ -260,7 +314,7 @@ impl SqliteStore {
 fn automation_task_select_sql(where_clause: &str) -> String {
     format!(
         r#"
-        SELECT id, workdir, kind, target_thread_id, title, prompt, schedule_json,
+        SELECT id, cwd, kind, target_thread_id, title, prompt, schedule_json,
                enabled, execution_json, model, reasoning_effort, source_key,
                created_at_ms, updated_at_ms, last_run_at_ms, next_run_at_ms,
                last_status, last_error
@@ -289,7 +343,7 @@ fn automation_task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Automat
     let enabled: i64 = row.get(7)?;
     Ok(AutomationTaskRecord {
         id: row.get(0)?,
-        workdir: row.get(1)?,
+        cwd: row.get(1)?,
         kind: row.get(2)?,
         target_thread_id: row.get(3)?,
         title: row.get(4)?,
@@ -310,21 +364,28 @@ fn automation_task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Automat
 }
 
 fn automation_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AutomationRunRecord> {
-    let metadata_json: Option<String> = row.get(9)?;
+    automation_run_from_row_at(row, 0)
+}
+
+fn automation_run_from_row_at(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<AutomationRunRecord> {
+    let metadata_json: Option<String> = row.get(offset + 9)?;
     let metadata = metadata_json
         .as_deref()
-        .map(|value| json_from_column(value, 9))
+        .map(|value| json_from_column(value, offset + 9))
         .transpose()?;
     Ok(AutomationRunRecord {
-        id: row.get(0)?,
-        automation_id: row.get(1)?,
-        trigger: row.get(2)?,
-        status: row.get(3)?,
-        started_at_ms: row.get(4)?,
-        completed_at_ms: row.get(5)?,
-        thread_id: row.get(6)?,
-        source_key: row.get(7)?,
-        error: row.get(8)?,
+        id: row.get(offset)?,
+        automation_id: row.get(offset + 1)?,
+        trigger: row.get(offset + 2)?,
+        status: row.get(offset + 3)?,
+        started_at_ms: row.get(offset + 4)?,
+        completed_at_ms: row.get(offset + 5)?,
+        thread_id: row.get(offset + 6)?,
+        source_key: row.get(offset + 7)?,
+        error: row.get(offset + 8)?,
         metadata,
     })
 }

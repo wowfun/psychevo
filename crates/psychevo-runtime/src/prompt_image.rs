@@ -52,7 +52,7 @@ pub fn split_image_source_argument(input: &str) -> Option<ImageSourceArgument> {
     })
 }
 
-pub fn resolve_image_source(source: &str, workdir: &Path) -> Result<ImageInput> {
+pub fn resolve_image_source(source: &str, cwd: &Path) -> Result<ImageInput> {
     let source = strip_wrapping_quotes(source.trim());
     if source.is_empty() {
         return Err(Error::Message("image source is empty".to_string()));
@@ -65,7 +65,7 @@ pub fn resolve_image_source(source: &str, workdir: &Path) -> Result<ImageInput> 
             "unsupported image type: {source}; expected png, jpg, jpeg, webp, gif, bmp, or avif"
         )));
     }
-    let path = resolve_prompt_path(source, Some(workdir));
+    let path = resolve_prompt_path(source, Some(cwd));
     validate_local_image_path(&path)?;
     Ok(ImageInput::LocalPath(path))
 }
@@ -73,32 +73,32 @@ pub fn resolve_image_source(source: &str, workdir: &Path) -> Result<ImageInput> 
 #[cfg(test)]
 pub(crate) fn prompt_message_from_text(
     prompt: &str,
-    workdir: &Path,
+    cwd: &Path,
     metadata: &ModelMetadata,
 ) -> Result<Message> {
-    prompt_message_from_inputs(prompt, &[], workdir, metadata).map(|build| build.message)
+    prompt_message_from_inputs(prompt, &[], cwd, metadata).map(|build| build.message)
 }
 
 #[allow(dead_code)]
 pub(crate) fn prompt_message_from_inputs(
     prompt: &str,
     image_inputs: &[ImageInput],
-    workdir: &Path,
+    cwd: &Path,
     metadata: &ModelMetadata,
 ) -> Result<PromptMessageBuild> {
-    prompt_message_from_inputs_with_options(prompt, image_inputs, workdir, metadata, true)
+    prompt_message_from_inputs_with_options(prompt, image_inputs, cwd, metadata, true)
 }
 
 pub fn prompt_message_from_inputs_with_options(
     prompt: &str,
     image_inputs: &[ImageInput],
-    workdir: &Path,
+    cwd: &Path,
     metadata: &ModelMetadata,
     extract_prompt_image_sources: bool,
 ) -> Result<PromptMessageBuild> {
     let mut images = image_inputs.to_vec();
     let prompt_text = if extract_prompt_image_sources {
-        let extraction = extract_image_sources_from_prompt(prompt, workdir)?;
+        let extraction = extract_image_sources_from_prompt(prompt, cwd)?;
         images.extend(extraction.images);
         extraction.text
     } else {
@@ -150,9 +150,9 @@ pub fn prompt_message_from_inputs_with_options(
 
 pub fn extract_image_sources_from_prompt(
     prompt: &str,
-    workdir: &Path,
+    cwd: &Path,
 ) -> Result<PromptImageExtraction> {
-    let spans = image_source_spans(prompt, workdir)?;
+    let spans = image_source_spans(prompt, cwd)?;
     if spans.is_empty() {
         return Ok(PromptImageExtraction {
             images: Vec::new(),
@@ -203,28 +203,26 @@ pub(crate) fn validate_local_image_path(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn source_is_supported_leading_image_prompt(source: &str) -> bool {
-    is_remote_image_url(source)
-        || is_data_image_url(source)
+    is_data_image_url(source)
         || (source.starts_with("file://") && supported_image_extension(source))
         || (supported_image_extension(source) && !looks_like_prose_prefixed_path(source))
 }
 
 pub(crate) fn source_is_supported_embedded_image_prompt(source: &str) -> bool {
-    is_remote_image_url(source)
-        || is_data_image_url(source)
+    is_data_image_url(source)
         || (source.starts_with("file://") && supported_image_extension(source))
         || ((source.starts_with("~/") || Path::new(source).is_absolute())
             && supported_image_extension(source)
             && !looks_like_prose_prefixed_path(source))
 }
 
-pub(crate) fn resolve_prompt_path(token: &str, workdir: Option<&Path>) -> PathBuf {
+pub(crate) fn resolve_prompt_path(token: &str, cwd: Option<&Path>) -> PathBuf {
     let value = file_url_path(token).unwrap_or_else(|| expand_home_path(token));
     let path = PathBuf::from(value);
     if path.is_absolute() {
         path
     } else {
-        workdir.map_or(path.clone(), |workdir| workdir.join(path))
+        cwd.map_or(path.clone(), |cwd| cwd.join(path))
     }
 }
 
@@ -383,7 +381,7 @@ pub(crate) struct ImageSourceSpan {
     pub(crate) image: ImageInput,
 }
 
-pub(crate) fn image_source_spans(prompt: &str, workdir: &Path) -> Result<Vec<ImageSourceSpan>> {
+pub(crate) fn image_source_spans(prompt: &str, cwd: &Path) -> Result<Vec<ImageSourceSpan>> {
     let mut spans = Vec::new();
     let mut cursor = 0usize;
     let first_non_whitespace = prompt
@@ -402,11 +400,9 @@ pub(crate) fn image_source_spans(prompt: &str, workdir: &Path) -> Result<Vec<Ima
             parse_quoted_token(prompt, index, ch)
                 .filter(|token| source_is_supported_embedded_image_prompt(&token.value))
         } else if prompt[index..].starts_with("file://")
-            || prompt[index..].starts_with("http://")
-            || prompt[index..].starts_with("https://")
             || prompt[index..].starts_with("data:image/")
             || prompt[index..].starts_with("~/")
-            || ch == '/'
+            || (ch == '/' && !index_is_inside_http_url_token(prompt, index))
         {
             parse_unquoted_token(prompt, index)
                 .filter(|token| source_is_supported_embedded_image_prompt(&token.value))
@@ -418,7 +414,7 @@ pub(crate) fn image_source_spans(prompt: &str, workdir: &Path) -> Result<Vec<Ima
             && (source_is_supported_leading_image_prompt(&token.value)
                 || source_is_supported_embedded_image_prompt(&token.value))
         {
-            let image = resolve_image_source(&token.value, workdir)?;
+            let image = resolve_image_source(&token.value, cwd)?;
             spans.push(ImageSourceSpan {
                 start: token.start,
                 end: token.end,
@@ -430,6 +426,16 @@ pub(crate) fn image_source_spans(prompt: &str, workdir: &Path) -> Result<Vec<Ima
         cursor = index + ch.len_utf8();
     }
     Ok(spans)
+}
+
+pub(crate) fn index_is_inside_http_url_token(prompt: &str, index: usize) -> bool {
+    let token_start = prompt[..index]
+        .char_indices()
+        .rev()
+        .find_map(|(index, ch)| ch.is_whitespace().then_some(index + ch.len_utf8()))
+        .unwrap_or(0);
+    let token_prefix = &prompt[token_start..index];
+    token_prefix.contains("http:") || token_prefix.contains("https:")
 }
 
 pub(crate) fn looks_like_prose_prefixed_path(source: &str) -> bool {
@@ -476,6 +482,9 @@ pub(crate) mod tests {
         ));
         assert!(prompt_starts_with_supported_image_path(
             "/tmp/image.bmp describe"
+        ));
+        assert!(!prompt_starts_with_supported_image_path(
+            "https://example.com/image.png describe"
         ));
         assert!(!prompt_starts_with_supported_image_path("/unknown"));
         assert!(!prompt_starts_with_supported_image_path(
@@ -583,6 +592,44 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn http_urls_remain_text_during_prompt_extraction() {
+        let prompt = concat!(
+            "https://example.com/image.png describe it\n",
+            "See https://developers.openai.com/codex/hooks for docs\n",
+            "Markdown ![diagram](https://example.com/diagram.jpg) and ",
+            "`https://example.com/quoted.png` stay text"
+        );
+        let message = prompt_message_from_text(prompt, Path::new("."), &ModelMetadata::default())
+            .expect("message");
+
+        let Message::User { content, .. } = message else {
+            panic!("user message");
+        };
+        assert_eq!(content, vec![UserContentBlock::text(prompt)]);
+    }
+
+    #[test]
+    fn data_image_url_prompt_still_becomes_image_url() {
+        let message = prompt_message_from_text(
+            "data:image/png;base64,aGVsbG8= describe it",
+            Path::new("."),
+            &ModelMetadata::default(),
+        )
+        .expect("message");
+
+        let Message::User { content, .. } = message else {
+            panic!("user message");
+        };
+        assert_eq!(
+            content,
+            vec![
+                UserContentBlock::image_url("data:image/png;base64,aGVsbG8="),
+                UserContentBlock::text("describe it"),
+            ]
+        );
+    }
+
+    #[test]
     fn creates_image_url_message_from_explicit_inputs() {
         let message = prompt_message_from_inputs(
             "describe it",
@@ -645,7 +692,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn resolves_workdir_relative_and_quoted_image_paths() {
+    fn resolves_cwd_relative_and_quoted_image_paths() {
         let temp = tempfile::tempdir().expect("temp");
         let path = temp.path().join("image one.webp");
         fs::write(&path, [1]).expect("image");

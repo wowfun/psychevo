@@ -147,8 +147,8 @@ pub fn set_provider_api_key(
             "provider API key must not contain newlines".to_string(),
         ));
     }
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_run_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
     let config_entry = loaded.config.provider.get(&provider_id);
     let built_in = built_in_provider(&provider_id);
     if built_in.is_none() && config_entry.is_none() {

@@ -14,7 +14,7 @@ pub(crate) use serde_json::{Value, json};
 pub(crate) use crate::compaction::load_projected_messages;
 pub(crate) use crate::config::{load_project_context_instruction_mode, selected_configured_model};
 pub(crate) use crate::error::{Error, Result};
-pub(crate) use crate::paths::canonical_workdir;
+pub(crate) use crate::paths::canonical_cwd;
 pub(crate) use crate::project_instructions::load_project_instructions;
 pub(crate) use crate::prompt_assembly::runtime_environment_prompt;
 pub(crate) use crate::prompt_templates;

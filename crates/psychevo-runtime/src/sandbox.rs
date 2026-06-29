@@ -1,6 +1,6 @@
 use crate::config::load_run_config;
 use crate::error::{Error, Result};
-use crate::paths::canonical_workdir;
+use crate::paths::canonical_cwd;
 use crate::types::{RunMode, RunOptions};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -171,7 +171,7 @@ impl SandboxPolicy {
 
     pub(crate) fn from_config(
         config: &SandboxConfig,
-        workdir: &Path,
+        cwd: &Path,
         run_mode: RunMode,
         env: &BTreeMap<String, String>,
     ) -> Result<Self> {
@@ -188,13 +188,13 @@ impl SandboxPolicy {
             config.mode
         };
         let backend = backend_for_platform();
-        let workdir = canonicalize_existing(workdir)?;
+        let cwd = canonicalize_existing(cwd)?;
 
         let mut writable_roots = Vec::new();
         if matches!(effective_mode, SandboxMode::WorkspaceWrite) {
-            push_unique(&mut writable_roots, workdir.clone());
+            push_unique(&mut writable_roots, cwd.clone());
             for root in &config.writable_roots {
-                let root = path_from_config(root, workdir.as_path());
+                let root = path_from_config(root, cwd.as_path());
                 let root = canonicalize_deepest_existing(&root)?;
                 push_unique(&mut writable_roots, root);
             }
@@ -382,16 +382,16 @@ fn merge_paths(target: &mut Vec<PathBuf>, paths: Vec<PathBuf>) {
 }
 
 pub fn sandbox_status_value(options: &RunOptions, mode: RunMode) -> Result<Value> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_run_config(options, &workdir)?;
-    let policy = SandboxPolicy::from_config(&loaded.config.sandbox, &workdir, mode, &loaded.env)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
+    let policy = SandboxPolicy::from_config(&loaded.config.sandbox, &cwd, mode, &loaded.env)?;
     Ok(policy.status_value())
 }
 
 pub fn sandbox_status_text(options: &RunOptions, mode: RunMode) -> Result<String> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_run_config(options, &workdir)?;
-    let policy = SandboxPolicy::from_config(&loaded.config.sandbox, &workdir, mode, &loaded.env)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
+    let policy = SandboxPolicy::from_config(&loaded.config.sandbox, &cwd, mode, &loaded.env)?;
     Ok(policy.status_text())
 }
 
@@ -570,12 +570,12 @@ fn platform_name() -> String {
     }
 }
 
-fn path_from_config(raw: &str, workdir: &Path) -> PathBuf {
+fn path_from_config(raw: &str, cwd: &Path) -> PathBuf {
     let path = PathBuf::from(raw);
     if path.is_absolute() {
         path
     } else {
-        workdir.join(path)
+        cwd.join(path)
     }
 }
 

@@ -17,8 +17,8 @@ pub(crate) fn aliases_and_auto_resolution_use_local_env_map() {
     .expect("config");
     fs::write(config_dir.join(".env"), "DASHSCOPE_API_KEY=qwen-key\n").expect("env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "dashscope");
     assert_eq!(resolved.api_key_env.as_deref(), Some("DASHSCOPE_API_KEY"));
@@ -48,7 +48,7 @@ pub(crate) fn aliases_and_auto_resolution_use_local_env_map() {
         "DEEPSEEK_API_KEY=deepseek-key\nOPENAI_API_KEY=openai-key\n",
     )
     .expect("env");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("auto");
     assert_eq!(resolved.provider, "openrouter");
 }
@@ -58,7 +58,7 @@ pub(crate) fn explicit_config_replaces_home_and_project_config_but_loads_project
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);
     let explicit_dir = temp.path().join("explicit");
-    let project_dir = options.workdir.join(".psychevo");
+    let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&explicit_dir).expect("explicit dir");
     fs::create_dir_all(&project_dir).expect("project dir");
     fs::create_dir_all(home_dir(&temp)).expect("home dir");
@@ -94,8 +94,8 @@ api_key_env = "CUSTOM_KEY"
     fs::write(project_dir.join(".env"), "CUSTOM_KEY=project-key\n").expect("project env");
     options.config_path = Some(explicit);
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "custom");
     assert_eq!(resolved.model, "local");
@@ -108,7 +108,7 @@ pub(crate) fn explicit_config_agent_backends_still_load_project_overlay() {
     let options = base_options(&temp);
     let home = home_dir(&temp);
     let explicit_dir = temp.path().join("explicit");
-    let project_dir = options.workdir.join(".psychevo");
+    let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&home).expect("home dir");
     fs::create_dir_all(&explicit_dir).expect("explicit dir");
     fs::create_dir_all(&project_dir).expect("project dir");
@@ -156,7 +156,7 @@ args = ["acp"]
         ),
     ]);
 
-    let backends = load_agent_backend_configs(&home, &options.workdir, &env).expect("backends");
+    let backends = load_agent_backend_configs(&home, &options.cwd, &env).expect("backends");
 
     assert!(backends.contains_key("cursor"));
     assert!(backends.contains_key("opencode"));
@@ -208,8 +208,8 @@ base_url = "http://127.0.0.1:1234/v1"
         ),
     ]));
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "custom");
     assert_eq!(resolved.model, "local");
@@ -219,8 +219,8 @@ base_url = "http://127.0.0.1:1234/v1"
 pub(crate) fn missing_home_config_rejects_before_agent_start() {
     let temp = tempdir().expect("temp");
     let options = base_options(&temp);
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let err = load_run_config(&options, &workdir).expect_err("missing home");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let err = load_run_config(&options, &cwd).expect_err("missing home");
     assert!(err.to_string().contains("pevo init"));
 }
 
@@ -236,8 +236,8 @@ pub(crate) fn config_jsonc_without_toml_is_ignored_and_missing_home_rejects() {
     )
     .expect("jsonc");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let err = load_run_config(&options, &workdir).expect_err("missing toml");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let err = load_run_config(&options, &cwd).expect_err("missing toml");
     assert!(err.to_string().contains("pevo init"));
     assert!(err.to_string().contains("config.toml"));
     assert!(!err.to_string().contains("config.jsonc"));
@@ -260,8 +260,8 @@ pub(crate) fn config_jsonc_is_ignored_when_toml_exists() {
     )
     .expect("jsonc");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    load_run_config(&options, &workdir).expect("config.jsonc ignored");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    load_run_config(&options, &cwd).expect("config.jsonc ignored");
 }
 
 #[test]
@@ -272,24 +272,20 @@ pub(crate) fn workspace_root_defaults_to_home_workspaces() {
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(config_dir.join("config.toml"), "").expect("toml config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let root = resolve_workspace_root(&options, &workdir).expect("workspace root");
-    let default_workdir =
-        resolve_default_workspace_workdir(&options, &workdir).expect("default workspace");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let root = resolve_workspace_root(&options, &cwd).expect("workspace root");
+    let default_cwd = resolve_default_workspace_cwd(&options, &cwd).expect("default workspace");
 
     assert_eq!(root, temp.path().join("workspaces"));
-    assert_eq!(
-        default_workdir,
-        temp.path().join("workspaces").join("general")
-    );
+    assert_eq!(default_cwd, temp.path().join("workspaces").join("general"));
 }
 
 #[test]
-pub(crate) fn workspace_root_uses_profile_config_without_workdir_overlay() {
+pub(crate) fn workspace_root_uses_profile_config_without_cwd_overlay() {
     let temp = tempdir().expect("temp");
     let options = base_options(&temp);
     let config_dir = home_dir(&temp);
-    let project_dir = options.workdir.join(".psychevo");
+    let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&config_dir).expect("config dir");
     fs::create_dir_all(&project_dir).expect("project dir");
     write_config(
@@ -309,8 +305,8 @@ root = "~/ignored-workspaces"
     )
     .expect("project config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let root = resolve_workspace_root(&options, &workdir).expect("workspace root");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let root = resolve_workspace_root(&options, &cwd).expect("workspace root");
 
     assert_eq!(root, temp.path().join("shared-workspaces"));
 }
@@ -330,8 +326,8 @@ root = "  "
     )
     .expect("home config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let err = resolve_workspace_root(&options, &workdir).expect_err("empty root");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let err = resolve_workspace_root(&options, &cwd).expect_err("empty root");
 
     assert!(
         err.to_string()
@@ -354,15 +350,15 @@ instructions = "cwd"
     )
     .expect("toml config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     assert_eq!(
         loaded.config.project_context.instructions,
         ProjectContextInstructionMode::Cwd
     );
 
     options.project_context_override = Some(ProjectContextInstructionMode::Off);
-    let loaded = load_run_config(&options, &workdir).expect("override");
+    let loaded = load_run_config(&options, &cwd).expect("override");
     assert_eq!(
         loaded.config.project_context.instructions,
         ProjectContextInstructionMode::Off
@@ -373,10 +369,10 @@ instructions = "cwd"
 pub(crate) fn project_context_lightweight_load_does_not_require_home_config() {
     let temp = tempdir().expect("temp");
     let options = base_options(&temp);
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".psychevo")).expect("project config dir");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".psychevo")).expect("project config dir");
     write_config(
-        workdir.join(".psychevo/config.toml"),
+        cwd.join(".psychevo/config.toml"),
         r#"
 [project_context]
 instructions = "cwd"
@@ -384,9 +380,9 @@ instructions = "cwd"
     )
     .expect("project config");
 
-    let mode = load_project_context_instruction_mode(&options, &workdir).expect("mode");
+    let mode = load_project_context_instruction_mode(&options, &cwd).expect("mode");
     assert_eq!(mode, ProjectContextInstructionMode::Cwd);
-    assert!(load_run_config(&options, &workdir).is_err());
+    assert!(load_run_config(&options, &cwd).is_err());
 }
 
 #[test]
@@ -404,8 +400,8 @@ instructions = "repo-root"
     )
     .expect("toml config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let err = load_run_config(&options, &workdir).expect_err("invalid context mode");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let err = load_run_config(&options, &cwd).expect_err("invalid context mode");
     assert!(
         err.to_string()
             .contains("project_context.instructions must be git-root, cwd, or off")
@@ -432,8 +428,8 @@ reasoning_effort = "high"
     )
     .expect("config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.reasoning_effort.as_deref(), Some("high"));
 

@@ -123,7 +123,7 @@ channel = "wechat"
 label = "Personal WeChat"
 transport = "polling"
 enabled = true
-workdir = "/tmp/project"
+cwd = "/tmp/project"
 model = "provider/model"
 credential_env = "WECHAT_BOT_TOKEN"
 account_env = "WECHAT_ACCOUNT_ID"
@@ -173,7 +173,7 @@ allow_users = ["existing-user"]
 
     let config = fs::read_to_string(config_dir.join("config.toml")).expect("config");
     assert!(config.contains("label = \"Personal WeChat\""));
-    assert!(config.contains("workdir = \"/tmp/project\""));
+    assert!(config.contains("cwd = \"/tmp/project\""));
     assert!(config.contains("model = \"provider/model\""));
     assert!(config.contains("allow_users = [\"existing-user\"]"));
     let env = fs::read_to_string(config_dir.join(".env")).expect("env");
@@ -196,7 +196,7 @@ channel = "wechat"
 label = "Personal WeChat"
 transport = "polling"
 enabled = false
-workdir = "/tmp/project"
+cwd = "/tmp/project"
 model = "provider/model"
 permission_mode = "dontAsk"
 require_mention = true
@@ -219,7 +219,7 @@ allow_groups = ["old-group"]
         id: "wechat".to_string(),
         label: Some(" Ops WeChat ".to_string()),
         enabled: Some(true),
-        workdir: Some("".to_string()),
+        cwd: Some("".to_string()),
         model: Some("".to_string()),
         permission_mode: Some("default".to_string()),
         require_mention: Some(false),
@@ -273,7 +273,7 @@ allow_groups = ["old-group"]
             .collect::<Vec<_>>(),
         vec!["team", "ops"]
     );
-    assert!(connection.get("workdir").is_none());
+    assert!(connection.get("cwd").is_none());
     assert!(connection.get("model").is_none());
     assert!(connection.get("permission_mode").is_none());
 
@@ -287,7 +287,7 @@ allow_groups = ["old-group"]
         id: "wechat".to_string(),
         label: None,
         enabled: None,
-        workdir: None,
+        cwd: None,
         model: None,
         permission_mode: None,
         require_mention: None,
@@ -311,7 +311,7 @@ allow_groups = ["old-group"]
         id: "missing".to_string(),
         label: None,
         enabled: None,
-        workdir: None,
+        cwd: None,
         model: None,
         permission_mode: None,
         require_mention: None,

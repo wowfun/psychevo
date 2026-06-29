@@ -52,10 +52,10 @@ pub(crate) fn sqlite_schema_v21_rejects_unknown_state_database() {
 pub(crate) fn sqlite_schema_v23_stores_gateway_coordination_without_runtime_debug() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
     let message_seq = store
         .append_message_with_undo_snapshot_and_context_evidence(
@@ -103,13 +103,13 @@ pub(crate) fn sqlite_schema_v23_stores_gateway_coordination_without_runtime_debu
 pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let first_session = store
-        .create_session_with_metadata(&workdir, "acp", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "acp", "model", "provider", None)
         .expect("first session");
     let second_session = store
-        .create_session_with_metadata(&workdir, "acp", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "acp", "model", "provider", None)
         .expect("second session");
 
     let first = store
@@ -201,16 +201,16 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
 pub(crate) fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let wechat_session = store
-        .create_session_with_metadata(&workdir, "channel", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "channel", "model", "provider", None)
         .expect("wechat session");
     let telegram_session = store
-        .create_session_with_metadata(&workdir, "channel", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "channel", "model", "provider", None)
         .expect("telegram session");
     let web_session = store
-        .create_session_with_metadata(&workdir, "web", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "web", "model", "provider", None)
         .expect("web session");
 
     store
@@ -271,10 +271,10 @@ pub(crate) fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
 pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
 
     let first = store
@@ -352,13 +352,13 @@ pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
 pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let first = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("second");
     store
         .append_message(&first, &user_message("hello", 1))
@@ -367,7 +367,7 @@ pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
     store.archive_session(&first).expect("archive");
     assert_eq!(
         store
-            .list_sessions_for_workdir_with_sources(&workdir, &["run"])
+            .list_sessions_for_cwd_with_sources(&cwd, &["run"])
             .expect("active")
             .iter()
             .map(|session| session.id.as_str())
@@ -376,7 +376,7 @@ pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
     );
     assert_eq!(
         store
-            .list_archived_sessions_for_workdir_with_sources(&workdir, &["run"])
+            .list_archived_sessions_for_cwd_with_sources(&cwd, &["run"])
             .expect("archived")
             .iter()
             .map(|session| session.id.as_str())
@@ -386,17 +386,13 @@ pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
 
     store.archive_session(&second).expect("archive second");
     assert_eq!(
-        store
-            .latest_run_session_for_workdir(&workdir)
-            .expect("latest"),
+        store.latest_run_session_for_cwd(&cwd).expect("latest"),
         None
     );
 
     store.restore_session(&first).expect("restore");
     assert_eq!(
-        store
-            .latest_run_session_for_workdir(&workdir)
-            .expect("latest"),
+        store.latest_run_session_for_cwd(&cwd).expect("latest"),
         Some(first.clone())
     );
 
@@ -409,13 +405,13 @@ pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
 pub(crate) fn sqlite_resume_session_is_non_mutating_and_append_updates_recency() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let first = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("second");
     let conn = Connection::open(&db).expect("db");
     set_session_times(&conn, &first, 1_000, 1_000);
@@ -425,9 +421,7 @@ pub(crate) fn sqlite_resume_session_is_non_mutating_and_append_updates_recency()
 
     assert_eq!(session_updated_at(&store, &first), 1_000);
     assert_eq!(
-        store
-            .latest_run_session_for_workdir(&workdir)
-            .expect("latest"),
+        store.latest_run_session_for_cwd(&cwd).expect("latest"),
         Some(second.clone())
     );
 
@@ -437,9 +431,7 @@ pub(crate) fn sqlite_resume_session_is_non_mutating_and_append_updates_recency()
 
     assert!(session_updated_at(&store, &first) > 2_000);
     assert_eq!(
-        store
-            .latest_run_session_for_workdir(&workdir)
-            .expect("latest"),
+        store.latest_run_session_for_cwd(&cwd).expect("latest"),
         Some(first)
     );
 }
@@ -448,13 +440,13 @@ pub(crate) fn sqlite_resume_session_is_non_mutating_and_append_updates_recency()
 pub(crate) fn sqlite_archive_restore_preserve_activity_order() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let first = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("second");
     let conn = Connection::open(&db).expect("db");
     set_session_times(&conn, &first, 1_000, 1_000);
@@ -467,7 +459,7 @@ pub(crate) fn sqlite_archive_restore_preserve_activity_order() {
     assert_eq!(session_updated_at(&store, &first), 1_000);
     assert_eq!(
         store
-            .list_sessions_for_workdir_with_sources(&workdir, &["run"])
+            .list_sessions_for_cwd_with_sources(&cwd, &["run"])
             .expect("active")
             .iter()
             .map(|session| session.id.as_str())
@@ -475,9 +467,7 @@ pub(crate) fn sqlite_archive_restore_preserve_activity_order() {
         vec![second.as_str(), first.as_str()]
     );
     assert_eq!(
-        store
-            .latest_run_session_for_workdir(&workdir)
-            .expect("latest"),
+        store.latest_run_session_for_cwd(&cwd).expect("latest"),
         Some(second)
     );
 }
@@ -486,13 +476,13 @@ pub(crate) fn sqlite_archive_restore_preserve_activity_order() {
 pub(crate) fn sqlite_append_to_archived_session_reopens_and_updates_recency() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let first = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("second");
     let conn = Connection::open(&db).expect("db");
     set_session_times(&conn, &first, 1_000, 1_000);
@@ -516,9 +506,7 @@ pub(crate) fn sqlite_append_to_archived_session_reopens_and_updates_recency() {
     assert_eq!(summary.end_reason, None);
     assert_eq!(summary.archived_at_ms, None);
     assert_eq!(
-        store
-            .latest_run_session_for_workdir(&workdir)
-            .expect("latest"),
+        store.latest_run_session_for_cwd(&cwd).expect("latest"),
         Some(first)
     );
 }
@@ -548,10 +536,10 @@ pub(crate) fn session_updated_at(store: &SqliteStore, session_id: &str) -> i64 {
 pub(crate) fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
 
     let prompt_seq = store
@@ -629,10 +617,10 @@ pub(crate) fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages(
 pub(crate) fn sqlite_user_message_display_metadata_overrides_content_text() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let display_text = "[Image #1] describe it";
     let metadata = json!({
@@ -679,16 +667,16 @@ pub(crate) fn sqlite_user_message_display_metadata_overrides_content_text() {
 pub(crate) fn sqlite_agent_edges_round_trip_and_close_subtree() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let parent = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("parent");
     let child = store
-        .create_child_session_with_metadata(&parent, &workdir, "agent", "model", "provider", None)
+        .create_child_session_with_metadata(&parent, &cwd, "agent", "model", "provider", None)
         .expect("child");
     let grandchild = store
-        .create_child_session_with_metadata(&child, &workdir, "agent", "model", "provider", None)
+        .create_child_session_with_metadata(&child, &cwd, "agent", "model", "provider", None)
         .expect("grandchild");
     store
         .upsert_agent_edge(
@@ -723,10 +711,10 @@ pub(crate) fn sqlite_agent_edges_round_trip_and_close_subtree() {
 pub(crate) fn sqlite_context_evidence_cascades_with_prompt_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
     let prompt_seq = store
         .append_message_with_undo_snapshot_and_context_evidence(

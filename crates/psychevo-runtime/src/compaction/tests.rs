@@ -60,12 +60,12 @@ pub(crate) mod tests {
 
     fn auto_check_options(
         db_path: PathBuf,
-        workdir: PathBuf,
+        cwd: PathBuf,
         psychevo_home: PathBuf,
     ) -> AutoCompactionCheckOptions {
         AutoCompactionCheckOptions {
             state: StateRuntime::open(&db_path).expect("state runtime"),
-            workdir,
+            cwd,
             session: "session".to_string(),
             config_path: None,
             model: Some("mock/model".to_string()),
@@ -81,9 +81,9 @@ pub(crate) mod tests {
     fn auto_compaction_check_uses_configured_usage_threshold() {
         let temp = tempfile::tempdir().expect("temp");
         let home = temp.path().join("home");
-        let workdir = temp.path().join("work");
+        let cwd = temp.path().join("work");
         fs::create_dir_all(&home).expect("home");
-        fs::create_dir_all(&workdir).expect("workdir");
+        fs::create_dir_all(&cwd).expect("cwd");
         fs::write(
             home.join("config.toml"),
             r#"[compression]
@@ -92,7 +92,7 @@ reserve_tokens = 5000
 "#,
         )
         .expect("config");
-        let options = auto_check_options(home.join("state.db"), workdir, home);
+        let options = auto_check_options(home.join("state.db"), cwd, home);
 
         assert!(
             !auto_compaction_due_for_snapshot(&options, &snapshot(69_000, Some(100_000)))

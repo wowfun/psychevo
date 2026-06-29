@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-pub(crate) struct WriteTool(WorkdirTool);
+pub(crate) struct WriteTool(CwdTool);
 
 impl WriteTool {
-    pub(crate) fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
-        Self(WorkdirTool::with_context(workdir, context))
+    pub(crate) fn new(cwd: PathBuf, context: ToolRuntimeContext) -> Self {
+        Self(CwdTool::with_context(cwd, context))
     }
 }
 
@@ -55,12 +55,12 @@ impl ToolBinding for WriteTool {
 }
 
 #[cfg(test)]
-pub(crate) fn write_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn write_tool_impl(tool: CwdTool, args: Value) -> Result<Value> {
     write_tool_impl_for_call(tool, None, args)
 }
 
 pub(crate) fn write_tool_impl_for_call(
-    tool: WorkdirTool,
+    tool: CwdTool,
     tool_call_id: Option<&str>,
     args: Value,
 ) -> Result<Value> {
@@ -92,9 +92,9 @@ pub(crate) fn write_tool_impl_for_call(
 pub(crate) mod write_tool_tests {
     pub(crate) use super::*;
 
-    fn workdir_tool(path: &Path) -> WorkdirTool {
-        WorkdirTool::with_context(
-            path.canonicalize().expect("canonical workdir"),
+    fn cwd_tool(path: &Path) -> CwdTool {
+        CwdTool::with_context(
+            path.canonicalize().expect("canonical cwd"),
             ToolRuntimeContext {
                 task_id: uuid::Uuid::now_v7().to_string(),
                 lsp: LspConfig {
@@ -112,9 +112,9 @@ pub(crate) mod write_tool_tests {
         )
     }
 
-    fn workdir_tool_with_task(path: &Path, task_id: &str) -> WorkdirTool {
-        WorkdirTool::with_context(
-            path.canonicalize().expect("canonical workdir"),
+    fn cwd_tool_with_task(path: &Path, task_id: &str) -> CwdTool {
+        CwdTool::with_context(
+            path.canonicalize().expect("canonical cwd"),
             ToolRuntimeContext {
                 task_id: task_id.to_string(),
                 lsp: LspConfig {
@@ -132,7 +132,7 @@ pub(crate) mod write_tool_tests {
         )
     }
 
-    fn workdir_tool_with_sandbox(path: &Path) -> WorkdirTool {
+    fn cwd_tool_with_sandbox(path: &Path) -> CwdTool {
         let env = BTreeMap::new();
         let policy = crate::sandbox::SandboxPolicy::from_config(
             &crate::sandbox::SandboxConfig {
@@ -147,8 +147,8 @@ pub(crate) mod write_tool_tests {
             &env,
         )
         .expect("sandbox policy");
-        WorkdirTool::with_context(
-            path.canonicalize().expect("canonical workdir"),
+        CwdTool::with_context(
+            path.canonicalize().expect("canonical cwd"),
             ToolRuntimeContext {
                 sandbox_policy: policy,
                 ..ToolRuntimeContext::default()
@@ -156,7 +156,7 @@ pub(crate) mod write_tool_tests {
         )
     }
 
-    fn workdir_tool_with_shell_tmp(path: &Path, tmp: &Path) -> WorkdirTool {
+    fn cwd_tool_with_shell_tmp(path: &Path, tmp: &Path) -> CwdTool {
         let env = BTreeMap::from([("TMPDIR".to_string(), tmp.display().to_string())]);
         let policy = crate::sandbox::SandboxPolicy::from_config(
             &crate::sandbox::SandboxConfig {
@@ -171,8 +171,8 @@ pub(crate) mod write_tool_tests {
             &env,
         )
         .expect("sandbox policy");
-        WorkdirTool::with_context(
-            path.canonicalize().expect("canonical workdir"),
+        CwdTool::with_context(
+            path.canonicalize().expect("canonical cwd"),
             ToolRuntimeContext {
                 sandbox_policy: policy,
                 ..ToolRuntimeContext::default()
@@ -203,7 +203,7 @@ pub(crate) mod write_tool_tests {
     fn write_tool_creates_parent_and_returns_lint() {
         let temp = tempfile::tempdir().expect("temp");
         let value = write_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({"path": "nested/config.json", "content": "{\"ok\": true}\n"}),
         )
         .expect("write");
@@ -221,7 +221,7 @@ pub(crate) mod write_tool_tests {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("bad.txt"), [0xff, 0xfe]).expect("seed");
         let err = write_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({"path": "bad.txt", "content": "replacement\n"}),
         )
         .expect_err("invalid preexisting utf8");
@@ -232,7 +232,7 @@ pub(crate) mod write_tool_tests {
     fn write_tool_warns_after_partial_read() {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("partial.txt"), "one\ntwo\nthree\n").expect("seed");
-        let tool = workdir_tool_with_task(temp.path(), "partial-read-test");
+        let tool = cwd_tool_with_task(temp.path(), "partial-read-test");
         read_tool_impl(
             tool.clone(),
             json!({"path": "partial.txt", "offset": 1, "limit": 1}),
@@ -250,8 +250,8 @@ pub(crate) mod write_tool_tests {
     fn write_tool_warns_after_sibling_write() {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("shared.txt"), "one\n").expect("seed");
-        let reader = workdir_tool_with_task(temp.path(), "reader-agent");
-        let writer = workdir_tool_with_task(temp.path(), "writer-agent");
+        let reader = cwd_tool_with_task(temp.path(), "reader-agent");
+        let writer = cwd_tool_with_task(temp.path(), "writer-agent");
         read_tool_impl(reader.clone(), json!({"path": "shared.txt"})).expect("read");
         write_tool_impl(writer, json!({"path": "shared.txt", "content": "two\n"}))
             .expect("sibling write");
@@ -265,7 +265,7 @@ pub(crate) mod write_tool_tests {
         let temp = tempfile::tempdir().expect("temp");
         let outside = tempfile::tempdir().expect("outside");
         let err = write_tool_impl(
-            workdir_tool_with_sandbox(temp.path()),
+            cwd_tool_with_sandbox(temp.path()),
             json!({
                 "path": outside.path().join("blocked.txt").display().to_string(),
                 "content": "nope\n",
@@ -283,7 +283,7 @@ pub(crate) mod write_tool_tests {
         let shell_tmp = tempfile::tempdir().expect("shell tmp");
         let target = shell_tmp.path().join("blocked.txt");
         let err = write_tool_impl(
-            workdir_tool_with_shell_tmp(temp.path(), shell_tmp.path()),
+            cwd_tool_with_shell_tmp(temp.path(), shell_tmp.path()),
             json!({
                 "path": target.display().to_string(),
                 "content": "nope\n",

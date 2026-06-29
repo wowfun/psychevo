@@ -1,13 +1,13 @@
 impl LspClient {
     pub(crate) fn start(
         command: LspServerCommand,
-        workdir: PathBuf,
+        cwd: PathBuf,
         timeout: Duration,
     ) -> Result<Self> {
         let mut process = std::process::Command::new(&command.program);
         process
             .args(&command.args)
-            .current_dir(&workdir)
+            .current_dir(&cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -36,7 +36,7 @@ impl LspClient {
         });
         let client = Self {
             command,
-            workdir,
+            cwd,
             child: Mutex::new(Some(child)),
             stdin: Mutex::new(Some(stdin)),
             rx: Mutex::new(rx),
@@ -71,14 +71,14 @@ impl LspClient {
                     "method": "initialize",
                     "params": {
                         "processId": null,
-                        "rootUri": file_uri(&self.workdir),
+                        "rootUri": file_uri(&self.cwd),
                         "capabilities": {
                             "textDocument": {
                                 "publishDiagnostics": { "relatedInformation": false },
                                 "diagnostic": { "dynamicRegistration": true }
                             }
                         },
-                        "workspaceFolders": [{ "uri": file_uri(&self.workdir), "name": "workspace" }],
+                        "workspaceFolders": [{ "uri": file_uri(&self.cwd), "name": "workspace" }],
                         "clientInfo": { "name": "psychevo", "version": "0" }
                     }
                 }),
@@ -454,7 +454,7 @@ pub(crate) fn hash_content(content: &str) -> u64 {
 }
 
 pub(crate) fn emit_lsp_status(
-    tool: &WorkdirTool,
+    tool: &CwdTool,
     status: &str,
     server_id: Option<&str>,
     path: Option<&Path>,
@@ -471,7 +471,7 @@ pub(crate) fn emit_lsp_status(
     }
     event.insert(
         "workspace".to_string(),
-        json!(tool.workdir().display().to_string()),
+        json!(tool.cwd().display().to_string()),
     );
     if let Some(path) = path {
         event.insert("path".to_string(), json!(tool.relative(path)));
@@ -496,7 +496,7 @@ pub(crate) fn command_available(program: &str) -> bool {
 #[cfg(test)]
 pub(crate) fn lsp_diagnostics_with_command(
     server: &LspServerCommand,
-    workdir: &Path,
+    cwd: &Path,
     path: &Path,
     content: &str,
     timeout: Duration,
@@ -504,7 +504,7 @@ pub(crate) fn lsp_diagnostics_with_command(
     let uri = file_uri(path);
     let mut child = std::process::Command::new(&server.program)
         .args(&server.args)
-        .current_dir(workdir)
+        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -535,14 +535,14 @@ pub(crate) fn lsp_diagnostics_with_command(
             "method": "initialize",
             "params": {
                 "processId": null,
-                "rootUri": file_uri(workdir),
+                "rootUri": file_uri(cwd),
                 "capabilities": {
                     "textDocument": {
                         "publishDiagnostics": { "relatedInformation": false },
                         "diagnostic": { "dynamicRegistration": true }
                     }
                 },
-                "workspaceFolders": [{ "uri": file_uri(workdir), "name": "workspace" }],
+                "workspaceFolders": [{ "uri": file_uri(cwd), "name": "workspace" }],
                 "clientInfo": { "name": "psychevo", "version": "0" }
             }
         }),

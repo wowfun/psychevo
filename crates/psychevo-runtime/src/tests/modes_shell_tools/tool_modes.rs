@@ -38,9 +38,9 @@ pub(crate) async fn exec_command_prepends_managed_tool_path() {
     use std::os::unix::fs::PermissionsExt;
 
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let tools_dir = temp.path().join("tools");
-    fs::create_dir_all(&workdir).expect("workdir");
+    fs::create_dir_all(&cwd).expect("cwd");
     fs::create_dir_all(&tools_dir).expect("tools");
     let rg = tools_dir.join("rg");
     fs::write(&rg, "#!/bin/sh\nprintf 'managed-rg\\n'\n").expect("fake rg");
@@ -48,7 +48,7 @@ pub(crate) async fn exec_command_prepends_managed_tool_path() {
     permissions.set_mode(0o755);
     fs::set_permissions(&rg, permissions).expect("chmod");
     let tools = crate::tools::coding_core_tools_for_mode_with_context(
-        &workdir,
+        &cwd,
         RunMode::Default,
         crate::tools::ToolRuntimeContext {
             task_id: "exec-path-test".to_string(),
@@ -517,8 +517,8 @@ pub(crate) async fn wait_until(timeout: Duration, condition: impl Fn() -> bool) 
 #[tokio::test]
 pub(crate) async fn user_shell_streams_exec_command_events_without_provider_config() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_for_stream = Arc::clone(&captured);
     let stream: RunStreamSink = Arc::new(move |event| {
@@ -531,7 +531,7 @@ pub(crate) async fn user_shell_streams_exec_command_events_without_provider_conf
 
     let result = run_user_shell_command_streaming_controlled(
         UserShellOptions {
-            workdir: workdir.clone(),
+            cwd: cwd.clone(),
             command: "printf 'shell ok\\n'".to_string(),
             context: None,
             inject_into: None,
@@ -569,15 +569,15 @@ pub(crate) async fn user_shell_streams_exec_command_events_without_provider_conf
 #[tokio::test]
 pub(crate) async fn user_shell_abort_returns_aborted_result() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let stream: RunStreamSink = Arc::new(|_| {});
     let (handle, control) = run_control();
     handle.abort();
 
     let result = run_user_shell_command_streaming_controlled(
         UserShellOptions {
-            workdir,
+            cwd,
             command: "sleep 5".to_string(),
             context: None,
             inject_into: None,
@@ -596,15 +596,15 @@ pub(crate) async fn user_shell_abort_returns_aborted_result() {
 #[tokio::test]
 pub(crate) async fn user_shell_context_persists_user_xml_record() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    let context = configured_user_shell_context(&temp, &workdir);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let context = configured_user_shell_context(&temp, &cwd);
     let stream: RunStreamSink = Arc::new(|_| {});
     let (_handle, control) = run_control();
 
     let result = run_user_shell_command_streaming_controlled(
         UserShellOptions {
-            workdir: workdir.clone(),
+            cwd: cwd.clone(),
             command: "printf 'context-ok\\n'".to_string(),
             context: Some(context),
             inject_into: None,
@@ -654,12 +654,12 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
         Some("printf 'context-ok\\n'")
     );
 
-    let mut resume_context = configured_user_shell_context(&temp, &workdir);
+    let mut resume_context = configured_user_shell_context(&temp, &cwd);
     resume_context.session = Some(session_id.to_string());
     let (_handle, control) = run_control();
     let resumed = run_user_shell_command_streaming_controlled(
         UserShellOptions {
-            workdir,
+            cwd,
             command: "printf 'again\\n'".to_string(),
             context: Some(resume_context),
             inject_into: None,
@@ -676,9 +676,9 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
 #[tokio::test]
 pub(crate) async fn user_shell_context_missing_config_rejects_before_execution() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    let marker = workdir.join("marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let marker = cwd.join("marker");
     let context = UserShellContextOptions {
         state: StateRuntime::open(temp.path().join("state.db")).expect("state runtime"),
         session: None,
@@ -698,7 +698,7 @@ pub(crate) async fn user_shell_context_missing_config_rejects_before_execution()
     let (_handle, control) = run_control();
     let err = run_user_shell_command_streaming_controlled(
         UserShellOptions {
-            workdir,
+            cwd,
             command: "touch marker".to_string(),
             context: Some(context),
             inject_into: None,
@@ -719,15 +719,15 @@ pub(crate) async fn user_shell_context_missing_config_rejects_before_execution()
 #[tokio::test]
 pub(crate) async fn user_shell_context_records_bounded_truncated_output() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    let context = configured_user_shell_context(&temp, &workdir);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let context = configured_user_shell_context(&temp, &cwd);
     let stream: RunStreamSink = Arc::new(|_| {});
     let (_handle, control) = run_control();
 
     let result = run_user_shell_command_streaming_controlled(
         UserShellOptions {
-            workdir,
+            cwd,
             command: "yes x | head -c 60000".to_string(),
             context: Some(context),
             inject_into: None,
@@ -754,13 +754,13 @@ pub(crate) async fn user_shell_context_records_bounded_truncated_output() {
 #[tokio::test]
 pub(crate) async fn exec_command_abort_kills_background_child_process_group() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    let marker = workdir.join("bg.pid");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let marker = cwd.join("bg.pid");
     let command = format!("sleep 60 & echo $! > {}; wait", shell_quote_path(&marker));
     let (handle, receivers) = psychevo_agent_core::ControlHandle::new();
     let task = tokio::spawn(crate::tools::run_exec_command_for_user_shell(
-        workdir,
+        cwd,
         command,
         crate::sandbox::SandboxPolicy::disabled(),
         receivers.abort_signal(),
@@ -790,12 +790,12 @@ pub(crate) async fn exec_command_abort_kills_background_child_process_group() {
 #[tokio::test]
 pub(crate) async fn exec_command_yields_long_running_session() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
     let result = crate::tools::exec_command_tool_impl(
-        workdir,
+        cwd,
         false,
         json!({"cmd": "sleep 1; printf done", "yield_time_ms": 250}),
         receivers.abort_signal(),

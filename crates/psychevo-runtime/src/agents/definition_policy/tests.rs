@@ -1,4 +1,3 @@
-
 impl ToolBinding for HookedTool {
     fn name(&self) -> &str {
         self.inner.name()
@@ -27,37 +26,33 @@ impl ToolBinding for HookedTool {
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
         let inner = Arc::clone(&self.inner);
-        let hooks = self.hooks.clone();
-        let agent_name = self.agent_name.clone();
+        let hook_runtime = self.hook_runtime.clone();
         let tool_name = self.inner.name().to_string();
-        let workdir = self.workdir.clone();
         Box::pin(async move {
             let pre_payload = json!({
                 "event": "PreToolUse",
-                "agent": agent_name,
                 "tool": tool_name,
                 "tool_call_id": tool_call_id.clone(),
                 "arguments": args.clone(),
             });
-            if let Some(blocked) =
-                run_hook_commands(hooks.as_ref(), "PreToolUse", &workdir, &pre_payload)
-            {
+            let pre_result = hook_runtime.run_event("PreToolUse", &pre_payload);
+            if let Some(blocked) = pre_result.blocked_reason {
                 return ToolOutput::error(blocked);
             }
+            let effective_args = pre_result.updated_input.unwrap_or(args);
 
             let output = inner
-                .execute(tool_call_id.clone(), args.clone(), abort)
+                .execute(tool_call_id.clone(), effective_args.clone(), abort)
                 .await;
             let post_payload = json!({
                 "event": "PostToolUse",
-                "agent": agent_name,
                 "tool": tool_name,
                 "tool_call_id": tool_call_id,
-                "arguments": args.clone(),
+                "arguments": effective_args,
                 "output": output.json.clone(),
                 "is_error": output.is_error,
             });
-            let _ = run_hook_commands(hooks.as_ref(), "PostToolUse", &workdir, &post_payload);
+            let _ = hook_runtime.run_event("PostToolUse", &post_payload);
             output
         })
     }

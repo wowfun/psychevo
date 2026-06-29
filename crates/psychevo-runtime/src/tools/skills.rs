@@ -271,20 +271,14 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             let description = required_string(&args, "description")?;
             let value = create_skill(
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 target_from_args(&args)?,
                 name,
                 description,
             )?;
             if let Some(content) = optional_string(&args, "content")? {
                 let catalog = discover_skills(options)?;
-                crate::skills::edit_skill(
-                    &catalog,
-                    &options.home,
-                    &options.workdir,
-                    name,
-                    content,
-                )?;
+                crate::skills::edit_skill(&catalog, &options.home, &options.cwd, name, content)?;
             }
             Ok(value)
         }
@@ -293,7 +287,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             crate::skills::edit_skill(
                 &catalog,
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 required_string(&args, "name")?,
                 required_string(&args, "content")?,
             )
@@ -303,7 +297,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             patch_skill(
                 &catalog,
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 required_string(&args, "name")?,
                 required_string(&args, "old")?,
                 required_string(&args, "new")?,
@@ -320,7 +314,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             remove_skill(
                 &catalog,
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 required_string(&args, "name")?,
             )
         }
@@ -329,7 +323,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             crate::skills::write_skill_file(
                 &catalog,
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 required_string(&args, "name")?,
                 required_string(&args, "file_path")?,
                 required_string(&args, "content")?,
@@ -340,7 +334,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             crate::skills::remove_skill_file(
                 &catalog,
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 required_string(&args, "name")?,
                 required_string(&args, "file_path")?,
             )
@@ -525,7 +519,7 @@ pub(crate) fn skill_hub_impl(
             let identifier = required_string(&args, "identifier")?.to_string();
             install_skill(
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 InstallOptions {
                     source: identifier,
                     target: target_from_args(&args)?,
@@ -543,7 +537,7 @@ pub(crate) fn skill_hub_impl(
             remove_skill(
                 &catalog,
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 required_string(&args, "name")?,
             )
         }
@@ -666,14 +660,14 @@ pub(crate) fn skill_config_impl(
         }
         "enable" => set_skill_enabled(
             &options.home,
-            &options.workdir,
+            &options.cwd,
             target_from_args(&args)?,
             required_string(&args, "name")?,
             true,
         ),
         "disable" => set_skill_enabled(
             &options.home,
-            &options.workdir,
+            &options.cwd,
             target_from_args(&args)?,
             required_string(&args, "name")?,
             false,
@@ -684,7 +678,7 @@ pub(crate) fn skill_config_impl(
             })?;
             set_skill_config_value(
                 &options.home,
-                &options.workdir,
+                &options.cwd,
                 target_from_args(&args)?,
                 required_string(&args, "key")?,
                 value,

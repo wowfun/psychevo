@@ -41,7 +41,7 @@ impl ClarifyToolSurface {
 }
 
 pub(crate) struct ToolSurfaceAssembly {
-    pub(crate) workdir: PathBuf,
+    pub(crate) cwd: PathBuf,
     pub(crate) task_id: String,
     pub(crate) mode: RunMode,
     pub(crate) lsp: LspConfig,
@@ -74,7 +74,7 @@ pub(crate) fn assemble_tool_surface_with_warnings(
     let mut warnings = Vec::new();
 
     let mut tools = coding_core_tools_for_mode_with_selection(
-        &input.workdir,
+        &input.cwd,
         input.mode,
         ToolRuntimeContext {
             task_id: input.task_id,

@@ -23,7 +23,7 @@ pub struct ChannelUpdateInput {
     pub id: String,
     pub label: Option<String>,
     pub enabled: Option<bool>,
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     pub model: Option<String>,
     pub permission_mode: Option<String>,
     pub require_mention: Option<bool>,
@@ -43,7 +43,7 @@ pub struct ChannelRuntimeConnection {
     pub enabled: bool,
     pub label: String,
     pub transport: String,
-    pub workdir: Option<String>,
+    pub cwd: Option<String>,
     pub model: Option<String>,
     pub permission_mode: Option<String>,
     pub require_mention: bool,
@@ -63,16 +63,16 @@ struct LoadedChannelsConfig {
 }
 
 pub fn channel_list_value(options: &RunOptions) -> Result<Value> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_channels_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_channels_config(options, &cwd)?;
     Ok(json!({
         "channels": channel_rows(&loaded),
     }))
 }
 
 pub fn channel_show_value(options: &RunOptions, id: &str) -> Result<Value> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_channels_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_channels_config(options, &cwd)?;
     let row = loaded
         .channels
         .connections
@@ -85,8 +85,8 @@ pub fn channel_show_value(options: &RunOptions, id: &str) -> Result<Value> {
 }
 
 pub fn channel_doctor_value(options: &RunOptions, id: Option<&str>, live: bool) -> Result<Value> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_channels_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_channels_config(options, &cwd)?;
     let connections = loaded
         .channels
         .connections
@@ -174,17 +174,17 @@ pub fn channel_doctor_value(options: &RunOptions, id: Option<&str>, live: bool) 
 }
 
 pub fn channel_summary_value(options: &RunOptions) -> Result<Value> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_channels_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_channels_config(options, &cwd)?;
     Ok(channel_summary(&loaded))
 }
 
 pub fn channel_runtime_connections(
     options: &RunOptions,
-    workdir: &Path,
+    cwd: &Path,
 ) -> Result<Vec<ChannelRuntimeConnection>> {
-    let workdir = canonical_workdir(workdir)?;
-    let loaded = load_channels_config(options, &workdir)?;
+    let cwd = canonical_cwd(cwd)?;
+    let loaded = load_channels_config(options, &cwd)?;
     Ok(loaded
         .channels
         .connections
@@ -196,7 +196,7 @@ pub fn channel_runtime_connections(
             enabled: connection.enabled,
             label: connection.label.clone(),
             transport: connection.transport.as_str().to_string(),
-            workdir: connection.workdir.clone(),
+            cwd: connection.cwd.clone(),
             model: connection.model.clone(),
             permission_mode: connection.permission_mode.clone(),
             require_mention: connection.require_mention,
@@ -269,8 +269,8 @@ pub fn update_channel_connection(input: ChannelUpdateInput) -> Result<Value> {
     if let Some(enabled) = input.enabled {
         connection.insert("enabled".to_string(), json!(enabled));
     }
-    if let Some(value) = input.workdir {
-        set_optional_string_field(connection, "workdir", "channel workdir", value, false)?;
+    if let Some(value) = input.cwd {
+        set_optional_string_field(connection, "cwd", "channel cwd", value, false)?;
     }
     if let Some(value) = input.model {
         set_optional_string_field(connection, "model", "channel model", value, false)?;
@@ -687,8 +687,8 @@ fn normalize_channel_list(values: Vec<String>) -> Vec<String> {
     out
 }
 
-fn load_channels_config(options: &RunOptions, workdir: &Path) -> Result<LoadedChannelsConfig> {
-    let loaded = load_config_value(options, workdir)?;
+fn load_channels_config(options: &RunOptions, cwd: &Path) -> Result<LoadedChannelsConfig> {
+    let loaded = load_config_value(options, cwd)?;
     Ok(LoadedChannelsConfig {
         channels: channels_config_from_value(&loaded.value)?,
         env: loaded.env,
@@ -720,7 +720,7 @@ fn channel_row(connection: &ChannelConnectionConfig, env: &BTreeMap<String, Stri
         "enabled": connection.enabled,
         "label": connection.label,
         "transport": connection.transport.as_str(),
-        "workdir": connection.workdir,
+        "cwd": connection.cwd,
         "model": connection.model,
         "permission_mode": connection.permission_mode,
         "require_mention": connection.require_mention,

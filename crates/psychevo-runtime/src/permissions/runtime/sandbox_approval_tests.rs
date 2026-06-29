@@ -48,7 +48,7 @@ mod sandbox_approval_tests {
     }
 
     fn sandbox_policy(
-        workdir: &Path,
+        cwd: &Path,
         mode: crate::sandbox::SandboxMode,
     ) -> crate::sandbox::SandboxPolicy {
         crate::sandbox::SandboxPolicy::from_config(
@@ -59,7 +59,7 @@ mod sandbox_approval_tests {
                 include_tmp: false,
                 include_common_caches: false,
             },
-            workdir,
+            cwd,
             crate::types::RunMode::Default,
             &BTreeMap::new(),
         )
@@ -87,13 +87,13 @@ mod sandbox_approval_tests {
     }
 
     fn permission_runtime(
-        workdir: &Path,
+        cwd: &Path,
         policy: crate::sandbox::SandboxPolicy,
         grants: crate::sandbox::SandboxWriteGrants,
         handler: Arc<RecordingApprovalHandler>,
     ) -> PermissionRuntime {
         permission_runtime_with_config(
-            workdir,
+            cwd,
             PermissionConfig::default(),
             policy,
             grants,
@@ -102,15 +102,15 @@ mod sandbox_approval_tests {
     }
 
     fn permission_runtime_with_config(
-        workdir: &Path,
+        cwd: &Path,
         config: PermissionConfig,
         policy: crate::sandbox::SandboxPolicy,
         grants: crate::sandbox::SandboxWriteGrants,
         handler: Arc<RecordingApprovalHandler>,
     ) -> PermissionRuntime {
         PermissionRuntime::new(
-            workdir.to_path_buf(),
-            workdir.join(".psychevo"),
+            cwd.to_path_buf(),
+            cwd.join(".psychevo"),
             config,
             PermissionMode::Default,
             ApprovalMode::Manual,
@@ -121,14 +121,14 @@ mod sandbox_approval_tests {
     }
 
     fn wrapped_write(
-        workdir: &Path,
+        cwd: &Path,
         policy: crate::sandbox::SandboxPolicy,
         grants: crate::sandbox::SandboxWriteGrants,
         runtime: &PermissionRuntime,
     ) -> Arc<dyn ToolBinding> {
         runtime
             .wrap_tools(vec![Arc::new(crate::tools::WriteTool::new(
-                workdir.to_path_buf(),
+                cwd.to_path_buf(),
                 tool_context(policy, grants),
             )) as Arc<dyn ToolBinding>])
             .into_iter()
@@ -137,14 +137,14 @@ mod sandbox_approval_tests {
     }
 
     fn wrapped_edit(
-        workdir: &Path,
+        cwd: &Path,
         policy: crate::sandbox::SandboxPolicy,
         grants: crate::sandbox::SandboxWriteGrants,
         runtime: &PermissionRuntime,
     ) -> Arc<dyn ToolBinding> {
         runtime
             .wrap_tools(vec![Arc::new(crate::tools::EditTool::new(
-                workdir.to_path_buf(),
+                cwd.to_path_buf(),
                 tool_context(policy, grants),
             )) as Arc<dyn ToolBinding>])
             .into_iter()

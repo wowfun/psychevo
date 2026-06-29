@@ -28,8 +28,8 @@ Define acceptance expectations and validation scenarios for the checked-in
 
 ## Current Implementation Slice
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 This benchmark is validated through the `psychevo-eval` deterministic test
 harness and CLI smoke coverage with fake agents or local evaluators. Live agent

@@ -98,7 +98,7 @@ values by default unless a lower spec defines an explicit raw-export opt-in.
 ## Related Topics
 
 - [001 Architecture](../001-architecture/spec.md)
-- [060 Automation](../060-automation/spec.md)
+- [065 CI/CD](../065-ci-cd/spec.md)
 - [095 Evaluation Framework](../095-evaluation-framework/spec.md)
 - [300 peval CLI](../300-peval-cli/spec.md)
 - [350 Coding Evaluation](../350-coding-evaluation/spec.md)

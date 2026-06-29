@@ -89,18 +89,18 @@ pub(crate) fn catalog() -> Result<AgentCatalog> {
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
-    let workdir = cwd.canonicalize().unwrap_or(cwd);
-    catalog_for(&home, &workdir, env_map)
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    catalog_for(&home, &cwd, env_map)
 }
 
 pub(crate) fn catalog_for(
     home: &std::path::Path,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
     env_map: std::collections::BTreeMap<String, String>,
 ) -> Result<AgentCatalog> {
     discover_agents(&AgentDiscoveryOptions {
         home: home.to_path_buf(),
-        workdir: workdir.to_path_buf(),
+        cwd: cwd.to_path_buf(),
         env: env_map,
         explicit_inputs: Vec::new(),
         no_agents: false,

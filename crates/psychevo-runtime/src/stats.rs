@@ -3,19 +3,19 @@ use rusqlite::{Connection, params, params_from_iter, types::Value as SqlValue};
 use serde_json::{Value, json};
 
 use crate::error::Result;
-use crate::paths::canonical_workdir;
+use crate::paths::canonical_cwd;
 use crate::types::{
     SessionUsageOptions, SessionUsageSummary, StatsOptions, UsageActivity, UsageActivityDay,
     UsageReadOptions, UsageReadResult, UsageWindowSummary,
 };
 
 pub fn usage_stats(options: StatsOptions) -> Result<Value> {
-    let workdir = canonical_workdir(&options.workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
     let cutoff_ms = options
         .days
         .map(|days| now_ms().saturating_sub(days as i64 * 86_400_000));
     let scope = StatsScope {
-        workdir: (!options.all).then(|| workdir.to_string_lossy().to_string()),
+        cwd: (!options.all).then(|| cwd.to_string_lossy().to_string()),
         cutoff_ms,
         limit: options.limit.max(1),
     };
@@ -27,7 +27,7 @@ pub fn usage_stats(options: StatsOptions) -> Result<Value> {
         Ok(json!({
             "scope": {
                 "all": options.all,
-                "workdir": scope.workdir,
+                "cwd": scope.cwd,
                 "days": options.days,
             },
             "totals": totals,
@@ -500,7 +500,7 @@ fn json_i64(value: Option<&Value>, key: &str) -> Option<i64> {
 }
 
 pub(crate) struct StatsScope {
-    pub(crate) workdir: Option<String>,
+    pub(crate) cwd: Option<String>,
     pub(crate) cutoff_ms: Option<i64>,
     pub(crate) limit: usize,
 }
@@ -628,7 +628,7 @@ pub(crate) fn top_sessions(conn: &Connection, scope: &StatsScope) -> Result<Valu
         SELECT
             s.id,
             s.title,
-            s.workdir,
+            s.cwd,
             s.provider,
             s.model,
             COALESCE(SUM(m.reported_total_tokens), 0),
@@ -652,7 +652,7 @@ pub(crate) fn top_sessions(conn: &Connection, scope: &StatsScope) -> Result<Valu
         Ok(json!({
             "session": row.get::<_, String>(0)?,
             "title": row.get::<_, Option<String>>(1)?,
-            "workdir": row.get::<_, String>(2)?,
+            "cwd": row.get::<_, String>(2)?,
             "provider": row.get::<_, String>(3)?,
             "model": row.get::<_, String>(4)?,
             "reported_total_tokens": row.get::<_, i64>(5)?,
@@ -664,18 +664,18 @@ pub(crate) fn top_sessions(conn: &Connection, scope: &StatsScope) -> Result<Valu
 }
 
 pub(crate) fn scope_where_clause(scope: &StatsScope) -> &'static str {
-    match (scope.workdir.is_some(), scope.cutoff_ms.is_some()) {
+    match (scope.cwd.is_some(), scope.cutoff_ms.is_some()) {
         (false, false) => "WHERE 1 = 1",
-        (true, false) => "WHERE s.workdir = ?1",
+        (true, false) => "WHERE s.cwd = ?1",
         (false, true) => "WHERE s.updated_at_ms >= ?1",
-        (true, true) => "WHERE s.workdir = ?1 AND s.updated_at_ms >= ?2",
+        (true, true) => "WHERE s.cwd = ?1 AND s.updated_at_ms >= ?2",
     }
 }
 
 pub(crate) fn scope_params(scope: &StatsScope) -> Vec<SqlValue> {
     let mut values = Vec::new();
-    if let Some(workdir) = &scope.workdir {
-        values.push(SqlValue::Text(workdir.clone()));
+    if let Some(cwd) = &scope.cwd {
+        values.push(SqlValue::Text(cwd.clone()));
     }
     if let Some(cutoff_ms) = &scope.cutoff_ms {
         values.push(SqlValue::Integer(*cutoff_ms));

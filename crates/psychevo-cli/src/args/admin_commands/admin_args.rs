@@ -1,4 +1,3 @@
-
 #[cfg(test)]
 pub(crate) mod tests {
     pub(crate) use super::*;
@@ -13,6 +12,62 @@ pub(crate) mod tests {
             }))
         ));
         assert!(Cli::try_parse_from(["pevo", "skills", "list"]).is_err());
+    }
+
+    #[test]
+    fn parses_singular_plugin_and_rejects_plural_plugins() {
+        let cli = Cli::try_parse_from(["pevo", "plugin", "list", "--json"]).expect("plugin");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Plugin(PluginArgs {
+                command: Some(PluginCommand::List(PluginListArgs { json: true }))
+            }))
+        ));
+        assert!(Cli::try_parse_from(["pevo", "plugins", "list"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "pevo",
+                "plugin",
+                "install",
+                "/tmp/plugin",
+                "--local",
+                "--global"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "pevo",
+                "plugin",
+                "marketplace",
+                "add",
+                "local",
+                "/tmp/plugins",
+                "--kind",
+                "local",
+                "--json"
+            ])
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn parses_hooks_commands() {
+        let cli = Cli::try_parse_from(["pevo", "hooks", "list", "--json"]).expect("hooks");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Hooks(HooksArgs {
+                command: Some(HooksCommand::List(HooksListArgs { json: true }))
+            }))
+        ));
+        let cli = Cli::try_parse_from(["pevo", "hooks", "trust", "hk_abc", "--json"])
+            .expect("hooks trust");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Hooks(HooksArgs {
+                command: Some(HooksCommand::Trust(HookKeyArgs { key, json: true }))
+            })) if key == "hk_abc"
+        ));
     }
 
     #[test]

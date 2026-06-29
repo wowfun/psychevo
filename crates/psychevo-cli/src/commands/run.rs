@@ -50,7 +50,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         ensure_home_initialized(&home)?;
     }
 
-    let workdir = match &args.dir {
+    let cwd = match &args.dir {
         Some(dir) => resolve_explicit_path(dir, &env_map, &cwd)?,
         None => cwd,
     };
@@ -98,7 +98,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         .with_raw_identity(serde_json::json!({
             "kind": "cli",
             "entrypoint": "run",
-            "cwd": workdir.display().to_string(),
+            "cwd": cwd.display().to_string(),
         }));
 
     let turn_result = gateway
@@ -110,7 +110,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             input: Vec::new(),
             options: RunOptions {
                 state,
-                workdir,
+                cwd,
                 snapshot_root: Some(home.join("snapshots")),
                 session: args.session.clone(),
                 continue_latest: args.continue_latest,

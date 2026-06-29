@@ -15,10 +15,45 @@ pub fn openai_chat_completions_endpoint(base_url: &str) -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImageInputTranslationMode {
+    ModelMetadata,
+    ForceText,
+}
+
 pub fn openai_chat_request_body(request: &GenerationRequest, base_url: &str) -> Value {
+    openai_chat_request_body_with_image_mode(
+        request,
+        base_url,
+        ImageInputTranslationMode::ModelMetadata,
+    )
+}
+
+pub(crate) fn openai_chat_request_body_text_only_images(
+    request: &GenerationRequest,
+    base_url: &str,
+) -> Value {
+    openai_chat_request_body_with_image_mode(
+        request,
+        base_url,
+        ImageInputTranslationMode::ForceText,
+    )
+}
+
+pub(crate) fn openai_chat_request_body_with_image_mode(
+    request: &GenerationRequest,
+    base_url: &str,
+    image_mode: ImageInputTranslationMode,
+) -> Value {
     let mut body = json!({
         "model": request.model.model,
-        "messages": translate_messages(&request.messages, &request.model, &request.metadata, base_url),
+        "messages": translate_messages(
+            &request.messages,
+            &request.model,
+            &request.metadata,
+            base_url,
+            image_mode,
+        ),
         "stream": true,
         "stream_options": { "include_usage": true },
     });
@@ -127,8 +162,13 @@ pub fn count_openai_chat_request(
     let mut transcript_message_count = 0usize;
 
     for message in &request.messages {
-        let provider_messages =
-            translate_message_for_request(message, &request.model, &request.metadata, base_url);
+        let provider_messages = translate_message_for_request(
+            message,
+            &request.model,
+            &request.metadata,
+            base_url,
+            ImageInputTranslationMode::ModelMetadata,
+        );
         let tokens = provider_messages
             .iter()
             .map(|message| count_value(enc, message))
@@ -399,6 +439,31 @@ pub(crate) fn capability_is_true(metadata: &Value, key: &str) -> bool {
         == Some(true)
 }
 
+pub(crate) fn model_metadata_disables_image_input(metadata: &Value) -> bool {
+    capability_modalities_without_image(metadata) || capability_is_false(metadata, "attachment")
+}
+
+pub(crate) fn capability_modalities_without_image(metadata: &Value) -> bool {
+    let Some(capabilities) = model_capabilities(metadata) else {
+        return false;
+    };
+    let modal_input = capabilities
+        .get("modalities")
+        .and_then(|modalities| modalities.get("input"));
+    let legacy_input = capabilities.get("input_modalities");
+    input_modalities_without_image(modal_input) || input_modalities_without_image(legacy_input)
+}
+
+pub(crate) fn input_modalities_without_image(value: Option<&Value>) -> bool {
+    let Some(modalities) = value.and_then(Value::as_array) else {
+        return false;
+    };
+    !modalities
+        .iter()
+        .filter_map(Value::as_str)
+        .any(|modality| modality.eq_ignore_ascii_case("image"))
+}
+
 pub(crate) fn model_capabilities(metadata: &Value) -> Option<&Value> {
     metadata
         .get("model_metadata")
@@ -410,10 +475,13 @@ pub(crate) fn translate_messages(
     target: &ModelTarget,
     metadata: &Value,
     base_url: &str,
+    image_mode: ImageInputTranslationMode,
 ) -> Vec<Value> {
     messages
         .iter()
-        .flat_map(|message| translate_message_for_request(message, target, metadata, base_url))
+        .flat_map(|message| {
+            translate_message_for_request(message, target, metadata, base_url, image_mode)
+        })
         .collect::<Vec<_>>()
 }
 
@@ -422,8 +490,11 @@ pub(crate) fn translate_message_for_request(
     target: &ModelTarget,
     metadata: &Value,
     base_url: &str,
+    image_mode: ImageInputTranslationMode,
 ) -> Vec<Value> {
-    merge_adjacent_user_messages(translate_message(message, target, metadata, base_url))
+    merge_adjacent_user_messages(translate_message(
+        message, target, metadata, base_url, image_mode,
+    ))
 }
 
 pub(crate) fn translate_message(
@@ -431,11 +502,12 @@ pub(crate) fn translate_message(
     target: &ModelTarget,
     metadata: &Value,
     base_url: &str,
+    image_mode: ImageInputTranslationMode,
 ) -> Vec<Value> {
     match message.get("role").and_then(Value::as_str) {
         Some("system") => system_messages(message),
         Some("developer") => developer_messages(message, metadata),
-        Some("user") => user_messages(message, metadata),
+        Some("user") => user_messages(message, metadata, image_mode),
         Some("assistant") => assistant_messages(message, target, metadata, base_url),
         Some("tool_result") => tool_result_messages(message),
         _ => Vec::new(),
@@ -467,7 +539,11 @@ pub(crate) fn system_messages(message: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-pub(crate) fn user_messages(message: &Value, metadata: &Value) -> Vec<Value> {
+pub(crate) fn user_messages(
+    message: &Value,
+    metadata: &Value,
+    image_mode: ImageInputTranslationMode,
+) -> Vec<Value> {
     let Some(content) = message.get("content") else {
         return Vec::new();
     };
@@ -482,23 +558,10 @@ pub(crate) fn user_messages(message: &Value, metadata: &Value) -> Vec<Value> {
         return Vec::new();
     };
     if blocks.iter().any(is_image_block) {
-        if capability_is_false(metadata, "attachment") {
-            let text = blocks
-                .iter()
-                .filter_map(|block| {
-                    block
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                        .or_else(|| {
-                            is_image_block(block).then(|| {
-                                "[image attachment omitted: selected model metadata disables image input]"
-                                    .to_string()
-                            })
-                        })
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+        if image_mode == ImageInputTranslationMode::ForceText
+            || model_metadata_disables_image_input(metadata)
+        {
+            let text = degraded_user_content_text(blocks);
             return if text.trim().is_empty() {
                 Vec::new()
             } else {
@@ -533,6 +596,62 @@ pub(crate) fn is_image_block(block: &Value) -> bool {
     is_local_image_block(block) || is_image_url_block(block)
 }
 
+pub(crate) fn request_has_image_blocks(request: &GenerationRequest) -> bool {
+    request.messages.iter().any(message_has_image_blocks)
+}
+
+pub(crate) fn message_has_image_blocks(message: &Value) -> bool {
+    message
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| blocks.iter().any(is_image_block))
+}
+
+pub(crate) fn degraded_user_content_text(blocks: &[Value]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| {
+            block
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+                .or_else(|| image_block_source_text(block))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn image_block_source_text(block: &Value) -> Option<String> {
+    if is_local_image_block(block) {
+        return block
+            .get("path")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_string)
+            .or_else(|| Some("[image attachment omitted: missing local path]".to_string()));
+    }
+    if is_image_url_block(block) {
+        let Some(url) = image_url_block_url(block).filter(|url| !url.is_empty()) else {
+            return Some("[image attachment omitted: missing image URL]".to_string());
+        };
+        if url.starts_with("data:image/") {
+            return Some("[image attachment omitted: data image]".to_string());
+        }
+        return Some(url.to_string());
+    }
+    None
+}
+
+pub(crate) fn image_url_block_url(block: &Value) -> Option<&str> {
+    block.get("url").and_then(Value::as_str).or_else(|| {
+        block
+            .get("image_url")
+            .and_then(|image_url| image_url.get("url"))
+            .and_then(Value::as_str)
+    })
+}
+
 pub(crate) fn user_content_parts(blocks: &[Value]) -> Vec<Value> {
     let mut parts = Vec::new();
     for block in blocks {
@@ -565,7 +684,7 @@ pub(crate) fn user_content_parts(blocks: &[Value]) -> Vec<Value> {
             }
         }
         if is_image_url_block(block)
-            && let Some(url) = block.get("url").and_then(Value::as_str)
+            && let Some(url) = image_url_block_url(block)
             && !url.is_empty()
         {
             parts.push(json!({

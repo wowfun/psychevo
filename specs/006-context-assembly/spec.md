@@ -41,7 +41,7 @@ evidence, and accounting are defined by the
 outside this spec.
 
 Runtime environment context is instruction context that tells the model the
-canonical runtime workdir and the path-resolution boundary for local tools. It
+canonical runtime cwd and the path-resolution boundary for local tools. It
 is model-visible for every agent invocation and is distinct from permission or
 sandbox enforcement.
 
@@ -66,8 +66,8 @@ Context projection is the runtime-owned selection and transformation of availabl
 Runtime assembles model context before invoking generation.
 
 Project instruction discovery is configurable separately from tool permissions.
-The default policy follows the project root to workdir hierarchy. A cwd-only
-policy limits discovery to the canonical workdir, and an off policy suppresses
+The default policy follows the project root to cwd hierarchy. A cwd-only
+policy limits discovery to the canonical cwd, and an off policy suppresses
 project instruction injection. These policies change model-visible project
 context only; they do not widen or narrow filesystem, shell, network, or
 approval behavior.
@@ -167,7 +167,7 @@ available.
 
 Session observability must respect the current session boundary and any
 history/revert visibility boundary used by transcript reload. It must not sum
-messages from other sessions, hidden reverted ranges, or other workdirs. Missing
+messages from other sessions, hidden reverted ranges, or other cwds. Missing
 accounting facts are treated as unknown/zero for display rather than
 reconstructing provider requests.
 

@@ -59,10 +59,10 @@ field.
 
 Profile-global and project config use the normal deep-merge behavior. The active
 profile's `$PSYCHEVO_HOME/config.toml` supplies reusable backends for that
-profile, while the current workdir's `.psychevo/config.toml` may add or
+profile, while the current cwd's `.psychevo/config.toml` may add or
 override command-bearing backends. If an invocation uses an explicit
 `PSYCHEVO_CONFIG`, that file replaces the active profile config for backend
-loading, but the current workdir overlay still applies afterward. Workbench may
+loading, but the current cwd overlay still applies afterward. Workbench may
 edit either the active profile config or the current project overlay, but it
 must not switch profiles inside one Gateway process. `enabled = false` disables
 the generated agent and makes Markdown definitions that reference the backend

@@ -63,7 +63,7 @@ normative order:
 
 `base/mode`, runtime environment, selected main agent, agent catalog, skill
 index, and AGENTS/project context are instruction slots. Runtime environment
-context identifies the canonical workdir and path-resolution boundary for model
+context identifies the canonical cwd and path-resolution boundary for model
 planning; it is not a permission grant. AGENTS/project context is policy context
 rather than user task input and is placed before retained history to keep the
 prefix stable. Selected skill bodies and required `@agent` call hints are
@@ -118,7 +118,7 @@ text.
 
 Runtime lazily creates a missing prefix snapshot on the next accepted turn
 using the current config and files. Current sessions do not automatically
-refresh when workdir context, AGENTS, agent, or skill files change. The stable
+refresh when cwd context, AGENTS, agent, or skill files change. The stable
 prefix is rebuilt only by:
 
 - TUI `/refresh`

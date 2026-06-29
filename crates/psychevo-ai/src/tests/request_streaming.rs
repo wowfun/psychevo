@@ -47,6 +47,117 @@ pub(crate) fn chat_request_maps_local_image_blocks_to_content_parts() {
 }
 
 #[test]
+pub(crate) fn chat_request_degrades_image_blocks_when_input_modalities_are_text_only() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "xiaomi-token-plan".to_string(),
+            model: "mimo-v2.5-pro".to_string(),
+        },
+        messages: vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "image_url", "url": "https://example.com/image.png" },
+                { "text": "describe it" }
+            ],
+            "timestamp_ms": 1
+        })],
+        tools: Vec::new(),
+        metadata: json!({
+            "model_metadata": {
+                "capabilities": {
+                    "modalities": { "input": ["text"], "output": ["text"] }
+                }
+            }
+        }),
+    };
+
+    let body = openai_chat_request_body(&request, "https://api.xiaomimimo.com/v1");
+
+    assert_eq!(
+        body["messages"][0],
+        json!({"role": "user", "content": "https://example.com/image.png\ndescribe it"})
+    );
+    assert!(
+        !serde_json::to_string(&body)
+            .expect("json")
+            .contains("\"image_url\"")
+    );
+}
+
+#[test]
+pub(crate) fn chat_request_preserves_image_blocks_when_input_modalities_include_image() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "openai".to_string(),
+            model: "gpt-test".to_string(),
+        },
+        messages: vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "image_url", "url": "https://example.com/image.png" },
+                { "text": "describe it" }
+            ],
+            "timestamp_ms": 1
+        })],
+        tools: Vec::new(),
+        metadata: json!({
+            "model_metadata": {
+                "capabilities": {
+                    "modalities": { "input": ["text", "image"], "output": ["text"] }
+                }
+            }
+        }),
+    };
+
+    let body = openai_chat_request_body(&request, "https://api.openai.com/v1");
+
+    assert_eq!(
+        body["messages"][0]["content"][0],
+        json!({
+            "type": "image_url",
+            "image_url": { "url": "https://example.com/image.png" }
+        })
+    );
+}
+
+#[test]
+pub(crate) fn chat_request_degrades_image_blocks_when_attachment_is_false() {
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "custom".to_string(),
+            model: "text-model".to_string(),
+        },
+        messages: vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "local_image", "path": "/tmp/screenshot.png" },
+                { "type": "image_url", "url": "data:image/png;base64,aGVsbG8=" },
+                { "text": "read this" }
+            ],
+            "timestamp_ms": 1
+        })],
+        tools: Vec::new(),
+        metadata: json!({
+            "model_metadata": {
+                "capabilities": {
+                    "attachment": false
+                }
+            }
+        }),
+    };
+
+    let body = openai_chat_request_body(&request, "https://example.test/v1");
+
+    assert_eq!(
+        body["messages"][0],
+        json!({
+            "role": "user",
+            "content": "/tmp/screenshot.png\n[image attachment omitted: data image]\nread this"
+        })
+    );
+}
+
+#[test]
 pub(crate) fn chat_request_transcodes_bmp_local_image_to_png_part() {
     let temp = tempfile::tempdir().expect("temp");
     let image_path = temp.path().join("image.bmp");

@@ -86,7 +86,7 @@ impl PrefixSlotInput {
 
 pub(crate) struct MainPromptPrefixInput<'a> {
     pub(crate) mode: RunMode,
-    pub(crate) workdir: &'a Path,
+    pub(crate) cwd: &'a Path,
     pub(crate) selected_agent: Option<&'a AgentDefinition>,
     pub(crate) agents: &'a [AgentDefinition],
     pub(crate) skills: &'a [Skill],
@@ -98,7 +98,7 @@ pub(crate) struct MainPromptPrefixInput<'a> {
 pub(crate) fn assemble_main_prompt_prefix(input: MainPromptPrefixInput<'_>) -> MainPromptAssembly {
     let MainPromptPrefixInput {
         mode,
-        workdir,
+        cwd,
         selected_agent,
         agents,
         skills,
@@ -126,7 +126,7 @@ pub(crate) fn assemble_main_prompt_prefix(input: MainPromptPrefixInput<'_>) -> M
     prompt_instructions.push(instruction_from_slot(&mode_slot));
     prefix_slots.push(mode_slot);
 
-    let environment_slot = runtime_environment_slot(order, developer_role, workdir);
+    let environment_slot = runtime_environment_slot(order, developer_role, cwd);
     order += 1;
     prompt_instructions.push(instruction_from_slot(&environment_slot));
     prefix_slots.push(environment_slot);
@@ -222,7 +222,7 @@ pub(crate) fn assemble_main_prompt_prefix(input: MainPromptPrefixInput<'_>) -> M
 
 pub(crate) fn assemble_child_prompt_prefix(
     mode: RunMode,
-    workdir: &Path,
+    cwd: &Path,
     selected_agent: &AgentDefinition,
     capabilities: &ModelCapabilities,
     tools_available: bool,
@@ -247,7 +247,7 @@ pub(crate) fn assemble_child_prompt_prefix(
     prompt_instructions.push(instruction_from_slot(&mode_slot));
     prefix_slots.push(mode_slot);
 
-    let environment_slot = runtime_environment_slot(order, developer_role, workdir);
+    let environment_slot = runtime_environment_slot(order, developer_role, cwd);
     order += 1;
     prompt_instructions.push(instruction_from_slot(&environment_slot));
     prefix_slots.push(environment_slot);
@@ -518,7 +518,7 @@ pub(crate) fn format_project_instruction_prompt(fragment: &ProjectInstructionFra
 pub(crate) fn runtime_environment_slot(
     order: usize,
     developer_role: &str,
-    workdir: &Path,
+    cwd: &Path,
 ) -> PromptPrefixSlotRecord {
     prefix_slot(
         PrefixSlotInput::new(
@@ -527,20 +527,16 @@ pub(crate) fn runtime_environment_slot(
             "base_policy",
             developer_role,
             order,
-            runtime_environment_prompt(workdir),
+            runtime_environment_prompt(cwd),
         )
-        .source(
-            "runtime",
-            "environment",
-            Some(workdir.display().to_string()),
-        ),
+        .source("runtime", "environment", Some(cwd.display().to_string())),
     )
 }
 
-pub(crate) fn runtime_environment_prompt(workdir: &Path) -> String {
+pub(crate) fn runtime_environment_prompt(cwd: &Path) -> String {
     format!(
         "Runtime environment:\n- Current working directory: {}\n- Relative file paths in tool calls resolve against this working directory.\n- Absolute paths are only usable when permitted by the active filesystem and resource gates.",
-        workdir.display()
+        cwd.display()
     )
 }
 

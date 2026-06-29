@@ -271,7 +271,7 @@ fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result
     });
     let child_session = context.state.store().create_child_session_with_metadata(
         &context.parent_session_id,
-        &context.workdir,
+        &context.cwd,
         "agent",
         &child_model,
         &context.model_provider,
@@ -373,7 +373,7 @@ async fn spawn_external_subagent(
     });
     let child_session = context.state.store().create_child_session_with_metadata(
         &context.parent_session_id,
-        &context.workdir,
+        &context.cwd,
         "peer_agent",
         &agent.name,
         &format!("acp:{}", backend.name),
@@ -620,7 +620,7 @@ pub(crate) fn spawn_child_agent_background(
     });
     let child_session = context.state.store().create_child_session_with_metadata(
         &context.parent_session_id,
-        &context.workdir,
+        &context.cwd,
         "agent",
         &child_model,
         &context.model_provider,
@@ -719,7 +719,7 @@ pub(crate) async fn maybe_preflight_child_compaction(
 ) -> Result<()> {
     let _ = compact_session(CompactSessionOptions {
         state: context.state.clone(),
-        workdir: context.workdir.clone(),
+        cwd: context.cwd.clone(),
         session: child_session.to_string(),
         config_path: context.config_path.clone(),
         model: Some(format!("{}/{}", context.model_provider, child_model)),

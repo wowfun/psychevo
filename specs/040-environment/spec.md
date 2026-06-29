@@ -9,7 +9,7 @@ Define Psychevo's local host environment and authority boundary for runtime and
 caller-facing operations.
 
 This topic is the source of truth for how Psychevo describes the local
-environment it operates in: workdir, filesystem, process, network, platform,
+environment it operates in: cwd, filesystem, process, network, platform,
 environment-variable, temporary-directory, and cache exposure. It does not grant
 authority by itself. [041 Permissions](../041-permissions/spec.md) owns policy
 gates, and [045 Sandbox](../045-sandbox/spec.md) owns sandbox enforcement below
@@ -19,7 +19,7 @@ those gates.
 
 - local host environment vocabulary used by runtime, Gateway, CLI, TUI,
   Workbench, and future shell surfaces
-- workdir and workspace-root assumptions at the environment boundary
+- cwd and workspace-root assumptions at the environment boundary
 - filesystem, process, network, environment-variable, temporary-directory, and
   cache exposure categories
 - platform capability constraints that affect local execution
@@ -45,7 +45,7 @@ Out of scope:
 ## Environment Boundary
 
 The local environment is the host context Psychevo can observe or act within
-when running locally. It includes the process workdir, known workspace roots,
+when running locally. It includes the process cwd, known workspace roots,
 filesystem paths exposed to resource and tool operations, inherited environment
 variables, local process execution, platform capabilities, network reachability,
 temporary directories, and development cache locations.
@@ -55,7 +55,7 @@ temporary directory, cache root, or platform capability being present only means
 it may be considered by an owning policy or tool. Permissions, resource gates,
 runtime mode, and sandbox policy decide whether it may be used.
 
-The process workdir is the default local scope for workspace-oriented behavior,
+The process cwd is the default local scope for workspace-oriented behavior,
 but it is not the universal security boundary. Specs that use workspace roots
 must say whether they mean caller intent, default path resolution, permission
 profile defaults, sandbox writer roots, Gateway source scope, or UI grouping.

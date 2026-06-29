@@ -45,7 +45,7 @@ pub fn skill_context_fragments(
 
 pub fn create_skill(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     target: SkillTarget,
     name: &str,
     description: &str,
@@ -56,7 +56,7 @@ pub fn create_skill(
     if description.trim().is_empty() {
         return Err(Error::Message("description is required".to_string()));
     }
-    let root = target_skills_dir(home, workdir, target);
+    let root = target_skills_dir(home, cwd, target);
     let dir = root.join(name);
     let file = dir.join("SKILL.md");
     if file.exists() {
@@ -76,13 +76,13 @@ pub fn create_skill(
 pub fn patch_skill(
     catalog: &SkillCatalog,
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     name: &str,
     old: &str,
     new: &str,
 ) -> Result<Value> {
     let skill = find_skill(catalog, name)?;
-    ensure_mutable_skill(skill, home, workdir)?;
+    ensure_mutable_skill(skill, home, cwd)?;
     if old == new {
         return Err(Error::Message("old and new text are identical".to_string()));
     }
@@ -102,12 +102,12 @@ pub fn patch_skill(
 pub fn edit_skill(
     catalog: &SkillCatalog,
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     name: &str,
     content: &str,
 ) -> Result<Value> {
     let skill = find_skill(catalog, name)?;
-    ensure_mutable_skill(skill, home, workdir)?;
+    ensure_mutable_skill(skill, home, cwd)?;
     fs::write(&skill.file_path, content)?;
     Ok(json!({"success": true, "name": skill.name, "path": skill.file_path}))
 }
@@ -115,13 +115,13 @@ pub fn edit_skill(
 pub fn write_skill_file(
     catalog: &SkillCatalog,
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     name: &str,
     file_path: &str,
     content: &str,
 ) -> Result<Value> {
     let skill = find_skill(catalog, name)?;
-    ensure_mutable_skill(skill, home, workdir)?;
+    ensure_mutable_skill(skill, home, cwd)?;
     let target = resolve_skill_write_path(skill, file_path)?;
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
@@ -133,12 +133,12 @@ pub fn write_skill_file(
 pub fn remove_skill_file(
     catalog: &SkillCatalog,
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     name: &str,
     file_path: &str,
 ) -> Result<Value> {
     let skill = find_skill(catalog, name)?;
-    ensure_mutable_skill(skill, home, workdir)?;
+    ensure_mutable_skill(skill, home, cwd)?;
     let target = resolve_skill_relative_path(skill, file_path)?;
     if target == skill.file_path {
         return Err(Error::Message(
@@ -149,14 +149,9 @@ pub fn remove_skill_file(
     Ok(json!({"success": true, "name": skill.name, "path": target}))
 }
 
-pub fn remove_skill(
-    catalog: &SkillCatalog,
-    home: &Path,
-    workdir: &Path,
-    name: &str,
-) -> Result<Value> {
+pub fn remove_skill(catalog: &SkillCatalog, home: &Path, cwd: &Path, name: &str) -> Result<Value> {
     let skill = find_skill(catalog, name)?;
-    ensure_mutable_skill(skill, home, workdir)?;
+    ensure_mutable_skill(skill, home, cwd)?;
     if skill.file_path.file_name().and_then(|value| value.to_str()) == Some("SKILL.md") {
         fs::remove_dir_all(&skill.base_dir)?;
     } else {
@@ -167,7 +162,7 @@ pub fn remove_skill(
 
 pub fn remove_installed_skill(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     target: SkillTarget,
     name: &str,
 ) -> Result<Value> {
@@ -175,7 +170,7 @@ pub fn remove_installed_skill(
     if name.is_empty() {
         return Err(Error::Message("skill name is required".to_string()));
     }
-    let root = target_skills_dir(home, workdir, target);
+    let root = target_skills_dir(home, cwd, target);
     let package = root.join(name);
     let markdown = root.join(format!("{name}.md"));
     let path = if package.join("SKILL.md").is_file() {
@@ -195,14 +190,14 @@ pub fn remove_installed_skill(
 
 pub fn set_skill_enabled(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     target: SkillTarget,
     name: &str,
     enabled: bool,
 ) -> Result<Value> {
     let config_path = match target {
         SkillTarget::Global => home.join(CONFIG_FILE_NAME),
-        SkillTarget::Project => workdir.join(".psychevo").join(CONFIG_FILE_NAME),
+        SkillTarget::Project => cwd.join(".psychevo").join(CONFIG_FILE_NAME),
     };
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)?;
@@ -224,7 +219,7 @@ pub fn set_skill_enabled(
 
 pub fn set_skill_config_value(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     target: SkillTarget,
     key: &str,
     new_value: Value,
@@ -249,7 +244,7 @@ pub fn set_skill_config_value(
 
     let config_path = match target {
         SkillTarget::Global => home.join(CONFIG_FILE_NAME),
-        SkillTarget::Project => workdir.join(".psychevo").join(CONFIG_FILE_NAME),
+        SkillTarget::Project => cwd.join(".psychevo").join(CONFIG_FILE_NAME),
     };
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)?;
@@ -356,8 +351,8 @@ pub fn scan_skill_path(path: &Path) -> Result<ScanResult> {
     Ok(ScanResult { verdict, findings })
 }
 
-pub fn install_skill(home: &Path, workdir: &Path, options: InstallOptions) -> Result<Value> {
-    let source_path = match existing_input_path(&options.source, workdir, &BTreeMap::new())? {
+pub fn install_skill(home: &Path, cwd: &Path, options: InstallOptions) -> Result<Value> {
+    let source_path = match existing_input_path(&options.source, cwd, &BTreeMap::new())? {
         Some(path) => path,
         None => clone_git_source(&options.source)?,
     };
@@ -395,7 +390,7 @@ pub fn install_skill(home: &Path, workdir: &Path, options: InstallOptions) -> Re
         return Err(Error::Message("requested skill not found".to_string()));
     }
 
-    let target_root = target_skills_dir(home, workdir, options.target);
+    let target_root = target_skills_dir(home, cwd, options.target);
     fs::create_dir_all(&target_root)?;
     let mut installed = Vec::new();
     for skill in selected {
@@ -437,18 +432,18 @@ pub fn install_skill(home: &Path, workdir: &Path, options: InstallOptions) -> Re
     Ok(json!({"success": true, "installed": installed}))
 }
 
-pub fn target_skills_dir(home: &Path, workdir: &Path, target: SkillTarget) -> PathBuf {
+pub fn target_skills_dir(home: &Path, cwd: &Path, target: SkillTarget) -> PathBuf {
     match target {
         SkillTarget::Global => home.join("skills"),
-        SkillTarget::Project => workdir.join(".psychevo").join("skills"),
+        SkillTarget::Project => cwd.join(".psychevo").join("skills"),
     }
 }
 
-pub fn list_skill_bundles(home: &Path, workdir: &Path) -> Result<Vec<SkillBundle>> {
+pub fn list_skill_bundles(home: &Path, cwd: &Path) -> Result<Vec<SkillBundle>> {
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
     for (scope, root) in [
-        (SkillTarget::Project, project_bundles_dir(workdir)),
+        (SkillTarget::Project, project_bundles_dir(cwd)),
         (SkillTarget::Global, home.join(BUNDLES_DIR)),
     ] {
         if !root.is_dir() {
@@ -475,7 +470,7 @@ pub fn list_skill_bundles(home: &Path, workdir: &Path) -> Result<Vec<SkillBundle
 
 pub fn save_skill_bundle(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     options: SaveSkillBundleOptions,
 ) -> Result<Value> {
     let slug = slugify(&options.name);
@@ -495,7 +490,7 @@ pub fn save_skill_bundle(
             "bundle must reference at least one skill".to_string(),
         ));
     }
-    let root = bundles_dir(home, workdir, options.target);
+    let root = bundles_dir(home, cwd, options.target);
     fs::create_dir_all(&root)?;
     let path = root.join(format!("{slug}.toml"));
     if path.exists() && !options.overwrite {
@@ -529,12 +524,12 @@ pub fn save_skill_bundle(
 
 pub fn delete_skill_bundle(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     target: SkillTarget,
     name: &str,
 ) -> Result<Value> {
     let slug = slugify(name);
-    let path = bundles_dir(home, workdir, target).join(format!("{slug}.toml"));
+    let path = bundles_dir(home, cwd, target).join(format!("{slug}.toml"));
     if !path.exists() {
         return Err(Error::Message(format!("bundle not found: {name}")));
     }
@@ -542,14 +537,14 @@ pub fn delete_skill_bundle(
     Ok(json!({"success": true, "name": name, "scope": target.as_str(), "path": path}))
 }
 
-pub(crate) fn project_bundles_dir(workdir: &Path) -> PathBuf {
-    workdir.join(".psychevo").join(BUNDLES_DIR)
+pub(crate) fn project_bundles_dir(cwd: &Path) -> PathBuf {
+    cwd.join(".psychevo").join(BUNDLES_DIR)
 }
 
-pub(crate) fn bundles_dir(home: &Path, workdir: &Path, target: SkillTarget) -> PathBuf {
+pub(crate) fn bundles_dir(home: &Path, cwd: &Path, target: SkillTarget) -> PathBuf {
     match target {
         SkillTarget::Global => home.join(BUNDLES_DIR),
-        SkillTarget::Project => project_bundles_dir(workdir),
+        SkillTarget::Project => project_bundles_dir(cwd),
     }
 }
 

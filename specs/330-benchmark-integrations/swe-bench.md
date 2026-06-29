@@ -21,8 +21,8 @@ Dataset rows are translated into coding tasks with issue text, repository
 identity, base commit or base state, and evaluator expectations.
 
 The ACP candidate runs in a containerized authoring environment rooted at the
-official SWE-bench workdir, normally `/testbed`. The prompt contains the
-instance problem statement plus minimal workdir instructions. It must not
+official SWE-bench cwd, normally `/testbed`. The prompt contains the
+instance problem statement plus minimal cwd instructions. It must not
 include hidden tests, `FAIL_TO_PASS`, or `PASS_TO_PASS`.
 
 After the ACP agent finishes, the bridge collects `git diff` from the authoring

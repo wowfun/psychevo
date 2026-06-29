@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+use crate::agents::{apply_hook_runtime, build_hook_runtime};
 use crate::config::resolve_title_generation_provider;
 
 pub(crate) async fn run_live_internal(
@@ -10,7 +11,7 @@ pub(crate) async fn run_live_internal(
     control: Option<RunControl>,
     overflow_retry_attempted: bool,
 ) -> Result<RunResult> {
-    let workdir = canonical_workdir(&options.workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
     if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
         return Err(Error::Message("prompt is empty".to_string()));
     }
@@ -20,9 +21,17 @@ pub(crate) async fn run_live_internal(
             "--agent cannot be used together with no_agents".to_string(),
         ));
     }
-    let loaded = load_run_config(&options, &workdir)?;
+    let loaded = load_run_config(&options, &cwd)?;
+    let home = crate::config::resolve_psychevo_home(&loaded.env)?;
+    let plugin_assembly = crate::plugins::load_enabled_plugin_contributions(
+        &home,
+        &cwd,
+        &loaded.env,
+        &loaded.config.plugins,
+    );
+    let plugin_warnings = plugin_assembly.warnings.clone();
     let project_context_mode = loaded.config.project_context.instructions;
-    let project_instructions = load_project_instructions(&workdir, project_context_mode)?;
+    let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
     let approval_mode = options.approval_mode.unwrap_or({
         match loaded.config.permissions.approvals_reviewer {
@@ -34,7 +43,7 @@ pub(crate) async fn run_live_internal(
     let resumed_session_id = if let Some(session_id) = &options.session {
         Some(session_id.clone())
     } else if options.continue_latest {
-        store.latest_session_for_workdir_with_sources(&workdir, continue_sources)?
+        store.latest_session_for_cwd_with_sources(&cwd, continue_sources)?
     } else {
         None
     };
@@ -43,24 +52,26 @@ pub(crate) async fn run_live_internal(
         .map(|session_id| store.session_metadata(session_id))
         .transpose()?
         .flatten();
-    let agents_home = resolve_agents_home(&loaded.env, &workdir)?;
+    let agents_home = resolve_agents_home(&loaded.env, &cwd)?;
     let agent_input = main_agent_input_from_sources(
         options.no_agents,
         options.agent.as_deref(),
         session_metadata_for_agent.as_ref(),
     );
+    let mut agent_explicit_inputs = agent_input.iter().cloned().collect::<Vec<_>>();
+    agent_explicit_inputs.extend(plugin_assembly.agent_inputs.clone());
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         env: loaded.env.clone(),
-        explicit_inputs: agent_input.iter().cloned().collect(),
+        explicit_inputs: agent_explicit_inputs,
         no_agents: options.no_agents,
     })?;
     let selected_agent = match &agent_input {
         Some(input) => Some(resolve_agent_definition(
             &agent_catalog,
             input,
-            &workdir,
+            &cwd,
             &loaded.env,
         )?),
         None => None,
@@ -84,17 +95,18 @@ pub(crate) async fn run_live_internal(
     }
     let resolved = resolve_run_provider(&resolved_options, &loaded)?;
     let managed_tools = ensure_rg(&loaded.env).await?;
-    let skills_home = resolve_skills_home(&loaded.env, &workdir)?;
+    let skills_home = resolve_skills_home(&loaded.env, &cwd)?;
     let mut explicit_skill_inputs = options.skill_inputs.clone();
     if let Some(agent) = &selected_agent {
         explicit_skill_inputs.extend(agent.skills.clone());
     }
     let skill_options = SkillDiscoveryOptions {
         home: skills_home.clone(),
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         config_path: options.config_path.clone(),
         env: loaded.env.clone(),
         explicit_inputs: explicit_skill_inputs.clone(),
+        additional_roots: plugin_assembly.skill_inputs.clone(),
         no_skills: options.no_skills,
     };
     let skill_catalog = discover_skills(&skill_options)?;
@@ -102,7 +114,7 @@ pub(crate) async fn run_live_internal(
         &skill_catalog,
         &options.prompt,
         &explicit_skill_inputs,
-        &workdir,
+        &cwd,
         &loaded.env,
     );
     let selected_agent_summary = selected_agent_for_result(selected_agent.as_ref());
@@ -135,7 +147,7 @@ pub(crate) async fn run_live_internal(
             "project_context": {
                 "instructions": project_context_mode.as_str(),
             },
-            "workdir": workdir.display().to_string(),
+            "cwd": cwd.display().to_string(),
             "selected_agent": selected_agent_summary.clone(),
         });
         if let Some(main_agent) = selected_main_agent_metadata.clone()
@@ -161,7 +173,7 @@ pub(crate) async fn run_live_internal(
         } else {
             (
                 store.create_session_with_metadata(
-                    &workdir,
+                    &cwd,
                     source,
                     &resolved.model,
                     &resolved.provider,
@@ -173,7 +185,7 @@ pub(crate) async fn run_live_internal(
     } else {
         (
             store.create_session_with_metadata(
-                &workdir,
+                &cwd,
                 source,
                 &resolved.model,
                 &resolved.provider,
@@ -203,7 +215,7 @@ pub(crate) async fn run_live_internal(
     store.cleanup_reverted_messages(&session_id)?;
     maybe_preflight_compact_session(
         &options,
-        &workdir,
+        &cwd,
         &session_id,
         &resolved.provider,
         &resolved.model,
@@ -212,7 +224,7 @@ pub(crate) async fn run_live_internal(
     )
     .await?;
     let prompt_snapshot = options.snapshot_root.as_ref().and_then(|root| {
-        SnapshotStore::new(root.clone(), workdir.clone())
+        SnapshotStore::new(root.clone(), cwd.clone())
             .track()
             .ok()
             .flatten()
@@ -225,7 +237,7 @@ pub(crate) async fn run_live_internal(
         "provider": resolved.provider.clone(),
         "model": resolved.model.clone(),
         "db": options.state.db_path().to_path_buf(),
-        "workdir": workdir.clone(),
+        "cwd": cwd.clone(),
         "base_url": resolved.base_url.clone(),
         "api_key_env": resolved.api_key_env.clone(),
         "reasoning_effort": resolved.reasoning_effort.clone(),
@@ -282,6 +294,7 @@ pub(crate) async fn run_live_internal(
         &events,
         stream_events.as_ref(),
     );
+    emit_warning_events(&plugin_warnings, &events, stream_events.as_ref());
 
     let previous_messages =
         load_projected_messages(&store, &session_id, options.max_context_messages)?;
@@ -339,7 +352,7 @@ pub(crate) async fn run_live_internal(
     }
     let sandbox_policy = crate::sandbox::SandboxPolicy::from_config(
         &loaded.config.sandbox,
-        &workdir,
+        &cwd,
         options.mode,
         &loaded.env,
     )?;
@@ -355,7 +368,7 @@ pub(crate) async fn run_live_internal(
             reasoning_effort: resolved.reasoning_effort.clone(),
             context_limit: resolved.context_limit,
             generation_metadata: generation_metadata.clone(),
-            workdir: workdir.clone(),
+            cwd: cwd.clone(),
             mode: options.mode,
             project_context_mode,
             permission_config: loaded.config.permissions.clone(),
@@ -391,8 +404,8 @@ pub(crate) async fn run_live_internal(
         None
     };
     let permission_runtime = PermissionRuntime::new(
-        workdir.clone(),
-        workdir.join(".psychevo"),
+        cwd.clone(),
+        cwd.join(".psychevo"),
         loaded.config.permissions.clone(),
         permission_mode,
         approval_mode,
@@ -407,12 +420,18 @@ pub(crate) async fn run_live_internal(
     let permission_runtime =
         permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
     let (mut extension_tools, mcp_warnings) =
-        crate::mcp::mcp_tool_bindings(&options.mcp_servers, &workdir, Some(&permission_runtime))
+        crate::mcp::mcp_tool_bindings(&options.mcp_servers, &cwd, Some(&permission_runtime))
             .await;
     extension_tools.extend(options.runtime_tools.iter().map(|tool| tool.binding()));
+    extension_tools.extend(
+        plugin_assembly
+            .runtime_tools
+            .iter()
+            .map(|tool| tool.binding()),
+    );
     emit_warning_events(&mcp_warnings, &events, stream_events.as_ref());
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         task_id: session_id.clone(),
         mode: options.mode,
         lsp: loaded.config.lsp.clone(),
@@ -435,10 +454,34 @@ pub(crate) async fn run_live_internal(
     });
     emit_warning_events(&tool_surface.warnings, &events, stream_events.as_ref());
     let mut tool_surface_warnings = tool_surface.warnings;
+    let hook_config = crate::hooks::hook_runtime_config_from_options(&options, &cwd)?;
+    let hook_runtime = build_hook_runtime(
+        selected_agent.as_ref(),
+        plugin_assembly.hook_sources.clone(),
+        hook_config,
+        &cwd,
+    );
+    let hook_runtime_for_lifecycle = hook_runtime.clone();
+    if let Some(runtime) = &hook_runtime_for_lifecycle {
+        let _ = runtime.run_event(
+            "SessionStart",
+            &json!({
+                "session_id": session_id,
+                "source": if created_session { "startup" } else { "resume" },
+                "cwd": cwd,
+            }),
+        );
+    }
     let mut tools = tool_surface.tools;
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
-    tools = apply_agent_hooks(tools, selected_agent.as_ref(), &workdir);
+    let permission_runtime = match hook_runtime.clone() {
+        Some(runtime) => permission_runtime.with_hook_runtime(runtime),
+        None => permission_runtime,
+    };
     tools = permission_runtime.wrap_tools(tools);
+    if let Some(runtime) = hook_runtime.clone() {
+        tools = apply_hook_runtime(tools, runtime);
+    }
     let effective_tool_names = effective_tool_names(&tools);
     let prompt_agents = if options.no_agents {
         Vec::new()
@@ -466,7 +509,7 @@ pub(crate) async fn run_live_internal(
         "project_context": {
             "instructions": project_context_mode.as_str(),
         },
-        "workdir": workdir.display().to_string(),
+        "cwd": cwd.display().to_string(),
         "selected_agent": selected_agent_summary.clone(),
         "agents_enabled": !options.no_agents,
         "effective_tools": effective_tool_names,
@@ -494,7 +537,7 @@ pub(crate) async fn run_live_internal(
     let (prompt_assembly, prompt_prefix_record) = if needs_prefix_rebuild {
         let assembly = assemble_main_prompt_prefix(MainPromptPrefixInput {
             mode: options.mode,
-            workdir: &workdir,
+            cwd: &cwd,
             selected_agent: selected_agent.as_ref(),
             agents: &prompt_agents,
             skills: &prompt_skills,
@@ -560,7 +603,7 @@ pub(crate) async fn run_live_internal(
         "project_instructions_visible": prefix_metadata.get("project_instructions_visible").cloned().unwrap_or_default(),
         "project_instructions_role": prefix_metadata.get("project_instructions_role").cloned().unwrap_or_default(),
         "project_context": prefix_metadata.get("project_context").cloned().unwrap_or_default(),
-        "workdir": prefix_metadata.get("workdir").cloned().unwrap_or_default(),
+        "cwd": prefix_metadata.get("cwd").cloned().unwrap_or_default(),
     });
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
@@ -602,6 +645,19 @@ pub(crate) async fn run_live_internal(
             ),
         );
     }
+    if let Some(runtime) = &hook_runtime_for_lifecycle {
+        let prompt_hook = runtime.run_event(
+            "UserPromptSubmit",
+            &json!({
+                "session_id": session_id,
+                "prompt": options.prompt,
+                "cwd": cwd,
+            }),
+        );
+        if let Some(reason) = prompt_hook.blocked_reason {
+            return Err(Error::Message(reason));
+        }
+    }
     let request = AgentLoopRequest {
         model_provider: resolved.provider.clone(),
         model: resolved.model.clone(),
@@ -616,7 +672,7 @@ pub(crate) async fn run_live_internal(
             prompt_message_from_inputs_with_options(
                 &options.prompt,
                 &options.image_inputs,
-                &workdir,
+                &cwd,
                 &resolved.metadata,
                 options.extract_prompt_image_sources,
             )?
@@ -635,7 +691,7 @@ pub(crate) async fn run_live_internal(
                 store.delete_messages_from_seq(&session_id, prompt_session_seq)?;
                 compact_session(CompactSessionOptions {
                     state: options.state.clone(),
-                    workdir: workdir.clone(),
+                    cwd: cwd.clone(),
                     session: session_id.clone(),
                     config_path: options.config_path.clone(),
                     model: options
@@ -683,18 +739,29 @@ pub(crate) async fn run_live_internal(
         &completion.messages,
         &required_agent_mentions,
     )?;
-    run_agent_hook_event(
-        selected_agent.as_ref(),
-        "Stop",
-        &workdir,
-        json!({ "outcome": completion.outcome.as_str() }),
-    );
     let final_answer = completion
         .messages
         .iter()
         .rev()
         .find_map(assistant_text)
         .unwrap_or_default();
+    if let Some(runtime) = &hook_runtime_for_lifecycle {
+        let _ = runtime.run_event(
+            "PostLLMCall",
+            &json!({
+                "session_id": session_id,
+                "outcome": completion.outcome.as_str(),
+                "assistant_text": final_answer,
+            }),
+        );
+        let _ = runtime.run_event(
+            "Stop",
+            &json!({
+                "session_id": session_id,
+                "outcome": completion.outcome.as_str(),
+            }),
+        );
+    }
     let tool_failures = completion
         .messages
         .iter()
@@ -728,15 +795,25 @@ pub(crate) async fn run_live_internal(
         }
     }
     let mut warnings = project_instructions.warnings;
+    warnings.extend(plugin_warnings);
     warnings.extend(mcp_warnings);
     warnings.append(&mut tool_surface_warnings);
+    if let Some(runtime) = &hook_runtime_for_lifecycle {
+        let _ = runtime.run_event(
+            "SessionEnd",
+            &json!({
+                "session_id": session_id,
+                "outcome": completion.outcome.as_str(),
+            }),
+        );
+    }
     Ok(RunResult {
         session_id,
         outcome: completion.outcome,
         terminal_reason: completion.terminal_reason,
         final_answer,
         db_path: options.state.db_path().to_path_buf(),
-        workdir,
+        cwd,
         provider: resolved.provider,
         model: resolved.model,
         base_url: resolved.base_url,
@@ -752,123 +829,4 @@ pub(crate) async fn run_live_internal(
     })
 }
 
-pub(crate) fn first_use_empty_visible_session(
-    store: &SqliteStore,
-    session_id: &str,
-) -> Result<bool> {
-    let Some(summary) = store.session_summary(session_id)? else {
-        return Ok(false);
-    };
-    Ok(summary.message_count == 0
-        && summary.parent_session_id.is_none()
-        && summary.ended_at_ms.is_none()
-        && visible_session_source_allows_auto_title(&summary.source))
-}
-
-pub(crate) fn materialize_first_use_empty_session(
-    store: &SqliteStore,
-    session_id: &str,
-    provider: &str,
-    model: &str,
-    metadata: Value,
-) -> Result<bool> {
-    if !first_use_empty_visible_session(store, session_id)? {
-        return Ok(false);
-    }
-    store.set_session_model(session_id, provider, model)?;
-    store.set_session_metadata(session_id, Some(metadata))?;
-    Ok(true)
-}
-
-pub(crate) fn should_title_completed_session(
-    created_session: bool,
-    first_use_empty_visible_session: bool,
-    outcome: Outcome,
-) -> bool {
-    (created_session || first_use_empty_visible_session) && outcome == Outcome::Normal
-}
-
-pub(crate) fn selected_skills_for_run(
-    catalog: &crate::skills::SkillCatalog,
-    prompt: &str,
-    explicit_inputs: &[String],
-    workdir: &std::path::Path,
-    env: &BTreeMap<String, String>,
-) -> Vec<SelectedSkill> {
-    let mut selected = select_explicit_skills(catalog, explicit_inputs, workdir, env);
-    selected.extend(select_skills_for_prompt(catalog, prompt));
-    let mut seen = std::collections::BTreeSet::new();
-    selected
-        .into_iter()
-        .filter(|skill| seen.insert(skill.path.clone()))
-        .collect()
-}
-
-pub(crate) async fn maybe_preflight_compact_session(
-    options: &RunOptions,
-    workdir: &std::path::Path,
-    session_id: &str,
-    provider: &str,
-    model: &str,
-    reasoning_effort: &Option<String>,
-    env: &BTreeMap<String, String>,
-) -> Result<()> {
-    let model_override = options
-        .model
-        .clone()
-        .or_else(|| Some(format!("{provider}/{model}")));
-    let result = compact_session(CompactSessionOptions {
-        state: options.state.clone(),
-        workdir: workdir.to_path_buf(),
-        session: session_id.to_string(),
-        config_path: options.config_path.clone(),
-        model: model_override,
-        reasoning_effort: options
-            .reasoning_effort
-            .clone()
-            .or_else(|| reasoning_effort.clone()),
-        inherited_env: Some(env.clone()),
-        reason: CompactionReason::AutoThreshold,
-        instructions: None,
-        force: false,
-    })
-    .await?;
-    let _ = result;
-    Ok(())
-}
-
-pub(crate) fn selected_agent_for_result(agent: Option<&AgentDefinition>) -> Option<SelectedAgent> {
-    agent.map(|agent| SelectedAgent {
-        name: agent.name.clone(),
-        source: agent.source.as_str().to_string(),
-        path: agent.file_path.clone(),
-    })
-}
-
-pub(crate) fn session_model_metadata(metadata: &serde_json::Value) -> ModelMetadata {
-    metadata
-        .get("model_metadata")
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok())
-        .unwrap_or_default()
-}
-
-pub(crate) fn main_agent_input_from_sources(
-    no_agents: bool,
-    explicit_agent: Option<&str>,
-    session_metadata: Option<&serde_json::Value>,
-) -> Option<String> {
-    if no_agents {
-        return None;
-    }
-    if let Some(input) = explicit_agent
-        .map(str::trim)
-        .filter(|input| !input.is_empty())
-    {
-        return Some(input.to_string());
-    }
-    if let Some(input) = session_metadata.and_then(session_agent_input_from_metadata) {
-        return Some(input);
-    }
-    None
-}
+include!("run_loop/helpers.rs");

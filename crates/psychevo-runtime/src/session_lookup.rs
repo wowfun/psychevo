@@ -19,9 +19,6 @@ pub fn session_exists(state: &StateRuntime, session_id: &str) -> Result<bool> {
     })
 }
 
-pub fn latest_run_session_for_workdir(
-    state: &StateRuntime,
-    workdir: &Path,
-) -> Result<Option<String>> {
-    state.store().latest_run_session_for_workdir(workdir)
+pub fn latest_run_session_for_cwd(state: &StateRuntime, cwd: &Path) -> Result<Option<String>> {
+    state.store().latest_run_session_for_cwd(cwd)
 }

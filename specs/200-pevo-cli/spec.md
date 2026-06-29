@@ -20,6 +20,7 @@ product-level environment variables.
 - `pevo tui` product positioning
 - `pevo acp` product positioning
 - `pevo skill` product positioning
+- `pevo plugin` product positioning
 - `pevo profile` product positioning
 - local session, model, config, and auth inspection/maintenance commands
 - local session export/share artifacts
@@ -51,6 +52,7 @@ The initialized home tree contains:
 - `logs/`
 - `cache/`
 - `skills/`
+- `plugins/`
 - `agents/`
 
 Named profiles additionally contain `profile.toml` when created through
@@ -91,6 +93,8 @@ Implemented first-slice commands:
 - `pevo acp`
 - `pevo profile`
 - `pevo skill`
+- `pevo plugin`
+- `pevo hooks`
 - `pevo stats`
 - `pevo context`
 - `pevo session`
@@ -110,8 +114,26 @@ expose sensitive reconstructed prompt material.
 `pevo skill` is the only skill command family name. The obsolete plural
 `pevo skills` is not accepted.
 
+`pevo plugin` is the only plugin command family name. The obsolete plural
+`pevo plugins` is not accepted.
+
+`pevo hooks` owns local hook review and profile-owned hook state. It supports:
+
+- `pevo hooks list`
+- `pevo hooks trust <hook-key>`
+- `pevo hooks enable <hook-key>`
+- `pevo hooks disable <hook-key>`
+
+Read commands accept `--json` and emit secret-free metadata including event,
+matcher, handler type, source kind, source id, plugin id when relevant, enabled
+state, current hash, trusted hash when present, trust status, skipped reason,
+and source path when available. Mutating commands write only
+`hooks.state.<hook_key>` in the active profile configuration. They must not edit
+project hook files, plugin packages, session SQLite state, or hook declaration
+content.
+
 `pevo -p, --profile <name>` selects a named Psychevo profile for the entire
-command invocation. It does not change the workspace/workdir protocol scope.
+command invocation. It does not change the workspace/cwd protocol scope.
 Profile selection is resolved before subcommand execution and before Gateway or
 ACP child processes are launched.
 
@@ -218,12 +240,27 @@ defined by [057 Profiles](../057-profiles/spec.md).
 `pevo skill` owns the singular skill hub/config/list/view router. With no
 subcommand it shows help. `list` and `view` are read operations; `audit`
 absorbs the old scan behavior; scoped `install`, `config`, and `bundle`
-writes default to the current workdir local scope and use `-g`/`--global` for
+writes default to the current cwd local scope and use `-g`/`--global` for
 global scope. Old verb-based
 lifecycle subcommands (`create`, `patch`, `remove`, `enable`, `disable`,
 `scan`) are not the CLI contract for this topic. Skill package, discovery,
 scanner, hub, bundle, curator, and provenance semantics belong to
 [055 Skills](../055-skills/spec.md).
+
+`pevo plugin` owns local plugin package inspection, installation, policy, and
+marketplace catalog management. With no subcommand it shows help. `list`,
+`view`, and `doctor` are read or diagnostic operations and accept `--json`.
+`install`, `uninstall`, `enable`, and `disable` write the active profile scope
+by default. `--local` writes the current cwd `.psychevo` scope. `-g` or
+`--global` writes the active profile scope and conflicts with `--local`.
+`enable` enables every declared capability family for that plugin in the
+selected scope. When a selector matches more than one installed plugin,
+`name@source` is required. `plugin marketplace list/add/remove` manages local
+and Git source catalogs separately from plugin installation and enablement.
+Plugin package, manifest, store, worker, hook, and contribution behavior
+belongs to [054 Plugins](../054-plugins/spec.md),
+[150 Plugin Runtime](../150-plugin-runtime/spec.md), and
+[155 Plugin Manifest](../155-plugin-manifest/spec.md).
 
 `pevo stats` owns local token and estimated-cost reporting from the SQLite
 state database. It does not contact providers, refresh catalogs, or reconcile
@@ -253,9 +290,9 @@ session. It does not contact providers, refresh catalogs, or persist prompt
 snapshots.
 
 `pevo session` owns scriptable local session maintenance for the current
-workdir: `list`, `show`, `rename`, `archive`, `restore`, `export`, and
+cwd: `list`, `show`, `rename`, `archive`, `restore`, `export`, and
 `share`. `latest` resolves the latest active `run` or `tui` session for the
-current canonical workdir. Exact session ids are matched exactly. The first CLI
+current canonical cwd. Exact session ids are matched exactly. The first CLI
 batch intentionally does not expose session `delete`, `undo`, or `redo`.
 
 `pevo session export <session|latest>` emits a local artifact from the SQLite
@@ -326,7 +363,7 @@ artifact for the session and reports its filesystem path. This command is an
 explicit local packaging step, not remote publication: it must not upload to a
 service, create gists, call provider APIs, or mark durable sharing state. When
 no output path is supplied, the artifact is written as
-`psychevo-share-<short-session-id>.md` in the current workdir, using the same
+`psychevo-share-<short-session-id>.md` in the current cwd, using the same
 collision-resistant short session id as export filenames. `--json` changes the
 command result reporting to JSON; it does not change the Markdown artifact
 format. Share content is selected with `-i, --include`; the share include
@@ -343,13 +380,13 @@ intentionally excluded from share artifacts.
 and explicit provider catalog fetches: `list`, `current`, `set`, and `fetch`.
 `list`, `current`, and `set` read only local configuration/cache and never
 contact providers. `set <provider/model>` writes the top-level default model
-in the current workdir `.psychevo/config.toml` by default, uses
+in the current cwd `.psychevo/config.toml` by default, uses
 `-g`/`--global` for `$PSYCHEVO_HOME/config.toml`, reports the written path, and
 supports `--json`. `fetch` is the only model command that contacts provider
 `/models` endpoints.
 
 `pevo config` owns path/config/provider inspection plus scoped provider
-creation. Scoped config writes default to the current workdir's `.psychevo`
+creation. Scoped config writes default to the current cwd's `.psychevo`
 scope; `-g`/`--global` writes `$PSYCHEVO_HOME`; `--local` explicitly selects
 the default local scope. `--global` and `--local` are mutually exclusive.
 `--project` is not accepted.
@@ -364,7 +401,7 @@ Permission semantics, rule precedence, approval modes, and hard-deny behavior
 are defined by [041 Permissions](../041-permissions/spec.md); this topic owns
 only the concrete `pevo` command spelling and output surface.
 
-`pevo config permissions list/remove` manages the current workdir's
+`pevo config permissions list/remove` manages the current cwd's
 project-local `.psychevo/config.toml` permission rules. `allow always` approval
 writes use the same project-local rule store.
 
@@ -372,7 +409,7 @@ writes use the same project-local rule store.
 built-in providers. It supports `status` and `set`; destructive
 unset/logout/remove behavior is not part of this batch. Raw API keys are never
 accepted as argv values. `auth set` reads the key from stdin and writes to the
-current workdir `.psychevo/.env` by default; `-g`/`--global` writes the global
+current cwd `.psychevo/.env` by default; `-g`/`--global` writes the global
 `.env`.
 
 New `session`, `model`, `config`, and `auth` commands emit human output by

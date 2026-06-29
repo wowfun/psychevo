@@ -377,7 +377,7 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
     let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
         crate::prompt_assembly::MainPromptPrefixInput {
             mode: RunMode::Default,
-            workdir: &PathBuf::from("/tmp/repo"),
+            cwd: &PathBuf::from("/tmp/repo"),
             selected_agent: Some(&agent),
             agents: &prompt_agents,
             skills: &prompt_skills,
@@ -411,12 +411,12 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
 }
 
 #[test]
-pub(crate) fn prompt_prefix_includes_runtime_workdir_environment() {
-    let workdir = PathBuf::from("/tmp/repo/task");
+pub(crate) fn prompt_prefix_includes_runtime_cwd_environment() {
+    let cwd = PathBuf::from("/tmp/repo/task");
     let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
         crate::prompt_assembly::MainPromptPrefixInput {
             mode: RunMode::Default,
-            workdir: &workdir,
+            cwd: &cwd,
             selected_agent: None,
             agents: &[],
             skills: &[],
@@ -456,7 +456,7 @@ pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallba
     let developer_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
         crate::prompt_assembly::MainPromptPrefixInput {
             mode: RunMode::Default,
-            workdir: &PathBuf::from("/tmp/repo"),
+            cwd: &PathBuf::from("/tmp/repo"),
             selected_agent: None,
             agents: &[],
             skills: &[],
@@ -486,7 +486,7 @@ pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallba
     let fallback_assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
         crate::prompt_assembly::MainPromptPrefixInput {
             mode: RunMode::Default,
-            workdir: &PathBuf::from("/tmp/repo"),
+            cwd: &PathBuf::from("/tmp/repo"),
             selected_agent: None,
             agents: &[],
             skills: &[],

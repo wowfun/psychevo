@@ -340,7 +340,7 @@ pub(crate) fn reconstructed_tool_declarations(
     store: &SqliteStore,
     summary: &SessionSummary,
     metadata: &Value,
-    workdir: &Path,
+    cwd: &Path,
     mode: RunMode,
 ) -> Vec<ToolDeclaration> {
     let base_url = metadata
@@ -354,7 +354,7 @@ pub(crate) fn reconstructed_tool_declarations(
         summary.provider.clone(),
     ));
     let tools = assemble_tool_surface(ToolSurfaceAssembly {
-        workdir: workdir.to_path_buf(),
+        cwd: cwd.to_path_buf(),
         task_id: summary.id.clone(),
         mode,
         lsp: Default::default(),
@@ -368,11 +368,12 @@ pub(crate) fn reconstructed_tool_declarations(
         custom_toolsets: BTreeMap::new(),
         clarify: ClarifyToolSurface::declaration_only(),
         skills: Some(SkillDiscoveryOptions {
-            home: workdir.join(".psychevo"),
-            workdir: workdir.to_path_buf(),
+            home: cwd.join(".psychevo"),
+            cwd: cwd.to_path_buf(),
             config_path: None,
             env: BTreeMap::new(),
             explicit_inputs: Vec::new(),
+            additional_roots: Vec::new(),
             no_skills: false,
         }),
         extension_tools: Vec::new(),
@@ -396,7 +397,7 @@ pub(crate) fn reconstructed_tool_declarations(
                 .map(str::to_string),
             context_limit: metadata.get("context_limit").and_then(Value::as_u64),
             generation_metadata: json_value_object_with_model_metadata(metadata),
-            workdir: workdir.to_path_buf(),
+            cwd: cwd.to_path_buf(),
             mode,
             project_context_mode: Default::default(),
             permission_config: Default::default(),
@@ -530,7 +531,7 @@ pub(crate) fn export_document<'a>(
             session: ExportSessionValue {
                 id: &summary.id,
                 source: &summary.source,
-                workdir: &summary.workdir,
+                cwd: &summary.cwd,
                 model: &summary.model,
                 provider: &summary.provider,
                 started_at_ms: summary.started_at_ms,
@@ -585,7 +586,7 @@ pub(crate) fn render_markdown(
         }
         push_line(&mut out, &format!("Session: `{}`", summary.id));
         push_line(&mut out, &format!("Source: `{}`", summary.source));
-        push_line(&mut out, &format!("Workdir: `{}`", summary.workdir));
+        push_line(&mut out, &format!("Cwd: `{}`", summary.cwd));
         push_line(
             &mut out,
             &format!("Model: `{}/{}`", summary.provider, summary.model),

@@ -74,7 +74,7 @@ The first implementation slice stores these session columns:
 - `id` text primary key, UUID v7
 - `source` text
 - `parent_session_id` text nullable
-- `workdir` text
+- `cwd` text
 - `model` text
 - `provider` text
 - `started_at_ms` integer
@@ -171,7 +171,7 @@ message, or Gateway activity records.
 `automations` stores one definition per local automation task. Required
 semantics include:
 - durable task identity
-- workdir scope
+- cwd scope
 - target kind, either project automation or thread heartbeat
 - optional target thread id for thread heartbeats
 - title and prompt text
@@ -185,7 +185,7 @@ semantics include:
 The first implementation slice stores these automation columns:
 
 - `id` text primary key, UUID v7
-- `workdir` text
+- `cwd` text
 - `kind` text, `project` or `thread_heartbeat`
 - `target_thread_id` text nullable
 - `title` text
@@ -432,6 +432,12 @@ coordination tables.
 The version 22 slice adds `gateway_live_snapshots` for coalesced live transcript
 observation replay and clears retained live relay buffers when migrating from
 earlier supported development databases.
+
+The pre-release current-working-directory naming cutover to `cwd` is a state
+reset boundary, not a compatibility migration. Development databases created
+with the former column name must be rebuilt with `pevo init --reset-state`
+instead of being silently rewritten on open; the runtime then creates the
+current `cwd` schema from first principles.
 
 The version 21 slice adds structured cost status, pricing missing-reason, and
 pricing version columns for local accounting projections. Because the product

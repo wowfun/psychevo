@@ -16,9 +16,9 @@ This attachment is part of [200 pevo CLI](spec.md).
 - optional `--json`
 
 Bare `pevo context` is a usage error. The literal `latest` resolves the latest
-active `run` or `tui` session for the canonical current workdir, or for
+active `run` or `tui` session for the canonical current cwd, or for
 `--dir` when provided. Exact session ids may refer to active or archived
-sessions and use the session's persisted workdir.
+sessions and use the session's persisted cwd.
 
 The command requires initialized `PSYCHEVO_HOME`, reads the SQLite state
 database selected by `PSYCHEVO_DB` or `$PSYCHEVO_HOME/state.db`, and may read

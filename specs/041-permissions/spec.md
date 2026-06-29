@@ -55,8 +55,8 @@ Permission profiles define the baseline capability boundary. Built-in profiles
 are `:read-only`, `:workspace`, and `:danger-full-access`; project profiles may
 extend another profile and add filesystem paths, network hosts/domains, and
 tool-family grants. Profiles are policy gates, not OS sandboxes. Filesystem
-profile entries may grant paths outside the current workdir, so a cross-project
-read can be approved without changing the session workdir.
+profile entries may grant paths outside the current cwd, so a cross-project
+read can be approved without changing the session cwd.
 
 `approval_policy` controls whether an action that needs consent may ask:
 
@@ -180,9 +180,9 @@ Protected reads are intentionally narrow. Internal Psychevo cache/index paths
 that could inject stale or untrusted runtime material may be denied.
 
 Filesystem reads, writes, and edits are evaluated against the active profile.
-The current workdir is no longer the hard boundary for file tools; it is the
+The current cwd is no longer the hard boundary for file tools; it is the
 default workspace root used by built-in profiles. A profile grant may authorize
-an absolute path outside the workdir, while protected denies still win.
+an absolute path outside the cwd, while protected denies still win.
 
 Exec commands are evaluated in three layers:
 
@@ -307,7 +307,7 @@ recent smart denial with `/approve once|session|always`.
   reads without prompting; unrecognized inline behavior prompts.
 - `exec_policy.rules` support token alternatives, `justification`,
   `match`/`not_match` self-tests, and host executable path resolution.
-- Filesystem grants match canonical paths inside or outside the workdir.
+- Filesystem grants match canonical paths inside or outside the cwd.
 - No-handler approval paths fail closed.
 - `approval_policy = "never"` denies prompt-level actions without showing UI.
 - `allow always` writes project-local TOML through the correct adapter and

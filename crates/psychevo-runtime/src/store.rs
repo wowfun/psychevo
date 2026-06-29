@@ -75,7 +75,7 @@ pub struct ContextEvidenceRecord {
 
 pub struct ChildSessionSnapshotInput<'a> {
     pub parent_session_id: &'a str,
-    pub workdir: &'a Path,
+    pub cwd: &'a Path,
     pub source: &'a str,
     pub model: &'a str,
     pub provider: &'a str,
@@ -229,7 +229,7 @@ pub struct GatewayTurnTerminalRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AutomationTaskInput {
     pub id: Option<String>,
-    pub workdir: String,
+    pub cwd: String,
     pub kind: String,
     pub target_thread_id: Option<String>,
     pub title: String,
@@ -246,7 +246,7 @@ pub struct AutomationTaskInput {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AutomationTaskRecord {
     pub id: String,
-    pub workdir: String,
+    pub cwd: String,
     pub kind: String,
     pub target_thread_id: Option<String>,
     pub title: String,
@@ -277,6 +277,12 @@ pub struct AutomationRunRecord {
     pub source_key: Option<String>,
     pub error: Option<String>,
     pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationRunRecoveryCandidate {
+    pub task: AutomationTaskRecord,
+    pub run: AutomationRunRecord,
 }
 
 #[derive(Debug, Clone, PartialEq)]

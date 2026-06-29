@@ -27,12 +27,13 @@ Psychevo therefore needs a product-level plugin system above capability
 contributions. The system should let plugins be installed, enabled, diagnosed,
 and updated while ensuring that every contributed capability still passes
 through the owning runtime boundary, permission policy, sandbox status, and
-evidence model.
+evidence model. Hook-specific authority, trust review, payload, execution, and
+run-summary rules are owned by ADR 0004.
 
 Specifications remain self-contained. This ADR records architectural decisions;
 future specs must define concrete manifest schemas, CLI/API surfaces, storage
-schemas, command names, hook payloads, and worker protocol messages without
-depending on this ADR as normative text.
+schemas, command names, hook contribution shapes, and worker protocol messages
+without depending on this ADR as normative text.
 
 ## Decision
 
@@ -123,8 +124,8 @@ $PSYCHEVO_HOME/plugins/data
 Installed project plugins live under the current project overlay:
 
 ```text
-<workdir>/.psychevo/plugins/cache
-<workdir>/.psychevo/plugins/data
+<cwd>/.psychevo/plugins/cache
+<cwd>/.psychevo/plugins/data
 ```
 
 The cache root contains materialized plugin packages. The data root is the only
@@ -151,10 +152,10 @@ configuration declare policy. The overlay model must support:
 - provider adapter enablement without embedding credentials in the plugin
 - project-local overrides that do not mutate inactive profiles
 
-Project configuration overlays profile configuration for the current workdir,
+Project configuration overlays profile configuration for the current cwd,
 following the existing profile and project config boundary. Profile-global
-state remains profile-local. Workdir-local plugin state remains under
-`<workdir>/.psychevo` and must not select or override the active profile.
+state remains profile-local. Cwd-local plugin state remains under
+`<cwd>/.psychevo` and must not select or override the active profile.
 
 No plugin manifest, marketplace entry, or runtime worker response grants
 permission. Permission policy in 041 decides whether a selected operation may
@@ -177,7 +178,8 @@ configuration directly.
 Worker-provided tools, hooks, providers, commands, and agent backends are
 candidate contributions. Runtime must normalize them through the same source
 identity, conflict, selection, visibility, dispatch, permission, and evidence
-vocabulary used for built-in and configured capabilities.
+vocabulary used for built-in and configured capabilities. Worker-provided hook
+handlers still execute only through the runtime hook module defined by ADR 0004.
 
 MCP remains a supported capability source and may be contributed by plugins,
 but MCP is not the only plugin runtime API. MCP servers contribute MCP protocol
@@ -198,8 +200,8 @@ into the existing owning boundary:
 - Skills map to 055 Skills.
 - MCP sources and MCP tools map to 056 MCP.
 - Tool declarations, execution bindings, and toolsets map to 007 Tool Surface.
-- Agent definitions, peer-agent backends, selected-agent policy, skills, MCP
-  scope, and hooks map to 051 Agents.
+- Agent definitions, peer-agent backends, selected-agent policy, skills, and
+  MCP scope map to 051 Agents.
 - Provider adapters map to the provider manager and AI protocol boundary; the
   provider manager keeps provider/model resolution and credential handling.
 - Commands map to the runtime command catalog and shared slash-command surface;
@@ -208,10 +210,12 @@ into the existing owning boundary:
 - Sandbox status and confinement limits map to 045 Sandbox.
 
 Hooks are plugin capabilities only after runtime accepts them as typed
-contributions. A hook may observe, request, or contribute through the owning
-boundary for that hook point. Tool hooks may affect the current tool call only
-within the tool hook contract; they must not rewrite provider payloads, mutate
-future capability snapshots, or persist new permission grants.
+contributions. Plugin manifest and worker hook declarations map to ADR 0004 and
+specs 053/140. Installing or enabling a plugin does not automatically trust or
+run plugin hooks. A plugin hook also requires the plugin to be enabled, the
+`hooks` capability family to be enabled, and the hook definition to pass the
+hook trust model. Hook effects remain event-scoped and must not rewrite provider
+payloads, mutate future capability snapshots, or persist new permission grants.
 
 Provider adapters may be contributed by plugins, but secrets and credentials
 remain outside plugin packages. A provider plugin may declare required
@@ -226,9 +230,11 @@ not full runtime compatibility.
 
 Claude Code and Codex compatibility means Psychevo can read compatible
 manifest paths and map supported fields such as skills, MCP servers, hooks, and
-display metadata where semantics align. It does not mean Psychevo can execute
-Claude Code commands, agents, LSP servers, monitors, themes, settings, or
-other host-specific components without an explicit Psychevo mapping.
+display metadata where semantics align. Hook fields normalize to the Psychevo
+hook system rather than executing through the source host's hook runtime. It
+does not mean Psychevo can execute Claude Code commands, agents, LSP servers,
+monitors, themes, settings, or other host-specific components without an
+explicit Psychevo mapping.
 
 OpenCode and Hermes plugins are not runtime-compatible. Their JavaScript,
 TypeScript, and Python registration APIs must be adapted through a Psychevo
@@ -242,6 +248,7 @@ The plugin system must fail closed at trust boundaries:
 
 - an installed plugin is not automatically enabled
 - an enabled plugin is not automatically model-visible
+- an enabled plugin hook is not automatically trusted or executable
 - a model-visible tool is not execution approval
 - a worker process is not sandboxed merely because it is a plugin
 - plugin package metadata is not a credential source

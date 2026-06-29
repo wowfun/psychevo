@@ -1,4 +1,3 @@
-
 impl AgentRunStatus {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -109,7 +108,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) context_limit: Option<u64>,
     pub(crate) generation_metadata: Value,
-    pub(crate) workdir: PathBuf,
+    pub(crate) cwd: PathBuf,
     pub(crate) mode: RunMode,
     pub(crate) project_context_mode: ProjectContextInstructionMode,
     pub(crate) permission_config: PermissionConfig,
@@ -166,7 +165,7 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
         if input.trim().is_empty() {
             continue;
         }
-        if let Some(path) = existing_agent_path(input, &options.workdir, &options.env)? {
+        if let Some(path) = existing_agent_path(input, &options.cwd, &options.env)? {
             load_agent_file(&mut catalog, &mut winners, &path, AgentSource::Explicit)?;
         }
     }
@@ -174,11 +173,11 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
     load_agent_dir(
         &mut catalog,
         &mut winners,
-        &options.workdir.join(".psychevo").join("agents"),
+        &options.cwd.join(".psychevo").join("agents"),
         AgentSource::Project,
     )?;
 
-    for dir in ancestor_claude_agent_dirs(&options.workdir) {
+    for dir in ancestor_claude_agent_dirs(&options.cwd) {
         load_agent_dir(&mut catalog, &mut winners, &dir, AgentSource::ClaudeProject)?;
     }
 
@@ -198,7 +197,7 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
         )?;
     }
 
-    match crate::config::load_agent_backend_configs(&options.home, &options.workdir, &options.env) {
+    match crate::config::load_agent_backend_configs(&options.home, &options.cwd, &options.env) {
         Ok(backends) => {
             for backend in backends.values() {
                 if let Some(agent) = generated_agent_from_backend(backend) {
@@ -222,10 +221,10 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
 pub fn resolve_agent_definition(
     catalog: &AgentCatalog,
     input: &str,
-    workdir: &Path,
+    cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> Result<AgentDefinition> {
-    if let Some(path) = existing_agent_path(input, workdir, env)? {
+    if let Some(path) = existing_agent_path(input, cwd, env)? {
         return parse_agent_file(&path, AgentSource::Explicit);
     }
 
@@ -541,31 +540,59 @@ pub(crate) fn agent_policy_allows_agent_spawn(agent: &AgentDefinition) -> bool {
     agent_policy_allows_agent_catalog(agent)
 }
 
-pub(crate) fn apply_agent_hooks(
-    tools: Vec<Arc<dyn ToolBinding>>,
+pub(crate) fn build_hook_runtime(
     agent: Option<&AgentDefinition>,
-    workdir: &Path,
-) -> Vec<Arc<dyn ToolBinding>> {
-    let Some(agent) = agent.filter(|agent| agent.hooks.is_some()) else {
-        return tools;
+    plugin_hook_sources: Vec<crate::hooks::HookSourceDescriptor>,
+    mut config: crate::hooks::HookRuntimeConfig,
+    cwd: &Path,
+) -> Option<crate::hooks::HookRuntime> {
+    if let Some(agent) = agent.filter(|agent| agent.hooks.is_some())
+        && let Some(source) = crate::hooks::agent_hook_source(&agent.name, agent.hooks.as_ref())
+    {
+        config.sources.push(source);
+    }
+    config.sources.extend(plugin_hook_sources);
+    if config.sources.is_empty() {
+        return None;
     };
+    Some(crate::hooks::HookRuntime::new(
+        cwd.to_path_buf(),
+        config,
+    ))
+}
+
+pub(crate) fn apply_hook_runtime(
+    tools: Vec<Arc<dyn ToolBinding>>,
+    hook_runtime: crate::hooks::HookRuntime,
+) -> Vec<Arc<dyn ToolBinding>> {
     tools
         .into_iter()
         .map(|tool| {
             Arc::new(HookedTool {
                 inner: tool,
-                hooks: agent.hooks.clone(),
-                agent_name: agent.name.clone(),
-                workdir: workdir.to_path_buf(),
+                hook_runtime: hook_runtime.clone(),
             }) as Arc<dyn ToolBinding>
         })
         .collect()
 }
 
+pub(crate) fn apply_runtime_hooks(
+    tools: Vec<Arc<dyn ToolBinding>>,
+    agent: Option<&AgentDefinition>,
+    plugin_hook_sources: Vec<crate::hooks::HookSourceDescriptor>,
+    config: crate::hooks::HookRuntimeConfig,
+    cwd: &Path,
+) -> Vec<Arc<dyn ToolBinding>> {
+    match build_hook_runtime(agent, plugin_hook_sources, config, cwd) {
+        Some(runtime) => apply_hook_runtime(tools, runtime),
+        None => tools,
+    }
+}
+
 pub(crate) fn run_agent_hook_event(
     agent: Option<&AgentDefinition>,
     event: &str,
-    workdir: &Path,
+    cwd: &Path,
     payload: Value,
 ) {
     let Some(agent) = agent else {
@@ -576,7 +603,9 @@ pub(crate) fn run_agent_hook_event(
         "agent": agent.name.clone(),
         "payload": payload,
     });
-    let _ = run_hook_commands(agent.hooks.as_ref(), event, workdir, &payload);
+    if let Some(source) = crate::hooks::agent_hook_source(&agent.name, agent.hooks.as_ref()) {
+        let _ = crate::hooks::run_hook_sources(&[source], event, cwd, &payload);
+    }
 }
 
 pub(crate) fn agent_tools(context: AgentToolContext) -> Vec<Arc<dyn ToolBinding>> {

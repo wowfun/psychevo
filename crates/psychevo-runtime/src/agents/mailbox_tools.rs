@@ -512,76 +512,18 @@ impl ToolBinding for ResumeAgentTool {
     }
 }
 
-pub(crate) fn resolve_agents_home(
-    env: &BTreeMap<String, String>,
-    workdir: &Path,
-) -> Result<PathBuf> {
-    resolve_skills_home(env, workdir)
+pub(crate) fn resolve_agents_home(env: &BTreeMap<String, String>, cwd: &Path) -> Result<PathBuf> {
+    resolve_skills_home(env, cwd)
 }
 
+#[cfg(test)]
 pub(crate) fn run_hook_commands(
     hooks: Option<&Value>,
     event: &str,
-    workdir: &Path,
+    cwd: &Path,
     payload: &Value,
 ) -> Option<String> {
-    for command in hook_commands(hooks, event) {
-        let output = run_hook_command(&command, workdir, payload);
-        match output {
-            Ok(output) if event == "PreToolUse" && output.status.code() == Some(2) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                return Some(if stderr.is_empty() {
-                    "PreToolUse hook blocked tool execution".to_string()
-                } else {
-                    stderr
-                });
-            }
-            Ok(_) | Err(_) => {}
-        }
-    }
-    None
-}
-
-pub(crate) fn run_hook_command(
-    command: &str,
-    workdir: &Path,
-    payload: &Value,
-) -> std::io::Result<std::process::Output> {
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .current_dir(workdir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        let _ = stdin.write_all(payload.to_string().as_bytes());
-    }
-    child.wait_with_output()
-}
-
-pub(crate) fn hook_commands(hooks: Option<&Value>, event: &str) -> Vec<String> {
-    let Some(Value::Object(map)) = hooks else {
-        return Vec::new();
-    };
-    let Some(value) = map.get(event).or_else(|| map.get(&event.to_lowercase())) else {
-        return Vec::new();
-    };
-    parse_hook_command_value(value)
-}
-
-pub(crate) fn parse_hook_command_value(value: &Value) -> Vec<String> {
-    match value {
-        Value::String(command) => vec![command.clone()],
-        Value::Array(items) => items.iter().flat_map(parse_hook_command_value).collect(),
-        Value::Object(map) => map
-            .get("command")
-            .and_then(Value::as_str)
-            .map(|command| vec![command.to_string()])
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    }
+    crate::hooks::run_hook_commands(hooks, event, cwd, payload)
 }
 
 pub(crate) fn now_ms() -> i64 {

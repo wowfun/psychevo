@@ -36,7 +36,7 @@ pub(crate) fn prompt_prefix_invalidation_reason(
         "project_instructions_visible",
         "project_instructions_role",
         "project_context",
-        "workdir",
+        "cwd",
     ] {
         if metadata.get(key).unwrap_or(&serde_json::Value::Null)
             != expected_metadata
@@ -306,7 +306,7 @@ mod smart_reviewer_tests {
             tool_call_id: "call-1".to_string(),
             tool_name: "read".to_string(),
             summary: "/etc/hosts".to_string(),
-            reason: "outside workdir".to_string(),
+            reason: "outside cwd".to_string(),
             matched_rule: None,
             suggested_rule: Some("filesystem:/etc/hosts".to_string()),
             allow_always: true,

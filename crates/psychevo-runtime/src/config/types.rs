@@ -126,6 +126,28 @@ pub(crate) struct CustomToolsetConfig {
 }
 
 #[derive(Debug, Clone, Default)]
+pub(crate) struct PluginPolicyConfig {
+    pub(crate) plugins: BTreeMap<String, PluginPolicyEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginPolicyEntry {
+    pub(crate) enabled: Option<bool>,
+    pub(crate) capabilities: BTreeSet<String>,
+}
+
+impl PluginPolicyEntry {
+    pub(crate) fn plugin_enabled(&self) -> bool {
+        self.enabled.unwrap_or(false)
+    }
+
+    pub(crate) fn capability_enabled(&self, family: &str) -> bool {
+        self.plugin_enabled()
+            && (self.capabilities.is_empty() || self.capabilities.contains(family))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ChannelsConfig {
     pub(crate) connections: Vec<ChannelConnectionConfig>,
 }
@@ -138,7 +160,7 @@ pub(crate) struct ChannelConnectionConfig {
     pub(crate) enabled: bool,
     pub(crate) label: String,
     pub(crate) transport: ChannelTransport,
-    pub(crate) workdir: Option<String>,
+    pub(crate) cwd: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) permission_mode: Option<String>,
     pub(crate) require_mention: bool,
@@ -417,8 +439,8 @@ pub(crate) const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
     },
 ];
 
-pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<LoadedRunConfig> {
-    let loaded = load_config_value(options, workdir)?;
+pub(crate) fn load_run_config(options: &RunOptions, cwd: &Path) -> Result<LoadedRunConfig> {
+    let loaded = load_config_value(options, cwd)?;
     let mut config = parse_run_config(loaded.value)?;
     if let Some(mode) = options.project_context_override {
         config.project_context.instructions = mode;
@@ -443,7 +465,45 @@ pub(crate) fn load_run_config(options: &RunOptions, workdir: &Path) -> Result<Lo
     })
 }
 
-pub fn resolve_workspace_root(options: &RunOptions, _workdir: &Path) -> Result<PathBuf> {
+pub(crate) fn load_plugin_policy_config_lenient(
+    options: &RunOptions,
+    cwd: &Path,
+) -> Result<(PluginPolicyConfig, BTreeMap<String, String>, PathBuf)> {
+    let mut env_map = options
+        .inherited_env
+        .clone()
+        .unwrap_or_else(|| env::vars().collect());
+    let home = resolve_psychevo_home(&env_map)?;
+    let project_dir = cwd.join(".psychevo");
+    let mut value = json!({});
+
+    if let Some(config_path) = resolve_config_path(options, &env_map)? {
+        deep_merge(&mut value, load_toml_config_file(&config_path, true)?);
+        if let Some(parent) = config_path.parent() {
+            load_dotenv_file(&parent.join(".env"), &mut env_map)?;
+        }
+    } else {
+        deep_merge(
+            &mut value,
+            load_toml_config_file(&home.join(CONFIG_FILE_NAME), false)?,
+        );
+        load_dotenv_file(&home.join(".env"), &mut env_map)?;
+        deep_merge(
+            &mut value,
+            load_toml_config_file(&project_dir.join(CONFIG_FILE_NAME), false)?,
+        );
+    }
+
+    load_dotenv_file(&project_dir.join(".env"), &mut env_map)?;
+    let plugins = value
+        .get("plugins")
+        .map(parse_plugin_policy_config)
+        .transpose()?
+        .unwrap_or_default();
+    Ok((plugins, env_map, home))
+}
+
+pub fn resolve_workspace_root(options: &RunOptions, _cwd: &Path) -> Result<PathBuf> {
     let mut env_map = options
         .inherited_env
         .clone()
@@ -476,13 +536,13 @@ pub fn resolve_workspace_root(options: &RunOptions, _workdir: &Path) -> Result<P
     resolve_explicit_path(Path::new(&root), &env_map)
 }
 
-pub fn resolve_default_workspace_workdir(options: &RunOptions, workdir: &Path) -> Result<PathBuf> {
-    Ok(resolve_workspace_root(options, workdir)?.join(DEFAULT_WORKSPACE_NAME))
+pub fn resolve_default_workspace_cwd(options: &RunOptions, cwd: &Path) -> Result<PathBuf> {
+    Ok(resolve_workspace_root(options, cwd)?.join(DEFAULT_WORKSPACE_NAME))
 }
 
 pub(crate) fn load_project_context_instruction_mode(
     options: &RunOptions,
-    workdir: &Path,
+    cwd: &Path,
 ) -> Result<ProjectContextInstructionMode> {
     if let Some(mode) = options.project_context_override {
         return Ok(mode);
@@ -504,7 +564,7 @@ pub(crate) fn load_project_context_instruction_mode(
         }
         deep_merge(
             &mut value,
-            load_toml_config_file(&workdir.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
+            load_toml_config_file(&cwd.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
         );
     }
 
@@ -517,7 +577,7 @@ pub(crate) fn load_project_context_instruction_mode(
 
 pub fn load_agent_backend_configs(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     env_map: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, AgentBackendConfig>> {
     let mut value = json!({});
@@ -537,7 +597,7 @@ pub fn load_agent_backend_configs(
     }
     deep_merge(
         &mut value,
-        load_toml_config_file(&workdir.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
+        load_toml_config_file(&cwd.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
     );
     value
         .get("agents")
@@ -546,12 +606,12 @@ pub fn load_agent_backend_configs(
         .map(Option::unwrap_or_default)
 }
 
-pub(crate) fn load_config_value(options: &RunOptions, workdir: &Path) -> Result<LoadedConfigValue> {
+pub(crate) fn load_config_value(options: &RunOptions, cwd: &Path) -> Result<LoadedConfigValue> {
     let mut env_map = options
         .inherited_env
         .clone()
         .unwrap_or_else(|| env::vars().collect());
-    let project_dir = workdir.join(".psychevo");
+    let project_dir = cwd.join(".psychevo");
     let mut value = json!({});
     let mut sources = Vec::new();
 

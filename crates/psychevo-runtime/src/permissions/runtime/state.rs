@@ -4,7 +4,7 @@ pub(crate) struct PermissionRuntime {
 }
 
 pub(crate) struct PermissionRuntimeInner {
-    pub(crate) workdir: PathBuf,
+    pub(crate) cwd: PathBuf,
     pub(crate) project_config_dir: PathBuf,
     pub(crate) mode: PermissionMode,
     pub(crate) config: PermissionConfig,
@@ -15,6 +15,7 @@ pub(crate) struct PermissionRuntimeInner {
     pub(crate) approval_events: Mutex<Vec<ApprovalLifecycleEvent>>,
     pub(crate) approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
     pub(crate) smart_approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
+    pub(crate) hook_runtime: Option<crate::hooks::HookRuntime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

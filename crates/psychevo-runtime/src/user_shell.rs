@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 
 use crate::config::{load_run_config, resolve_run_provider};
 use crate::error::{Error, Result};
-use crate::paths::canonical_workdir;
+use crate::paths::canonical_cwd;
 use crate::run::SESSION_TITLE_MAX_CHARS;
 use crate::store::SqliteStore;
 use crate::tools::{default_exec_max_output_tokens, run_exec_command_for_user_shell};
@@ -27,7 +27,7 @@ pub async fn run_user_shell_command_streaming_controlled(
     stream: RunStreamSink,
     control: RunControl,
 ) -> Result<UserShellResult> {
-    let workdir = canonical_workdir(&options.workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
     let command = options.command;
     if command.trim().is_empty() {
         return Err(Error::Message("shell command is empty".to_string()));
@@ -35,7 +35,7 @@ pub async fn run_user_shell_command_streaming_controlled(
     let prepared_context = options
         .context
         .as_ref()
-        .map(|context| prepare_user_shell_context(context, &workdir, &command))
+        .map(|context| prepare_user_shell_context(context, &cwd, &command))
         .transpose()?;
     let stream_session_id = prepared_context
         .as_ref()
@@ -58,7 +58,7 @@ pub async fn run_user_shell_command_streaming_controlled(
 
     let started = Instant::now();
     let (result, is_error) = match run_exec_command_for_user_shell(
-        workdir.clone(),
+        cwd.clone(),
         command.clone(),
         sandbox_policy,
         control.receivers.abort_signal(),
@@ -109,7 +109,7 @@ pub async fn run_user_shell_command_streaming_controlled(
                 &prepared_context.session_id,
                 &message,
                 Some(user_shell_metadata(
-                    &command, &workdir, outcome, is_error, elapsed, &result,
+                    &command, &cwd, outcome, is_error, elapsed, &result,
                 )),
                 Some(format!("!{command}")),
                 &[],
@@ -124,7 +124,7 @@ pub async fn run_user_shell_command_streaming_controlled(
 
     Ok(UserShellResult {
         command,
-        workdir,
+        cwd,
         session_id,
         context_text,
         outcome,
@@ -135,12 +135,12 @@ pub async fn run_user_shell_command_streaming_controlled(
 
 pub(crate) fn prepare_user_shell_context(
     context: &UserShellContextOptions,
-    workdir: &Path,
+    cwd: &Path,
     command: &str,
 ) -> Result<PreparedUserShellContext> {
     let options = RunOptions {
         state: context.state.clone(),
-        workdir: workdir.to_path_buf(),
+        cwd: cwd.to_path_buf(),
         snapshot_root: None,
         session: context.session.clone(),
         continue_latest: context.continue_latest,
@@ -172,11 +172,11 @@ pub(crate) fn prepare_user_shell_context(
         mcp_servers: Vec::new(),
         runtime_tools: Vec::new(),
     };
-    let loaded = load_run_config(&options, workdir)?;
+    let loaded = load_run_config(&options, cwd)?;
     let resolved = resolve_run_provider(&options, &loaded)?;
     let sandbox_policy = crate::sandbox::SandboxPolicy::from_config(
         &loaded.config.sandbox,
-        workdir,
+        cwd,
         context.mode,
         &loaded.env,
     )?;
@@ -191,14 +191,14 @@ pub(crate) fn prepare_user_shell_context(
         (session_id, false)
     } else if context.continue_latest {
         if let Some(session_id) =
-            store.latest_session_for_workdir_with_sources(workdir, &continue_sources)?
+            store.latest_session_for_cwd_with_sources(cwd, &continue_sources)?
         {
             store.resume_session(&session_id)?;
             (session_id, false)
         } else {
             (
                 store.create_session_with_metadata(
-                    workdir,
+                    cwd,
                     &context.source,
                     &resolved.model,
                     &resolved.provider,
@@ -218,7 +218,7 @@ pub(crate) fn prepare_user_shell_context(
     } else {
         (
             store.create_session_with_metadata(
-                workdir,
+                cwd,
                 &context.source,
                 &resolved.model,
                 &resolved.provider,
@@ -248,7 +248,7 @@ pub(crate) fn prepare_user_shell_context(
 
 pub(crate) fn user_shell_metadata(
     command: &str,
-    workdir: &Path,
+    cwd: &Path,
     outcome: Outcome,
     is_error: bool,
     elapsed: Duration,
@@ -259,7 +259,7 @@ pub(crate) fn user_shell_metadata(
         USER_SHELL_METADATA_KEY.to_string(),
         json!({
             "command": command,
-            "workdir": workdir,
+            "cwd": cwd,
             "outcome": outcome.as_str(),
             "is_error": is_error,
             "exit_code": result.get("exit_code").cloned().unwrap_or(Value::Null),

@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
 use psychevo_gateway::{Gateway, GatewayWebServerConfig, bind_gateway_web_server};
-use psychevo_runtime::{StateRuntime, canonicalize_workdir};
+use psychevo_runtime::{StateRuntime, canonicalize_cwd};
 use serde_json::json;
 
 use crate::args::ServeArgs;
@@ -25,11 +25,11 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
         ensure_home_initialized(&home)?;
     }
 
-    let requested_workdir = match &args.dir {
+    let requested_cwd = match &args.dir {
         Some(dir) => resolve_explicit_path(dir, &env_map, &cwd)?,
         None => cwd.clone(),
     };
-    let workdir = canonicalize_workdir(&requested_workdir)?;
+    let cwd = canonicalize_cwd(&requested_cwd)?;
     let token = serve_token(&args, &env_map, &cwd)?;
     let static_dir = args
         .static_dir
@@ -48,7 +48,7 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
     let profile_name = env_value(crate::profiles::PROFILE_ENV, &env_map)
         .unwrap_or_else(|| crate::profiles::DEFAULT_PROFILE.to_string());
     let mut config =
-        GatewayWebServerConfig::headless(gateway, home, workdir, config_path, env_map, token);
+        GatewayWebServerConfig::headless(gateway, home, cwd, config_path, env_map, token);
     config.bind_addr = args.bind;
     config.bind_port_fallbacks = args.bind_fallbacks;
     config.static_dir = static_dir;

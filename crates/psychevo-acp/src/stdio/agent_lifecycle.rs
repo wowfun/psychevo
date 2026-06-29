@@ -264,11 +264,11 @@ impl PsychevoAcpAgent {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let store = self.state.store().clone();
         let sessions = store
-            .list_sessions_for_workdir_with_sources(&cwd, &[])
+            .list_sessions_for_cwd_with_sources(&cwd, &[])
             .map_err(acp_internal_error)?
             .into_iter()
             .map(|summary| {
-                SessionInfo::new(summary.id, PathBuf::from(summary.workdir))
+                SessionInfo::new(summary.id, PathBuf::from(summary.cwd))
                     .title(summary.title)
                     .updated_at(Some(summary.updated_at_ms.to_string()))
             })

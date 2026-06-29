@@ -76,7 +76,7 @@ transport.
 - explicit `PSYCHEVO_CONFIG`
 - global `$PSYCHEVO_HOME/config.toml`
 - global `~/.psychevo/config.toml` when `PSYCHEVO_HOME` is unset
-- project `<workdir>/.psychevo/config.toml`
+- project `<cwd>/.psychevo/config.toml`
 
 When `PSYCHEVO_CONFIG` is supplied, it replaces config discovery and only that
 file is loaded as configuration. CLI model and variant overrides still have
@@ -125,6 +125,13 @@ Configuration may define:
 
 The legacy model `context_limit` field is rejected. Configurations must use
 `limit.context` for context-window token limits.
+
+Model capability facts come from explicit configuration overrides, fetched or
+cached provider catalogs, and models.dev-derived metadata. Built-in provider
+registry entries must not hard-code capability metadata for specific model
+names. When metadata is absent, capability is unknown; request translation and
+provider recovery handle mismatches without modifying user configuration,
+catalog caches, or model metadata.
 
 Example:
 
@@ -177,12 +184,12 @@ Provider labels are display-only. They do not change provider identity,
 selection, config merge keys, or the `provider/model` model-spec form.
 
 Interactive clients and CLI config commands may create user-defined OpenAI
-Chat-compatible providers in the global config or the current workdir's local
+Chat-compatible providers in the global config or the current cwd's local
 `.psychevo/config.toml`. The created provider id must be a new normalized user
 provider id and must not collide with built-in provider ids or aliases. The
 credential variable is stored in `options.api_key_env`; raw API keys must be
 written only to `.env` files, never TOML configuration. CLI provider/auth
-writes default to the current workdir local scope and use `-g`/`--global` for
+writes default to the current cwd local scope and use `-g`/`--global` for
 the global scope.
 
 Shared setup flows may initialize a minimal config file before writing provider
@@ -197,7 +204,7 @@ default model by writing the top-level `model` field in the selected scope's
 `config.toml`. CLI `model set` writes `model = "provider/model"`. Interactive
 model pickers may write the equivalent object form when persisting a selected
 `reasoning_effort`: `model = { id = "provider/model", reasoning_effort =
-"high" }`. This write defaults to the current workdir `.psychevo/config.toml`
+"high" }`. This write defaults to the current cwd `.psychevo/config.toml`
 and uses `-g`/`--global` for `$PSYCHEVO_HOME/config.toml`. It must require
 provider-qualified `provider/model` input, must validate that the provider is
 built-in or present in the selected scope's effective provider set, must
@@ -213,10 +220,10 @@ environment and Psychevo `.env` files.
 When discovery is used, runtime loads:
 
 - `$PSYCHEVO_HOME/.env` or `~/.psychevo/.env`
-- project `<workdir>/.psychevo/.env`
+- project `<cwd>/.psychevo/.env`
 
 When `PSYCHEVO_CONFIG` is supplied, runtime loads `.env` from the config file's
-parent directory when present, then project `<workdir>/.psychevo/.env`.
+parent directory when present, then project `<cwd>/.psychevo/.env`.
 
 Later `.env` files override earlier `.env` files and inherited process
 environment values. Runtime must not write these values into global process
@@ -281,11 +288,10 @@ keeps a typed core view plus the raw public registry model JSON for future
 fields. Resolution order is highest-precedence first:
 
 1. explicit per-model metadata from TOML configuration
-2. metadata present in a cached, explicitly fetched provider `/models` response
-3. cache-first `models.dev` public registry lookup
-4. official provider pricing/context snapshots bundled with the release
-5. built-in metadata fallback table for known model families
-6. unknown as `None`
+2. cache-first `models.dev` public registry lookup
+3. official provider pricing/context snapshots bundled with the release
+4. built-in metadata fallback table for known model families
+5. unknown as `None`
 
 The `models.dev` cache is stored under `$PSYCHEVO_HOME/models_dev_cache.json`.
 It is a pruned cache of user-relevant models, not a full public registry mirror.
@@ -307,13 +313,17 @@ configured base URL to a registry provider `api` URL. This keeps user-defined
 provider ids such as `xiaomi-token-plan` stable while still resolving
 `xiaomi-token-plan-cn` metadata.
 
-Provider `/models` metadata is local only after an explicit user-triggered
-catalog fetch. Runtime provider resolution, `pevo run`, `pevo stats`, and GUI
-stats reads must not contact provider `/models` endpoints. When a catalog fetch
-returns pricing metadata, Psychevo stores a bounded provider-model cache under
-`$PSYCHEVO_HOME` keyed by provider, base URL, and model id. That cache is an
-advisory metadata source; credentials, request payloads, and provider response
-bodies unrelated to model metadata are not stored.
+Provider `/models` catalogs are fetched only after an explicit user-triggered
+catalog action such as `pevo model fetch` or Workbench's provider catalog
+refresh. Runtime provider resolution, `pevo run`, `pevo stats`, and GUI stats
+reads must not contact provider `/models` endpoints, and provider catalog cache
+entries must not alter runtime metadata precedence. Successful explicit fetches
+store a bounded provider-model picker cache at
+`$PSYCHEVO_HOME/cache/provider_models_cache.json`, keyed by provider identity,
+base URL, and a non-reversible credential fingerprint. The cache may enrich
+Settings, Workbench, and CLI model picker surfaces with model ids and display
+metadata, but credentials, request payloads, and raw provider response bodies
+are not stored.
 
 Provider catalog pricing parsers accept the local `cost` object described above
 and common provider-style `pricing` objects. `pricing.prompt` and

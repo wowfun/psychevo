@@ -109,6 +109,22 @@ pub(crate) fn read_http_request(stream: &mut std::net::TcpStream) -> String {
     String::from_utf8_lossy(&request).to_string()
 }
 
+pub(crate) fn http_response(status: &str, content_type: &str, body: &str) -> Vec<u8> {
+    format!(
+        "HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+pub(crate) fn http_request_json_body(request: &str) -> Value {
+    let body = request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .expect("http body");
+    serde_json::from_str(body).expect("request json")
+}
+
 #[tokio::test]
 pub(crate) async fn openai_provider_posts_public_request_body() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -141,6 +157,77 @@ pub(crate) async fn openai_provider_posts_public_request_body() {
         .expect("http body");
     let body: Value = serde_json::from_str(body).expect("request json");
     assert_eq!(body, expected);
+    server.join().expect("server");
+}
+
+#[tokio::test]
+pub(crate) async fn openai_provider_retries_image_rejection_as_text() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let base_url = format!("http://{addr}/v1");
+    let (request_tx, request_rx) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("first accept");
+        let request = read_http_request(&mut stream);
+        request_tx.send(request).expect("first request");
+        let body = r#"{"error":{"message":"No endpoints found that support image input"}}"#;
+        stream
+            .write_all(&http_response("404 Not Found", "application/json", body))
+            .expect("first response");
+
+        let (mut stream, _) = listener.accept().expect("second accept");
+        let request = read_http_request(&mut stream);
+        request_tx.send(request).expect("second request");
+        stream
+            .write_all(&http_response(
+                "200 OK",
+                "text/event-stream",
+                "data: [DONE]\n\n",
+            ))
+            .expect("second response");
+    });
+
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: "xiaomi-token-plan".to_string(),
+            model: "mimo-v2.5-pro".to_string(),
+        },
+        messages: vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "image_url", "url": "https://developers.openai.com/codex/hooks" },
+                { "text": "summarize this page" }
+            ],
+            "timestamp_ms": 1
+        })],
+        tools: Vec::new(),
+        metadata: json!({}),
+    };
+    let provider = OpenAiChatProvider::new(base_url, "test-key", "xiaomi-token-plan");
+    let (_abort_tx, abort_rx) = watch::channel(false);
+    let _stream = provider
+        .stream(request, AbortSignal::new(abort_rx))
+        .await
+        .expect("stream");
+
+    let first = request_rx.recv().expect("first captured request");
+    let second = request_rx.recv().expect("second captured request");
+    let first_body = http_request_json_body(&first);
+    let second_body = http_request_json_body(&second);
+    assert!(
+        serde_json::to_string(&first_body)
+            .expect("first json")
+            .contains("\"image_url\"")
+    );
+    let second_body_text = serde_json::to_string(&second_body).expect("second json");
+    assert!(!second_body_text.contains("\"image_url\""));
+    assert_eq!(
+        second_body["messages"][0],
+        json!({
+            "role": "user",
+            "content": "https://developers.openai.com/codex/hooks\nsummarize this page"
+        })
+    );
     server.join().expect("server");
 }
 

@@ -5,18 +5,18 @@ use std::path::{Path, PathBuf};
 use crate::error::Result;
 use sha2::{Digest, Sha256};
 
-pub(crate) fn canonical_workdir(path: &Path) -> Result<PathBuf> {
+pub(crate) fn canonical_cwd(path: &Path) -> Result<PathBuf> {
     fs::create_dir_all(path)?;
     Ok(path.canonicalize()?)
 }
 
-pub fn canonicalize_workdir(path: &Path) -> Result<PathBuf> {
-    canonical_workdir(path)
+pub fn canonicalize_cwd(path: &Path) -> Result<PathBuf> {
+    canonical_cwd(path)
 }
 
 pub fn workspace_snapshot_id(path: &Path) -> Result<String> {
-    let workdir = canonical_workdir(path)?;
-    Ok(workspace_snapshot_id_for_canonical_path(&workdir))
+    let cwd = canonical_cwd(path)?;
+    Ok(workspace_snapshot_id_for_canonical_path(&cwd))
 }
 
 pub(crate) fn workspace_snapshot_id_for_canonical_path(path: &Path) -> String {

@@ -3,7 +3,7 @@ pub(crate) enum PermissionAction {
     ExecCommand {
         command: String,
         normalized: String,
-        workdir: Option<FileTarget>,
+        cwd: Option<FileTarget>,
     },
     File {
         tool: String,
@@ -32,11 +32,11 @@ pub(crate) struct FileTarget {
     pub(crate) raw: String,
     pub(crate) absolute: PathBuf,
     pub(crate) relative: String,
-    pub(crate) within_workdir: bool,
+    pub(crate) within_cwd: bool,
 }
 
 impl PermissionAction {
-    pub(crate) fn from_tool_call(workdir: &Path, tool_name: &str, args: &Value) -> Option<Self> {
+    pub(crate) fn from_tool_call(cwd: &Path, tool_name: &str, args: &Value) -> Option<Self> {
         match tool_name {
             "exec_command" => {
                 args.get("cmd")
@@ -44,24 +44,24 @@ impl PermissionAction {
                     .map(|command| Self::ExecCommand {
                         command: command.to_string(),
                         normalized: normalize_command(command),
-                        workdir: args
-                            .get("workdir")
+                        cwd: args
+                            .get("cwd")
                             .and_then(Value::as_str)
-                            .map(|path| file_target(workdir, path)),
+                            .map(|path| file_target(cwd, path)),
                     })
             }
-            "read" => file_paths_from_args(workdir, args, &["path"]).map(|paths| Self::File {
+            "read" => file_paths_from_args(cwd, args, &["path"]).map(|paths| Self::File {
                 tool: "read".to_string(),
                 paths,
                 mutating: false,
             }),
-            "write" => file_paths_from_args(workdir, args, &["path"]).map(|paths| Self::File {
+            "write" => file_paths_from_args(cwd, args, &["path"]).map(|paths| Self::File {
                 tool: "write".to_string(),
                 paths,
                 mutating: true,
             }),
             "edit" => {
-                let paths = edit_paths_from_args(workdir, args);
+                let paths = edit_paths_from_args(cwd, args);
                 (!paths.is_empty()).then(|| Self::File {
                     tool: "edit".to_string(),
                     paths,
@@ -249,9 +249,9 @@ impl PermissionAction {
         }
     }
 
-    pub(crate) fn file_targets_all_within_workdir(&self) -> bool {
+    pub(crate) fn file_targets_all_within_cwd(&self) -> bool {
         match self {
-            Self::File { paths, .. } => paths.iter().all(|path| path.within_workdir),
+            Self::File { paths, .. } => paths.iter().all(|path| path.within_cwd),
             _ => false,
         }
     }
@@ -279,20 +279,20 @@ impl PermissionAction {
 }
 
 pub(crate) fn file_paths_from_args(
-    workdir: &Path,
+    cwd: &Path,
     args: &Value,
     keys: &[&str],
 ) -> Option<Vec<FileTarget>> {
     let paths = keys
         .iter()
         .filter_map(|key| args.get(*key).and_then(Value::as_str))
-        .map(|path| file_target(workdir, path))
+        .map(|path| file_target(cwd, path))
         .collect::<Vec<_>>();
     (!paths.is_empty()).then_some(paths)
 }
 
-pub(crate) fn edit_paths_from_args(workdir: &Path, args: &Value) -> Vec<FileTarget> {
-    if let Some(paths) = file_paths_from_args(workdir, args, &["path"]) {
+pub(crate) fn edit_paths_from_args(cwd: &Path, args: &Value) -> Vec<FileTarget> {
+    if let Some(paths) = file_paths_from_args(cwd, args, &["path"]) {
         return paths;
     }
     args.get("patch")
@@ -301,7 +301,7 @@ pub(crate) fn edit_paths_from_args(workdir: &Path, args: &Value) -> Vec<FileTarg
             patch
                 .lines()
                 .flat_map(patch_file_paths)
-                .map(|path| file_target(workdir, &path))
+                .map(|path| file_target(cwd, &path))
                 .collect()
         })
         .unwrap_or_default()
@@ -328,22 +328,22 @@ pub(crate) fn patch_file_paths(line: &str) -> Vec<String> {
     Vec::new()
 }
 
-pub(crate) fn file_target(workdir: &Path, raw: &str) -> FileTarget {
+pub(crate) fn file_target(cwd: &Path, raw: &str) -> FileTarget {
     let path = Path::new(raw);
     let absolute = if path.is_absolute() {
         lexical_normalize(path)
     } else {
-        lexical_normalize(&workdir.join(path))
+        lexical_normalize(&cwd.join(path))
     };
-    let (relative, within_workdir) = absolute
-        .strip_prefix(workdir)
+    let (relative, within_cwd) = absolute
+        .strip_prefix(cwd)
         .map(|path| (path.to_string_lossy().replace('\\', "/"), true))
         .unwrap_or_else(|_| (raw.replace('\\', "/"), false));
     FileTarget {
         raw: raw.to_string(),
         absolute,
         relative,
-        within_workdir,
+        within_cwd,
     }
 }
 

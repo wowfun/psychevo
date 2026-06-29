@@ -78,8 +78,8 @@ pub(crate) fn list_agents(args: AgentListArgs) -> Result<ExitCode> {
 }
 
 pub(crate) fn agent_backend_list(args: AgentBackendListArgs) -> Result<ExitCode> {
-    let (home, workdir, env_map) = backend_context()?;
-    let backends = load_agent_backend_configs(&home, &workdir, &env_map)?;
+    let (home, cwd, env_map) = backend_context()?;
+    let backends = load_agent_backend_configs(&home, &cwd, &env_map)?;
     let values = backends
         .values()
         .map(agent_backend_value)
@@ -113,9 +113,9 @@ pub(crate) fn agent_backend_add(args: AgentBackendAddArgs) -> Result<ExitCode> {
     if args.command.trim().is_empty() {
         return Err(anyhow!("backend command must be non-empty"));
     }
-    let (home, workdir, _env_map) = backend_context()?;
+    let (home, cwd, _env_map) = backend_context()?;
     let config_dir = if args.local {
-        workdir.join(".psychevo")
+        cwd.join(".psychevo")
     } else {
         home.clone()
     };
@@ -181,8 +181,8 @@ pub(crate) fn agent_backend_add(args: AgentBackendAddArgs) -> Result<ExitCode> {
 }
 
 pub(crate) fn agent_backend_doctor(args: AgentBackendDoctorArgs) -> Result<ExitCode> {
-    let (home, workdir, env_map) = backend_context()?;
-    let backends = load_agent_backend_configs(&home, &workdir, &env_map)?;
+    let (home, cwd, env_map) = backend_context()?;
+    let backends = load_agent_backend_configs(&home, &cwd, &env_map)?;
     let backend = backends
         .get(&args.id)
         .ok_or_else(|| anyhow!("unknown backend: {}", args.id))?;
@@ -223,9 +223,9 @@ pub(crate) fn view_agent(args: AgentNameArgs) -> Result<ExitCode> {
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
-    let workdir = cwd.canonicalize().unwrap_or(cwd);
-    let catalog = catalog_for(&home, &workdir, env_map.clone())?;
-    let agent = resolve_agent_definition(&catalog, &args.name, &workdir, &env_map)?;
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    let catalog = catalog_for(&home, &cwd, env_map.clone())?;
+    let agent = resolve_agent_definition(&catalog, &args.name, &cwd, &env_map)?;
     let value = view_agent_value_with_catalog(&agent, Some(&catalog));
     if args.json {
         println!("{}", serde_json::to_string(&value)?);
@@ -240,9 +240,9 @@ pub(crate) fn validate_agent(args: AgentNameArgs) -> Result<ExitCode> {
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
-    let workdir = cwd.canonicalize().unwrap_or(cwd);
-    let catalog = catalog_for(&home, &workdir, env_map.clone())?;
-    let agent = resolve_agent_definition(&catalog, &args.name, &workdir, &env_map)?;
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    let catalog = catalog_for(&home, &cwd, env_map.clone())?;
+    let agent = resolve_agent_definition(&catalog, &args.name, &cwd, &env_map)?;
     let value = json!({
         "valid": true,
         "agent": view_agent_value_with_catalog(&agent, Some(&catalog)),
@@ -269,12 +269,12 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         ensure_home_initialized(&home)?;
     }
 
-    let workdir = match &args.dir {
+    let cwd = match &args.dir {
         Some(dir) => resolve_explicit_path(dir, &env_map, &cwd)?,
         None => cwd,
     };
-    let catalog = catalog_for(&home, &workdir, env_map.clone())?;
-    let selected = resolve_agent_definition(&catalog, &args.name, &workdir, &env_map)?;
+    let catalog = catalog_for(&home, &cwd, env_map.clone())?;
+    let selected = resolve_agent_definition(&catalog, &args.name, &cwd, &env_map)?;
     let mut prompt = read_prompt(&args.message)?;
     if prompt.trim().is_empty()
         && let Some(initial) = selected.initial_prompt.clone()
@@ -287,7 +287,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
 
     let result = psychevo_runtime::run_live(RunOptions {
         state: StateRuntime::open(&db_path)?,
-        workdir,
+        cwd,
         snapshot_root: Some(home.join("snapshots")),
         session: None,
         continue_latest: false,
@@ -349,11 +349,11 @@ pub(crate) fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let store = SqliteStore::open(&db_path)?;
-    let workdir = cwd.canonicalize().unwrap_or(cwd);
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
     let parent = if args.all {
         None
     } else {
-        store.latest_session_for_workdir_with_sources(&workdir, &["run", "tui"])?
+        store.latest_session_for_cwd_with_sources(&cwd, &["run", "tui"])?
     };
     let value = agent_status_value(Some(&store), parent.as_deref(), args.all);
     if args.json {
@@ -419,10 +419,10 @@ pub(crate) async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let store = SqliteStore::open(&db_path)?;
-    let workdir = cwd.canonicalize().unwrap_or(cwd);
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
     let session_id = store
-        .latest_run_session_for_workdir(&workdir)?
-        .ok_or_else(|| anyhow!("no run session found for {}", workdir.display()))?;
+        .latest_run_session_for_cwd(&cwd)?
+        .ok_or_else(|| anyhow!("no run session found for {}", cwd.display()))?;
     let value =
         wait_agent_mailbox(&session_id, Duration::from_millis(args.timeout_ms), &store).await?;
     if args.json {
@@ -575,7 +575,7 @@ pub(crate) fn session_summary_value(summary: &SessionSummary) -> Value {
     json!({
         "id": summary.id,
         "source": summary.source,
-        "workdir": summary.workdir,
+        "cwd": summary.cwd,
         "model": summary.model,
         "provider": summary.provider,
         "started_at_ms": summary.started_at_ms,
@@ -797,8 +797,8 @@ pub(crate) fn backend_context()
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
-    let workdir = cwd.canonicalize().unwrap_or(cwd);
-    Ok((home, workdir, env_map))
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    Ok((home, cwd, env_map))
 }
 
 pub(crate) fn validate_backend_entrypoints(values: &[String]) -> Result<Vec<String>> {

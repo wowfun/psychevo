@@ -238,7 +238,7 @@ ordinary main transcript history. Commands whose output kind is a bottom pane
 use that pane instead of adding transcript rows. Any future persistent command
 result history requires an explicit domain sidecar spec rather than a generic
 transcript sidecar.
-GUI display-only feedback is scoped to the active session/workdir and must be
+GUI display-only feedback is scoped to the active session/cwd and must be
 cleared when that scope changes or when new user input is submitted.
 This boundary follows the transcript state and projection ownership defined by
 [030 Transcript State](../030-state-and-data-model/transcript-state.md) and

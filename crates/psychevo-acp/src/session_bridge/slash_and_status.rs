@@ -314,7 +314,7 @@ impl PsychevoAcpAgent {
         let model = session.model.as_deref().unwrap_or("(configured default)");
         let runtime_session = session.runtime_session_id.as_deref().unwrap_or("(new)");
         format!(
-            "ACP session: {session_id}\nruntime session: {runtime_session}\nworkdir: {}\nmode: {}\nmodel: {model}\ncommands: {}",
+            "ACP session: {session_id}\nruntime session: {runtime_session}\ncwd: {}\nmode: {}\nmodel: {model}\ncommands: {}",
             session.cwd.display(),
             session.mode.as_str(),
             self.available_commands_for_session_state(session, session.control.is_some())
@@ -358,7 +358,7 @@ impl PsychevoAcpAgent {
     ) -> Result<String, psychevo_runtime::Error> {
         let catalog = discover_agents(&AgentDiscoveryOptions {
             home: self.options.home.clone(),
-            workdir: session.cwd.clone(),
+            cwd: session.cwd.clone(),
             env: self.options.inherited_env.clone(),
             explicit_inputs: Vec::new(),
             no_agents: false,
@@ -402,7 +402,7 @@ impl PsychevoAcpAgent {
     pub(crate) fn usage_command_text(&self, session: &AcpSession) -> Result<String, Error> {
         let value = usage_stats(psychevo_runtime::StatsOptions {
             state: self.state.clone(),
-            workdir: session.cwd.clone(),
+            cwd: session.cwd.clone(),
             all: false,
             days: None,
             limit: 20,
@@ -417,7 +417,7 @@ impl PsychevoAcpAgent {
         };
         let snapshot = context_snapshot(ContextOptions {
             state: self.state.clone(),
-            workdir: session.cwd.clone(),
+            cwd: session.cwd.clone(),
             session: runtime_session_id,
             config_path: self.options.config_path.clone(),
             inherited_env: Some(self.options.inherited_env.clone()),

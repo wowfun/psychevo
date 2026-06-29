@@ -11,13 +11,13 @@ use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home, 
 pub(crate) fn run_stats_command(args: StatsArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
-    let workdir = args.dir.clone().unwrap_or_else(|| cwd.clone());
+    let cwd = args.dir.clone().unwrap_or_else(|| cwd.clone());
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let report = usage_stats(StatsOptions {
         state: StateRuntime::open(&db_path)?,
-        workdir,
+        cwd,
         all: args.all,
         days: args.days,
         limit: args.limit,
@@ -37,10 +37,10 @@ pub(crate) fn print_human_report(report: &Value) {
         "all sessions".to_string()
     } else {
         scope
-            .get("workdir")
+            .get("cwd")
             .and_then(Value::as_str)
-            .map(|workdir| format!("workdir {workdir}"))
-            .unwrap_or_else(|| "current workdir".to_string())
+            .map(|cwd| format!("cwd {cwd}"))
+            .unwrap_or_else(|| "current cwd".to_string())
     };
     println!("Stats for {scope_label}");
     println!(

@@ -28,7 +28,7 @@ The profile maps manifest fields to ACP setup explicitly:
 - skills and skill disabling
 - MCP server inputs
 - toolset policy when exposed by runtime
-- host database, workdir, config path, and inherited environment by default
+- host database, cwd, config path, and inherited environment by default
 
 For host-run benchmarks the profile defaults to the same Psychevo home, config,
 database, provider credentials, and environment that `pevo acp` would use from

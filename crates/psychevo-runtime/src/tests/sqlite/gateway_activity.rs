@@ -241,9 +241,9 @@ fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
 fn gateway_turn_terminals_round_trip_and_order_by_thread() {
     let temp = tempdir().expect("tempdir");
     let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let thread_id = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
 
     let failed = store

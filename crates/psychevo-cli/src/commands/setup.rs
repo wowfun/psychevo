@@ -634,9 +634,9 @@ mod tests {
     fn setup_workspace() -> (TempDir, PathBuf, PathBuf, BTreeMap<String, String>) {
         let temp = tempdir().expect("temp");
         let home = temp.path().join("psychevo-home");
-        let workdir = temp.path().join("work");
+        let cwd = temp.path().join("work");
         fs::create_dir_all(&home).expect("home");
-        fs::create_dir_all(&workdir).expect("workdir");
+        fs::create_dir_all(&cwd).expect("cwd");
         fs::write(
             home.join("config.toml"),
             crate::commands::init::STARTER_CONFIG,
@@ -653,7 +653,7 @@ mod tests {
                 home.to_string_lossy().to_string(),
             ),
         ]);
-        (temp, home, workdir, env_map)
+        (temp, home, cwd, env_map)
     }
 
     fn unused_loopback_base_url() -> String {
@@ -673,7 +673,7 @@ mod tests {
 
     #[tokio::test]
     async fn deepseek_setup_fetches_models_and_hides_secret() {
-        let (_temp, home, workdir, env_map) = setup_workspace();
+        let (_temp, home, cwd, env_map) = setup_workspace();
         let server = SetupCatalogServer::new(r#"{"data":[{"id":"remote-model"}]}"#);
         let mut io = TestIo::new(
             vec![
@@ -685,7 +685,7 @@ mod tests {
             vec!["secret-key".to_string()],
         );
 
-        configure_provider_with_io(&home, &workdir, &env_map, &mut io)
+        configure_provider_with_io(&home, &cwd, &env_map, &mut io)
             .await
             .expect("setup");
 
@@ -717,7 +717,7 @@ mod tests {
             ("", "https://api.z.ai/api/paas/v4"),
             ("2", "https://api.z.ai/api/coding/paas/v4"),
         ] {
-            let (_temp, home, workdir, env_map) = setup_workspace();
+            let (_temp, home, cwd, env_map) = setup_workspace();
             let mut io = TestIo::new(
                 vec![
                     "2".to_string(),
@@ -728,7 +728,7 @@ mod tests {
                 vec![String::new()],
             );
 
-            configure_provider_with_io(&home, &workdir, &env_map, &mut io)
+            configure_provider_with_io(&home, &cwd, &env_map, &mut io)
                 .await
                 .expect("setup");
 
@@ -742,7 +742,7 @@ mod tests {
 
     #[tokio::test]
     async fn setup_allows_explicit_api_key_env_override() {
-        let (_temp, home, workdir, env_map) = setup_workspace();
+        let (_temp, home, cwd, env_map) = setup_workspace();
         let mut io = TestIo::new(
             vec![
                 "2".to_string(),
@@ -754,7 +754,7 @@ mod tests {
             vec![String::new()],
         );
 
-        configure_provider_with_io(&home, &workdir, &env_map, &mut io)
+        configure_provider_with_io(&home, &cwd, &env_map, &mut io)
             .await
             .expect("setup");
 
@@ -767,7 +767,7 @@ mod tests {
 
     #[tokio::test]
     async fn setup_rejects_pasted_api_key_as_env_var_without_echoing_it() {
-        let (_temp, home, workdir, env_map) = setup_workspace();
+        let (_temp, home, cwd, env_map) = setup_workspace();
         let pasted_key = "sk-pasted-secret-value";
         let mut io = TestIo::new(
             vec![
@@ -781,7 +781,7 @@ mod tests {
             vec!["secret-key".to_string()],
         );
 
-        configure_provider_with_io(&home, &workdir, &env_map, &mut io)
+        configure_provider_with_io(&home, &cwd, &env_map, &mut io)
             .await
             .expect("setup");
 
@@ -797,7 +797,7 @@ mod tests {
 
     #[tokio::test]
     async fn xiaomi_token_plan_setup_selects_region_with_canonical_provider_id() {
-        let (_temp, home, workdir, env_map) = setup_workspace();
+        let (_temp, home, cwd, env_map) = setup_workspace();
         let mut io = TestIo::new(
             vec![
                 "3".to_string(),
@@ -808,7 +808,7 @@ mod tests {
             vec![String::new()],
         );
 
-        configure_provider_with_io(&home, &workdir, &env_map, &mut io)
+        configure_provider_with_io(&home, &cwd, &env_map, &mut io)
             .await
             .expect("setup");
 
@@ -821,7 +821,7 @@ mod tests {
 
     #[tokio::test]
     async fn setup_falls_back_to_custom_model_id_when_fetch_fails() {
-        let (_temp, home, workdir, env_map) = setup_workspace();
+        let (_temp, home, cwd, env_map) = setup_workspace();
         let base_url = unused_loopback_base_url();
         let mut io = TestIo::new(
             vec![
@@ -833,7 +833,7 @@ mod tests {
             vec!["secret-key".to_string()],
         );
 
-        configure_provider_with_io(&home, &workdir, &env_map, &mut io)
+        configure_provider_with_io(&home, &cwd, &env_map, &mut io)
             .await
             .expect("setup");
 
@@ -844,7 +844,7 @@ mod tests {
 
     #[tokio::test]
     async fn custom_provider_path_fetches_empty_catalog_then_prompts_model_id() {
-        let (_temp, home, workdir, env_map) = setup_workspace();
+        let (_temp, home, cwd, env_map) = setup_workspace();
         let server = SetupCatalogServer::new(r#"{"data":[]}"#);
         let mut io = TestIo::new(
             vec![
@@ -857,7 +857,7 @@ mod tests {
             vec![String::new()],
         );
 
-        configure_provider_with_io(&home, &workdir, &env_map, &mut io)
+        configure_provider_with_io(&home, &cwd, &env_map, &mut io)
             .await
             .expect("setup");
 

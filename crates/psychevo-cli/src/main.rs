@@ -21,8 +21,10 @@ use commands::config::run_config_command;
 use commands::context::run_context_command;
 use commands::doctor::run_doctor_command;
 use commands::gateway::run_gateway_command;
+use commands::hooks::run_hooks_command;
 use commands::init::run_init_command;
 use commands::model::run_model_command;
+use commands::plugin::run_plugin_command;
 use commands::profile::run_profile_command;
 use commands::run::run_run_command;
 use commands::serve::run_serve_command;
@@ -57,6 +59,8 @@ pub(crate) async fn run() -> Result<ExitCode> {
         Some(Commands::Profile(args)) => run_profile_command(args),
         Some(Commands::Agent(args)) => run_agent_command(args).await,
         Some(Commands::Skill(args)) => run_skills_command(args),
+        Some(Commands::Plugin(args)) => run_plugin_command(args),
+        Some(Commands::Hooks(args)) => run_hooks_command(args),
         Some(Commands::Tool(args)) => run_tool_command(args),
         Some(Commands::Run(args)) => run_run_command(args).await,
         Some(Commands::Stats(args)) => run_stats_command(args),

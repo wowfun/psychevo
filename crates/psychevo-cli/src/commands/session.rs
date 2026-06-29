@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 use psychevo_runtime::{
     ReloadContextOptions, SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet,
     SessionExportOptions, SessionExportWriteResult, SessionSummary, SqliteStore, StateRuntime,
-    canonicalize_workdir, default_session_export_filename, reload_session_context,
+    canonicalize_cwd, default_session_export_filename, reload_session_context,
     render_session_export, write_session_export,
 };
 use serde_json::{Value, json};
@@ -39,31 +39,29 @@ pub(crate) fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> 
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let state = StateRuntime::open(&db_path)?;
     let store = state.store().clone();
-    let workdir = canonicalize_workdir(&cwd)?;
+    let cwd = canonicalize_cwd(&cwd)?;
 
     match &args.command {
-        SessionCommand::List(args) => list_sessions(args, &store, &workdir)?,
+        SessionCommand::List(args) => list_sessions(args, &store, &cwd)?,
         SessionCommand::Show(args) => {
-            let session_id = resolve_session_id(&store, &workdir, &args.session)?;
+            let session_id = resolve_session_id(&store, &cwd, &args.session)?;
             let summary = store
                 .session_summary(&session_id)?
                 .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
             print_session_result("session", &summary, args.json)?;
         }
-        SessionCommand::Rename(args) => rename_session(args, &store, &workdir)?,
-        SessionCommand::ReloadContext(args) => {
-            reload_context(args, &store, &workdir, &state, env_map)?
-        }
-        SessionCommand::Export(args) => export_session(args, &store, &workdir)?,
-        SessionCommand::Share(args) => share_session(args, &store, &workdir)?,
+        SessionCommand::Rename(args) => rename_session(args, &store, &cwd)?,
+        SessionCommand::ReloadContext(args) => reload_context(args, &store, &cwd, &state, env_map)?,
+        SessionCommand::Export(args) => export_session(args, &store, &cwd)?,
+        SessionCommand::Share(args) => share_session(args, &store, &cwd)?,
         SessionCommand::Archive(args) => {
-            let summary = mutate_session(args, &store, &workdir, |store, session_id| {
+            let summary = mutate_session(args, &store, &cwd, |store, session_id| {
                 store.archive_session(session_id)
             })?;
             print_session_result("archived", &summary, args.json)?;
         }
         SessionCommand::Restore(args) => {
-            let summary = mutate_session(args, &store, &workdir, |store, session_id| {
+            let summary = mutate_session(args, &store, &cwd, |store, session_id| {
                 store.restore_session(session_id)
             })?;
             print_session_result("restored", &summary, args.json)?;
@@ -75,15 +73,15 @@ pub(crate) fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> 
 pub(crate) fn list_sessions(
     args: &SessionListArgs,
     store: &SqliteStore,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
 ) -> Result<()> {
     if args.limit == 0 {
         return Err(anyhow!("--limit must be greater than 0"));
     }
     let mut sessions = if args.archived {
-        store.list_archived_sessions_for_workdir_with_sources(workdir, SESSION_SOURCES)?
+        store.list_archived_sessions_for_cwd_with_sources(cwd, SESSION_SOURCES)?
     } else {
-        store.list_sessions_for_workdir_with_sources(workdir, SESSION_SOURCES)?
+        store.list_sessions_for_cwd_with_sources(cwd, SESSION_SOURCES)?
     };
     sessions.truncate(args.limit);
     if args.json {
@@ -115,9 +113,9 @@ pub(crate) fn list_sessions(
 pub(crate) fn rename_session(
     args: &SessionRenameArgs,
     store: &SqliteStore,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
 ) -> Result<()> {
-    let session_id = resolve_session_id(store, workdir, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session)?;
     let title = args.title.join(" ");
     store.set_session_title(&session_id, &title)?;
     let summary = store
@@ -129,11 +127,11 @@ pub(crate) fn rename_session(
 pub(crate) fn reload_context(
     args: &SessionIdArgs,
     store: &SqliteStore,
-    workdir: &Path,
+    cwd: &Path,
     state: &StateRuntime,
     env_map: std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
-    let session_id = resolve_session_id(store, workdir, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session)?;
     let result = reload_session_context(ReloadContextOptions {
         state: state.clone(),
         session: session_id,
@@ -169,9 +167,9 @@ pub(crate) fn reload_context(
 pub(crate) fn export_session(
     args: &SessionExportArgs,
     store: &SqliteStore,
-    workdir: &Path,
+    cwd: &Path,
 ) -> Result<()> {
-    let session_id = resolve_session_id(store, workdir, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session)?;
     let artifact_kind = SessionArtifactKind::Export;
     let options = SessionExportOptions {
         format: args.format.into(),
@@ -191,12 +189,12 @@ pub(crate) fn export_session(
 pub(crate) fn share_session(
     args: &SessionShareArgs,
     store: &SqliteStore,
-    workdir: &Path,
+    cwd: &Path,
 ) -> Result<()> {
-    let session_id = resolve_session_id(store, workdir, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session)?;
     let artifact_kind = SessionArtifactKind::Share;
     let output = args.output.clone().unwrap_or_else(|| {
-        workdir.join(default_session_export_filename(
+        cwd.join(default_session_export_filename(
             &session_id,
             SessionExportFormat::Markdown,
             artifact_kind,
@@ -224,10 +222,10 @@ pub(crate) fn parse_include(
 pub(crate) fn mutate_session(
     args: &SessionIdArgs,
     store: &SqliteStore,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
     mutate: impl Fn(&SqliteStore, &str) -> psychevo_runtime::Result<()>,
 ) -> Result<SessionSummary> {
-    let session_id = resolve_session_id(store, workdir, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session)?;
     mutate(store, &session_id)?;
     store
         .session_summary(&session_id)?
@@ -236,14 +234,14 @@ pub(crate) fn mutate_session(
 
 pub(crate) fn resolve_session_id(
     store: &SqliteStore,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
     raw: &str,
 ) -> Result<String> {
     let raw = raw.trim();
     if raw == "latest" {
         return store
-            .latest_session_for_workdir_with_sources(workdir, SESSION_SOURCES)?
-            .ok_or_else(|| anyhow!("no active session found for {}", workdir.display()));
+            .latest_session_for_cwd_with_sources(cwd, SESSION_SOURCES)?
+            .ok_or_else(|| anyhow!("no active session found for {}", cwd.display()));
     }
     if raw.is_empty() {
         return Err(anyhow!("session id is required"));
@@ -270,7 +268,7 @@ pub(crate) fn print_session_result(
             println!("title: {title}");
         }
         println!("source: {}", summary.source);
-        println!("workdir: {}", summary.workdir);
+        println!("cwd: {}", summary.cwd);
         println!("messages: {}", summary.message_count);
     }
     Ok(())
@@ -280,7 +278,7 @@ pub(crate) fn session_value(session: &SessionSummary) -> Value {
     json!({
         "id": session.id,
         "source": session.source,
-        "workdir": session.workdir,
+        "cwd": session.cwd,
         "model": session.model,
         "provider": session.provider,
         "started_at_ms": session.started_at_ms,

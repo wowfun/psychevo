@@ -1,8 +1,30 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+pub const PROVIDER_MODELS_CACHE_FILE: &str = "provider_models_cache.json";
+pub const PROVIDER_MODELS_CACHE_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ProviderModelsCacheFile {
+    version: u32,
+    #[serde(default)]
+    providers: BTreeMap<String, ProviderModelsCacheEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderModelsCacheEntry {
+    fingerprint: String,
+    base_url: String,
+    fetched_at_ms: i64,
+    models: Vec<ModelCatalogEntry>,
+}
+
 pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_run_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
     let cli_model = parse_model_override(options.model.as_ref())?;
     let env_model = loaded
         .env
@@ -89,8 +111,8 @@ pub fn model_catalog_endpoint(base_url: &str) -> String {
 }
 
 pub fn model_catalog_providers(options: &RunOptions) -> Result<Vec<ModelCatalogProvider>> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_run_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
     let cli_model = parse_model_override(options.model.as_ref())?;
     let env_model = loaded
         .env
@@ -151,8 +173,8 @@ pub fn model_catalog_provider(
     options: &RunOptions,
     provider: &str,
 ) -> Result<Option<ModelCatalogProvider>> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_run_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
     Ok(catalog_provider_for(provider, &loaded))
 }
 
@@ -161,6 +183,17 @@ pub async fn fetch_model_catalog(
 ) -> Result<Vec<ModelCatalogEntry>> {
     let client = reqwest::Client::new();
     fetch_model_catalog_with_client(provider, &client, MODEL_CATALOG_TIMEOUT).await
+}
+
+pub async fn fetch_and_cache_model_catalog(
+    home: &Path,
+    provider: &ModelCatalogProvider,
+) -> Result<Vec<ModelCatalogEntry>> {
+    let models = fetch_model_catalog(provider).await?;
+    if !models.is_empty() {
+        write_cached_model_catalog(home, provider, &models)?;
+    }
+    Ok(models)
 }
 
 pub async fn fetch_model_catalog_with_client(
@@ -220,6 +253,117 @@ pub fn model_catalog_entry_is_free(provider: &str, entry: &ModelCatalogEntry) ->
     false
 }
 
+pub fn read_cached_model_catalog(
+    home: &Path,
+    provider: &ModelCatalogProvider,
+) -> Option<Vec<ModelCatalogEntry>> {
+    let cache = read_provider_models_cache(home)?;
+    let entry = cache
+        .providers
+        .get(&normalize_provider_id(&provider.provider))?;
+    (entry.fingerprint == provider_models_cache_fingerprint(provider)).then(|| {
+        entry
+            .models
+            .iter()
+            .cloned()
+            .map(sanitize_model_catalog_entry_for_cache)
+            .collect()
+    })
+}
+
+pub fn write_cached_model_catalog(
+    home: &Path,
+    provider: &ModelCatalogProvider,
+    models: &[ModelCatalogEntry],
+) -> Result<()> {
+    if models.is_empty() {
+        return Ok(());
+    }
+    let mut cache = read_provider_models_cache(home).unwrap_or_default();
+    cache.version = PROVIDER_MODELS_CACHE_VERSION;
+    cache.providers.insert(
+        normalize_provider_id(&provider.provider),
+        ProviderModelsCacheEntry {
+            fingerprint: provider_models_cache_fingerprint(provider),
+            base_url: normalize_provider_base_url_for_cache(&provider.base_url),
+            fetched_at_ms: now_ms(),
+            models: models
+                .iter()
+                .cloned()
+                .map(sanitize_model_catalog_entry_for_cache)
+                .collect(),
+        },
+    );
+    let path = provider_models_cache_path_for_home(home);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temp_path = path.with_file_name(format!("{PROVIDER_MODELS_CACHE_FILE}.tmp"));
+    fs::write(&temp_path, serde_json::to_vec_pretty(&cache)?)?;
+    fs::rename(temp_path, path)?;
+    Ok(())
+}
+
+pub fn provider_models_cache_path_for_home(home: &Path) -> PathBuf {
+    home.join("cache").join(PROVIDER_MODELS_CACHE_FILE)
+}
+
+pub fn provider_models_cache_fingerprint(provider: &ModelCatalogProvider) -> String {
+    let auth_marker = if provider.no_auth {
+        "no-auth".to_string()
+    } else if let Some(api_key) = provider.api_key.as_deref() {
+        format!("api-key:{api_key}")
+    } else {
+        "missing-auth".to_string()
+    };
+    let mut hasher = Sha256::new();
+    for part in [
+        normalize_provider_id(&provider.provider),
+        normalize_provider_base_url_for_cache(&provider.base_url),
+        provider.api_key_env.clone().unwrap_or_default(),
+        auth_marker,
+    ] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    digest
+        .iter()
+        .take(12)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn read_provider_models_cache(home: &Path) -> Option<ProviderModelsCacheFile> {
+    let path = provider_models_cache_path_for_home(home);
+    let text = fs::read_to_string(path).ok()?;
+    let cache: ProviderModelsCacheFile = serde_json::from_str(&text).ok()?;
+    (cache.version == PROVIDER_MODELS_CACHE_VERSION).then_some(cache)
+}
+
+fn normalize_provider_base_url_for_cache(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    trimmed
+        .strip_suffix("/chat/completions")
+        .unwrap_or(trimmed)
+        .to_string()
+}
+
+fn sanitize_model_catalog_entry_for_cache(mut entry: ModelCatalogEntry) -> ModelCatalogEntry {
+    entry.metadata.raw = None;
+    entry.context_limit = entry
+        .context_limit
+        .or_else(|| entry.metadata.context_limit());
+    entry
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 pub(crate) fn model_cost_is_free(cost: Option<&ModelCost>) -> bool {
     let Some(cost) = cost else {
         return false;
@@ -236,8 +380,8 @@ pub(crate) fn model_cost_is_free(cost: Option<&ModelCost>) -> bool {
 }
 
 pub fn selected_configured_model(options: &RunOptions) -> Result<Option<ConfiguredModel>> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_run_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
     let cli_model = parse_model_override(options.model.as_ref())?;
     let env_model = loaded
         .env

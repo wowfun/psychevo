@@ -113,7 +113,7 @@ pub(crate) fn result_output(result: Result<Value>) -> ToolOutput {
 }
 
 pub(crate) fn write_text_to_target(
-    tool: &WorkdirTool,
+    tool: &CwdTool,
     target: &Path,
     content: &str,
     dirs_created: bool,
@@ -214,7 +214,7 @@ pub(crate) fn git_patch_move(source_path: &str, dest_path: &str) -> String {
 }
 
 pub(crate) fn write_edit_text(
-    tool: &WorkdirTool,
+    tool: &CwdTool,
     target: &Path,
     content: &str,
     pre_content: Option<&str>,

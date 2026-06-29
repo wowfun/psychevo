@@ -25,14 +25,14 @@ pub(crate) mod lsp_tests {
     }
 
     fn test_tool(
-        workdir: &Path,
+        cwd: &Path,
         lsp: LspConfig,
         lsp_manager: Arc<LspManager>,
         env: BTreeMap<String, String>,
         stream_events: Option<RunStreamSink>,
-    ) -> WorkdirTool {
-        WorkdirTool::with_context(
-            workdir.canonicalize().expect("workdir"),
+    ) -> CwdTool {
+        CwdTool::with_context(
+            cwd.canonicalize().expect("cwd"),
             ToolRuntimeContext {
                 task_id: uuid::Uuid::now_v7().to_string(),
                 lsp,
@@ -126,10 +126,10 @@ pub(crate) mod lsp_tests {
     #[test]
     fn lsp_auto_install_is_background_and_deduplicated() {
         let temp = tempfile::tempdir().expect("temp");
-        let workdir = temp.path().join("work");
+        let cwd = temp.path().join("work");
         let home = temp.path().join("home");
         let path_dir = temp.path().join("path");
-        fs::create_dir_all(&workdir).expect("workdir");
+        fs::create_dir_all(&cwd).expect("cwd");
         fs::create_dir_all(&home).expect("home");
         fs::create_dir_all(&path_dir).expect("path");
         let calls = Arc::new(AtomicUsize::new(0));
@@ -147,7 +147,7 @@ pub(crate) mod lsp_tests {
             }
         });
         let tool = test_tool(
-            &workdir,
+            &cwd,
             LspConfig {
                 install_strategy: "auto".to_string(),
                 ..Default::default()
@@ -156,7 +156,7 @@ pub(crate) mod lsp_tests {
             env_for(&home, &path_dir),
             Some(stream),
         );
-        let file = workdir.join("sample.py");
+        let file = cwd.join("sample.py");
         let first = Instant::now();
         let run = tool
             .context
@@ -193,10 +193,10 @@ pub(crate) mod lsp_tests {
     #[test]
     fn python_write_does_not_call_npx_when_lsp_auto_is_missing() {
         let temp = tempfile::tempdir().expect("temp");
-        let workdir = temp.path().join("work");
+        let cwd = temp.path().join("work");
         let home = temp.path().join("home");
         let path_dir = temp.path().join("path");
-        fs::create_dir_all(&workdir).expect("workdir");
+        fs::create_dir_all(&cwd).expect("cwd");
         fs::create_dir_all(&home).expect("home");
         fs::create_dir_all(&path_dir).expect("path");
         let marker = temp.path().join("npx-called");
@@ -211,7 +211,7 @@ pub(crate) mod lsp_tests {
             Ok(())
         })));
         let tool = test_tool(
-            &workdir,
+            &cwd,
             LspConfig {
                 install_strategy: "auto".to_string(),
                 ..Default::default()
@@ -220,7 +220,7 @@ pub(crate) mod lsp_tests {
             env_for(&home, &path_dir),
             None,
         );
-        let target = workdir.join("add.py");
+        let target = cwd.join("add.py");
         let value = write_text_to_target(&tool, &target, "print('ok')\n", false, None, None)
             .expect("write");
         assert_eq!(value["error"], Value::Null);
@@ -327,10 +327,10 @@ while True:
             return;
         }
         let temp = tempfile::tempdir().expect("temp");
-        let workdir = temp.path().join("work");
+        let cwd = temp.path().join("work");
         let home = temp.path().join("home");
         let path_dir = temp.path().join("path");
-        fs::create_dir_all(&workdir).expect("workdir");
+        fs::create_dir_all(&cwd).expect("cwd");
         fs::create_dir_all(&home).expect("home");
         fs::create_dir_all(&path_dir).expect("path");
         let count_path = temp.path().join("starts.txt");
@@ -405,7 +405,7 @@ while True:
             Err(Error::Message("unexpected install".to_string()))
         })));
         let tool = test_tool(
-            &workdir,
+            &cwd,
             LspConfig {
                 install_strategy: "manual".to_string(),
                 wait_timeout_secs: 1.0,
@@ -415,7 +415,7 @@ while True:
             env_for_with_system_path(&home, &path_dir),
             None,
         );
-        let file = workdir.join("sample.py");
+        let file = cwd.join("sample.py");
         fs::write(&file, "bad\n").expect("file");
         let baseline_run = tool
             .context
@@ -438,10 +438,10 @@ while True:
     #[test]
     fn lsp_manager_marks_failed_server_broken() {
         let temp = tempfile::tempdir().expect("temp");
-        let workdir = temp.path().join("work");
+        let cwd = temp.path().join("work");
         let home = temp.path().join("home");
         let path_dir = temp.path().join("path");
-        fs::create_dir_all(&workdir).expect("workdir");
+        fs::create_dir_all(&cwd).expect("cwd");
         fs::create_dir_all(&home).expect("home");
         fs::create_dir_all(&path_dir).expect("path");
         write_executable(&path_dir.join("pyright-langserver"), "#!/bin/sh\nexit 1\n");
@@ -453,7 +453,7 @@ while True:
             }
         });
         let tool = test_tool(
-            &workdir,
+            &cwd,
             LspConfig {
                 install_strategy: "manual".to_string(),
                 wait_timeout_secs: 0.1,
@@ -465,7 +465,7 @@ while True:
             env_for(&home, &path_dir),
             Some(stream),
         );
-        let file = workdir.join("sample.py");
+        let file = cwd.join("sample.py");
         let first = tool
             .context
             .lsp_manager

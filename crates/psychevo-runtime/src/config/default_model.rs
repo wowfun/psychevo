@@ -1,23 +1,23 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-pub fn set_default_model(home: &Path, workdir: &Path, global: bool, model: &str) -> Result<Value> {
-    set_default_model_with_reasoning(home, workdir, global, model, None)
+pub fn set_default_model(home: &Path, cwd: &Path, global: bool, model: &str) -> Result<Value> {
+    set_default_model_with_reasoning(home, cwd, global, model, None)
 }
 
 pub fn set_auxiliary_model(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     global: bool,
     task: &str,
     provider: &str,
     model: &str,
 ) -> Result<Value> {
-    set_auxiliary_model_with_reasoning(home, workdir, global, task, provider, model, None)
+    set_auxiliary_model_with_reasoning(home, cwd, global, task, provider, model, None)
 }
 
 pub fn set_auxiliary_model_with_reasoning(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     global: bool,
     task: &str,
     provider: &str,
@@ -34,7 +34,7 @@ pub fn set_auxiliary_model_with_reasoning(
                 "auxiliary model save requires a concrete provider".to_string(),
             ));
         }
-        validate_default_model_provider(home, workdir, global, &provider)?;
+        validate_default_model_provider(home, cwd, global, &provider)?;
     }
     let provider_value = if model.is_empty() {
         "auto".to_string()
@@ -44,7 +44,7 @@ pub fn set_auxiliary_model_with_reasoning(
     let config_dir = if global {
         home.to_path_buf()
     } else {
-        canonical_workdir(workdir)?.join(".psychevo")
+        canonical_cwd(cwd)?.join(".psychevo")
     };
     let config_path = config_dir.join(CONFIG_FILE_NAME);
     let mut value = load_toml_config_file(&config_path, false)?;
@@ -80,18 +80,18 @@ pub fn set_auxiliary_model_with_reasoning(
 
 pub fn set_default_model_with_reasoning(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     global: bool,
     model: &str,
     reasoning_effort: Option<&str>,
 ) -> Result<Value> {
     let (provider, model) = parse_provider_model_spec(model)?;
     let reasoning_effort = validate_reasoning_effort(reasoning_effort.map(str::to_string))?;
-    validate_default_model_provider(home, workdir, global, &provider)?;
+    validate_default_model_provider(home, cwd, global, &provider)?;
     let config_dir = if global {
         home.to_path_buf()
     } else {
-        canonical_workdir(workdir)?.join(".psychevo")
+        canonical_cwd(cwd)?.join(".psychevo")
     };
     let config_path = config_dir.join(CONFIG_FILE_NAME);
     let mut value = load_toml_config_file(&config_path, false)?;
@@ -146,7 +146,7 @@ pub(crate) fn validate_auxiliary_model_task(task: &str) -> Result<&'static str> 
 
 pub(crate) fn validate_default_model_provider(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     global: bool,
     provider: &str,
 ) -> Result<()> {
@@ -164,9 +164,7 @@ pub(crate) fn validate_default_model_provider(
         )));
     }
     let local_config = parse_run_config(load_toml_config_file(
-        &canonical_workdir(workdir)?
-            .join(".psychevo")
-            .join(CONFIG_FILE_NAME),
+        &canonical_cwd(cwd)?.join(".psychevo").join(CONFIG_FILE_NAME),
         false,
     )?)?;
     if local_config.provider.contains_key(provider) {

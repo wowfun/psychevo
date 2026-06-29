@@ -17,7 +17,7 @@ use crate::config::{load_run_config, resolve_compression_config, resolve_run_pro
 use crate::context::prune_context;
 use crate::context_usage::ContextSnapshot;
 use crate::error::{Error, Result};
-use crate::paths::canonical_workdir;
+use crate::paths::canonical_cwd;
 use crate::prompt_templates;
 use crate::state_runtime::StateRuntime;
 use crate::store::{
@@ -51,7 +51,7 @@ impl CompactionReason {
 #[derive(Debug, Clone)]
 pub struct CompactSessionOptions {
     pub state: StateRuntime,
-    pub workdir: PathBuf,
+    pub cwd: PathBuf,
     pub session: String,
     pub config_path: Option<PathBuf>,
     pub model: Option<String>,
@@ -65,7 +65,7 @@ pub struct CompactSessionOptions {
 #[derive(Debug, Clone)]
 pub struct AutoCompactionCheckOptions {
     pub state: StateRuntime,
-    pub workdir: PathBuf,
+    pub cwd: PathBuf,
     pub session: String,
     pub config_path: Option<PathBuf>,
     pub model: Option<String>,
@@ -89,7 +89,7 @@ pub struct CompactionResult {
 }
 
 pub async fn compact_session(options: CompactSessionOptions) -> Result<CompactionResult> {
-    let workdir = canonical_workdir(&options.workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
     let store = options.state.store().clone();
     let summary = store
         .session_summary(&options.session)?
@@ -102,8 +102,8 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
         ));
     }
 
-    let run_options = compaction_run_options(&options, &summary.provider, &summary.model, &workdir);
-    let loaded = load_run_config(&run_options, &workdir)?;
+    let run_options = compaction_run_options(&options, &summary.provider, &summary.model, &cwd);
+    let loaded = load_run_config(&run_options, &cwd)?;
     let compression_config = loaded.config.compression.clone();
     if !compression_config.enabled {
         return Ok(skipped_result(
@@ -258,9 +258,9 @@ pub fn auto_compaction_due_for_snapshot(
     if snapshot.context_limit.unwrap_or_default() == 0 {
         return Ok(false);
     }
-    let workdir = canonical_workdir(&options.workdir)?;
-    let run_options = auto_compaction_check_run_options(options, snapshot, &workdir);
-    let loaded = load_run_config(&run_options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let run_options = auto_compaction_check_run_options(options, snapshot, &cwd);
+    let loaded = load_run_config(&run_options, &cwd)?;
     let compression_config = loaded.config.compression;
     if !compression_config.enabled || !compression_config.auto {
         return Ok(false);
@@ -694,11 +694,11 @@ pub(crate) fn skipped_result(
 pub(crate) fn auto_compaction_check_run_options(
     options: &AutoCompactionCheckOptions,
     snapshot: &ContextSnapshot,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
 ) -> RunOptions {
     RunOptions {
         state: options.state.clone(),
-        workdir: workdir.to_path_buf(),
+        cwd: cwd.to_path_buf(),
         snapshot_root: None,
         session: Some(options.session.clone()),
         continue_latest: false,
@@ -739,11 +739,11 @@ pub(crate) fn compaction_run_options(
     options: &CompactSessionOptions,
     session_provider: &str,
     session_model: &str,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
 ) -> RunOptions {
     RunOptions {
         state: options.state.clone(),
-        workdir: workdir.to_path_buf(),
+        cwd: cwd.to_path_buf(),
         snapshot_root: None,
         session: Some(options.session.clone()),
         continue_latest: false,

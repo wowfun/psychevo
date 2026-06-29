@@ -9,8 +9,8 @@ Define deterministic acceptance coverage for the `clarify` tool contract,
 runtime control path, fullscreen TUI answering flow, and persisted/exported
 evidence.
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 ## Long-Term Acceptance Contract
 
@@ -82,12 +82,12 @@ Relevant narrow validation:
 
 Broad deterministic validation:
 
-- `scripts/validate-rust.sh broad`
+- `cargo xtask ci run --profile rust-broad`
 
 VHS capture is required only for fullscreen TUI visual changes that affect the
 clarify panel or result rendering:
 
-- `scripts/pevo-tui-capture.sh demo`
+- `cargo xtask ci run --profile visual`
 
 VHS uses a deterministic local mock provider and isolated local state. It
 remains outside broad validation and must not require live provider credentials.

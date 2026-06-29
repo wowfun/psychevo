@@ -300,6 +300,14 @@ use smoke_cli_agent::*;
 mod smoke_cli_skills;
 #[allow(unused_imports)]
 use smoke_cli_skills::*;
+#[path = "smoke_cli/plugins.rs"]
+mod smoke_cli_plugins;
+#[allow(unused_imports)]
+use smoke_cli_plugins::*;
+#[path = "smoke_cli/hooks.rs"]
+mod smoke_cli_hooks;
+#[allow(unused_imports)]
+use smoke_cli_hooks::*;
 #[path = "smoke_cli/profile.rs"]
 mod smoke_cli_profile;
 #[allow(unused_imports)]

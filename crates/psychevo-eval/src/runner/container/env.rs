@@ -28,8 +28,8 @@ pub(crate) fn harbor_container_environment(
         .unwrap_or(600);
     let cpus = toml_value_as_f64(environment.get("cpus"));
     let memory_mb = toml_value_as_u64(environment.get("memory_mb"));
-    let workdir = environment
-        .get("workdir")
+    let cwd = environment
+        .get("cwd")
         .and_then(toml::Value::as_str)
         .unwrap_or("/app")
         .to_string();
@@ -45,7 +45,7 @@ pub(crate) fn harbor_container_environment(
         build_timeout_seconds,
         cpus,
         memory_mb,
-        workdir,
+        cwd,
     })
 }
 

@@ -191,8 +191,8 @@ surfaces and are not included in provider-visible tool result JSON.
 Parameters:
 
 - `cmd`: string, required
-- `workdir`: string, optional; relative paths resolve against the accepted
-  workdir, absolute paths must pass permission/resource gates
+- `cwd`: string, optional; relative paths resolve against the accepted
+  cwd, absolute paths must pass permission/resource gates
 - `shell`: string, optional; defaults to the user's shell
 - `tty`: boolean, optional, default `false`
 - `yield_time_ms`: integer, optional, default `10000`, clamped to

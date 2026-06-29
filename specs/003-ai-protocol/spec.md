@@ -71,11 +71,14 @@ User messages in model context may contain provider-neutral text blocks, local
 image blocks, and remote image URL blocks. Text-only messages preserve the
 existing text semantics and may continue to project to text-only provider
 payloads. Local image blocks represent runtime-resolved local files that the AI
-layer converts to provider-compatible image input when the target adapter
-family supports it. Remote image URL blocks carry provider-consumable image URLs
-without local prefetch. Runtime must avoid sending structured image blocks when
-model metadata explicitly rules image input out; unknown metadata may be
-forwarded for the provider to decide.
+layer converts to provider-compatible image input when the target adapter family
+supports it. Remote image URL blocks carry provider-consumable image URLs
+without local prefetch and must come from explicit image inputs such as
+attachment, protocol, gateway, or API image fields. Runtime must not infer remote
+image URL blocks from arbitrary HTTP(S) URLs in free-form prompt text, including
+URLs with image-looking path extensions. Runtime must avoid sending structured
+image blocks when model metadata explicitly rules image input out; unknown
+metadata may be forwarded for the provider to decide.
 
 Runtime-originated tool attachments may be projected into model context as
 ordinary provider-neutral user image blocks after the corresponding text tool

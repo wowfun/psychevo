@@ -55,16 +55,16 @@ pub enum WorkspaceDiffFileStatus {
     Unreadable,
 }
 
-pub fn collect_workspace_diff(workdir: &Path) -> Result<WorkspaceDiff> {
-    collect_workspace_diff_with_caps(workdir, WORKSPACE_DIFF_MAX_BYTES, WORKSPACE_DIFF_MAX_LINES)
+pub fn collect_workspace_diff(cwd: &Path) -> Result<WorkspaceDiff> {
+    collect_workspace_diff_with_caps(cwd, WORKSPACE_DIFF_MAX_BYTES, WORKSPACE_DIFF_MAX_LINES)
 }
 
 pub fn collect_workspace_diff_with_caps(
-    workdir: &Path,
+    cwd: &Path,
     max_bytes: usize,
     max_lines: usize,
 ) -> Result<WorkspaceDiff> {
-    if !is_inside_git_work_tree(workdir)? {
+    if !is_inside_git_work_tree(cwd)? {
         return Ok(WorkspaceDiff {
             is_git_repo: false,
             files: Vec::new(),
@@ -79,21 +79,21 @@ pub fn collect_workspace_diff_with_caps(
         });
     }
 
-    let tracked_diff = git_stdout(workdir, ["diff", "--no-color"], true)?;
-    let tracked_files = tracked_diff_files(workdir)?;
-    let untracked_paths = untracked_files(workdir)?;
+    let tracked_diff = git_stdout(cwd, ["diff", "--no-color"], true)?;
+    let tracked_files = tracked_diff_files(cwd)?;
+    let untracked_paths = untracked_files(cwd)?;
     let mut files = Vec::new();
     for tracked in tracked_files {
-        files.push(build_tracked_file_entry(workdir, tracked));
+        files.push(build_tracked_file_entry(cwd, tracked));
     }
 
     let mut accumulator = DiffAccumulator::new(max_bytes, max_lines);
     accumulator.append(&tracked_diff);
 
     for path in untracked_paths {
-        let entry = build_untracked_file_entry(workdir, &path);
+        let entry = build_untracked_file_entry(cwd, &path);
         match git_stdout(
-            workdir,
+            cwd,
             [
                 OsStr::new("diff"),
                 OsStr::new("--no-color"),
@@ -120,10 +120,10 @@ pub fn collect_workspace_diff_with_caps(
     })
 }
 
-fn is_inside_git_work_tree(workdir: &Path) -> Result<bool> {
+fn is_inside_git_work_tree(cwd: &Path) -> Result<bool> {
     let output = Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
-        .current_dir(workdir)
+        .current_dir(cwd)
         .output()?;
     if !output.status.success() {
         return Ok(false);
@@ -131,8 +131,8 @@ fn is_inside_git_work_tree(workdir: &Path) -> Result<bool> {
     Ok(String::from_utf8_lossy(&output.stdout).trim() == "true")
 }
 
-fn tracked_diff_files(workdir: &Path) -> Result<Vec<TrackedDiffFile>> {
-    let output = git_stdout_bytes(workdir, ["diff", "--name-status", "-z"], false)?;
+fn tracked_diff_files(cwd: &Path) -> Result<Vec<TrackedDiffFile>> {
+    let output = git_stdout_bytes(cwd, ["diff", "--name-status", "-z"], false)?;
     let fields = nul_fields(&output);
     let mut files = Vec::new();
     let mut index = 0usize;
@@ -164,9 +164,9 @@ fn tracked_diff_files(workdir: &Path) -> Result<Vec<TrackedDiffFile>> {
     Ok(files)
 }
 
-fn untracked_files(workdir: &Path) -> Result<Vec<String>> {
+fn untracked_files(cwd: &Path) -> Result<Vec<String>> {
     git_stdout_bytes(
-        workdir,
+        cwd,
         ["ls-files", "--others", "--exclude-standard", "-z"],
         false,
     )
@@ -181,21 +181,21 @@ fn tracked_status(code: char) -> WorkspaceDiffFileStatus {
     }
 }
 
-fn build_tracked_file_entry(workdir: &Path, tracked: TrackedDiffFile) -> WorkspaceDiffFile {
-    let old_text = git_blob_text(workdir, &tracked.path);
+fn build_tracked_file_entry(cwd: &Path, tracked: TrackedDiffFile) -> WorkspaceDiffFile {
+    let old_text = git_blob_text(cwd, &tracked.path);
     let new_text = match tracked.status {
         WorkspaceDiffFileStatus::Deleted => SafeText::Text(String::new()),
-        _ => read_text_file(&workdir.join(&tracked.path)),
+        _ => read_text_file(&cwd.join(&tracked.path)),
     };
     finalize_file_entry(tracked.path, tracked.status, old_text, new_text)
 }
 
-fn build_untracked_file_entry(workdir: &Path, path: &str) -> WorkspaceDiffFile {
+fn build_untracked_file_entry(cwd: &Path, path: &str) -> WorkspaceDiffFile {
     finalize_file_entry(
         path.to_string(),
         WorkspaceDiffFileStatus::Untracked,
         SafeText::Unreadable,
-        read_text_file(&workdir.join(path)),
+        read_text_file(&cwd.join(path)),
     )
 }
 
@@ -251,9 +251,9 @@ fn finalize_file_entry(
     }
 }
 
-fn git_blob_text(workdir: &Path, path: &str) -> SafeText {
+fn git_blob_text(cwd: &Path, path: &str) -> SafeText {
     let spec = format!("HEAD:{path}");
-    git_stdout_bytes(workdir, [OsStr::new("show"), OsStr::new(&spec)], false)
+    git_stdout_bytes(cwd, [OsStr::new("show"), OsStr::new(&spec)], false)
         .map(bytes_to_text)
         .unwrap_or(SafeText::Unreadable)
 }
@@ -281,25 +281,22 @@ fn placeholder_diff(path: &str, entry: &WorkspaceDiffFile) -> String {
     format!("diff --git a/{path} b/{path}\n[{message}]\n")
 }
 
-fn git_stdout<I, S>(workdir: &Path, args: I, allow_exit_one: bool) -> Result<String>
+fn git_stdout<I, S>(cwd: &Path, args: I, allow_exit_one: bool) -> Result<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let bytes = git_stdout_bytes(workdir, args, allow_exit_one)?;
+    let bytes = git_stdout_bytes(cwd, args, allow_exit_one)?;
     String::from_utf8(bytes)
         .map_err(|err| Error::Message(format!("git output was not UTF-8: {err}")))
 }
 
-fn git_stdout_bytes<I, S>(workdir: &Path, args: I, allow_exit_one: bool) -> Result<Vec<u8>>
+fn git_stdout_bytes<I, S>(cwd: &Path, args: I, allow_exit_one: bool) -> Result<Vec<u8>>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(workdir)
-        .output()?;
+    let output = Command::new("git").args(args).current_dir(cwd).output()?;
     if output.status.success() || (allow_exit_one && output.status.code() == Some(1)) {
         return Ok(output.stdout);
     }
@@ -544,14 +541,14 @@ mod tests {
         temp
     }
 
-    fn git<I, S>(workdir: &Path, args: I)
+    fn git<I, S>(cwd: &Path, args: I)
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
         let output = Command::new("git")
             .args(args)
-            .current_dir(workdir)
+            .current_dir(cwd)
             .output()
             .expect("git");
         assert!(

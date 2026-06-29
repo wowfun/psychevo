@@ -34,6 +34,7 @@ pub enum SkillSource {
     Agents,
     Global,
     Config,
+    Plugin,
     InstallSource,
 }
 
@@ -45,6 +46,7 @@ impl SkillSource {
             Self::Agents => "agents",
             Self::Global => "global",
             Self::Config => "config",
+            Self::Plugin => "plugin",
             Self::InstallSource => "install_source",
         }
     }
@@ -104,10 +106,11 @@ pub struct SkillContextFragment {
 #[derive(Debug, Clone)]
 pub struct SkillDiscoveryOptions {
     pub home: PathBuf,
-    pub workdir: PathBuf,
+    pub cwd: PathBuf,
     pub config_path: Option<PathBuf>,
     pub env: BTreeMap<String, String>,
     pub explicit_inputs: Vec<String>,
+    pub additional_roots: Vec<PathBuf>,
     pub no_skills: bool,
 }
 
@@ -256,7 +259,7 @@ pub struct SkillBundle {
 
 pub fn load_skill_settings(
     home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     config_path: Option<&Path>,
     env: &BTreeMap<String, String>,
 ) -> Result<SkillSettings> {
@@ -271,28 +274,28 @@ pub fn load_skill_settings(
         );
         deep_merge(
             &mut merged,
-            load_toml_config_file(&workdir.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
+            load_toml_config_file(&cwd.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
         );
     }
-    parse_skill_settings(&merged, home, workdir, env)
+    parse_skill_settings(&merged, home, cwd, env)
 }
 
-pub fn resolve_skills_home(env: &BTreeMap<String, String>, workdir: &Path) -> Result<PathBuf> {
+pub fn resolve_skills_home(env: &BTreeMap<String, String>, cwd: &Path) -> Result<PathBuf> {
     if let Some(value) = env
         .get("PSYCHEVO_HOME")
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        resolve_configured_path(value, workdir, env)
+        resolve_configured_path(value, cwd, env)
     } else {
-        resolve_configured_path("~/.psychevo", workdir, env)
+        resolve_configured_path("~/.psychevo", cwd, env)
     }
 }
 
 pub(crate) fn parse_skill_settings(
     value: &Value,
     _home: &Path,
-    workdir: &Path,
+    cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> Result<SkillSettings> {
     let mut settings = SkillSettings::default();
@@ -322,7 +325,7 @@ pub(crate) fn parse_skill_settings(
         for raw_path in raw.paths.unwrap_or_default() {
             settings
                 .paths
-                .push(resolve_configured_path(&raw_path, workdir, env)?);
+                .push(resolve_configured_path(&raw_path, cwd, env)?);
         }
         settings.enable_commands = raw.enable_commands;
         if let Some(value) = raw.template_vars {
@@ -348,7 +351,7 @@ pub(crate) fn active_skill_platform(env: &BTreeMap<String, String>) -> &str {
 pub fn discover_skills(options: &SkillDiscoveryOptions) -> Result<SkillCatalog> {
     let settings = load_skill_settings(
         &options.home,
-        &options.workdir,
+        &options.cwd,
         options.config_path.as_deref(),
         &options.env,
     )?;
@@ -362,7 +365,7 @@ pub fn discover_skills_with_settings(
     let explicit_names = options
         .explicit_inputs
         .iter()
-        .filter(|input| !looks_like_existing_path(input, &options.workdir, &options.env))
+        .filter(|input| !looks_like_existing_path(input, &options.cwd, &options.env))
         .map(|input| input.trim().to_string())
         .filter(|input| !input.is_empty())
         .collect::<BTreeSet<_>>();
@@ -370,7 +373,7 @@ pub fn discover_skills_with_settings(
     let mut seen = BTreeMap::<String, PathBuf>::new();
 
     for input in &options.explicit_inputs {
-        let Some(path) = existing_input_path(input, &options.workdir, &options.env)? else {
+        let Some(path) = existing_input_path(input, &options.cwd, &options.env)? else {
             continue;
         };
         add_path_skills(
@@ -389,16 +392,19 @@ pub fn discover_skills_with_settings(
         let only_names = options.no_skills.then_some(&explicit_names);
         let mut sources = Vec::new();
         sources.push((
-            options.workdir.join(".psychevo").join("skills"),
+            options.cwd.join(".psychevo").join("skills"),
             SkillSource::Project,
             true,
         ));
-        for dir in ancestor_agents_skill_dirs(&options.workdir) {
+        for dir in ancestor_agents_skill_dirs(&options.cwd) {
             sources.push((dir, SkillSource::Agents, false));
         }
         sources.push((options.home.join("skills"), SkillSource::Global, true));
         for path in &settings.paths {
             sources.push((path.clone(), SkillSource::Config, true));
+        }
+        for path in &options.additional_roots {
+            sources.push((path.clone(), SkillSource::Plugin, true));
         }
         for (path, source, include_root_files) in sources {
             add_path_skills(
@@ -781,13 +787,13 @@ pub fn select_skills_for_prompt(catalog: &SkillCatalog, prompt: &str) -> Vec<Sel
 pub fn select_explicit_skills(
     catalog: &SkillCatalog,
     explicit_inputs: &[String],
-    workdir: &Path,
+    cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> Vec<SelectedSkill> {
     let mut selected = Vec::new();
     let mut seen = BTreeSet::new();
     for input in explicit_inputs {
-        if let Ok(Some(path)) = existing_input_path(input, workdir, env) {
+        if let Ok(Some(path)) = existing_input_path(input, cwd, env) {
             let Ok(path) = path.canonicalize() else {
                 continue;
             };

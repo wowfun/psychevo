@@ -171,9 +171,9 @@ pub(crate) fn cli_setup_rejects_non_tty_without_prompting() {
 pub(crate) fn cli_doctor_json_reports_local_web_asset_status() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let dist = temp.path().join("dist");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&dist).expect("dist");
     std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
 
@@ -191,7 +191,7 @@ pub(crate) fn cli_doctor_json_reports_local_web_asset_status() {
     let output = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
         .env("PSYCHEVO_WEB_DIST", &dist)
-        .current_dir(&workdir)
+        .current_dir(&cwd)
         .args(["doctor", "--json"])
         .output()
         .expect("pevo doctor");
@@ -208,12 +208,12 @@ pub(crate) fn cli_doctor_json_reports_local_web_asset_status() {
 }
 
 #[test]
-pub(crate) fn cli_web_opens_current_workdir_with_json_output() {
+pub(crate) fn cli_web_opens_current_cwd_with_json_output() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let dist = temp.path().join("dist");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&dist).expect("dist");
     std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
 
@@ -231,13 +231,13 @@ pub(crate) fn cli_web_opens_current_workdir_with_json_output() {
     let output = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
         .env("PSYCHEVO_WEB_DIST", &dist)
-        .current_dir(&workdir)
+        .current_dir(&cwd)
         .args(["web", "--no-browser", "--print-url"])
         .output()
         .expect("pevo web");
     let stop = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
-        .current_dir(&workdir)
+        .current_dir(&cwd)
         .args(["gateway", "stop"])
         .output()
         .expect("pevo gateway stop");
@@ -254,7 +254,7 @@ pub(crate) fn cli_web_opens_current_workdir_with_json_output() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("web json");
     assert_eq!(value["ok"], true);
     assert_eq!(value["openedBrowser"], false);
-    assert_eq!(value["workdir"], workdir.display().to_string());
+    assert_eq!(value["cwd"], cwd.display().to_string());
     assert!(
         value["openUrl"]
             .as_str()
@@ -273,9 +273,9 @@ pub(crate) fn cli_web_opens_current_workdir_with_json_output() {
 pub(crate) fn cli_init_reset_state_stops_managed_gateway_before_recreating_state() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let dist = temp.path().join("dist");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&dist).expect("dist");
     std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
 
@@ -293,7 +293,7 @@ pub(crate) fn cli_init_reset_state_stops_managed_gateway_before_recreating_state
     let first_web = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
         .env("PSYCHEVO_WEB_DIST", &dist)
-        .current_dir(&workdir)
+        .current_dir(&cwd)
         .args(["web", "--no-browser", "--print-url"])
         .output()
         .expect("pevo web");
@@ -333,13 +333,13 @@ pub(crate) fn cli_init_reset_state_stops_managed_gateway_before_recreating_state
     let second_web = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
         .env("PSYCHEVO_WEB_DIST", &dist)
-        .current_dir(&workdir)
+        .current_dir(&cwd)
         .args(["web", "--no-browser", "--print-url"])
         .output()
         .expect("pevo web after reset");
     let stop = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
-        .current_dir(&workdir)
+        .current_dir(&cwd)
         .args(["gateway", "stop"])
         .output()
         .expect("pevo gateway stop");

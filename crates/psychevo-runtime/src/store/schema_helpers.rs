@@ -44,7 +44,7 @@ pub(crate) fn session_summary_from_row(
         id: row.get(0)?,
         source: row.get(1)?,
         parent_session_id: row.get(2)?,
-        workdir: row.get(3)?,
+        cwd: row.get(3)?,
         model: row.get(4)?,
         provider: row.get(5)?,
         started_at_ms: row.get(6)?,

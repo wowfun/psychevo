@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-pub(crate) struct EditTool(WorkdirTool);
+pub(crate) struct EditTool(CwdTool);
 
 impl EditTool {
-    pub(crate) fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
-        Self(WorkdirTool::with_context(workdir, context))
+    pub(crate) fn new(cwd: PathBuf, context: ToolRuntimeContext) -> Self {
+        Self(CwdTool::with_context(cwd, context))
     }
 }
 
@@ -73,12 +73,12 @@ impl ToolBinding for EditTool {
 }
 
 #[cfg(test)]
-pub(crate) fn edit_tool_impl(tool: WorkdirTool, args: Value) -> Result<Value> {
+pub(crate) fn edit_tool_impl(tool: CwdTool, args: Value) -> Result<Value> {
     edit_tool_impl_for_call(tool, None, args)
 }
 
 pub(crate) fn edit_tool_impl_for_call(
-    tool: WorkdirTool,
+    tool: CwdTool,
     tool_call_id: Option<&str>,
     args: Value,
 ) -> Result<Value> {
@@ -94,7 +94,7 @@ pub(crate) fn edit_tool_impl_for_call(
 }
 
 pub(crate) fn edit_replace(
-    tool: WorkdirTool,
+    tool: CwdTool,
     tool_call_id: Option<&str>,
     args: Value,
 ) -> Result<Value> {
@@ -134,11 +134,7 @@ pub(crate) fn edit_replace(
     }))
 }
 
-pub(crate) fn edit_patch(
-    tool: WorkdirTool,
-    tool_call_id: Option<&str>,
-    args: Value,
-) -> Result<Value> {
+pub(crate) fn edit_patch(tool: CwdTool, tool_call_id: Option<&str>, args: Value) -> Result<Value> {
     let patch = required_string(&args, "patch")?;
     let operations = match parse_v4a_patch(patch) {
         Ok(operations) => operations,
@@ -210,7 +206,7 @@ pub(crate) enum V4aApply {
 }
 
 pub(crate) fn validate_v4a_operations(
-    tool: &WorkdirTool,
+    tool: &CwdTool,
     tool_call_id: Option<&str>,
     operations: &[V4aOperation],
 ) -> Result<Vec<V4aApply>> {
@@ -285,7 +281,7 @@ pub(crate) fn validate_v4a_operations(
     Ok(plan)
 }
 
-pub(crate) fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<Value> {
+pub(crate) fn apply_v4a_plan(tool: &CwdTool, plan: Vec<V4aApply>) -> Result<Value> {
     let mut diffs = Vec::new();
     let mut files_modified = Vec::new();
     let mut files_created = Vec::new();
@@ -384,9 +380,9 @@ pub(crate) fn apply_v4a_plan(tool: &WorkdirTool, plan: Vec<V4aApply>) -> Result<
 pub(crate) mod edit_tool_tests {
     pub(crate) use super::*;
 
-    fn workdir_tool(path: &Path) -> WorkdirTool {
-        WorkdirTool::with_context(
-            path.canonicalize().expect("canonical workdir"),
+    fn cwd_tool(path: &Path) -> CwdTool {
+        CwdTool::with_context(
+            path.canonicalize().expect("canonical cwd"),
             ToolRuntimeContext {
                 task_id: uuid::Uuid::now_v7().to_string(),
                 lsp: LspConfig {
@@ -404,7 +400,7 @@ pub(crate) mod edit_tool_tests {
         )
     }
 
-    fn workdir_tool_read_only_sandbox(path: &Path) -> WorkdirTool {
+    fn cwd_tool_read_only_sandbox(path: &Path) -> CwdTool {
         let env = BTreeMap::new();
         let policy = crate::sandbox::SandboxPolicy::from_config(
             &crate::sandbox::SandboxConfig {
@@ -419,8 +415,8 @@ pub(crate) mod edit_tool_tests {
             &env,
         )
         .expect("sandbox policy");
-        WorkdirTool::with_context(
-            path.canonicalize().expect("canonical workdir"),
+        CwdTool::with_context(
+            path.canonicalize().expect("canonical cwd"),
             ToolRuntimeContext {
                 sandbox_policy: policy,
                 ..ToolRuntimeContext::default()
@@ -455,7 +451,7 @@ pub(crate) mod edit_tool_tests {
         )
         .expect("seed");
         let value = edit_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({
                 "mode": "replace",
                 "path": "main.rs",
@@ -482,7 +478,7 @@ pub(crate) mod edit_tool_tests {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("dup.txt"), "a\na\n").expect("seed");
         let ambiguous = edit_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({
                 "mode": "replace",
                 "path": "dup.txt",
@@ -500,7 +496,7 @@ pub(crate) mod edit_tool_tests {
         );
 
         let replaced = edit_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({
                 "mode": "replace",
                 "path": "dup.txt",
@@ -522,7 +518,7 @@ pub(crate) mod edit_tool_tests {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("win.txt"), "\u{feff}one\r\ntwo\r\n").expect("seed");
         edit_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({
                 "mode": "replace",
                 "path": "win.txt",
@@ -541,7 +537,7 @@ pub(crate) mod edit_tool_tests {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("main.rs"), "fn main() {}\n").expect("seed");
         let err = edit_tool_impl(
-            workdir_tool_read_only_sandbox(temp.path()),
+            cwd_tool_read_only_sandbox(temp.path()),
             json!({
                 "mode": "replace",
                 "path": "main.rs",
@@ -577,7 +573,7 @@ pub(crate) mod edit_tool_tests {
 *** Move File: move.txt -> moved.txt
 *** End Patch"#;
         let value = edit_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({"mode": "patch", "patch": patch}),
         )
         .expect("patch");
@@ -642,7 +638,7 @@ pub(crate) mod edit_tool_tests {
 +created
 *** End Patch"#;
         let value = edit_tool_impl(
-            workdir_tool(temp.path()),
+            cwd_tool(temp.path()),
             json!({"mode": "patch", "patch": patch}),
         )
         .expect("failed value");

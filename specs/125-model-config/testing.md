@@ -10,7 +10,7 @@ model state, provider setup, and explicit catalog fetch UX.
 
 ## Default Validation
 
-Tests must use fake providers and isolated config, env, home, and workdir state
+Tests must use fake providers and isolated config, env, home, and cwd state
 by default. No default test or broad validation path may require a real provider
 key, live OpenCode Zen request, or live model catalog fetch.
 
@@ -24,7 +24,7 @@ behavior.
 - Settings > Models reads and saves profile/global model defaults without being
   masked by the current project `.psychevo/config.toml`.
 - Composer model pickers in GUI and TUI write `model-state.json` for the
-  canonical workdir and do not write TOML defaults.
+  canonical cwd and do not write TOML defaults.
 - Provider save flows write durable secrets only through Gateway/runtime `.env`
   handling and never persist raw keys in frontend storage or TOML.
 - Explicit fake catalog fetches update assignment controls and composer model
@@ -40,7 +40,7 @@ behavior.
   `settings/read.controls` and syncs the in-memory composer label to the
   backend-resolved current-scope model.
 - Saving defaults or assignments does not hot-swap an already running turn, and
-  active session or workdir composer overrides continue to win over the global
+  active session or cwd composer overrides continue to win over the global
   default.
 - Legacy `tui-state.json` model fields are not automatically migrated during
   normal startup.
@@ -48,7 +48,7 @@ behavior.
 ## Live Opt-In Validation
 
 Live provider and live catalog validation is opt-in only. When explicitly run,
-it must use isolated `PSYCHEVO_HOME`, `PSYCHEVO_CONFIG`, workdir, and temp state
+it must use isolated `PSYCHEVO_HOME`, `PSYCHEVO_CONFIG`, cwd, and temp state
 unless the caller explicitly chooses real user configuration.
 
 ## Related Topics

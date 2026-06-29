@@ -670,7 +670,7 @@ pub fn valid_agent_name(name: &str) -> bool {
 
 pub(crate) fn existing_agent_path(
     input: &str,
-    workdir: &Path,
+    cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> Result<Option<PathBuf>> {
     let raw = input.trim();
@@ -687,14 +687,14 @@ pub(crate) fn existing_agent_path(
     let path = if path.is_absolute() {
         path
     } else {
-        workdir.join(path)
+        cwd.join(path)
     };
     Ok((path.is_file()).then_some(path))
 }
 
-pub(crate) fn ancestor_claude_agent_dirs(workdir: &Path) -> Vec<PathBuf> {
+pub(crate) fn ancestor_claude_agent_dirs(cwd: &Path) -> Vec<PathBuf> {
     let mut result = Vec::new();
-    let mut current = workdir.to_path_buf();
+    let mut current = cwd.to_path_buf();
     loop {
         result.push(current.join(".claude").join("agents"));
         if current.join(".git").exists() {
@@ -798,7 +798,5 @@ impl SpawnAgentTool {
 
 pub(crate) struct HookedTool {
     pub(crate) inner: Arc<dyn ToolBinding>,
-    pub(crate) hooks: Option<Value>,
-    pub(crate) agent_name: String,
-    pub(crate) workdir: PathBuf,
+    pub(crate) hook_runtime: crate::hooks::HookRuntime,
 }

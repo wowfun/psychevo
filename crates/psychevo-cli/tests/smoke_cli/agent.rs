@@ -24,13 +24,13 @@ pub(crate) fn cli_agent_inspect_json_includes_identity_and_depth() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let store = psychevo_runtime::SqliteStore::open(&db).expect("store");
-    let workdir = temp.path().join("repo");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("repo");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     let parent = store
-        .create_session_with_metadata(&workdir, "tui", "mock-model", "mock", None)
+        .create_session_with_metadata(&cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
     let child = store
-        .create_child_session_with_metadata(&parent, &workdir, "agent", "mock-model", "mock", None)
+        .create_child_session_with_metadata(&parent, &cwd, "agent", "mock-model", "mock", None)
         .expect("child");
     store
         .upsert_agent_edge(

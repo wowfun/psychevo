@@ -34,7 +34,7 @@ impl SqliteStore {
                 id TEXT PRIMARY KEY,
                 source TEXT NOT NULL,
                 parent_session_id TEXT,
-                workdir TEXT NOT NULL,
+                cwd TEXT NOT NULL,
                 model TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 started_at_ms INTEGER NOT NULL,
@@ -237,7 +237,7 @@ impl SqliteStore {
 
             CREATE TABLE IF NOT EXISTS automations (
                 id TEXT PRIMARY KEY,
-                workdir TEXT NOT NULL,
+                cwd TEXT NOT NULL,
                 kind TEXT NOT NULL,
                 target_thread_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
                 title TEXT NOT NULL,
@@ -268,7 +268,6 @@ impl SqliteStore {
                 error TEXT,
                 metadata_json TEXT
             );
-
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
             CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
@@ -303,8 +302,8 @@ impl SqliteStore {
                 ON gateway_control_commands(owner_id, status, id);
             CREATE INDEX IF NOT EXISTS idx_gateway_turn_terminals_thread
                 ON gateway_turn_terminals(thread_id, completed_at_ms);
-            CREATE INDEX IF NOT EXISTS idx_automations_workdir_enabled_next
-                ON automations(workdir, enabled, next_run_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_automations_cwd_enabled_next
+                ON automations(cwd, enabled, next_run_at_ms);
             CREATE INDEX IF NOT EXISTS idx_automation_runs_task
                 ON automation_runs(automation_id, started_at_ms);
             CREATE INDEX IF NOT EXISTS idx_automation_runs_status

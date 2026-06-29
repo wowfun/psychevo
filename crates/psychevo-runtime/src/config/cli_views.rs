@@ -18,8 +18,8 @@ pub fn config_show_value(options: &RunOptions, scope: ConfigScope) -> Result<Val
             ))
         }
         ConfigScope::Local => {
-            let workdir = canonical_workdir(&options.workdir)?;
-            let path = workdir.join(".psychevo").join(CONFIG_FILE_NAME);
+            let cwd = canonical_cwd(&options.cwd)?;
+            let path = cwd.join(".psychevo").join(CONFIG_FILE_NAME);
             Ok(config_document_value(
                 "local",
                 Some(path.clone()),
@@ -29,8 +29,8 @@ pub fn config_show_value(options: &RunOptions, scope: ConfigScope) -> Result<Val
             ))
         }
         ConfigScope::Effective => {
-            let workdir = canonical_workdir(&options.workdir)?;
-            let loaded = load_config_value(options, &workdir)?;
+            let cwd = canonical_cwd(&options.cwd)?;
+            let loaded = load_config_value(options, &cwd)?;
             Ok(config_document_value(
                 "effective",
                 None,
@@ -176,8 +176,8 @@ pub(crate) fn remove_config_path_value(root: &mut Value, path: &[&str]) -> Resul
 }
 
 pub fn auth_status_value(options: &RunOptions, provider: Option<&str>) -> Result<Value> {
-    let workdir = canonical_workdir(&options.workdir)?;
-    let loaded = load_run_config(options, &workdir)?;
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
     let mut providers = BTreeSet::new();
     if let Some(provider) = provider {
         providers.insert(normalize_provider_id(provider));

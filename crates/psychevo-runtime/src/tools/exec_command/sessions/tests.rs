@@ -96,7 +96,7 @@ mod tests {
         let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
         let err = exec_command_tool_impl_with_context(
-            temp.path().canonicalize().expect("workdir"),
+            temp.path().canonicalize().expect("cwd"),
             ToolRuntimeContext {
                 sandbox_policy: policy,
                 ..ToolRuntimeContext::default()
@@ -139,7 +139,7 @@ mod tests {
         let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
         let value = exec_command_tool_impl_with_context(
-            work.path().canonicalize().expect("workdir"),
+            work.path().canonicalize().expect("cwd"),
             ToolRuntimeContext {
                 sandbox_policy: policy,
                 ..ToolRuntimeContext::default()
@@ -184,7 +184,7 @@ mod tests {
         let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
         let result = exec_command_tool_impl_with_context(
-            work.path().canonicalize().expect("workdir"),
+            work.path().canonicalize().expect("cwd"),
             ToolRuntimeContext {
                 sandbox_policy: policy,
                 ..ToolRuntimeContext::default()

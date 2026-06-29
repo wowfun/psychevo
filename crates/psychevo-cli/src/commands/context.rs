@@ -44,13 +44,13 @@ pub(crate) fn run_context_command_inner(args: &ContextArgs) -> Result<ExitCode> 
     ensure_home_initialized(&home)?;
     let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let workdir = match &args.dir {
+    let cwd = match &args.dir {
         Some(dir) => resolve_explicit_path(dir, &env_map, &cwd)?,
         None => cwd,
     };
     let snapshot = context_snapshot(ContextOptions {
         state: StateRuntime::open(&db_path)?,
-        workdir,
+        cwd,
         session,
         config_path,
         inherited_env: Some(env_map),

@@ -241,7 +241,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/variant <none|minimal|low|medium|high|xhigh|max>",
         summary: "set reasoning effort",
         help_detail: Some(
-            "Persists a TUI-local reasoning effort override for this workdir and future turns.",
+            "Persists a TUI-local reasoning effort override for this cwd and future turns.",
         ),
         surface: TUI_SLASH,
         group: COMMANDS,

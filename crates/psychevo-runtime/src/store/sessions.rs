@@ -1,34 +1,32 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 impl SqliteStore {
-    pub fn create_session(&self, workdir: &Path) -> Result<String> {
-        self.create_session_with_metadata(workdir, "smoke", "fake-coding-model", "fake", None)
+    pub fn create_session(&self, cwd: &Path) -> Result<String> {
+        self.create_session_with_metadata(cwd, "smoke", "fake-coding-model", "fake", None)
     }
 
     pub fn create_session_with_metadata(
         &self,
-        workdir: &Path,
+        cwd: &Path,
         source: &str,
         model: &str,
         provider: &str,
         metadata: Option<Value>,
     ) -> Result<String> {
-        self.create_session_with_parent_and_metadata(
-            workdir, source, None, model, provider, metadata,
-        )
+        self.create_session_with_parent_and_metadata(cwd, source, None, model, provider, metadata)
     }
 
     pub fn create_child_session_with_metadata(
         &self,
         parent_session_id: &str,
-        workdir: &Path,
+        cwd: &Path,
         source: &str,
         model: &str,
         provider: &str,
         metadata: Option<Value>,
     ) -> Result<String> {
         self.create_session_with_parent_and_metadata(
-            workdir,
+            cwd,
             source,
             Some(parent_session_id),
             model,
@@ -47,7 +45,7 @@ impl SqliteStore {
         );
         let child_session = self.create_child_session_with_metadata(
             input.parent_session_id,
-            input.workdir,
+            input.cwd,
             input.source,
             input.model,
             input.provider,
@@ -72,7 +70,7 @@ impl SqliteStore {
 
     pub(crate) fn create_session_with_parent_and_metadata(
         &self,
-        workdir: &Path,
+        cwd: &Path,
         source: &str,
         parent_session_id: Option<&str>,
         model: &str,
@@ -81,7 +79,7 @@ impl SqliteStore {
     ) -> Result<String> {
         let id = Uuid::now_v7().to_string();
         let now = now_ms();
-        let workdir = workdir.to_string_lossy().to_string();
+        let cwd = cwd.to_string_lossy().to_string();
         let metadata_json = metadata
             .map(|value| serde_json::to_string(&value))
             .transpose()?;
@@ -89,7 +87,7 @@ impl SqliteStore {
             conn.execute(
                 r#"
                 INSERT INTO sessions (
-                    id, source, parent_session_id, workdir, model, provider,
+                    id, source, parent_session_id, cwd, model, provider,
                     started_at_ms, updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
                     message_count, tool_call_count, title, metadata_json
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6,
@@ -99,7 +97,7 @@ impl SqliteStore {
                     &id,
                     source,
                     parent_session_id,
-                    &workdir,
+                    &cwd,
                     model,
                     provider,
                     now,
@@ -111,38 +109,38 @@ impl SqliteStore {
         Ok(id)
     }
 
-    pub fn latest_run_session_for_workdir(&self, workdir: &Path) -> Result<Option<String>> {
-        self.latest_session_for_workdir_with_sources(workdir, &["run"])
+    pub fn latest_run_session_for_cwd(&self, cwd: &Path) -> Result<Option<String>> {
+        self.latest_session_for_cwd_with_sources(cwd, &["run"])
     }
 
-    pub fn latest_session_for_workdir_with_sources(
+    pub fn latest_session_for_cwd_with_sources(
         &self,
-        workdir: &Path,
+        cwd: &Path,
         sources: &[&str],
     ) -> Result<Option<String>> {
         Ok(self
-            .list_sessions_for_workdir_with_sources(workdir, sources)?
+            .list_sessions_for_cwd_with_sources(cwd, sources)?
             .into_iter()
             .next()
             .map(|session| session.id))
     }
 
-    pub fn list_sessions_for_workdir_with_sources(
+    pub fn list_sessions_for_cwd_with_sources(
         &self,
-        workdir: &Path,
+        cwd: &Path,
         sources: &[&str],
     ) -> Result<Vec<SessionSummary>> {
-        let workdir = workdir.to_string_lossy().to_string();
-        self.list_sessions_with_sources_and_archive(Some(&workdir), sources, false)
+        let cwd = cwd.to_string_lossy().to_string();
+        self.list_sessions_with_sources_and_archive(Some(&cwd), sources, false)
     }
 
-    pub fn list_archived_sessions_for_workdir_with_sources(
+    pub fn list_archived_sessions_for_cwd_with_sources(
         &self,
-        workdir: &Path,
+        cwd: &Path,
         sources: &[&str],
     ) -> Result<Vec<SessionSummary>> {
-        let workdir = workdir.to_string_lossy().to_string();
-        self.list_sessions_with_sources_and_archive(Some(&workdir), sources, true)
+        let cwd = cwd.to_string_lossy().to_string();
+        self.list_sessions_with_sources_and_archive(Some(&cwd), sources, true)
     }
 
     pub fn list_sessions_with_sources(&self, sources: &[&str]) -> Result<Vec<SessionSummary>> {
@@ -158,24 +156,24 @@ impl SqliteStore {
 
     pub(crate) fn list_sessions_with_sources_and_archive(
         &self,
-        workdir: Option<&str>,
+        cwd: Option<&str>,
         sources: &[&str],
         archived: bool,
     ) -> Result<Vec<SessionSummary>> {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, source, parent_session_id, workdir, model, provider, started_at_ms,
+            SELECT id, source, parent_session_id, cwd, model, provider, started_at_ms,
                    updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
                    message_count, tool_call_count, title
             FROM sessions
-            WHERE (?1 IS NULL OR workdir = ?1)
+            WHERE (?1 IS NULL OR cwd = ?1)
               AND ((?2 = 0 AND archived_at_ms IS NULL) OR (?2 = 1 AND archived_at_ms IS NOT NULL))
             ORDER BY updated_at_ms DESC, started_at_ms DESC
             "#,
         )?;
         let archived = if archived { 1 } else { 0 };
-        let rows = stmt.query_map(params![workdir, archived], session_summary_from_row)?;
+        let rows = stmt.query_map(params![cwd, archived], session_summary_from_row)?;
         let mut summaries = Vec::new();
         for row in rows {
             let summary = row?;
@@ -191,7 +189,7 @@ impl SqliteStore {
         Ok(conn
             .query_row(
                 r#"
-                SELECT id, source, parent_session_id, workdir, model, provider, started_at_ms,
+                SELECT id, source, parent_session_id, cwd, model, provider, started_at_ms,
                        updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
                        message_count, tool_call_count, title
                 FROM sessions
@@ -338,12 +336,8 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn delete_sessions_for_workdir_with_source(
-        &self,
-        workdir: &Path,
-        source: &str,
-    ) -> Result<usize> {
-        let ids = self.session_ids_for_workdir_with_source(workdir, source)?;
+    pub fn delete_sessions_for_cwd_with_source(&self, cwd: &Path, source: &str) -> Result<usize> {
+        let ids = self.session_ids_for_cwd_with_source(cwd, source)?;
         self.write_retry(|conn| {
             for id in &ids {
                 conn.execute("DELETE FROM messages WHERE session_id = ?1", params![id])?;
@@ -353,17 +347,12 @@ impl SqliteStore {
         })
     }
 
-    pub fn session_ids_for_workdir_with_source(
-        &self,
-        workdir: &Path,
-        source: &str,
-    ) -> Result<Vec<String>> {
-        let workdir = workdir.to_string_lossy().to_string();
+    pub fn session_ids_for_cwd_with_source(&self, cwd: &Path, source: &str) -> Result<Vec<String>> {
+        let cwd = cwd.to_string_lossy().to_string();
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id FROM sessions WHERE workdir = ?1 AND source = ?2 ORDER BY id ASC",
-        )?;
-        let rows = stmt.query_map(params![&workdir, source], |row| row.get::<_, String>(0))?;
+        let mut stmt =
+            conn.prepare("SELECT id FROM sessions WHERE cwd = ?1 AND source = ?2 ORDER BY id ASC")?;
+        let rows = stmt.query_map(params![&cwd, source], |row| row.get::<_, String>(0))?;
         let mut ids = Vec::new();
         for row in rows {
             ids.push(row?);

@@ -186,7 +186,7 @@ pub(crate) fn run_acp_agent_in_container(
     let profile = acp_profile(&case.agent);
     let (command, configured_args) = acp_command_and_args(&case.agent)?;
     let mut env_map = resolve_container_acp_env(&case.agent, artifact_root)?;
-    env_map.insert("PEVAL_WORKSPACE".to_string(), runtime.workdir.clone());
+    env_map.insert("PEVAL_WORKSPACE".to_string(), runtime.cwd.clone());
     env_map.insert("PEVAL_TASK_DIR".to_string(), "/task".to_string());
     env_map.insert("PEVAL_LOGS".to_string(), "/logs".to_string());
     env_map.insert("PEVAL_TASK_ID".to_string(), case.task.id.clone());
@@ -207,7 +207,7 @@ pub(crate) fn run_acp_agent_in_container(
             .map(|arg| {
                 render_agent_template(
                     arg,
-                    Path::new(&runtime.workdir),
+                    Path::new(&runtime.cwd),
                     container_task_dir,
                     &prompt,
                     prompt_file,
@@ -222,7 +222,7 @@ pub(crate) fn run_acp_agent_in_container(
             .map(|arg| {
                 render_agent_template(
                     arg,
-                    Path::new(&runtime.workdir),
+                    Path::new(&runtime.cwd),
                     container_task_dir,
                     &prompt,
                     prompt_file,
@@ -244,7 +244,7 @@ pub(crate) fn run_acp_agent_in_container(
         }),
     );
     let mut process =
-        docker_compose_exec_process(runtime, &runtime.workdir, &env_map, &command, &args)?;
+        docker_compose_exec_process(runtime, &runtime.cwd, &env_map, &command, &args)?;
     process
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -252,7 +252,7 @@ pub(crate) fn run_acp_agent_in_container(
     let mut child = process.spawn().with_context(|| {
         format!(
             "failed to spawn container ACP agent `{}` in {}",
-            case.agent.id, runtime.workdir
+            case.agent.id, runtime.cwd
         )
     })?;
     let mut stdin = child.stdin.take().context("ACP agent stdin unavailable")?;
@@ -325,7 +325,7 @@ pub(crate) fn run_acp_agent_in_container(
         next_id,
         "session/new",
         json!({
-            "cwd": runtime.workdir,
+            "cwd": runtime.cwd,
             "mcpServers": [],
         }),
     )?;

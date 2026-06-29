@@ -223,7 +223,7 @@ impl AgentInvocationRole {
 #[derive(Debug, Clone)]
 pub struct AgentDiscoveryOptions {
     pub home: PathBuf,
-    pub workdir: PathBuf,
+    pub cwd: PathBuf,
     pub env: BTreeMap<String, String>,
     pub explicit_inputs: Vec<String>,
     pub no_agents: bool,

@@ -5,10 +5,10 @@ pub(crate) use super::*;
 pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metrics_separately() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
     store
         .append_message_with_metrics(
@@ -154,10 +154,10 @@ pub(crate) fn session_compaction_checkpoint_respects_revert_boundary() {
 pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "run", "mimo-v2.5-pro", "xiaomi", None)
+        .create_session_with_metadata(&cwd, "run", "mimo-v2.5-pro", "xiaomi", None)
         .expect("session");
     store
         .append_message_with_metrics_and_accounting(
@@ -198,7 +198,7 @@ pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
 
     let report = usage_stats(StatsOptions {
         state: StateRuntime::open(&db).expect("state runtime"),
-        workdir,
+        cwd,
         all: false,
         days: None,
         limit: 5,
@@ -213,10 +213,10 @@ pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
 pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounting() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "run", "mimo-v2.5-pro", "xiaomi", None)
+        .create_session_with_metadata(&cwd, "run", "mimo-v2.5-pro", "xiaomi", None)
         .expect("session");
     store
         .append_message_with_metrics_and_accounting(
@@ -322,13 +322,13 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
 pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let first = store
-        .create_session_with_metadata(&workdir, "run", "model-a", "provider-a", None)
+        .create_session_with_metadata(&cwd, "run", "model-a", "provider-a", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&workdir, "run", "model-b", "provider-b", None)
+        .create_session_with_metadata(&cwd, "run", "model-b", "provider-b", None)
         .expect("second");
     for (timestamp_ms, session_id, tokens) in [
         (1_i64, &first, 100_u64),
@@ -398,10 +398,10 @@ pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
 pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
     let now = psychevo_agent_core::now_ms();
     for (timestamp_ms, total, cache_read, billable_input) in [

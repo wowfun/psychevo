@@ -11,14 +11,14 @@ This attachment is part of [200 pevo CLI](spec.md).
 
 `pevo stats` accepts:
 
-- optional `--dir <path>` to select the workdir scope
+- optional `--dir <path>` to select the cwd scope
 - optional `--all` to include every session in the selected state database
 - optional `--days <n>` to limit sessions updated in the last `n` days; `0`
   means today
 - optional `--limit <n>` to bound top model, tool, and session rows
 - optional `--json` for deterministic JSON output
 
-The default scope is the canonical current workdir. The command reads only the
+The default scope is the canonical current cwd. The command reads only the
 SQLite state database selected by `PSYCHEVO_DB` or `$PSYCHEVO_HOME/state.db`.
 It must not contact model providers or refresh public catalogs.
 

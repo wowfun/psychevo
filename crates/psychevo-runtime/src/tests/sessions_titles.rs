@@ -1,28 +1,28 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 #[test]
-pub(crate) fn latest_run_session_filters_source_and_workdir() {
+pub(crate) fn latest_run_session_filters_source_and_cwd() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
-    let other_workdir = canonical_workdir(&temp.path().join("other")).expect("other");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let other_cwd = canonical_cwd(&temp.path().join("other")).expect("other");
     let store = SqliteStore::open(&db).expect("store");
-    let smoke = store.create_session(&workdir).expect("smoke");
+    let smoke = store.create_session(&cwd).expect("smoke");
     let other = store
-        .create_session_with_metadata(&other_workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&other_cwd, "run", "model", "provider", None)
         .expect("other");
     let first = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
     let second = store
-        .create_session_with_metadata(&workdir, "run", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("second");
     store
         .append_message(&first, &user_message("real activity", 1))
         .expect("activity");
 
     let state = StateRuntime::from_store(db, store.clone());
-    let latest = latest_run_session_for_workdir(&state, &workdir)
+    let latest = latest_run_session_for_cwd(&state, &cwd)
         .expect("latest")
         .expect("session");
     assert_eq!(latest, first);
@@ -35,10 +35,10 @@ pub(crate) fn latest_run_session_filters_source_and_workdir() {
 pub(crate) fn session_title_setter_normalizes_and_bounds_title() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
 
     let title = store
@@ -58,10 +58,10 @@ pub(crate) fn session_title_setter_normalizes_and_bounds_title() {
 pub(crate) async fn new_visible_session_title_uses_model_generated_title_without_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("  \"Investigate TUI Copy\"  \nextra".to_string()),
@@ -94,10 +94,10 @@ pub(crate) async fn new_visible_session_title_uses_model_generated_title_without
 pub(crate) async fn new_visible_session_title_falls_back_when_model_title_fails() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let provider = Arc::new(FakeProvider::new(Vec::new()));
     let resolved = resolved_title_provider();
@@ -128,10 +128,10 @@ pub(crate) async fn new_visible_session_title_falls_back_when_model_title_fails(
 pub(crate) async fn new_visible_session_title_fallback_uses_selected_skill_for_marker_prompt() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let provider = Arc::new(FakeProvider::new(Vec::new()));
     let resolved = resolved_title_provider();
@@ -172,13 +172,13 @@ pub(crate) fn session_title_request_includes_selected_skill_context() {
 pub(crate) async fn new_visible_session_title_fallback_covers_visible_sources() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let resolved = resolved_title_provider();
 
     for source in ["web", "run", "automation", "channel/wechat"] {
         let session_id = store
-            .create_session_with_metadata(&workdir, source, "model", "provider", None)
+            .create_session_with_metadata(&cwd, source, "model", "provider", None)
             .expect("session");
         ensure_new_visible_session_title(
             &store,
@@ -204,12 +204,12 @@ pub(crate) async fn new_visible_session_title_fallback_covers_visible_sources() 
 pub(crate) async fn new_visible_session_title_skips_internal_and_child_sessions() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let resolved = resolved_title_provider();
     let internal = store
         .create_session_with_metadata(
-            &workdir,
+            &cwd,
             crate::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
             "model",
             "provider",
@@ -217,10 +217,10 @@ pub(crate) async fn new_visible_session_title_skips_internal_and_child_sessions(
         )
         .expect("internal session");
     let parent = store
-        .create_session_with_metadata(&workdir, "web", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "web", "model", "provider", None)
         .expect("parent");
     let child = store
-        .create_child_session_with_metadata(&parent, &workdir, "web", "model", "provider", None)
+        .create_child_session_with_metadata(&parent, &cwd, "web", "model", "provider", None)
         .expect("child");
 
     for session_id in [&internal, &child] {
@@ -250,10 +250,10 @@ pub(crate) async fn new_visible_session_title_skips_internal_and_child_sessions(
 pub(crate) async fn new_visible_session_title_preserves_existing_title() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "web", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "web", "model", "provider", None)
         .expect("session");
     store
         .set_session_title(&session_id, "Manual Title")
@@ -310,14 +310,14 @@ pub(crate) fn visible_session_source_title_rules_match_history_sources() {
 pub(crate) fn first_use_empty_visible_session_materializes_model_and_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "web", "pending", "pending", None)
+        .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
         .expect("session");
     let metadata = json!({
         "provider_label": "Local Test",
-        "workdir": workdir.display().to_string(),
+        "cwd": cwd.display().to_string(),
     });
 
     let materialized = crate::run::materialize_first_use_empty_session(
@@ -346,11 +346,11 @@ pub(crate) fn first_use_empty_visible_session_materializes_model_and_metadata() 
 pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_internal_sessions() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let non_empty = store
         .create_session_with_metadata(
-            &workdir,
+            &cwd,
             "web",
             "existing-model",
             "existing-provider",
@@ -362,7 +362,7 @@ pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_inter
         .expect("message");
     let internal = store
         .create_session_with_metadata(
-            &workdir,
+            &cwd,
             crate::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
             "internal-model",
             "internal-provider",
@@ -370,12 +370,12 @@ pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_inter
         )
         .expect("internal");
     let parent = store
-        .create_session_with_metadata(&workdir, "web", "parent-model", "parent-provider", None)
+        .create_session_with_metadata(&cwd, "web", "parent-model", "parent-provider", None)
         .expect("parent");
     let child = store
         .create_child_session_with_metadata(
             &parent,
-            &workdir,
+            &cwd,
             "web",
             "child-model",
             "child-provider",

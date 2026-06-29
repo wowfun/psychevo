@@ -27,15 +27,15 @@ pub(crate) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
     match action {
         PermissionAction::ExecCommand {
             normalized,
-            workdir,
+            cwd,
             ..
         } => {
-            if workdir
+            if cwd
                 .as_ref()
-                .is_some_and(|target| !target.within_workdir)
+                .is_some_and(|target| !target.within_cwd)
             {
                 return Some(
-                    "command workdir outside accepted workdir requires approval".to_string(),
+                    "command cwd outside accepted cwd requires approval".to_string(),
                 );
             }
             dangerous_bash_reason(normalized)
@@ -74,18 +74,18 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
         PermissionAction::File {
             paths, mutating, ..
         } => {
-            if paths.iter().all(|target| target.within_workdir) {
+            if paths.iter().all(|target| target.within_cwd) {
                 return ActionPolicyEvaluation::Allow;
             }
             let outside = paths
                 .iter()
-                .filter(|target| !target.within_workdir)
+                .filter(|target| !target.within_cwd)
                 .map(|target| target.absolute.to_string_lossy().to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
             ActionPolicyEvaluation::Ask {
                 reason: format!(
-                    "{} outside workdir requires approval: {outside}",
+                    "{} outside cwd requires approval: {outside}",
                     if *mutating { "file write" } else { "file read" }
                 ),
                 matched_rule: None,
@@ -138,10 +138,10 @@ pub(crate) fn read_only_profile_decision(action: &PermissionAction) -> ActionPol
             paths,
             mutating: false,
             ..
-        } if paths.iter().all(|target| target.within_workdir) => ActionPolicyEvaluation::Allow,
+        } if paths.iter().all(|target| target.within_cwd) => ActionPolicyEvaluation::Allow,
         PermissionAction::File { .. } => ActionPolicyEvaluation::Ask {
             reason:
-                "read-only permissions require approval for file writes or outside-workdir reads"
+                "read-only permissions require approval for file writes or outside-cwd reads"
                     .to_string(),
             matched_rule: None,
             suggested_rule: action.suggested_rule(),

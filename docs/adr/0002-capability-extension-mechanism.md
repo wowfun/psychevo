@@ -128,30 +128,21 @@ remain additive unless 010 defines a composition rule.
 
 ## Hooks
 
-Hooks are controlled event points on the registry, assembly, and dispatch path.
-The default hook authority model is typed contribution, typed observation, or
-typed request. A hook may contribute a context candidate, observe a provider
-request, request replacement, or report availability, but the owning boundary
-decides whether that effect changes the invocation.
+Hooks are capability contributions that attach handlers to controlled runtime
+lifecycle events. This ADR only requires hook declarations to enter the shared
+contribution mechanism with source identity, selection state, conflict
+diagnostics, and compact evidence.
 
-Provider and API request hooks are observation-first. They may record facts,
-metrics, diagnostics, or policy inputs. They must not rewrite raw provider
-payloads. Provider-neutral protocol semantics remain owned by 003.
+ADR 0004 owns the hook event catalog, declaration shape, trust review,
+execution semantics, payloads, event-scoped effects, and run summaries. Specs
+053 and 140 define the hook authority and runtime slices against that ADR.
 
-Pre-LLM context hooks must contribute typed context into 006. They cannot write
-directly into the system prompt or provider payload.
-
-Tool hooks are the direct-effect exception. They may affect only the current
-tool call contract: block the call, rewrite this call's hook-facing input,
-merge post-call feedback, replace the model-visible result, or add turn-scoped
-context. They must not change the registry, provider payload, session
-permissions, or future capability snapshot.
-
-Tool hook execution follows the Codex-style model. Matching hooks may run
-concurrently. Reporting remains ordered by declaration or display order. Any
-block decision wins. Input rewrite may be resolved by completion order.
-PostToolUse feedback is merged into the model-visible result according to the
-tool hook contract.
+Hook contributions still obey the owning runtime boundaries. Provider protocol
+semantics remain owned by 003. Context projection remains owned by 006. Tool
+surface and dispatch remain owned by 007. Permission and sandbox decisions
+remain owned by 041 and 045. A hook contribution does not grant provider,
+permission, sandbox, registry, session-state, or future-snapshot authority by
+being discovered.
 
 ## Evidence
 
@@ -160,13 +151,9 @@ contributions, omitted or degraded contributions that affected assembly,
 conflicts that affected selection, visibility decisions, and dispatch trace
 facts. It should not persist every discovered candidate by default.
 
-Hook evidence follows a lightweight Codex-style shape. Hook runs emit
-started/completed summaries with an id, event, source, scope, order, status,
-timing, and entries. Final model-visible tool results remain normal tool
-evidence. This ADR does not require Psychevo to preserve the original tool
-output when a hook replaces the model-visible result. A later tool or evidence
-spec may choose to retain such output under its own privacy, size, and storage
-rules.
+Hook evidence is governed by ADR 0004. This ADR requires only that hook
+evidence remains source-qualified and compact, and that final model-visible
+tool results remain normal tool evidence.
 
 ## Worked Example
 
@@ -188,8 +175,9 @@ runtime policy activates it for the invocation, the tool declaration enters the
 visible surface before the model may call it.
 
 Fourth, the model calls the visible tool name. Dispatch resolves the visible
-name back to raw identity, runs matching tool hooks, checks permission and
-resource policy, invokes the execution binding, and runs post-call tool hooks.
+name back to raw identity, runs matching hook events through the runtime hook
+module defined by ADR 0004, checks permission and resource policy, and invokes
+the execution binding.
 
 Fifth, Psychevo records compact evidence: selected source identity, visibility
 decision, omitted conflicting candidates that affected selection, permission
@@ -227,10 +215,10 @@ The hybrid direct/deferred model adds one more step before some tools can run.
 It keeps prompts smaller and makes the visible execution surface inspectable for
 each invocation.
 
-The hook model favors contributor ergonomics over full deterministic replay.
-Concurrent tool hooks can resolve input rewrites by completion order. Psychevo
-accepts that Codex-style behavior for tool hooks, while keeping hook authority
-bounded to the current tool contract.
+Delegating hook specifics to ADR 0004 keeps this ADR focused on contribution
+normalization. The cost is one more document to read when a capability source
+contributes hooks. The benefit is that hook event, trust, execution, and
+evidence rules can evolve without re-opening the whole contribution mechanism.
 
 ## Open Questions
 
@@ -240,9 +228,8 @@ implementation details:
 - exact Rust types, API boundaries, and SDK facades for sources,
   contributions, registries, and snapshots
 - concrete field names and persistence shape for source records, snapshot
-  records, hook run summaries, and evidence records
-- hook event names, payload schemas, timeout behavior, trust review, and UI
-  rendering
+  records, and evidence records
+- hook review and UI rendering details that ADR 0004 leaves to later specs
 - reset, refresh, and catalog UX for CLI, TUI, web UI, desktop app, Gateway,
   IM connectors, and ACP
 - exact naming and validation rules for session-scoped dynamic tools and

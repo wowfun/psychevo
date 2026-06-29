@@ -12,7 +12,7 @@ pub const CONTEXT_BAR_MAX_CELLS: usize = 100;
 #[derive(Debug, Clone)]
 pub struct ContextOptions {
     pub state: StateRuntime,
-    pub workdir: PathBuf,
+    pub cwd: PathBuf,
     pub session: String,
     pub config_path: Option<PathBuf>,
     pub inherited_env: Option<BTreeMap<String, String>>,
@@ -224,13 +224,12 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         ));
     }
     let summary = if selector == "latest" {
-        let workdir = canonical_workdir(&options.workdir)?;
-        let Some(session_id) =
-            store.latest_session_for_workdir_with_sources(&workdir, &["run", "tui"])?
+        let cwd = canonical_cwd(&options.cwd)?;
+        let Some(session_id) = store.latest_session_for_cwd_with_sources(&cwd, &["run", "tui"])?
         else {
             return Err(Error::Message(format!(
                 "no active run or tui session for {}",
-                workdir.display()
+                cwd.display()
             )));
         };
         store
@@ -242,7 +241,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
             .ok_or_else(|| Error::Message(format!("session not found: {selector}")))?
     };
     let session_metadata = store.session_metadata(&summary.id)?.unwrap_or(Value::Null);
-    let workdir = PathBuf::from(&summary.workdir);
+    let cwd = PathBuf::from(&summary.cwd);
     let mode = session_metadata
         .get("mode")
         .and_then(Value::as_str)
@@ -251,9 +250,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     let context_limit = session_metadata
         .get("context_limit")
         .and_then(Value::as_u64)
-        .or_else(|| {
-            configured_context_limit(&options, &summary.provider, &summary.model, &workdir)
-        });
+        .or_else(|| configured_context_limit(&options, &summary.provider, &summary.model, &cwd));
     let message_summaries = store
         .load_tui_message_summaries(&summary.id)?
         .into_iter()
@@ -273,7 +270,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         .unwrap_or_else(|| std::env::vars().collect());
     let project_context_options = RunOptions {
         state: options.state.clone(),
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         snapshot_root: None,
         session: Some(summary.id.clone()),
         continue_latest: false,
@@ -309,14 +306,15 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         runtime_tools: Vec::new(),
     };
     let project_context_mode =
-        load_project_context_instruction_mode(&project_context_options, &workdir)?;
-    let skills_home = resolve_skills_home(&env, &workdir)?;
+        load_project_context_instruction_mode(&project_context_options, &cwd)?;
+    let skills_home = resolve_skills_home(&env, &cwd)?;
     let skill_options = SkillDiscoveryOptions {
         home: skills_home,
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         config_path: options.config_path.clone(),
         env,
         explicit_inputs: Vec::new(),
+        additional_roots: Vec::new(),
         no_skills: false,
     };
     let catalog = discover_skills(&skill_options)?;
@@ -331,7 +329,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     })];
     request_messages.push(json!({
         "role": "system",
-        "content": runtime_environment_prompt(&workdir),
+        "content": runtime_environment_prompt(&cwd),
         "metadata": {
             "prompt_slot": "runtime_environment",
             "prompt_semantic_role": "base_policy",
@@ -347,7 +345,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
             },
         }));
     }
-    let project_instructions = load_project_instructions(&workdir, project_context_mode)?;
+    let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     for (index, fragment) in project_instructions.fragments.iter().enumerate() {
         request_messages.push(json!({
             "role": "system",
@@ -361,7 +359,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     for message in &messages {
         request_messages.push(serde_json::to_value(message)?);
     }
-    let mut tools = coding_core_tools_for_mode(&workdir, mode);
+    let mut tools = coding_core_tools_for_mode(&cwd, mode);
     tools.extend(skill_tools_for_mode(skill_options, mode));
     let request = GenerationRequest {
         model: ModelTarget {
@@ -640,11 +638,11 @@ pub(crate) fn configured_context_limit(
     options: &ContextOptions,
     provider: &str,
     model: &str,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
 ) -> Option<u64> {
     let run_options = crate::types::RunOptions {
         state: options.state.clone(),
-        workdir: workdir.to_path_buf(),
+        cwd: cwd.to_path_buf(),
         snapshot_root: None,
         session: None,
         continue_latest: false,

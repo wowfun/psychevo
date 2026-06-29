@@ -46,31 +46,49 @@ impl GenerationProvider for OpenAiChatProvider {
             }
 
             let endpoint = openai_chat_completions_endpoint(&base_url);
-            let body = openai_chat_request_body(&request, &base_url);
-            let mut http_request = client
-                .post(endpoint)
-                .header("accept", "text/event-stream")
-                .json(&body);
-            if !api_key.trim().is_empty() {
-                http_request = http_request.bearer_auth(api_key);
-            }
-            let send = http_request.send();
-            let response = tokio::select! {
-                biased;
-                _ = abort.wait_for_abort() => return Ok(aborted_generation_stream()),
-                response = send => response?,
-            };
+            let has_image_blocks = request_has_image_blocks(&request);
+            let mut force_text_images = false;
+            let response = loop {
+                let body = if force_text_images {
+                    openai_chat_request_body_text_only_images(&request, &base_url)
+                } else {
+                    openai_chat_request_body(&request, &base_url)
+                };
+                let mut http_request = client
+                    .post(endpoint.clone())
+                    .header("accept", "text/event-stream")
+                    .json(&body);
+                if !api_key.trim().is_empty() {
+                    http_request = http_request.bearer_auth(&api_key);
+                }
+                let send = http_request.send();
+                let response = tokio::select! {
+                    biased;
+                    _ = abort.wait_for_abort() => return Ok(aborted_generation_stream()),
+                    response = send => response?,
+                };
 
-            let status = response.status();
-            if !status.is_success() {
+                let status = response.status();
+                if status.is_success() {
+                    break response;
+                }
                 let body = response
                     .text()
                     .await
                     .unwrap_or_else(|err| format!("<failed to read error body: {err}>"));
+                if should_retry_image_rejection_as_text(
+                    status,
+                    &body,
+                    has_image_blocks,
+                    force_text_images,
+                ) {
+                    force_text_images = true;
+                    continue;
+                }
                 return Err(Error::Provider(format!(
                     "{provider_name} returned HTTP {status}: {body}"
                 )));
-            }
+            };
 
             let bytes = Box::pin(response.bytes_stream());
             let state = OpenAiChatStreamState {
@@ -170,6 +188,42 @@ impl GenerationProvider for OpenAiChatProvider {
             Ok(Box::pin(output) as Pin<Box<_>>)
         })
     }
+}
+
+pub(crate) fn should_retry_image_rejection_as_text(
+    status: reqwest::StatusCode,
+    body: &str,
+    has_image_blocks: bool,
+    force_text_images: bool,
+) -> bool {
+    has_image_blocks
+        && !force_text_images
+        && status.is_client_error()
+        && is_image_input_rejection_body(body)
+}
+
+pub(crate) fn is_image_input_rejection_body(body: &str) -> bool {
+    let body = body.to_ascii_lowercase();
+    [
+        "no endpoints found that support image input",
+        "does not support image input",
+        "does not support images",
+        "does not support image",
+        "only text content type",
+        "only 'text' content type",
+        "image_url is not supported",
+        "image content is not supported",
+        "image input is not supported",
+        "multimodal content is not supported",
+        "multimodal input is not supported",
+        "multimodal is not supported",
+        "vision input is not supported",
+        "vision is not supported",
+        "unknown variant `image_url`, expected `text`",
+        "unknown variant image_url, expected text",
+    ]
+    .iter()
+    .any(|phrase| body.contains(phrase))
 }
 
 pub(crate) fn aborted_generation_stream() -> GenerationStream {

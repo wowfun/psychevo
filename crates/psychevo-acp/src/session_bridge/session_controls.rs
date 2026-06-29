@@ -105,7 +105,7 @@ impl PsychevoAcpAgent {
     ) -> Result<Vec<SessionSummary>, Error> {
         let store = self.state.store().clone();
         store
-            .list_sessions_for_workdir_with_sources(&session.cwd, &[])
+            .list_sessions_for_cwd_with_sources(&session.cwd, &[])
             .map_err(acp_internal_error)
     }
 
@@ -288,7 +288,7 @@ impl PsychevoAcpAgent {
         };
         let result = compact_session(CompactSessionOptions {
             state: self.state.clone(),
-            workdir: session.cwd.clone(),
+            cwd: session.cwd.clone(),
             session: runtime_session_id,
             config_path: self.options.config_path.clone(),
             model: session.model.clone(),
@@ -312,7 +312,7 @@ impl PsychevoAcpAgent {
         };
         Ok(SessionUndoOptions {
             state: self.state.clone(),
-            workdir: session.cwd.clone(),
+            cwd: session.cwd.clone(),
             snapshot_root: self.options.home.join("snapshots"),
             session_id: runtime_session_id,
         })
@@ -323,7 +323,7 @@ impl PsychevoAcpAgent {
             return Err(Error::invalid_params()
                 .data("cannot change project-local config while PSYCHEVO_CONFIG is active"));
         }
-        canonicalize_workdir(&session.cwd)
+        canonicalize_cwd(&session.cwd)
             .map(|path| path.join(".psychevo"))
             .map_err(acp_internal_error)
     }
@@ -382,10 +382,11 @@ impl PsychevoAcpAgent {
         }
         if let Ok(catalog) = discover_skills(&SkillDiscoveryOptions {
             home: self.options.home.clone(),
-            workdir: session.cwd.clone(),
+            cwd: session.cwd.clone(),
             config_path: self.options.config_path.clone(),
             env: self.options.inherited_env.clone(),
             explicit_inputs: Vec::new(),
+            additional_roots: Vec::new(),
             no_skills: false,
         }) {
             for skill in catalog.skills {

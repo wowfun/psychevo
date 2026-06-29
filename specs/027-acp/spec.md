@@ -98,7 +98,7 @@ Image file resources use the runtime image pipeline. Audio and unsupported
 resources degrade to explicit visible text.
 
 Text resource links are resolved only when they are local paths or file URIs
-inside the session workdir context. All text resources are capped at 512 KiB
+inside the session cwd context. All text resources are capped at 512 KiB
 after decoding. Remote HTTP(S) resource links are not fetched proactively and
 degrade to a visible resource-link note. Resource handling records
 prompt-scoped summaries in runtime context evidence; text that is actually

@@ -243,6 +243,10 @@ pub(crate) fn install_preflight_reports_missing_native_compiler() {
         stderr.contains("cc, gcc, or clang") || stderr.contains("build-essential"),
         "{stderr}"
     );
+    assert!(
+        stderr.contains("cargo xtask doctor deps check --only install"),
+        "{stderr}"
+    );
 }
 
 #[cfg(unix)]
@@ -263,6 +267,10 @@ pub(crate) fn install_preflight_reports_missing_node_for_default_web_install() {
         "{stderr}"
     );
     assert!(stderr.contains("--no-web"), "{stderr}");
+    assert!(
+        stderr.contains("cargo xtask doctor deps check --only install"),
+        "{stderr}"
+    );
 }
 
 #[cfg(unix)]
@@ -284,6 +292,10 @@ pub(crate) fn install_preflight_reports_missing_pnpm_for_default_web_install() {
         "{stderr}"
     );
     assert!(stderr.contains("--no-web"), "{stderr}");
+    assert!(
+        stderr.contains("cargo xtask doctor deps check --only install"),
+        "{stderr}"
+    );
 }
 
 #[cfg(unix)]

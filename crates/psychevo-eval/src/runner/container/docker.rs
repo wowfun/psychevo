@@ -21,12 +21,12 @@ pub(crate) fn docker_compose_command(runtime: &ContainerRuntime, args: &[&str]) 
 
 pub(crate) fn docker_compose_exec_shell(
     runtime: &ContainerRuntime,
-    workdir: &str,
+    cwd: &str,
     env_map: &BTreeMap<String, String>,
     shell: &str,
 ) -> Result<Command> {
     let mut command = docker_compose_command(runtime, &["exec", "-T"])?;
-    command.arg("-w").arg(workdir);
+    command.arg("-w").arg(cwd);
     for (key, value) in env_map {
         command.arg("-e").arg(format!("{key}={value}"));
     }
@@ -36,13 +36,13 @@ pub(crate) fn docker_compose_exec_shell(
 
 pub(crate) fn docker_compose_exec_process(
     runtime: &ContainerRuntime,
-    workdir: &str,
+    cwd: &str,
     env_map: &BTreeMap<String, String>,
     program: &str,
     args: &[String],
 ) -> Result<Command> {
     let mut command = docker_compose_command(runtime, &["exec", "-T"])?;
-    command.arg("-w").arg(workdir);
+    command.arg("-w").arg(cwd);
     for (key, value) in env_map {
         command.arg("-e").arg(format!("{key}={value}"));
     }

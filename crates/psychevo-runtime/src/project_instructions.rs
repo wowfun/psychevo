@@ -72,13 +72,13 @@ pub(crate) const CLAUDE_CANDIDATES: &[ClaudeCandidate] = &[
 ];
 
 pub(crate) fn load_project_instructions(
-    workdir: &Path,
+    cwd: &Path,
     mode: ProjectContextInstructionMode,
 ) -> Result<ProjectInstructionLoad> {
     if mode == ProjectContextInstructionMode::Off {
         return Ok(ProjectInstructionLoad::default());
     }
-    let search_dirs = project_instruction_search_dirs(workdir, mode);
+    let search_dirs = project_instruction_search_dirs(cwd, mode);
     let warnings = claude_migration_warnings(&search_dirs)?;
     let fragments = load_instruction_fragments(&search_dirs)?;
     Ok(ProjectInstructionLoad {
@@ -88,17 +88,17 @@ pub(crate) fn load_project_instructions(
 }
 
 pub(crate) fn project_instruction_search_dirs(
-    workdir: &Path,
+    cwd: &Path,
     mode: ProjectContextInstructionMode,
 ) -> Vec<PathBuf> {
     if mode == ProjectContextInstructionMode::Cwd {
-        return vec![workdir.to_path_buf()];
+        return vec![cwd.to_path_buf()];
     }
-    let Some(root) = project_root(workdir) else {
-        return vec![workdir.to_path_buf()];
+    let Some(root) = project_root(cwd) else {
+        return vec![cwd.to_path_buf()];
     };
     let mut dirs = Vec::new();
-    let mut cursor = workdir.to_path_buf();
+    let mut cursor = cwd.to_path_buf();
     loop {
         dirs.push(cursor.clone());
         if cursor == root {
@@ -113,9 +113,8 @@ pub(crate) fn project_instruction_search_dirs(
     dirs
 }
 
-pub(crate) fn project_root(workdir: &Path) -> Option<PathBuf> {
-    workdir
-        .ancestors()
+pub(crate) fn project_root(cwd: &Path) -> Option<PathBuf> {
+    cwd.ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
         .map(Path::to_path_buf)
 }
@@ -254,7 +253,7 @@ pub(crate) mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn loads_agents_files_from_root_to_workdir() {
+    fn loads_agents_files_from_root_to_cwd() {
         let temp = tempdir().expect("temp");
         let root = temp.path().join("repo");
         let nested = root.join("crates/app");
@@ -288,7 +287,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn workdir_git_root_ignores_parent_agents() {
+    fn cwd_git_root_ignores_parent_agents() {
         let temp = tempdir().expect("temp");
         let parent = temp.path().join("parent");
         let child = parent.join("child");
@@ -385,7 +384,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cwd_mode_only_loads_current_workdir_instructions() {
+    fn cwd_mode_only_loads_current_cwd_instructions() {
         let temp = tempdir().expect("temp");
         let root = temp.path().join("repo");
         let nested = root.join("task");

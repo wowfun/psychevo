@@ -156,6 +156,12 @@ same durable parent/child edge as model-triggered `spawn_agent` tool calls, and
 writes a short parent-session observation row so the child transcript remains
 discoverable after it leaves the live running view.
 
+Child-agent tool execution inherits the current invocation's effective
+profile, project, and plugin hook policy. Runtime then appends hooks declared by
+the selected child agent definition. A child agent must not drop trusted
+project/plugin `PreToolUse`, `PermissionRequest`, or `PostToolUse` policy that
+would apply to the same tool call in the parent run.
+
 Control tools use first-class agent naming rather than subagent-specific names:
 `list_agents`, `wait_agent`, `send_message`, `close_agent`, and
 `resume_agent`. `wait_agent` accepts only an optional timeout, waits for any

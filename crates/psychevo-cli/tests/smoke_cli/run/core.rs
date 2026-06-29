@@ -8,16 +8,10 @@ pub(crate) fn cli_run_positional_prompt_outputs_final_answer_and_persists_metada
     let server = MockSseServer::start(vec![sse_text("mock final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
-        .args([
-            "run",
-            "--dir",
-            workdir.to_str().expect("workdir"),
-            "hello",
-            "world",
-        ])
+        .args(["run", "--dir", cwd.to_str().expect("cwd"), "hello", "world"])
         .output()
         .expect("pevo run");
     assert!(
@@ -60,16 +54,16 @@ pub(crate) fn cli_run_selected_main_agent_includes_description_and_body() {
     let server = MockSseServer::start(vec![sse_text("agent final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("git");
-    std::fs::create_dir_all(workdir.join(".claude/agents")).expect("agents");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("git");
+    std::fs::create_dir_all(cwd.join(".claude/agents")).expect("agents");
     std::fs::write(
-        workdir.join("AGENTS.md"),
+        cwd.join("AGENTS.md"),
         "Do not translate this project instruction.",
     )
     .expect("agents");
     std::fs::write(
-        workdir.join(".claude/agents/translate.md"),
+        cwd.join(".claude/agents/translate.md"),
         "---\nname: translate\ndescription: Detect the source language automatically. Translate Chinese to English; translate all other languages to Chinese.\ntools: []\nprojectInstructions: false\n---\nPreserve tone, meaning, punctuation, emoji, and inline formatting. Return only the translated text.",
     )
     .expect("agent");
@@ -78,7 +72,7 @@ pub(crate) fn cli_run_selected_main_agent_includes_description_and_body() {
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--agent",
             "translate",
             "-f",
@@ -140,11 +134,11 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let psychevo_home = init_tui_home(temp.path());
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("git");
-    std::fs::create_dir_all(workdir.join(".claude/agents")).expect("agents");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("git");
+    std::fs::create_dir_all(cwd.join(".claude/agents")).expect("agents");
     std::fs::write(
-        workdir.join(".claude/agents/translate.md"),
+        cwd.join(".claude/agents/translate.md"),
         "---\nname: translate\ndescription: Translate English to Chinese.\n---\nReturn only the translated text.",
     )
     .expect("agent");
@@ -153,7 +147,7 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "-f",
             "json",
             "use translate",
@@ -279,19 +273,19 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
 }
 
 #[test]
-pub(crate) fn cli_run_dir_controls_tool_workdir() {
+pub(crate) fn cli_run_dir_controls_tool_cwd() {
     let server = MockSseServer::start(vec![sse_tool_read_then_done(), sse_text("read complete")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
-    std::fs::write(workdir.join("fixture.txt"), "fixture content\n").expect("fixture");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::write(cwd.join("fixture.txt"), "fixture content\n").expect("fixture");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "read",
             "fixture.txt",
         ])
@@ -327,16 +321,16 @@ pub(crate) fn cli_run_allows_more_than_thirty_two_tool_turns_before_final_answer
     let server = MockSseServer::start(responses);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
-    std::fs::write(workdir.join("fixture.txt"), "fixture content\n").expect("fixture");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::write(cwd.join("fixture.txt"), "fixture content\n").expect("fixture");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "read",
             "fixture.txt",
             "several",
@@ -380,16 +374,16 @@ pub(crate) fn cli_run_budget_exhaustion_reports_model_turn_limit() {
     let server = MockSseServer::start(responses);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
-    std::fs::write(workdir.join("fixture.txt"), "fixture content\n").expect("fixture");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::write(cwd.join("fixture.txt"), "fixture content\n").expect("fixture");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "keep",
             "reading",
         ])
@@ -418,16 +412,16 @@ pub(crate) fn cli_run_json_budget_exhaustion_includes_terminal_reason() {
     let server = MockSseServer::start(responses);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
-    std::fs::write(workdir.join("fixture.txt"), "fixture content\n").expect("fixture");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::write(cwd.join("fixture.txt"), "fixture content\n").expect("fixture");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "keep",
@@ -464,13 +458,13 @@ pub(crate) fn cli_run_json_outputs_ndjson_events() {
     let server = MockSseServer::start(vec![sse_text("json final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "hello",
@@ -517,10 +511,10 @@ pub(crate) fn cli_context_reports_latest_session_json() {
     let temp = tempdir().expect("temp");
     let psychevo_home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let run = isolated_tui_cmd(temp.path(), &psychevo_home, &config, &db)
-        .args(["run", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .args(["run", "--dir", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo run");
     assert!(
@@ -535,7 +529,7 @@ pub(crate) fn cli_context_reports_latest_session_json() {
             "--session",
             "latest",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--json",
         ])
         .output()
@@ -563,7 +557,7 @@ pub(crate) fn cli_context_reports_latest_session_json() {
             "--session",
             "latest",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
         ])
         .output()
         .expect("pevo context text");
@@ -590,8 +584,8 @@ pub(crate) fn cli_run_skill_marker_injects_context_and_preserves_prompt() {
     let server = MockSseServer::start(vec![sse_text("skill final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("cwd");
     write_home_skill(
         temp.path(),
         "reviewer",
@@ -603,7 +597,7 @@ pub(crate) fn cli_run_skill_marker_injects_context_and_preserves_prompt() {
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "$reviewer do it",
@@ -649,8 +643,8 @@ pub(crate) fn cli_run_skill_flag_injects_without_stdout_pollution() {
     let server = MockSseServer::start(vec![sse_text("flag final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("cwd");
     write_home_skill(
         temp.path(),
         "reviewer",
@@ -662,7 +656,7 @@ pub(crate) fn cli_run_skill_flag_injects_without_stdout_pollution() {
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--skill",
             "reviewer",
             "do it",
@@ -690,15 +684,15 @@ pub(crate) fn cli_run_unknown_skill_marker_remains_plain_text() {
     let server = MockSseServer::start(vec![sse_text("plain final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("cwd");
     write_home_skill(temp.path(), "reviewer", "review code", "review body");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "$missing do it",
@@ -726,19 +720,18 @@ pub(crate) fn cli_run_injects_agents_project_instructions_without_persisting_as_
     let server = MockSseServer::start(vec![sse_text("agents final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("git");
-    std::fs::create_dir_all(workdir.join(".psychevo")).expect("psychevo");
-    std::fs::write(workdir.join("AGENTS.md"), "Use root workflow.").expect("agents");
-    std::fs::write(workdir.join(".psychevo/AGENTS.md"), "Use pevo workflow.")
-        .expect("psychevo agents");
-    std::fs::write(workdir.join("AGENTS.local.md"), "Use local workflow.").expect("local");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("git");
+    std::fs::create_dir_all(cwd.join(".psychevo")).expect("psychevo");
+    std::fs::write(cwd.join("AGENTS.md"), "Use root workflow.").expect("agents");
+    std::fs::write(cwd.join(".psychevo/AGENTS.md"), "Use pevo workflow.").expect("psychevo agents");
+    std::fs::write(cwd.join("AGENTS.local.md"), "Use local workflow.").expect("local");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "do it",
@@ -832,17 +825,17 @@ pub(crate) fn cli_run_project_context_cwd_ignores_repo_root_agents() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let repo = temp.path().join("repo");
-    let workdir = repo.join("task");
-    std::fs::create_dir_all(workdir.join(".psychevo")).expect("dirs");
+    let cwd = repo.join("task");
+    std::fs::create_dir_all(cwd.join(".psychevo")).expect("dirs");
     std::fs::create_dir(repo.join(".git")).expect("git");
     std::fs::write(repo.join("AGENTS.md"), "Use repo-root workflow.").expect("root agents");
-    std::fs::write(workdir.join("AGENTS.md"), "Use task workflow.").expect("task agents");
+    std::fs::write(cwd.join("AGENTS.md"), "Use task workflow.").expect("task agents");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--project-context",
             "cwd",
             "--format",
@@ -862,7 +855,7 @@ pub(crate) fn cli_run_project_context_cwd_ignores_repo_root_agents() {
         system_messages
             .iter()
             .any(|message| message.contains("Current working directory:")
-                && message.contains(workdir.to_str().expect("workdir utf8")))
+                && message.contains(cwd.to_str().expect("cwd utf8")))
     );
     assert!(
         system_messages

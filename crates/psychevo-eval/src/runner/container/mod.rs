@@ -179,12 +179,12 @@ pub(crate) struct HarborContainerEnvironment {
     pub(crate) build_timeout_seconds: u64,
     pub(crate) cpus: Option<f64>,
     pub(crate) memory_mb: Option<u64>,
-    pub(crate) workdir: String,
+    pub(crate) cwd: String,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ContainerRuntime {
     pub(crate) project_name: String,
     pub(crate) compose_path: PathBuf,
-    pub(crate) workdir: String,
+    pub(crate) cwd: String,
 }

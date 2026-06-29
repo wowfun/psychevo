@@ -61,7 +61,7 @@ are omitted from automatic prompt indexes, dynamic slash, and marker activation.
 Skill discovery is deterministic. The precedence order is:
 
 1. explicit `--skill` paths or names
-2. project `<workdir>/.psychevo/skills`
+2. project `<cwd>/.psychevo/skills`
 3. ancestor `.agents/skills` from nearest directory to git root
 4. global `$PSYCHEVO_HOME/skills`
 5. optional configured `skills.paths`
@@ -173,7 +173,7 @@ Primary command groups:
 applies when a bundled manifest exists; this spec does not add bundled skill
 seeding or syncing.
 
-`pevo skill install` defaults to the current workdir `.psychevo/skills`;
+`pevo skill install` defaults to the current cwd `.psychevo/skills`;
 `-g`/`--global` installs under `$PSYCHEVO_HOME/skills`. Installing a managed
 skill as an editable copy uses `install --name <new-name>`, and the new name is
 required. `--project` is not accepted as a scope alias.
@@ -183,7 +183,7 @@ shows a bounded hub dashboard/help block. Read subcommands include `list`,
 `browse`, `search`, `inspect`, `check`, `audit`, and `reload`. Mutating
 hub/config actions go through Psychevo permissions and remain blocked in Plan
 Mode. TUI skill mutations that write scoped state use the same scope rule as
-CLI: default current workdir `.psychevo`, `--local` explicit local, and
+CLI: default current cwd `.psychevo`, `--local` explicit local, and
 `-g`/`--global` global; legacy `--scope` and `--project` are not accepted.
 Dynamic TUI slash uses `/<skill-or-bundle>` names and submits the slash line as
 prompt input from Enter or mouse selection. Runtime still receives the

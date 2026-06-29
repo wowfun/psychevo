@@ -8,13 +8,13 @@ Define validation expectations for the first live-provider registry and
 
 ## Default Validation
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 The default validation gate is:
 
 ```bash
-scripts/validate-rust.sh broad
+cargo xtask ci run --profile rust-broad
 ```
 
 For this topic, the default gate is the broad deterministic validation path.
@@ -35,10 +35,12 @@ For this topic, the default gate is the broad deterministic validation path.
   metadata precedence, `models.dev` cache lookup, base-url inference for
   user-defined providers, config metadata overrides, and Xiaomi's
   `XIAOMI_API_KEY`.
-- Model catalog tests cover limit/capability/cost metadata parsed from cached
-  provider `/models` responses, provider-style `pricing` aliases,
-  config-over-provider-cache precedence, `models.dev` cache enrichment, and
-  official snapshot fallback without requiring live provider credentials.
+- Model catalog tests cover explicit provider `/models` fetch parsing,
+  provider-style `pricing` aliases, persistent picker cache write/read,
+  credential-fingerprint invalidation, raw-payload stripping, empty-result
+  non-overwrite behavior, GUI/CLI/TUI cache hydration, `models.dev` cache
+  enrichment, and official snapshot fallback without requiring live provider
+  credentials.
 - Cost-accounting tests cover billable input/output subtraction, cache read and
   write tokens, reasoning-as-output pricing, unknown pricing for missing
   nonzero-required bucket prices, known free pricing from explicit zero prices,
@@ -51,34 +53,43 @@ For this topic, the default gate is the broad deterministic validation path.
 
 ## Live Opt-In Validation
 
-Live provider tests are ignored by default. They are run only as live opt-in
-validation, for example:
+Live provider tests are selected through the xtask-owned live registry. They are
+run only as live opt-in validation, for example:
 
 ```bash
-cargo test --workspace --all-targets -- --ignored live
+cargo xtask live run
+cargo xtask live run --suite provider
 ```
 
 The default live suite covers one provider: `xiaomi-token-plan` as the primary
-Xiaomi-family provider. It must require `PSYCHEVO_HOME` or explicit
-`PSYCHEVO_CONFIG` to point at isolated Psychevo configuration. The tests must
-not read third-party auth files or any other external auth store. Live harnesses
-should pass a provider-qualified model for the provider under test so a
-provider-qualified default model in the isolated home does not mask the requested
-provider. Additional providers may be validated only when explicitly selected by
-the caller.
+Xiaomi-family provider. The runner must point `PSYCHEVO_HOME`,
+`PSYCHEVO_CONFIG`, and `PSYCHEVO_DB` at isolated repo-local paths for each
+check. The tests must not read third-party auth files or any other external auth
+store. Live harnesses should pass a provider-qualified model for the provider
+under test so a provider-qualified default model in the isolated home does not
+mask the requested provider. Additional providers may be validated only when
+explicitly selected with `cargo xtask live run --provider <id>`.
 
 Live provider registry tests may use the repo-local development home defined by
-[060 Automation](../060-automation/spec.md), including
-`.local/.psychevo-dev/config.toml` through explicit `PSYCHEVO_CONFIG`. This is
-still live opt-in validation and must not read the user's normal home unless the
-caller explicitly points `PSYCHEVO_HOME` or `PSYCHEVO_CONFIG` there.
+[065 CI/CD](../065-ci-cd/spec.md), including
+`.local/.psychevo-dev/config.toml` and `.local/.psychevo-dev/.env`. This is
+still live opt-in validation and must not read the user's normal home.
 
-Each live provider test creates an isolated temporary workdir fixture, asks the
+Each live provider test creates an isolated temporary cwd fixture, asks the
 model to use the `read` tool, and asserts:
 
 - normal completion
 - at least one successful `read` tool-result message
 - durable session/message persistence
+
+Explicit live catalog validation may fetch a configured provider `/models`
+endpoint such as `xiaomi-token-plan`. It must write any provider picker cache to
+an isolated temporary home, assert the cache is populated, and assert API-key
+values are not present in the cache file.
+
+TUI catalog validation must prove that a cache written by GUI or CLI fetch is
+visible after constructing a fresh TUI state with empty in-process catalog
+state, and that TUI fetch writes the same persistent cache file.
 
 Live test failures do not block this topic's default validation path unless a
 caller explicitly asks to validate live providers.

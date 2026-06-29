@@ -310,10 +310,11 @@ impl PsychevoAcpAgent {
     ) -> Result<psychevo_runtime::SkillCatalog, Error> {
         discover_skills(&SkillDiscoveryOptions {
             home: self.options.home.clone(),
-            workdir: session.cwd.clone(),
+            cwd: session.cwd.clone(),
             config_path: self.options.config_path.clone(),
             env: self.options.inherited_env.clone(),
             explicit_inputs: Vec::new(),
+            additional_roots: Vec::new(),
             no_skills: false,
         })
         .map_err(acp_internal_error)

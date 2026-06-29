@@ -38,7 +38,7 @@ pub(crate) fn session_result_json(
             "session_id": session.id,
             "tool_call_id": session.root_tool_call_id.clone(),
             "cmd": session.cmd.clone(),
-            "workdir": session.workdir.display().to_string(),
+            "cwd": session.cwd.display().to_string(),
             "started_at_ms": session.started_at_ms,
         })));
     }
@@ -191,16 +191,16 @@ pub(crate) fn sessions_for_task(task_id: &str) -> Vec<Arc<ExecSession>> {
         .unwrap_or_default()
 }
 
-pub(crate) fn resolve_exec_workdir(accepted_workdir: &Path, raw: Option<&str>) -> Result<PathBuf> {
+pub(crate) fn resolve_exec_cwd(accepted_cwd: &Path, raw: Option<&str>) -> Result<PathBuf> {
     let path = match raw {
         Some(raw) if Path::new(raw).is_absolute() => PathBuf::from(raw),
-        Some(raw) => accepted_workdir.join(raw),
-        None => accepted_workdir.to_path_buf(),
+        Some(raw) => accepted_cwd.join(raw),
+        None => accepted_cwd.to_path_buf(),
     };
     let path = path.canonicalize()?;
     if !path.is_dir() {
         return Err(Error::Message(format!(
-            "workdir is not a directory: {}",
+            "cwd is not a directory: {}",
             path.display()
         )));
     }

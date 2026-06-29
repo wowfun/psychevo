@@ -16,7 +16,7 @@ cost semantics belong to [120 Provider Registry](../120-provider-registry/spec.m
 ## Scope
 
 - Workbench Settings > Models as the profile/global model configuration surface
-- GUI and TUI composer model pickers as current-workdir UX state
+- GUI and TUI composer model pickers as current-cwd UX state
 - shared `$PSYCHEVO_HOME/model-state.json` model-selection state
 - Gateway model settings, provider save/catalog, and assignment RPC semantics
 - explicit model catalog fetch UX and immediate option propagation
@@ -52,19 +52,19 @@ shows as the saved global default.
 
 Composer model selection is shared UX state, not default configuration. GUI and
 TUI composer pickers write `$PSYCHEVO_HOME/model-state.json` for the canonical
-workdir and never write TOML defaults. If a user wants a saved default, they must
+cwd and never write TOML defaults. If a user wants a saved default, they must
 use Settings > Models, `pevo model set`, or another explicit default-saving
 command.
 
-`model-state.json` stores only bounded model-selection state: per-workdir
+`model-state.json` stores only bounded model-selection state: per-cwd
 provider-qualified model, optional reasoning effort, update timestamp, and
 recent model entries for picker ordering. It must not store provider secrets,
 raw prompts, transcripts, reasoning text, model catalog payloads, or API
 responses.
 
-Legacy TUI model fields are not automatically migrated at startup. A one-time
-maintenance script may read an existing `tui-state.json`, write equivalent
-`model-state.json` model fields, and leave TUI-only flags in `tui-state.json`.
+Legacy TUI model fields are not migrated. Pre-release development state should
+use fresh profile state or `pevo init --reset-state` instead of carrying forward
+old `tui-state.json` model selections.
 
 ## Provider Configuration UX
 
@@ -81,13 +81,15 @@ show a privacy/data-retention warning before save; the provider id, aliases,
 base URL, credential env, no-auth support, and free-model classification are
 defined by [120 Provider Registry](../120-provider-registry/spec.md).
 
-Fetched catalogs are session-visible candidate models, not persisted model
-configuration. Gateway keeps fetched catalog rows in process memory and merges
-them into subsequent `model/settings/read` assignment options and
-`settings/read.controls.modelDetails` for the composer. The GUI also reflects a
-fresh fetch immediately in both Settings > Models and the composer selector.
-This makes provider models selectable after configuration/fetch without writing
-each catalog row into TOML or silently changing the active composer model.
+Fetched catalogs are picker/display candidate models, not persisted model
+configuration and not runtime metadata precedence. Successful explicit fetches
+from Workbench, CLI, or TUI write the shared provider-model picker cache at
+`$PSYCHEVO_HOME/cache/provider_models_cache.json`. `model/settings/read` and
+Settings read paths hydrate matching cached rows without contacting provider
+`/models` endpoints, and a fresh fetch is reflected immediately in Settings,
+Workbench, CLI, and TUI picker surfaces. This makes provider models selectable
+after configuration/fetch without writing each catalog row into TOML or silently
+changing the active composer model.
 
 The page offers independent save controls for:
 
@@ -115,7 +117,7 @@ After saving the default model, Workbench must refresh the current
 backend-resolved controls model and reasoning effort. This keeps the composer
 label from displaying a stale in-memory model after a successful default save.
 The refresh does not change scope precedence: an active session model or
-workdir entry from `model-state.json` still wins over the global default.
+cwd entry from `model-state.json` still wins over the global default.
 
 ## Gateway RPC
 
@@ -123,7 +125,7 @@ Workbench uses Gateway JSON-RPC methods:
 
 - `model/settings/read`
   - For `scope: "global"`, returns default and auxiliary assignments from the
-    profile/global config rather than the current workdir's effective config.
+    profile/global config rather than the current cwd's effective config.
 - `model/provider/save`
 - `model/provider/catalog`
 - `model/assignment/set`

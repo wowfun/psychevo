@@ -9,7 +9,7 @@ impl PsychevoAcpAgent {
     ) -> RunOptions {
         RunOptions {
             state: self.state.clone(),
-            workdir: session.cwd.clone(),
+            cwd: session.cwd.clone(),
             snapshot_root: Some(self.options.home.join("snapshots")),
             session: session.runtime_session_id.clone(),
             continue_latest: false,
@@ -46,7 +46,7 @@ impl PsychevoAcpAgent {
     pub(crate) fn probe_run_options(&self, cwd: PathBuf, model: Option<String>) -> RunOptions {
         RunOptions {
             state: self.state.clone(),
-            workdir: cwd,
+            cwd,
             snapshot_root: None,
             session: None,
             continue_latest: false,

@@ -17,12 +17,12 @@ const OPERATION_LOCK_POLL: Duration = Duration::from_millis(50);
 #[derive(Debug, Clone)]
 pub(crate) struct SnapshotStore {
     pub(crate) root: PathBuf,
-    pub(crate) workdir: PathBuf,
+    pub(crate) cwd: PathBuf,
 }
 
 impl SnapshotStore {
-    pub(crate) fn new(root: PathBuf, workdir: PathBuf) -> Self {
-        Self { root, workdir }
+    pub(crate) fn new(root: PathBuf, cwd: PathBuf) -> Self {
+        Self { root, cwd }
     }
 
     pub(crate) fn track(&self) -> Result<Option<String>> {
@@ -87,7 +87,7 @@ impl SnapshotStore {
                 continue;
             };
             if status.starts_with('A') {
-                remove_worktree_path(&self.workdir.join(path))?;
+                remove_worktree_path(&self.cwd.join(path))?;
             } else {
                 let checkout = self.git_snapshot(["checkout", target, "--", path])?;
                 if !checkout.status.success() {
@@ -102,7 +102,7 @@ impl SnapshotStore {
     }
 
     pub(crate) fn workspace_id(&self) -> Result<String> {
-        workspace_snapshot_id(&self.workdir)
+        workspace_snapshot_id(&self.cwd)
     }
 
     pub(crate) fn git_dir(&self) -> Result<PathBuf> {
@@ -133,7 +133,7 @@ impl SnapshotStore {
     pub(crate) fn is_git_worktree(&self) -> bool {
         Command::new("git")
             .arg("-C")
-            .arg(&self.workdir)
+            .arg(&self.cwd)
             .args(["rev-parse", "--is-inside-work-tree"])
             .output()
             .ok()
@@ -150,7 +150,7 @@ impl SnapshotStore {
         }
         let init = Command::new("git")
             .env("GIT_DIR", &git_dir)
-            .env("GIT_WORK_TREE", &self.workdir)
+            .env("GIT_WORK_TREE", &self.cwd)
             .arg("init")
             .output()?;
         if !init.status.success() {
@@ -179,7 +179,7 @@ impl SnapshotStore {
             .arg("--git-dir")
             .arg(git_dir)
             .arg("--work-tree")
-            .arg(&self.workdir)
+            .arg(&self.cwd)
             .args(args)
             .output()?)
     }
@@ -364,12 +364,12 @@ pub(crate) fn remove_worktree_path(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn init_git_workdir(workdir: &Path) {
-        fs::create_dir_all(workdir).expect("workdir");
+    fn init_git_cwd(cwd: &Path) {
+        fs::create_dir_all(cwd).expect("cwd");
         assert!(
             Command::new("git")
                 .arg("-C")
-                .arg(workdir)
+                .arg(cwd)
                 .arg("init")
                 .output()
                 .expect("git init")
@@ -381,26 +381,26 @@ mod tests {
     #[test]
     fn workspace_snapshot_id_is_stable_safe_and_path_opaque() {
         let temp = tempfile::tempdir().expect("temp");
-        let workdir = temp.path().join("work");
-        fs::create_dir_all(&workdir).expect("workdir");
+        let cwd = temp.path().join("work");
+        fs::create_dir_all(&cwd).expect("cwd");
 
-        let id = workspace_snapshot_id(&workdir).expect("workspace id");
+        let id = workspace_snapshot_id(&cwd).expect("workspace id");
 
         assert_eq!(id.len(), 34);
         assert!(id.starts_with("w_"));
         assert!(id[2..].chars().all(|ch| ch.is_ascii_hexdigit()));
         assert!(!id.contains("work"));
-        assert_eq!(id, workspace_snapshot_id(&workdir).expect("stable id"));
+        assert_eq!(id, workspace_snapshot_id(&cwd).expect("stable id"));
     }
 
     #[test]
-    fn workspace_git_dir_is_shared_by_workdir_and_not_session_scoped() {
+    fn workspace_git_dir_is_shared_by_cwd_and_not_session_scoped() {
         let temp = tempfile::tempdir().expect("temp");
         let root = temp.path().join("snapshots");
-        let workdir = temp.path().join("work");
-        fs::create_dir_all(&workdir).expect("workdir");
-        let first = SnapshotStore::new(root.clone(), workdir.clone());
-        let second = SnapshotStore::new(root.clone(), workdir.clone());
+        let cwd = temp.path().join("work");
+        fs::create_dir_all(&cwd).expect("cwd");
+        let first = SnapshotStore::new(root.clone(), cwd.clone());
+        let second = SnapshotStore::new(root.clone(), cwd.clone());
         let other = SnapshotStore::new(root, temp.path().join("other"));
 
         assert_eq!(
@@ -417,10 +417,10 @@ mod tests {
     fn track_writes_workspace_store_without_session_directory() {
         let temp = tempfile::tempdir().expect("temp");
         let root = temp.path().join("snapshots");
-        let workdir = temp.path().join("work");
-        init_git_workdir(&workdir);
-        fs::write(workdir.join("tracked.txt"), "base\n").expect("file");
-        let snapshots = SnapshotStore::new(root.clone(), workdir);
+        let cwd = temp.path().join("work");
+        init_git_cwd(&cwd);
+        fs::write(cwd.join("tracked.txt"), "base\n").expect("file");
+        let snapshots = SnapshotStore::new(root.clone(), cwd);
 
         let hash = snapshots.track().expect("track").expect("snapshot");
 
@@ -433,11 +433,11 @@ mod tests {
     fn restore_reads_from_workspace_store() {
         let temp = tempfile::tempdir().expect("temp");
         let root = temp.path().join("snapshots");
-        let workdir = temp.path().join("work");
-        init_git_workdir(&workdir);
-        let file = workdir.join("tracked.txt");
+        let cwd = temp.path().join("work");
+        init_git_cwd(&cwd);
+        let file = cwd.join("tracked.txt");
         fs::write(&file, "base\n").expect("base");
-        let snapshots = SnapshotStore::new(root, workdir);
+        let snapshots = SnapshotStore::new(root, cwd);
         let before = snapshots.track().expect("track").expect("snapshot");
         fs::write(&file, "changed\n").expect("changed");
 

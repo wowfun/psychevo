@@ -14,7 +14,7 @@ impl PermissionRuntime {
                 grant.reason
             )));
         }
-        if let Some(action) = PermissionAction::from_tool_call(&self.inner.workdir, tool_name, args)
+        if let Some(action) = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args)
             && matches!(self.inner.config.approval_policy, ApprovalPolicy::Granular)
             && !self.granular_allows_prompt(&action)
         {
@@ -112,6 +112,37 @@ impl PermissionRuntime {
                 &format!("approval_policy=never suppressed prompt: {reason}"),
                 matched_rule,
             ));
+        }
+        if let Some(hook_runtime) = &self.inner.hook_runtime {
+            let hook_response = hook_runtime.run_event(
+                "PermissionRequest",
+                &json!({
+                    "tool": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "arguments": args,
+                    "reason": reason,
+                    "matched_rule": matched_rule,
+                    "suggested_rule": suggested_rule,
+                    "allow_always": false,
+                }),
+            );
+            if let Some(decision) = hook_response.approval_decision() {
+                if decision.outcome == PermissionApprovalOutcome::Deny {
+                    let hook_reason = hook_response
+                        .feedback
+                        .first()
+                        .cloned()
+                        .or(hook_response.blocked_reason)
+                        .or_else(|| hook_response.diagnostics.first().cloned())
+                        .unwrap_or_else(|| "PermissionRequest hook denied permission".to_string());
+                    return Err(permission_error(
+                        "denied",
+                        &format!("PermissionRequest hook denied permission: {hook_reason}"),
+                        matched_rule,
+                    ));
+                }
+                return Ok(crate::types::PermissionApprovalDecision::allow_once());
+            }
         }
         let reviewer = self.inner.config.approvals_reviewer;
         let handler = match reviewer {

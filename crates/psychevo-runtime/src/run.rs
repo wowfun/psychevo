@@ -17,10 +17,10 @@ pub(crate) use tokio::time;
 pub(crate) use crate::agents::{
     AgentDefinition, AgentDiscoveryOptions, AgentToolContext, agent_catalog_for_prompt,
     agent_catalog_for_selected_policy, agent_mailbox_event_message,
-    agent_policy_allows_agent_spawn, agent_project_instructions_enabled, apply_agent_hooks,
-    apply_agent_tool_policy, discover_agents, effective_tool_names, main_agent_metadata,
+    agent_policy_allows_agent_spawn, agent_project_instructions_enabled, apply_agent_tool_policy,
+    apply_runtime_hooks, discover_agents, effective_tool_names, main_agent_metadata,
     narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
-    run_agent_hook_event, session_agent_input_from_metadata, skill_catalog_visible_for_tools,
+    session_agent_input_from_metadata, skill_catalog_visible_for_tools,
     spawn_child_agent_background,
 };
 pub(crate) use crate::compaction::{
@@ -28,8 +28,8 @@ pub(crate) use crate::compaction::{
     load_projected_messages,
 };
 pub(crate) use crate::config::{
-    ResolvedRunProvider, load_project_context_instruction_mode, load_run_config,
-    resolve_run_provider,
+    ResolvedRunProvider, load_plugin_policy_config_lenient, load_project_context_instruction_mode,
+    load_run_config, resolve_run_provider,
 };
 pub(crate) use crate::context_usage::{
     ContextRecorder, ContextRecordingProvider, LiveContextProfile, context_counting_metadata,
@@ -38,7 +38,7 @@ pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::events::PersistenceSink;
 pub(crate) use crate::managed_tools::ensure_rg;
 pub(crate) use crate::messages::assistant_text;
-pub(crate) use crate::paths::canonical_workdir;
+pub(crate) use crate::paths::canonical_cwd;
 pub(crate) use crate::permissions::PermissionRuntime;
 pub(crate) use crate::project_instructions::load_project_instructions;
 pub(crate) use crate::prompt_assembly::{

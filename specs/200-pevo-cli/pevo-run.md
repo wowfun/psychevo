@@ -49,7 +49,7 @@ Out of scope:
 The first-slice default format is `default`.
 
 The removed first-slice flags are not accepted: `--prompt`, `--json`,
-`--provider`, `--base-url`, `--api-key-env`, `--db`, `--workdir`,
+`--provider`, `--base-url`, `--api-key-env`, `--db`, `--cwd`,
 `--max-context-messages`, `--verbose`, and `--config`.
 
 ## Prompt Input
@@ -59,11 +59,11 @@ stdin text is appended after the positional message with one newline separator.
 If the final prompt is empty after trimming whitespace, the command rejects
 before session creation with `You must provide a message`.
 
-## Workdir and State
+## Cwd and State
 
-The default workdir is process cwd. `--dir` overrides it. `~` expands, relative
+The default cwd is process cwd. `--dir` overrides it. `~` expands, relative
 paths resolve relative to process cwd, and the runtime receives a canonical
-workdir.
+cwd.
 
 The default SQLite path is `$PSYCHEVO_HOME/state.db`. `PSYCHEVO_DB` may override
 the SQLite path and is an environment-only control.
@@ -74,16 +74,16 @@ global home initialization.
 
 ## Project Context
 
-`pevo run` always makes the canonical runtime workdir visible to the model as
+`pevo run` always makes the canonical runtime cwd visible to the model as
 runtime environment context. This context explains that relative paths resolve
-from that workdir and that absolute paths remain subject to the normal
+from that cwd and that absolute paths remain subject to the normal
 permission gates.
 
 Project instruction discovery defaults to the configured
 `[project_context].instructions` value, or `git-root` when unset.
 `git-root` preserves the existing behavior of loading AGENTS/project
-instructions from the discovered Git root through the workdir. `cwd` loads only
-instruction files in the canonical workdir. `off` suppresses project
+instructions from the discovered Git root through the cwd. `cwd` loads only
+instruction files in the canonical cwd. `off` suppresses project
 instruction injection.
 
 `--project-context <git-root|cwd|off>` overrides configuration for the
@@ -124,7 +124,7 @@ The resumed session becomes recently updated only when new transcript material
 is persisted.
 
 `--continue` selects the latest `source = "run"` session for the canonical
-workdir, ordered by latest persisted activity then start time. Viewing or
+cwd, ordered by latest persisted activity then start time. Viewing or
 opening a session does not affect this ordering. If no matching session exists,
 runtime creates a new session.
 

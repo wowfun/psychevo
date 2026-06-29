@@ -36,7 +36,7 @@ pub(crate) struct ExportHeaderValue<'a> {
 pub(crate) struct ExportSessionValue<'a> {
     pub(crate) id: &'a str,
     pub(crate) source: &'a str,
-    pub(crate) workdir: &'a str,
+    pub(crate) cwd: &'a str,
     pub(crate) model: &'a str,
     pub(crate) provider: &'a str,
     pub(crate) started_at_ms: i64,
@@ -455,8 +455,8 @@ pub(crate) fn reconstruct_last_provider_request(
     let mut warnings = base_reconstruction_warnings(&metadata);
     let mode = session_mode_from_metadata(&metadata, &mut warnings);
     let generation_metadata = generation_metadata_from_session_metadata(&metadata, &mut warnings);
-    let workdir = PathBuf::from(&summary.workdir);
-    let all_tools = reconstructed_tool_declarations(store, summary, &metadata, &workdir, mode);
+    let cwd = PathBuf::from(&summary.cwd);
+    let all_tools = reconstructed_tool_declarations(store, summary, &metadata, &cwd, mode);
     let reconstructed_tool_declarations_hash = tool_declarations_hash_from_declarations(&all_tools);
     let mut current_prompt = None;
     let mut last_request = None;

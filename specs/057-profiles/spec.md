@@ -16,7 +16,7 @@ state, sessions, caches, skills, agents, and managed processes.
 - `pevo -p/--profile`
 - `pevo profile` management commands
 - clone and alias behavior
-- interaction with workdirs, project `.psychevo`, Gateway, TUI, and Workbench
+- interaction with cwds, project `.psychevo`, Gateway, TUI, and Workbench
 
 Out of scope:
 
@@ -30,8 +30,8 @@ Out of scope:
 ## Concepts
 
 A profile is the active Psychevo home. It is not a workspace protocol field.
-Interactive context is represented by the current workdir and the existing
-`GatewayRequestScope { workdir, source }` shape. A workdir may be a code
+Interactive context is represented by the current cwd and the existing
+`GatewayRequestScope { cwd, source }` shape. A cwd may be a code
 project, a plain directory, or a GUI-created workspace; runtime, Gateway, and
 session storage do not persist a project/workspace type distinction.
 
@@ -48,21 +48,21 @@ registry-level files such as `active_profile` and the `profiles/` directory in
 addition to the default profile's own `config.toml`, `.env`, `state.db`,
 `sessions/`, `logs/`, `cache/`, `skills/`, `agents/`, and `gateway/` data.
 
-A workdir-local `<workdir>/.psychevo` remains an overlay for config, agents,
+A cwd-local `<cwd>/.psychevo` remains an overlay for config, agents,
 skills, and other directory-scoped resources. It does not select, own, or
 override the active profile.
 
 ACP peer-agent backends follow the same rule. Profile-global backend
 registrations live in the active profile home and are visible only to Gateway,
 TUI, ACP, and Workbench processes launched for that profile. Project-local
-backend registrations live in `<workdir>/.psychevo/config.toml` and overlay the
-active profile for that workdir. Workbench may manage both locations for the
-currently running profile/workdir, but it must not aggregate or mutate inactive
+backend registrations live in `<cwd>/.psychevo/config.toml` and overlay the
+active profile for that cwd. Workbench may manage both locations for the
+currently running profile/cwd, but it must not aggregate or mutate inactive
 profiles.
 
-GUI and desktop shells may create user-facing workdirs under a configurable
+GUI and desktop shells may create user-facing cwds under a configurable
 workspace root. The default root is `~/workspaces`; the default no-project GUI
-workdir is `<workspace-root>/general`. This root is profile configuration, not
+cwd is `<workspace-root>/general`. This root is profile configuration, not
 profile-owned data: multiple profiles may use the same root while keeping
 credentials, sessions, and profile-level configuration isolated.
 
@@ -88,7 +88,7 @@ runtime layers as `PSYCHEVO_HOME`. `PSYCHEVO_DB` and `PSYCHEVO_CONFIG` keep
 their existing override semantics and may bypass the home for the specific
 database or config path they name. ACP peer-agent backend loading treats an
 explicit `PSYCHEVO_CONFIG` as the profile-level config source, then still merges
-the current workdir's `.psychevo/config.toml` overlay so Project-target backend
+the current cwd's `.psychevo/config.toml` overlay so Project-target backend
 edits are immediately effective.
 
 Selecting a missing named profile fails with a clear local error that points to

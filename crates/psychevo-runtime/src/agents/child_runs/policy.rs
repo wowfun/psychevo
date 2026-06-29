@@ -1,4 +1,3 @@
-
 pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     if child.abort.aborted() {
         if let Some(child_session) = child.existing_child_session.as_deref() {
@@ -28,7 +27,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             .store()
             .create_child_session_with_metadata(
                 &child.context.parent_session_id,
-                &child.context.workdir,
+                &child.context.cwd,
                 "agent",
                 &child_model,
                 &child.context.model_provider,
@@ -72,7 +71,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     run_agent_hook_event(
         Some(&child.agent),
         "SubagentStart",
-        &child.context.workdir,
+        &child.context.cwd,
         json!({
             "id": child.id.clone(),
             "child_session_id": child_session.clone(),
@@ -101,7 +100,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     child_agent_tool_context.spawn_depth_remaining = Some(child.spawn_depth_remaining);
     let sandbox_grants = crate::sandbox::SandboxWriteGrants::default();
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
-        workdir: child.context.workdir.clone(),
+        cwd: child.context.cwd.clone(),
         task_id: child_session.clone(),
         mode: child.context.mode,
         lsp: child.context.lsp.clone(),
@@ -120,21 +119,28 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     });
     let mut tools = tool_surface.tools;
     tools = apply_agent_tool_policy(tools, Some(&child.agent), child.context.mode);
-    tools = apply_agent_hooks(tools, Some(&child.agent), &child.context.workdir);
+    let hook_runtime = child_hook_runtime(&child)?;
     let permission_mode =
         narrow_permission_mode_for_agent(child.context.permission_mode, Some(&child.agent));
     let permission_runtime = PermissionRuntime::new(
-        child.context.workdir.clone(),
-        child.context.workdir.join(".psychevo"),
+        child.context.cwd.clone(),
+        child.context.cwd.join(".psychevo"),
         child.context.permission_config.clone(),
         permission_mode,
         child.context.approval_mode,
         child.context.approval_handler.clone(),
         None,
     );
+    let permission_runtime = match hook_runtime.clone() {
+        Some(runtime) => permission_runtime.with_hook_runtime(runtime),
+        None => permission_runtime,
+    };
     let permission_runtime =
         permission_runtime.with_sandbox(child.context.sandbox_policy.clone(), sandbox_grants);
     tools = permission_runtime.wrap_tools(tools);
+    if let Some(runtime) = hook_runtime {
+        tools = apply_hook_runtime(tools, runtime);
+    }
     let effective_tool_names = effective_tool_names(&tools);
     let tool_declarations_hash = tool_declarations_hash(&tools);
     let selected_agent = SelectedAgent {
@@ -144,7 +150,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     };
     let prompt_assembly = assemble_child_prompt_prefix(
         child.context.mode,
-        &child.context.workdir,
+        &child.context.cwd,
         &child.agent,
         &child.context.model_metadata.capabilities,
         !tools.is_empty(),
@@ -165,7 +171,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         "project_context": {
             "instructions": child.context.project_context_mode.as_str(),
         },
-        "workdir": child.context.workdir.display().to_string(),
+        "cwd": child.context.cwd.display().to_string(),
     });
     let prefix_record = prompt_prefix_record(PromptPrefixRecordInput {
         session_id: &child_session,
@@ -201,7 +207,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         "project_instructions_visible": prefix_metadata.get("project_instructions_visible").cloned().unwrap_or_default(),
         "project_instructions_role": prefix_metadata.get("project_instructions_role").cloned().unwrap_or_default(),
         "project_context": prefix_metadata.get("project_context").cloned().unwrap_or_default(),
-        "workdir": prefix_metadata.get("workdir").cloned().unwrap_or_default(),
+        "cwd": prefix_metadata.get("cwd").cloned().unwrap_or_default(),
     });
     let prompt_context_evidence = context_evidence_for_request(
         &prompt_assembly.prompt_instructions,
@@ -282,7 +288,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             run_agent_hook_event(
                 Some(&child.agent),
                 "SubagentStop",
-                &child.context.workdir,
+                &child.context.cwd,
                 json!({
                     "id": child.id.clone(),
                     "outcome": "failed",
@@ -307,7 +313,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     run_agent_hook_event(
         Some(&child.agent),
         "SubagentStop",
-        &child.context.workdir,
+        &child.context.cwd,
         json!({
             "id": child.id.clone(),
             "outcome": completion.outcome.as_str(),
@@ -386,6 +392,62 @@ fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
         "backend_ref": event.agent.backend.as_ref().map(|backend| backend.name.clone()),
         "effective_max_spawn_depth": event.spawn_depth_remaining,
     })));
+}
+
+fn child_hook_runtime(child: &ChildRun) -> Result<Option<crate::hooks::HookRuntime>> {
+    let config = match child_hook_runtime_config(&child.context) {
+        Ok(config) => config,
+        Err(_err) if child.context.env.is_empty() && child.context.config_path.is_none() => {
+            crate::hooks::HookRuntimeConfig::default()
+        }
+        Err(err) => return Err(err),
+    };
+    Ok(build_hook_runtime(
+        Some(&child.agent),
+        Vec::new(),
+        config,
+        &child.context.cwd,
+    ))
+}
+
+fn child_hook_runtime_config(
+    context: &AgentToolContext,
+) -> Result<crate::hooks::HookRuntimeConfig> {
+    let options = crate::types::RunOptions {
+        state: context.state.clone(),
+        cwd: context.cwd.clone(),
+        snapshot_root: None,
+        session: None,
+        continue_latest: false,
+        prompt: String::new(),
+        image_inputs: Vec::new(),
+        extract_prompt_image_sources: false,
+        prompt_display: None,
+        max_context_messages: None,
+        config_path: context.config_path.clone(),
+        project_context_override: Some(context.project_context_mode),
+        sandbox_override: None,
+        model: None,
+        reasoning_effort: context.reasoning_effort.clone(),
+        runtime_ref: None,
+        runtime_session_id: None,
+        runtime_options: BTreeMap::new(),
+        include_reasoning: false,
+        mode: context.mode,
+        permission_mode: Some(context.permission_mode),
+        approval_mode: Some(context.approval_mode),
+        approval_handler: context.approval_handler.clone(),
+        clarify_enabled: false,
+        inherited_env: Some(context.env.clone()),
+        agent: None,
+        external_agent_delegate: None,
+        no_agents: false,
+        no_skills: true,
+        skill_inputs: Vec::new(),
+        mcp_servers: Vec::new(),
+        runtime_tools: Vec::new(),
+    };
+    crate::hooks::hook_runtime_config_with_plugin_sources_from_options(&options, &context.cwd)
 }
 
 pub(crate) fn child_model(child: &ChildRun) -> String {

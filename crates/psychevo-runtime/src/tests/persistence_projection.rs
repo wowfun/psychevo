@@ -4,10 +4,10 @@ pub(crate) use super::*;
 pub(crate) async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_for_stream = Arc::clone(&captured);
@@ -91,10 +91,10 @@ pub(crate) async fn persistence_sink_streams_elapsed_metadata_for_assistant_mess
 pub(crate) async fn persistence_sink_persists_selected_agent_on_assistant_message_end() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let sink = PersistenceSink {
         store: store.clone(),
@@ -119,7 +119,7 @@ pub(crate) async fn persistence_sink_persists_selected_agent_on_assistant_messag
         selected_agent: Some(SelectedAgent {
             name: "translate".to_string(),
             source: "project".to_string(),
-            path: Some(workdir.join(".psychevo/agents/translate.md")),
+            path: Some(cwd.join(".psychevo/agents/translate.md")),
         }),
         prompt_prefix_metadata: None,
     };
@@ -153,11 +153,11 @@ pub(crate) async fn persistence_sink_persists_selected_agent_on_assistant_messag
 pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(
-            &workdir,
+            &cwd,
             "tui",
             "model",
             "provider",
@@ -239,10 +239,10 @@ pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
 pub(crate) async fn persistence_sink_persists_assistant_reasoning_effort_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_for_stream = Arc::clone(&captured);
@@ -313,10 +313,10 @@ pub(crate) async fn persistence_sink_persists_assistant_reasoning_effort_metadat
 pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_for_stream = Arc::clone(&captured);
@@ -414,10 +414,10 @@ pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
 pub(crate) async fn messages_preserve_assistant_content_order() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let sink = test_persistence_sink(store.clone(), session_id.clone());
 
@@ -492,10 +492,10 @@ pub(crate) async fn messages_preserve_assistant_content_order() {
 pub(crate) async fn messages_preserve_tool_call_and_tool_result_facts() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let sink = test_persistence_sink(store.clone(), session_id.clone());
 
@@ -571,10 +571,10 @@ pub(crate) async fn messages_preserve_tool_call_and_tool_result_facts() {
 pub(crate) async fn messages_preserve_selected_skill_prompt_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let mut sink = test_persistence_sink(store.clone(), session_id.clone());
     sink.prompt_prefix_metadata = Some(json!({
@@ -609,10 +609,10 @@ pub(crate) async fn messages_preserve_selected_skill_prompt_metadata() {
 pub(crate) async fn persistence_sink_persists_prompt_context_evidence_once() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = canonical_workdir(&temp.path().join("work")).expect("workdir");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let sink = PersistenceSink {
         store: store.clone(),

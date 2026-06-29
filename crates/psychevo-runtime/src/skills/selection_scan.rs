@@ -626,9 +626,9 @@ pub(crate) fn collect_relative_files_inner(
     Ok(())
 }
 
-pub(crate) fn ensure_mutable_skill(skill: &Skill, home: &Path, workdir: &Path) -> Result<()> {
+pub(crate) fn ensure_mutable_skill(skill: &Skill, home: &Path, cwd: &Path) -> Result<()> {
     let global = home.join("skills").canonicalize().ok();
-    let project = workdir.join(".psychevo").join("skills").canonicalize().ok();
+    let project = cwd.join(".psychevo").join("skills").canonicalize().ok();
     let target = skill.file_path.canonicalize()?;
     let mutable = global.as_ref().is_some_and(|root| target.starts_with(root))
         || project
@@ -789,9 +789,9 @@ pub(crate) fn copy_dir_recursive(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn ancestor_agents_skill_dirs(workdir: &Path) -> Vec<PathBuf> {
+pub(crate) fn ancestor_agents_skill_dirs(cwd: &Path) -> Vec<PathBuf> {
     let mut result = Vec::new();
-    let mut current = workdir.to_path_buf();
+    let mut current = cwd.to_path_buf();
     loop {
         result.push(current.join(".agents").join("skills"));
         if current.join(".git").exists() {
@@ -810,19 +810,19 @@ pub(crate) fn ancestor_agents_skill_dirs(workdir: &Path) -> Vec<PathBuf> {
 
 pub(crate) fn existing_input_path(
     input: &str,
-    workdir: &Path,
+    cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> Result<Option<PathBuf>> {
-    let path = resolve_configured_path(input, workdir, env)?;
+    let path = resolve_configured_path(input, cwd, env)?;
     Ok(path.exists().then_some(path))
 }
 
 pub(crate) fn looks_like_existing_path(
     input: &str,
-    workdir: &Path,
+    cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> bool {
-    existing_input_path(input, workdir, env)
+    existing_input_path(input, cwd, env)
         .ok()
         .flatten()
         .is_some()
@@ -830,7 +830,7 @@ pub(crate) fn looks_like_existing_path(
 
 pub(crate) fn resolve_configured_path(
     raw: &str,
-    workdir: &Path,
+    cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> Result<PathBuf> {
     let raw = raw.trim();
@@ -844,7 +844,7 @@ pub(crate) fn resolve_configured_path(
     Ok(if path.is_absolute() {
         path
     } else {
-        workdir.join(path)
+        cwd.join(path)
     })
 }
 

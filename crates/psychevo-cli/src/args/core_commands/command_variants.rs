@@ -4,7 +4,7 @@ pub(crate) struct TuiArgs {
     #[arg(
         long = "dir",
         value_name = "DIR",
-        help = "Open the TUI for this workdir"
+        help = "Open the TUI for this cwd"
     )]
     pub(crate) dir: Option<PathBuf>,
     #[arg(
@@ -121,7 +121,7 @@ pub(crate) struct ToolModeMutationArgs {
     #[arg(
         long,
         conflicts_with = "global",
-        help = "Write to the current workdir .psychevo scope"
+        help = "Write to the current cwd .psychevo scope"
     )]
     pub(crate) local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
@@ -156,7 +156,7 @@ pub(crate) struct ToolCreateArgs {
     #[arg(
         long,
         conflicts_with = "global",
-        help = "Write to the current workdir .psychevo scope"
+        help = "Write to the current cwd .psychevo scope"
     )]
     pub(crate) local: bool,
     #[arg(long, help = "Overwrite an existing custom toolset")]
@@ -179,7 +179,7 @@ pub(crate) struct ToolRemoveArgs {
     #[arg(
         long,
         conflicts_with = "global",
-        help = "Remove from the current workdir .psychevo scope"
+        help = "Remove from the current cwd .psychevo scope"
     )]
     pub(crate) local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
@@ -296,7 +296,7 @@ pub(crate) struct AgentBackendAddArgs {
     #[arg(
         long,
         conflicts_with = "global",
-        help = "Write current workdir .psychevo/config.toml"
+        help = "Write current cwd .psychevo/config.toml"
     )]
     pub(crate) local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
@@ -332,7 +332,7 @@ pub(crate) struct AgentRunArgs {
     #[arg(
         long = "dir",
         value_name = "DIR",
-        help = "Run tools and resolve project config from this workdir"
+        help = "Run tools and resolve project config from this cwd"
     )]
     pub(crate) dir: Option<PathBuf>,
     #[arg(

@@ -5,16 +5,28 @@ psychevo_self_edit: deny
 
 Define acceptance coverage for the `pevo` product CLI.
 
-## Default Validation
+## Long-Term Acceptance Contract
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+- `pevo` command families remain singular, discoverable through help output,
+  and validated by clap-owned argument parsing.
+- CLI commands that read or write profile/project state use isolated
+  `PSYCHEVO_HOME`, cwd, config, and state paths in tests.
+- JSON output is structured, secret-free, and uses the common error shape for
+  command failures that intentionally report through stdout.
+- Commands that can contact providers or live services use deterministic local
+  fakes in default tests; real providers remain explicit live opt-in
+  validation.
+- Scoped writes default to the documented profile or project scope for that
+  command family and never mutate unrelated global user config.
 
-The default deterministic gate is:
+## Current Implementation Slice
 
-```bash
-scripts/validate-rust.sh broad
-```
+This testing topic covers the current product CLI surface for init, run,
+runtime config discovery, command metadata, sessions, models, config/auth,
+plugins, permissions, install helpers, stats, and context inspection. Manual
+broad validation for code changes is the Rust workspace gate defined by
+[065 CI/CD](../065-ci-cd/spec.md), but acceptance coverage should
+come from the focused command and smoke tests below.
 
 ## Init Coverage
 
@@ -34,7 +46,7 @@ scripts/validate-rust.sh broad
 - stdin-only prompt.
 - positional prompt plus stdin append.
 - empty prompt rejection before session creation.
-- `--dir` controls the tool workdir.
+- `--dir` controls the tool cwd.
 - `--format json` emits typed transcript NDJSON beginning with `thread.started`
   and `turn.started`.
 - `--format json` hides reasoning by default.
@@ -73,7 +85,7 @@ scripts/validate-rust.sh broad
 - missing home config rejects before `agent_start`.
 - TOML `reasoning_effort` uses the same validation as CLI `--variant`.
 - `none` disables lower-level reasoning effort.
-- latest-session lookup filters by canonical workdir and `source = "run"`.
+- latest-session lookup filters by canonical cwd and `source = "run"`.
 - SQLite state uses `user_version = 23`; older unsupported state databases reject with an
   explicit reset/cutover instruction.
 - Reasoning is preserved locally as folded assistant content, without entering
@@ -85,11 +97,14 @@ scripts/validate-rust.sh broad
   contract vocabulary while argv parsing remains clap-owned.
 - Representative command help, including `pevo run --help`, `pevo tui --help`,
   `pevo session --help`, `pevo session export --help`, `pevo skill --help`,
+  `pevo plugin --help`, `pevo plugin doctor --help`,
   `pevo model fetch --help`, `pevo config provider add --help`, and
   `pevo auth set --help`, describes arguments, flags, local writes, provider
-  calls, stdin secrets, JSON output, skill selection, and sensitive export
-  includes where applicable.
+  calls, stdin secrets, JSON output, skill and plugin selection, and sensitive
+  export includes where applicable.
 - `pevo skill` is the only skill command family; obsolete `pevo skills` is
+  rejected by argument parsing.
+- `pevo plugin` is the only plugin command family; obsolete `pevo plugins` is
   rejected by argument parsing.
 - `pevo session`, `pevo model`, `pevo config`, and `pevo auth` expose singular
   top-level command names.
@@ -99,7 +114,7 @@ scripts/validate-rust.sh broad
 - `pevo session list`, `show`, `rename`, `archive`, and `restore` operate on
   isolated SQLite state.
 - `latest` resolves the latest active `run` or `tui` session for the current
-  canonical workdir.
+  canonical cwd.
 - Exact ids are not fuzzy matched.
 - `--json` emits structured output; JSON errors use the common
   `{"type":"error","message":"..."}` shape.
@@ -107,7 +122,7 @@ scripts/validate-rust.sh broad
 ## Model Coverage
 
 - `pevo model list` and `pevo model current` read only local config/cache.
-- `pevo model set <provider/model>` writes the current workdir local top-level
+- `pevo model set <provider/model>` writes the current cwd local top-level
   model setting by default; `-g`/`--global` writes
   `$PSYCHEVO_HOME/config.toml`. It rejects unqualified model ids and unknown
   providers without contacting providers.
@@ -117,7 +132,7 @@ scripts/validate-rust.sh broad
 
 ## Config And Auth Coverage
 
-- Scoped config/auth writes default to the current workdir `.psychevo` scope;
+- Scoped config/auth writes default to the current cwd `.psychevo` scope;
   `-g`/`--global` writes global `$PSYCHEVO_HOME`.
 - `--global` and `--local` are mutually exclusive.
 - `--project` is rejected by argument parsing.
@@ -126,6 +141,26 @@ scripts/validate-rust.sh broad
   secret to the selected `.env`.
 - `pevo auth status` and `pevo auth set --api-key-stdin` never print raw
   secrets in human or JSON output.
+
+## Plugin Coverage
+
+- `pevo plugin list`, `view`, and `doctor` read isolated profile and project
+  plugin stores and emit secret-free JSON with `--json`.
+- `pevo plugin install <path>` defaults to active profile scope.
+- `pevo plugin install <path> --local` writes the current cwd plugin store.
+- `pevo plugin install <git-url> --ref <ref>` works with deterministic local
+  Git repositories in tests.
+- `pevo plugin uninstall`, `enable`, and `disable` honor default profile scope
+  and `-g`/`--global`.
+- `pevo plugin enable --local` and `disable --local` can resolve a
+  profile-installed plugin selector while writing only current cwd
+  `.psychevo/config.toml` policy.
+- `--global` and `--local` are mutually exclusive for plugin write commands.
+- Selector conflicts require `name@source`.
+- `pevo plugin marketplace list/add/remove` manages source catalogs separately
+  from plugin enablement policy.
+- Plugin worker fixtures can expose a tool through the normal run tool surface
+  without contacting a live provider.
 
 ## Permission Coverage
 
@@ -136,7 +171,7 @@ scripts/validate-rust.sh broad
 - `dontAsk` denies actions that would otherwise prompt unless they already
   match `permissions.allow` or a safe default.
 - `pevo config permissions list/remove` manages local allow, ask, and deny
-  rules in the current workdir's project-local `.psychevo/config.toml`.
+  rules in the current cwd's project-local `.psychevo/config.toml`.
 - `allow always` approval writes project-local TOML and skips exact duplicate
   rules.
 
@@ -152,10 +187,13 @@ scripts/validate-rust.sh broad
   Node.js, missing `pnpm`, and `--no-web` bypass behavior without cloning,
   installing, initializing, network access, provider credentials, or global
   Psychevo state.
+- Local checkout preflight failures for native and Web build prerequisites
+  include the optional `cargo xtask doctor deps check --only install`
+  diagnostic hint. Missing Cargo bootstrap failures do not require `xtask`.
 
 ## Stats Coverage
 
-- `pevo stats` defaults to the current workdir and reads only local SQLite
+- `pevo stats` defaults to the current cwd and reads only local SQLite
   state.
 - `pevo stats --all`, `--dir`, `--days`, `--limit`, and `--json` produce
   deterministic output.
@@ -166,7 +204,7 @@ scripts/validate-rust.sh broad
 ## Context Coverage
 
 - `pevo context` requires `--session <id|latest>`.
-- `latest` resolves active `run`/`tui` sessions by canonical workdir and
+- `latest` resolves active `run`/`tui` sessions by canonical cwd and
   honors `--dir`.
 - Exact session ids can inspect archived sessions.
 - Text output includes only implemented categories and no unavailable rows.
@@ -183,11 +221,18 @@ or explicit `PSYCHEVO_CONFIG`/`PSYCHEVO_DB` isolation, but they do not run in
 the default validation path.
 
 Repo-local CLI and TUI live validation may use the shared repo-local
-development home defined by [060 Automation](../060-automation/spec.md).
-Scripts that use `.local/.psychevo-dev/` must still set `PSYCHEVO_HOME`
-explicitly, set `PSYCHEVO_CONFIG` when they rely on that directory's
-`config.toml`, and set `PSYCHEVO_DB` when the run needs isolated state. They
-must not copy credential files automatically.
+development home defined by [065 CI/CD](../065-ci-cd/spec.md). The canonical
+entrypoints are:
+
+```bash
+cargo xtask init dev-env
+cargo xtask live run
+cargo xtask live run --suite provider
+```
+
+The live runner sets `PSYCHEVO_HOME`, `PSYCHEVO_CONFIG`, and `PSYCHEVO_DB`
+explicitly for each check, uses `.local/.psychevo-dev/config.toml` and `.env`
+for config and credentials, and must not copy credential files automatically.
 
 VHS terminal captures are projection evidence. Their tape waits should anchor on
 stable user-visible content from the exercised workflow instead of transient

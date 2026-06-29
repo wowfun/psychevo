@@ -24,8 +24,8 @@ api_key_env = "DEEPSEEK_API_KEY"
     .expect("global config");
     fs::write(global_dir.join(".env"), "DEEPSEEK_API_KEY=home-key\n").expect("global env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "deepseek");
     assert_eq!(resolved.model, "deepseek-chat");
@@ -53,8 +53,8 @@ no_auth = true
     )
     .expect("config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "opencode-zen");
     assert_eq!(resolved.model, "mimo-v2.5-free");
@@ -93,8 +93,8 @@ api_key_env = "DEEPSEEK_API_KEY"
     .expect("config");
     fs::write(custom_home.join(".env"), "DEEPSEEK_API_KEY=custom-key\n").expect("env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.base_url, "http://custom-home.example/v1");
     assert_eq!(resolved.api_key, "custom-key");
@@ -105,7 +105,7 @@ pub(crate) fn config_merge_dotenv_precedence_and_provider_qualified_model() {
     let temp = tempdir().expect("temp");
     let options = base_options(&temp);
     let config_dir = home_dir(&temp);
-    let project_dir = options.workdir.join(".psychevo");
+    let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&config_dir).expect("config dir");
     fs::create_dir_all(&project_dir).expect("project dir");
     write_config(
@@ -137,8 +137,8 @@ reasoning_effort = "high"
     .expect("project config");
     fs::write(project_dir.join(".env"), "DEEPSEEK_API_KEY='project-key'\n").expect("project env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "deepseek");
     assert_eq!(resolved.model, "deepseek-chat");
@@ -167,8 +167,8 @@ reasoning_effort = "medium"
     .expect("config");
     fs::write(config_dir.join(".env"), "XIAOMI_API_KEY=xiaomi-key\n").expect("env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "xiaomi");
     assert_eq!(resolved.model, "mimo-v2.5");
@@ -195,8 +195,8 @@ model = "xiaomi-token-plan/mimo-v2.5-pro"
     )
     .expect("env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "xiaomi-token-plan");
     assert_eq!(resolved.base_url, "https://token-plan-cn.xiaomimimo.com/v1");
@@ -530,8 +530,8 @@ output = 2.5
     .expect("config");
     fs::write(config_dir.join(".env"), "DEEPSEEK_API_KEY=key\n").expect("env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.context_limit, Some(1234));
     assert_eq!(resolved.reasoning_effort, None);
@@ -563,8 +563,8 @@ context_limit = 1234
     )
     .expect("config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let err = load_run_config(&options, &workdir).expect_err("legacy field");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let err = load_run_config(&options, &cwd).expect_err("legacy field");
     assert!(err.to_string().contains("use limit.context"));
 }
 
@@ -586,8 +586,8 @@ api_key = "secret"
     )
     .expect("config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let err = load_run_config(&options, &workdir).expect_err("raw key");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let err = load_run_config(&options, &cwd).expect_err("raw key");
     assert!(err.to_string().contains("raw API keys"));
 }
 
@@ -615,8 +615,8 @@ api_key_env = "CUSTOM_KEY"
     .expect("config");
     fs::write(config_dir.join(".env"), "CUSTOM_KEY=custom-key\n").expect("env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "custom");
     assert_eq!(resolved.display_label, "Xiaomi Token Plan CN");
@@ -666,9 +666,9 @@ pub(crate) fn set_default_model_writes_local_by_default_and_global_when_requeste
     let temp = tempdir().expect("temp");
     let options = base_options(&temp);
     let home = home_dir(&temp);
-    let workdir = options.workdir.clone();
+    let cwd = options.cwd.clone();
     fs::create_dir_all(&home).expect("home");
-    fs::create_dir_all(workdir.join(".psychevo")).expect("local config dir");
+    fs::create_dir_all(cwd.join(".psychevo")).expect("local config dir");
     write_config(
         home.join("config.toml"),
         r#"
@@ -678,7 +678,7 @@ base_url = "http://127.0.0.1:9"
     )
     .expect("global config");
     write_config(
-        workdir.join(".psychevo/config.toml"),
+        cwd.join(".psychevo/config.toml"),
         r#"
 [provider.localmock.options]
 base_url = "http://127.0.0.1:9"
@@ -686,11 +686,10 @@ base_url = "http://127.0.0.1:9"
     )
     .expect("local config");
 
-    let local = set_default_model(&home, &workdir, false, "localmock/local-model")
+    let local = set_default_model(&home, &cwd, false, "localmock/local-model")
         .expect("local default model");
     assert_eq!(local["scope"], "local");
-    let local_config =
-        fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("local config");
+    let local_config = fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("local config");
     assert!(local_config.contains("model = \"localmock/local-model\""));
     assert!(
         !fs::read_to_string(home.join("config.toml"))
@@ -698,8 +697,8 @@ base_url = "http://127.0.0.1:9"
             .contains("local-model")
     );
 
-    let global = set_default_model(&home, &workdir, true, "mock/global-model")
-        .expect("global default model");
+    let global =
+        set_default_model(&home, &cwd, true, "mock/global-model").expect("global default model");
     assert_eq!(global["scope"], "global");
     let global_config = fs::read_to_string(home.join("config.toml")).expect("global config");
     assert!(global_config.contains("model = \"mock/global-model\""));
@@ -709,7 +708,7 @@ base_url = "http://127.0.0.1:9"
 pub(crate) fn set_default_model_with_reasoning_writes_model_object() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     fs::create_dir_all(&home).expect("home");
     write_config(
         home.join("config.toml"),
@@ -721,7 +720,7 @@ base_url = "http://127.0.0.1:9"
     .expect("global config");
 
     let value =
-        set_default_model_with_reasoning(&home, &workdir, true, "mock/global-model", Some("high"))
+        set_default_model_with_reasoning(&home, &cwd, true, "mock/global-model", Some("high"))
             .expect("global default model with reasoning");
 
     assert_eq!(value["scope"], "global");
@@ -733,7 +732,7 @@ base_url = "http://127.0.0.1:9"
     assert!(global_config.contains("reasoning_effort = \"high\""));
 
     let err =
-        set_default_model_with_reasoning(&home, &workdir, true, "mock/global-model", Some("turbo"))
+        set_default_model_with_reasoning(&home, &cwd, true, "mock/global-model", Some("turbo"))
             .expect_err("invalid reasoning effort");
     assert!(err.to_string().contains("reasoning_effort"));
 }
@@ -742,11 +741,11 @@ base_url = "http://127.0.0.1:9"
 pub(crate) fn set_default_model_validates_provider_scope_without_catalog_fetch() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     fs::create_dir_all(home.join("cache")).expect("home");
-    fs::create_dir_all(workdir.join(".psychevo")).expect("local");
+    fs::create_dir_all(cwd.join(".psychevo")).expect("local");
     write_config(
-        workdir.join(".psychevo/config.toml"),
+        cwd.join(".psychevo/config.toml"),
         r#"
 [provider.localonly.options]
 base_url = "http://127.0.0.1:9"
@@ -754,15 +753,15 @@ base_url = "http://127.0.0.1:9"
     )
     .expect("local config");
 
-    set_default_model(&home, &workdir, false, "localonly/model").expect("local provider");
-    let global_err = set_default_model(&home, &workdir, true, "localonly/model")
+    set_default_model(&home, &cwd, false, "localonly/model").expect("local provider");
+    let global_err = set_default_model(&home, &cwd, true, "localonly/model")
         .expect_err("local provider cannot be global default");
     assert!(global_err.to_string().contains("unknown provider"));
-    let format_err = set_default_model(&home, &workdir, false, "unqualified")
+    let format_err = set_default_model(&home, &cwd, false, "unqualified")
         .expect_err("provider-qualified model required");
     assert!(format_err.to_string().contains("provider/model"));
     let unknown_err =
-        set_default_model(&home, &workdir, false, "unknown/model").expect_err("unknown provider");
+        set_default_model(&home, &cwd, false, "unknown/model").expect_err("unknown provider");
     assert!(unknown_err.to_string().contains("unknown provider"));
     assert!(!home.join("models_dev_cache.json").exists());
 }
@@ -803,8 +802,8 @@ model = "aux-model"
     )
     .expect("config");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let current = resolve_run_provider(&options, &loaded).expect("main provider");
     let compression =
         resolve_compression_config(&options, &loaded, &current).expect("compression provider");
@@ -818,7 +817,7 @@ model = "aux-model"
 pub(crate) fn auxiliary_model_assignment_writes_hermes_style_task_slot() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     fs::create_dir_all(&home).expect("home");
     write_config(
         home.join("config.toml"),
@@ -832,7 +831,7 @@ no_auth = true
 
     let value = set_auxiliary_model_with_reasoning(
         &home,
-        &workdir,
+        &cwd,
         true,
         "title_generation",
         "zen",
@@ -946,8 +945,8 @@ pub(crate) fn unique_model_default_and_multiple_model_rejection() {
     .expect("config");
     fs::write(config_dir.join(".env"), "XIAOMI_API_KEY=xiaomi-key\n").expect("env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.model, "mimo-v2.5");
 
@@ -962,7 +961,7 @@ pub(crate) fn unique_model_default_and_multiple_model_rejection() {
 "#,
     )
     .expect("config");
-    let loaded = load_run_config(&explicit_options, &workdir).expect("config");
+    let loaded = load_run_config(&explicit_options, &cwd).expect("config");
     let resolved = resolve_run_provider(&explicit_options, &loaded).expect("provider");
     assert_eq!(resolved.model, "mimo-v2.5");
 }
@@ -991,8 +990,8 @@ model = "xiaomi/mimo-v2.5"
     )
     .expect("env");
 
-    let workdir = canonical_workdir(&options.workdir).expect("workdir");
-    let loaded = load_run_config(&options, &workdir).expect("config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "deepseek");
     assert_eq!(resolved.model, "deepseek-chat");

@@ -335,7 +335,7 @@ pub(crate) fn set_export_fixture_session_metadata(conn: &Connection, session_id:
 pub(crate) fn insert_session(
     conn: &Connection,
     id: &str,
-    workdir: &Path,
+    cwd: &Path,
     source: &str,
     started_at_ms: i64,
     updated_at_ms: i64,
@@ -343,7 +343,7 @@ pub(crate) fn insert_session(
     conn.execute(
         r#"
         INSERT INTO sessions (
-            id, source, parent_session_id, workdir, model, provider,
+            id, source, parent_session_id, cwd, model, provider,
             started_at_ms, updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
             message_count, tool_call_count, title, metadata_json
         ) VALUES (?1, ?2, NULL, ?3, 'model', 'provider',
@@ -352,7 +352,7 @@ pub(crate) fn insert_session(
         rusqlite::params![
             id,
             source,
-            workdir.to_string_lossy(),
+            cwd.to_string_lossy(),
             started_at_ms,
             updated_at_ms
         ],

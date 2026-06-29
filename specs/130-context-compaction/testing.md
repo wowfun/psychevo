@@ -9,8 +9,8 @@ Define deterministic acceptance coverage for runtime-owned context compaction,
 checkpoint persistence, compacted context projection, summary generation, and
 TUI `/compact` behavior.
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 ## Long-Term Acceptance Contract
 
@@ -93,13 +93,13 @@ Relevant narrow validation:
 
 Broad deterministic validation:
 
-- `scripts/validate-rust.sh broad`
+- `cargo xtask ci run --profile rust-broad`
 
 ## Validation Boundaries
 
 - Tests should use fake or test providers for summary generation and
   context-overflow retry behavior.
-- Tests must isolate `PSYCHEVO_HOME`, `PSYCHEVO_DB`, config files, workdirs,
+- Tests must isolate `PSYCHEVO_HOME`, `PSYCHEVO_DB`, config files, cwds,
   and any process environment changes.
 - Assertions should target behavior, token-estimate invariants, checkpoint
   validity, and projected context shape rather than provider prompt wording or

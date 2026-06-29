@@ -6,9 +6,9 @@ pub(crate) fn cli_run_keeps_agents_skill_and_prompt_as_separate_provider_message
     let server = MockSseServer::start(vec![sse_text("combined final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("git");
-    std::fs::write(workdir.join("AGENTS.md"), "Use project workflow.").expect("agents");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("git");
+    std::fs::write(cwd.join("AGENTS.md"), "Use project workflow.").expect("agents");
     write_home_skill(
         temp.path(),
         "reviewer",
@@ -20,7 +20,7 @@ pub(crate) fn cli_run_keeps_agents_skill_and_prompt_as_separate_provider_message
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "$reviewer do it",
@@ -86,15 +86,15 @@ pub(crate) fn cli_run_warns_for_claude_memory_without_loading_it() {
     let server = MockSseServer::start(vec![sse_text("claude final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("git");
-    std::fs::write(workdir.join("CLAUDE.md"), "Do not load this Claude memory.").expect("claude");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("git");
+    std::fs::write(cwd.join("CLAUDE.md"), "Do not load this Claude memory.").expect("claude");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "hello",
@@ -138,12 +138,12 @@ pub(crate) fn cli_run_default_writes_claude_warning_to_stderr_only() {
     let server = MockSseServer::start(vec![sse_text("default final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".git")).expect("git");
-    std::fs::write(workdir.join("CLAUDE.local.md"), "local claude").expect("claude local");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("git");
+    std::fs::write(cwd.join("CLAUDE.local.md"), "local claude").expect("claude local");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
-        .args(["run", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .args(["run", "--dir", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo run");
     assert!(
@@ -171,14 +171,14 @@ pub(crate) fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() 
     ]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let hidden = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "hello",
@@ -199,7 +199,7 @@ pub(crate) fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() 
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "--include-reasoning",
@@ -232,13 +232,13 @@ pub(crate) fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() 
 pub(crate) fn cli_run_include_reasoning_requires_json_format() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--include-reasoning",
             "hello",
         ])
@@ -253,13 +253,13 @@ pub(crate) fn cli_run_json_omits_metadata_only_message_updates() {
     let server = MockSseServer::start(vec![sse_metadata_usage_then_text("metadata final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "hello",
@@ -299,11 +299,11 @@ pub(crate) fn cli_run_reads_stdin_and_appends_to_positional_prompt() {
     ]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let mut stdin_only = isolated_run_cmd(temp.path(), &config, &db)
-        .args(["run", "--dir", workdir.to_str().expect("workdir")])
+        .args(["run", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -323,13 +323,7 @@ pub(crate) fn cli_run_reads_stdin_and_appends_to_positional_prompt() {
     );
 
     let mut appended = isolated_run_cmd(temp.path(), &config, &db)
-        .args([
-            "run",
-            "--dir",
-            workdir.to_str().expect("workdir"),
-            "fix",
-            "this",
-        ])
+        .args(["run", "--dir", cwd.to_str().expect("cwd"), "fix", "this"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -359,10 +353,10 @@ pub(crate) fn cli_run_reads_stdin_and_appends_to_positional_prompt() {
 pub(crate) fn cli_run_empty_prompt_rejects_before_session_creation() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
     let mut child = isolated_run_cmd(temp.path(), &config, &db)
-        .args(["run", "--dir", workdir.to_str().expect("workdir")])
+        .args(["run", "--dir", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -384,7 +378,7 @@ pub(crate) fn cli_run_empty_prompt_rejects_before_session_creation() {
 pub(crate) fn cli_run_errors_use_selected_output_format() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config_dir = temp.path().join("config");
     std::fs::create_dir_all(&config_dir).expect("config dir");
     let config = config_dir.join("config.toml");
@@ -403,7 +397,7 @@ api_key_env = "PSYCHEVO_TEST_MISSING_KEY_SHOULD_NOT_EXIST"
     .expect("config");
 
     let default_output = isolated_run_cmd(temp.path(), &config, &db)
-        .args(["run", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .args(["run", "--dir", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo run");
     assert!(!default_output.status.success());
@@ -413,7 +407,7 @@ api_key_env = "PSYCHEVO_TEST_MISSING_KEY_SHOULD_NOT_EXIST"
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--format",
             "json",
             "hello",
@@ -455,7 +449,7 @@ pub(crate) fn cli_run_rejects_removed_flags() {
         &["run", "--base-url", "http://127.0.0.1:9", "hello"],
         &["run", "--api-key-env", "KEY", "hello"],
         &["run", "--db", "state.db", "hello"],
-        &["run", "--workdir", ".", "hello"],
+        &["run", "--cwd", ".", "hello"],
         &["run", "--max-context-messages", "1", "hello"],
         &["run", "--verbose", "hello"],
         &["run", "--config", "config.toml", "hello"],
@@ -479,14 +473,14 @@ pub(crate) fn cli_run_model_override_requires_provider_qualified_model() {
     let server = MockSseServer::start(vec![sse_text("model final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let output = isolated_run_cmd(temp.path(), &config, &db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "-m",
             "mock/mock-model",
             "hello",
@@ -504,7 +498,7 @@ pub(crate) fn cli_run_model_override_requires_provider_qualified_model() {
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "-m",
             "mock-model",
             "hello",
@@ -520,13 +514,13 @@ pub(crate) fn cli_run_variant_overrides_reasoning_effort_and_none_suppresses_it(
     let high_server = MockSseServer::start(vec![sse_text("high")]);
     let temp = tempdir().expect("temp");
     let high_db = temp.path().join("high.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let high_config = write_run_config(&temp.path().join("high-config"), &high_server.base_url);
     let high = isolated_run_cmd(temp.path(), &high_config, &high_db)
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--variant",
             "high",
             "hello",
@@ -547,7 +541,7 @@ pub(crate) fn cli_run_variant_overrides_reasoning_effort_and_none_suppresses_it(
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--variant",
             "none",
             "hello",
@@ -572,11 +566,11 @@ pub(crate) fn cli_run_continue_reuses_latest_matching_run_session() {
     ]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let first = isolated_run_cmd(temp.path(), &config, &db)
-        .args(["run", "--dir", workdir.to_str().expect("workdir"), "first"])
+        .args(["run", "--dir", cwd.to_str().expect("cwd"), "first"])
         .output()
         .expect("first run");
     assert!(
@@ -588,7 +582,7 @@ pub(crate) fn cli_run_continue_reuses_latest_matching_run_session() {
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--continue",
             "second",
         ])
@@ -618,7 +612,7 @@ pub(crate) fn cli_run_continue_reuses_latest_matching_run_session() {
         .args([
             "run",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--continue",
             "--session",
             "session-id",
@@ -631,11 +625,11 @@ pub(crate) fn cli_run_continue_reuses_latest_matching_run_session() {
 }
 
 #[test]
-pub(crate) fn cli_stats_reports_current_workdir_and_json() {
+pub(crate) fn cli_stats_reports_current_cwd_and_json() {
     let server = MockSseServer::start(vec![sse_text("stats")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
+    let cwd = temp.path().join("work");
     let init = pevo_cmd(temp.path()).arg("init").output().expect("init");
     assert!(
         init.status.success(),
@@ -644,7 +638,7 @@ pub(crate) fn cli_stats_reports_current_workdir_and_json() {
     );
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
     let run = isolated_run_cmd(temp.path(), &config, &db)
-        .args(["run", "--dir", workdir.to_str().expect("workdir"), "hello"])
+        .args(["run", "--dir", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("run");
     assert!(run.status.success());
@@ -654,7 +648,7 @@ pub(crate) fn cli_stats_reports_current_workdir_and_json() {
         .args([
             "stats",
             "--dir",
-            workdir.to_str().expect("workdir"),
+            cwd.to_str().expect("cwd"),
             "--days",
             "30",
             "--limit",

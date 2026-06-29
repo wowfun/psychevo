@@ -6,7 +6,7 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 use serde_json::json;
 
-pub(crate) struct ExecCommandTool(WorkdirTool);
+pub(crate) struct ExecCommandTool(CwdTool);
 
 pub(crate) struct WriteStdinTool;
 
@@ -18,8 +18,8 @@ pub(crate) const PTY_FALLBACK_NOTICE: &str =
     "[exec_command] tty=true requested but PTY was unavailable; running with pipes instead.\n";
 
 impl ExecCommandTool {
-    pub(crate) fn new(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
-        Self(WorkdirTool::with_context(workdir, context))
+    pub(crate) fn new(cwd: PathBuf, context: ToolRuntimeContext) -> Self {
+        Self(CwdTool::with_context(cwd, context))
     }
 }
 
@@ -47,9 +47,9 @@ impl ToolBinding for ExecCommandTool {
                     "type": "string",
                     "description": "Shell command to run."
                 },
-                "workdir": {
+                "cwd": {
                     "type": "string",
-                    "description": "Working directory for the command. Relative paths resolve against the accepted workdir; absolute paths must pass permission and resource gates."
+                    "description": "Working directory for the command. Relative paths resolve against the accepted cwd; absolute paths must pass permission and resource gates."
                 },
                 "shell": {
                     "type": "string",
@@ -92,11 +92,11 @@ impl ToolBinding for ExecCommandTool {
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let accepted_workdir = self.0.workdir.clone();
+        let accepted_cwd = self.0.cwd.clone();
         let context = self.0.context.clone();
         Box::pin(async move {
             match exec_command_tool_impl_with_context(
-                accepted_workdir,
+                accepted_cwd,
                 context,
                 tool_call_id,
                 args,
@@ -170,13 +170,13 @@ impl ToolBinding for WriteStdinTool {
 
 #[cfg(test)]
 pub(crate) async fn exec_command_tool_impl(
-    accepted_workdir: PathBuf,
+    accepted_cwd: PathBuf,
     allow_login_shell: bool,
     args: Value,
     abort: AbortSignal,
 ) -> Result<Value> {
     exec_command_tool_impl_with_context(
-        accepted_workdir,
+        accepted_cwd,
         ToolRuntimeContext {
             task_id: "default".to_string(),
             lsp: LspConfig::default(),
@@ -196,7 +196,7 @@ pub(crate) async fn exec_command_tool_impl(
 }
 
 pub(crate) async fn exec_command_tool_impl_with_context(
-    accepted_workdir: PathBuf,
+    accepted_cwd: PathBuf,
     context: ToolRuntimeContext,
     tool_call_id: String,
     args: Value,
@@ -207,7 +207,7 @@ pub(crate) async fn exec_command_tool_impl_with_context(
         return Err(Error::Message("cmd must not be empty".to_string()));
     }
     reject_untracked_background_command(&cmd)?;
-    let workdir = resolve_exec_workdir(&accepted_workdir, optional_string(&args, "workdir")?)?;
+    let cwd = resolve_exec_cwd(&accepted_cwd, optional_string(&args, "cwd")?)?;
     let shell = optional_string(&args, "shell")?
         .map(ToOwned::to_owned)
         .unwrap_or_else(default_shell);
@@ -233,7 +233,7 @@ pub(crate) async fn exec_command_tool_impl_with_context(
     let max_output_tokens = output_token_limit(optional_i64(&args, "max_output_tokens")?)?;
     let invocation = ExecInvocation {
         cmd,
-        workdir,
+        cwd,
         shell,
         login,
         tty,
@@ -303,14 +303,14 @@ pub(crate) async fn write_stdin_tool_impl_with_call(
 }
 
 pub(crate) async fn run_exec_command_for_user_shell(
-    workdir: PathBuf,
+    cwd: PathBuf,
     command: String,
     sandbox_policy: SandboxPolicy,
     abort: AbortSignal,
 ) -> Result<(Value, bool)> {
     let invocation = ExecInvocation {
         cmd: command,
-        workdir,
+        cwd,
         shell: default_shell(),
         login: false,
         tty: false,
@@ -367,7 +367,7 @@ pub(crate) async fn run_exec_command_for_user_shell(
 #[derive(Clone)]
 pub(crate) struct ExecInvocation {
     pub(crate) cmd: String,
-    pub(crate) workdir: PathBuf,
+    pub(crate) cwd: PathBuf,
     pub(crate) shell: String,
     pub(crate) login: bool,
     pub(crate) tty: bool,
@@ -393,7 +393,7 @@ pub(crate) struct ExecSession {
     pub(crate) task_id: String,
     pub(crate) root_tool_call_id: String,
     pub(crate) cmd: String,
-    pub(crate) workdir: PathBuf,
+    pub(crate) cwd: PathBuf,
     pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) started: Instant,
     pub(crate) started_at_ms: i64,
@@ -441,7 +441,7 @@ impl ExecSession {
             task_id: context.task_id,
             root_tool_call_id: context.root_tool_call_id,
             cmd: invocation.cmd.clone(),
-            workdir: invocation.workdir.clone(),
+            cwd: invocation.cwd.clone(),
             stream_events: context.stream_events,
             started: Instant::now(),
             started_at_ms: now_unix_ms(),
@@ -646,7 +646,7 @@ pub(crate) fn spawn_pipe_session(
     invocation.sandbox_policy.ensure_shell_supported()?;
     let mut command = pipe_command(invocation)?;
     command
-        .current_dir(&invocation.workdir)
+        .current_dir(&invocation.cwd)
         .stdin(if stdin_allowed {
             Stdio::piped()
         } else {
@@ -761,7 +761,7 @@ pub(crate) fn spawn_pty_session(
         .map_err(|err| Error::Message(err.to_string()))?;
     let mut command = portable_pty::CommandBuilder::new(&invocation.shell);
     command.args(shell_args(invocation.login, &invocation.cmd));
-    command.cwd(invocation.workdir.as_os_str());
+    command.cwd(invocation.cwd.as_os_str());
     if let Some(path) = subprocess_path(&invocation.path_prefixes)? {
         command.env("PATH", path);
     }

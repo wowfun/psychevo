@@ -42,17 +42,11 @@ impl StateRuntime {
         Ok(())
     }
 
-    pub fn delete_sessions_for_workdir_with_source(
-        &self,
-        workdir: &Path,
-        source: &str,
-    ) -> Result<usize> {
-        let ids = self
-            .store
-            .session_ids_for_workdir_with_source(workdir, source)?;
+    pub fn delete_sessions_for_cwd_with_source(&self, cwd: &Path, source: &str) -> Result<usize> {
+        let ids = self.store.session_ids_for_cwd_with_source(cwd, source)?;
         let count = self
             .store
-            .delete_sessions_for_workdir_with_source(workdir, source)?;
+            .delete_sessions_for_cwd_with_source(cwd, source)?;
         for id in ids {
             let _ = remove_session_trace_dir(&self.db_path, &id);
         }

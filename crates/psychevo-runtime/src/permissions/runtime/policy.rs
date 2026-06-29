@@ -1,6 +1,6 @@
 impl PermissionRuntime {
     pub(crate) fn evaluate(&self, tool_name: &str, args: &Value) -> PermissionDecision {
-        let action = PermissionAction::from_tool_call(&self.inner.workdir, tool_name, args);
+        let action = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args);
         let Some(action) = action else {
             return PermissionDecision::Allow;
         };
@@ -66,7 +66,7 @@ impl PermissionRuntime {
             } => {
                 if self.inner.mode == PermissionMode::AcceptEdits
                     && action.is_safe_file_edit()
-                    && action.file_targets_all_within_workdir()
+                    && action.file_targets_all_within_cwd()
                 {
                     return PermissionDecision::Allow;
                 }
@@ -115,17 +115,17 @@ impl PermissionRuntime {
         let PermissionAction::ExecCommand {
             command,
             normalized,
-            workdir,
+            cwd,
         } = action
         else {
             return None;
         };
-        if workdir
+        if cwd
             .as_ref()
-            .is_some_and(|target| !target.within_workdir)
+            .is_some_and(|target| !target.within_cwd)
         {
             return Some(ActionPolicyEvaluation::Ask {
-                reason: "command workdir outside accepted workdir requires approval".to_string(),
+                reason: "command cwd outside accepted cwd requires approval".to_string(),
                 matched_rule: None,
                 suggested_rule: action.suggested_rule(),
                 persistent_grants: action.persistent_grants(),
@@ -194,7 +194,7 @@ impl PermissionRuntime {
         }
         let targets = paths
             .iter()
-            .map(|path| file_target(&self.inner.workdir, path))
+            .map(|path| file_target(&self.inner.cwd, path))
             .collect::<Vec<_>>();
         if targets
             .iter()

@@ -1,4 +1,3 @@
-
 impl fmt::Debug for ModelCatalogProvider {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -15,7 +14,7 @@ impl fmt::Debug for ModelCatalogProvider {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelCatalogEntry {
     pub id: String,
     pub context_limit: Option<u64>,
@@ -35,6 +34,7 @@ pub struct ModelMetadata {
     pub cost: Option<ModelCost>,
     pub capabilities: ModelCapabilities,
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<Value>,
 }
 

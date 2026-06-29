@@ -1,6 +1,6 @@
 impl PermissionRuntime {
     pub(crate) fn new(
-        workdir: PathBuf,
+        cwd: PathBuf,
         project_config_dir: PathBuf,
         config: PermissionConfig,
         mode: PermissionMode,
@@ -10,7 +10,7 @@ impl PermissionRuntime {
     ) -> Self {
         Self {
             inner: Arc::new(PermissionRuntimeInner {
-                workdir,
+                cwd,
                 project_config_dir,
                 mode,
                 config,
@@ -21,8 +21,16 @@ impl PermissionRuntime {
                 approval_events: Mutex::new(Vec::new()),
                 approval_handler,
                 smart_approval_handler,
+                hook_runtime: None,
             }),
         }
+    }
+
+    pub(crate) fn with_hook_runtime(mut self, hook_runtime: crate::hooks::HookRuntime) -> Self {
+        let inner = Arc::get_mut(&mut self.inner)
+            .expect("hook runtime must be attached before PermissionRuntime is cloned");
+        inner.hook_runtime = Some(hook_runtime);
+        self
     }
 
     pub(crate) fn with_sandbox(
@@ -101,7 +109,7 @@ impl PermissionRuntime {
         if abort.as_ref().is_some_and(AbortSignal::aborted) {
             return Err(ToolOutput::error("aborted"));
         }
-        let action = PermissionAction::from_tool_call(&self.inner.workdir, tool_name, args);
+        let action = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args);
         match self.evaluate(tool_name, args) {
             PermissionDecision::Allow => {
                 let sandbox_grant = match action.as_ref() {

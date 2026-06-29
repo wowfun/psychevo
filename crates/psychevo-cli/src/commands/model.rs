@@ -4,7 +4,8 @@ use std::process::ExitCode;
 use anyhow::{Result, anyhow};
 use psychevo_runtime::{
     ConfiguredModel, ModelCatalogEntry, ModelCatalogProvider, configured_models,
-    fetch_model_catalog, model_catalog_providers, selected_configured_model, set_default_model,
+    fetch_and_cache_model_catalog, model_catalog_providers, selected_configured_model,
+    set_default_model,
 };
 use serde_json::{Value, json};
 
@@ -35,7 +36,7 @@ pub(crate) async fn run_model_command_inner(args: &ModelArgs) -> Result<ExitCode
         ModelCommand::List(args) => list_models(args, &options)?,
         ModelCommand::Current(args) => current_model(args, &options)?,
         ModelCommand::Set(args) => set_model(args, &home, &cwd)?,
-        ModelCommand::Fetch(args) => fetch_models(args, &options).await?,
+        ModelCommand::Fetch(args) => fetch_models(args, &home, &options).await?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -121,6 +122,7 @@ pub(crate) fn set_model(
 
 pub(crate) async fn fetch_models(
     args: &ModelFetchArgs,
+    home: &std::path::Path,
     options: &psychevo_runtime::RunOptions,
 ) -> Result<()> {
     let mut providers = model_catalog_providers(options)?;
@@ -139,7 +141,7 @@ pub(crate) async fn fetch_models(
 
     let mut rows = Vec::new();
     for provider in &providers {
-        let models = fetch_model_catalog(provider).await?;
+        let models = fetch_and_cache_model_catalog(home, provider).await?;
         rows.push(json!({
             "provider": provider_value(provider),
             "models": models.iter().map(catalog_model_value).collect::<Vec<_>>(),

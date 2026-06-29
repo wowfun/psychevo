@@ -4,26 +4,26 @@ pub(crate) use super::*;
 pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     assert!(
         std::process::Command::new("git")
             .arg("-C")
-            .arg(&workdir)
+            .arg(&cwd)
             .arg("init")
             .output()
             .expect("git init")
             .status
             .success()
     );
-    let file = workdir.join("tracked.txt");
+    let file = cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
 
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
-    let snapshots = SnapshotStore::new(temp.path().join("snapshots"), workdir.clone());
+    let snapshots = SnapshotStore::new(temp.path().join("snapshots"), cwd.clone());
     let before_first = snapshots
         .track()
         .expect("track first")
@@ -59,7 +59,7 @@ pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
 
     let options = SessionUndoOptions {
         state: StateRuntime::open(&db).expect("state runtime"),
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
     };
@@ -118,25 +118,25 @@ pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
 pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     assert!(
         std::process::Command::new("git")
             .arg("-C")
-            .arg(&workdir)
+            .arg(&cwd)
             .arg("init")
             .output()
             .expect("git init")
             .status
             .success()
     );
-    let file = workdir.join("tracked.txt");
+    let file = cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
-    let snapshots = SnapshotStore::new(temp.path().join("snapshots"), workdir.clone());
+    let snapshots = SnapshotStore::new(temp.path().join("snapshots"), cwd.clone());
     let before_first = snapshots
         .track()
         .expect("track first")
@@ -170,7 +170,7 @@ pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
 
     undo_session(SessionUndoOptions {
         state: StateRuntime::open(&db).expect("state runtime"),
-        workdir,
+        cwd,
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
     })
@@ -198,15 +198,15 @@ pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
 pub(crate) fn undo_redo_error_paths_do_not_mutate_revert_state() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let store = SqliteStore::open(&db).expect("store");
     let session_id = store
-        .create_session_with_metadata(&workdir, "tui", "model", "provider", None)
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
     let options = SessionUndoOptions {
         state: StateRuntime::open(&db).expect("state runtime"),
-        workdir: workdir.clone(),
+        cwd: cwd.clone(),
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
     };

@@ -51,7 +51,7 @@ pub(crate) fn prepare_harbor_compose(
     yaml.push_str("    command: [\"sh\", \"-lc\", \"sleep infinity\"]\n");
     yaml.push_str(&format!(
         "    working_dir: {}\n",
-        yaml_scalar(&environment.workdir)
+        yaml_scalar(&environment.cwd)
     ));
     if !environment.allow_internet {
         yaml.push_str("    network_mode: none\n");
@@ -83,7 +83,7 @@ pub(crate) fn prepare_harbor_compose(
     Ok(ContainerRuntime {
         project_name,
         compose_path,
-        workdir: environment.workdir.clone(),
+        cwd: environment.cwd.clone(),
     })
 }
 

@@ -39,7 +39,7 @@ pub(crate) use psychevo_runtime::{
     RunMode, RunOptions, RunStreamEvent, SessionArtifactKind, SessionExportFormat,
     SessionExportIncludeSet, SessionExportOptions, SessionSummary, SessionUndoOptions,
     SkillDiscoveryOptions, SkillTarget, StateRuntime, UserContentBlock, WorkspaceDiff,
-    WorkspaceDiffFile, append_local_permission_rule, canonicalize_workdir, collect_workspace_diff,
+    WorkspaceDiffFile, append_local_permission_rule, canonicalize_cwd, collect_workspace_diff,
     compact_session, configured_models, context_snapshot, default_session_export_filename,
     discover_agents, discover_skills, format_context_snapshot_text_with_options, install_skill,
     list_agents_value, list_skill_bundles, model_catalog_providers, permission_rules_value,

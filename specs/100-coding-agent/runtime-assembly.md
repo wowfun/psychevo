@@ -51,7 +51,7 @@ Deterministic runtime harnesses support:
 - resume by explicit session id
 
 The live run entrypoint supports create, resume by explicit session id, and
-product-CLI continue selection of the latest run session for a workdir.
+product-CLI continue selection of the latest run session for a cwd.
 
 Session ids are UUID v7 text values. Reopening an existing session appends new
 messages to the same durable session instead of creating a per-invocation root.
@@ -68,10 +68,10 @@ tool-call/tool-result relationships.
 
 ## Project Instructions
 
-Runtime discovers project instructions from the canonical workdir before each
+Runtime discovers project instructions from the canonical cwd before each
 live coding-agent invocation. The first slice uses `.git` as the project-root
-marker. When no `.git` ancestor exists, only the canonical workdir is searched.
-When a root exists, runtime searches directories from root to workdir.
+marker. When no `.git` ancestor exists, only the canonical cwd is searched.
+When a root exists, runtime searches directories from root to cwd.
 
 For each searched directory, runtime appends non-empty regular files in this
 order:

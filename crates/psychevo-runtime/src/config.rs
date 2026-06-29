@@ -11,7 +11,7 @@ pub(crate) use crate::agents::{
     default_peer_client_capabilities, valid_agent_name,
 };
 pub(crate) use crate::error::{Error, Result};
-pub(crate) use crate::paths::canonical_workdir;
+pub(crate) use crate::paths::canonical_cwd;
 pub(crate) use crate::sandbox::{SandboxConfig, SandboxMode};
 pub(crate) use crate::types::{
     ApprovalPolicy, ApprovalsReviewer, AutoReviewConfig, ConfigScope, ConfiguredModel,
@@ -38,6 +38,7 @@ pub(crate) struct RunConfig {
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) agent_backends: BTreeMap<String, AgentBackendConfig>,
     pub(crate) channels: ChannelsConfig,
+    pub(crate) plugins: PluginPolicyConfig,
 }
 
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.
@@ -47,7 +48,7 @@ pub(crate) mod config_types;
 pub(crate) use config_types::*;
 pub use config_types::{
     DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, REASONING_EFFORT_VALUES,
-    load_agent_backend_configs, resolve_default_workspace_workdir, resolve_workspace_root,
+    load_agent_backend_configs, resolve_default_workspace_cwd, resolve_workspace_root,
 };
 #[path = "config/file_env.rs"]
 pub(crate) mod config_file_env;

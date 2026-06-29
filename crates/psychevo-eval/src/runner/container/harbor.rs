@@ -18,7 +18,7 @@ pub(crate) fn run_harbor_container_case(
         json!({
             "project": runtime.project_name,
             "compose": "container/docker-compose.yml",
-            "workdir": runtime.workdir,
+            "cwd": runtime.cwd,
             "image": environment.docker_image,
             "allow_internet": environment.allow_internet,
         }),
@@ -90,9 +90,9 @@ pub(crate) fn run_harbor_container_case(
         .unwrap_or(default_agent_timeout_seconds());
     let verifier = docker_compose_exec_shell(
         &runtime,
-        &runtime.workdir,
+        &runtime.cwd,
         &BTreeMap::from([
-            ("PEVAL_WORKSPACE".to_string(), runtime.workdir.clone()),
+            ("PEVAL_WORKSPACE".to_string(), runtime.cwd.clone()),
             ("PEVAL_TASK_DIR".to_string(), "/task".to_string()),
             ("PEVAL_LOGS".to_string(), "/logs".to_string()),
             ("PEVAL_TASK_ID".to_string(), case.task.id.clone()),
@@ -151,7 +151,7 @@ pub(crate) fn run_harbor_container_case(
             fs::remove_dir_all(&retained_workspace)
                 .with_context(|| format!("failed to remove {}", retained_workspace.display()))?;
         }
-        copy_from_container(&runtime, &runtime.workdir, &retained_workspace)
+        copy_from_container(&runtime, &runtime.cwd, &retained_workspace)
             .with_context(|| "failed to retain container workspace artifact")?;
     }
 

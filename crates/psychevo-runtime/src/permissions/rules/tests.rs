@@ -313,9 +313,9 @@ print(len(data))""#;
     }
 
     #[test]
-    fn outside_workdir_exec_workdir_defaults_to_ask() {
+    fn outside_cwd_exec_cwd_defaults_to_ask() {
         let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
-        let decision = runtime.evaluate("exec_command", &json!({"cmd": "pwd", "workdir": "/tmp"}));
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": "pwd", "cwd": "/tmp"}));
         assert!(matches!(decision, PermissionDecision::Ask { .. }));
     }
 
@@ -430,10 +430,10 @@ print(len(data))""#;
             .authorize(
                 "call-1",
                 "read",
-                &json!({"path": "/tmp/outside-workdir.txt"}),
+                &json!({"path": "/tmp/outside-cwd.txt"}),
             )
             .await
-            .expect_err("outside workdir read should need a handler");
+            .expect_err("outside cwd read should need a handler");
         assert!(output.is_error);
         assert_eq!(output.json["permission"]["decision"], "denied");
         assert!(

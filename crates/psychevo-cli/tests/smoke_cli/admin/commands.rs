@@ -3,11 +3,9 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-pub(crate) fn admin_cmd(test_home: &Path, psychevo_home: &Path, workdir: &Path) -> Command {
+pub(crate) fn admin_cmd(test_home: &Path, psychevo_home: &Path, cwd: &Path) -> Command {
     let mut command = pevo_cmd(test_home);
-    command
-        .env("PSYCHEVO_HOME", psychevo_home)
-        .current_dir(workdir);
+    command.env("PSYCHEVO_HOME", psychevo_home).current_dir(cwd);
     command
 }
 
@@ -71,11 +69,11 @@ pub(crate) fn cli_rejects_obsolete_plural_skills_command() {
 pub(crate) fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secret() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
 
-    let add_local = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let add_local = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "config",
             "provider",
@@ -102,12 +100,11 @@ pub(crate) fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secr
     assert_eq!(value["api_key_env"], "MOCK_LOCAL_KEY");
     assert_eq!(value["wrote_api_key"], false);
 
-    let local_config =
-        std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("config");
+    let local_config = std::fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("config");
     assert!(local_config.contains("MOCK_LOCAL_KEY"));
     assert!(!local_config.contains("secret-key"));
 
-    let mut set_cmd = admin_cmd(temp.path(), &psychevo_home, &workdir);
+    let mut set_cmd = admin_cmd(temp.path(), &psychevo_home, &cwd);
     set_cmd.args(["auth", "set", "mock-local", "--api-key-stdin", "--json"]);
     let set = run_with_stdin(set_cmd, "secret-key\n");
     assert!(
@@ -117,10 +114,10 @@ pub(crate) fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secr
     );
     assert!(!String::from_utf8_lossy(&set.stdout).contains("secret-key"));
     assert!(!String::from_utf8_lossy(&set.stderr).contains("secret-key"));
-    let local_env = std::fs::read_to_string(workdir.join(".psychevo/.env")).expect("env");
+    let local_env = std::fs::read_to_string(cwd.join(".psychevo/.env")).expect("env");
     assert_eq!(local_env, "MOCK_LOCAL_KEY=secret-key\n");
 
-    let status = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let status = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["auth", "status", "mock-local", "--json"])
         .output()
         .expect("auth status");
@@ -133,7 +130,7 @@ pub(crate) fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secr
     assert_eq!(value["providers"][0]["status"], "present");
     assert!(!String::from_utf8_lossy(&status.stdout).contains("secret-key"));
 
-    let mut add_global_cmd = admin_cmd(temp.path(), &psychevo_home, &workdir);
+    let mut add_global_cmd = admin_cmd(temp.path(), &psychevo_home, &cwd);
     add_global_cmd.args([
         "config",
         "provider",
@@ -167,17 +164,17 @@ pub(crate) fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secr
 pub(crate) fn cli_gateway_setup_channels_are_secret_free_and_old_command_is_removed() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
 
-    let old = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let old = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["channel", "list"])
         .output()
         .expect("old channel command");
     assert!(!old.status.success());
 
-    let mut setup_cmd = admin_cmd(temp.path(), &psychevo_home, &workdir);
+    let mut setup_cmd = admin_cmd(temp.path(), &psychevo_home, &cwd);
     setup_cmd.args([
         "gateway",
         "setup",
@@ -220,7 +217,7 @@ pub(crate) fn cli_gateway_setup_channels_are_secret_free_and_old_command_is_remo
     let env = std::fs::read_to_string(psychevo_home.join(".env")).expect("env");
     assert!(env.contains("TELEGRAM_BOT_TOKEN=telegram-secret"));
 
-    let status = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let status = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["gateway", "status", "--json"])
         .output()
         .expect("gateway status");
@@ -241,8 +238,8 @@ pub(crate) fn cli_gateway_setup_channels_are_secret_free_and_old_command_is_remo
 pub(crate) fn cli_gateway_setup_wechat_qr_writes_env_backed_config_without_leaking_secret() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
     let server = MockJsonServer::start(vec![
         serde_json::json!({
@@ -258,7 +255,7 @@ pub(crate) fn cli_gateway_setup_wechat_qr_writes_env_backed_config_without_leaki
         }),
     ]);
 
-    let setup = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let setup = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "gateway",
             "setup",
@@ -308,11 +305,11 @@ pub(crate) fn cli_gateway_setup_wechat_qr_writes_env_backed_config_without_leaki
 pub(crate) fn cli_config_permissions_lists_and_removes_project_local_rules() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(workdir.join(".psychevo")).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".psychevo")).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
     std::fs::write(
-        workdir.join(".psychevo/config.toml"),
+        cwd.join(".psychevo/config.toml"),
         r#"# project-local policy
 
 default_permissions = "local"
@@ -334,7 +331,7 @@ decision = "prompt"
     )
     .expect("config");
 
-    let listed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let listed = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["config", "permissions", "list", "--json"])
         .output()
         .expect("permissions list");
@@ -359,7 +356,7 @@ decision = "prompt"
         "prompt"
     );
 
-    let removed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let removed = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "config",
             "permissions",
@@ -382,7 +379,7 @@ decision = "prompt"
         combined.contains("[[exec_policy.rules]]"),
         "output: {combined}"
     );
-    let config = std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("config");
+    let config = std::fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("config");
     assert!(config.contains("\"npm\""));
     assert!(config.contains("\"cargo\""));
 }
@@ -391,11 +388,11 @@ decision = "prompt"
 pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
 
-    let listed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let listed = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["tool", "list", "--json"])
         .output()
         .expect("tool list");
@@ -414,7 +411,7 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
             .any(|tool| tool.as_str() == Some("web_fetch"))
     );
 
-    let disabled = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let disabled = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["tool", "disable", "web", "--mode", "plan", "--json"])
         .output()
         .expect("tool disable");
@@ -426,7 +423,7 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
     let value: Value = serde_json::from_slice(&disabled.stdout).expect("json");
     assert_eq!(value["changed"], true);
 
-    let listed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let listed = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["tool", "list", "--json"])
         .output()
         .expect("tool list");
@@ -439,7 +436,7 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
             .any(|tool| tool.as_str() == Some("web_fetch"))
     );
 
-    let created = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let created = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "tool",
             "create",
@@ -458,7 +455,7 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
         String::from_utf8_lossy(&created.stderr)
     );
 
-    let enabled = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let enabled = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["tool", "enable", "docs", "--mode", "plan", "--json"])
         .output()
         .expect("tool enable");
@@ -467,7 +464,7 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
         "stderr: {}",
         String::from_utf8_lossy(&enabled.stderr)
     );
-    let listed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let listed = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["tool", "list", "--json"])
         .output()
         .expect("tool list");
@@ -480,7 +477,7 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
             .any(|tool| tool.as_str() == Some("web_fetch"))
     );
 
-    let removed = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let removed = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["tool", "remove", "docs", "--json"])
         .output()
         .expect("tool remove");
@@ -489,7 +486,7 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
         "stderr: {}",
         String::from_utf8_lossy(&removed.stderr)
     );
-    let config = std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("config");
+    let config = std::fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("config");
     assert!(!config.contains("[toolsets.docs]"));
 }
 
@@ -497,16 +494,16 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
 pub(crate) fn cli_session_commands_manage_active_and_archived_sessions() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
-    let canonical = workdir.canonicalize().expect("canonical");
+    let canonical = cwd.canonicalize().expect("canonical");
     let db = psychevo_home.join("state.db");
     let conn = Connection::open(&db).expect("db");
     insert_session(&conn, "older", &canonical, "run", 1_000, 1_000);
     insert_session(&conn, "newer", &canonical, "tui", 2_000, 2_000);
 
-    let list = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let list = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "list", "--json"])
         .output()
         .expect("session list");
@@ -518,7 +515,7 @@ pub(crate) fn cli_session_commands_manage_active_and_archived_sessions() {
     let value: Value = serde_json::from_slice(&list.stdout).expect("json");
     assert_eq!(value["sessions"][0]["id"], "newer");
 
-    let rename = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let rename = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "rename", "latest", "New", "Title", "--json"])
         .output()
         .expect("session rename");
@@ -531,20 +528,20 @@ pub(crate) fn cli_session_commands_manage_active_and_archived_sessions() {
     assert_eq!(value["session"]["id"], "newer");
     assert_eq!(value["session"]["title"], "New Title");
 
-    let archive = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let archive = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "archive", "latest", "--json"])
         .output()
         .expect("session archive");
     assert!(archive.status.success());
 
-    let archived = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let archived = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "list", "--archived", "--json"])
         .output()
         .expect("session archived list");
     let value: Value = serde_json::from_slice(&archived.stdout).expect("json");
     assert_eq!(value["sessions"][0]["id"], "newer");
 
-    let restore = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let restore = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "restore", "newer", "--json"])
         .output()
         .expect("session restore");
@@ -555,17 +552,17 @@ pub(crate) fn cli_session_commands_manage_active_and_archived_sessions() {
 pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
-    let canonical = workdir.canonicalize().expect("canonical");
+    let canonical = cwd.canonicalize().expect("canonical");
     let db = psychevo_home.join("state.db");
     let conn = Connection::open(&db).expect("db");
     insert_session(&conn, "exported-session", &canonical, "tui", 1_000, 2_000);
     set_export_fixture_session_metadata(&conn, "exported-session");
     insert_export_fixture_messages(&conn, "exported-session");
 
-    let default_export = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let default_export = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "export", "latest"])
         .output()
         .expect("session export");
@@ -582,7 +579,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(!stdout.contains("private plan"));
     assert!(!stdout.contains("hidden AGENTS"));
 
-    let reasoning_export = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let reasoning_export = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "export", "latest", "--include", "reasoning"])
         .output()
         .expect("session export reasoning");
@@ -591,7 +588,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(stdout.contains("private plan"));
     assert!(!stdout.contains("provider_evidence"));
 
-    let full_inputs_export = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let full_inputs_export = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "session",
             "export",
@@ -606,7 +603,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(stdout.contains("Provider Input Evidence"));
     assert!(stdout.contains("hidden AGENTS"));
 
-    let json_export = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let json_export = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "export", "latest", "--format", "json"])
         .output()
         .expect("session export json");
@@ -618,7 +615,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(value.get("provider_input_evidence").is_none());
     assert!(value.get("last_provider_request").is_none());
 
-    let json_header = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let json_header = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "session",
             "export",
@@ -672,7 +669,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(value.get("prompt_prefix").is_none());
     assert!(value.get("messages").is_none());
 
-    let markdown_header = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let markdown_header = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "export", "latest", "--include", "header"])
         .output()
         .expect("session export markdown header");
@@ -683,7 +680,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(stdout.contains("agent_catalog"));
     assert!(!stdout.contains("Available agents"));
 
-    let json_last_request = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let json_last_request = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "session", "export", "latest", "--format", "json", "-i", "lpr",
         ])
@@ -763,7 +760,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
             .any(|message| message["role"] == "tool" && message["content"] == "file body")
     );
 
-    let markdown_last_request = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let markdown_last_request = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "session",
             "export",
@@ -791,7 +788,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
         rusqlite::params!["exported-session"],
     )
     .expect("stale prefix hash");
-    let stale_last_request = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let stale_last_request = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "session",
             "export",
@@ -814,25 +811,25 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
             .is_some_and(|text| text.contains("does not match") && text.contains("approximate"))
     }));
 
-    let old_reasoning_export = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let old_reasoning_export = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "export", "latest", "--with-reasoning"])
         .output()
         .expect("session export old reasoning");
     assert!(!old_reasoning_export.status.success());
 
-    let old_full_inputs_export = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let old_full_inputs_export = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "export", "latest", "--full-inputs"])
         .output()
         .expect("session export old full inputs");
     assert!(!old_full_inputs_export.status.success());
 
-    let raw_requests_export = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let raw_requests_export = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "export", "latest", "--raw-requests"])
         .output()
         .expect("session export raw requests");
     assert!(!raw_requests_export.status.success());
 
-    let share_last_request = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let share_last_request = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "session",
             "share",
@@ -844,7 +841,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
         .expect("session share last request");
     assert!(!share_last_request.status.success());
 
-    let json_full_inputs = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let json_full_inputs = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args([
             "session",
             "export",
@@ -868,7 +865,7 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
         "project_instructions"
     );
 
-    let share = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let share = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "share", "latest", "--json"])
         .output()
         .expect("session share");
@@ -892,8 +889,8 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
 pub(crate) fn cli_model_list_current_and_fetch_use_local_config_and_explicit_fetch_only() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
-    let workdir = temp.path().join("work");
-    std::fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
     let server = CatalogJsonServer::start(r#"{"data":[{"id":"mock-a"},{"id":"mock-b"}]}"#);
     std::fs::write(psychevo_home.join(".env"), "MOCK_KEY=test-key\n").expect("env");
@@ -916,7 +913,7 @@ api_key_env = "MOCK_KEY"
     )
     .expect("config");
 
-    let list = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let list = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["model", "list", "--json"])
         .output()
         .expect("model list");
@@ -925,7 +922,7 @@ api_key_env = "MOCK_KEY"
     assert_eq!(value["models"][0]["provider"], "mock");
     assert_eq!(server.requests.lock().expect("requests").len(), 0);
 
-    let current = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let current = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["model", "current", "--json"])
         .output()
         .expect("model current");
@@ -934,7 +931,7 @@ api_key_env = "MOCK_KEY"
     assert_eq!(value["model"]["model"], "mock-a");
     assert_eq!(server.requests.lock().expect("requests").len(), 0);
 
-    let set_local = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let set_local = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["model", "set", "mock/mock-b", "--json"])
         .output()
         .expect("model set local");
@@ -947,11 +944,11 @@ api_key_env = "MOCK_KEY"
     assert_eq!(value["scope"], "local");
     assert_eq!(value["model"], "mock/mock-b");
     let local_config =
-        std::fs::read_to_string(workdir.join(".psychevo/config.toml")).expect("local config");
+        std::fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("local config");
     assert!(local_config.contains("model = \"mock/mock-b\""));
     assert_eq!(server.requests.lock().expect("requests").len(), 0);
 
-    let set_global = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let set_global = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["model", "set", "-g", "mock/mock-a", "--json"])
         .output()
         .expect("model set global");
@@ -965,14 +962,14 @@ api_key_env = "MOCK_KEY"
     let global_config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
     assert!(global_config.contains("model = \"mock/mock-a\""));
 
-    let invalid = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let invalid = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["model", "set", "mock-a", "--json"])
         .output()
         .expect("model set invalid");
     assert!(!invalid.status.success());
     assert!(String::from_utf8_lossy(&invalid.stdout).contains("provider/model"));
 
-    let fetch = admin_cmd(temp.path(), &psychevo_home, &workdir)
+    let fetch = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["model", "fetch", "mock", "--json"])
         .output()
         .expect("model fetch");
@@ -986,4 +983,8 @@ api_key_env = "MOCK_KEY"
     let requests = server.requests.lock().expect("requests");
     assert_eq!(requests.len(), 1);
     assert!(requests[0].starts_with("GET /v1/models HTTP/1.1"));
+    let cache = std::fs::read_to_string(psychevo_home.join("cache/provider_models_cache.json"))
+        .expect("provider models cache");
+    assert!(cache.contains("mock-a"));
+    assert!(!cache.contains("test-key"));
 }

@@ -1,19 +1,19 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 #[derive(Clone)]
-pub(crate) struct WorkdirTool {
-    pub(crate) workdir: PathBuf,
+pub(crate) struct CwdTool {
+    pub(crate) cwd: PathBuf,
     pub(crate) context: ToolRuntimeContext,
 }
 
-impl WorkdirTool {
+impl CwdTool {
     #[cfg(test)]
-    pub(crate) fn new(workdir: PathBuf) -> Self {
-        Self::with_context(workdir, ToolRuntimeContext::default())
+    pub(crate) fn new(cwd: PathBuf) -> Self {
+        Self::with_context(cwd, ToolRuntimeContext::default())
     }
 
-    pub(crate) fn with_context(workdir: PathBuf, context: ToolRuntimeContext) -> Self {
-        Self { workdir, context }
+    pub(crate) fn with_context(cwd: PathBuf, context: ToolRuntimeContext) -> Self {
+        Self { cwd, context }
     }
 
     pub(crate) fn task_id(&self) -> &str {
@@ -24,8 +24,8 @@ impl WorkdirTool {
         &self.context.lsp
     }
 
-    pub(crate) fn workdir(&self) -> &Path {
-        &self.workdir
+    pub(crate) fn cwd(&self) -> &Path {
+        &self.cwd
     }
 
     pub(crate) fn sandbox_policy(&self) -> &SandboxPolicy {
@@ -61,16 +61,16 @@ impl WorkdirTool {
         if path.is_absolute() {
             path.to_path_buf()
         } else {
-            self.workdir.join(path)
+            self.cwd.join(path)
         }
     }
 
     pub(crate) fn ensure_contained(&self, path: &Path) -> Result<()> {
-        if path == self.workdir || path.starts_with(&self.workdir) {
+        if path == self.cwd || path.starts_with(&self.cwd) {
             Ok(())
         } else {
             Err(Error::Message(format!(
-                "path escapes workdir: {}",
+                "path escapes cwd: {}",
                 path.display()
             )))
         }
@@ -98,7 +98,7 @@ impl WorkdirTool {
     }
 
     pub(crate) fn relative(&self, path: &Path) -> String {
-        path.strip_prefix(&self.workdir)
+        path.strip_prefix(&self.cwd)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/")

@@ -100,7 +100,7 @@ pub(crate) mod tests {
             reasoning_effort: None,
             context_limit: None,
             generation_metadata: json!({}),
-            workdir: tmp.path().to_path_buf(),
+            cwd: tmp.path().to_path_buf(),
             mode: RunMode::Default,
             project_context_mode: Default::default(),
             permission_config: PermissionConfig::default(),

@@ -10,12 +10,14 @@ pub(crate) mod context;
 pub(crate) mod context_usage;
 pub(crate) mod error;
 pub(crate) mod events;
+pub mod hooks;
 pub(crate) mod managed_tools;
 pub(crate) mod mcp;
 pub(crate) mod messages;
 pub mod model_state;
 pub(crate) mod paths;
 pub(crate) mod permissions;
+pub mod plugins;
 pub(crate) mod project_instructions;
 pub(crate) mod prompt_assembly;
 pub(crate) mod prompt_image;
@@ -66,15 +68,17 @@ pub use config::{
     channel_doctor_value, channel_list_value, channel_runtime_connections, channel_show_value,
     channel_summary_value, config_provider_list_value, config_show_value, configured_models,
     create_global_custom_provider, create_local_toolset, create_scoped_custom_provider,
-    custom_provider_api_key_env, delete_channel_connection, fetch_model_catalog,
-    load_agent_backend_configs, model_catalog_endpoint, model_catalog_entry_is_free,
-    model_catalog_provider, model_catalog_providers, normalize_provider_id, permission_rules_value,
-    refresh_model_metadata_cache, remove_config_value, remove_local_permission_rule,
-    remove_local_toolset, resolve_default_workspace_workdir, resolve_workspace_root,
-    selected_configured_model, set_auxiliary_model, set_auxiliary_model_with_reasoning,
-    set_channel_enabled, set_config_value, set_default_model, set_default_model_with_reasoning,
-    set_local_toolset_enabled, set_provider_api_key, setup_channel_connection, toolsets_value,
-    update_channel_connection, upsert_channel_connection,
+    custom_provider_api_key_env, delete_channel_connection, fetch_and_cache_model_catalog,
+    fetch_model_catalog, load_agent_backend_configs, model_catalog_endpoint,
+    model_catalog_entry_is_free, model_catalog_provider, model_catalog_providers,
+    normalize_provider_id, permission_rules_value, provider_models_cache_path_for_home,
+    read_cached_model_catalog, refresh_model_metadata_cache, remove_config_value,
+    remove_local_permission_rule, remove_local_toolset, resolve_default_workspace_cwd,
+    resolve_workspace_root, selected_configured_model, set_auxiliary_model,
+    set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value, set_default_model,
+    set_default_model_with_reasoning, set_local_toolset_enabled, set_provider_api_key,
+    setup_channel_connection, toolsets_value, update_channel_connection, upsert_channel_connection,
+    write_cached_model_catalog,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -86,10 +90,17 @@ pub use context_usage::{
 };
 pub use error::{Error, Result};
 pub use model_state::{
-    MODEL_STATE_FILE, MODEL_STATE_RECENT_LIMIT, MODEL_STATE_VERSION, ModelRecentEntry, ModelState,
-    ModelWorkdirState, SESSION_COMPOSER_MODEL_METADATA_KEY, normalize_reasoning_effort,
+    MODEL_STATE_FILE, MODEL_STATE_RECENT_LIMIT, MODEL_STATE_VERSION, ModelCwdState,
+    ModelRecentEntry, ModelState, SESSION_COMPOSER_MODEL_METADATA_KEY, normalize_reasoning_effort,
 };
-pub use paths::{canonicalize_workdir, workspace_snapshot_id};
+pub use paths::{canonicalize_cwd, workspace_snapshot_id};
+pub use plugins::{
+    LoadedPluginManifest, PluginDiagnostic, PluginInstallOptions, PluginInstallRecord,
+    PluginManifestKind, PluginMarketplaceEntry, PluginScope, PluginWorkerSpec, install_plugin,
+    load_plugin_manifest, plugin_doctor_value, plugin_install_value, plugin_list_value,
+    plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
+    plugin_set_enabled_value, plugin_uninstall_value, plugin_view_value,
+};
 pub use prompt_image::{
     extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,
     prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path,
@@ -112,7 +123,7 @@ pub use session_export::{
     SessionExportIncludeSet, SessionExportOptions, SessionExportWriteResult,
     default_session_export_filename, render_session_export, write_session_export,
 };
-pub use session_lookup::{latest_run_session_for_workdir, session_exists};
+pub use session_lookup::{latest_run_session_for_cwd, session_exists};
 pub use session_trace::{
     SESSION_TRACE_DEFAULT_LIMIT, SESSION_TRACE_MAX_LIMIT, SessionTraceReadOptions,
     SessionTraceReadResult, read_session_trace, session_trace_path,

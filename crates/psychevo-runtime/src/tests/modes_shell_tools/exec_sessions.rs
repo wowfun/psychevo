@@ -5,15 +5,15 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn exec_command_yielded_session_emits_background_lifecycle_events() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let events = Arc::new(Mutex::new(Vec::<crate::types::RunStreamEvent>::new()));
     let sink_events = Arc::clone(&events);
     let stream: crate::types::RunStreamSink = Arc::new(move |event| {
         sink_events.lock().expect("events").push(event);
     });
     let tools = crate::tools::coding_core_tools_for_mode_with_context(
-        &workdir,
+        &cwd,
         RunMode::Default,
         crate::tools::ToolRuntimeContext {
             task_id: "exec-lifecycle-test".to_string(),
@@ -81,15 +81,15 @@ pub(crate) async fn exec_command_yielded_session_emits_background_lifecycle_even
 #[tokio::test]
 pub(crate) async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let events = Arc::new(Mutex::new(Vec::<crate::types::RunStreamEvent>::new()));
     let sink_events = Arc::clone(&events);
     let stream: crate::types::RunStreamSink = Arc::new(move |event| {
         sink_events.lock().expect("events").push(event);
     });
     let tools = crate::tools::coding_core_tools_for_mode_with_context(
-        &workdir,
+        &cwd,
         RunMode::Default,
         crate::tools::ToolRuntimeContext {
             task_id: "exec-interrupt-test".to_string(),
@@ -129,12 +129,12 @@ pub(crate) async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() 
 #[tokio::test]
 pub(crate) async fn exec_command_rejects_shell_background_wrappers() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
     let err = crate::tools::exec_command_tool_impl(
-        workdir,
+        cwd,
         false,
         json!({"cmd": "sleep 30 &"}),
         receivers.abort_signal(),
@@ -149,12 +149,12 @@ pub(crate) async fn exec_command_rejects_shell_background_wrappers() {
 #[tokio::test]
 pub(crate) async fn exec_command_allows_foreground_heredoc_with_ampersand_content() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
     let result = crate::tools::exec_command_tool_impl(
-        workdir.clone(),
+        cwd.clone(),
         false,
         json!({
             "cmd": "cat > fixnull.c <<'EOF'\nint flags = value & mask;\nEOF\ncat fixnull.c",
@@ -168,7 +168,7 @@ pub(crate) async fn exec_command_allows_foreground_heredoc_with_ampersand_conten
     assert_eq!(result["exit_code"].as_i64(), Some(0), "{result}");
     assert_eq!(result["output"], "int flags = value & mask;\n");
     assert_eq!(
-        fs::read_to_string(workdir.join("fixnull.c")).expect("heredoc output"),
+        fs::read_to_string(cwd.join("fixnull.c")).expect("heredoc output"),
         "int flags = value & mask;\n"
     );
 }
@@ -176,12 +176,12 @@ pub(crate) async fn exec_command_allows_foreground_heredoc_with_ampersand_conten
 #[tokio::test]
 pub(crate) async fn exec_command_pipe_stdin_is_closed_for_prompt_style_commands() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
     let result = crate::tools::exec_command_tool_impl(
-        workdir,
+        cwd,
         false,
         json!({
             "cmd": "if read line; then printf 'read:%s\\n' \"$line\"; else printf 'stdin closed\\n'; fi"
@@ -197,12 +197,12 @@ pub(crate) async fn exec_command_pipe_stdin_is_closed_for_prompt_style_commands(
 #[tokio::test]
 pub(crate) async fn exec_command_nonzero_exit_is_successful_result() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
     let result = crate::tools::exec_command_tool_impl(
-        workdir,
+        cwd,
         false,
         json!({"cmd": "exit 7", "yield_time_ms": 250}),
         receivers.abort_signal(),
@@ -218,12 +218,12 @@ pub(crate) async fn exec_command_nonzero_exit_is_successful_result() {
 #[tokio::test]
 pub(crate) async fn exec_command_token_truncates_output() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
     let result = crate::tools::exec_command_tool_impl(
-        workdir,
+        cwd,
         false,
         json!({
             "cmd": "printf 'one two three four five six seven eight nine ten eleven twelve'",
@@ -241,12 +241,12 @@ pub(crate) async fn exec_command_token_truncates_output() {
 #[tokio::test]
 pub(crate) async fn write_stdin_polls_and_writes_to_tty_or_fallback_session() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
     let start = crate::tools::exec_command_tool_impl(
-        workdir,
+        cwd,
         false,
         json!({
             "cmd": "read line; printf 'got:%s\\n' \"$line\"",
@@ -282,12 +282,12 @@ pub(crate) async fn write_stdin_polls_and_writes_to_tty_or_fallback_session() {
 #[tokio::test]
 pub(crate) async fn write_stdin_rejects_non_tty_pipe_session_input() {
     let temp = tempdir().expect("temp");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
     let start = crate::tools::exec_command_tool_impl(
-        workdir,
+        cwd,
         false,
         json!({"cmd": "sleep 1", "yield_time_ms": 250}),
         receivers.abort_signal(),
@@ -327,7 +327,7 @@ pub(crate) async fn write_stdin_unknown_session_fails() {
 
 pub(crate) fn configured_user_shell_context(
     temp: &tempfile::TempDir,
-    _workdir: &std::path::Path,
+    _cwd: &std::path::Path,
 ) -> UserShellContextOptions {
     let home = home_dir(temp);
     fs::create_dir_all(&home).expect("home");

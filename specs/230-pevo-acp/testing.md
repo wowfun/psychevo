@@ -9,8 +9,8 @@ Define deterministic acceptance coverage for the `psychevo-acp` crate,
 `psychevo-acp` binary, `pevo acp` product wrapper, process setup, stdio server
 packaging, and runtime-call construction.
 
-Automation vocabulary and generic validation boundaries follow
-[060 Automation](../060-automation/spec.md).
+CI/CD vocabulary and generic validation boundaries follow
+[065 CI/CD](../065-ci-cd/spec.md).
 
 ## Long-Term Acceptance Contract
 
@@ -59,7 +59,7 @@ Required process setup coverage:
   defaults.
 - The server creates the home directory when needed and preserves
   caller-provided isolated config and database paths.
-- Relative workdirs and file paths resolve from the server process cwd.
+- Relative cwds and file paths resolve from the server process cwd.
 - Inherited environment variables reach runtime provider and auth resolution
   without reading unrelated user config or credential stores.
 
@@ -99,7 +99,7 @@ Relevant narrow validation:
 
 Broad deterministic validation:
 
-- `scripts/validate-rust.sh broad`
+- `cargo xtask ci run --profile rust-broad`
 
 ## Validation Boundaries
 

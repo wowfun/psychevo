@@ -12,17 +12,18 @@ use crate::tools::skill_tools_for_mode;
 pub(crate) fn skill_options(
     temp: &tempfile::TempDir,
     home: &std::path::Path,
-    workdir: &std::path::Path,
+    cwd: &std::path::Path,
 ) -> SkillDiscoveryOptions {
     SkillDiscoveryOptions {
         home: home.to_path_buf(),
-        workdir: workdir.to_path_buf(),
+        cwd: cwd.to_path_buf(),
         config_path: None,
         env: BTreeMap::from([(
             "HOME".to_string(),
             temp.path().to_string_lossy().to_string(),
         )]),
         explicit_inputs: Vec::new(),
+        additional_roots: Vec::new(),
         no_skills: false,
     }
 }
@@ -56,9 +57,9 @@ pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_fil
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let repo = temp.path().join("repo");
-    let workdir = repo.join("sub");
+    let cwd = repo.join("sub");
     fs::create_dir_all(repo.join(".git")).expect("git marker");
-    fs::create_dir_all(&workdir).expect("workdir");
+    fs::create_dir_all(&cwd).expect("cwd");
 
     write_package_skill(
         &home.join("skills"),
@@ -67,19 +68,19 @@ pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_fil
         "global body",
     );
     write_package_skill(
-        &workdir.join(".psychevo").join("skills"),
+        &cwd.join(".psychevo").join("skills"),
         "shared",
         "project shared skill",
         "project body",
     );
     write_package_skill(
-        &workdir.join(".agents").join("skills"),
+        &cwd.join(".agents").join("skills"),
         "agent-tool",
         "nearest agent package",
         "agent body",
     );
     write_root_skill(
-        &workdir.join(".agents").join("skills"),
+        &cwd.join(".agents").join("skills"),
         "agent-root",
         "must be ignored",
         "ignored body",
@@ -91,7 +92,7 @@ pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_fil
         "root body",
     );
 
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let names = catalog
         .skills
         .iter()
@@ -124,9 +125,9 @@ pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_fil
 pub(crate) fn skills_discovery_skips_missing_descriptions_and_honors_disabled_and_hidden() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
 
     write_package_skill(&home.join("skills"), "normal", "normal skill", "body");
     let hidden = home.join("skills").join("hidden");
@@ -143,9 +144,9 @@ pub(crate) fn skills_discovery_skips_missing_descriptions_and_honors_disabled_an
         "---\nname: missing-description\n---\n\nbody\n",
     )
     .expect("missing skill");
-    set_skill_enabled(&home, &workdir, SkillTarget::Global, "normal", false).expect("disable");
+    set_skill_enabled(&home, &cwd, SkillTarget::Global, "normal", false).expect("disable");
 
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let names = catalog
         .skills
         .iter()
@@ -173,9 +174,9 @@ pub(crate) fn skills_discovery_skips_missing_descriptions_and_honors_disabled_an
 pub(crate) fn skills_prompt_escapes_xml_and_uses_view_skill_wording() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
     let root = home.join("skills");
     fs::create_dir_all(&root).expect("root");
     fs::write(
@@ -184,7 +185,7 @@ pub(crate) fn skills_prompt_escapes_xml_and_uses_view_skill_wording() {
     )
     .expect("skill");
 
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let prompt = format_skills_for_prompt(&catalog.skills);
 
     assert!(prompt.contains("use view_skill to load"));
@@ -198,9 +199,9 @@ pub(crate) fn skills_prompt_escapes_xml_and_uses_view_skill_wording() {
 pub(crate) fn skills_selection_parses_markers_and_dedupes_unknowns() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
 
     write_package_skill(
         &home.join("skills"),
@@ -210,7 +211,7 @@ pub(crate) fn skills_selection_parses_markers_and_dedupes_unknowns() {
     );
     write_package_skill(&home.join("skills"), "audit", "audit changes", "audit body");
 
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let selected =
         select_skills_for_prompt(&catalog, "$reviewer do it $missing $HOME $reviewer $audit");
     let names = selected
@@ -225,9 +226,9 @@ pub(crate) fn skills_selection_parses_markers_and_dedupes_unknowns() {
 pub(crate) fn skills_selection_allows_hidden_explicit_and_excludes_disabled() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
 
     let hidden = home.join("skills").join("hidden");
     fs::create_dir_all(&hidden).expect("hidden");
@@ -242,9 +243,9 @@ pub(crate) fn skills_selection_allows_hidden_explicit_and_excludes_disabled() {
         "disabled skill",
         "disabled body",
     );
-    set_skill_enabled(&home, &workdir, SkillTarget::Global, "disabled", false).expect("disable");
+    set_skill_enabled(&home, &cwd, SkillTarget::Global, "disabled", false).expect("disable");
 
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let selected = select_skills_for_prompt(&catalog, "$hidden $disabled");
     let names = selected
         .iter()
@@ -259,9 +260,9 @@ pub(crate) fn skills_selection_allows_hidden_explicit_and_excludes_disabled() {
 pub(crate) fn explicit_skill_selection_accepts_name_and_path() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
 
     write_package_skill(
         &home.join("skills"),
@@ -281,18 +282,18 @@ pub(crate) fn explicit_skill_selection_accepts_name_and_path() {
         "root two",
         "root two body",
     );
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let env = BTreeMap::from([(
         "HOME".to_string(),
         temp.path().to_string_lossy().to_string(),
     )]);
     let skill_dir = home.join("skills").join("reviewer");
 
-    let by_name = select_explicit_skills(&catalog, &["reviewer".to_string()], &workdir, &env);
+    let by_name = select_explicit_skills(&catalog, &["reviewer".to_string()], &cwd, &env);
     let by_path = select_explicit_skills(
         &catalog,
         &[skill_dir.to_string_lossy().to_string()],
-        &workdir,
+        &cwd,
         &env,
     );
     let by_root_file = select_explicit_skills(
@@ -302,7 +303,7 @@ pub(crate) fn explicit_skill_selection_accepts_name_and_path() {
             .join("root-one.md")
             .to_string_lossy()
             .to_string()],
-        &workdir,
+        &cwd,
         &env,
     );
 
@@ -317,9 +318,9 @@ pub(crate) fn explicit_skill_selection_accepts_name_and_path() {
 pub(crate) fn selected_skill_context_contains_body_without_frontmatter() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
 
     write_package_skill(
         &home.join("skills"),
@@ -327,7 +328,7 @@ pub(crate) fn selected_skill_context_contains_body_without_frontmatter() {
         "review code",
         "Follow the review workflow.",
     );
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let selected = select_skills_for_prompt(&catalog, "$reviewer do it");
     let fragments = skill_context_fragments(&selected, &catalog).expect("fragments");
     let contexts = skill_context_messages(&selected, &catalog).expect("contexts");
@@ -350,9 +351,9 @@ pub(crate) fn selected_skill_context_contains_body_without_frontmatter() {
 pub(crate) fn view_skill_reads_linked_files_but_rejects_path_escape() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
     let skill_dir = home.join("skills").join("reader");
     fs::create_dir_all(skill_dir.join("references")).expect("refs");
     fs::write(
@@ -363,7 +364,7 @@ pub(crate) fn view_skill_reads_linked_files_but_rejects_path_escape() {
     fs::write(skill_dir.join("references").join("note.md"), "reference\n").expect("ref");
     fs::write(home.join("outside.md"), "outside\n").expect("outside");
 
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let skill = view_skill_value(&catalog, "reader", None).expect("skill view");
     assert_eq!(skill["content"], "Read me.");
     assert_eq!(skill["linked_files"]["references"][0], "references/note.md");
@@ -378,9 +379,9 @@ pub(crate) fn view_skill_reads_linked_files_but_rejects_path_escape() {
 pub(crate) fn view_skill_reports_hermes_metadata_and_setup_readiness() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
     let skill_dir = home.join("skills").join("metadata");
     fs::create_dir_all(skill_dir.join("references")).expect("refs");
     fs::write(
@@ -390,7 +391,7 @@ pub(crate) fn view_skill_reports_hermes_metadata_and_setup_readiness() {
     .expect("skill");
     fs::write(skill_dir.join("references").join("guide.md"), "guide\n").expect("guide");
 
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let value = view_skill_value(&catalog, "metadata", None).expect("view");
 
     assert_eq!(value["readiness_status"], "setup_needed");
@@ -423,19 +424,19 @@ pub(crate) fn view_skill_reports_hermes_metadata_and_setup_readiness() {
 pub(crate) fn skill_name_collisions_require_explicit_resolution_for_view() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
 
     write_package_skill(
-        &workdir.join(".psychevo").join("skills"),
+        &cwd.join(".psychevo").join("skills"),
         "same",
         "project",
         "project",
     );
     write_package_skill(&home.join("skills"), "same", "global", "global");
 
-    let catalog = discover_skills(&skill_options(&temp, &home, &workdir)).expect("catalog");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     assert!(view_skill_value(&catalog, "same", None).is_err());
     assert!(catalog.collisions.contains_key("same"));
 }
@@ -444,12 +445,12 @@ pub(crate) fn skill_name_collisions_require_explicit_resolution_for_view() {
 pub(crate) fn skill_bundles_project_scope_overrides_global_and_config_set_is_namespaced() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
 
     save_skill_bundle(
         &home,
-        &workdir,
+        &cwd,
         SaveSkillBundleOptions {
             target: SkillTarget::Global,
             name: "daily".to_string(),
@@ -462,7 +463,7 @@ pub(crate) fn skill_bundles_project_scope_overrides_global_and_config_set_is_nam
     .expect("global bundle");
     save_skill_bundle(
         &home,
-        &workdir,
+        &cwd,
         SaveSkillBundleOptions {
             target: SkillTarget::Project,
             name: "daily".to_string(),
@@ -479,14 +480,14 @@ pub(crate) fn skill_bundles_project_scope_overrides_global_and_config_set_is_nam
     )
     .expect("legacy yaml bundle");
 
-    let bundles = list_skill_bundles(&home, &workdir).expect("bundles");
+    let bundles = list_skill_bundles(&home, &cwd).expect("bundles");
     assert_eq!(bundles.len(), 1);
     assert_eq!(bundles[0].scope, SkillTarget::Project);
     assert_eq!(bundles[0].skills, vec!["project"]);
 
     let err = set_skill_config_value(
         &home,
-        &workdir,
+        &cwd,
         SkillTarget::Global,
         "providers.openai",
         serde_json::json!(true),
@@ -496,7 +497,7 @@ pub(crate) fn skill_bundles_project_scope_overrides_global_and_config_set_is_nam
 
     set_skill_config_value(
         &home,
-        &workdir,
+        &cwd,
         SkillTarget::Global,
         "skills.config.daily.enabled",
         serde_json::json!(true),
@@ -506,9 +507,9 @@ pub(crate) fn skill_bundles_project_scope_overrides_global_and_config_set_is_nam
     assert!(config.contains("[skills.config.daily]"));
     assert!(config.contains("enabled = true"));
 
-    delete_skill_bundle(&home, &workdir, SkillTarget::Project, "daily").expect("delete");
+    delete_skill_bundle(&home, &cwd, SkillTarget::Project, "daily").expect("delete");
     assert_eq!(
-        list_skill_bundles(&home, &workdir).expect("bundles")[0].scope,
+        list_skill_bundles(&home, &cwd).expect("bundles")[0].scope,
         SkillTarget::Global
     );
 }
@@ -542,10 +543,10 @@ pub(crate) fn skill_scanner_flags_dangerous_content() {
 pub(crate) fn skill_tools_are_read_only_in_plan_and_mutating_in_default() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
-    let options = skill_options(&temp, &home, &workdir);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
+    let options = skill_options(&temp, &home, &cwd);
 
     let plan = skill_tools_for_mode(options.clone(), RunMode::Plan)
         .iter()
@@ -576,10 +577,10 @@ pub(crate) fn skill_tools_are_read_only_in_plan_and_mutating_in_default() {
 pub(crate) fn skill_tool_schemas_describe_parameters() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
-    let workdir = temp.path().join("work");
-    fs::create_dir_all(&workdir).expect("workdir");
-    fs::create_dir_all(workdir.join(".git")).expect("git marker");
-    let options = skill_options(&temp, &home, &workdir);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
+    let options = skill_options(&temp, &home, &cwd);
 
     for mode in [RunMode::Plan, RunMode::Default] {
         for tool in skill_tools_for_mode(options.clone(), mode) {
