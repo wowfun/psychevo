@@ -2,6 +2,9 @@
 
 ## 2026-06-29
 
+- Fixed Workbench live transcript duplication during tool-call and child-agent
+  turns by treating running assistant updates as snapshots and keeping parent
+  activity ownership stable.
 - Completed the production large-file cleanup by splitting Rust runtime,
   Gateway, CLI/TUI, Workbench, protocol, and `peval-py` monoliths into focused
   modules while preserving public interfaces and behavior.
@@ -17,6 +20,9 @@
 - Split `peval-py` state, inspection, input/report assets, tests, and specs
   into focused modules and normative detail docs while preserving CLI/report
   behavior.
+- Fixed `peval-py` workspace snapshot path handling so Git Bash and WSL users
+  can pass accessible Windows drive paths for Trial cell artifacts and saved
+  workspace snapshots without cwd-relative rewrites.
 - Documented `cargo xtask doctor large-files` remediation expectations so
   future large-file work follows semantic module boundaries.
 
