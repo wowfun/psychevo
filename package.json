@@ -7,8 +7,8 @@
     "check": "pnpm -r check",
     "dev": "pnpm --filter @psychevo/workbench dev",
     "e2e": "pnpm --filter @psychevo/workbench build && playwright test",
-    "e2e:live": "pnpm --filter @psychevo/workbench build && playwright test --grep @live",
-    "e2e:live-skill": "pnpm --filter @psychevo/workbench build && PSYCHEVO_PLAYWRIGHT_LIVE_SKILL=1 playwright test apps/workbench/e2e/live-skill.spec.ts",
+    "e2e:live": "cargo xtask live run --suite web",
+    "e2e:live-skill": "cargo xtask live run --suite skill",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },

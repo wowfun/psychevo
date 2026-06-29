@@ -1,6 +1,10 @@
-use std::path::PathBuf;
+mod ci;
+mod doctor;
+mod init;
+mod live;
+mod paths;
 
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -14,6 +18,14 @@ struct Xtask {
 enum Command {
     #[command(subcommand)]
     GatewayProtocol(GatewayProtocolCommand),
+    #[command(subcommand)]
+    Ci(ci::CiCommand),
+    #[command(subcommand)]
+    Doctor(doctor::DoctorCommand),
+    #[command(subcommand)]
+    Init(init::InitCommand),
+    #[command(subcommand)]
+    Live(live::LiveCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -26,22 +38,14 @@ enum GatewayProtocolCommand {
 
 fn main() -> Result<()> {
     let xtask = Xtask::parse();
+    let root = paths::repo_root()?;
     match xtask.command {
         Command::GatewayProtocol(GatewayProtocolCommand::Generate { check }) => {
-            let root = repo_root()?;
             psychevo_gateway_protocol::generate_typescript_and_schema(&root, check)
         }
-    }
-}
-
-fn repo_root() -> Result<PathBuf> {
-    let mut dir = std::env::current_dir().context("read current directory")?;
-    loop {
-        if dir.join("Cargo.toml").is_file() && dir.join("packages").is_dir() {
-            return Ok(dir);
-        }
-        if !dir.pop() {
-            bail!("could not find repository root");
-        }
+        Command::Ci(command) => ci::run(command, &root),
+        Command::Doctor(command) => doctor::run(command, &root),
+        Command::Init(command) => init::run(command, &root),
+        Command::Live(command) => live::run(command, &root),
     }
 }

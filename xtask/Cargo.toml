@@ -9,3 +9,5 @@ license.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 psychevo-gateway-protocol = { path = "../crates/psychevo-gateway-protocol" }
+serde.workspace = true
+serde_json.workspace = true

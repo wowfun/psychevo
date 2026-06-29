@@ -20,7 +20,7 @@ foundation.
 |------|-------------------|
 | CLI turns | `pevo run` executes a coding-agent turn from the shell using the same runtime as the interactive surfaces. |
 | Terminal UI | `pevo tui` opens a fullscreen workspace with sessions, transcripts, slash commands, model controls, evidence rows, and local shell escapes. |
-| Web UI | `pevo web` and `pevo gateway open` launch the managed local Workbench for the current workdir. |
+| Web UI | `pevo web` and `pevo gateway open` launch the managed local Workbench for the current cwd. |
 | Gateway API | `pevo serve` starts a strict loopback API server for headless or managed local clients. |
 | ACP editors | `pevo acp` runs a stdio Agent Client Protocol bridge for ACP-speaking editors. |
 | Profiles | `pevo profile` manages named Psychevo homes for separate config, credentials, skills, agents, and Gateway state. |
@@ -71,6 +71,13 @@ manager or OS package source, then enable or install pnpm, for example:
 ```bash
 corepack enable
 corepack prepare pnpm@11.8.0 --activate
+```
+
+From a checked-out repository, this non-mutating diagnostic summarizes the full
+source-install prerequisite set:
+
+```bash
+cargo xtask doctor deps check --only install
 ```
 
 ### Install A Checkout
@@ -190,7 +197,7 @@ pevo run -m deepseek/deepseek-chat "inspect the CLI entrypoints"
 | `pevo doctor` | Run deterministic local diagnostics; use `--live` only when provider network checks are intended. |
 | `pevo run [message..]` | Run one coding-agent turn from the shell. |
 | `pevo tui [message..]` | Start the fullscreen terminal UI, or process scripted stdin line by line. |
-| `pevo web` | Open the managed local Workbench Web UI for the current workdir. |
+| `pevo web` | Open the managed local Workbench Web UI for the current cwd. |
 | `pevo gateway ...` | Open, start, inspect, stop, or restart the managed local Gateway Web Shell. |
 | `pevo serve` | Run the strict headless local Gateway API server on loopback. |
 | `pevo acp` | Start the Agent Client Protocol stdio server for editor clients. |
@@ -239,11 +246,20 @@ best-fit `specs/<topic>/spec.md`.
 Rust workspace broad gate:
 
 ```bash
-scripts/validate-rust.sh broad
+cargo xtask ci run --profile rust-broad
 ```
 
 Use narrower validation when it covers the changed behavior. Live-provider,
 API-key, and live-service checks are opt-in only.
+
+Repo-local live validation is xtask-owned:
+
+```bash
+cargo xtask init dev-env
+cargo xtask live run
+cargo xtask live run --env isolated
+cargo xtask live run --suite provider
+```
 
 Useful local commands:
 

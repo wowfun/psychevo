@@ -199,6 +199,12 @@ manual_web_hint() {
   printf 'Install Node.js and pnpm, then rerun this script, or use --no-web to install only the CLI.'
 }
 
+developer_install_check_hint() {
+  if [ "${source_origin:-}" = "local" ] && [ -n "${source_dir:-}" ]; then
+    printf ' In a Psychevo checkout, run cargo xtask doctor deps check --only install for a full dependency report.'
+  fi
+}
+
 install_rust_unix() {
   have_cmd curl || die "curl is required to install Rust with rustup. $(manual_rust_hint)"
   info "Installing Rust with rustup..."
@@ -257,7 +263,7 @@ ensure_native_build_tools() {
   if have_cmd cc || have_cmd gcc || have_cmd clang; then
     return 0
   fi
-  die "a native C compiler/linker is required to build pevo from source. $(native_build_hint)"
+  die "a native C compiler/linker is required to build pevo from source. $(native_build_hint)$(developer_install_check_hint)"
 }
 
 ensure_web_toolchain() {
@@ -265,12 +271,12 @@ ensure_web_toolchain() {
     return 0
   fi
   if ! have_cmd node; then
-    die "Node.js is required to build Web UI assets. $(manual_web_hint)"
+    die "Node.js is required to build Web UI assets. $(manual_web_hint)$(developer_install_check_hint)"
   fi
   if have_cmd pnpm; then
     return 0
   fi
-  die "pnpm is required to build Web UI assets. $(manual_web_hint)"
+  die "pnpm is required to build Web UI assets. $(manual_web_hint)$(developer_install_check_hint)"
 }
 
 resolve_pevo_bin() {

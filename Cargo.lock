@@ -2793,6 +2793,7 @@ dependencies = [
  "psychevo-runtime",
  "qrcode",
  "reqwest 0.12.28",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2855,6 +2856,8 @@ dependencies = [
  "anyhow",
  "clap",
  "psychevo-gateway-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

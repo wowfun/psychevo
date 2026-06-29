@@ -7,6 +7,12 @@ Define the source-install helper script for the `pevo` product CLI.
 
 This attachment is part of [200 pevo CLI](spec.md).
 
+`scripts/install.sh` is the standalone product installer. Repository-local
+developer diagnostics may mirror its host prerequisite checks through
+`cargo xtask doctor deps`, but the installer must not depend on `xtask` because
+the remote `curl | sh` path and first-time bootstrap path may not have a
+checkout or usable Cargo yet.
+
 ## Scope
 
 - one-command source install helper
@@ -90,6 +96,12 @@ Web UI asset installation is enabled by default. When it is enabled, missing
 rerun with `--no-web`. The script does not install Node.js or pnpm
 automatically. The supported `pnpm` version follows the repository root
 `packageManager` declaration.
+
+When the script is running from a local Psychevo checkout and reports missing
+native or Web build prerequisites, it may additionally point developers to
+`cargo xtask doctor deps check --only install` for a complete non-mutating
+dependency report. It must not give that `xtask` hint for missing Cargo
+bootstrap failures where `xtask` cannot run.
 
 If `cargo install` fails under Windows Git Bash/MSYS/MINGW, the failure text must
 mention that Rust and native C/C++ build tools, such as Visual Studio Build

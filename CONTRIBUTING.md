@@ -22,7 +22,7 @@ Use deterministic local validation by default. The Rust workspace broad entry
 point is:
 
 ```bash
-scripts/validate-rust.sh broad
+cargo xtask ci run --profile rust-broad
 ```
 
 For focused code changes, prefer a narrower or subsystem-specific command that
@@ -39,7 +39,10 @@ unless the behavior change is intentional.
 
 Live-provider, API-key, network, or live-service validation is opt-in only. The
 default validation path must use fake providers or deterministic local
-harnesses.
+harnesses. Use `cargo xtask init dev-env` to prepare the repo-local live home
+and `cargo xtask live run [--env shared|isolated] [--suite <suite>|--check
+<id>]` for explicit live validation. Live validation defaults to the shared
+repo-local dev home so persisted-home issues are visible.
 
 ## Project Rules
 

@@ -20,5 +20,5 @@ psychevo_self_edit: deny
 - Update snapshots, baselines, inventories, ignore lists, or expected-failure records only for intentional behavior changes or with explicit approval; treat those diffs as review material.
 - Do not rerun the exact same validation only for formality; report the validation most relevant to the changed surface.
 - Do not run multiple broad test commands concurrently in the same worktree unless the test infrastructure explicitly supports isolation.
-- Rust workspace broad gate: `scripts/validate-rust.sh broad`.
+- Rust workspace broad gate: `cargo xtask ci run --profile rust-broad`.
 - If validation cannot be run, report the attempted validation path and the blocker.

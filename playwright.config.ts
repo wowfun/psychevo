@@ -3,6 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "apps/workbench/e2e",
   fullyParallel: false,
+  grepInvert: process.env.PSYCHEVO_XTASK_LIVE_CONTEXT ? undefined : /@live/,
   retries: 0,
   timeout: 180_000,
   expect: {
