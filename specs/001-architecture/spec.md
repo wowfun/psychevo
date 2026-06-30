@@ -112,7 +112,7 @@ Owns:
 - built-in runtime capability modules specified by capability specs
 - resource surface wiring
 - agent-invocation scoped tool surface assembly
-- capability extension resolution into agent-invocation scoped selections
+- capability-extension declaration acceptance and runtime extension registry assembly
 - model context assembly
 - durable execution records, persistence, and replay wiring
 - the stable library surface for future non-CLI entry points
@@ -207,7 +207,8 @@ Allowed direct interaction rules:
 - Interactive `psychevo-cli` and `psychevo-acp` work should interact with `psychevo-gateway` for thread/turn orchestration and may interact with `psychevo-runtime` for non-interactive administrative helpers that are not gateway semantics.
 - `psychevo-gateway` may directly interact with `psychevo-runtime` only.
 - `psychevo-runtime` may directly interact with `psychevo-agent-core`, `psychevo-ai`, agent-invocation scoped tool surface bindings, and runtime-owned durable records.
-- `psychevo-runtime` may resolve capability extension contributions into agent-invocation scoped selections.
+- `psychevo-runtime` may accept capability-extension declarations and assemble
+  the runtime extension registry for an invocation.
 - `psychevo-runtime` may implement and assemble built-in capability modules, such as capability specs that explicitly place their implementation in runtime. Concrete capability behavior remains owned by those capability specs.
 - `psychevo-runtime` may own SQLite persistence for the first implementation slice without adding a new crate.
 - `psychevo-agent-core` may directly interact with `psychevo-ai` and tool abstractions supplied by runtime.
@@ -240,7 +241,9 @@ Prohibited dependency rules:
 - [021 Gateway](../021-gateway/spec.md) defines transport-neutral gateway orchestration.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines cross-cutting semantic state relationships.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines storage and persistence boundaries.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries resolved by runtime.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  capability-extension source, declaration, and registry boundaries resolved by
+  runtime.
 - [051 Agents](../051-agents/spec.md) defines reusable agent definitions and selected-agent orchestration semantics.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines a runtime-owned built-in capability target.
 - [027 ACP](../027-acp/spec.md) defines the Agent Client Protocol boundary.

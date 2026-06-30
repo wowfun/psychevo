@@ -31,30 +31,33 @@ trusted, executable, model-visible, or allowed to mutate runtime state.
 
 The canonical declaration shape is Codex-style: `hooks.<Event>[]` contains
 matcher groups, and each matcher group contains a `matcher` plus a `hooks[]`
-handler list. Existing Psychevo agent and plugin hook shapes may be accepted as
-compatibility input, but diagnostics and evidence report normalized event,
-matcher-group, and handler metadata.
+handler list. Diagnostics and evidence report normalized event, matcher-group,
+and handler metadata.
 
 ## Event Catalog
 
-Hook event names are case-sensitive product names. The target catalog is:
+Hook event names are case-sensitive product names. The Codex-aligned core
+catalog is:
 
 - `SessionStart`
-- `SessionEnd`
-- `SubagentStart`
-- `SubagentStop`
 - `UserPromptSubmit`
 - `PreToolUse`
 - `PermissionRequest`
 - `PostToolUse`
-- `PostLLMCall`
 - `PreCompact`
 - `PostCompact`
-- `Notification`
+- `SubagentStart`
+- `SubagentStop`
 - `Stop`
 
-Implementations may accept compatibility aliases while reporting the normalized
-event name in diagnostics, hook metadata, and run summaries.
+Psychevo also keeps these product events:
+
+- `SessionEnd`: explicit close behavior for long-lived UI, Gateway, daemon, and
+  replay contexts where cleanup is not the same as `Stop`.
+- `PostLLMCall`: provider-adjacent observation after a model response is
+  received, while preserving raw provider output and signed reasoning.
+- `Notification`: redacted, actionable runtime notification hooks for product
+  surfaces that are not ordinary transcript messages.
 
 ## Source Trust
 
@@ -66,8 +69,8 @@ per-hook hash review.
 
 Project hooks and plugin hooks require accepted source policy plus per-hook
 normalized-hash review before they run. Project hooks require trusted project
-configuration. Plugin hooks require the plugin to be enabled, the `hooks`
-capability family to be enabled, and the hook definition to be trusted.
+configuration. Plugin hooks require the plugin package to be enabled and the
+hook definition to be trusted.
 
 Hook trust status values are:
 
@@ -106,8 +109,8 @@ The first-class handler types are:
 Unsupported handler types and unavailable adapters are skipped with
 source-qualified diagnostics.
 
-Worker handlers call the plugin worker hook method and require both plugin
-enablement and the `hooks` capability family. Prompt handlers contribute typed
+Worker handlers call the plugin worker hook method and require package
+enablement plus an accepted hook source. Prompt handlers contribute typed
 context candidates to context assembly. Agent handlers delegate through the
 agent/subagent interface with bounded timeout and turn limits. These adapters
 are hidden behind the hook module interface; callers must not execute worker,
@@ -116,10 +119,10 @@ prompt, or agent handlers directly.
 ## Authority
 
 Hooks do not own provider payload semantics, permission policy, sandbox policy,
-session state, registry state, durable transcript facts, or future capability
-snapshots.
+session state, registry state, durable transcript facts, or future registry
+views.
 
-Most hook effects are observation, typed request, or typed contribution effects.
+Most hook effects are observation, typed request, or typed context effects.
 The owning runtime boundary decides whether a request changes the current
 invocation. Context and prompt contributions enter context assembly; they do
 not write directly into the system prompt or provider payload.
@@ -159,8 +162,8 @@ failed, timed out, emitted invalid JSON, or exited non-zero.
 Command handlers receive one JSON payload on stdin, execute in the canonical
 run cwd by default, use a default timeout of 600 seconds with a one-second
 minimum, and capture bounded stdout and stderr. Structured JSON stdout is the
-primary response contract. Exit code `2` remains a compatibility block signal
-for blocking events when structured output does not provide a stronger result.
+primary response contract. Exit code `2` blocks events whose contract supports
+blocking when structured output does not provide a stronger result.
 
 ## Evidence
 

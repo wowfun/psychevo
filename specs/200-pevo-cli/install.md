@@ -50,6 +50,13 @@ Accepted flags and environment defaults:
 - `--with-peval` also installs and verifies the `peval` evaluation CLI.
 - `--no-web` skips building and installing Web UI assets.
 - `--no-init` skips post-install `pevo init`.
+- `--check` prints dependency, version, and environment-readiness diagnostics
+  without cloning, installing, building Web assets, copying files, initializing,
+  or attempting best-effort repairs.
+- `--offline` requires an existing source checkout and runs Cargo and pnpm in
+  offline mode. It must reject clone-mode installs before any network action.
+- `--web-dist <path>` installs prebuilt Workbench assets from a directory that
+  contains `index.html`; it skips `pnpm install` and `pnpm build`.
 - `--dry-run` prints the resolved plan and commands without cloning,
   installing, initializing, or requiring installed dependencies.
 - `-h, --help` prints usage.
@@ -86,16 +93,46 @@ cannot make `cargo` available in the current process, the script fails with a
 manual Rust installation hint. The documented `curl | sh` install path is
 non-interactive stdin, so it requires Rust/Cargo to already be available.
 
+When `cargo` is present, the script checks `rustc --version` against the root
+`Cargo.toml` `rust-version`. If Rust is too old and `rustup` is available in an
+interactive shell, the script asks before attempting `rustup update stable`,
+refreshes the current-process PATH, and rechecks. It must not install or update
+Rust non-interactively.
+
 Unix, macOS, and WSL source builds require a native C compiler/linker toolchain
 before `cargo install` runs. The script must fail early when no `cc`, `gcc`, or
 `clang` command is available, with a short platform-appropriate hint. The script
 must not install native compiler toolchains automatically.
 
-Web UI asset installation is enabled by default. When it is enabled, missing
-`node` or `pnpm` is a hard failure with a short hint to install Node.js/pnpm or
-rerun with `--no-web`. The script does not install Node.js or pnpm
-automatically. The supported `pnpm` version follows the repository root
-`packageManager` declaration.
+Windows Git Bash/MSYS/MINGW source builds check for `cl`, `link`, `gcc`,
+`clang`, `cc`, or `vswhere` before `cargo install`. If none are detected, the
+script prints Visual Studio Build Tools and MinGW guidance and continues only
+after explicit interactive confirmation. It must never install Visual Studio
+Build Tools or MinGW automatically.
+
+Web UI asset installation is enabled by default. When it is enabled, missing or
+unsupported `node` is a hard failure with a short hint to install Node.js or
+rerun with `--no-web`. Missing `pnpm` may use the interactive best-effort
+Corepack/npm repair path below; otherwise it is a hard failure with a short
+hint. The script does not install Node.js automatically. The repository root
+`packageManager` declaration is the recommended `pnpm` version for source
+installs, not an exact installer gate.
+
+When Web asset installation is enabled and `--web-dist` is not supplied, the
+script checks Node.js against the current frontend requirement, with the
+supported lines `20.19+`, `22.13+`, or `24+`. If `pnpm` is present but differs
+from the root `packageManager` declaration, the script prints a warning and
+continues; `pnpm install --frozen-lockfile` remains the real compatibility gate.
+If `pnpm` is missing and stdin is interactive, the script asks before trying
+Corepack `corepack enable` plus `corepack prepare pnpm@<version> --activate`; if
+Corepack is unavailable but npm exists, it asks before trying
+`npm install -g pnpm@<version>`. After either path, it refreshes the current
+process PATH and rechecks for any available `pnpm`. It must not install Node.js
+automatically.
+
+After any best-effort tool installation or update, Windows Git Bash/MSYS/MINGW
+refreshes only the current process PATH with common Cargo, Node.js, npm, and
+pnpm locations. The script must not edit shell profiles.
 
 When the script is running from a local Psychevo checkout and reports missing
 native or Web build prerequisites, it may additionally point developers to
@@ -107,6 +144,13 @@ If `cargo install` fails under Windows Git Bash/MSYS/MINGW, the failure text mus
 mention that Rust and native C/C++ build tools, such as Visual Studio Build
 Tools or a compatible MinGW setup, may be required.
 
+When clone, Cargo install, or pnpm install/build steps fail, the script prints a
+compact enterprise-network diagnostics block. The block reports relevant
+Git proxy, npm/pnpm registry, `HTTP_PROXY`/`HTTPS_PROXY`, Cargo registry/source
+configuration presence, and CA-related environment variables. It must not modify
+Git, npm, pnpm, Cargo, proxy, registry, mirror, or CA configuration. Internal
+Git mirrors continue to use `--repo-url` or `PEVO_INSTALL_REPO`.
+
 ## Post-Install Behavior
 
 After `cargo install` succeeds, the script locates `pevo` or `pevo.exe`, runs
@@ -114,17 +158,20 @@ After `cargo install` succeeds, the script locates `pevo` or `pevo.exe`, runs
 supplied, the script also locates `peval` or `peval.exe` and runs
 `peval --help`.
 
-Unless `--no-web` is supplied, the script builds Workbench assets from the
-selected source checkout using:
+Unless `--no-web` or `--web-dist` is supplied, the script builds Workbench
+assets from the selected source checkout using:
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter @psychevo/workbench build
 ```
 
-It then copies `apps/workbench/dist` into `$(dirname pevo)/../share/psychevo/web`.
-This install-share location is the stable Web UI asset location for source
-installs. Dry-run output includes the install, build, and copy commands.
+With `--offline`, the script adds Cargo `--offline` and pnpm `--offline` to the
+install commands. It then copies either `apps/workbench/dist` or the explicit
+`--web-dist` directory into `$(dirname pevo)/../share/psychevo/web`. This
+install-share location is the stable Web UI asset location for source installs.
+Dry-run output includes the install, build, copy, offline, and `--web-dist`
+decisions.
 
 The install script must not run `peval init` automatically. Evaluation store
 setup remains an explicit user action through `peval init`, `--root`, or

@@ -251,12 +251,15 @@ and the selected agent's `tools` policy may only narrow that ceiling.
 
 ## Hooks
 
-Runtime owns hook execution. Hooks do not enter `psychevo-agent-core`.
+Runtime owns hook execution. Agent definitions may declare hook sources, but
+those declarations enter the same runtime hook module as profile, project,
+plugin, and managed hooks. Hooks do not enter `psychevo-agent-core`.
 
-Supported hook points are `PreToolUse`, `PostToolUse`, `Stop`,
-`SubagentStart`, and `SubagentStop`. `PreToolUse` exit code `2` blocks tool
-execution and returns stderr as a tool error. Other non-zero exit codes are
-diagnostics and do not fail closed in the first implementation slice.
+Agent-declared hooks use the event catalog, trust model, handler families, and
+event-scoped effects defined by [053 Hooks](../053-hooks/spec.md) and
+[140 Hook Runtime](../140-hook-runtime/spec.md). Selecting an agent may add
+hook declarations to invocation assembly, but it must not bypass hook trust,
+permission, resource, context, tool, or registry boundaries.
 
 ## Attachments
 
@@ -276,6 +279,8 @@ diagnostics and do not fail closed in the first implementation slice.
   fallback.
 - [007 Tool Surface](../007-tool-surface/spec.md) defines tool declaration and
   execution binding semantics.
+- [053 Hooks](../053-hooks/spec.md) defines runtime hook authority.
+- [140 Hook Runtime](../140-hook-runtime/spec.md) defines hook execution.
 - [055 Skills](../055-skills/spec.md) defines skill package semantics that an
   agent definition may reference.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines the built-in coding

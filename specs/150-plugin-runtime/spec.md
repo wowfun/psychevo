@@ -3,16 +3,16 @@ name: 150. Plugin Runtime
 psychevo_self_edit: deny
 ---
 
-Define the first implementation slice for plugin installation, policy,
-diagnostics, static contributions, and worker execution.
+Define the current implementation slice for plugin installation, package
+enablement, diagnostics, static declarations, and Psychevo worker execution.
 
 ## Scope
 
 - plugin store roots for profile and project scopes
 - local directory and Git installation
 - marketplace catalogs for local and Git sources
-- plugin policy overlay in `RunConfig`
-- static contribution loading
+- plugin package enablement overlay in `RunConfig`
+- static declaration loading
 - stdio JSON-RPC worker execution for tools
 - CLI-facing read, diagnostic, install, uninstall, enable, disable, and catalog operations
 
@@ -50,34 +50,30 @@ future spec.
 
 ## Policy Overlay
 
-`RunConfig` includes plugin policy. Profile config and project config overlay
-produce the effective plugin policy for an invocation.
+`RunConfig` includes plugin package policy. Profile config and project config
+overlay produce the effective plugin policy for an invocation.
 
-Policy records plugin enabled state and capability-family enabled state. The
-capability families are:
+Plugin policy records package enabled state only. Enabling a package makes its
+accepted declarations available to the host-owned mapping step. The owning
+runtime module then decides whether the effect is usable:
 
-- `skills`
-- `mcp`
-- `tools`
-- `hooks`
-- `agents`
-- `commands`
-- `providers`
-- `runtime`
+- MCP server and tool approval policy belongs to MCP and tool surfaces.
+- hook trust belongs to 140 Hook Runtime.
+- provider policy and credentials belong to provider management.
+- sandbox and permission decisions belong to permission runtime.
 
 CLI `install`, `enable`, and `disable` write the active profile scope by
 default. `--local` writes the current cwd `.psychevo/config.toml`.
 `--global` is an alias for the active profile scope and conflicts with
-`--local`. Enabling a plugin enables every declared capability family unless
-explicit family flags are supplied in a later spec.
+`--local`.
 
 When multiple installed plugins match the same selector, commands require
 `name@source`.
 
-## Contribution Loading
+## Declaration Loading
 
 Runtime loads enabled plugins before agent and skill discovery. Static manifest
-contributions can add:
+declarations can add:
 
 - skill roots
 - MCP server descriptors
@@ -91,19 +87,20 @@ The owning runtime boundary decides whether each descriptor is usable. Duplicate
 model-visible tool names are conflict-resolved by the existing tool surface
 rules, with plugin identity included in diagnostics.
 
-Plugin hook sources are loaded only when the plugin and `hooks` capability
-family are enabled. Loading a plugin hook source does not trust or execute its
-handlers. Runtime passes plugin hook declarations to 140 Hook Runtime, where
-they normalize to the canonical hook shape and require hook trust review before
-execution.
+Plugin hook sources are loaded only when the plugin package is enabled. Loading
+a plugin hook source does not trust or execute its handlers. Runtime passes
+plugin hook declarations to 140 Hook Runtime, where they normalize to the
+canonical hook shape and require hook trust review before execution.
 
 ## Worker V1
 
-A plugin worker is an external stdio JSON-RPC process declared by the manifest.
-Runtime starts workers only when the plugin and `runtime` family are enabled.
+A plugin worker is an external stdio JSON-RPC process declared by Psychevo
+manifest metadata under `psychevo.runtime`. Runtime starts workers only when the
+plugin package is enabled and an owning runtime path needs the worker.
 
 Startup context includes plugin identity, plugin root, plugin data root,
-invocation scope, enabled capability families, and host capability descriptors.
+invocation scope, manifest resources, Psychevo extension metadata, and host
+capability descriptors.
 
 Worker V1 supports:
 
@@ -113,14 +110,14 @@ Worker V1 supports:
 - `hooks/call`
 - `shutdown`
 
-The first executable worker contribution is a tool. Worker tool descriptors
+The first executable worker declaration is a tool. Worker tool descriptors
 become `ToolBinding` adapters and enter `ToolSurfaceAssembly.extension_tools`.
-Worker-provided hook handlers are candidate hook contributions for the hook
+Worker-provided hook handlers are candidate hook declarations for the hook
 runtime handler family. A `worker` hook handler calls `hooks/call` through the
-plugin worker adapter after plugin policy enables both `runtime` and `hooks`.
-Missing runtime capability, missing worker process, method-not-found responses,
-malformed worker responses, and worker timeouts become structured hook
-diagnostics and affect only the hook run.
+plugin worker adapter after package enablement and hook trust review select that
+handler. Missing worker metadata, missing worker process, method-not-found
+responses, malformed worker responses, and worker timeouts become structured
+hook diagnostics and affect only the hook run.
 
 ## CLI Operations
 
@@ -141,8 +138,9 @@ All read and diagnostic commands accept `--json` and emit secret-free
 structured output. Human output is concise and action-oriented.
 
 `plugin doctor` reports discovered packages, manifest path, supported and
-ignored fields, install source, active version, enabled state, skipped reason,
-loaded capabilities, policy overlays, worker failures, and data root.
+ignored fields, manifest resources, Psychevo extensions, install source, active
+version, enabled state, skipped reason, owning-surface policy state, worker
+failures, and data root.
 
 ## Related Topics
 

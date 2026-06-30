@@ -32,8 +32,8 @@ CI/CD vocabulary and generic validation boundaries follow
 - `psychevo-acp` constructs runtime calls directly from ACP session state and
   prompt inputs.
 - Runtime remains responsible for session coordination, model resolution, tool
-  surface assembly, capability source normalization, permission policy, command
-  metadata, persistence, and evidence.
+  surface assembly, capability-extension source normalization, permission
+  policy, command metadata, persistence, and evidence.
 - ACP transport-local session and cancellation state is not durable evidence.
 - Command availability is sent only after the client receives or can apply the
   ACP session id.

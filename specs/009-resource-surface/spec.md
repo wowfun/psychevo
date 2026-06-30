@@ -37,7 +37,7 @@ The resource surface is the runtime-supplied candidate surface of resource facts
 
 Runtime supplies the resource surface. This spec does not define how resources are discovered, selected, prioritized, provisioned, scheduled, cleaned up, or configured.
 
-Capability extensions may contribute resource candidates or resource gates. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, contribution, activation, availability, and conflict boundaries for those candidates. This spec owns resource surface and resource decision semantics after candidates reach the resource boundary.
+Capability extensions may declare resource candidates or resource gates. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, declaration, activation, availability, and conflict boundaries for those candidates. This spec owns resource surface and resource decision semantics after candidates reach the resource boundary.
 
 Resource facts are not automatically model-visible. [006 Context Assembly](../006-context-assembly/spec.md) owns context projection and visibility.
 
@@ -103,4 +103,5 @@ Durable evidence may represent that a resource fact was allowed, denied, or defe
 - [041 Permissions](../041-permissions/spec.md) defines the concrete runtime
   permission policy that specializes resource gates for local operations.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how resource facts relate to other state families.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide resource candidates or gates.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  how extension declarations may provide resource candidates or gates.

@@ -13,7 +13,7 @@ execution.
 - Hook declaration parsing never panics on unsupported shapes; malformed
   declarations are skipped with source-qualified diagnostics.
 - Canonical Codex-style event matcher groups normalize from profile, project,
-  agent, plugin, managed, and compatibility hook declarations.
+  agent, plugin, and managed hook declarations.
 - Profile and selected-agent hooks run as trusted configuration; project and
   plugin hooks are skipped until source policy and normalized-hash trust allow
   them.
@@ -33,9 +33,9 @@ execution.
 
 ## Current Implementation Slice
 
-The current implementation slice covers command hooks for tool events and
-compatibility declaration shapes. Tests exercise local command fixtures through
-the shared hook runtime rather than testing agent-only wrappers.
+The current implementation slice covers command hooks for tool events. Tests
+exercise local command fixtures through the shared hook runtime rather than
+testing agent-only wrappers.
 
 Until worker, prompt, and agent hook handlers execute, tests should assert that
 those handler types normalize and skip with structured diagnostics rather than
@@ -50,8 +50,8 @@ acceptance coverage should come from focused hook/runtime tests.
 - Agent-declared `PreToolUse` hooks still run before tool execution.
 - Plugin hook source descriptors and agent hook source descriptors produce the
   same hook runtime outcomes for equivalent hook declarations.
-- Codex-style `hooks.<Event>[]` matcher groups normalize to the same internal
-  records as accepted legacy declaration forms.
+- Codex-style `hooks.<Event>[]` matcher groups normalize to stable internal
+  records from every accepted hook source.
 - Project/plugin hook sources with untrusted or modified hashes are listed but
   skipped before handler execution.
 - Multiple matching handlers all start for the same event even when one later

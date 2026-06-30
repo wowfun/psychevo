@@ -34,7 +34,7 @@ Memory is for stable reusable knowledge. It is not task progress, transcript rep
 
 Memory may come from user intent, execution observations, durable evidence, or external memory providers. Regardless of source, memory must not become a second source of execution truth.
 
-Capability extensions may contribute memory candidates or memory providers. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, contribution, activation, availability, and conflict boundaries for those candidates. This spec owns memory semantics after memory candidates or providers reach the memory boundary.
+Capability extensions may declare memory candidates or memory providers. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, declaration, activation, availability, and conflict boundaries for those candidates. This spec owns memory semantics after memory candidates or providers reach the memory boundary.
 
 ## Memory Candidates
 
@@ -87,4 +87,5 @@ Durable evidence remains the source for execution facts. Memory may reference ev
 - [008 Session Continuity](../008-session-continuity/spec.md) defines session continuity, which stays separate from cross-session memory.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how memory facts relate to other state families.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines optional persistence boundaries for retained memory facts.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide memory candidates or providers.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  how extension declarations may provide memory candidates or providers.

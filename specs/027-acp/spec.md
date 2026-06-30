@@ -18,7 +18,7 @@ runtime permission policy, durable storage, or MCP semantics.
 - ACP session creation, loading, listing, closing, prompting, and cancellation
 - ACP projection of runtime messages, reasoning, tools, permissions, models,
   modes, config options, and command metadata
-- ACP-provided MCP servers as session-scoped runtime capability sources
+- ACP-provided MCP servers as session-scoped capability-extension sources
 - ACP authentication projection for configured model providers
 - protocol-level rejection, observation, and completion mapping
 
@@ -337,7 +337,7 @@ must return bounded protocol errors instead of falling back silently.
 
 ## MCP
 
-ACP-provided MCP servers are session-scoped capability sources following
+ACP-provided MCP servers are session-scoped capability-extension sources following
 [056 MCP](../056-mcp/spec.md). ACP accepts supported MCP declarations from the
 client and passes them to runtime. Runtime owns conversion into tool candidates,
 availability, conflict handling, selection, permission wrapping, and evidence.
@@ -379,7 +379,7 @@ always when runtime can persist a safe rule, and deny.
 - [041 Permissions](../041-permissions/spec.md) defines runtime permission
   policy.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines
-  capability contribution boundaries.
+  capability-extension source, declaration, and registry boundaries.
 - [056 MCP](../056-mcp/spec.md) defines MCP source, naming, dispatch,
   permission, and evidence boundaries.
 - [230 pevo-acp](../230-pevo-acp/spec.md) defines the concrete ACP server

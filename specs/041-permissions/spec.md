@@ -184,6 +184,12 @@ The current cwd is no longer the hard boundary for file tools; it is the
 default workspace root used by built-in profiles. A profile grant may authorize
 an absolute path outside the cwd, while protected denies still win.
 
+Relative filesystem profile entries are human path strings relative to the
+current cwd. They use `/` separators after host normalization and must not
+require file-URI percent encoding for ordinary path characters such as spaces.
+Absolute filesystem entries may use canonical host path identity for
+containment matching.
+
 Exec commands are evaluated in three layers:
 
 1. hard/protected deny and background-process deny

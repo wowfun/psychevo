@@ -71,8 +71,8 @@ image inputs, inherited environment, config path, database path, approval
 handler, and ACP-provided MCP servers through normal Gateway/runtime inputs.
 
 Runtime remains the owner of session coordination, model resolution, tool
-surface assembly, capability source normalization, permission policy, command
-metadata, persistence, and evidence.
+surface assembly, capability-extension source normalization, permission policy,
+command metadata, persistence, and evidence.
 
 The server exposes runtime model controls through standard ACP session config
 options. On `session/new` and `session/load`, clients receive `mode`, `model`,

@@ -10,14 +10,14 @@ Define acceptance expectations and validation scenarios for plugin runtime.
 - Installing a plugin materializes a package into the selected profile or
   project cache without copying content outside the package root.
 - Installing does not enable a plugin; profile and project policy decide
-  plugin and capability-family activation for each invocation.
+  package enablement for each invocation.
 - Project policy can override profile-installed plugin enablement without
   requiring a duplicate project install record.
-- Runtime loads enabled plugin contributions before agent and skill discovery,
-  then routes each contribution through the existing owning boundary.
-- Plugin hook declarations load only when the plugin and `hooks` family are
-  enabled, then remain subject to the hook system's normalized-hash trust
-  review before execution.
+- Runtime loads enabled plugin declarations before agent and skill discovery,
+  then routes each declaration through the existing owning boundary.
+- Plugin hook declarations load only when the plugin package is enabled, then
+  remain subject to the hook system's normalized-hash trust review before
+  execution.
 - Worker contribution discovery and tool execution receive the same effective
   environment and bounded startup context.
 - Worker startup, response, timeout, and tool errors degrade only the affected
@@ -30,7 +30,7 @@ Define acceptance expectations and validation scenarios for plugin runtime.
 The current slice covers local directory and local Git installs, JSON store
 records, TOML policy overlay, static skill/agent/hook roots, and stdio
 JSON-RPC worker tools. MCP, provider, command, and toolset descriptors may be
-recognized as declared capabilities, but executable routing remains owned by
+recognized as declared resources, but executable routing remains owned by
 their future boundaries.
 
 Manual broad validation for code changes is still the Rust workspace gate
@@ -50,11 +50,11 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - `--local` enable and disable can resolve a profile-installed plugin selector
   while writing only current cwd `.psychevo/config.toml` policy.
 - `--global` and `--local` conflict for plugin write commands.
-- Project policy overlays profile policy for plugin and capability-family
-  enablement.
+- Project policy overlays profile policy for package enablement.
 - Selector conflicts require `name@source`.
 - Static skill roots, hook sources, and worker tool descriptors are loaded only
-  when the plugin and related capability family are enabled.
+  when the plugin package is enabled, then routed through the owning runtime
+  module.
 - Plugin hook sources are listed but not executed when their normalized hook
   hashes are untrusted or modified.
 - Worker-provided hook handlers are either routed through 140 Hook Runtime or

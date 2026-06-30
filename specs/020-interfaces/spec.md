@@ -53,7 +53,7 @@ At the semantic level, an invocation may include:
 - optional resource surface hints
 - optional memory hints
 
-Runtime first resolves the session boundary, then assembles the agent invocation. These invocation inputs are hints to runtime assembly. Runtime resolves them through the source-of-truth specs for session continuity, runtime assembly, context assembly, tool surface, resource surface, memory, and capability extensions.
+Runtime first resolves the session boundary, then assembles the agent invocation. These invocation inputs are hints to runtime assembly. Runtime resolves them through the source-of-truth specs for session continuity, runtime assembly, context assembly, tool surface, resource surface, memory, and capability-extension declarations.
 
 A session-start rejection happens when an entrypoint or runtime cannot create, open, reopen, or provide the required session boundary.
 
@@ -113,7 +113,7 @@ Pause, resume, retry, undo, branch navigation, and checkpoint restore are out of
 
 ACP interfaces specialize this baseline by mapping protocol requests to gateway
 threads, observations, control signals, permissions, auth, commands, model and
-mode controls, config controls, and capability source inputs. That protocol
+mode controls, config controls, and capability-extension source inputs. That protocol
 mapping is owned by [027 ACP](../027-acp/spec.md).
 
 ## Related Topics

@@ -9,7 +9,7 @@ Define plugin package manifest loading and validation.
 
 - recognized manifest paths
 - native required fields and compatibility loading
-- supported field families
+- shared Codex-compatible manifest fields and Psychevo namespaced extensions
 - path safety for local package resources
 - diagnostics for supported, ignored, and invalid fields
 
@@ -39,27 +39,33 @@ A native manifest requires:
 - `version`
 - `description`
 
-The supported field families are:
+The shared Codex-compatible package fields are:
 
 - `skills`
 - `mcpServers`
-- `tools`
 - `hooks`
-- `agents`
-- `agentBackends`
-- `commands`
-- `toolsets`
-- `providers`
-- `runtime`
+- `apps`
 - `interface`
 
-Unknown fields are ignored with diagnostics. Unsupported supported-field shapes
-are invalid diagnostics and the affected contribution is skipped.
+`interface.capabilities` is descriptive model/UI metadata. It is not a
+permission grant, runtime capability gate, or fine-grained policy selector.
 
-The `hooks` field declares candidate hook contributions only. Manifest loading
+Psychevo-only plugin behavior must live under the top-level `psychevo` object.
+The supported Psychevo extension fields are:
+
+- `psychevo.runtime`
+- `psychevo.commands`
+- `psychevo.providers`
+- `psychevo.agents`
+- `psychevo.toolsets`
+
+Unknown top-level fields are ignored with diagnostics. Unsupported supported
+field shapes are invalid diagnostics and the affected declaration is skipped.
+
+The `hooks` field declares candidate hook declarations only. Manifest loading
 does not trust or execute hook handlers; hook declarations are normalized and
-reviewed by 053 Hooks and 140 Hook Runtime after plugin policy enables the
-plugin and `hooks` capability family.
+reviewed by 053 Hooks and 140 Hook Runtime after plugin package enablement makes
+the declaration available.
 
 Plugin hooks may be declared inline with the canonical hook object shape or by
 package-relative paths listed under `hooks`. A default `hooks/hooks.json` file
@@ -74,9 +80,9 @@ manifest paths. They may load as local development packages when native-required
 fields are missing, but marketplace install requires a resolvable name and
 version.
 
-Compatibility fields are mapped only when their semantics match Psychevo field
-families. Compatibility does not imply command, hook, app, UI, LSP, theme, or
-SDK runtime compatibility.
+Compatibility fields are mapped only when their semantics match Psychevo's
+shared package-resource semantics. Compatibility does not imply command, hook,
+app, UI, LSP, theme, or SDK runtime compatibility.
 
 ## Path Safety
 
@@ -87,27 +93,30 @@ All local paths in a manifest must be explicit package-relative paths:
 - path contains no `..` component
 - resolved path remains inside the plugin root
 
-Invalid paths skip the affected contribution and produce diagnostics. Runtime
+Invalid paths skip the affected declaration and produce diagnostics. Runtime
 must not canonicalize an invalid path into an accepted path by silently dropping
 unsafe components.
 
 ## Worker Manifest Fields
 
-`runtime.worker` declares a stdio worker:
+`psychevo.runtime.worker` declares a Psychevo stdio worker:
 
 ```json
 {
-  "runtime": {
-    "worker": {
-      "command": "./worker.py",
-      "args": ["--stdio"]
+  "psychevo": {
+    "runtime": {
+      "worker": {
+        "command": "./worker.py",
+        "args": ["--stdio"]
+      }
     }
   }
 }
 ```
 
 `command` uses the same local path safety rules. `args` are literal argv values
-and do not grant shell evaluation.
+and do not grant shell evaluation. A top-level `runtime` field is not a
+Codex-compatible worker field and must not be used for new Psychevo packages.
 
 ## Related Topics
 

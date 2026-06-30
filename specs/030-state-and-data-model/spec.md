@@ -62,7 +62,7 @@ Execution state covers agent invocations, turns, loop-visible messages, tool exe
 
 AI generation state covers model targets, generation requests, normalized stream categories, terminal generation outcomes, and optional metadata. [003 AI Protocol](../003-ai-protocol/spec.md) owns these semantics.
 
-Runtime assembly state covers the facts runtime resolves for an agent invocation: session boundary, model and generation selections, provider configuration selection, context projection, resource surface, tool surface, capability extension selections, session continuity inputs, memory hints, control-signal wiring, and evidence sink wiring. [004 Runtime Contract](../004-runtime-contract/spec.md) owns runtime assembly.
+Runtime assembly state covers the facts runtime resolves for an agent invocation: session boundary, model and generation selections, provider configuration selection, context projection, resource surface, tool surface, extension registry view, accepted declaration facts, session continuity inputs, memory hints, control-signal wiring, and evidence sink wiring. [004 Runtime Contract](../004-runtime-contract/spec.md) owns runtime assembly.
 
 Context state covers instruction context, loop-visible context, attached context, summary context, and context projection. [006 Context Assembly](../006-context-assembly/spec.md) owns model visibility and transformation boundaries.
 
@@ -80,15 +80,15 @@ Resource state covers resource facts, resource operations, access gates, and res
 
 Memory state covers memory candidates, retained memory, memory recall, and memory mutation boundaries. [010 Memory System](../010-memory-system/spec.md) owns memory semantics.
 
-Extension state covers capability source identity, capability contributions, activation, availability, agent-invocation scoped selection, and conflicts. [050 Capability Extensions](../050-capability-extensions/spec.md) owns capability extension semantics.
+Extension state covers source identity, declarations, activation, availability, accepted registry effects, and conflicts. [050 Capability Extensions](../050-capability-extensions/spec.md) owns capability extension semantics.
 
 ## Identity and Relationships
 
-State facts must be relatable across their source boundaries. A consumer should be able to connect a session to its agent invocations, turns, messages, AI generations, assistant tool requests, tool executions, tool-result artifacts, runtime assembly facts, resource decisions, durable evidence, continuity inputs, memory-related facts, and capability extension facts when those facts exist.
+State facts must be relatable across their source boundaries. A consumer should be able to connect a session to its agent invocations, turns, messages, AI generations, assistant tool requests, tool executions, tool-result artifacts, runtime assembly facts, resource decisions, durable evidence, continuity inputs, memory-related facts, and extension registry facts when those facts exist.
 
 Semantic identity means a fact can be recognized and related within its owning semantics. This spec does not define identifier names, identifier formats, database keys, storage cursors, field names, or payload shapes.
 
-Causal relationships matter more than one physical log. A model tool request causes or contributes to a tool execution; a tool execution produces a tool-result artifact; a context projection contributes to a generation request; a resource decision may affect model visibility or tool execution; session continuity inputs, memory recall, and capability extension selections may contribute to runtime assembly.
+Causal relationships matter more than one physical log. A model tool request causes or contributes to a tool execution; a tool execution produces a tool-result artifact; a context projection contributes to a generation request; a resource decision may affect model visibility or tool execution; session continuity inputs, memory recall, and extension registry facts may contribute to runtime assembly.
 
 Derived views must not become new truth sources. CLI rendering, SDK responses, live observation views, test harness output, caches, and future transport payloads may expose or summarize state facts, but they must not redefine the underlying semantics.
 
@@ -100,7 +100,7 @@ Durable facts must be representable through durable evidence or another durable 
 
 [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines the persistence boundary for durable facts. This spec defines recoverability classes, not persistence substrate behavior.
 
-Reconstructable facts may be rebuilt from durable facts, configuration, source material, or provider/runtime capability discovery. Context projections, summary context, selected tool surfaces, tool declaration snapshots, resource facts, capability extension candidates, capability assembly selections, and memory recall candidates may be reconstructable when their source material remains available. This spec does not guarantee deterministic reconstruction.
+Reconstructable facts may be rebuilt from durable facts, configuration, source material, or provider/runtime discovery. Context projections, summary context, selected tool surfaces, tool declaration snapshots, resource facts, extension declarations, extension registry views, and memory recall candidates may be reconstructable when their source material remains available. This spec does not guarantee deterministic reconstruction.
 
 Request reconstruction should prefer durable prompt-prefix evidence, message
 metadata, context evidence, and current runtime/provider registries over a
@@ -144,4 +144,5 @@ Recoverability class is semantic. It does not define persistence format, retenti
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface projection for session and agent-invocation state.
 - [021 Gateway](../021-gateway/spec.md) defines source-to-thread and live gateway state semantics.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability extension state boundaries.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  capability-extension state boundaries and registry facts.

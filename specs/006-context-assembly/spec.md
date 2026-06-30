@@ -10,7 +10,7 @@ Define the model context assembly contract owned by `psychevo-runtime`.
 - semantic model context assembled for one generation request
 - per-agent-invocation context projection boundary
 - generic source category visibility boundaries
-- capability-supplied context candidates
+- contributor-supplied context candidates
 - runtime-owned context projection
 - context transformation boundaries
 - prompt slot assembly and provider role fallback as specified by the
@@ -72,7 +72,7 @@ project instruction injection. These policies change model-visible project
 context only; they do not widen or narrow filesystem, shell, network, or
 approval behavior.
 
-Context projection may combine instruction context, loop-visible context, attached context, summary context, capability-supplied context candidates, session continuity inputs, memory recall candidates, and generic resource facts. These are source categories, not required sections or provider fields. [008 Session Continuity](../008-session-continuity/spec.md) defines session continuity inputs. [009 Resource Surface](../009-resource-surface/spec.md) defines resource facts and resource gates. [010 Memory System](../010-memory-system/spec.md) defines memory recall candidates. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source and contribution boundaries for capability-supplied candidates.
+Context projection may combine instruction context, loop-visible context, attached context, summary context, contributor-supplied context candidates, session continuity inputs, memory recall candidates, and generic resource facts. These are source categories, not required sections or provider fields. [008 Session Continuity](../008-session-continuity/spec.md) defines session continuity inputs. [009 Resource Surface](../009-resource-surface/spec.md) defines resource facts and resource gates. [010 Memory System](../010-memory-system/spec.md) defines memory recall candidates. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, declaration, and registry boundaries for contributor-supplied candidates.
 
 Runtime must preserve visibility boundaries during projection. Inputs that remain runtime-only must not become model-visible. Inputs projected as loop-visible context must use agent execution message semantics.
 
@@ -205,7 +205,8 @@ Transformation policy may depend on caller inputs, runtime configuration, provid
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource facts and gates that may constrain context projection.
 - [010 Memory System](../010-memory-system/spec.md) defines memory recall candidates that may feed context projection.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how context facts relate to other state families.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contribution boundaries for context candidates.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  source, declaration, and registry boundaries for context candidates.
 - [055 Skills](../055-skills/spec.md) defines skill package discovery and model-visible skill index semantics.
 - [130 Context Compaction](../130-context-compaction/spec.md) defines the
   implementation policy for compacted summary context.

@@ -15,6 +15,9 @@ authority by itself. [041 Permissions](../041-permissions/spec.md) owns policy
 gates, and [045 Sandbox](../045-sandbox/spec.md) owns sandbox enforcement below
 those gates.
 
+Windows Git Bash and Windows path compatibility are specified in the
+[Windows Compatibility](windows-compatibility.md) attachment for this topic.
+
 ## Scope
 
 - local host environment vocabulary used by runtime, Gateway, CLI, TUI,
@@ -88,6 +91,12 @@ or shell integrations. Host path exposure must preserve the distinction between
 display labels, user-selected files, canonical local paths, and model-visible
 content.
 
+Host path parsers preserve path literals. They may reject unsupported syntax or
+normalize path separators and `.`/`..` segments at the host boundary, but they
+must not trim leading or trailing whitespace from a path string. Surfaces that
+want to forgive accidental whitespace must do so before calling the generic
+path parser.
+
 Process exposure includes shell execution, stdin/stdout/stderr handling,
 long-running child sessions, yielded stdin, platform-specific process
 capabilities, and executable discovery. Shell execution remains subject to
@@ -106,6 +115,52 @@ material must define a safe redaction or opt-in boundary.
 Temporary and cache roots are host conveniences, not durable truth sources.
 Specs that use them must avoid creating hidden execution truth that cannot be
 reconstructed from durable evidence or declared configuration.
+
+## Windows Shell and Path Compatibility
+
+Windows support must keep shell syntax, host process APIs, and stored path
+identity separate. Native Windows compatibility is not the same capability as
+Git Bash/MSYS compatibility.
+
+The first native Windows support slice is intentionally Git-Bash-only. Native
+Windows execution surfaces must use Git Bash for shell commands and interactive
+terminal sessions. PowerShell and `cmd.exe` may remain installer or diagnostic
+helpers, but they are not supported runtime shells in this slice.
+
+Durable cwd identity remains a canonical native path string. Runtime may derive
+structured path views at host boundaries, but cwd, home, config, database,
+executable, and absolute external host paths must not require persisted path
+metadata unless a future feature introduces a concrete cross-environment
+identity need.
+
+When a Windows execution path uses a POSIX-like shell such as Git Bash or MSYS,
+that shell choice must be explicit in the environment capability or launch
+contract. Cwd values, temp roots, snapshot files, and permission checks that
+cross from the shell into native process APIs must normalize shell-emitted
+drive paths such as `/c/...` before passing them to `Path`, `Command`,
+subprocess, or filesystem-policy code. Native Windows paths must remain
+idempotent through that normalization.
+
+Path parsers at product boundaries should accept Windows drive paths, UNC
+paths, and supported extended/verbatim Windows prefixes as Windows absolute
+syntax independently of the current host platform. Foreign Windows paths must
+not be joined to the current POSIX cwd or treated as relative path text. MSYS,
+Cygwin, or WSL drive spellings are compatibility inputs and should normalize at
+the host boundary into an explicit native-path or path-convention value before
+storage, permission matching, or durable evidence.
+
+Generic POSIX shell tokenization must not be the first parser for unquoted
+Windows drive or UNC paths because backslashes are valid path separators there.
+Drive and UNC detection should run before shell-unescape fallback. Windows
+process launches must also preserve case-insensitive environment-variable
+semantics and provide Windows lookup essentials such as `COMSPEC` and `PATHEXT`
+when the child process path depends on native shell lookup.
+
+User-visible shell guidance must name the actual configured shell family. If a
+Windows run uses Git Bash, the guidance should use POSIX examples and explain
+that PowerShell builtins do not apply. If it uses PowerShell or `cmd.exe`, the
+guidance should use that shell's quoting, chaining, and environment-variable
+rules instead.
 
 ## Platform Capability
 

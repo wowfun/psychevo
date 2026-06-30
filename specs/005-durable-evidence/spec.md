@@ -13,7 +13,7 @@ Define the durable evidence contract for Psychevo sessions and agent invocations
 - AI generation terminal outcomes
 - assistant tool request, tool execution outcome, and tool-result linkage
 - resource decisions that affect model visibility or tool execution
-- capability extension facts that affect agent-invocation assembly
+- extension registry facts that affect agent-invocation assembly
 - terminal agent-invocation outcome
 - causal relationships between session, agent invocation, turn, message, generation, and tool facts
 - optional metadata preservation boundary
@@ -47,7 +47,7 @@ Before-agent-start rejection may be exposed as an observable rejection. This spe
 
 ## Required Evidence
 
-Durable evidence must be able to represent agent-invocation assembly facts at the semantic level. Those facts may include the capability target, model target, generation controls, context assembly facts, runtime-injected context material that was model-visible, resource surface facts, toolset selection and expansion facts, tool declaration snapshot facts, tool refresh facts, capability extension selection facts, unavailable or degraded assembly facts, cancellation wiring facts, and evidence sink wiring facts. [006 Context Assembly](../006-context-assembly/spec.md) defines context assembly semantics. [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability extension facts that may affect agent-invocation assembly. This spec does not require full prompt snapshots, context schemas, policy schemas, extension manifests, or concrete configuration fields.
+Durable evidence must be able to represent agent-invocation assembly facts at the semantic level. Those facts may include the capability target, model target, generation controls, context assembly facts, runtime-injected context material that was model-visible, resource surface facts, toolset selection and expansion facts, tool declaration snapshot facts, tool refresh facts, extension registry facts, unavailable or degraded assembly facts, cancellation wiring facts, and evidence sink wiring facts. [006 Context Assembly](../006-context-assembly/spec.md) defines context assembly semantics. [050 Capability Extensions](../050-capability-extensions/spec.md) defines registry facts that may affect agent-invocation assembly. This spec does not require full prompt snapshots, context schemas, policy schemas, extension manifests, or concrete configuration fields.
 
 Durable evidence must be able to represent finalized loop-visible message artifacts from agent execution. Message semantics are defined by [002 Agent Execution](../002-agent-execution/spec.md).
 

@@ -29,5 +29,5 @@ Out of scope:
 - [010 Memory System](../010-memory-system/spec.md) defines the optional memory boundary downstream of the execution substrate.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines the persistence boundary downstream of execution evidence.
 - [040 Environment](../040-environment/spec.md) defines local host environment and authority boundaries.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions remain outside the minimal core until runtime selection.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines how extension declarations remain outside the minimal core until host-owned runtime acceptance.
 - [070 Experience](../070-experience/spec.md) defines cross-cutting UX and DX defaults for user-facing and developer-facing work.

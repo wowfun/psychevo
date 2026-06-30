@@ -13,8 +13,8 @@ Define acceptance expectations and validation scenarios for plugin manifests.
 - Compatibility manifests may load for local development without native-only
   required fields, but installable compatibility packages must have resolvable
   name and version.
-- Supported field families with invalid shapes skip only the affected
-  contribution and return diagnostics.
+- Supported shared fields or Psychevo extension fields with invalid shapes skip
+  only the affected declaration and return diagnostics.
 - Unknown fields are ignored with diagnostics.
 - Every manifest local path is explicit package-relative input and cannot
   escape the plugin root through absolutes, `..`, symlinks, or canonicalization.
@@ -34,6 +34,8 @@ acceptance coverage should come from focused manifest loader tests.
 - Native `.psychevo-plugin/plugin.json` is selected before compatibility
   manifests.
 - Additional recognized manifests are reported as ignored diagnostics.
+- A malformed preferred manifest fails on that manifest and does not fall
+  through to lower-priority manifest paths.
 - Missing native `name`, `version`, or `description` produces invalid manifest
   diagnostics.
 - Compatibility manifests may load for local development with compatibility
@@ -43,12 +45,15 @@ acceptance coverage should come from focused manifest loader tests.
 - Compatibility manifest install accepts packages with name and version but no
   description, storing an empty description.
 - Unknown fields produce ignored-field diagnostics.
-- Supported fields with invalid shape skip the affected contribution.
+- Shared fields and Psychevo extension fields with invalid shape skip the
+  affected declaration.
 - Local path values must start with `./`.
 - Absolute paths are rejected.
 - Paths containing `..` are rejected.
 - Symlink or canonicalization escapes outside the plugin root are rejected.
-- Worker command paths use the same local path safety rules.
+- `psychevo.runtime.worker.command` paths use the same local path safety rules.
+- Top-level `runtime.worker` is ignored for new worker loading and reported as an
+  ignored field.
 
 ## Validation Boundaries
 

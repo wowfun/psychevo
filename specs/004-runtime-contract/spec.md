@@ -15,7 +15,7 @@ Define the runtime contract owned by `psychevo-runtime`.
 - resource surface wiring
 - agent-invocation scoped tool surface assembly
 - permission policy, permission mode, approval handler, and session grant wiring
-- capability extension resolution
+- capability-extension declaration acceptance and extension registry assembly
 - stop, abort, cancellation, and pending user-input control wiring
 - durable evidence sink wiring
 - transport-neutral runtime library boundary
@@ -52,7 +52,7 @@ If runtime cannot create, open, or provide the required session boundary, the re
 
 ## Agent-Invocation Assembly
 
-After a session boundary exists, runtime assembles an agent invocation from caller inputs, configuration, session continuity inputs, and available capability contributions. Agent-invocation assembly connects:
+After a session boundary exists, runtime assembles an agent invocation from caller inputs, configuration, session continuity inputs, and accepted extension declarations. Agent-invocation assembly connects:
 - `psychevo-agent-core`
 - `psychevo-ai`
 - optional capability target and toolset hints
@@ -63,7 +63,7 @@ After a session boundary exists, runtime assembles an agent invocation from call
 - agent-invocation scoped tool surface
 - permission policy inputs, permission mode, approval handler, and session grants
 - generation-request tool declaration snapshots
-- capability extension selections
+- extension registry view and accepted declaration facts
 - optional selected agent definition and child-agent control scope
 - stop, abort, cancellation, and pending user-input control signals
 - evidence sink
@@ -92,11 +92,11 @@ does not change which tool declarations runtime may expose.
 [041 Permissions](../041-permissions/spec.md) owns permission semantics, rule
 precedence, approval behavior, and fallback policy.
 
-Runtime resolves optional capability targets and toolset hints from built-in, runtime-provided, or external contributions. If required capability material, working context, toolset, model, resource boundary, or evidence wiring cannot be assembled, runtime rejects the request before `agent_start`. A before-agent-start rejection is an invocation rejection, not a failed agent invocation. [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability source, contribution, activation, availability, and conflict boundaries. This spec does not define plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols.
+Runtime resolves optional capability targets and toolset hints from built-in, runtime-provided, or external sources. If required capability material, working context, toolset, model, resource boundary, or evidence wiring cannot be assembled, runtime rejects the request before `agent_start`. A before-agent-start rejection is an invocation rejection, not a failed agent invocation. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, declaration, activation, availability, conflict, and runtime extension registry boundaries. This spec does not define plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols.
 
 Runtime may receive interface-supplied capability sources as invocation or
 session inputs. ACP-supplied MCP servers are one such source. Runtime owns
-normalization of those sources into capability contributions, conflict-safe
+normalization of those sources into accepted declarations, conflict-safe
 tool names, availability/degraded facts, permission wrapping, and evidence
 projection before any contributed tool reaches an agent invocation.
 
@@ -155,7 +155,8 @@ parsing, terminal layout, editor protocol payloads, or WebUI rendering.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing invocation, observation, completion, and control-signal semantics.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines runtime assembly state relationships.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines persistence substrate boundaries for runtime-wired durable facts.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines capability contributions resolved by runtime into agent-invocation scoped selections.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  capability-extension declarations and registry facts resolved by runtime.
 - [051 Agents](../051-agents/spec.md) defines selected agent definitions.
 - [051 Subagents](../051-agents/subagents.md) defines child-agent control behavior.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines a built-in capability target assembled by runtime.

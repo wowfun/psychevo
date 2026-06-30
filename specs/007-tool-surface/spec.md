@@ -46,7 +46,7 @@ Runtime assembles the initial tool surface for an accepted agent invocation befo
 
 Runtime must expose a tool declaration in a generation-request snapshot only when the same agent invocation has a matching execution binding for that request. Runtime may omit unavailable tools from a snapshot or from the agent-invocation scoped tool surface.
 
-Runtime selects the agent-invocation scoped tool surface from available inputs. Capability extensions may contribute tool candidates or toolset candidates, but [050 Capability Extensions](../050-capability-extensions/spec.md) owns source, contribution, activation, availability, and conflict boundaries. This spec does not define source discovery, selection precedence, or plugin mechanics.
+Runtime selects the agent-invocation scoped tool surface from available inputs. Capability extensions may declare tool candidates or toolset candidates, but [050 Capability Extensions](../050-capability-extensions/spec.md) owns source, declaration, activation, availability, conflict, and registry boundaries. This spec does not define source discovery, selection precedence, or plugin mechanics.
 
 When an agent definition is selected, runtime applies that definition's tool
 policy as an additional invocation-scoped constraint. Agent policy may narrow
@@ -88,7 +88,7 @@ binding with that name exists.
 
 When expansion produces a tool declaration, runtime must still verify that a matching execution binding exists for the same agent invocation and for any generation-request snapshot that exposes that declaration.
 
-This spec owns expansion semantics. [050 Capability Extensions](../050-capability-extensions/spec.md) owns source identity, activation, availability, degraded state, and conflicts for contributed toolsets and tools.
+This spec owns expansion semantics. [050 Capability Extensions](../050-capability-extensions/spec.md) owns source identity, activation, availability, degraded state, and conflicts for declared toolsets and tools.
 
 ## Request and Execution Boundary
 
@@ -126,6 +126,8 @@ A tool result artifact is loop-visible result material produced after a tool exe
 - [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly, which stays separate from tool declarations and generation controls.
 - [009 Resource Surface](../009-resource-surface/spec.md) defines resource gates that may affect tool execution.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines how tool facts relate to other state families.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines how capability contributions may provide tool candidates before agent-invocation scoped selection.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  how extension declarations may provide tool candidates before invocation
+  tool-surface selection.
 - [051 Agents](../051-agents/spec.md) defines selected-agent tool policy.
 - [051 Subagents](../051-agents/subagents.md) defines subagent control tools.

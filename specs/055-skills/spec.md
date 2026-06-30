@@ -81,7 +81,7 @@ Disabled state lives in `config.toml` under `skills.disabled` and
 explicit `--skill` inputs.
 
 Discovery facts that affect agent-invocation assembly are capability extension
-facts. Runtime owns their selection into an invocation and should expose
+facts. Runtime owns their acceptance into an invocation and should expose
 diagnostics through CLI/TUI observation surfaces when practical.
 
 ## Model Visibility
@@ -251,7 +251,7 @@ or compatibility shim is required before the product is released.
 - [006 Context Assembly](../006-context-assembly/spec.md) owns model visibility
   for skill index and explicit skill expansion material.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) owns
-  capability source and contribution selection boundaries.
+  capability-extension source, declaration, and registry boundaries.
 - [100 Coding Agent](../100-coding-agent/spec.md) defines the built-in
   coding-agent capability that may use skill adjunct tools.
 - [110 Coding Core Tools](../110-coding-core-tools/spec.md) defines the required

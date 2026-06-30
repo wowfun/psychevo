@@ -3,14 +3,16 @@ name: 054. Plugins
 psychevo_self_edit: deny
 ---
 
-Define product-level plugin boundaries before concrete plugin runtime and
-manifest details.
+Define product-level plugin package boundaries before concrete plugin runtime
+and manifest details.
 
 ## Scope
 
-- plugin as a package, installable source, and policy-controlled capability source
+- plugin as a manifest-first package, installable source, and policy-controlled
+  declaration source
 - separation between install, enablement, visibility, execution, permission, and evidence
-- relationship between plugin packages and existing capability-owning boundaries
+- relationship between plugin packages, host-owned declaration mapping, and the
+  runtime extension registry
 
 Out of scope:
 - concrete manifest field schemas, worker wire messages, store record schemas, or CLI flags
@@ -22,12 +24,13 @@ Out of scope:
 
 A plugin package is a directory or materialized Git source with one recognized
 manifest. Installing a plugin makes a package available to policy. Installing
-does not enable the plugin, make any contribution model-visible, execute worker
-code, grant permissions, or create credentials.
+does not enable the plugin, make any declaration model-visible, execute worker
+code, trust hooks, grant permissions, create credentials, or mutate the runtime
+extension registry.
 
-A plugin contribution is a candidate capability declared statically in a
-manifest or dynamically by a plugin worker. Candidate capabilities must be
-normalized by the owning runtime boundary before use:
+A plugin declaration is candidate material declared statically in a manifest or
+reported by a runtime helper such as a Psychevo worker. Candidate declarations
+must be mapped by Psychevo host code before use:
 
 - skills map to 055 Skills
 - MCP servers map to 056 MCP
@@ -36,14 +39,22 @@ normalized by the owning runtime boundary before use:
 - agents and agent backends map to 051 Agents
 - commands map to the shared command catalog and CLI/TUI/Web command surfaces
 - providers map to the provider manager and AI protocol boundary
+- accepted runtime effects map into the typed contributors defined by 050
+  Runtime Extension Registry
 
 Plugin identity must be preserved for diagnostics, conflict handling, data-root
 selection, and evidence.
 
-Plugin hook declarations are candidate hook contributions. Installing a plugin
-does not trust or run them. Runtime loads plugin hooks only when the plugin and
-`hooks` capability family are enabled, then applies the hook system's
-normalized-hash trust review before execution.
+Codex-compatible manifest fields keep their Codex semantics. `skills`,
+`mcpServers`, `hooks`, `apps`, and `interface.*` declare package resources or
+model/UI metadata. Psychevo-only plugin behavior must live under a Psychevo
+namespace such as `psychevo.runtime`; it must not redefine a shared Codex field
+as executable authority.
+
+Plugin hook declarations are candidate hook declarations. Installing or enabling
+a plugin does not trust or run them. Runtime passes accepted plugin hook
+declarations to the hook runtime, then applies the hook system's normalized-hash
+trust review before execution.
 
 ## Policy
 
@@ -51,10 +62,16 @@ Profile and project configuration declare plugin policy. The effective policy
 for one invocation is the profile policy overlaid by project-local policy for
 the selected cwd.
 
-Policy can enable or disable a plugin and can enable capability families such
-as skills, MCP, tools, hooks, agents, commands, providers, and worker runtime.
-Enabling a plugin does not bypass permission or sandbox gates. A manifest or
-worker response never grants permission.
+Policy can enable or disable a plugin package. Enabling a plugin makes its
+accepted declarations available to the owning runtime modules, but it does not
+bypass permission, hook trust, tool approval, MCP policy, provider policy, or
+sandbox gates. A manifest or worker response never grants permission.
+
+Fine-grained policy belongs to the runtime module that owns the effect. For
+example, MCP server/tool policy belongs to MCP and tool approval surfaces; hook
+trust belongs to the hook runtime; provider credentials and provider policy
+belong to provider management. Plugin policy must not grow per-declaration
+gates that duplicate those owning surfaces.
 
 Profile-global state remains profile-local. Project-local plugin state remains
 under the current cwd's `.psychevo` tree and must not select or mutate the
@@ -93,6 +110,8 @@ skill, MCP server, command, or agent backend.
 ## Related Topics
 
 - [155 Plugin Manifest](../155-plugin-manifest/spec.md) defines package manifest loading.
-- [150 Plugin Runtime](../150-plugin-runtime/spec.md) defines store, policy, worker, and contribution loading.
-- [053 Hooks](../053-hooks/spec.md) defines the hook capability boundary.
+- [150 Plugin Runtime](../150-plugin-runtime/spec.md) defines store, policy, worker, and declaration loading.
+- [053 Hooks](../053-hooks/spec.md) defines the hook declaration boundary.
 - [140 Hook Runtime](../140-hook-runtime/spec.md) defines hook execution.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  source/declaration boundaries and runtime extension registry mapping.

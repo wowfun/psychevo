@@ -5,8 +5,8 @@ psychevo_self_edit: deny
 
 Define Psychevo's Model Context Protocol integration boundary.
 
-MCP is a capability source for tools and adjacent protocol objects. Psychevo
-normalizes MCP servers into runtime-owned capability contributions before any
+MCP is a capability-extension source for tools and adjacent protocol objects. Psychevo
+normalizes MCP servers into runtime-owned declarations before any
 MCP tool becomes model-visible or executable. ACP may supply MCP servers for a
 session, but MCP semantics are not owned by ACP.
 
@@ -29,11 +29,11 @@ Out of scope:
 
 ## Source Boundary
 
-An MCP server is a capability source. The source may be built-in, configured,
+An MCP server is a capability-extension source. The source may be built-in, configured,
 or provided by an interface for one session. Source presence does not imply
 trust, activation, selection, permission approval, or persistence.
 
-Runtime owns normalization from MCP server source to capability contributions.
+Runtime owns normalization from MCP server source to accepted declarations.
 Interfaces may provide MCP server declarations, but they must not bypass
 runtime tool assembly, permission wrapping, conflict checks, or evidence
 capture.
@@ -138,6 +138,6 @@ Runtime does not need to persist every discovered MCP candidate by default.
 - [041 Permissions](../041-permissions/spec.md) defines permission policy and
   approval semantics.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines
-  capability contribution boundaries.
+  capability-extension source, declaration, and registry boundaries.
 - [027 ACP](../027-acp/spec.md) defines ACP protocol projection and
   ACP-provided MCP source input.

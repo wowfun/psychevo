@@ -47,6 +47,11 @@ observations, or message-derived tool-result relationships. Reasoning or
 assistant prose that describes intended work must not create active `read`,
 `write`, `exec_command`, Agent, or similar rows.
 
+Quiet surface notices for selected skill activation are turn-start feedback.
+If a surface renders them in the transcript ledger, they must remain before
+the turn's reasoning, tool, assistant answer, and footer rows across live
+updates, spinner refreshes, and committed-history replacement.
+
 Successful file-read evidence renders the invocation title and file content
 without surfacing read-result metadata as ordinary transcript detail.
 When no separate summary is present, the invocation title uses the row's

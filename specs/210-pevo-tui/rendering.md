@@ -67,6 +67,13 @@ widths. While foreground work is running, it appends the shared activity marker
 and elapsed/interrupt hint to the stable status line instead of replacing
 model/mode/context information with generic `Working` text.
 
+Turn-start quiet notices, including selected skill activation such as
+`skill loaded: x-daily`, stay anchored to the submitted turn before live
+reasoning, tool, answer, and footer rows. When live rows are replaced by
+committed transcript entries, TUI must preserve that notice as turn-start
+feedback rather than appending it after the committed assistant answer or
+elapsed footer.
+
 ## Terminal Rendering
 
 TUI uses a compact terminal-adaptive palette:

@@ -525,7 +525,8 @@ deterministic source/session routing while preserving Psychevo's Gateway core:
 - [027 ACP](../027-acp/spec.md) defines the ACP projection boundary.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines state relationships.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines SQLite persistence boundaries.
-- [050 Capability Extensions](../050-capability-extensions/spec.md) defines runtime capability contribution semantics.
+- [050 Capability Extensions](../050-capability-extensions/spec.md) defines
+  runtime capability-extension declaration and registry semantics.
 - [028 Channels](../028-channels/spec.md) defines shared channel behavior.
 - [281 WeChat Channel](../281-wechat-channel/spec.md),
   [282 Telegram Channel](../282-telegram-channel/spec.md), and

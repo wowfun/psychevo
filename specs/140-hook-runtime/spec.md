@@ -3,8 +3,7 @@ name: 140. Hook Runtime
 psychevo_self_edit: deny
 ---
 
-Define runtime-owned hook execution and the compatibility path from the current
-command-hook slice to the target hook system.
+Define runtime-owned hook execution for the target hook system.
 
 ## Scope
 
@@ -13,7 +12,7 @@ command-hook slice to the target hook system.
 - canonical hook declaration normalization
 - trust-aware matching and execution
 - structured run summaries and bounded diagnostics
-- compatibility execution for existing command hooks declared by agents and plugins
+- command, worker, prompt, and agent handler execution through one hook module
 
 Out of scope:
 - hosted hook catalogs, graphical hook editing, hot reload, remote hook services, or stable SDKs
@@ -35,7 +34,7 @@ A hook source descriptor contains:
 - optional display name
 - source path when available
 - plugin id when relevant
-- canonical hook declaration data or compatibility declaration data
+- canonical hook declaration data
 - trust facts available before normalized-hash review
 
 Runtime normalizes all accepted declaration shapes into event matcher groups
@@ -45,9 +44,7 @@ and are not executed.
 Runtime accepts hook declarations from inline `hooks.<Event>` configuration and
 from `hooks.json` files discovered beside profile and project configuration
 layers. Sources are additive; higher-precedence configuration does not erase
-lower-precedence hook declarations. Existing Psychevo command-array agent and
-plugin declarations are accepted only as compatibility input and normalize into
-the same matcher-group and handler model.
+lower-precedence hook declarations.
 
 Runtime exposes a metadata/listing interface that reports every normalized
 handler, including handlers skipped for disabled state, untrusted hash, modified
@@ -111,7 +108,7 @@ permission and resource checks. A `PreToolUse` handler may:
 
 Permission and resource policy evaluate the effective tool request after
 `PreToolUse` resolution. A hook must not persist permission grants, mutate
-future capability snapshots, or widen sandbox authority.
+future registry views, or widen sandbox authority.
 
 `PermissionRequest` handlers run when runtime is about to ask for approval.
 They may allow, deny, or provide no decision for the current request only.
@@ -121,9 +118,10 @@ name, effective input, bounded output summary, and success state. `PostToolUse`
 may add diagnostics or feedback but cannot retroactively change permission or
 execution.
 
-Existing command-hook compatibility keeps exit code `2` as a block signal for
-blocking command events. Other non-zero exits are diagnostics unless a later
-handler response schema defines a stronger event-specific result.
+Command handlers use exit code `2` as a block signal for blocking command
+events when structured output does not provide a stronger result. Other
+non-zero exits are diagnostics unless a later handler response schema defines a
+stronger event-specific result.
 
 `PermissionRequest` hook decisions run before the existing approval handler.
 Any hook denial fails the current request. A hook allow is one-shot and may

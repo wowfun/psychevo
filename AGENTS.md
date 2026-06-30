@@ -3,6 +3,7 @@ psychevo_self_edit: deny
 ---
 
 - Specs first: before implementing code, always READ/UPDATE/CREATE `specs/<topic>/spec.md`.
+- Pre-release, backward compatibility is not required; use a first-principles approach and avoid unnecessary technical debt.
 - The product experience MUST minimize cognitive load by omitting anything that does not clarify intent, enable action, or add incremental value, unless required for correctness, safety, or explicit user confirmation.
 - After implementation lands, update `CHANGELOG.md`.
 
