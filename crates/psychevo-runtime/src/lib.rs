@@ -12,6 +12,7 @@ pub(crate) mod error;
 pub(crate) mod events;
 pub mod extensions;
 pub mod hooks;
+mod host_paths;
 pub(crate) mod managed_tools;
 pub(crate) mod mcp;
 pub(crate) mod messages;
@@ -96,6 +97,9 @@ pub use extensions::{
     ExtensionRegistryBuilder, McpServerContributor, SelectedCapabilityRoot,
     ThreadLifecycleContributor, TokenUsageContributor, ToolContributor, ToolLifecycleContributor,
     TurnInputContributor, TurnItemContributor, TurnLifecycleContributor,
+};
+pub use host_paths::{
+    GitBashRuntime, PSYCHEVO_GIT_BASH_PATH, resolve_input_path, shell_is_git_bash,
 };
 pub use model_state::{
     MODEL_STATE_FILE, MODEL_STATE_RECENT_LIMIT, MODEL_STATE_VERSION, ModelCwdState,

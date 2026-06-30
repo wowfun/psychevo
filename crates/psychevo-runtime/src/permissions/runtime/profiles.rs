@@ -307,7 +307,8 @@ pub(crate) fn filesystem_rule_matches(rule: &str, target: &FileTarget) -> bool {
     let rule_path = Path::new(rule);
     if rule_path.is_absolute() {
         let normalized = lexical_normalize(rule_path);
-        return target.absolute == normalized || target.absolute.starts_with(&normalized);
+        let rule_ref = crate::host_paths::path_ref_for_native_path(&normalized);
+        return path_uri_contains(&rule_ref.uri, &target.uri);
     }
     let rule = rule.replace('\\', "/");
     target.relative == rule
@@ -315,6 +316,11 @@ pub(crate) fn filesystem_rule_matches(rule: &str, target: &FileTarget) -> bool {
             .relative
             .strip_prefix(&rule)
             .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn path_uri_contains(root: &str, target: &str) -> bool {
+    let root = root.trim_end_matches('/');
+    target == root || target.strip_prefix(root).is_some_and(|rest| rest.starts_with('/'))
 }
 
 pub(crate) fn matching_access<'a>(
@@ -349,4 +355,21 @@ pub(crate) fn web_fetch_host(value: &str) -> Option<String> {
         .map(str::trim)
         .filter(|host| !host.is_empty())
         .map(str::to_ascii_lowercase)
+}
+
+#[cfg(test)]
+mod profile_filesystem_tests {
+    use super::*;
+
+    #[test]
+    fn relative_filesystem_rule_matches_decoded_space_path() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path();
+        let path = cwd.join("a b.txt");
+        let path_ref = crate::host_paths::path_ref_for_native_path(&path);
+        let target = file_target(cwd, &path_ref.uri);
+
+        assert!(filesystem_rule_matches("a b.txt", &target));
+        assert!(!filesystem_rule_matches("a%20b.txt", &target));
+    }
 }

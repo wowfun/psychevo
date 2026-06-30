@@ -78,14 +78,14 @@ export function AutomationsPage({
   onSave
 }: AutomationsPageProps) {
   const [draft, setDraft] = useState<AutomationDraft | null>(null);
-  const [selectedCwd, setSelectedCwd] = useState(scope?.cwd ?? cwd);
+  const [selectedCwd, setSelectedCwd] = useState(scope?.cwd || cwd);
   const [requestText, setRequestText] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const sorted = useMemo(() => [...automations].sort(sortAutomations), [automations]);
   const surfaceMode = draft ? "has-draft" : "is-list-only";
   const workspaceOptions = useMemo(
-    () => automationWorkspaceOptions(cwd, scope?.cwd ?? null, sessionBrowserWorkspaces, sessions, automations),
+    () => automationWorkspaceOptions(cwd, scope?.cwd || null, sessionBrowserWorkspaces, sessions, automations),
     [automations, cwd, scope?.cwd, sessionBrowserWorkspaces, sessions]
   );
   const selectedThreadOptions = useMemo(

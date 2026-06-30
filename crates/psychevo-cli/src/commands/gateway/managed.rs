@@ -217,7 +217,7 @@ pub(super) async fn create_launch(
         ))
         .bearer_auth(token)
         .json(&json!({
-            "cwd": cwd,
+            "cwd": cwd.to_string_lossy(),
             "source": {
                 "kind": "web",
                 "lifetime": "persistent",

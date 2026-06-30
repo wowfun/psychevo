@@ -204,7 +204,9 @@ pub(crate) fn missing_read_result(tool: &CwdTool, path: &str) -> Value {
 }
 
 pub(crate) fn similar_files(tool: &CwdTool, path: &str) -> Vec<String> {
-    let target = tool.resolve_raw(path);
+    let Ok(target) = tool.resolve_raw(path) else {
+        return Vec::new();
+    };
     let Some(parent) = target.parent() else {
         return Vec::new();
     };

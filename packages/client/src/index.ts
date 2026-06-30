@@ -293,7 +293,7 @@ export type GatewayRequestInit<M extends GatewayMethod> =
 
 export function scopeForCwd(cwd: string): GatewayRequestScope {
   return {
-    cwd: cwd,
+    cwd,
     source: {
       kind: "web",
       rawId: null,

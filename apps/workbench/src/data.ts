@@ -41,7 +41,7 @@ export function parseBackendList(value: unknown): WorkbenchBackend[] {
           description: optionalStringField(item.description),
           command: optionalStringField(item.command),
           args: stringArray(item.args),
-          cwd: optionalStringField(item.cwd) ?? "invocation",
+          cwd: stringField(item.cwd) || "invocation",
           entrypoints: stringArray(item.entrypoints),
           clientCapabilities: stringArray(item.clientCapabilities),
           mcpServers: stringArray(item.mcpServers),

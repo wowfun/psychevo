@@ -120,7 +120,17 @@ pub(super) fn channel_update_result(
     let config_dir = active_profile_config_dir(state, scope);
     let requested_cwd = params.cwd.clone();
     let previous_cwd = if requested_cwd.is_some() {
-        Some(channel_show_result(state, scope, &params.id)?.channel.cwd)
+        channel_show_result(state, scope, &params.id)?.channel.cwd
+    } else {
+        None
+    };
+    let normalized_requested_cwd = requested_cwd
+        .as_deref()
+        .map(|cwd| normalized_channel_update_cwd(cwd, &state.inner.cwd))
+        .transpose()?;
+    let normalized_cwd_value = normalized_requested_cwd.clone().flatten();
+    let update_cwd = if requested_cwd.is_some() {
+        Some(normalized_cwd_value.clone().unwrap_or_default())
     } else {
         None
     };
@@ -129,7 +139,7 @@ pub(super) fn channel_update_result(
         id: params.id.clone(),
         label: params.label,
         enabled: params.enabled,
-        cwd: params.cwd,
+        cwd: update_cwd,
         model: params.model,
         permission_mode: params.permission_mode,
         require_mention: params.require_mention,
@@ -140,9 +150,7 @@ pub(super) fn channel_update_result(
         allow_users: params.allow_users,
         allow_groups: params.allow_groups,
     })?;
-    if let Some(cwd) = requested_cwd
-        && previous_cwd.flatten() != normalized_channel_update_text(&cwd)
-    {
+    if requested_cwd.is_some() && previous_cwd != normalized_cwd_value {
         state
             .inner
             .gateway
@@ -153,9 +161,20 @@ pub(super) fn channel_update_result(
     channel_show_result(state, scope, &params.id)
 }
 
-fn normalized_channel_update_text(value: &str) -> Option<String> {
+fn normalized_channel_update_cwd(
+    value: &str,
+    cwd: &Path,
+) -> psychevo_runtime::Result<Option<String>> {
     let value = value.trim();
-    (!value.is_empty()).then(|| value.to_string())
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let resolved = psychevo_runtime::resolve_input_path(value, cwd)?;
+    Ok(Some(
+        psychevo_runtime::canonicalize_cwd(&resolved)?
+            .display()
+            .to_string(),
+    ))
 }
 
 pub(super) fn channel_delete_result(
@@ -224,7 +243,7 @@ pub(super) fn channel_source_list_result(
         let cwd = summary
             .as_ref()
             .map(|summary| summary.cwd.clone())
-            .unwrap_or_default();
+            .unwrap_or_else(|| state.inner.cwd.display().to_string());
         let visible_name = Some(redacted_channel_source_name(
             &platform,
             chat_type.as_deref(),

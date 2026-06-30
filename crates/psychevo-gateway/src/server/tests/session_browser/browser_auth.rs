@@ -56,8 +56,8 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
     .expect("settings/read after cross-project resume");
 
     assert_eq!(
-        settings["project"]["path"],
-        other_cwd.display().to_string()
+        settings["project"]["path"].as_str(),
+        Some(other_cwd.display().to_string().as_str())
     );
 }
 
@@ -99,8 +99,8 @@ async fn browser_session_profile_auth_allows_global_settings_for_other_cwd() {
     .expect("settings/read for other cwd");
 
     assert_eq!(
-        settings["project"]["path"],
-        other_cwd.display().to_string()
+        settings["project"]["path"].as_str(),
+        Some(other_cwd.display().to_string().as_str())
     );
 }
 
@@ -154,8 +154,8 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
     .expect("thread/start in known project");
     assert!(snapshot.get("thread").is_some_and(Value::is_null));
     assert_eq!(
-        snapshot["scope"]["cwd"],
-        other_cwd.display().to_string()
+        snapshot["scope"]["cwd"].as_str(),
+        Some(other_cwd.display().to_string().as_str())
     );
 
     let settings = handle_rpc(
@@ -173,8 +173,8 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
     .expect("settings/read after project start");
 
     assert_eq!(
-        settings["project"]["path"],
-        other_cwd.display().to_string()
+        settings["project"]["path"].as_str(),
+        Some(other_cwd.display().to_string().as_str())
     );
 }
 
@@ -230,7 +230,7 @@ root = "~/workspaces"
     let cwd_string = cwd.display().to_string();
 
     assert_eq!(created["cwd"], cwd_string);
-    assert_eq!(created["scope"]["cwd"], cwd_string);
+    assert_eq!(created["scope"]["cwd"].as_str(), Some(cwd_string.as_str()));
 
     let settings = handle_rpc(
         state,
@@ -246,6 +246,9 @@ root = "~/workspaces"
     .await
     .expect("settings/read after workspace/create");
 
-    assert_eq!(settings["cwd"], cwd_string);
-    assert_eq!(settings["project"]["path"], cwd_string);
+    assert_eq!(settings["cwd"].as_str(), Some(cwd_string.as_str()));
+    assert_eq!(
+        settings["project"]["path"].as_str(),
+        Some(cwd_string.as_str())
+    );
 }

@@ -31,6 +31,7 @@ pub(crate) enum PermissionAction {
 pub(crate) struct FileTarget {
     pub(crate) raw: String,
     pub(crate) absolute: PathBuf,
+    pub(crate) uri: String,
     pub(crate) relative: String,
     pub(crate) within_cwd: bool,
 }
@@ -329,22 +330,44 @@ pub(crate) fn patch_file_paths(line: &str) -> Vec<String> {
 }
 
 pub(crate) fn file_target(cwd: &Path, raw: &str) -> FileTarget {
-    let path = Path::new(raw);
-    let absolute = if path.is_absolute() {
-        lexical_normalize(path)
-    } else {
-        lexical_normalize(&cwd.join(path))
-    };
-    let (relative, within_cwd) = absolute
-        .strip_prefix(cwd)
-        .map(|path| (path.to_string_lossy().replace('\\', "/"), true))
-        .unwrap_or_else(|_| (raw.replace('\\', "/"), false));
+    let path_ref = crate::host_paths::resolve_host_path(
+        raw,
+        cwd,
+        &crate::host_paths::PathResolveOptions::current(),
+    )
+    .unwrap_or_else(|_| {
+        let path = Path::new(raw);
+        let absolute = if path.is_absolute() {
+            lexical_normalize(path)
+        } else {
+            lexical_normalize(&cwd.join(path))
+        };
+        crate::host_paths::path_ref_for_native_path(&absolute)
+    });
+    let absolute = PathBuf::from(&path_ref.native);
+    let cwd_path = crate::host_paths::path_ref_for_native_path(cwd);
+    let (relative, within_cwd) = relative_to_cwd(&path_ref.native, &cwd_path)
+        .map(|relative| (relative, true))
+        .unwrap_or_else(|| (raw.replace('\\', "/"), false));
     FileTarget {
         raw: raw.to_string(),
         absolute,
+        uri: path_ref.uri,
         relative,
         within_cwd,
     }
+}
+
+fn relative_to_cwd(native: &str, cwd: &crate::host_paths::PathRef) -> Option<String> {
+    if native == cwd.native {
+        return Some(String::new());
+    }
+    let cwd_native = cwd.native.trim_end_matches(['\\', '/']);
+    let native_prefix = format!("{cwd_native}\\");
+    native
+        .strip_prefix(&native_prefix)
+        .or_else(|| native.strip_prefix(&format!("{cwd_native}/")))
+        .map(|rest| rest.replace('\\', "/"))
 }
 
 pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
@@ -359,4 +382,34 @@ pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod action_path_tests {
+    use super::*;
+
+    #[test]
+    fn file_target_relative_path_preserves_spaces() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path();
+
+        let target = file_target(cwd, "a b.txt");
+
+        assert_eq!(target.relative, "a b.txt");
+        assert!(target.within_cwd);
+    }
+
+    #[test]
+    fn file_target_file_uri_relative_path_is_decoded() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path();
+        let path = cwd.join("a b.txt");
+        let path_ref = crate::host_paths::path_ref_for_native_path(&path);
+
+        let target = file_target(cwd, &path_ref.uri);
+
+        assert_eq!(target.relative, "a b.txt");
+        assert!(target.within_cwd);
+        assert!(target.uri.ends_with("/a%20b.txt"));
+    }
 }

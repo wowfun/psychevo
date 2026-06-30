@@ -380,7 +380,7 @@ function groupSessionsByProject(
 ): SessionProjectGroup[] {
   const groups = new Map<string, SessionProjectGroup>();
   for (const session of sessions) {
-    const cwd = session.project?.cwd || session.cwd || "";
+    const cwd = session.project?.cwd ?? session.cwd;
     const label = session.project?.label || projectLabelFromCwd(cwd);
     const updatedAt = session.updatedAtMs ?? session.startedAtMs ?? 0;
     const existing = groups.get(cwd);

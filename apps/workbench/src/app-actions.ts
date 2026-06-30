@@ -156,7 +156,7 @@ export function createAppActions(params: AppActionsParams) {
   function scope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForCwd(params.settings?.cwd ?? window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd || window.location.pathname);
   }
 
   function resetRuntimeSelection() {

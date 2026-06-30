@@ -210,7 +210,8 @@ pub(crate) async fn exec_command_tool_impl_with_context(
     let cwd = resolve_exec_cwd(&accepted_cwd, optional_string(&args, "cwd")?)?;
     let shell = optional_string(&args, "shell")?
         .map(ToOwned::to_owned)
-        .unwrap_or_else(default_shell);
+        .map(Ok)
+        .unwrap_or_else(|| default_shell_for_env(&context.env))?;
     let tty = optional_bool(&args, "tty")?.unwrap_or(false);
     if tty && context.sandbox_policy.enabled {
         return Err(crate::sandbox::sandbox_denied(
@@ -311,7 +312,7 @@ pub(crate) async fn run_exec_command_for_user_shell(
     let invocation = ExecInvocation {
         cmd: command,
         cwd,
-        shell: default_shell(),
+        shell: default_shell_for_env(&std::env::vars().collect())?,
         login: false,
         tty: false,
         path_prefixes: Vec::new(),
@@ -720,12 +721,20 @@ fn pipe_command(invocation: &ExecInvocation) -> Result<std::process::Command> {
             .arg(crate::sandbox::seatbelt_profile(&invocation.sandbox_policy))
             .arg("--")
             .arg(&invocation.shell)
-            .args(shell_args(invocation.login, &invocation.cmd));
+            .args(shell_args(
+                &invocation.shell,
+                invocation.login,
+                &invocation.cmd,
+            )?);
         return Ok(command);
     }
 
     let mut command = std::process::Command::new(&invocation.shell);
-    command.args(shell_args(invocation.login, &invocation.cmd));
+    command.args(shell_args(
+        &invocation.shell,
+        invocation.login,
+        &invocation.cmd,
+    )?);
     Ok(command)
 }
 
@@ -760,7 +769,11 @@ pub(crate) fn spawn_pty_session(
         })
         .map_err(|err| Error::Message(err.to_string()))?;
     let mut command = portable_pty::CommandBuilder::new(&invocation.shell);
-    command.args(shell_args(invocation.login, &invocation.cmd));
+    command.args(shell_args(
+        &invocation.shell,
+        invocation.login,
+        &invocation.cmd,
+    )?);
     command.cwd(invocation.cwd.as_os_str());
     if let Some(path) = subprocess_path(&invocation.path_prefixes)? {
         command.env("PATH", path);

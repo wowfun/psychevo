@@ -339,7 +339,10 @@ allow_users = ["12345"]
         .find(|source| source["sourceKey"] == "im.telegram:source-hash")
         .expect("source view");
     assert_eq!(source["threadId"], source_list_thread);
-    assert_eq!(source["cwd"], state.inner.cwd.display().to_string());
+    assert_eq!(
+        source["cwd"].as_str(),
+        Some(state.inner.cwd.display().to_string().as_str())
+    );
     assert_eq!(source["activityStatus"], "idle");
     assert!(source["chatLabel"].as_str().unwrap().contains("..."));
     assert!(source["userLabel"].as_str().unwrap().contains("..."));

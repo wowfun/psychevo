@@ -192,7 +192,7 @@
         .expect("initialize");
 
         assert_eq!(value["profile"]["name"], "coder");
-        assert_eq!(value["profile"]["home"], home);
+        assert_eq!(value["profile"]["home"].as_str(), Some(home.as_str()));
         assert_eq!(value["profile"]["default"], false);
     }
 

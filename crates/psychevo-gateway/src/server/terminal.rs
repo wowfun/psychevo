@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use psychevo_gateway_protocol as wire;
-use psychevo_runtime::{Error, canonicalize_cwd};
+use psychevo_runtime::{Error, GitBashRuntime, canonicalize_cwd, resolve_input_path};
 use serde_json::json;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -46,8 +46,9 @@ impl TerminalManager {
                 pixel_height: 0,
             })
             .map_err(|err| Error::Message(err.to_string()))?;
-        let shell = default_terminal_shell(inherited_env);
+        let (shell, shell_args) = default_terminal_shell(inherited_env)?;
         let mut command = portable_pty::CommandBuilder::new(shell);
+        command.args(shell_args);
         command.cwd(cwd.as_os_str());
         command.env("TERM", "xterm-256color");
         for (key, value) in inherited_env {
@@ -256,11 +257,7 @@ fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> psychevo_runtime::Res
         return Err(Error::Message("terminal cwd is invalid".to_string()));
     }
     let raw = Path::new(cwd);
-    let candidate = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        root.join(raw)
-    };
+    let candidate = resolve_input_path(&raw.to_string_lossy(), root)?;
     let canonical = canonicalize_cwd(&candidate)?;
     if !canonical.starts_with(root) {
         return Err(Error::Message(
@@ -270,20 +267,24 @@ fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> psychevo_runtime::Res
     Ok(canonical)
 }
 
-fn default_terminal_shell(inherited_env: &BTreeMap<String, String>) -> String {
-    inherited_env
-        .get("SHELL")
-        .filter(|value| !value.trim().is_empty())
-        .cloned()
-        .or_else(|| std::env::var("SHELL").ok())
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| inherited_env.get("COMSPEC").cloned())
-        .or_else(|| std::env::var("COMSPEC").ok())
-        .unwrap_or_else(|| {
-            if cfg!(windows) {
-                "cmd.exe".to_string()
-            } else {
-                "/bin/sh".to_string()
-            }
-        })
+fn default_terminal_shell(
+    inherited_env: &BTreeMap<String, String>,
+) -> psychevo_runtime::Result<(String, Vec<String>)> {
+    if cfg!(windows) {
+        let git_bash = GitBashRuntime::discover(inherited_env)?;
+        return Ok((
+            git_bash.bash.display().to_string(),
+            vec!["--login".to_string(), "-i".to_string()],
+        ));
+    }
+    Ok((
+        inherited_env
+            .get("SHELL")
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .or_else(|| std::env::var("SHELL").ok())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "/bin/sh".to_string()),
+        Vec::new(),
+    ))
 }

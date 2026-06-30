@@ -310,29 +310,6 @@ impl SqliteStore {
                 ON automation_runs(automation_id, status, started_at_ms);
             "#,
         )?;
-        if !sqlite_column_exists(&conn, "context_evidence", "provider_group")? {
-            conn.execute_batch("ALTER TABLE context_evidence ADD COLUMN provider_group TEXT;")?;
-        }
-        if !sqlite_column_exists(&conn, "context_evidence", "provider_block_index")? {
-            conn.execute_batch(
-                "ALTER TABLE context_evidence ADD COLUMN provider_block_index INTEGER;",
-            )?;
-        }
-        if !sqlite_column_exists(&conn, "context_evidence", "context_kind")? {
-            conn.execute_batch("ALTER TABLE context_evidence ADD COLUMN context_kind TEXT;")?;
-        }
-        if !sqlite_column_exists(&conn, "gateway_live_events", "owner_id")? {
-            conn.execute_batch("ALTER TABLE gateway_live_events ADD COLUMN owner_id TEXT;")?;
-        }
-        if (1..22).contains(&user_version) {
-            conn.execute_batch(
-                r#"
-                DELETE FROM gateway_live_events;
-                DELETE FROM gateway_live_snapshots;
-                DELETE FROM sqlite_sequence WHERE name = 'gateway_live_events';
-                "#,
-            )?;
-        }
         conn.pragma_update(None, "user_version", SQLITE_SCHEMA_VERSION)?;
         Ok(Self {
             inner: Arc::new(SqliteStoreInner {

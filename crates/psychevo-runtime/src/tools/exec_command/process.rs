@@ -193,8 +193,7 @@ pub(crate) fn sessions_for_task(task_id: &str) -> Vec<Arc<ExecSession>> {
 
 pub(crate) fn resolve_exec_cwd(accepted_cwd: &Path, raw: Option<&str>) -> Result<PathBuf> {
     let path = match raw {
-        Some(raw) if Path::new(raw).is_absolute() => PathBuf::from(raw),
-        Some(raw) => accepted_cwd.join(raw),
+        Some(raw) => crate::host_paths::resolve_input_path(raw, accepted_cwd)?,
         None => accepted_cwd.to_path_buf(),
     };
     let path = path.canonicalize()?;
@@ -207,29 +206,42 @@ pub(crate) fn resolve_exec_cwd(accepted_cwd: &Path, raw: Option<&str>) -> Result
     Ok(path)
 }
 
-pub(crate) fn default_shell() -> String {
+pub(crate) fn default_shell_for_env(env_map: &BTreeMap<String, String>) -> Result<String> {
     #[cfg(windows)]
     {
-        env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        Ok(crate::host_paths::GitBashRuntime::discover(env_map)?
+            .bash
+            .display()
+            .to_string())
     }
     #[cfg(not(windows))]
     {
-        env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        let _ = env_map;
+        Ok(env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()))
     }
 }
 
-pub(crate) fn shell_args(login: bool, command: &str) -> Vec<String> {
+pub(crate) fn shell_args(shell: &str, login: bool, command: &str) -> Result<Vec<String>> {
     #[cfg(windows)]
     {
-        let _ = login;
-        vec!["/C".to_string(), command.to_string()]
+        if !crate::host_paths::shell_is_git_bash(shell) {
+            return Err(Error::Message(
+                "native Windows shell execution supports Git Bash only; install Git for Windows or set PSYCHEVO_GIT_BASH_PATH"
+                    .to_string(),
+            ));
+        }
+        Ok(vec![
+            if login { "-lc" } else { "-c" }.to_string(),
+            command.to_string(),
+        ])
     }
     #[cfg(not(windows))]
     {
-        vec![
+        let _ = shell;
+        Ok(vec![
             if login { "-lc" } else { "-c" }.to_string(),
             command.to_string(),
-        ]
+        ])
     }
 }
 

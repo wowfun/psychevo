@@ -3,6 +3,7 @@ import { afterEach, beforeAll, vi } from "vitest";
 import type { SessionSummary, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 
 export const noop = vi.fn();
+export const cwdPath = (cwd: string) => cwd;
 
 export function setupComponentFallbackTests() {
   beforeAll(() => {
@@ -60,8 +61,8 @@ export function transcriptBlock(overrides: Partial<TranscriptBlock> = {}): Trans
 export function sessionSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   const summary: SessionSummary = {
     id: "thread-1",
-    cwd: "/tmp/project",
-    project: { cwd: "/tmp/project", label: "project", displayPath: "/tmp/project" },
+    cwd: cwdPath("/tmp/project"),
+    project: { cwd: cwdPath("/tmp/project"), label: "project", displayPath: "/tmp/project" },
     model: null,
     provider: null,
     startedAtMs: 1,

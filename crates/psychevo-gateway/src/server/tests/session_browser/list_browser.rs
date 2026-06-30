@@ -56,8 +56,8 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
         .find(|session| session["id"].as_str() == Some(top_level.as_str()))
         .expect("top level listed");
     assert_eq!(
-        listed["project"]["cwd"],
-        other_cwd.display().to_string()
+        listed["project"]["cwd"].as_str(),
+        Some(other_cwd.display().to_string().as_str())
     );
     assert_eq!(listed["project"]["label"], "other-work");
     assert_eq!(listed["visibleEntryCount"], 0);
@@ -67,7 +67,7 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
 #[tokio::test]
 async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() {
     let (_temp, state) = web_state();
-    let cwd = state.inner.cwd.display().to_string();
+    let cwd_string = state.inner.cwd.display().to_string();
     let store = state.inner.state.store();
     let mut ids = Vec::new();
     for index in 0..25 {
@@ -92,7 +92,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/browser".to_string(),
-            params: Some(json!({ "cwd": cwd.clone(), "limit": 20 })),
+            params: Some(json!({ "cwd": cwd_string.clone(), "limit": 20 })),
         },
     )
     .await
@@ -142,7 +142,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
             id: Some(json!(3)),
             method: "thread/browser".to_string(),
             params: Some(json!({
-                "cwd": cwd.clone(),
+                "cwd": cwd_string,
                 "limit": 20,
                 "includeSessionIds": [included_id.clone()],
             })),

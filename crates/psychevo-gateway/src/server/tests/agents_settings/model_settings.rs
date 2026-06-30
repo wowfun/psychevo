@@ -329,7 +329,7 @@ reasoning_effort = "high"
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
             id: Some(json!("settings")),
             method: "settings/read".to_string(),
-            params: Some(json!({ "cwd": model_settings["cwd"] })),
+            params: Some(json!({ "cwd": model_settings["cwd"].as_str().expect("cwd") })),
         },
     )
     .await

@@ -376,7 +376,7 @@ export function ComposerStatusLine({
     <div className="composerStatusLine" aria-label="Composer status">
       <StatusSelect label="Permission mode" value={permissionMode} values={controls?.permissionModeOptions ?? ["default"]} onChange={onPermissionModeChange} />
       {profileLabel ? (
-        <span className="profileStatusPill" title={profile?.home ?? profileLabel}>
+        <span className="profileStatusPill" title={profile?.home || profileLabel}>
           <Pin size={12} />
           <span>{profileLabel}</span>
         </span>

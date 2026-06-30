@@ -382,7 +382,7 @@ export function App() {
           includeSessionIds: [currentThreadId ?? null, ...pinnedSessionIds].filter((id): id is string => Boolean(id)),
           limit: 20,
           recentDays: 7,
-          cwd: cwd
+          cwd
         })
       );
       setSessions((current) => mergeSessionSummaries(current, sessionsFromThreadBrowser(result)));
@@ -711,7 +711,7 @@ export function App() {
       runtimeOptions,
       runtimeRef: selectedRuntimeRef,
       runtimeSessionId,
-      scope: activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? window.location.pathname),
+      scope: activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd || window.location.pathname),
       threadId,
       text: null
     });

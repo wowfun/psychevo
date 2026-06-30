@@ -112,7 +112,7 @@ export function createCommandActions(params: CommandActionsParams) {
   function commandScope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForCwd(params.settings?.cwd ?? window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd || window.location.pathname);
   }
 
   function revealCommandsPanel(_trigger: CommandTrigger = "commandsPanel") {

@@ -3,8 +3,8 @@ pub(crate) use super::*;
 use crate::store::{PromptPrefixRecord, PromptPrefixSlotRecord};
 
 #[test]
-pub(crate) fn sqlite_schema_v21_rejects_old_state_databases() {
-    for version in 1..=20 {
+pub(crate) fn sqlite_schema_v23_rejects_old_state_databases() {
+    for version in 1..=22 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
         {
@@ -29,7 +29,7 @@ pub(crate) fn sqlite_schema_v21_rejects_old_state_databases() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v21_rejects_unknown_state_database() {
+pub(crate) fn sqlite_schema_v23_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {

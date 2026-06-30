@@ -33,12 +33,12 @@ impl CwdTool {
     }
 
     pub(crate) fn resolve_existing(&self, raw: &str) -> Result<PathBuf> {
-        let target = self.resolve_raw(raw);
+        let target = self.resolve_raw(raw)?;
         Ok(target.canonicalize()?)
     }
 
     pub(crate) fn resolve_write_target(&self, raw: &str) -> Result<(PathBuf, bool)> {
-        let target = self.resolve_raw(raw);
+        let target = self.resolve_raw(raw)?;
         if target.exists() {
             return Ok((target.canonicalize()?, false));
         }
@@ -56,13 +56,8 @@ impl CwdTool {
         Ok((target, dirs_created))
     }
 
-    pub(crate) fn resolve_raw(&self, raw: &str) -> PathBuf {
-        let path = Path::new(raw);
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.cwd.join(path)
-        }
+    pub(crate) fn resolve_raw(&self, raw: &str) -> Result<PathBuf> {
+        crate::host_paths::resolve_input_path(raw, &self.cwd)
     }
 
     pub(crate) fn ensure_contained(&self, path: &Path) -> Result<()> {

@@ -90,7 +90,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
   function defaultScope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForCwd(params.settings?.cwd ?? window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd || window.location.pathname);
   }
 
   async function refreshSnapshot(
@@ -181,7 +181,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     params.scopeRef.current = scope;
     params.setActiveScope(scope);
     const threadId = nextSnapshot.thread?.id ?? null;
-    if (previous?.cwd === scope.cwd) {
+    if ((previous?.cwd ?? "") === scope.cwd) {
       const nextSettings = SettingsReadResultSchema.parse(await nextClient.request("settings/read", { threadId, cwd: scope.cwd }));
       params.setSettings(nextSettings);
       applyInitialControls(nextSettings);
@@ -210,7 +210,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
           includeSessionIds: browserIncludeSessionIds(),
           limit: 20,
           recentDays: 7,
-          cwd: cwd ?? null
+          cwd: cwd || null
         })
       );
       const nextSessions = sessionsFromThreadBrowser(result);
@@ -219,7 +219,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return nextSessions;
     }
     const result = ThreadListResultSchema.parse(
-      await nextClient.request("thread/list", { archived: includeArchived, limit: 100, cwd: cwd ?? null })
+      await nextClient.request("thread/list", { archived: includeArchived, limit: 100, cwd: cwd || null })
     );
     const nextSessions = result.sessions.map(normalizeSessionSummary);
     if (includeArchived) {

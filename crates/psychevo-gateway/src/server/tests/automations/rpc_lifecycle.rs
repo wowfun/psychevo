@@ -134,7 +134,10 @@ async fn browser_session_can_manage_automation_for_other_cwd() {
     )
     .await
     .expect("automation/write other cwd");
-    assert_eq!(created["automation"]["cwd"], other_cwd.display().to_string());
+    assert_eq!(
+        created["automation"]["cwd"].as_str(),
+        Some(other_cwd.display().to_string().as_str())
+    );
 
     let listed = handle_rpc(
         state,

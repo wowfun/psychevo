@@ -17,21 +17,6 @@ impl SqliteStore {
     }
 }
 
-pub(crate) fn sqlite_column_exists(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-) -> rusqlite::Result<bool> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for row in rows {
-        if row? == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 pub(crate) fn is_busy(err: &rusqlite::Error) -> bool {
     let msg = err.to_string().to_lowercase();
     msg.contains("busy") || msg.contains("locked")

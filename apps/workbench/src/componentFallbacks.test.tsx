@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { HistoryPanel, StatusPanel, TranscriptPanel } from "@psychevo/components";
 import type { SessionSummary, TranscriptBlock } from "@psychevo/protocol";
 import {
+  cwdPath,
   noop,
   sessionSummary,
   setupComponentFallbackTests,
@@ -19,8 +20,8 @@ describe("component fallback rendering", () => {
   it("renders older session summaries without activity metadata", () => {
     const session = {
       id: "thread-old",
-      cwd: "/tmp/project",
-      project: { cwd: "/tmp/project", label: "project", displayPath: "/tmp/project" },
+      cwd: cwdPath("/tmp/project"),
+      project: { cwd: cwdPath("/tmp/project"), label: "project", displayPath: "/tmp/project" },
       model: null,
       provider: null,
       startedAtMs: 1,
@@ -252,8 +253,8 @@ describe("component fallback rendering", () => {
           sessionSummary({
             id: "thread-2",
             title: "Other session",
-            cwd: "/tmp/other",
-            project: { cwd: "/tmp/other", label: "other", displayPath: "/tmp/other" }
+            cwd: cwdPath("/tmp/other"),
+            project: { cwd: cwdPath("/tmp/other"), label: "other", displayPath: "/tmp/other" }
           })
         ]}
         onArchive={noop}
@@ -281,16 +282,16 @@ describe("component fallback rendering", () => {
           sessionSummary({
             id: "thread-newer",
             title: "Newer session",
-            cwd: "/tmp/newer-project",
-            project: { cwd: "/tmp/newer-project", label: "newer-project", displayPath: "/tmp/newer-project" },
+            cwd: cwdPath("/tmp/newer-project"),
+            project: { cwd: cwdPath("/tmp/newer-project"), label: "newer-project", displayPath: "/tmp/newer-project" },
             startedAtMs: 3_000,
             updatedAtMs: 3_000
           }),
           sessionSummary({
             id: "thread-older",
             title: "Older active session",
-            cwd: "/tmp/older-project",
-            project: { cwd: "/tmp/older-project", label: "older-project", displayPath: "/tmp/older-project" },
+            cwd: cwdPath("/tmp/older-project"),
+            project: { cwd: cwdPath("/tmp/older-project"), label: "older-project", displayPath: "/tmp/older-project" },
             startedAtMs: 1_000,
             updatedAtMs: 1_000
           })

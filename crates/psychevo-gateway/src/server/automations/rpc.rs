@@ -3,15 +3,15 @@ pub(super) fn automation_list_result(
     _auth: &AuthContext,
     params: wire::AutomationListParams,
 ) -> psychevo_runtime::Result<Value> {
-    let cwd = match params.cwd {
-        Some(cwd) => Some(canonicalize_cwd(Path::new(&cwd))?.display().to_string()),
-        None => None,
+    let store = state.inner.state.store();
+    let records = match params.cwd {
+        Some(cwd) => {
+            let cwd = canonicalize_cwd(Path::new(&cwd))?;
+            store.automation_tasks_for_cwd(&cwd.display().to_string())?
+        }
+        None => store.automation_tasks_for_optional_cwd(None)?,
     };
-    let automations = state
-        .inner
-        .state
-        .store()
-        .automation_tasks_for_optional_cwd(cwd.as_deref())?
+    let automations = records
         .into_iter()
         .map(|record| automation_task_view(state, record))
         .collect::<psychevo_runtime::Result<Vec<_>>>()?;
