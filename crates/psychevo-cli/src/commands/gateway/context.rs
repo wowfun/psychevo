@@ -105,6 +105,7 @@ impl GatewayContext {
             agent: None,
             no_agents: false,
             no_skills: false,
+            selected_capability_roots: Vec::new(),
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
             runtime_tools: Vec::new(),

@@ -24,6 +24,7 @@ impl TuiApp {
             inherited_env: Some(self.env_map.clone()),
             selected_parent_agent: self.current_agent.clone(),
             no_skills: self.no_skills,
+            selected_capability_roots: Vec::new(),
             skill_inputs: self.skill_inputs.clone(),
             mcp_servers: Vec::new(),
         })

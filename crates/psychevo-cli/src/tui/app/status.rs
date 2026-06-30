@@ -40,6 +40,7 @@ impl TuiApp {
             agent: self.current_agent.clone(),
             no_agents: self.no_agents,
             no_skills: self.no_skills,
+            selected_capability_roots: Vec::new(),
             skill_inputs: self.skill_inputs.clone(),
             mcp_servers: Vec::new(),
             runtime_tools: Vec::new(),

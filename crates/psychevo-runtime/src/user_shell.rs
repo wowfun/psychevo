@@ -168,6 +168,7 @@ pub(crate) fn prepare_user_shell_context(
         external_agent_delegate: None,
         no_agents: true,
         no_skills: true,
+        selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
         runtime_tools: Vec::new(),

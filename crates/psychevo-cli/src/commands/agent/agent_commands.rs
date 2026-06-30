@@ -315,6 +315,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         agent: Some(args.name),
         no_agents: false,
         no_skills: false,
+        selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
         runtime_tools: Vec::new(),

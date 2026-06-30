@@ -79,6 +79,7 @@ pub(crate) fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         external_agent_delegate: None,
         no_agents: false,
         no_skills: false,
+        selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
     }

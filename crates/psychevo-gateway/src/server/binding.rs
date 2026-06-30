@@ -364,6 +364,7 @@ impl WebState {
             external_agent_delegate: None,
             no_agents: false,
             no_skills: false,
+            selected_capability_roots: Vec::new(),
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
             runtime_tools: automations::automation_runtime_tools(
