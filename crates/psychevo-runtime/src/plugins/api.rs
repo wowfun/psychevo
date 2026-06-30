@@ -59,7 +59,7 @@ pub fn plugin_doctor_value(options: &RunOptions, selector: Option<&str>) -> Resu
         let manifest = load_plugin_manifest(&record.package_root, true)?;
         let policy = policy_entry(&loaded.config.plugins, &record);
         let mut worker = json!({"configured": manifest.worker.is_some(), "tools": []});
-        if policy.is_some_and(|policy| policy.capability_enabled("runtime"))
+        if policy.is_some_and(PluginPolicyEntry::plugin_enabled)
             && let Some(spec) = &manifest.worker
         {
             worker = match worker_tools(&record, &manifest, spec, &loaded.env) {
@@ -134,7 +134,6 @@ pub fn plugin_set_enabled_value(
         &key,
         PluginPolicyEntry {
             enabled: Some(enabled),
-            capabilities: record.capabilities.iter().cloned().collect(),
         },
     )?;
     write_toml_config_file(&config_path, &document)?;
@@ -145,7 +144,8 @@ pub fn plugin_set_enabled_value(
         "plugin": record.name,
         "source": record.source_slug,
         "enabled": enabled,
-        "capabilities": record.capabilities,
+        "manifest_resources": record.manifest_resources,
+        "psychevo_extensions": record.psychevo_extensions,
     }))
 }
 
@@ -162,10 +162,7 @@ fn set_plugin_policy_document_value(
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or_else(|| Error::Config("plugins must be an object".to_string()))?;
-    let value = json!({
-        "enabled": entry.enabled,
-        "capabilities": entry.capabilities.into_iter().collect::<Vec<_>>(),
-    });
+    let value = json!({ "enabled": entry.enabled });
     plugins.insert(key.to_string(), value);
     Ok(())
 }
@@ -183,11 +180,9 @@ fn record_value(record: &PluginInstallRecord, policy: &PluginPolicyConfig) -> Va
         "data_root": record.data_root,
         "manifest_path": record.manifest_path,
         "manifest_kind": record.manifest_kind.as_str(),
-        "capabilities": record.capabilities,
+        "manifest_resources": record.manifest_resources,
+        "psychevo_extensions": record.psychevo_extensions,
         "enabled": policy.is_some_and(PluginPolicyEntry::plugin_enabled),
-        "enabled_capabilities": policy
-            .map(|entry| entry.capabilities.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default(),
         "diagnostics": record.diagnostics,
     })
 }
@@ -202,7 +197,8 @@ fn manifest_value(manifest: &LoadedPluginManifest) -> Value {
         "supported_fields": manifest.supported_fields.iter().cloned().collect::<Vec<_>>(),
         "ignored_fields": manifest.ignored_fields.iter().cloned().collect::<Vec<_>>(),
         "ignored_manifest_paths": manifest.ignored_manifest_paths,
-        "capabilities": manifest.capability_families.iter().cloned().collect::<Vec<_>>(),
+        "manifest_resources": manifest.manifest_resources.iter().cloned().collect::<Vec<_>>(),
+        "psychevo_extensions": manifest.psychevo_extensions.iter().cloned().collect::<Vec<_>>(),
         "skill_roots": manifest.skill_roots,
         "agent_roots": manifest.agent_roots,
         "hooks": manifest.hooks.is_some(),

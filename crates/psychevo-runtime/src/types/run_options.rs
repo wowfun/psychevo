@@ -14,6 +14,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::error::Result;
+use crate::extensions::SelectedCapabilityRoot;
 use crate::skills::SelectedSkill;
 use crate::state_runtime::StateRuntime;
 
@@ -56,6 +57,7 @@ pub struct RunOptions {
     pub external_agent_delegate: Option<Arc<dyn ExternalAgentDelegate>>,
     pub no_agents: bool,
     pub no_skills: bool,
+    pub selected_capability_roots: Vec<SelectedCapabilityRoot>,
     pub skill_inputs: Vec<String>,
     pub mcp_servers: Vec<McpServerInput>,
     pub runtime_tools: Vec<RuntimeTool>,
@@ -135,6 +137,7 @@ pub struct AgentSpawnOptions {
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub selected_parent_agent: Option<String>,
     pub no_skills: bool,
+    pub selected_capability_roots: Vec<SelectedCapabilityRoot>,
     pub skill_inputs: Vec<String>,
     pub mcp_servers: Vec<McpServerInput>,
 }

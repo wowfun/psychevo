@@ -35,9 +35,7 @@ pub(crate) fn load_enabled_plugin_contributions(
             &enabled.policy,
             env,
         );
-        if enabled.policy.capability_enabled("runtime")
-            && let Some(worker) = enabled.manifest.worker.clone()
-        {
+        if let Some(worker) = enabled.manifest.worker.clone() {
             match worker_tools(&enabled.record, &enabled.manifest, &worker, env) {
                 Ok(tools) => {
                     assembly.runtime_tools.extend(tools.into_iter().map(|tool| {
@@ -123,19 +121,13 @@ fn add_static_contributions(
     policy: &PluginPolicyEntry,
     env: &BTreeMap<String, String>,
 ) {
-    if policy.capability_enabled("skills") {
-        assembly
-            .skill_inputs
-            .extend(manifest.skill_roots.iter().cloned());
-    }
-    if policy.capability_enabled("agents") {
-        assembly
-            .agent_inputs
-            .extend(agent_files_from_roots(&manifest.agent_roots));
-    }
-    if policy.capability_enabled("hooks")
-        && let Some(source) = hook_source_from_manifest(record, manifest, policy, env)
-    {
+    assembly
+        .skill_inputs
+        .extend(manifest.skill_roots.iter().cloned());
+    assembly
+        .agent_inputs
+        .extend(agent_files_from_roots(&manifest.agent_roots));
+    if let Some(source) = hook_source_from_manifest(record, manifest, policy, env) {
         assembly.hook_sources.push(source);
     }
 }
@@ -146,7 +138,7 @@ fn hook_source_from_manifest(
     policy: &PluginPolicyEntry,
     env: &BTreeMap<String, String>,
 ) -> Option<HookSourceDescriptor> {
-    if !policy.capability_enabled("hooks") {
+    if !policy.plugin_enabled() {
         return None;
     }
     let hooks = manifest.hooks.clone()?;
@@ -156,22 +148,19 @@ fn hook_source_from_manifest(
         display_name: Some(record.name.clone()),
         path: Some(record.manifest_path.clone()),
         hooks,
-        worker: manifest
-            .worker
-            .clone()
-            .filter(|_| policy.capability_enabled("runtime"))
-            .map(|worker| HookWorkerAdapter {
-                plugin_name: record.name.clone(),
-                plugin_version: record.version.clone(),
-                plugin_source: record.source_slug.clone(),
-                plugin_root: record.package_root.clone(),
-                plugin_data: record.data_root.clone(),
-                manifest_path: record.manifest_path.clone(),
-                capability_families: manifest.capability_families.iter().cloned().collect(),
-                command: worker.command,
-                args: worker.args,
-                env: env.clone(),
-            }),
+        worker: manifest.worker.clone().map(|worker| HookWorkerAdapter {
+            plugin_name: record.name.clone(),
+            plugin_version: record.version.clone(),
+            plugin_source: record.source_slug.clone(),
+            plugin_root: record.package_root.clone(),
+            plugin_data: record.data_root.clone(),
+            manifest_path: record.manifest_path.clone(),
+            manifest_resources: manifest.manifest_resources.iter().cloned().collect(),
+            psychevo_extensions: manifest.psychevo_extensions.iter().cloned().collect(),
+            command: worker.command,
+            args: worker.args,
+            env: env.clone(),
+        }),
     })
 }
 

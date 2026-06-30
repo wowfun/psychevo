@@ -499,7 +499,7 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
           "name": "child-hook-plugin",
           "version": "1.0.0",
           "description": "Child hook plugin",
-          "runtime": {"worker": {"command": "./worker.py"}},
+          "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}},
           "hooks": {
             "PostToolUse": [{
               "matcher": "Bash",
@@ -579,7 +579,8 @@ for line in sys.stdin:
             plugin_root: record.package_root.clone(),
             plugin_data: record.data_root.clone(),
             manifest_path: record.manifest_path.clone(),
-            capability_families: manifest.capability_families.iter().cloned().collect(),
+            manifest_resources: manifest.manifest_resources.iter().cloned().collect(),
+            psychevo_extensions: manifest.psychevo_extensions.iter().cloned().collect(),
             command: worker.command,
             args: worker.args,
             env: BTreeMap::new(),

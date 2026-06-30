@@ -133,17 +133,11 @@ pub(crate) struct PluginPolicyConfig {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PluginPolicyEntry {
     pub(crate) enabled: Option<bool>,
-    pub(crate) capabilities: BTreeSet<String>,
 }
 
 impl PluginPolicyEntry {
     pub(crate) fn plugin_enabled(&self) -> bool {
         self.enabled.unwrap_or(false)
-    }
-
-    pub(crate) fn capability_enabled(&self, family: &str) -> bool {
-        self.plugin_enabled()
-            && (self.capabilities.is_empty() || self.capabilities.contains(family))
     }
 }
 

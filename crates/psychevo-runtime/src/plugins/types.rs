@@ -91,7 +91,8 @@ pub struct LoadedPluginManifest {
     pub hooks: Option<Value>,
     pub worker: Option<PluginWorkerSpec>,
     pub interface: Option<Value>,
-    pub capability_families: BTreeSet<String>,
+    pub manifest_resources: BTreeSet<String>,
+    pub psychevo_extensions: BTreeSet<String>,
     pub supported_fields: BTreeSet<String>,
     pub ignored_fields: BTreeSet<String>,
 }
@@ -114,7 +115,8 @@ pub struct PluginInstallRecord {
     pub data_root: PathBuf,
     pub manifest_path: PathBuf,
     pub manifest_kind: PluginManifestKind,
-    pub capabilities: Vec<String>,
+    pub manifest_resources: Vec<String>,
+    pub psychevo_extensions: Vec<String>,
     pub diagnostics: Vec<PluginDiagnostic>,
 }
 

@@ -7,7 +7,7 @@ pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::thread;
 
 pub(crate) use rusqlite::Connection;
-pub(crate) use serde_json::Value;
+pub(crate) use serde_json::{Value, json};
 pub(crate) use tempfile::tempdir;
 
 pub(crate) fn pevo() -> &'static str {

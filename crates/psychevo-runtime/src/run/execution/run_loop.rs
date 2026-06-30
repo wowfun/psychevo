@@ -29,7 +29,10 @@ pub(crate) async fn run_live_internal(
         &loaded.env,
         &loaded.config.plugins,
     );
-    let plugin_warnings = plugin_assembly.warnings.clone();
+    let selected_root_contributions =
+        crate::extensions::selected_root_contributions(&cwd, &options.selected_capability_roots);
+    let mut plugin_warnings = plugin_assembly.warnings.clone();
+    plugin_warnings.extend(selected_root_contributions.warnings.clone());
     let project_context_mode = loaded.config.project_context.instructions;
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
@@ -60,6 +63,7 @@ pub(crate) async fn run_live_internal(
     );
     let mut agent_explicit_inputs = agent_input.iter().cloned().collect::<Vec<_>>();
     agent_explicit_inputs.extend(plugin_assembly.agent_inputs.clone());
+    agent_explicit_inputs.extend(selected_root_contributions.agent_inputs.clone());
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
         cwd: cwd.clone(),
@@ -106,7 +110,12 @@ pub(crate) async fn run_live_internal(
         config_path: options.config_path.clone(),
         env: loaded.env.clone(),
         explicit_inputs: explicit_skill_inputs.clone(),
-        additional_roots: plugin_assembly.skill_inputs.clone(),
+        additional_roots: plugin_assembly
+            .skill_inputs
+            .iter()
+            .cloned()
+            .chain(selected_root_contributions.skill_inputs.iter().cloned())
+            .collect(),
         no_skills: options.no_skills,
     };
     let skill_catalog = discover_skills(&skill_options)?;
@@ -419,13 +428,21 @@ pub(crate) async fn run_live_internal(
     );
     let permission_runtime =
         permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
-    let (mut extension_tools, mcp_warnings) =
-        crate::mcp::mcp_tool_bindings(&options.mcp_servers, &cwd, Some(&permission_runtime))
-            .await;
-    extension_tools.extend(options.runtime_tools.iter().map(|tool| tool.binding()));
-    extension_tools.extend(
-        plugin_assembly
+    let extension_registry = crate::extensions::registry_from_static_inputs(
+        options.mcp_servers.clone(),
+        options
             .runtime_tools
+            .iter()
+            .cloned()
+            .chain(plugin_assembly.runtime_tools.iter().cloned())
+            .collect(),
+    );
+    let mcp_server_inputs = extension_registry.mcp_servers();
+    let (mut extension_tools, mcp_warnings) =
+        crate::mcp::mcp_tool_bindings(&mcp_server_inputs, &cwd, Some(&permission_runtime)).await;
+    extension_tools.extend(
+        extension_registry
+            .runtime_tools()
             .iter()
             .map(|tool| tool.binding()),
     );
@@ -457,7 +474,12 @@ pub(crate) async fn run_live_internal(
     let hook_config = crate::hooks::hook_runtime_config_from_options(&options, &cwd)?;
     let hook_runtime = build_hook_runtime(
         selected_agent.as_ref(),
-        plugin_assembly.hook_sources.clone(),
+        plugin_assembly
+            .hook_sources
+            .iter()
+            .cloned()
+            .chain(selected_root_contributions.hook_sources.iter().cloned())
+            .collect(),
         hook_config,
         &cwd,
     );

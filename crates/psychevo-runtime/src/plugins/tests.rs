@@ -55,6 +55,24 @@ fn manifest_selects_native_before_compat_and_rejects_path_escape() {
 }
 
 #[test]
+fn malformed_preferred_manifest_does_not_fall_back_to_compat() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    fs::create_dir_all(root.join(".psychevo-plugin")).expect("native");
+    fs::write(root.join(".psychevo-plugin/plugin.json"), "{").expect("native manifest");
+    fs::create_dir_all(root.join(".codex-plugin")).expect("codex");
+    fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"codex-plugin","version":"1.0.0","description":"codex"}"#,
+    )
+    .expect("codex manifest");
+
+    let err = load_plugin_manifest(&root, true).expect_err("malformed preferred manifest");
+
+    assert!(err.to_string().contains(".psychevo-plugin/plugin.json"));
+}
+
+#[test]
 fn manifest_loads_path_and_default_hook_files_additively() {
     let temp = tempdir().expect("temp");
     let root = temp.path().join("plugin");
@@ -89,7 +107,27 @@ fn manifest_loads_path_and_default_hook_files_additively() {
             .map(Vec::len),
         Some(2)
     );
-    assert!(manifest.capability_families.contains("hooks"));
+    assert!(manifest.manifest_resources.contains("hooks"));
+}
+
+#[test]
+fn manifest_ignores_top_level_runtime_without_psychevo_namespace() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    write_plugin(
+        &root,
+        r#"{
+              "name": "compat-data",
+              "version": "1.0.0",
+              "description": "compat data",
+              "runtime": {"worker": {"command": "./worker.py"}}
+            }"#,
+    );
+
+    let manifest = load_plugin_manifest(&root, true).expect("manifest");
+
+    assert!(manifest.worker.is_none());
+    assert!(manifest.ignored_fields.contains("runtime"));
 }
 
 #[cfg(unix)]
@@ -387,7 +425,7 @@ fn worker_tool_executes_through_binding() {
               "name": "cleanup",
               "version": "1.0.0",
               "description": "cleanup",
-              "runtime": {"worker": {"command": "./worker.py"}}
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
             }"#,
     );
     write_worker(
@@ -449,7 +487,7 @@ fn worker_contribution_discovery_receives_effective_env() {
               "name": "cleanup",
               "version": "1.0.0",
               "description": "cleanup",
-              "runtime": {"worker": {"command": "./worker.py"}}
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
             }"#,
     );
     write_worker(
@@ -505,7 +543,7 @@ fn worker_contribution_discovery_times_out() {
               "name": "cleanup",
               "version": "1.0.0",
               "description": "cleanup",
-              "runtime": {"worker": {"command": "./worker.py"}}
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
             }"#,
     );
     write_worker(
@@ -556,7 +594,7 @@ async fn worker_tool_call_timeout_returns_tool_error() {
               "name": "cleanup",
               "version": "1.0.0",
               "description": "cleanup",
-              "runtime": {"worker": {"command": "./worker.py"}}
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
             }"#,
     );
     write_worker(

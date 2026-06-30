@@ -282,7 +282,8 @@ fn call_worker_json(
             },
             "manifest": {
                 "path": manifest.manifest_path,
-                "capabilities": manifest.capability_families.iter().cloned().collect::<Vec<_>>(),
+                "resources": manifest.manifest_resources.iter().cloned().collect::<Vec<_>>(),
+                "psychevo_extensions": manifest.psychevo_extensions.iter().cloned().collect::<Vec<_>>(),
             }
         }),
     ) {

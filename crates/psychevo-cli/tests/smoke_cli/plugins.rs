@@ -17,7 +17,7 @@ pub(crate) fn write_cli_plugin(root: &Path) {
           "version": "1.0.0",
           "description": "Track and clean temporary files",
           "skills": ["./skills"],
-          "runtime": {"worker": {"command": "./worker.py"}}
+          "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
         }"#,
     )
     .expect("manifest");
@@ -195,7 +195,13 @@ pub(crate) fn cli_plugin_local_enable_targets_profile_installed_plugin() {
     let listed: Value = serde_json::from_slice(&list.stdout).expect("list json");
     assert_eq!(listed["count"], 1);
     assert_eq!(listed["plugins"][0]["enabled"], true);
-    assert_eq!(listed["plugins"][0]["enabled_capabilities"][0], "runtime");
+    assert!(
+        listed["plugins"][0]["manifest_resources"]
+            .as_array()
+            .expect("manifest resources")
+            .contains(&json!("skills"))
+    );
+    assert_eq!(listed["plugins"][0]["psychevo_extensions"][0], "runtime");
 }
 
 #[test]
@@ -224,7 +230,6 @@ api_key_env = "TEST_PROVIDER_KEY"
 
 [plugins.disk-cleanup]
 enabled = true
-capabilities = ["skills", "tools", "runtime"]
 "#,
             server.base_url
         ),

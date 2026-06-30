@@ -443,6 +443,7 @@ fn child_hook_runtime_config(
         external_agent_delegate: None,
         no_agents: false,
         no_skills: true,
+        selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
         runtime_tools: Vec::new(),

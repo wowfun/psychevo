@@ -89,6 +89,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         external_agent_delegate: None,
         no_agents: options.no_agents,
         no_skills: options.no_skills,
+        selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
         runtime_tools: Vec::new(),
@@ -97,6 +98,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         load_plugin_policy_config_lenient(&project_context_options, &cwd)?;
     let plugin_assembly =
         crate::plugins::load_enabled_plugin_contributions(&home, &cwd, &plugin_env, &plugin_policy);
+    let selected_root_contributions = crate::extensions::selected_root_contributions(&cwd, &[]);
     let project_context_mode =
         load_project_context_instruction_mode(&project_context_options, &cwd)?;
     let agents_home = resolve_agents_home(&env, &cwd)?;
@@ -104,6 +106,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         main_agent_input_from_sources(options.no_agents, options.agent.as_deref(), Some(&metadata));
     let mut agent_explicit_inputs = agent_input.iter().cloned().collect::<Vec<_>>();
     agent_explicit_inputs.extend(plugin_assembly.agent_inputs.clone());
+    agent_explicit_inputs.extend(selected_root_contributions.agent_inputs.clone());
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
         cwd: cwd.clone(),
@@ -128,7 +131,12 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         config_path: options.config_path.clone(),
         env: env.clone(),
         explicit_inputs: explicit_skill_inputs,
-        additional_roots: plugin_assembly.skill_inputs.clone(),
+        additional_roots: plugin_assembly
+            .skill_inputs
+            .iter()
+            .cloned()
+            .chain(selected_root_contributions.skill_inputs.iter().cloned())
+            .collect(),
         no_skills: options.no_skills,
     };
     let skill_catalog = discover_skills(&skill_options)?;
@@ -203,8 +211,12 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     } else {
         None
     };
-    let extension_tools = plugin_assembly
-        .runtime_tools
+    let extension_registry = crate::extensions::registry_from_static_inputs(
+        Vec::new(),
+        plugin_assembly.runtime_tools.clone(),
+    );
+    let extension_tools = extension_registry
+        .runtime_tools()
         .iter()
         .map(|tool| tool.binding())
         .collect();
@@ -232,7 +244,12 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     tools = apply_runtime_hooks(
         tools,
         selected_agent.as_ref(),
-        plugin_assembly.hook_sources.clone(),
+        plugin_assembly
+            .hook_sources
+            .iter()
+            .cloned()
+            .chain(selected_root_contributions.hook_sources.iter().cloned())
+            .collect(),
         hook_config,
         &cwd,
     );
@@ -344,6 +361,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         external_agent_delegate: None,
         no_agents: false,
         no_skills: options.no_skills,
+        selected_capability_roots: options.selected_capability_roots.clone(),
         skill_inputs: options.skill_inputs.clone(),
         mcp_servers: options.mcp_servers.clone(),
         runtime_tools: Vec::new(),

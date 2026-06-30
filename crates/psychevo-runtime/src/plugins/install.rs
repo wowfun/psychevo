@@ -84,8 +84,13 @@ pub fn install_plugin(
         data_root,
         manifest_path: installed_manifest.manifest_path,
         manifest_kind: installed_manifest.kind,
-        capabilities: installed_manifest
-            .capability_families
+        manifest_resources: installed_manifest
+            .manifest_resources
+            .iter()
+            .cloned()
+            .collect(),
+        psychevo_extensions: installed_manifest
+            .psychevo_extensions
             .iter()
             .cloned()
             .collect(),

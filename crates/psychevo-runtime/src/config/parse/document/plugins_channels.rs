@@ -9,18 +9,12 @@ pub(crate) fn parse_plugin_policy_config(value: &Value) -> Result<PluginPolicyCo
             .as_object()
             .ok_or_else(|| Error::Config(format!("plugins.{name} must be an object")))?;
         let enabled = optional_bool_field(entry, "enabled")?;
-        let capabilities = entry
-            .get("capabilities")
-            .map(parse_plugin_capabilities)
-            .transpose()?
-            .unwrap_or_default();
-        out.insert(
-            name.clone(),
-            PluginPolicyEntry {
-                enabled,
-                capabilities,
-            },
-        );
+        if entry.contains_key("capabilities") {
+            return Err(Error::Config(format!(
+                "plugins.{name}.capabilities is no longer supported; enable or disable the plugin package and configure fine-grained behavior on the owning runtime surface"
+            )));
+        }
+        out.insert(name.clone(), PluginPolicyEntry { enabled });
     }
     Ok(PluginPolicyConfig { plugins: out })
 }
@@ -37,23 +31,6 @@ pub(crate) fn validate_plugin_policy_name(name: &str) -> Result<()> {
             "plugins.{name} must be a valid plugin policy name"
         )))
     }
-}
-
-pub(crate) fn parse_plugin_capabilities(value: &Value) -> Result<BTreeSet<String>> {
-    let capabilities = parse_string_array_value(value)?;
-    let mut out = BTreeSet::new();
-    for capability in capabilities {
-        if !matches!(
-            capability.as_str(),
-            "skills" | "mcp" | "tools" | "hooks" | "agents" | "commands" | "providers" | "runtime"
-        ) {
-            return Err(Error::Config(format!(
-                "plugin capability `{capability}` must be skills, mcp, tools, hooks, agents, commands, providers, or runtime"
-            )));
-        }
-        out.insert(capability);
-    }
-    Ok(out)
 }
 
 pub(crate) fn parse_channels_config(value: &Value) -> Result<ChannelsConfig> {

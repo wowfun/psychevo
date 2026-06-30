@@ -10,6 +10,7 @@ pub(crate) mod context;
 pub(crate) mod context_usage;
 pub(crate) mod error;
 pub(crate) mod events;
+pub mod extensions;
 pub mod hooks;
 pub(crate) mod managed_tools;
 pub(crate) mod mcp;
@@ -89,6 +90,13 @@ pub use context_usage::{
     format_context_total_value_parts, normalize_context_bar_width,
 };
 pub use error::{Error, Result};
+pub use extensions::{
+    ApprovalReviewContributor, CapabilityRootLocation, ConfigContributor, ContextContributor,
+    ExtensionData, ExtensionDataInit, ExtensionDataScope, ExtensionRegistry,
+    ExtensionRegistryBuilder, McpServerContributor, SelectedCapabilityRoot,
+    ThreadLifecycleContributor, TokenUsageContributor, ToolContributor, ToolLifecycleContributor,
+    TurnInputContributor, TurnItemContributor, TurnLifecycleContributor,
+};
 pub use model_state::{
     MODEL_STATE_FILE, MODEL_STATE_RECENT_LIMIT, MODEL_STATE_VERSION, ModelCwdState,
     ModelRecentEntry, ModelState, SESSION_COMPOSER_MODEL_METADATA_KEY, normalize_reasoning_effort,

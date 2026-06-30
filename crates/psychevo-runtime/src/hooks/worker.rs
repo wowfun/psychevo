@@ -99,7 +99,8 @@ fn call_worker_json(
             },
             "manifest": {
                 "path": worker.manifest_path,
-                "capabilities": worker.capability_families,
+                "resources": worker.manifest_resources,
+                "psychevo_extensions": worker.psychevo_extensions,
             }
         }),
     )?;

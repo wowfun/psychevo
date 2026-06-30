@@ -111,7 +111,8 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         }
     }
 
-    let mut capability_families = BTreeSet::new();
+    let mut manifest_resources = BTreeSet::new();
+    let mut psychevo_extensions = BTreeSet::new();
     let skill_roots = path_list_field(
         object.get("skills"),
         &root,
@@ -120,43 +121,45 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         &mut diagnostics,
     )?;
     if !skill_roots.is_empty() {
-        capability_families.insert("skills".to_string());
+        manifest_resources.insert("skills".to_string());
     }
+    if object.contains_key("mcpServers") {
+        manifest_resources.insert("mcpServers".to_string());
+    }
+    if object.contains_key("apps") {
+        manifest_resources.insert("apps".to_string());
+    }
+    if object.contains_key("interface") {
+        manifest_resources.insert("interface".to_string());
+    }
+    let psychevo = object.get("psychevo").and_then(Value::as_object);
     let agent_roots = path_list_field(
-        object.get("agents"),
+        psychevo.and_then(|psychevo| psychevo.get("agents")),
         &root,
-        "agents",
+        "psychevo.agents",
         &manifest_path,
         &mut diagnostics,
     )?;
     if !agent_roots.is_empty() {
-        capability_families.insert("agents".to_string());
+        psychevo_extensions.insert("agents".to_string());
     }
     let hooks = parse_manifest_hooks(object.get("hooks"), &root, &manifest_path, &mut diagnostics)?;
     if hooks.is_some() {
-        capability_families.insert("hooks".to_string());
+        manifest_resources.insert("hooks".to_string());
     }
-    for (field, family) in [
-        ("mcpServers", "mcp"),
-        ("tools", "tools"),
-        ("commands", "commands"),
-        ("toolsets", "tools"),
-        ("providers", "providers"),
-        ("agentBackends", "agents"),
-    ] {
-        if object.contains_key(field) {
-            capability_families.insert(family.to_string());
+    for field in ["commands", "providers", "toolsets"] {
+        if psychevo.is_some_and(|psychevo| psychevo.contains_key(field)) {
+            psychevo_extensions.insert(field.to_string());
         }
     }
     let worker = parse_worker(
-        object.get("runtime"),
+        psychevo.and_then(|psychevo| psychevo.get("runtime")),
         &root,
         &manifest_path,
         &mut diagnostics,
     )?;
     if worker.is_some() {
-        capability_families.insert("runtime".to_string());
-        capability_families.insert("tools".to_string());
+        psychevo_extensions.insert("runtime".to_string());
     }
     let interface = object.get("interface").cloned();
 
@@ -174,7 +177,8 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         hooks,
         worker,
         interface,
-        capability_families,
+        manifest_resources,
+        psychevo_extensions,
         supported_fields,
         ignored_fields,
     })
@@ -183,17 +187,7 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
 fn supported_manifest_field(key: &str) -> bool {
     matches!(
         key,
-        "skills"
-            | "mcpServers"
-            | "tools"
-            | "hooks"
-            | "agents"
-            | "agentBackends"
-            | "commands"
-            | "toolsets"
-            | "providers"
-            | "runtime"
-            | "interface"
+        "skills" | "mcpServers" | "hooks" | "apps" | "psychevo" | "interface"
     )
 }
 
@@ -348,7 +342,7 @@ fn parse_worker(
     };
     let Some(command_raw) = worker.get("command").and_then(Value::as_str) else {
         diagnostics.push(PluginDiagnostic::invalid(
-            "runtime.worker.command is required",
+            "psychevo.runtime.worker.command is required",
             Some(manifest_path.to_path_buf()),
         ));
         return Ok(None);
@@ -357,7 +351,7 @@ fn parse_worker(
         Ok(path) => path,
         Err(err) => {
             diagnostics.push(PluginDiagnostic::invalid(
-                format!("runtime.worker.command `{command_raw}` is invalid: {err}"),
+                format!("psychevo.runtime.worker.command `{command_raw}` is invalid: {err}"),
                 Some(manifest_path.to_path_buf()),
             ));
             return Ok(None);
@@ -368,11 +362,15 @@ fn parse_worker(
         .map(|value| {
             value
                 .as_array()
-                .ok_or_else(|| Error::Config("runtime.worker.args must be an array".to_string()))?
+                .ok_or_else(|| {
+                    Error::Config("psychevo.runtime.worker.args must be an array".to_string())
+                })?
                 .iter()
                 .map(|value| {
                     value.as_str().map(str::to_string).ok_or_else(|| {
-                        Error::Config("runtime.worker.args must contain strings".to_string())
+                        Error::Config(
+                            "psychevo.runtime.worker.args must contain strings".to_string(),
+                        )
                     })
                 })
                 .collect::<Result<Vec<_>>>()
