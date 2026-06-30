@@ -51,12 +51,17 @@ Install these before running the installer:
 | `git` | Cloning Psychevo when installing from a remote source. |
 | Rust/Cargo | Building `pevo` and optionally `peval`; the workspace uses Rust 1.94 and edition 2024. |
 | Native C compiler/linker | Source builds on Unix, macOS, and WSL; provide `cc`, `gcc`, or `clang`. |
-| Node.js and `pnpm` | Default Web UI asset builds; the workspace pins `pnpm@11.8.0`. |
+| Node.js and `pnpm` | Default Web UI asset builds; use Node.js 20.19+, 22.13+, or 24+; the workspace recommends `pnpm@11.8.0`. |
 
 The install script does not install Node.js, pnpm, apt/Homebrew/Yum packages,
 Xcode Command Line Tools, Visual Studio Build Tools, or MinGW. If Rust/Cargo is
 missing and stdin is interactive, it can ask before trying rustup; the
 `curl | sh` path is non-interactive, so Rust must already be installed there.
+On interactive shells, the script may try conservative best-effort repairs such
+as `rustup update stable` for an old Rust toolchain or Corepack/npm activation
+for a missing pnpm command. If a different pnpm version is already installed,
+the script warns and lets `pnpm install --frozen-lockfile` validate the lockfile.
+It never edits shell profiles or enterprise proxy/registry/CA configuration.
 
 On a fresh Ubuntu or WSL machine, the system-level pieces usually look like:
 
@@ -78,6 +83,13 @@ source-install prerequisite set:
 
 ```bash
 cargo xtask doctor deps check --only install
+```
+
+The standalone installer also has a checkout-local diagnostic that does not
+clone, build, install, initialize, or repair anything:
+
+```bash
+sh scripts/install.sh --check
 ```
 
 ### Install A Checkout
@@ -106,6 +118,20 @@ For CLI-only installation, skip Web UI assets:
 
 ```bash
 sh scripts/install.sh --no-web
+```
+
+For enterprise networks or pre-seeded package caches, run from a checkout and
+force offline package resolution:
+
+```bash
+sh scripts/install.sh --offline
+```
+
+To avoid npm/pnpm entirely, build or distribute Workbench assets separately and
+install the prebuilt `dist` directory:
+
+```bash
+sh scripts/install.sh --web-dist /path/to/workbench/dist
 ```
 
 Use `--no-init` to skip the idempotent `pevo init`, and `--with-peval` to also
