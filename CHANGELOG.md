@@ -1,7 +1,27 @@
 # Changelog
 
+## 2026-06-30
+
+- Fixed TUI ordering for selected-skill turn notices so `skill loaded` rows stay
+  before turn work and committed answers.
+- Added the Codex-compatible extension upgrade with selected capability roots,
+  the runtime extension registry, Psychevo plugin metadata, and package-based
+  plugin enablement.
+- Added the first Windows Git Bash compatibility slice: runtime path
+  normalization, Git Bash shell launch contracts, native cwd persistence, string
+  path protocol fields, and Gateway/Workbench input normalization.
+- Hardened capability-root path handling so malformed manifests fail closed,
+  relative permissions use decoded paths, and host path parsing preserves
+  whitespace.
+
 ## 2026-06-29
 
+- Hardened `scripts/install.sh` for Windows Git Bash and enterprise networks
+  with check/offline/web-dist modes, version and build-tool preflights, repair
+  prompts, and proxy/registry/CA diagnostics.
+- Documented Windows compatibility lessons from Codex, Hermes Agent, and
+  opencode, covering native shell selection, Git Bash discovery, and
+  MSYS/Cygwin/WSL path normalization boundaries.
 - Fixed Workbench live transcript duplication during tool-call and child-agent
   turns by treating running assistant updates as snapshots and keeping parent
   activity ownership stable.
@@ -59,15 +79,15 @@
   prompt/worker handlers, plugin hook loading, permission feedback, and
   deterministic/live validation.
 - Fixed hook inheritance, output truncation, and trust-key stability issues;
-  ADR 0004 and the hook/plugin specs now document the review and execution
-  contract without external decision-record dependencies.
+  the runtime hook ADR and the hook/plugin specs now document the review and
+  execution contract without external decision-record dependencies.
 - Fixed prompt image routing so ordinary HTTP(S) links remain text, text-only
   image capability metadata degrades image blocks before provider calls, and
   OpenAI-compatible providers retry once with text-only image fallbacks.
 
 ## 2026-06-26
 
-- Added ADR 0003 for the Psychevo plugin system, covering manifest
+- Added the plugin-system ADR, now superseded by ADR 0004, covering manifest
   compatibility, plugin store sources, policy overlays, and capability mappings.
 - Implemented the first plugin runtime slice with native/compat manifest
   loading, path-safe local/Git installs, scoped plugin stores, policy overlay
