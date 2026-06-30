@@ -163,7 +163,7 @@ pub(crate) fn committed_turn_entries_replace_live_overlay_and_optimistic_prompt(
 }
 
 #[tokio::test]
-pub(crate) async fn committed_turn_entries_keep_active_slash_feedback_after_committed_turn() {
+pub(crate) async fn committed_turn_entries_keep_turn_start_notice_before_answer_footer() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     app.current_session = Some("session-1".to_string());
@@ -196,7 +196,18 @@ pub(crate) async fn committed_turn_entries_keep_active_slash_feedback_after_comm
         events: RunningTurnEvents::Gateway(rx),
         task: RunningTask::Agent(task),
     });
-    ui.push_status("skill loaded: hackernews-daily");
+    app.apply_gateway_event(
+        &mut ui,
+        Some("session-1"),
+        GatewayEvent::TurnStarted {
+            thread_id: Some("session-1".to_string()),
+            turn_id: "turn-1".to_string(),
+            selected_skills: vec![psychevo_gateway::GatewaySelectedSkill {
+                name: "hackernews-daily".to_string(),
+                path: "/tmp/hackernews-daily/SKILL.md".to_string(),
+            }],
+        },
+    );
     app.handle_fullscreen_command(&mut ui, SlashCommand::Status)
         .await
         .expect("status");
@@ -218,7 +229,13 @@ pub(crate) async fn committed_turn_entries_keep_active_slash_feedback_after_comm
                     TranscriptBlockStatus::Completed,
                     None,
                     Some("committed answer"),
-                    None,
+                    Some(serde_json::json!({
+                        "provider": "mock",
+                        "model": "mock-model",
+                        "finish_reason": "stop",
+                        "outcome": "normal",
+                        "metadata": {"elapsed_ms": 2_000}
+                    })),
                 )],
             ),
         ],
@@ -246,9 +263,16 @@ pub(crate) async fn committed_turn_entries_keep_active_slash_feedback_after_comm
             row.kind == TranscriptKind::Status && row.text == "skill loaded: hackernews-daily"
         })
         .expect("skill status row");
+    let footer = ui
+        .transcript
+        .iter()
+        .position(|row| row.kind == TranscriptKind::Meta && row.text.contains("mock/mock-model"))
+        .expect("turn footer");
     assert!(prompt < answer, "{:?}", ui.transcript);
-    assert!(answer < skill_status, "{:?}", ui.transcript);
-    assert!(skill_status < status, "{:?}", ui.transcript);
+    assert!(prompt < skill_status, "{:?}", ui.transcript);
+    assert!(skill_status < answer, "{:?}", ui.transcript);
+    assert!(answer < footer, "{:?}", ui.transcript);
+    assert!(footer < status, "{:?}", ui.transcript);
     assert!(answer < status, "{:?}", ui.transcript);
 }
 

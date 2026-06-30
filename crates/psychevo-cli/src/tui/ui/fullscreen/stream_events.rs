@@ -101,7 +101,7 @@ impl<'a> FullscreenUi<'a> {
                 if let Some(skills) = selected_skill_names_from_event(value)
                     && !skills.is_empty()
                 {
-                    self.push_status(format!("skill loaded: {}", skills.join(", ")));
+                    self.push_turn_start_status(format!("skill loaded: {}", skills.join(", ")));
                 }
                 false
             }

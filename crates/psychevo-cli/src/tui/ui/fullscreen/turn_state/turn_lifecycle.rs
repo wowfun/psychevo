@@ -1,5 +1,20 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+
+pub(crate) const TUI_LOCAL_TRANSCRIPT_SOURCE: &str = "tui.local";
+pub(crate) const TUI_TURN_START_TRANSCRIPT_SOURCE: &str = "tui.turn_start";
+
+pub(crate) fn turn_local_transcript_source(source: Option<&str>) -> bool {
+    matches!(
+        source,
+        Some(TUI_LOCAL_TRANSCRIPT_SOURCE | TUI_TURN_START_TRANSCRIPT_SOURCE)
+    )
+}
+
+pub(crate) fn turn_start_local_row(row: &TranscriptRow) -> bool {
+    row.transcript_source.as_deref() == Some(TUI_TURN_START_TRANSCRIPT_SOURCE)
+}
+
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn mark_optimistic_rows_from(&mut self, start_index: usize) {
         for row in self.transcript.iter_mut().skip(start_index) {
@@ -19,7 +34,7 @@ impl<'a> FullscreenUi<'a> {
 
     pub(crate) fn bind_unbound_local_rows_to_turn(&mut self, turn_id: &str) {
         for row in &mut self.transcript {
-            if row.transcript_source.as_deref() == Some("tui.local")
+            if turn_local_transcript_source(row.transcript_source.as_deref())
                 && row.transcript_turn_id.is_none()
             {
                 row.transcript_turn_id = Some(turn_id.to_string());
@@ -29,7 +44,14 @@ impl<'a> FullscreenUi<'a> {
 
     pub(crate) fn tag_active_turn_local_row(&self, row: &mut TranscriptRow) {
         if let Some(running) = self.running.as_ref() {
-            row.transcript_source = Some("tui.local".to_string());
+            row.transcript_source = Some(TUI_LOCAL_TRANSCRIPT_SOURCE.to_string());
+            row.transcript_turn_id = running.turn_id.clone();
+        }
+    }
+
+    pub(crate) fn tag_active_turn_start_row(&self, row: &mut TranscriptRow) {
+        row.transcript_source = Some(TUI_TURN_START_TRANSCRIPT_SOURCE.to_string());
+        if let Some(running) = self.running.as_ref() {
             row.transcript_turn_id = running.turn_id.clone();
         }
     }
@@ -41,7 +63,7 @@ impl<'a> FullscreenUi<'a> {
                 continue;
             };
             if row.transcript_turn_id.as_deref() == Some(turn_id)
-                && row.transcript_source.as_deref() == Some("tui.local")
+                && turn_local_transcript_source(row.transcript_source.as_deref())
             {
                 rows.push(row.clone());
                 self.remove_transcript_row(index);

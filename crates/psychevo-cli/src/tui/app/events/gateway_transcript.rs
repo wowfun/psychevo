@@ -44,7 +44,7 @@ impl TuiApp {
                         .filter(|name| !name.trim().is_empty())
                         .collect::<Vec<_>>();
                     if !names.is_empty() {
-                        ui.push_status(format!("skill loaded: {}", names.join(", ")));
+                        ui.push_turn_start_status(format!("skill loaded: {}", names.join(", ")));
                     }
                 }
                 false
@@ -270,13 +270,29 @@ impl TuiApp {
         ui.bind_unbound_optimistic_rows_to_turn(turn_id);
         ui.bind_unbound_local_rows_to_turn(turn_id);
         ui.bind_unbound_live_turn_meta_to_turn(turn_id);
-        let local_rows = ui.take_local_rows_for_turn(turn_id);
+        let (mut turn_start_rows, local_rows): (Vec<_>, Vec<_>) = ui
+            .take_local_rows_for_turn(turn_id)
+            .into_iter()
+            .partition(turn_start_local_row);
         ui.remove_live_overlay_for_turn(turn_id);
         let mut active = false;
+        let mut inserted_turn_start_rows = turn_start_rows.is_empty();
         for entry in entries {
+            if !inserted_turn_start_rows && entry.role != TranscriptEntryRole::User {
+                insert_local_rows_at_end(ui, std::mem::take(&mut turn_start_rows));
+                inserted_turn_start_rows = true;
+            }
+            let role = entry.role;
             active |= self.apply_gateway_transcript_entry(ui, owner_session, entry);
+            if !inserted_turn_start_rows && role == TranscriptEntryRole::User {
+                insert_local_rows_at_end(ui, std::mem::take(&mut turn_start_rows));
+                inserted_turn_start_rows = true;
+            }
         }
-        ui.transcript.extend(local_rows);
+        if !inserted_turn_start_rows {
+            insert_local_rows_at_end(ui, turn_start_rows);
+        }
+        insert_local_rows_at_end(ui, local_rows);
         if let Some(max_seq) = max_message_seq {
             ui.loaded_session_message_count = ui
                 .loaded_session_message_count
@@ -519,5 +535,11 @@ impl TuiApp {
                 active
             }
         }
+    }
+}
+
+fn insert_local_rows_at_end(ui: &mut FullscreenUi<'_>, rows: Vec<TranscriptRow>) {
+    for row in rows {
+        ui.insert_transcript_row(ui.transcript.len(), row);
     }
 }

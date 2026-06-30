@@ -161,6 +161,30 @@ impl<'a> FullscreenUi<'a> {
         self.transcript.push(row);
     }
 
+    pub(crate) fn push_turn_start_status(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        let turn_id = self
+            .running
+            .as_ref()
+            .and_then(|running| running.turn_id.clone());
+        if let Some(row) = self.transcript.iter_mut().find(|row| {
+            row.kind == TranscriptKind::Status
+                && row.text == text
+                && row.transcript_source.as_deref() == Some(TUI_TURN_START_TRANSCRIPT_SOURCE)
+                && (turn_id.is_none()
+                    || row.transcript_turn_id.as_deref() == turn_id.as_deref()
+                    || row.transcript_turn_id.is_none())
+        }) {
+            if row.transcript_turn_id.is_none() {
+                row.transcript_turn_id = turn_id;
+            }
+            return;
+        }
+        let mut row = TranscriptRow::simple(TranscriptKind::Status, text);
+        self.tag_active_turn_start_row(&mut row);
+        self.transcript.push(row);
+    }
+
     pub(crate) fn set_ephemeral_status(&mut self, text: impl Into<String>) {
         self.ephemeral_status = Some(UiEphemeralStatus {
             text: text.into(),
