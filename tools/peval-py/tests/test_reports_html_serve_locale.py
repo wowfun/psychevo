@@ -143,8 +143,9 @@ class PevalPyReportHtmlServeLocaleTests(unittest.TestCase):
         self.assertIn("data-source-list", serve_html)
         self.assertIn("data-source-upload-form", serve_html)
         self.assertIn('t("export", "Export")', serve_html)
-        self.assertIn('t("export_table", "Table")', serve_html)
-        self.assertIn('data-export-kind="csv"', serve_html)
+        self.assertIn('t("export_xlsx_table", "Table (.xlsx)")', serve_html)
+        self.assertIn('data-export-kind="xlsx"', serve_html)
+        self.assertNotIn('data-export-kind="csv"', serve_html)
         self.assertIn('data-export-kind="json"', serve_html)
         self.assertIn('data-export-kind="html"', serve_html)
         self.assertIn("function exportScopeRows()", serve_html)
@@ -172,7 +173,10 @@ class PevalPyReportHtmlServeLocaleTests(unittest.TestCase):
         )
         self.assertIn('downloadText("peval-report-v19.json"', serve_html)
         self.assertIn('downloadText("peval-report.html"', serve_html)
-        self.assertIn('downloadText("peval-leaderboard-visible.csv"', serve_html)
+        self.assertIn("peval-leaderboard-visible.xlsx", serve_html)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", serve_html)
+        self.assertIn("function xlsxBytesForRows(rows)", serve_html)
+        self.assertNotIn("peval-leaderboard-visible.csv", serve_html)
 
 
     def test_html_render_mode_rejects_unknown_mode(self) -> None:

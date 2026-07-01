@@ -119,9 +119,20 @@ h2,h3 {
 .note-body>*:last-child {
   margin-bottom:0;
 }
-.note-body h4 {
-  margin:12px 0 6px;
-  font:700 16px/1.2 var(--serif);
+.note-body .markdown-heading {
+  margin:16px 0 7px;
+  color:var(--ink);
+  font-weight:800;
+  letter-spacing:0;
+}
+.note-body .markdown-heading-1 {
+  font:800 18px/1.2 var(--sans);
+}
+.note-body .markdown-heading-2 {
+  font:800 16px/1.25 var(--sans);
+}
+.note-body .markdown-heading-3 {
+  font:800 14px/1.3 var(--sans);
 }
 .note-body p {
   margin:8px 0;
@@ -135,6 +146,56 @@ h2,h3 {
   background:var(--surface-2);
   border-radius:4px;
   padding:1px 4px;
+}
+.note-body strong {
+  color:var(--ink);
+  font-weight:800;
+}
+.note-body em {
+  color:color-mix(in oklch,var(--ink),var(--muted) 22%);
+}
+.markdown-table-wrap {
+  max-width:100%;
+  overflow-x:auto;
+  margin:12px 0;
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  background:color-mix(in oklch,var(--surface),var(--surface-2) 10%);
+}
+.markdown-table {
+  width:100%;
+  min-width:max-content;
+  border-collapse:collapse;
+  font:13px/1.4 var(--sans);
+}
+.markdown-table th,.markdown-table td {
+  max-width:360px;
+  padding:8px 10px;
+  border-top:1px solid var(--rule);
+  border-right:1px solid color-mix(in oklch,var(--rule),#fff 32%);
+  text-align:left;
+  vertical-align:top;
+  overflow-wrap:anywhere;
+}
+.markdown-table th:last-child,.markdown-table td:last-child {
+  border-right:0;
+}
+.markdown-table thead th {
+  border-top:0;
+  background:color-mix(in oklch,var(--surface),var(--surface-2) 38%);
+  color:var(--ink);
+  font:800 12px/1.25 var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.markdown-table .align-center {
+  text-align:center;
+}
+.markdown-table .align-right {
+  text-align:right;
+}
+.analysis-md .markdown-heading {
+  color:var(--ink);
 }
 .note-code {
   max-height:none;
@@ -170,6 +231,15 @@ h2,h3 {
 }
 .table-wrap {
   overflow-x:auto;
+}
+.leaderboard .table-wrap {
+  max-height:calc(45px + (48px * 10));
+  overflow:auto;
+}
+.leaderboard .data-table thead th {
+  position:sticky;
+  top:0;
+  z-index:5;
 }
 .data-table {
   width:100%;
@@ -462,6 +532,9 @@ th.num .filter-menu {
 .trajectory-overview-list {
   display:grid;
   gap:8px;
+  max-height:calc((64px * 10) + (8px * 9));
+  overflow-y:auto;
+  padding-right:2px;
 }
 .trajectory-empty {
   border:1px dashed var(--rule);

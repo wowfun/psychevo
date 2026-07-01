@@ -82,21 +82,39 @@ def cached_analysis_report(
     if roots is None:
         return None
     root, cell_dir = roots
+    return cached_analysis_report_for_cell(
+        workspace_root=root,
+        cell_dir=cell_dir,
+        trial_key=trial_key,
+    )
 
+
+def cached_analysis_report_for_cell(
+    *,
+    workspace_root: str | Path | None,
+    cell_dir: str | Path,
+    trial_key: str,
+) -> dict[str, Any] | None:
+    root = safe_root(workspace_root)
+    if root is None:
+        return None
+    cell_path = safe_cell_dir(root, cell_dir)
+    if cell_path is None:
+        return None
     relative_paths: dict[str, str] = {}
     report: dict[str, Any] = {
         "trial_key": str(trial_key),
         "status": "cached",
     }
 
-    json_path = cell_dir / "analysis.json"
+    json_path = cell_path / ANALYSIS_JSON_FILENAME
     json_relative = read_json_analysis(json_path, root)
     if json_relative is not None:
         relative_paths["json"] = json_relative[0]
         report["relative_path"] = json_relative[0]
         report.update(json_relative[1])
 
-    md_path = cell_dir / "analysis.md"
+    md_path = cell_path / ANALYSIS_MD_FILENAME
     md_relative = read_markdown_report(md_path, root)
     if md_relative is not None:
         relative_paths["md"] = md_relative[0]
@@ -130,7 +148,26 @@ def cached_note_report(
     if roots is None:
         return None
     root, cell_dir = roots
-    return read_note_report(cell_dir / "notes.md", root, trial_key)
+    return cached_note_report_for_cell(
+        workspace_root=root,
+        cell_dir=cell_dir,
+        trial_key=trial_key,
+    )
+
+
+def cached_note_report_for_cell(
+    *,
+    workspace_root: str | Path | None,
+    cell_dir: str | Path,
+    trial_key: str,
+) -> dict[str, Any] | None:
+    root = safe_root(workspace_root)
+    if root is None:
+        return None
+    cell_path = safe_cell_dir(root, cell_dir)
+    if cell_path is None:
+        return None
+    return read_note_report(cell_path / "notes.md", root, trial_key)
 
 
 def save_cell_note(
@@ -626,7 +663,7 @@ def read_note_report(path: Path, root: Path, trial_key: str) -> dict[str, Any] |
     }
 
 
-def safe_root(value: str | None) -> Path | None:
+def safe_root(value: str | Path | None) -> Path | None:
     if value is None:
         return None
     try:
@@ -634,6 +671,18 @@ def safe_root(value: str | None) -> Path | None:
     except (OSError, RuntimeError):
         return None
     return root if root.is_dir() else None
+
+
+def safe_cell_dir(root: Path, value: str | Path) -> Path | None:
+    try:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = root / path
+        cell_dir = path.resolve()
+        cell_dir.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return cell_dir
 
 
 def safe_segment(value: object) -> str | None:

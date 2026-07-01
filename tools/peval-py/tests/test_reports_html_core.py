@@ -188,6 +188,12 @@ class PevalPyReportHtmlCoreTests(unittest.TestCase):
         self.assertIn('value: row => rowToolErrorRate(row)', html)
         self.assertIn('key: "cost_usd"', html)
         self.assertNotIn("metric: true, value: row => row.cost_usd", html)
+        self.assertIn('key: "analysised", label: t("analysised", "Analysised"), width: "112px", filterable: true', html)
+        self.assertIn("function rowAnalysised(row)", html)
+        self.assertIn("function analysisArtifactPathsFor(trialKey)", html)
+        self.assertIn('"analysised": "Analysised"', html)
+        self.assertIn("function markdownTableAt(lines, index)", html)
+        self.assertIn("function renderMarkdownTable(table)", html)
         self.assertIn('tableId: "leaderboard"', html)
         self.assertIn('tableId: "timeline"', html)
         self.assertIn("Leaderboard", html)
@@ -197,6 +203,36 @@ class PevalPyReportHtmlCoreTests(unittest.TestCase):
         self.assertIn("data-trial-key", html)
         self.assertIn("Trajectory Overview", html)
         self.assertIn("trajectory-overview-title", html)
+        self.assertIn(
+            compact_css_text(
+                ".leaderboard .table-wrap{max-height:calc(45px + (48px * 10));overflow:auto}"
+            ),
+            compact_html,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".leaderboard .data-table thead th{position:sticky;top:0;z-index:5}"
+            ),
+            compact_html,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".trajectory-overview-list{display:grid;gap:8px;max-height:calc((64px * 10) + (8px * 9));overflow-y:auto;padding-right:2px}"
+            ),
+            compact_html,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".note-body .markdown-heading{margin:16px 0 7px;color:var(--ink);font-weight:800;letter-spacing:0}"
+            ),
+            compact_html,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".markdown-table-wrap{max-width:100%;overflow-x:auto;margin:12px 0;border:1px solid var(--rule);border-radius:var(--radius);background:color-mix(in oklch,var(--surface),var(--surface-2) 10%)}"
+            ),
+            compact_html,
+        )
         self.assertIn("trajectory-node", html)
         self.assertIn("trajectory-node-letter", html)
         self.assertIn("trajectory-node.duration-heat-1", html)
@@ -576,6 +612,9 @@ console.log(result);
                 markdown=(
                     "## Slow step\n\n"
                     "- Check cached markdown.\n\n"
+                    "| Metric | Value |\n"
+                    "| :--- | ---: |\n"
+                    "| Duration | **1.2s** |\n\n"
                     "<script>alert(1)</script>"
                 ),
             )
@@ -617,6 +656,7 @@ console.log(result);
             self.assertNotIn("unknown_field", analysis)
             self.assertNotIn("checks", analysis)
             self.assertIn("## Slow step", analysis["md_report"])
+            self.assertIn("| Metric | Value |", analysis["md_report"])
             self.assertEqual(
                 analysis["relative_path"],
                 analysis_path.relative_to(root).as_posix(),
@@ -639,6 +679,7 @@ console.log(result);
             self.assertIn("review_turns", html)
             self.assertIn("## Slow step", html)
             self.assertIn("Check cached markdown.", html)
+            self.assertIn("| Metric | Value |", html)
             self.assertIn("renderMarkdown(analysis.md_report)", html)
             self.assertIn("\\u003cscript", html)
             self.assertNotIn("<script>alert(1)</script>", html)

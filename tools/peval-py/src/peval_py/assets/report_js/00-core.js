@@ -143,6 +143,26 @@ function cellNoteFor(trialKey) {
 function analysisFor(trialKey) {
   return (state.view?.annotations?.analysis || []).find(item => item.trial_key === trialKey) || null;
 }
+function analysisArtifactPathsFor(trialKey) {
+  const analysis = analysisFor(trialKey);
+  if (!analysis) return [];
+  const paths = [];
+  const relativePaths = analysis.relative_paths || {};
+  if (typeof relativePaths === "object") {
+    ["md", "json"].forEach(key => {
+      if (typeof relativePaths[key] === "string") paths.push(relativePaths[key]);
+    });
+  }
+  if (typeof analysis.relative_path === "string") paths.push(analysis.relative_path);
+  return paths;
+}
+function isAnalysisArtifactPath(path) {
+  const normalized = String(path || "").replace(/\\/g, "/");
+  return normalized === "analysis.md" || normalized === "analysis.json" || normalized.endsWith("/analysis.md") || normalized.endsWith("/analysis.json");
+}
+function rowAnalysised(row) {
+  return analysisArtifactPathsFor(row?.trial_key).some(isAnalysisArtifactPath) ? "True" : "False";
+}
 function activeServeSources() {
   return (Array.isArray(state.serveSources) ? state.serveSources : []).filter(source => source?.active !== false);
 }
@@ -216,6 +236,7 @@ function leaderboardColumns() {
     { key: "tool_error_rate", label: t("tool_error_rate", "Tool Error Rate"), width: "126px", type: "number", numeric: true, sortable: true, metric: true, value: row => rowToolErrorRate(row), format: fmtPct },
     { key: "tokens", label: t("tokens", "Tokens"), width: "100px", type: "number", numeric: true, sortable: true, metric: true, value: row => row.tokens, format: fmtNum },
     { key: "cost_usd", label: t("cost", "Cost"), width: "92px", type: "number", numeric: true, sortable: true, value: row => row.cost_usd, format: fmtCost },
+    { key: "analysised", label: t("analysised", "Analysised"), width: "112px", filterable: true, value: row => rowAnalysised(row) },
     { key: "notes", label: t("notes", "Notes"), width: "220px", value: row => noteSnippetFor(row.trial_key), html: row => renderNotesCell(row.trial_key), cellTitle: row => {
       const text = notesPlainText(notesFor(row.trial_key));
       return text && text !== noteSnippetFor(row.trial_key) ? text : "";
@@ -257,7 +278,7 @@ function renderLeaderboardExportControls() {
     <details class="export-menu">
       <summary class="export-menu-button" aria-label="${esc(t("export_options", "Export options"))}">${esc(t("export", "Export"))}</summary>
       <div class="export-menu-panel">
-        <button type="button" data-export-kind="csv">${esc(t("export_table", "Table"))}</button>
+        <button type="button" data-export-kind="xlsx">${esc(t("export_xlsx_table", "Table (.xlsx)"))}</button>
         <button type="button" data-export-kind="json">${esc(t("export_json_report", "JSON report"))}</button>
         <button type="button" data-export-kind="html">${esc(t("export_html_report", "HTML report"))}</button>
       </div>
@@ -526,7 +547,7 @@ function bindServeExportControls(target) {
   target.querySelectorAll("[data-export-kind]").forEach(button => {
     button.addEventListener("click", event => {
       event.stopPropagation();
-      exportCurrentScope(button.dataset.exportKind || "csv");
+      exportCurrentScope(button.dataset.exportKind || "xlsx");
       button.closest("details")?.removeAttribute("open");
     });
   });
@@ -556,17 +577,142 @@ function exportCurrentScope(kind) {
     downloadText("peval-report.html", "text/html", htmlReportForSubset(reportSubset(rows)));
     return;
   }
-  downloadText("peval-leaderboard-visible.csv", "text/csv", csvForRows(rows));
+  downloadBlob(
+    "peval-leaderboard-visible.xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    new Blob([xlsxBytesForRows(rows)], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    })
+  );
 }
-function csvForRows(rows) {
+function xlsxTableRows(rows) {
   const columns = leaderboardColumns();
-  const header = columns.map(column => csvValue(column.label));
-  const body = rows.map(row => columns.map(column => csvValue(tableText(row, column))).join(","));
-  return [header.join(","), ...body].join("\n");
+  return [
+    columns.map(column => column.label),
+    ...rows.map(row => columns.map(column => tableText(row, column)))
+  ];
 }
-function csvValue(value) {
-  const text = String(value ?? "");
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+function xlsxBytesForRows(rows) {
+  return zipFiles([
+    {
+      name: "[Content_Types].xml",
+      text: xmlDeclaration() + `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`
+    },
+    {
+      name: "_rels/.rels",
+      text: xmlDeclaration() + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`
+    },
+    {
+      name: "xl/workbook.xml",
+      text: xmlDeclaration() + `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Leaderboard" sheetId="1" r:id="rId1"/></sheets></workbook>`
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      text: xmlDeclaration() + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`
+    },
+    {
+      name: "xl/worksheets/sheet1.xml",
+      text: worksheetXml(xlsxTableRows(rows))
+    }
+  ]);
+}
+function xmlDeclaration() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`;
+}
+function worksheetXml(rows) {
+  const sheetData = rows.map((row, rowIndex) => {
+    const rowNumber = rowIndex + 1;
+    const cells = row.map((value, columnIndex) => {
+      const cellRef = `${xlsxColumnName(columnIndex)}${rowNumber}`;
+      return `<c r="${cellRef}" t="inlineStr"><is><t>${xmlEsc(value)}</t></is></c>`;
+    }).join("");
+    return `<row r="${rowNumber}">${cells}</row>`;
+  }).join("");
+  return xmlDeclaration() + `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`;
+}
+function xlsxColumnName(index) {
+  let value = index + 1;
+  let name = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    value = Math.floor((value - 1) / 26);
+  }
+  return name;
+}
+function xmlEsc(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&apos;", '"': "&quot;" }[ch]));
+}
+function zipFiles(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  const zipTime = 0;
+  const zipDate = 0x0021;
+  let offset = 0;
+  files.forEach(file => {
+    const nameBytes = encoder.encode(file.name);
+    const data = encoder.encode(file.text);
+    const crc = crc32(data);
+    const localHeader = concatBytes([
+      u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(zipTime), u16(zipDate),
+      u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0),
+      nameBytes
+    ]);
+    localParts.push(localHeader, data);
+    centralParts.push(concatBytes([
+      u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(zipTime), u16(zipDate),
+      u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length),
+      u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), nameBytes
+    ]));
+    offset += localHeader.length + data.length;
+  });
+  const centralDirectory = concatBytes(centralParts);
+  const end = concatBytes([
+    u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+    u32(centralDirectory.length), u32(offset), u16(0)
+  ]);
+  return concatBytes([...localParts, centralDirectory, end]);
+}
+function u16(value) {
+  const bytes = new Uint8Array(2);
+  new DataView(bytes.buffer).setUint16(0, value, true);
+  return bytes;
+}
+function u32(value) {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value >>> 0, true);
+  return bytes;
+}
+function concatBytes(parts) {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  const out = new Uint8Array(length);
+  let offset = 0;
+  parts.forEach(part => {
+    out.set(part, offset);
+    offset += part.length;
+  });
+  return out;
+}
+let CRC32_TABLE = null;
+function crc32(bytes) {
+  const table = crc32Table();
+  let crc = 0xffffffff;
+  bytes.forEach(byte => {
+    crc = (crc >>> 8) ^ table[(crc ^ byte) & 0xff];
+  });
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function crc32Table() {
+  if (CRC32_TABLE) return CRC32_TABLE;
+  CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
+    let crc = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc & 1) ? (0xedb88320 ^ (crc >>> 1)) : (crc >>> 1);
+    }
+    return crc >>> 0;
+  });
+  return CRC32_TABLE;
 }
 function reportSubset(rows) {
   const original = state.view || {};
@@ -620,6 +766,9 @@ function safeJsonForScript(value) {
 }
 function downloadText(filename, mime, text) {
   const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  downloadBlob(filename, mime, blob);
+}
+function downloadBlob(filename, mime, blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

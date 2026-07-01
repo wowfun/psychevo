@@ -255,30 +255,64 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 )
                 store.conn.commit()
 
-                write_cached_markdown(
-                    root,
-                    agent_id="opencode",
-                    session_id="common_session",
-                    markdown="Live overlay analysis.",
+                analysis_json = artifact_dir / "analysis.json"
+                analysis_json.write_text(
+                    json.dumps({"summary": "Live overlay summary."}),
+                    encoding="utf-8",
                 )
-                write_cached_note(
-                    root,
-                    agent_id="opencode",
-                    session_id="common_session",
-                    markdown="Live overlay note.",
-                )
+                analysis_md = artifact_dir / "analysis.md"
+                analysis_md.write_text("Live overlay analysis.", encoding="utf-8")
+                note_md = artifact_dir / "notes.md"
+                note_md.write_text("Live overlay note.", encoding="utf-8")
 
                 active_report = store.active_report(config)
                 annotations = active_report["annotations"]
                 self.assertEqual(
+                    annotations["analysis"][0]["summary"],
+                    "Live overlay summary.",
+                )
+                self.assertEqual(
                     annotations["analysis"][0]["md_report"],
                     "Live overlay analysis.",
                 )
+                self.assertEqual(annotations["analysis"][0]["status"], "cached")
                 self.assertEqual(
                     [item["markdown"] for item in annotations["notes"]],
                     ["Live overlay note."],
                 )
                 self.assertEqual(store.source_payload()[0]["last_status"], "error")
+
+                server = LocalHTTPServer(
+                    ("127.0.0.1", 0),
+                    make_handler(store, config),
+                )
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    status, _, raw_report = request_text(server.server_port, "/api/report")
+                    self.assertEqual(status, 200)
+                    api_report = json.loads(raw_report)
+                    self.assertEqual(
+                        api_report["annotations"]["analysis"][0]["md_report"],
+                        "Live overlay analysis.",
+                    )
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=5)
+
+                analysis_json.unlink()
+                analysis_md.unlink()
+                note_md.unlink()
+                deleted_report = store.active_report(config)
+                deleted_annotations = deleted_report["annotations"]
+                self.assertEqual(deleted_annotations["notes"], [])
+                self.assertEqual(
+                    deleted_annotations["analysis"][0]["status"],
+                    "computed",
+                )
+                self.assertNotIn("relative_path", deleted_annotations["analysis"][0])
+                self.assertNotIn("relative_paths", deleted_annotations["analysis"][0])
 
                 store.set_source_alias(keys[0], "Readable source")
                 payload = store.source_payload()[0]
@@ -293,6 +327,41 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                     store.active_report(config)["trajectory"][0]["session_id"],
                     "common_session",
                 )
+
+                snapshot_report = sample_report(config)
+                snapshot_report["trajectory"][0]["trajectory_id"] = "snapshot:one"
+                snapshot_report["trajectory"][0]["session_id"] = "snapshot-session"
+                snapshot_report["trajectory_meta"][0]["trial_key"] = "snapshot:t001"
+                snapshot_report.pop("annotations", None)
+                snapshot_keys = store.ingest_upload(
+                    "snapshot-report.json",
+                    json.dumps(snapshot_report),
+                    config,
+                )
+                snapshot_payload = next(
+                    item
+                    for item in store.source_payload()
+                    if item["source_key"] == snapshot_keys[0]
+                )
+                self.assertTrue(snapshot_payload["snapshot"])
+                snapshot_artifact_dir = root / snapshot_payload["artifact_dir"]
+                (snapshot_artifact_dir / "analysis.json").write_text(
+                    json.dumps({"summary": "Snapshot live summary."}),
+                    encoding="utf-8",
+                )
+                (snapshot_artifact_dir / "analysis.md").write_text(
+                    "Snapshot live analysis.",
+                    encoding="utf-8",
+                )
+                snapshot_active_report = store.active_report(config)
+                snapshot_analysis = next(
+                    item
+                    for item in snapshot_active_report["annotations"]["analysis"]
+                    if item["trial_key"] == "snapshot:t001"
+                )
+                self.assertEqual(snapshot_analysis["status"], "cached")
+                self.assertEqual(snapshot_analysis["summary"], "Snapshot live summary.")
+                self.assertEqual(snapshot_analysis["md_report"], "Snapshot live analysis.")
             finally:
                 store.close()
 

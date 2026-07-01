@@ -107,6 +107,16 @@ writes either JSON or HTML:
   displays scalars as key-value rows, arrays of objects as compact tables, and
   nested or mixed structures inside `<details>` instead of squeezing full JSON
   strings into metric cells.
+- HTML cached Markdown rendering is intentionally lightweight but must make
+  common `analysis.md` reports readable. It supports section headings, inline
+  code, emphasis, strong text, unordered lists, fenced code blocks, and
+  GFM-style pipe tables with optional alignment markers. Markdown headings in
+  the Analysis panel render as dark, bold section titles within the panel
+  hierarchy rather than as muted body text. Pipe tables render as real HTML
+  tables inside a horizontally scrollable wrapper, reuse report table tokens,
+  escape cell content, and keep malformed table-like text readable as normal
+  paragraphs. The renderer must not add a third-party Markdown dependency or
+  change report JSON.
 - HTML data tables use content-adaptive column widths with a safe maximum
   column width instead of fixed column tracks. Wide tables may still scroll
   horizontally inside their table shell, but narrow content such as compact
@@ -193,7 +203,10 @@ writes either JSON or HTML:
   leaderboard row checkboxes, or report-export controls. Serve UI mode reuses
   the same Leaderboard, Trajectory Overview, selected Trial trajectory, Step
   details drawer, state transitions, and visual tokens, then adds only
-  serve-specific controls around that body.
+  serve-specific controls around that body. Serve-mode table export writes the
+  current row selection, or all currently visible filtered rows when no rows are
+  selected, as a default `.xlsx` workbook rather than CSV. JSON report and HTML
+  report exports keep their existing behavior.
 
 Single-session HTML renders the current Run, Result, Evidence, and Steps
 sections. Multi-session HTML renders Report Notes, Leaderboard, Trajectory
@@ -206,13 +219,15 @@ preserved report UI term and remains English in localized reports.
 renders a separate Visible Heatmap panel. The Leaderboard shows the canonical
 session id, a separate Session Alias column that displays `source_alias` or
 `-`, agent, model, result, Last Turn End, active duration, turns, tools, tokens,
-cost, and notes. Last Turn End is the Trial's `trajectory_meta.finished_at_ms`;
+cost, HTML-only `Analysised`, and notes. Last Turn End is the Trial's
+`trajectory_meta.finished_at_ms`;
 missing values render as `-` and sort after present values. The
 Agent column uses the trajectory agent name and falls back to the adapter id
 when the trajectory does not provide an agent name. The Session, Agent, Model,
-and Result columns provide multi-value filters whose values are collected from
-the complete Leaderboard row set. Empty selections are equivalent to no filter,
-values within one column are OR-ed, and multiple filtered columns are AND-ed.
+Result, and `Analysised` columns provide multi-value filters whose values are
+collected from the complete Leaderboard row set. Empty selections are
+equivalent to no filter, values within one column are OR-ed, and multiple
+filtered columns are AND-ed.
 Filtering happens before sorting and before metric shading. If filters hide the
 currently selected Trial and visible rows remain, HTML selects the first visible
 Trial; if filters hide all rows, the selected Trial detail remains visible but
@@ -222,8 +237,15 @@ shading; each metric column computes its own scale from the currently visible
 filtered rows, missing values remain unshaded, and Cost is not shaded. The
 filter control appears inline on the right side of the filtered column label,
 similar to a spreadsheet table header, instead of occupying a second header
-line. The rendered comparison sections must not show benchmark, task, task-set,
-task-family, or matrix task-axis fields.
+line. `Analysised` displays `True` only when the Trial's analysis annotation
+points to cached cell artifacts named `analysis.md` or `analysis.json` through
+`relative_paths.md`, `relative_paths.json`, or `relative_path`; computed-only
+analysis annotations display `False`. This projection is not written to report
+JSON or `trajectory_meta[]`. The Leaderboard table body and Trajectory Overview
+list cap their vertical viewport at roughly 10 rows and scroll after that
+without truncating rows, filters, sorting, selection, metric shading, or export
+scope. The rendered comparison sections must not show benchmark, task,
+task-set, task-family, or matrix task-axis fields.
 
 Serve UI mode keeps the report body as the primary mental model rather than
 turning the page into a separate dashboard. It shows a compact source/status
@@ -265,10 +287,13 @@ paths and do not upload file contents. The DB Inspect action still inspects
 `serve` does not refresh sources on startup unless source flags were supplied on
 that invocation. The page opens from the latest canonical Trial artifacts
 and marks sources with their latest status. When composing the active served
-report, `serve` re-reads current workspace-side cell `analysis.json`,
-`analysis.md`, and `notes.md` for each active refreshable source and overlays
-those annotations on the stored artifacts without mutating the stored trajectory
-or requiring the original source file/DB session to refresh successfully.
+report for the initial `/` page render or `/api/report`, `serve` re-reads
+current workspace-side cell `analysis.json`, `analysis.md`, and `notes.md` from
+each active source's stored Trial artifact cell path and overlays those
+annotations on the stored artifacts without mutating the stored trajectory or
+requiring the original source file/DB session to refresh successfully. This
+scan includes non-refreshable report snapshots and observes both added and
+deleted analysis files on the next page/API reload.
 Refresh is explicit from the source manager or through source flags on the
 `serve` command.
 

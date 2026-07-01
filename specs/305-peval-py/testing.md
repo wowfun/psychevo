@@ -245,8 +245,11 @@ Coverage must verify:
   directly on `peval_py_sources`, and does not create a separate
   `peval_py_trials` table.
 - serve active report composition reads current cell-local `analysis.json`,
-  `analysis.md`, and `notes.md` for all active sources, including snapshots and
-  refreshable sources whose latest refresh status is `error`.
+  `analysis.md`, and `notes.md` from each active source's stored Trial artifact
+  cell path for all active sources, including snapshots and refreshable sources
+  whose latest refresh status is `error`; tests cover added and deleted analysis
+  files across repeated `active_report()` calls and `/api/report` reloads
+  without `refresh_sources()`.
 - report JSON uploads materialize matching Trial annotations into cell-local
   `notes.md`, `analysis.json`, and `analysis.md`; multiple Trial notes or
   analysis entries merge deterministically, typed incremental analysis fields
@@ -351,11 +354,12 @@ Coverage must verify:
   Turn End from `trajectory_meta.finished_at_ms`, and active duration, tokens,
   Tool Calls, and Turns cells show per-column metric intensity classes while
   Cost remains unshaded.
-- Leaderboard exposes multi-value filters for Session, Agent, Model, and Result;
-  filter options come from the complete row set, values within a column are
-  OR-ed, filtered columns are AND-ed, metric shading uses filtered visible rows,
-  the Trajectory Overview reuses the same filtered and sorted rows, and filter
-  buttons render inline to the right of each filterable column label.
+- Leaderboard exposes multi-value filters for Session, Agent, Model, Result,
+  and `Analysised`; filter options come from the complete row set, values within
+  a column are OR-ed, filtered columns are AND-ed, metric shading uses filtered
+  visible rows, the Trajectory Overview reuses the same filtered and sorted
+  rows, and filter buttons render inline to the right of each filterable column
+  label.
 - Trajectory Overview renders one session row per currently filtered and sorted
   Leaderboard row, preserving the same row count and order, aligns step nodes by
   the largest visible step count, renders neutral lettered nodes for `S`
@@ -379,6 +383,11 @@ Coverage must verify:
   sections for single-session reports.
 - HTML report typography keeps the body text baseline at 15px and compact
   labels, chips, table headers, and code blocks at 12px or larger.
+- HTML cached Markdown rendering tests cover Analysis `md_report` headings,
+  strong/emphasis, inline code, fenced code, unordered lists, escaped script
+  content, and GFM-style pipe tables with left, center, and right alignment.
+  Tests verify `analysis.md` pipe tables render as `<table>` markup rather than
+  plain paragraphs and that malformed table-like text remains readable.
 - HTML timed chips in the rendered Steps rail can show proportional fill for
   step duration, elapsed time, and tool execution time, while missing or zero
   timing values keep the plain chip style. Elapsed fill uses `wall_duration_ms`

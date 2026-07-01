@@ -8,7 +8,9 @@ from typing import Any
 from peval_py.analysis import (
     MERGEABLE_ANALYSIS_LIST_FIELDS,
     cached_analysis_report,
+    cached_analysis_report_for_cell,
     cached_note_report,
+    cached_note_report_for_cell,
 )
 from peval_py.config import ToolConfig
 
@@ -170,20 +172,33 @@ def source_report_with_current_annotations(
         or optional_str(meta.get("trial_key"))
     )
     agent_id = annotation_agent_id(source, trajectory)
-    current_note = cached_note_report(
-        workspace_root=config.workspace_root,
-        eval_slug=config.analysis_eval_slug,
-        agent_id=agent_id,
-        session_id=session_id,
-        trial_key=trial_key,
-    )
-    current_analysis = cached_analysis_report(
-        workspace_root=config.workspace_root,
-        eval_slug=config.analysis_eval_slug,
-        agent_id=agent_id,
-        session_id=session_id,
-        trial_key=trial_key,
-    )
+    artifact_dir = optional_str(source.get("artifact_dir"))
+    if artifact_dir:
+        current_note = cached_note_report_for_cell(
+            workspace_root=config.workspace_root,
+            cell_dir=artifact_dir,
+            trial_key=trial_key,
+        )
+        current_analysis = cached_analysis_report_for_cell(
+            workspace_root=config.workspace_root,
+            cell_dir=artifact_dir,
+            trial_key=trial_key,
+        )
+    else:
+        current_note = cached_note_report(
+            workspace_root=config.workspace_root,
+            eval_slug=config.analysis_eval_slug,
+            agent_id=agent_id,
+            session_id=session_id,
+            trial_key=trial_key,
+        )
+        current_analysis = cached_analysis_report(
+            workspace_root=config.workspace_root,
+            eval_slug=config.analysis_eval_slug,
+            agent_id=agent_id,
+            session_id=session_id,
+            trial_key=trial_key,
+        )
     notes: list[dict[str, Any]] = []
     if current_note is not None:
         notes.append(current_note)
