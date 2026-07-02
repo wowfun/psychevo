@@ -723,7 +723,8 @@ fn run_playwright_live_check(
     .current_dir(root);
     live_env.apply_to_command(&mut test, Some(provider));
     test.env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path)
-        .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
+        .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
+        .env_remove("NO_COLOR");
     let outcome = run_logged_process(check.id, &mut test, log)?;
     check_result_from_outcome(
         outcome,

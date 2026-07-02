@@ -1,9 +1,10 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { repoRoot, startPevoWeb } from "./harness";
+import { startPevoWeb } from "./harness";
+import { visualScreenshotRoot } from "./visualArtifacts";
 
-const screenshotDir = path.join(repoRoot, ".local/playwright/screenshots");
+const screenshotDir = visualScreenshotRoot();
 const MANY_MODEL_CONFIG = `
 [provider.lmstudio.models."alpha-1"]
 [provider.lmstudio.models."beta-2"]

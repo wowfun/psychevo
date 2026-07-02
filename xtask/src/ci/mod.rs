@@ -5,6 +5,7 @@ mod profiles;
 pub(crate) mod retention;
 mod runner;
 mod tui_capture;
+mod workbench_visual;
 
 use std::path::{Path, PathBuf};
 

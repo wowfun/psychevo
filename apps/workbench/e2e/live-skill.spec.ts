@@ -14,6 +14,7 @@ type DomRow = {
   index: number;
   kind: string;
   overflow: boolean;
+  running: boolean;
   source: string | null;
   status: string | null;
   text: string;
@@ -117,6 +118,7 @@ async function captureAndAssert(
     })))}\n`
   );
   const durableRows = loadDurableRows(dbPath);
+  const analysis = analyzeTranscriptRuntimeRows(rows, durableRows);
   assertNoToolHeaderResultJson(rows, sample);
   assertNoToolRawJson(rows, sample);
   assertNoEvidenceOverflow(rows, sample);
@@ -128,8 +130,9 @@ async function captureAndAssert(
   await assertNoCompletionPopover(page, sample);
   assertNoAssistantTextInsideReasoning(rows, durableRows, sample);
   assertDurableDomOrder(rows, durableRows, sample);
+  assertTranscriptRuntimeAnalysis(analysis, rows, sample);
   await testInfo.attach(`${String(sample).padStart(4, "0")}-${label}.json`, {
-    body: JSON.stringify({ durableRows, rows }, null, 2),
+    body: JSON.stringify({ analysis, durableRows, rows }, null, 2),
     contentType: "application/json"
   });
 }
@@ -157,6 +160,9 @@ async function transcriptRows(page: Page): Promise<DomRow[]> {
       const measured = line ?? element;
       const overflow = measured.scrollWidth > measured.clientWidth + 2;
       const blockKind = element.getAttribute("data-block-kind");
+      const running = className.includes("is-running") ||
+        className.includes("is-streaming") ||
+        className.includes("is-runningTool");
       const kind = (() => {
         if (blockKind === "reasoning") return "reasoning";
         if (blockKind && blockKind !== "text") return "tool";
@@ -175,6 +181,7 @@ async function transcriptRows(page: Page): Promise<DomRow[]> {
         index,
         kind,
         overflow,
+        running,
         source: element.getAttribute("data-source"),
         status,
         text,
@@ -380,6 +387,70 @@ function assertDurableDomOrder(rows: DomRow[], durableRows: DurableRow[], sample
   }
 }
 
+function analyzeTranscriptRuntimeRows(rows: DomRow[], durableRows: DurableRow[]) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const blockIds = new Set<string>();
+  const runningToolIds = new Set<string>();
+  const durableToolTitles = durableRows
+    .filter((row) => row.kind === "tool" && row.title)
+    .map((row) => normalize(row.title ?? ""));
+
+  for (const row of rows) {
+    if (row.blockId) {
+      const key = `${row.turnId ?? ""}:${row.blockId}`;
+      if (blockIds.has(key)) {
+        errors.push(`duplicateLiveToolIdentity: duplicate block identity ${key}`);
+      }
+      blockIds.add(key);
+    }
+    if (row.kind === "tool" && row.running) {
+      const identity = `${row.turnId ?? ""}:${row.blockId ?? row.header}`;
+      if (runningToolIds.has(identity)) {
+        errors.push(`duplicateLiveToolIdentity: duplicate running tool ${identity}`);
+      }
+      runningToolIds.add(identity);
+      if (row.source === "runtime.message") {
+        errors.push(`activeRowAfterTerminal: committed tool row is still active ${row.blockId ?? row.header}`);
+      }
+      if (barePendingExecCommandRow(row)) {
+        errors.push(`barePendingToolInvocation: pending exec_command row lacks invocation identity ${row.blockId ?? row.header}`);
+      }
+      const header = normalize(row.header);
+      if (durableToolTitles.some((title) => title && header.includes(title))) {
+        warnings.push(`liveAfterTerminalIgnored: running live row overlaps durable tool title ${row.blockId ?? row.header}`);
+      }
+    }
+    if (!row.running && barePendingExecCommandRow(row)) {
+      errors.push(`barePendingToolInvocation: pending exec_command row lacks invocation identity ${row.blockId ?? row.header}`);
+    }
+  }
+
+  return { errors, warnings };
+}
+
+function barePendingExecCommandRow(row: DomRow): boolean {
+  if (row.kind !== "tool" || normalizeNullable(row.status) !== "pending") {
+    return false;
+  }
+  const header = normalize(row.header);
+  const text = normalize(row.text);
+  return header === "exec_command" ||
+    header === "exec_command pending" ||
+    text === "exec_command" ||
+    text === "exec_command pending";
+}
+
+function assertTranscriptRuntimeAnalysis(
+  analysis: { errors: string[]; warnings: string[] },
+  rows: DomRow[],
+  sample: number
+) {
+  if (analysis.errors.length > 0) {
+    throw new Error(`sample ${sample}: transcript runtime analyzer failed: ${JSON.stringify({ analysis, rows }, null, 2)}`);
+  }
+}
+
 async function liveSkillCompleted(page: Page): Promise<boolean> {
   const transcript = page.getByRole("region", { name: "Transcript" });
   const runningRows = await transcript.locator(
@@ -410,6 +481,10 @@ function textOverlaps(left: string, right: string): boolean {
 
 function normalize(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function normalizeNullable(value: string | null): string {
+  return normalize(value ?? "");
 }
 
 function parseJsonObject(value: unknown): Record<string, unknown> {

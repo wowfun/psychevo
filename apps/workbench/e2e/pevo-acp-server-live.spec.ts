@@ -5,9 +5,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { repoRoot } from "./harness";
-
-const screenshotDir = path.join(repoRoot, ".local/playwright/screenshots/pevo-acp-server-live");
-const testRoot = path.join(repoRoot, ".local/playwright");
+import { liveContextFor, screenshotRoot } from "./liveContext";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -21,13 +19,20 @@ interface JsonRpcMessage {
 }
 
 test.describe("Psychevo ACP server live validation", () => {
-  test("streams standard ACP updates, accepts model config, and reports usage", async ({ page }, testInfo) => {
-    test.setTimeout(240_000);
+  test("streams standard ACP updates, accepts model config, and reports usage @live", async ({ page }, testInfo) => {
+    const context = liveContextFor("pevo-acp-server-live");
+    if (!context) {
+      test.skip(true, "run through cargo xtask live");
+      return;
+    }
+    test.setTimeout(context.timeoutMs);
+    const screenshotDir = screenshotRoot(context, "pevo-acp-server-live");
+    const testRoot = path.join(context.artifactRoot, "work");
     mkdirSync(screenshotDir, { recursive: true });
     mkdirSync(testRoot, { recursive: true });
     const root = mkdtempSync(path.join(testRoot, "pevo-acp-server-"));
     const mockServer = await startMockOpenAiServer();
-    const process = spawnPevoAcp(root, mockServer.baseUrl);
+    const process = spawnPevoAcp(root, mockServer.baseUrl, context.pevoBin);
     const rpc = new JsonRpcLineClient(process);
     const cwd = path.join(root, "cwd");
     mkdirSync(cwd, { recursive: true });
@@ -97,7 +102,7 @@ test.describe("Psychevo ACP server live validation", () => {
         requestBody,
         usageUpdate
       });
-      await capture(page, testInfo, "01-server-protocol-desktop");
+      await capture(page, testInfo, screenshotDir, "01-server-protocol-desktop");
     } finally {
       await rpc.close();
       await mockServer.stop();
@@ -106,7 +111,7 @@ test.describe("Psychevo ACP server live validation", () => {
   });
 });
 
-function spawnPevoAcp(root: string, baseUrl: string): ChildProcessWithoutNullStreams {
+function spawnPevoAcp(root: string, baseUrl: string, pevoBin?: string): ChildProcessWithoutNullStreams {
   const home = path.join(root, "home");
   mkdirSync(home, { recursive: true });
   const configPath = path.join(root, "config.toml");
@@ -131,9 +136,8 @@ context = 4096
   writeFileSync(configPath, config);
   writeFileSync(path.join(home, "config.toml"), config);
 
-  const pevoBin = process.env.PEVO_BIN;
-  const command = pevoBin ?? "cargo";
-  const args = pevoBin
+  const command = pevoBin ?? process.env.PEVO_BIN ?? "cargo";
+  const args = (pevoBin ?? process.env.PEVO_BIN)
     ? ["acp"]
     : ["run", "-p", "psychevo-cli", "--", "acp"];
   return spawn(command, args, {
@@ -547,7 +551,7 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-async function capture(page: Page, testInfo: TestInfo, label: string) {
+async function capture(page: Page, testInfo: TestInfo, screenshotDir: string, label: string) {
   const fileName = `${label}-${testInfo.project.name}.png`;
   const stablePath = path.join(screenshotDir, fileName);
   await page.screenshot({ fullPage: true, path: stablePath });

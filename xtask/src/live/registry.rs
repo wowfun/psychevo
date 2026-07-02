@@ -147,6 +147,17 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         },
     },
     LiveCheck {
+        id: "pevo-acp-server-live",
+        description: "Run Psychevo ACP server live validation",
+        suites: &["acp"],
+        action: LiveCheckAction::Playwright {
+            spec: "apps/workbench/e2e/pevo-acp-server-live.spec.ts",
+            grep: "streams standard ACP updates, accepts model config, and reports usage @live",
+            needs_opencode: false,
+            needs_skill_cwd: false,
+        },
+    },
+    LiveCheck {
         id: "opencode-acp-gui-live",
         description: "Run OpenCode ACP GUI live validation",
         suites: &["acp"],
@@ -189,7 +200,7 @@ pub(crate) const LIVE_SUITES: &[LiveSuite] = &[
     },
     LiveSuite {
         id: "acp",
-        description: "OpenCode ACP live checks",
+        description: "Psychevo and OpenCode ACP live checks",
     },
     LiveSuite {
         id: "automation",
@@ -368,6 +379,25 @@ mod tests {
         })
         .expect("checks");
         assert_eq!(checks.len(), LIVE_CHECKS.len());
+    }
+
+    #[test]
+    fn acp_suite_includes_psychevo_and_opencode_checks() {
+        let checks = select_checks(&LiveSelection {
+            checks: Vec::new(),
+            suites: vec!["acp".to_string()],
+            all: false,
+            providers: Vec::new(),
+        })
+        .expect("checks");
+        assert_eq!(
+            checks.iter().map(|check| check.id).collect::<Vec<_>>(),
+            vec![
+                "pevo-acp-server-live",
+                "opencode-acp-gui-live",
+                "opencode-acp-delegate-live",
+            ]
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ use super::process::{create_step_log, run_logged_process};
 use super::profiles::{find_profile, plan_for_profile_with_env};
 use super::retention::warn_if_ci_retention_cleanup_fails;
 use super::tui_capture::run_tui_vhs_demo;
+use super::workbench_visual::run_workbench_visual;
 use crate::live::{LiveEnvMode, run_ci_single_provider_live};
 
 const FAILURE_TAIL_LINES: usize = 80;
@@ -122,6 +123,9 @@ fn run_step(
         WorkflowStepAction::TuiVhsDemo => {
             run_tui_vhs_demo_step(root, artifact_root, step, log_path)
         }
+        WorkflowStepAction::WorkbenchVisual => {
+            run_workbench_visual_step(root, artifact_root, step, log_path)
+        }
     }
 }
 
@@ -166,6 +170,29 @@ fn run_tui_vhs_demo_step(
 ) -> Result<StepExecution> {
     let log = create_step_log(log_path)?;
     let outcome = run_tui_vhs_demo(root, artifact_root, log)?;
+    println!(
+        "ci step {}: {}",
+        step.id,
+        if outcome.passed { "ok" } else { "failed" }
+    );
+    Ok(step_execution(
+        step,
+        log_path,
+        step.action.command_for_plan(),
+        outcome.passed,
+        outcome.exit_code,
+        outcome.mirrored_diagnostics,
+    ))
+}
+
+fn run_workbench_visual_step(
+    root: &Path,
+    artifact_root: &Path,
+    step: &WorkflowStep,
+    log_path: &Path,
+) -> Result<StepExecution> {
+    let log = create_step_log(log_path)?;
+    let outcome = run_workbench_visual(root, artifact_root, log)?;
     println!(
         "ci step {}: {}",
         step.id,

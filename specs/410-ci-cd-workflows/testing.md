@@ -80,13 +80,19 @@ cargo xtask ci run --profile rust-broad
 - Default CI artifact retention keeps the 10 newest numeric run directories
   under `.local/.psychevo-dev/ci/` and ignores non-numeric entries.
 - `ci plan --profile visual --json` exposes the runner-owned `tui-vhs-demo`
-  step and does not call a public shell capture entrypoint.
+  and `workbench-visual` steps and does not call public shell capture
+  entrypoints.
+- `live plan --all --json` includes `pevo-acp-server-live`.
+- `live plan --suite acp --json` includes `pevo-acp-server-live` alongside the
+  registered OpenCode ACP checks.
 
 When VHS dependencies are installed, run `cargo xtask ci run --profile visual`
-and review artifacts under `.local/.psychevo-dev/ci/<run-id>/visual/tui/`.
-When host prerequisites are missing, report the blocked dependency set instead
-of treating the profile as product failure, and point to
-`cargo xtask doctor deps install --only vhs`.
+and review artifacts under `.local/.psychevo-dev/ci/<run-id>/visual/`.
+Workbench visual screenshots should be under
+`.local/.psychevo-dev/ci/<run-id>/visual/workbench/screenshots/`. When host
+prerequisites are missing, report the blocked dependency set instead of
+treating the profile as product failure, and point to the relevant
+`cargo xtask doctor deps install --only ...` command.
 
 ## Broad Validation
 

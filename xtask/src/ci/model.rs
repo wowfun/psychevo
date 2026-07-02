@@ -41,6 +41,7 @@ pub(crate) enum WorkflowStepAction {
     Command(&'static [&'static str]),
     SingleProviderLive,
     TuiVhsDemo,
+    WorkbenchVisual,
 }
 
 impl WorkflowStepAction {
@@ -49,6 +50,7 @@ impl WorkflowStepAction {
             Self::Command(command) => command,
             Self::SingleProviderLive => &["xtask-internal", "single-provider-live"],
             Self::TuiVhsDemo => &["xtask-internal", "tui-vhs-demo"],
+            Self::WorkbenchVisual => &["xtask-internal", "workbench-visual"],
         }
     }
 }

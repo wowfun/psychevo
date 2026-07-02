@@ -2,8 +2,9 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { repoRoot, startPevoWeb } from "./harness";
+import { visualScreenshotRoot } from "./visualArtifacts";
 
-const screenshotDir = path.join(repoRoot, ".local/playwright/screenshots/acp-peer-visual");
+const screenshotDir = visualScreenshotRoot("acp-peer-visual");
 
 test.describe("Workbench ACP peer client visual streaming", () => {
   test("renders standard ACP message, thought, tool, and plan updates", async ({ page, isMobile }, testInfo) => {

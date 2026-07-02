@@ -86,12 +86,20 @@ const WEB_STEPS: &[WorkflowStep] = &[
     },
 ];
 
-const VISUAL_STEPS: &[WorkflowStep] = &[WorkflowStep {
-    id: "tui-vhs-demo",
-    description: "Capture deterministic TUI visual diagnostics",
-    action: WorkflowStepAction::TuiVhsDemo,
-    live: false,
-}];
+const VISUAL_STEPS: &[WorkflowStep] = &[
+    WorkflowStep {
+        id: "tui-vhs-demo",
+        description: "Capture deterministic TUI visual diagnostics",
+        action: WorkflowStepAction::TuiVhsDemo,
+        live: false,
+    },
+    WorkflowStep {
+        id: "workbench-visual",
+        description: "Capture deterministic Workbench Playwright visual diagnostics",
+        action: WorkflowStepAction::WorkbenchVisual,
+        live: false,
+    },
+];
 
 const LIVE_STEPS: &[WorkflowStep] = &[WorkflowStep {
     id: "single-provider-live",
@@ -251,12 +259,19 @@ mod tests {
     }
 
     #[test]
-    fn visual_plan_uses_runner_owned_tui_capture_step() {
+    fn visual_plan_uses_runner_owned_visual_steps() {
         let plan = plan_profile("visual", None).expect("visual profile");
-        assert_eq!(plan.steps.len(), 1);
-        let step = &plan.steps[0];
-        assert_eq!(step.id, "tui-vhs-demo");
-        assert_eq!(step.command, vec!["xtask-internal", "tui-vhs-demo"]);
+        assert_eq!(plan.steps.len(), 2);
+        assert_eq!(plan.steps[0].id, "tui-vhs-demo");
+        assert_eq!(
+            plan.steps[0].command,
+            vec!["xtask-internal", "tui-vhs-demo"]
+        );
+        assert_eq!(plan.steps[1].id, "workbench-visual");
+        assert_eq!(
+            plan.steps[1].command,
+            vec!["xtask-internal", "workbench-visual"]
+        );
     }
 
     #[test]

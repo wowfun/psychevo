@@ -66,6 +66,11 @@ must fail before provider work unless the caller also passes `--live`.
 `cargo xtask ci plan --profile live` and `cargo xtask ci run --profile live
 --live` accept `--live-env shared|isolated` and default to `shared`.
 
+Direct `pnpm exec playwright ...` invocations are debugging commands for
+individual Workbench specs. They are not official full visual or full live
+entrypoints; use `cargo xtask ci run --profile visual` and
+`cargo xtask live run ...` for planned validation and artifacts.
+
 ## Profiles
 
 Initial profiles:
@@ -75,7 +80,8 @@ Initial profiles:
 - `rust-broad`: Rust workspace broad gate; runs format, clippy, and tests.
 - `web`: Workbench build, tests, and typecheck.
 - `visual`: deterministic visual diagnostics using fake/local providers; v1
-  owns the TUI/VHS capture workflow directly in `xtask`.
+  owns the TUI/VHS capture workflow and Workbench deterministic Playwright
+  visual specs directly in `xtask`.
 - `live`: opt-in live validation using explicit provider credentials.
 - `package`: artifact-only CD profile that builds local reviewable artifacts
   and checksums without publishing or creating hosted release objects.
@@ -83,6 +89,12 @@ Initial profiles:
 Workflow definitions are code-owned in `xtask` for v1. Do not add a public
 TOML/YAML manifest until there are multiple real adapters or external
 customization needs.
+
+Rust dependency hygiene is part of the `rust-broad` gate. Workspace-owned
+dependencies should use one compatible version line when existing transitive
+dependencies already require that line; for HTTP clients this means the
+workspace `reqwest` dependency follows the active `0.13.3` line instead of
+keeping a separate `0.12` build.
 
 ## Live Registry
 
@@ -101,6 +113,10 @@ Registered live checks:
   The Workbench web live checks live in
   `apps/workbench/e2e/workbench.live.spec.ts`; the live registry must track
   that file when Workbench deterministic specs are split or renamed.
+- `pevo-acp-server-live`: Psychevo ACP server live validation through
+  Workbench's Playwright harness. This check lives in
+  `apps/workbench/e2e/pevo-acp-server-live.spec.ts` and belongs to the `acp`
+  suite so `cargo xtask live run --all --env shared` covers it.
 - `web-skill-live`: Workbench live-skill flow.
   Completion checks for live skill flows must scope running/streaming DOM state
   to the active Transcript region so shell, sidebar, or history running
@@ -115,7 +131,7 @@ Suites:
   live.
 - `web`: Workbench composer, automation, and subagent live checks.
 - `skill`: live skill check.
-- `acp`: OpenCode ACP live checks.
+- `acp`: OpenCode ACP live checks and Psychevo ACP server live validation.
 - `automation`: gateway automation and Web automation live checks.
 - `all`: all registered checks.
 
@@ -144,6 +160,11 @@ caller selects an explicit artifact root. The runner creates separate output
 paths for plans, step logs, package artifacts, checksums, and live/visual
 diagnostics when those workflows run.
 
+Workbench deterministic visual screenshots belong under the CI artifact root,
+not only under `.local/playwright`. The runner must provide a screenshot root
+to Playwright visual specs so `cargo xtask ci run --profile visual` produces
+reviewable TUI and Workbench visual artifacts in one run directory.
+
 After a default-artifact-root run finishes or fails after creating its run
 directory, the runner prunes `.local/.psychevo-dev/ci/` to the 10 most recent
 numeric run directories. Non-numeric entries are ignored, and explicit
@@ -171,8 +192,15 @@ profile entrypoints. TUI/VHS capture and live provider smoke are runner-owned
 and are not exposed through public shell scripts.
 
 Host prerequisite installation is not a CI/CD profile. The `visual` profile may
-fail fast when VHS host tools are missing and point to `cargo xtask doctor deps
-install --only vhs`, but it must not install packages implicitly.
+fail fast when VHS or Playwright host tools are missing and point to
+`cargo xtask doctor deps install --only vhs` or
+`cargo xtask doctor deps install --only playwright`, but it must not install
+packages implicitly.
+
+Workbench Playwright validation commands must avoid passing conflicting Node
+color controls into Playwright worker processes. The runner may remove
+inherited `NO_COLOR` from Playwright test subprocesses because Playwright owns
+worker colorization and may set `FORCE_COLOR` for those workers.
 
 ## Related Topics
 

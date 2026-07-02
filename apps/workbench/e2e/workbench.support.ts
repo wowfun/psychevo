@@ -3,7 +3,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { analyzeTranscriptRuntimeRows, type TranscriptRuntimeRowSample } from "../src/transcriptRuntimeAnalyzer";
 import { repoRoot } from "./harness";
+
+export { analyzeTranscriptRuntimeRows };
+export type { TranscriptRuntimeRowSample };
 
 export const LIVE_TRANSLATE_SUBAGENT_PROMPT = "使用 translate agent 并发演示简单的中译英和英译中";
 export const CHANNELS_VISUAL_CONFIG = `
@@ -277,28 +281,60 @@ export async function expectNoTransientAssistantDuplicateDuring(
   throw new Error(`${label}: assistant row did not become visible within ${timeoutMs}ms`);
 }
 
-type TranscriptRowSample = {
-  blockId: string | null;
-  entryId: string | null;
-  source: string | null;
-  text: string;
-  turnId: string | null;
-};
+type TranscriptRowSample = TranscriptRuntimeRowSample;
 
 async function transcriptRowSamples(rows: Locator): Promise<TranscriptRowSample[]> {
-  return rows.evaluateAll((elements) => elements.map((element) => ({
-    blockId: element.getAttribute("data-block-id"),
-    entryId: element.getAttribute("data-entry-id"),
-    source: element.getAttribute("data-source"),
-    text: (element.textContent ?? "").replace(/\s+/g, " ").trim(),
-    turnId: element.getAttribute("data-turn-id")
-  })));
+  return rows.evaluateAll((elements) => {
+    const rowHeader = (element: Element): string => {
+      const line = element.querySelector(".pevo-evidenceLine");
+      return (line?.textContent ?? element.querySelector("button")?.textContent ?? "").replace(/\s+/g, " ").trim();
+    };
+    const rowKind = (element: Element): string => {
+      const className = element.getAttribute("class") ?? "";
+      const blockKind = element.getAttribute("data-block-kind");
+      if (blockKind === "reasoning") return "reasoning";
+      if (blockKind && blockKind !== "text") return "tool";
+      if (className.includes("pevo-message")) {
+        return className.includes("is-assistant") ? "assistant" : "prompt";
+      }
+      if (className.includes("pevo-reasoning")) return "reasoning";
+      return "tool";
+    };
+    const rowRunning = (element: Element): boolean => {
+      const className = element.getAttribute("class") ?? "";
+      return className.includes("is-running") ||
+        className.includes("is-streaming") ||
+        className.includes("is-runningTool");
+    };
+    return elements.map((element) => ({
+      blockId: element.getAttribute("data-block-id"),
+      entryId: element.getAttribute("data-entry-id"),
+      header: rowHeader(element),
+      kind: rowKind(element),
+      running: rowRunning(element),
+      source: element.getAttribute("data-source"),
+      status: element.querySelector("em")?.textContent?.trim() ?? null,
+      text: (element.textContent ?? "").replace(/\s+/g, " ").trim(),
+      turnId: element.getAttribute("data-turn-id")
+    }));
+  });
 }
 
 async function allTranscriptRowSamples(page: Page): Promise<TranscriptRowSample[]> {
   return transcriptRowSamples(
     page.locator(".pevo-threadItems .pevo-message, .pevo-threadItems .pevo-evidence")
   );
+}
+
+export async function sampleTranscriptRuntimeRows(page: Page): Promise<TranscriptRuntimeRowSample[]> {
+  return allTranscriptRowSamples(page);
+}
+
+export function assertTranscriptRuntimeRowsHealthy(rows: TranscriptRuntimeRowSample[], label: string) {
+  const analysis = analyzeTranscriptRuntimeRows(rows);
+  if (analysis.errors.length > 0) {
+    throw new Error(`${label}: transcript runtime analyzer failed: ${JSON.stringify({ analysis, rows }, null, 2)}`);
+  }
 }
 
 export async function captureChannelsWorkbench(page: Page, testInfo: TestInfo, label: string) {
