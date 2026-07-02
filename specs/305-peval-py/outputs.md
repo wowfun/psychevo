@@ -244,8 +244,14 @@ analysis annotations display `False`. This projection is not written to report
 JSON or `trajectory_meta[]`. The Leaderboard table body and Trajectory Overview
 list cap their vertical viewport at roughly 10 rows and scroll after that
 without truncating rows, filters, sorting, selection, metric shading, or export
-scope. The rendered comparison sections must not show benchmark, task,
-task-set, task-family, or matrix task-axis fields.
+scope. Selecting a Leaderboard row, Trajectory Overview row, or Trajectory
+Overview node must preserve those internal scroll positions across the selected
+Trial rerender instead of jumping either panel back to the first row. User
+scrolling in either capped panel also synchronizes the other panel by vertical
+scroll progress so the two views stay aligned across the same filtered row set;
+Leaderboard horizontal table scrolling remains independent. The rendered
+comparison sections must not show benchmark, task, task-set, task-family, or
+matrix task-axis fields.
 
 Serve UI mode keeps the report body as the primary mental model rather than
 turning the page into a separate dashboard. It shows a compact source/status

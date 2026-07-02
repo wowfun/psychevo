@@ -206,12 +206,74 @@ function renderSessionAliasCell(row) {
   return alias ? esc(alias) : `<span class="muted">-</span>`;
 }
 function renderComparisonPanels(options = {}) {
+  const scrollState = options.preserveScroll === false ? null : comparisonScrollState();
   const rows = leaderboardRows();
   syncSelectionWithVisibleRows(rows);
   renderLeaderboard(rows);
   renderTrajectoryOverview(rows);
+  restoreComparisonScrollState(scrollState);
+  bindComparisonScrollSync();
   if (options.trace !== false) renderTrace();
   renderStepDrawer();
+}
+function comparisonScrollState() {
+  return {
+    leaderboard: scrollPosition("#leaderboard .table-wrap", true),
+    trajectoryOverview: scrollPosition("#trajectory-overview .trajectory-overview-list", false)
+  };
+}
+function scrollPosition(selector, includeHorizontal) {
+  const node = document.querySelector(selector);
+  if (!node) return null;
+  const position = { top: node.scrollTop || 0 };
+  if (includeHorizontal) position.left = node.scrollLeft || 0;
+  return position;
+}
+function restoreComparisonScrollState(state) {
+  if (!state) return;
+  restoreScrollPosition("#leaderboard .table-wrap", state.leaderboard);
+  restoreScrollPosition("#trajectory-overview .trajectory-overview-list", state.trajectoryOverview);
+}
+function restoreScrollPosition(selector, position) {
+  if (!position) return;
+  const node = document.querySelector(selector);
+  if (!node) return;
+  node.scrollTop = position.top || 0;
+  if (Object.prototype.hasOwnProperty.call(position, "left")) {
+    node.scrollLeft = position.left || 0;
+  }
+}
+function bindComparisonScrollSync() {
+  const leaderboard = document.querySelector("#leaderboard .table-wrap");
+  const overview = document.querySelector("#trajectory-overview .trajectory-overview-list");
+  if (!leaderboard || !overview) return;
+  leaderboard.addEventListener("scroll", () => syncComparisonScroll(leaderboard, overview), { passive: true });
+  overview.addEventListener("scroll", () => syncComparisonScroll(overview, leaderboard), { passive: true });
+}
+function syncComparisonScroll(source, target) {
+  if (state.comparisonScrollSyncing) return;
+  const sourceRange = scrollRange(source);
+  const targetRange = scrollRange(target);
+  if (sourceRange <= 0 || targetRange <= 0) return;
+  const targetTop = scrollProgress(source, sourceRange) * targetRange;
+  state.comparisonScrollSyncing = true;
+  const apply = () => {
+    target.scrollTop = targetTop;
+    const release = () => {
+      state.comparisonScrollSyncing = false;
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(release);
+    else release();
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(apply);
+  else apply();
+}
+function scrollRange(node) {
+  return Math.max(0, (node.scrollHeight || 0) - (node.clientHeight || 0));
+}
+function scrollProgress(node, range = scrollRange(node)) {
+  if (range <= 0) return 0;
+  return Math.max(0, Math.min(1, (node.scrollTop || 0) / range));
 }
 function selectionColumn() {
   return {

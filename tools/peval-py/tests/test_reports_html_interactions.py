@@ -558,6 +558,243 @@ console.log(result);
         self.assertEqual(result["subsetAnalysisKeys"], ["trial:one", "trial:two"])
         self.assertEqual(result["legacyRowCount"], 0)
 
+    def test_comparison_panel_rerenders_preserve_scroll_positions(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = """
+const vm = require("vm");
+const asset = __ASSET__;
+const context = {
+  leaderboardWrap: { scrollTop: 96, scrollLeft: 42, addEventListener() {} },
+  overviewList: { scrollTop: 128, scrollLeft: 7, addEventListener() {} },
+  document: {
+    body: { classList: { toggle() {} } },
+    addEventListener() {},
+    getElementById: () => null,
+    querySelector(selector) {
+      if (selector === "#leaderboard .table-wrap") return context.leaderboardWrap;
+      if (selector === "#trajectory-overview .trajectory-overview-list") return context.overviewList;
+      return null;
+    },
+  },
+  window: { addEventListener() {} },
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  const calls = [];
+  leaderboardRows = () => [{ trial_key: "trial:one" }];
+  syncSelectionWithVisibleRows = rows => calls.push(["sync", rows.length]);
+  renderLeaderboard = rows => {
+    calls.push(["leaderboard", rows.length]);
+    globalThis.leaderboardWrap = { scrollTop: 0, scrollLeft: 0, addEventListener() {} };
+  };
+  renderTrajectoryOverview = rows => {
+    calls.push(["overview", rows.length]);
+    globalThis.overviewList = { scrollTop: 0, scrollLeft: 0, addEventListener() {} };
+  };
+  renderTrace = () => calls.push(["trace"]);
+  renderStepDrawer = () => calls.push(["drawer"]);
+  renderComparisonPanels();
+  JSON.stringify({
+    leaderboardTop: leaderboardWrap.scrollTop,
+    leaderboardLeft: leaderboardWrap.scrollLeft,
+    overviewTop: overviewList.scrollTop,
+    overviewLeft: overviewList.scrollLeft,
+    calls
+  });
+`, context);
+console.log(result);
+""".replace("__ASSET__", json.dumps(asset))
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["leaderboardTop"], 96)
+        self.assertEqual(result["leaderboardLeft"], 42)
+        self.assertEqual(result["overviewTop"], 128)
+        self.assertEqual(result["overviewLeft"], 0)
+        self.assertEqual(
+            result["calls"],
+            [["sync", 1], ["leaderboard", 1], ["overview", 1], ["trace"], ["drawer"]],
+        )
+
+    def test_comparison_panel_scroll_progress_syncs_in_both_directions(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = """
+const vm = require("vm");
+const asset = __ASSET__;
+const writes = { leaderboard: [], overview: [] };
+function makeNode(name, scrollTop, scrollLeft, scrollHeight, clientHeight) {
+  const node = {
+    handlers: [],
+    scrollHeight,
+    clientHeight,
+    addEventListener(type, handler) {
+      if (type === "scroll") this.handlers.push(handler);
+    },
+    triggerScroll() {
+      this.handlers.forEach(handler => handler({ target: this }));
+    }
+  };
+  let top = scrollTop;
+  let left = scrollLeft;
+  Object.defineProperty(node, "scrollTop", {
+    get() { return top; },
+    set(value) {
+      top = value;
+      writes[name].push({ field: "top", value });
+      if (name === "overview" && context.triggerOverviewNested) {
+        context.triggerOverviewNested = false;
+        node.triggerScroll();
+      }
+      if (name === "leaderboard" && context.triggerLeaderboardNested) {
+        context.triggerLeaderboardNested = false;
+        node.triggerScroll();
+      }
+    }
+  });
+  Object.defineProperty(node, "scrollLeft", {
+    get() { return left; },
+    set(value) {
+      left = value;
+      writes[name].push({ field: "left", value });
+    }
+  });
+  return node;
+}
+const context = {
+  leaderboardWrap: makeNode("leaderboard", 250, 77, 1200, 200),
+  overviewList: makeNode("overview", 0, 11, 2200, 200),
+  triggerOverviewNested: false,
+  triggerLeaderboardNested: false,
+  rafCalls: 0,
+  writes,
+  document: {
+    body: { classList: { toggle() {} } },
+    addEventListener() {},
+    getElementById: () => null,
+    querySelector(selector) {
+      if (selector === "#leaderboard .table-wrap") return context.leaderboardWrap;
+      if (selector === "#trajectory-overview .trajectory-overview-list") return context.overviewList;
+      return null;
+    },
+  },
+  requestAnimationFrame(callback) {
+    context.rafCalls += 1;
+    callback();
+  },
+  window: { addEventListener() {} },
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  bindComparisonScrollSync();
+  const listenerCounts = {
+    leaderboard: leaderboardWrap.handlers.length,
+    overview: overviewList.handlers.length
+  };
+
+  globalThis.triggerOverviewNested = true;
+  leaderboardWrap.triggerScroll();
+  const afterLeaderboardScroll = {
+    leaderboardTop: leaderboardWrap.scrollTop,
+    leaderboardLeft: leaderboardWrap.scrollLeft,
+    overviewTop: overviewList.scrollTop,
+    overviewLeft: overviewList.scrollLeft,
+    leaderboardWrites: writes.leaderboard.slice(),
+    overviewWrites: writes.overview.slice(),
+    syncingReleased: state.comparisonScrollSyncing === false
+  };
+
+  writes.leaderboard.length = 0;
+  writes.overview.length = 0;
+  overviewList.scrollTop = 1500;
+  writes.overview.length = 0;
+  globalThis.triggerLeaderboardNested = true;
+  overviewList.triggerScroll();
+  const afterOverviewScroll = {
+    leaderboardTop: leaderboardWrap.scrollTop,
+    leaderboardLeft: leaderboardWrap.scrollLeft,
+    overviewTop: overviewList.scrollTop,
+    overviewLeft: overviewList.scrollLeft,
+    leaderboardWrites: writes.leaderboard.slice(),
+    overviewWrites: writes.overview.slice(),
+    syncingReleased: state.comparisonScrollSyncing === false
+  };
+
+  JSON.stringify({ listenerCounts, afterLeaderboardScroll, afterOverviewScroll, rafCalls });
+`, context);
+console.log(result);
+""".replace("__ASSET__", json.dumps(asset))
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["listenerCounts"], {"leaderboard": 1, "overview": 1})
+        self.assertEqual(result["afterLeaderboardScroll"]["leaderboardTop"], 250)
+        self.assertEqual(result["afterLeaderboardScroll"]["leaderboardLeft"], 77)
+        self.assertEqual(result["afterLeaderboardScroll"]["overviewTop"], 500)
+        self.assertEqual(result["afterLeaderboardScroll"]["overviewLeft"], 11)
+        self.assertEqual(result["afterLeaderboardScroll"]["leaderboardWrites"], [])
+        self.assertEqual(
+            result["afterLeaderboardScroll"]["overviewWrites"],
+            [{"field": "top", "value": 500}],
+        )
+        self.assertTrue(result["afterLeaderboardScroll"]["syncingReleased"])
+        self.assertEqual(result["afterOverviewScroll"]["leaderboardTop"], 750)
+        self.assertEqual(result["afterOverviewScroll"]["leaderboardLeft"], 77)
+        self.assertEqual(result["afterOverviewScroll"]["overviewTop"], 1500)
+        self.assertEqual(result["afterOverviewScroll"]["overviewLeft"], 11)
+        self.assertEqual(
+            result["afterOverviewScroll"]["leaderboardWrites"],
+            [{"field": "top", "value": 750}],
+        )
+        self.assertEqual(result["afterOverviewScroll"]["overviewWrites"], [])
+        self.assertTrue(result["afterOverviewScroll"]["syncingReleased"])
+        self.assertGreaterEqual(result["rafCalls"], 4)
+
 
     def test_html_submenu_outside_click_closer_only_targets_menus(self) -> None:
         if not shutil.which("node"):
