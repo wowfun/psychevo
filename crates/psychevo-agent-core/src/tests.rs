@@ -70,6 +70,7 @@ pub(crate) fn request() -> AgentLoopRequest {
         turn_contextual_user_messages: Vec::new(),
         prompt_messages: vec![user_text_message("hello")],
         tools: Vec::new(),
+        tool_search: ToolSearchOptions::disabled(),
         max_turns: 1,
     }
 }
@@ -147,6 +148,39 @@ impl ToolBinding for HiddenTool {
     }
 }
 
+pub(crate) struct DeferredTool;
+
+impl ToolBinding for DeferredTool {
+    fn name(&self) -> &str {
+        "deferred_lookup"
+    }
+
+    fn description(&self) -> &str {
+        "Looks up deferred extension data."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {}, "additionalProperties": false})
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::Deferred
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Parallel
+    }
+
+    fn execute(
+        &self,
+        _tool_call_id: String,
+        _args: Value,
+        _abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        Box::pin(async { ToolOutput::ok(json!({"deferred": true})) })
+    }
+}
+
 #[tokio::test]
 pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
     let provider = RequestCaptureProvider::default();
@@ -171,12 +205,37 @@ pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
     assert!(value.get("display").is_none(), "{value}");
 }
 
+#[test]
+pub(crate) fn tool_search_activates_deferred_tools_for_later_declarations() {
+    let mut router = ToolRouter::from_tools(vec![Arc::new(DeferredTool) as Arc<dyn ToolBinding>])
+        .with_tool_search(ToolSearchOptions::enabled());
+
+    let initial_names = router
+        .declarations()
+        .into_iter()
+        .map(|declaration| declaration.name)
+        .collect::<Vec<_>>();
+    assert_eq!(initial_names, vec!["tool_search"]);
+
+    let output = router.execute_tool_search(&json!({"query": "extension data"}));
+    assert!(!output.is_error);
+    assert_eq!(output.json["activated"], json!(["deferred_lookup"]));
+
+    let activated_names = router
+        .declarations()
+        .into_iter()
+        .map(|declaration| declaration.name)
+        .collect::<Vec<_>>();
+    assert_eq!(activated_names, vec!["deferred_lookup"]);
+}
+
 #[tokio::test]
 pub(crate) async fn hidden_tools_are_not_model_callable() {
     let (_abort_tx, abort_rx) = watch::channel(false);
     let tools: Vec<Arc<dyn ToolBinding>> = vec![Arc::new(HiddenTool)];
+    let mut router = ToolRouter::from_tools(tools);
     let messages = execute_tool_batch(
-        &tools,
+        &mut router,
         &[ToolCallBlock {
             id: "call-1".to_string(),
             name: "hidden".to_string(),
@@ -238,6 +297,7 @@ pub(crate) async fn prefix_contextual_user_messages_are_inserted_before_history(
             turn_contextual_user_messages: Vec::new(),
             prompt_messages: vec![user_text_message("accepted prompt")],
             tools: Vec::new(),
+            tool_search: ToolSearchOptions::disabled(),
             max_turns: 1,
         },
         Arc::new(NoopEventSink),
@@ -399,9 +459,11 @@ pub(crate) async fn tool_call_pending_is_emitted_before_message_end() {
     });
     let sink = Arc::new(CaptureSink::default());
     let (_, control) = ControlHandle::new();
+    let router = ToolRouter::from_tools(request().tools);
     stream_assistant(
         provider,
         &request(),
+        &router,
         &[],
         sink.clone(),
         control.abort_signal(),
@@ -555,6 +617,7 @@ pub(crate) async fn tool_output_can_separate_event_json_from_model_content() {
         provider,
         AgentLoopRequest {
             tools: vec![Arc::new(SplitOutputTool)],
+            tool_search: ToolSearchOptions::disabled(),
             max_turns: 2,
             ..request()
         },

@@ -46,6 +46,25 @@ Runtime accepts common third-party skill package optional fields including
 metadata when practical. `allowed-tools` is metadata only and never grants or
 pre-approves Psychevo tool access.
 
+Psychevo recognizes Hermes-compatible prompt-visibility hints under
+`metadata.hermes.requires_tools` and `metadata.hermes.fallback_for_tools`.
+`requires_tools` means the skill is omitted from the automatic model-visible
+skill index unless every named tool is present in the accepted invocation tool
+surface. `fallback_for_tools` means the skill is omitted from that index when
+any named preferred tool is present, and may appear only when those preferred
+tools are absent. These fields affect automatic prompt visibility only; they
+do not prevent explicit viewing or explicit skill selection.
+
+Psychevo also recognizes `metadata.hermes.requires_toolsets` and
+`metadata.hermes.fallback_for_toolsets`. These use accepted invocation toolset
+facts from 007 Tool Surface. Runtime must not infer toolset availability from
+configuration alone when deciding skill prompt visibility.
+
+Plugin-provided skills join normal discovery by default. Runtime preserves the
+plugin source fact for diagnostics and visibility decisions, but automatic
+prompt indexing uses the same enabled, platform, hidden, tool, and toolset
+rules as other skills unless a future manifest policy changes that default.
+
 Runtime validates names using the skill naming shape: lowercase letters,
 numbers, and hyphens; no leading, trailing, or consecutive hyphens; maximum
 length 64. Invalid names are diagnostics but do not prevent loading. Missing or

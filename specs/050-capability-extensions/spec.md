@@ -84,6 +84,31 @@ declaration, selected agent, skill root, profile setting, project setting,
 managed policy, or interface input may cause contributors to be installed only
 through Psychevo host code.
 
+Runtime may build an internal contribution projection while assembling an
+invocation. The projection records compact source, declaration, acceptance,
+owner, effect, and reason facts used by tests and owning diagnostics surfaces.
+It is not a second runtime and does not decide domain
+semantics. Owning modules still accept or omit declarations.
+
+Projection acceptance status values are:
+
+- `accepted`
+- `omitted`
+- `unsupported`
+- `unavailable`
+- `degraded`
+- `conflict`
+- `hidden`
+- `invalid`
+
+The projection must stay source-qualified and payload-light. It may identify a
+declaration family, owner module, effect target, and short reason, but it must
+not persist skill bodies, agent instructions, provider secrets, raw provider
+payloads, full prompt context, or full tool declaration payloads by default.
+Projection facts may feed owning surfaces such as plugin diagnostics, hook
+listing, and tool status. Runtime must not add a public `contributions inspect`
+command or inject contribution diagnostics into normal prompts.
+
 ## Declaration Families
 
 Declaration families are non-exhaustive. They may include:
@@ -117,6 +142,38 @@ Capability extensions may add candidates or constraints, but they must not turn
 candidates into model context, model-visible tools, executable operations,
 retained memory, provider protocol semantics, persistent permission grants, or
 caller-facing behavior without passing through the owning module.
+
+## Contribution Placement
+
+New contribution surfaces should attach to the narrowest owning module that can
+preserve the intended semantics:
+
+- Core runtime is the right home when the change alters an existing invocation
+  invariant, accepted tool surface, context projection, evidence fact,
+  permission decision, provider contract, or storage relationship.
+- A skill is the right home for model-readable instructions and local support
+  files that do not need runtime authority, new tools, hooks, provider access,
+  or durable state.
+- An agent definition is the right home for a reusable execution identity:
+  instructions plus model preference, tool policy, selected skills, hooks, MCP
+  scope, or child-agent use.
+- A hook is the right home for event-scoped observation, review, feedback, or
+  bounded direct effects around existing runtime events.
+- A plugin package is the right home when a distributable package bundles one
+  or more extension declarations, worker tools, hook declarations, skills,
+  agents, MCP descriptors, provider descriptors, command descriptors, or
+  toolset descriptors. The plugin does not own the final effect; the relevant
+  runtime module still accepts or omits each declaration.
+- MCP, provider, command, memory, resource, or toolset declarations belong in
+  their owning specs and runtime modules whenever their semantics are more
+  specific than the generic capability-extension vocabulary.
+
+When multiple placements are possible, contributors should prefer the placement
+that needs the fewest new user concepts and the least runtime authority. A
+plugin package should not be introduced only to ship one local skill, agent, or
+hook unless distribution, package policy, or shared install lifecycle is part of
+the requirement. A registry or contributor abstraction should be added only
+when at least two existing owning surfaces need the same host-owned interface.
 
 ## Conflicts
 
@@ -169,8 +226,12 @@ normalization layer.
 Tool declarations enter a runtime-owned tool router. The router owns the
 model-visible tool declaration snapshot, dispatch lookup, duplicate visible-name
 rejection, and current invocation dispatch facts. It may represent direct,
-deferred, and hidden exposure, but the current slice does not add
-model-visible tool search or model-initiated dynamic activation.
+deferred, and hidden exposure. The current slice enables one runtime-owned
+`tool_search` declaration by default when accepted deferred tools exist. Calling
+`tool_search` searches source-qualified deferred declarations and activates
+matching tools for later generation-request snapshots in the same agent
+invocation. Explicit invocation configuration may disable synthetic
+`tool_search`; it must not change install, package, or manifest semantics.
 
 Prompt-prefix records freeze the request reconstruction boundary. They retain
 prompt slots, prompt hash, model-visible tool declaration hash, and minimal

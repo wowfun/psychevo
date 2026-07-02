@@ -33,13 +33,11 @@ execution.
 
 ## Current Implementation Slice
 
-The current implementation slice covers command hooks for tool events. Tests
-exercise local command fixtures through the shared hook runtime rather than
-testing agent-only wrappers.
-
-Until worker, prompt, and agent hook handlers execute, tests should assert that
-those handler types normalize and skip with structured diagnostics rather than
-silently running through ad hoc paths.
+The current implementation slice covers command, worker, and prompt hook
+handlers through the shared hook runtime. Command tests exercise local command
+fixtures; worker tests exercise a local plugin worker adapter; prompt tests
+assert turn-local context contribution. Agent handlers normalize and list, but
+skip with structured diagnostics until an agent hook adapter is defined.
 
 Manual broad validation for code changes is still the Rust workspace gate
 defined by [065 CI/CD](../065-ci-cd/spec.md), but this topic's
@@ -66,6 +64,25 @@ acceptance coverage should come from focused hook/runtime tests.
   and emit diagnostics.
 - `PostToolUse` hook failures do not alter completed tool output and emit
   diagnostics.
+- Worker hook handlers call the plugin worker adapter only after package
+  enablement and hook trust select that handler.
+- Worker hook handler failures or timeouts degrade only the hook run and return
+  bounded diagnostics.
+- Prompt hook handlers contribute turn-local context through typed hook results
+  and do not rewrite source prompts, prompt-prefix records, or persistent
+  instructions.
+- Typed lifecycle hook methods exist for every current Codex-aligned event;
+  production call sites use typed outcomes instead of stringly generic event
+  dispatch.
+- `SessionStart`, `SubagentStart`, `UserPromptSubmit`, `PreCompact`,
+  `PostCompact`, `Stop`, and `SubagentStop` honor typed stop/block outcomes
+  when handlers return `continue: false`.
+- `UserPromptSubmit` context injection remains turn-local and stops the current
+  turn without mutating the original user prompt when blocked.
+- `Stop` and `SubagentStop` surface continuation context as typed output and
+  guard against re-entering the same stop handler indefinitely.
+- Agent hook handlers are listed and skipped with an adapter-unavailable
+  diagnostic.
 - `PostLLMCall` tests preserve raw provider output while exercising any
   projected/display output path through typed hook results.
 - `Notification` fixtures assert redaction instead of snapshotting full
@@ -82,6 +99,6 @@ acceptance coverage should come from focused hook/runtime tests.
 
 - Tests should assert observable tool-call outcomes and structured hook
   diagnostics, not private process-spawning internals.
-- Tests must use local command fixtures and isolated temp directories.
+- Tests must use local command/worker fixtures and isolated temp directories.
 - Real shell hooks are allowed only in deterministic local harnesses and must
   not read user credentials or host-global config.

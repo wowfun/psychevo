@@ -1,12 +1,14 @@
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::{PluginPolicyConfig, ToolsetContribution};
+use crate::contribution_projection::ContributionProjection;
 use crate::hooks::HookSourceDescriptor;
-use crate::plugins::load_plugin_manifest;
+use crate::plugins::{load_enabled_plugin_contributions, load_plugin_manifest};
 use crate::types::{McpServerInput, RunWarning, RuntimeTool};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -303,9 +305,90 @@ impl ExtensionRegistry {
     }
 }
 
+pub(crate) struct ExtensionAssemblyInput<'a> {
+    pub(crate) home: &'a Path,
+    pub(crate) cwd: &'a Path,
+    pub(crate) env: &'a BTreeMap<String, String>,
+    pub(crate) plugin_policy: &'a PluginPolicyConfig,
+    pub(crate) selected_capability_roots: &'a [SelectedCapabilityRoot],
+    pub(crate) mcp_servers: Vec<McpServerInput>,
+    pub(crate) runtime_tools: Vec<RuntimeTool>,
+}
+
+#[derive(Default)]
+pub(crate) struct ExtensionAssembly {
+    pub(crate) registry: ExtensionRegistry,
+    pub(crate) skill_inputs: Vec<PathBuf>,
+    pub(crate) agent_inputs: Vec<String>,
+    pub(crate) hook_sources: Vec<HookSourceDescriptor>,
+    pub(crate) toolsets: Vec<ToolsetContribution>,
+    pub(crate) warnings: Vec<RunWarning>,
+    pub(crate) projection: ContributionProjection,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct AcceptedExtensionInputs {
+    pub(crate) mcp_servers: Vec<McpServerInput>,
+    pub(crate) runtime_tools: Vec<RuntimeTool>,
+    pub(crate) hook_sources: Vec<HookSourceDescriptor>,
+    pub(crate) toolsets: Vec<ToolsetContribution>,
+}
+
+impl ExtensionAssembly {
+    pub(crate) fn accepted_inputs(&self) -> AcceptedExtensionInputs {
+        AcceptedExtensionInputs {
+            mcp_servers: self.registry.mcp_servers(),
+            runtime_tools: self.registry.runtime_tools(),
+            hook_sources: self.hook_sources.clone(),
+            toolsets: self.toolsets.clone(),
+        }
+    }
+}
+
+pub(crate) fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> ExtensionAssembly {
+    let plugin_assembly =
+        load_enabled_plugin_contributions(input.home, input.cwd, input.env, input.plugin_policy);
+    let selected_root_contributions =
+        selected_root_contributions(input.cwd, input.selected_capability_roots);
+
+    let mut mcp_servers = input.mcp_servers;
+    mcp_servers.extend(plugin_assembly.mcp_servers.iter().cloned());
+    let mut runtime_tools = input.runtime_tools;
+    runtime_tools.extend(plugin_assembly.runtime_tools.iter().cloned());
+
+    let registry = registry_from_static_inputs(mcp_servers, runtime_tools);
+    let mut warnings = plugin_assembly.warnings.clone();
+    warnings.extend(selected_root_contributions.warnings.clone());
+
+    ExtensionAssembly {
+        registry,
+        skill_inputs: plugin_assembly
+            .skill_inputs
+            .iter()
+            .cloned()
+            .chain(selected_root_contributions.skill_inputs)
+            .collect(),
+        agent_inputs: plugin_assembly
+            .agent_inputs
+            .iter()
+            .cloned()
+            .chain(selected_root_contributions.agent_inputs)
+            .collect(),
+        hook_sources: plugin_assembly
+            .hook_sources
+            .iter()
+            .cloned()
+            .chain(selected_root_contributions.hook_sources)
+            .collect(),
+        toolsets: plugin_assembly.toolsets.clone(),
+        warnings,
+        projection: plugin_assembly.projection.clone(),
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct SelectedRootContributions {
-    pub(crate) skill_inputs: Vec<std::path::PathBuf>,
+    pub(crate) skill_inputs: Vec<PathBuf>,
     pub(crate) agent_inputs: Vec<String>,
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
     pub(crate) warnings: Vec<RunWarning>,
@@ -467,20 +550,20 @@ mod tests {
     fn registry_preserves_contributor_order() {
         let mut builder = ExtensionRegistryBuilder::new();
         builder.mcp_server_contributor(Arc::new(StaticMcpServerContributor {
-            mcp_servers: vec![McpServerInput {
-                name: "a".to_string(),
-                transport: crate::types::McpTransportInput::Unsupported {
+            mcp_servers: vec![McpServerInput::new(
+                "a",
+                crate::types::McpTransportInput::Unsupported {
                     kind: "test".to_string(),
                 },
-            }],
+            )],
         }));
         builder.mcp_server_contributor(Arc::new(StaticMcpServerContributor {
-            mcp_servers: vec![McpServerInput {
-                name: "b".to_string(),
-                transport: crate::types::McpTransportInput::Unsupported {
+            mcp_servers: vec![McpServerInput::new(
+                "b",
+                crate::types::McpTransportInput::Unsupported {
                     kind: "test".to_string(),
                 },
-            }],
+            )],
         }));
 
         let names = builder
@@ -539,6 +622,64 @@ mod tests {
         assert_eq!(contributions.hook_sources.len(), 1);
         assert!(contributions.hook_sources[0].worker.is_none());
         assert_eq!(contributions.warnings.len(), 1);
+    }
+
+    #[test]
+    fn assembly_freezes_static_inputs_and_selected_root_outputs() {
+        let temp = tempfile::tempdir().expect("temp");
+        let home = temp.path().join("home");
+        let root = temp.path().join("plugin");
+        fs::create_dir_all(&home).expect("home");
+        fs::create_dir_all(root.join(".psychevo-plugin")).expect("manifest dir");
+        fs::create_dir_all(root.join("skills/cleanup")).expect("skill dir");
+        fs::write(
+            root.join(".psychevo-plugin/plugin.json"),
+            r#"{
+              "name": "cleanup",
+              "version": "1.0.0",
+              "description": "cleanup",
+              "skills": ["./skills"],
+              "hooks": {
+                "SessionStart": [{"hooks": [{"type": "prompt", "prompt": "context"}]}]
+              }
+            }"#,
+        )
+        .expect("manifest");
+
+        let assembly = assemble_extensions(ExtensionAssemblyInput {
+            home: &home,
+            cwd: temp.path(),
+            env: &BTreeMap::new(),
+            plugin_policy: &PluginPolicyConfig::default(),
+            selected_capability_roots: &[SelectedCapabilityRoot::local("cleanup", "plugin")],
+            mcp_servers: vec![McpServerInput::new(
+                "static",
+                crate::types::McpTransportInput::Unsupported {
+                    kind: "test".to_string(),
+                },
+            )],
+            runtime_tools: Vec::new(),
+        });
+        let accepted = assembly.accepted_inputs();
+
+        assert_eq!(
+            assembly.skill_inputs,
+            vec![root.join("skills").canonicalize().expect("skills")]
+        );
+        assert_eq!(
+            assembly
+                .registry
+                .mcp_servers()
+                .into_iter()
+                .map(|server| server.name)
+                .collect::<Vec<_>>(),
+            vec!["static".to_string()]
+        );
+        assert_eq!(accepted.mcp_servers.len(), 1);
+        assert_eq!(accepted.hook_sources.len(), 1);
+        assert_eq!(accepted.hook_sources[0].source_kind, "capability_root");
+        assert!(accepted.runtime_tools.is_empty());
+        assert!(accepted.toolsets.is_empty());
     }
 
     #[test]

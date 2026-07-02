@@ -29,6 +29,8 @@ pub(crate) fn parse_output_entries(
         ("context", "context"),
         ("feedback", "feedback"),
         ("compactionGuidance", "compaction_guidance"),
+        ("modelContent", "model_content"),
+        ("model_content", "model_content"),
         ("stopReason", "stop"),
     ] {
         if let Some(entry) = value.get(field) {
@@ -48,6 +50,8 @@ pub(crate) fn parse_output_entries(
                     | "context"
                     | "feedback"
                     | "compactionGuidance"
+                    | "modelContent"
+                    | "model_content"
             ) {
                 diagnostics.push(format!("unsupported hook output field `{key}`"));
             }

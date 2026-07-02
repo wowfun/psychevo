@@ -144,10 +144,14 @@ impl HookEventName {
     pub(crate) fn supports_block(self) -> bool {
         matches!(
             self,
-            Self::PreToolUse
-                | Self::PermissionRequest
+            Self::SessionStart
+                | Self::SubagentStart
+                | Self::SubagentStop
                 | Self::UserPromptSubmit
+                | Self::PreToolUse
+                | Self::PermissionRequest
                 | Self::PreCompact
+                | Self::PostCompact
                 | Self::Stop
         )
     }
@@ -159,6 +163,7 @@ pub enum HookSourceKind {
     Managed,
     Profile,
     Project,
+    CapabilityRoot,
     Agent,
     Plugin,
     Worker,
@@ -172,6 +177,7 @@ impl HookSourceKind {
             "managed" => Self::Managed,
             "profile" | "user" | "global" => Self::Profile,
             "project" => Self::Project,
+            "capability_root" | "selected-capability-root" => Self::CapabilityRoot,
             "agent" | "selected-agent" => Self::Agent,
             "plugin" => Self::Plugin,
             "worker" => Self::Worker,
@@ -185,6 +191,7 @@ impl HookSourceKind {
             Self::Managed => "managed",
             Self::Profile => "profile",
             Self::Project => "project",
+            Self::CapabilityRoot => "capability_root",
             Self::Agent => "agent",
             Self::Plugin => "plugin",
             Self::Worker => "worker",
@@ -201,7 +208,10 @@ impl HookSourceKind {
     }
 
     pub(crate) fn requires_hash_review(self) -> bool {
-        matches!(self, Self::Project | Self::Plugin | Self::Worker)
+        matches!(
+            self,
+            Self::Project | Self::CapabilityRoot | Self::Plugin | Self::Worker
+        )
     }
 }
 
@@ -368,6 +378,7 @@ pub struct HookResponse {
     pub blocked_reason: Option<String>,
     pub permission_decision: Option<HookPermissionDecision>,
     pub updated_input: Option<Value>,
+    pub model_content: Option<String>,
     pub context: Vec<Value>,
     pub feedback: Vec<String>,
     pub compaction_guidance: Vec<String>,
@@ -382,6 +393,149 @@ impl HookResponse {
             Some(HookPermissionDecision::Deny) => Some(PermissionApprovalDecision::deny()),
             None => None,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookLifecycleOutcome {
+    pub response: HookResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+}
+
+impl HookLifecycleOutcome {
+    pub(crate) fn from_response(response: HookResponse) -> Self {
+        Self {
+            stop_reason: response.blocked_reason.clone(),
+            response,
+        }
+    }
+
+    pub fn should_stop(&self) -> bool {
+        self.stop_reason.is_some()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookUserPromptSubmitOutcome {
+    pub response: HookResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_reason: Option<String>,
+    #[serde(default)]
+    pub context: Vec<Value>,
+}
+
+impl HookUserPromptSubmitOutcome {
+    pub(crate) fn from_response(response: HookResponse) -> Self {
+        Self {
+            block_reason: response.blocked_reason.clone(),
+            context: response.context.clone(),
+            response,
+        }
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        self.block_reason.is_some()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookPreToolUseOutcome {
+    pub response: HookResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_input: Option<Value>,
+}
+
+impl HookPreToolUseOutcome {
+    pub(crate) fn from_response(response: HookResponse) -> Self {
+        Self {
+            block_reason: response.blocked_reason.clone(),
+            updated_input: response.updated_input.clone(),
+            response,
+        }
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        self.block_reason.is_some()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookPermissionRequestOutcome {
+    pub response: HookResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<HookPermissionDecision>,
+}
+
+impl HookPermissionRequestOutcome {
+    pub(crate) fn from_response(response: HookResponse) -> Self {
+        Self {
+            decision: response.permission_decision,
+            response,
+        }
+    }
+
+    pub fn approval_decision(&self) -> Option<PermissionApprovalDecision> {
+        self.response.approval_decision()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookPostToolUseOutcome {
+    pub response: HookResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_content: Option<String>,
+}
+
+impl HookPostToolUseOutcome {
+    pub(crate) fn from_response(response: HookResponse) -> Self {
+        Self {
+            model_content: response.model_content.clone(),
+            response,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookStopOutcome {
+    pub response: HookResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_reason: Option<String>,
+    #[serde(default)]
+    pub continuation_context: Vec<Value>,
+}
+
+impl HookStopOutcome {
+    pub(crate) fn from_response(response: HookResponse) -> Self {
+        let mut continuation_context = response.context.clone();
+        continuation_context.extend(response.feedback.iter().map(|text| {
+            serde_json::json!({
+                "source": "hook_feedback",
+                "text": text,
+            })
+        }));
+        Self {
+            block_reason: response.blocked_reason.clone(),
+            continuation_context,
+            response,
+        }
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        self.block_reason.is_some()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookReadOnlyOutcome {
+    pub response: HookResponse,
+}
+
+impl HookReadOnlyOutcome {
+    pub(crate) fn from_response(response: HookResponse) -> Self {
+        Self { response }
     }
 }
 

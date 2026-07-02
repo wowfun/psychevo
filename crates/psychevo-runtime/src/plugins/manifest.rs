@@ -1,15 +1,21 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
-use super::types::{LoadedPluginManifest, PluginDiagnostic, PluginManifestKind, PluginWorkerSpec};
+use super::types::{
+    LoadedPluginManifest, PluginDiagnostic, PluginInterfaceMetadata, PluginManifestKind,
+    PluginWorkerSpec,
+};
+use crate::config::CustomToolsetConfig;
 use crate::error::{Error, Result};
+use crate::types::{McpServerInput, McpTransportInput};
 
 const NATIVE_MANIFEST: &str = ".psychevo-plugin/plugin.json";
 const CODEX_MANIFEST: &str = ".codex-plugin/plugin.json";
 const CLAUDE_MANIFEST: &str = ".claude-plugin/plugin.json";
+const HERMES_MANIFESTS: [&str; 3] = ["plugin.yaml", "plugin.yml", ".hermes-plugin/plugin.yaml"];
 
 pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<LoadedPluginManifest> {
     let root = root.to_path_buf();
@@ -25,7 +31,18 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
             full.exists().then_some((full, *kind))
         })
         .collect::<Vec<_>>();
+    let hermes_manifest_paths = HERMES_MANIFESTS
+        .iter()
+        .map(|path| root.join(path))
+        .filter(|path| path.exists())
+        .collect::<Vec<_>>();
     if found.is_empty() {
+        if !hermes_manifest_paths.is_empty() {
+            return Err(Error::Config(format!(
+                "Hermes plugin.yaml is recognized as descriptive metadata only; dynamic register(ctx) plugins are unsupported: {}",
+                hermes_manifest_paths[0].display()
+            )));
+        }
         return Err(Error::Config(format!(
             "plugin manifest not found under {}",
             root.display()
@@ -54,6 +71,12 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
             )
         })
         .collect::<Vec<_>>();
+    diagnostics.extend(hermes_manifest_paths.into_iter().map(|path| {
+        PluginDiagnostic::warning(
+            "Hermes plugin.yaml is ignored; dynamic register(ctx) plugins are unsupported",
+            Some(path),
+        )
+    }));
 
     let name = string_field(object, "name")
         .or_else(|| string_field(object, "id"))
@@ -147,6 +170,23 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
     if hooks.is_some() {
         manifest_resources.insert("hooks".to_string());
     }
+    let mcp_servers = parse_manifest_mcp_servers(
+        object.get("mcpServers"),
+        &root,
+        &manifest_path,
+        &mut diagnostics,
+    )?;
+    if !mcp_servers.is_empty()
+        || object.contains_key("mcpServers")
+        || root.join(".mcp.json").is_file()
+    {
+        manifest_resources.insert("mcpServers".to_string());
+    }
+    let toolsets = parse_manifest_toolsets(
+        psychevo.and_then(|psychevo| psychevo.get("toolsets")),
+        &manifest_path,
+        &mut diagnostics,
+    );
     for field in ["commands", "providers", "toolsets"] {
         if psychevo.is_some_and(|psychevo| psychevo.contains_key(field)) {
             psychevo_extensions.insert(field.to_string());
@@ -161,7 +201,12 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
     if worker.is_some() {
         psychevo_extensions.insert("runtime".to_string());
     }
-    let interface = object.get("interface").cloned();
+    let interface = parse_manifest_interface(
+        object.get("interface"),
+        &root,
+        &manifest_path,
+        &mut diagnostics,
+    );
 
     Ok(LoadedPluginManifest {
         root,
@@ -175,7 +220,9 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         skill_roots,
         agent_roots,
         hooks,
+        mcp_servers,
         worker,
+        toolsets,
         interface,
         manifest_resources,
         psychevo_extensions,
@@ -266,17 +313,19 @@ fn parse_manifest_hooks(
             )),
         }
     }
-    let default_hooks = root.join("hooks/hooks.json");
-    if default_hooks.exists() {
-        match load_hook_file(&default_hooks) {
-            Ok(value) => merge_hook_declarations(&mut hooks, value),
-            Err(err) => diagnostics.push(PluginDiagnostic::invalid(
-                format!(
-                    "default hooks file `{}` is invalid: {err}",
-                    default_hooks.display()
-                ),
-                Some(manifest_path.to_path_buf()),
-            )),
+    if value.is_none() {
+        let default_hooks = root.join("hooks/hooks.json");
+        if default_hooks.exists() {
+            match load_hook_file(&default_hooks) {
+                Ok(value) => merge_hook_declarations(&mut hooks, value),
+                Err(err) => diagnostics.push(PluginDiagnostic::invalid(
+                    format!(
+                        "default hooks file `{}` is invalid: {err}",
+                        default_hooks.display()
+                    ),
+                    Some(manifest_path.to_path_buf()),
+                )),
+            }
         }
     }
     if hooks.as_object().is_some_and(|object| !object.is_empty()) {
@@ -284,6 +333,664 @@ fn parse_manifest_hooks(
     } else {
         Ok(None)
     }
+}
+
+fn parse_manifest_interface(
+    value: Option<&Value>,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<PluginInterfaceMetadata> {
+    let value = value?;
+    let Some(object) = value.as_object() else {
+        diagnostics.push(PluginDiagnostic::invalid(
+            "manifest interface must be an object",
+            Some(manifest_path.to_path_buf()),
+        ));
+        return None;
+    };
+    Some(PluginInterfaceMetadata {
+        display_name: interface_string(
+            object,
+            &["displayName"],
+            "interface.displayName",
+            manifest_path,
+            diagnostics,
+        ),
+        short_description: interface_string(
+            object,
+            &["shortDescription"],
+            "interface.shortDescription",
+            manifest_path,
+            diagnostics,
+        ),
+        long_description: interface_string(
+            object,
+            &["longDescription"],
+            "interface.longDescription",
+            manifest_path,
+            diagnostics,
+        ),
+        developer_name: interface_string(
+            object,
+            &["developerName"],
+            "interface.developerName",
+            manifest_path,
+            diagnostics,
+        ),
+        category: interface_string(
+            object,
+            &["category"],
+            "interface.category",
+            manifest_path,
+            diagnostics,
+        ),
+        capabilities: interface_string_array(
+            object,
+            "capabilities",
+            "interface.capabilities",
+            manifest_path,
+            diagnostics,
+        ),
+        website_url: interface_string(
+            object,
+            &["websiteUrl", "websiteURL"],
+            "interface.websiteUrl",
+            manifest_path,
+            diagnostics,
+        ),
+        privacy_policy_url: interface_string(
+            object,
+            &["privacyPolicyUrl", "privacyPolicyURL"],
+            "interface.privacyPolicyUrl",
+            manifest_path,
+            diagnostics,
+        ),
+        terms_of_service_url: interface_string(
+            object,
+            &["termsOfServiceUrl", "termsOfServiceURL"],
+            "interface.termsOfServiceUrl",
+            manifest_path,
+            diagnostics,
+        ),
+        brand_color: interface_string(
+            object,
+            &["brandColor"],
+            "interface.brandColor",
+            manifest_path,
+            diagnostics,
+        ),
+        composer_icon: interface_path(
+            object,
+            "composerIcon",
+            "interface.composerIcon",
+            root,
+            manifest_path,
+            diagnostics,
+        ),
+        logo: interface_path(
+            object,
+            "logo",
+            "interface.logo",
+            root,
+            manifest_path,
+            diagnostics,
+        ),
+        logo_dark: interface_path(
+            object,
+            "logoDark",
+            "interface.logoDark",
+            root,
+            manifest_path,
+            diagnostics,
+        ),
+        screenshots: interface_path_array(
+            object,
+            "screenshots",
+            "interface.screenshots",
+            root,
+            manifest_path,
+            diagnostics,
+        ),
+    })
+}
+
+fn interface_string(
+    object: &Map<String, Value>,
+    keys: &[&str],
+    label: &str,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<String> {
+    let value = first_interface_field(object, keys)?;
+    match value {
+        Value::String(value) if !value.trim().is_empty() => Some(value.trim().to_string()),
+        Value::String(_) | Value::Null => None,
+        _ => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("manifest {label} must be a string"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            None
+        }
+    }
+}
+
+fn interface_string_array(
+    object: &Map<String, Value>,
+    key: &str,
+    label: &str,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Vec<String> {
+    let Some(value) = object.get(key) else {
+        return Vec::new();
+    };
+    match string_array_value(value, key) {
+        Ok(values) => values
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect(),
+        Err(_) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("manifest {label} must be a string array"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            Vec::new()
+        }
+    }
+}
+
+fn interface_path(
+    object: &Map<String, Value>,
+    key: &str,
+    label: &str,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<PathBuf> {
+    let value = object.get(key)?;
+    let raw = match value {
+        Value::String(raw) if !raw.trim().is_empty() => raw.trim(),
+        Value::String(_) | Value::Null => return None,
+        _ => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("manifest {label} must be a string path"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return None;
+        }
+    };
+    match resolve_manifest_path(root, raw) {
+        Ok(path) => Some(path),
+        Err(err) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("manifest {label} path `{raw}` is invalid: {err}"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            None
+        }
+    }
+}
+
+fn interface_path_array(
+    object: &Map<String, Value>,
+    key: &str,
+    label: &str,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Vec<PathBuf> {
+    let Some(value) = object.get(key) else {
+        return Vec::new();
+    };
+    let Some(items) = value.as_array() else {
+        diagnostics.push(PluginDiagnostic::invalid(
+            format!("manifest {label} must be a string path array"),
+            Some(manifest_path.to_path_buf()),
+        ));
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    for item in items {
+        let Some(raw) = item.as_str().map(str::trim).filter(|raw| !raw.is_empty()) else {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("manifest {label} must contain string paths"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            continue;
+        };
+        match resolve_manifest_path(root, raw) {
+            Ok(path) => paths.push(path),
+            Err(err) => diagnostics.push(PluginDiagnostic::invalid(
+                format!("manifest {label} path `{raw}` is invalid: {err}"),
+                Some(manifest_path.to_path_buf()),
+            )),
+        }
+    }
+    paths
+}
+
+fn first_interface_field<'a>(object: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter().find_map(|key| object.get(*key))
+}
+
+fn parse_manifest_mcp_servers(
+    value: Option<&Value>,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Result<Vec<McpServerInput>> {
+    match value {
+        Some(Value::Object(object)) => Ok(parse_mcp_server_document(
+            Value::Object(object.clone()),
+            root,
+            manifest_path,
+            diagnostics,
+        )),
+        Some(Value::String(path)) => {
+            let path = match resolve_manifest_path(root, path) {
+                Ok(path) => path,
+                Err(err) => {
+                    diagnostics.push(PluginDiagnostic::invalid(
+                        format!("manifest mcpServers path is invalid: {err}"),
+                        Some(manifest_path.to_path_buf()),
+                    ));
+                    return Ok(Vec::new());
+                }
+            };
+            parse_mcp_servers_file(&path, root, manifest_path, diagnostics)
+        }
+        Some(_) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                "manifest mcpServers must be an object or string path",
+                Some(manifest_path.to_path_buf()),
+            ));
+            Ok(Vec::new())
+        }
+        None => {
+            let default_mcp = root.join(".mcp.json");
+            if default_mcp.is_file() {
+                parse_mcp_servers_file(&default_mcp, root, manifest_path, diagnostics)
+            } else {
+                Ok(Vec::new())
+            }
+        }
+    }
+}
+
+fn parse_mcp_servers_file(
+    path: &Path,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Result<Vec<McpServerInput>> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!(
+                    "manifest mcpServers file `{}` is invalid: {err}",
+                    path.display()
+                ),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return Ok(Vec::new());
+        }
+    };
+    let value = match serde_json::from_str::<Value>(&raw) {
+        Ok(value) => value,
+        Err(err) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!(
+                    "manifest mcpServers file `{}` is invalid: {err}",
+                    path.display()
+                ),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return Ok(Vec::new());
+        }
+    };
+    Ok(parse_mcp_server_document(
+        value,
+        root,
+        manifest_path,
+        diagnostics,
+    ))
+}
+
+fn parse_mcp_server_document(
+    value: Value,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Vec<McpServerInput> {
+    let Some(mut object) = value.as_object().cloned() else {
+        diagnostics.push(PluginDiagnostic::invalid(
+            "manifest mcpServers document must be an object",
+            Some(manifest_path.to_path_buf()),
+        ));
+        return Vec::new();
+    };
+    if let Some(Value::Object(servers)) = object.remove("mcpServers") {
+        object = servers;
+    }
+    let mut out = Vec::new();
+    for (name, descriptor) in object {
+        if name.starts_with('$') {
+            continue;
+        }
+        if let Some(input) =
+            parse_mcp_server_descriptor(&name, &descriptor, root, manifest_path, diagnostics)
+        {
+            out.push(input);
+        }
+    }
+    out
+}
+
+fn parse_mcp_server_descriptor(
+    name: &str,
+    value: &Value,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<McpServerInput> {
+    let Some(object) = value.as_object() else {
+        diagnostics.push(PluginDiagnostic::invalid(
+            format!("mcpServers.{name} must be an object"),
+            Some(manifest_path.to_path_buf()),
+        ));
+        return None;
+    };
+    let transport_type = object.get("type").and_then(Value::as_str);
+    if let Some(kind) = transport_type
+        && !matches!(
+            kind,
+            "stdio" | "http" | "streamable_http" | "streamable-http"
+        )
+    {
+        diagnostics.push(PluginDiagnostic::warning(
+            format!("mcpServers.{name} uses unsupported transport `{kind}`"),
+            Some(manifest_path.to_path_buf()),
+        ));
+        return Some(McpServerInput::new(
+            name,
+            McpTransportInput::Unsupported {
+                kind: kind.to_string(),
+            },
+        ));
+    }
+    let inferred_http = object.get("url").is_some()
+        || matches!(
+            transport_type,
+            Some("http" | "streamable_http" | "streamable-http")
+        );
+    if inferred_http {
+        return parse_http_mcp_server(name, object, manifest_path, diagnostics);
+    }
+    if object.get("command").is_some() || matches!(transport_type, Some("stdio")) {
+        return parse_stdio_mcp_server(name, object, root, manifest_path, diagnostics);
+    }
+    diagnostics.push(PluginDiagnostic::invalid(
+        format!("mcpServers.{name} must declare command or url"),
+        Some(manifest_path.to_path_buf()),
+    ));
+    None
+}
+
+fn parse_stdio_mcp_server(
+    name: &str,
+    object: &Map<String, Value>,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<McpServerInput> {
+    let command_raw = match object.get("command").and_then(Value::as_str) {
+        Some(command) if !command.trim().is_empty() => command.trim(),
+        _ => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("mcpServers.{name}.command is required"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return None;
+        }
+    };
+    let command = if command_raw.starts_with("./") {
+        match resolve_manifest_path(root, command_raw) {
+            Ok(path) => path,
+            Err(err) => {
+                diagnostics.push(PluginDiagnostic::invalid(
+                    format!("mcpServers.{name}.command `{command_raw}` is invalid: {err}"),
+                    Some(manifest_path.to_path_buf()),
+                ));
+                return None;
+            }
+        }
+    } else {
+        PathBuf::from(command_raw)
+    };
+    let args = match optional_string_array(object, "args") {
+        Ok(args) => args,
+        Err(err) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("mcpServers.{name}.{err}"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return None;
+        }
+    };
+    let env = match optional_string_map(object, "env") {
+        Ok(env) => env,
+        Err(err) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("mcpServers.{name}.{err}"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return None;
+        }
+    };
+    let cwd = match object.get("cwd") {
+        Some(Value::String(cwd)) => match resolve_manifest_cwd(root, cwd) {
+            Ok(cwd) => Some(cwd),
+            Err(err) => {
+                diagnostics.push(PluginDiagnostic::invalid(
+                    format!("mcpServers.{name}.cwd `{cwd}` is invalid: {err}"),
+                    Some(manifest_path.to_path_buf()),
+                ));
+                return None;
+            }
+        },
+        Some(Value::Null) | None => None,
+        Some(_) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("mcpServers.{name}.cwd must be a string"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return None;
+        }
+    };
+    Some(McpServerInput::new(
+        name,
+        McpTransportInput::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        },
+    ))
+}
+
+fn parse_http_mcp_server(
+    name: &str,
+    object: &Map<String, Value>,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<McpServerInput> {
+    let url = match object.get("url").and_then(Value::as_str) {
+        Some(url) if !url.trim().is_empty() => url.trim().to_string(),
+        _ => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("mcpServers.{name}.url is required"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return None;
+        }
+    };
+    let headers = match object
+        .get("headers")
+        .or_else(|| object.get("httpHeaders"))
+        .map(|value| string_map_value(value, "headers"))
+        .transpose()
+    {
+        Ok(headers) => headers.unwrap_or_default(),
+        Err(err) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("mcpServers.{name}.{err}"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            return None;
+        }
+    };
+    Some(McpServerInput::new(
+        name,
+        McpTransportInput::StreamableHttp { url, headers },
+    ))
+}
+
+fn parse_manifest_toolsets(
+    value: Option<&Value>,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> BTreeMap<String, CustomToolsetConfig> {
+    let Some(value) = value else {
+        return BTreeMap::new();
+    };
+    let Some(object) = value.as_object() else {
+        diagnostics.push(PluginDiagnostic::invalid(
+            "psychevo.toolsets must be an object",
+            Some(manifest_path.to_path_buf()),
+        ));
+        return BTreeMap::new();
+    };
+    let mut out = BTreeMap::new();
+    for (name, value) in object {
+        if !valid_toolset_name(name) {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("psychevo.toolsets.{name} has an invalid toolset name"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            continue;
+        }
+        let Some(toolset) = value.as_object() else {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("psychevo.toolsets.{name} must be an object"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            continue;
+        };
+        let description = match toolset.get("description") {
+            Some(Value::String(description)) => Some(description.clone()),
+            Some(Value::Null) | None => None,
+            Some(_) => {
+                diagnostics.push(PluginDiagnostic::invalid(
+                    format!("psychevo.toolsets.{name}.description must be a string"),
+                    Some(manifest_path.to_path_buf()),
+                ));
+                continue;
+            }
+        };
+        let tools = match optional_string_array(toolset, "tools") {
+            Ok(tools) => tools,
+            Err(err) => {
+                diagnostics.push(PluginDiagnostic::invalid(
+                    format!("psychevo.toolsets.{name}.{err}"),
+                    Some(manifest_path.to_path_buf()),
+                ));
+                continue;
+            }
+        };
+        let includes = match optional_string_array(toolset, "includes") {
+            Ok(includes) => includes,
+            Err(err) => {
+                diagnostics.push(PluginDiagnostic::invalid(
+                    format!("psychevo.toolsets.{name}.{err}"),
+                    Some(manifest_path.to_path_buf()),
+                ));
+                continue;
+            }
+        };
+        out.insert(
+            name.clone(),
+            CustomToolsetConfig {
+                description,
+                tools,
+                includes,
+            },
+        );
+    }
+    out
+}
+
+fn optional_string_array(
+    object: &Map<String, Value>,
+    key: &str,
+) -> std::result::Result<Vec<String>, String> {
+    match object.get(key) {
+        Some(value) => string_array_value(value, key),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn string_array_value(value: &Value, key: &str) -> std::result::Result<Vec<String>, String> {
+    let Some(values) = value.as_array() else {
+        return Err(format!("{key} must be an array"));
+    };
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("{key} must contain strings"))
+        })
+        .collect()
+}
+
+fn optional_string_map(
+    object: &Map<String, Value>,
+    key: &str,
+) -> std::result::Result<BTreeMap<String, String>, String> {
+    match object.get(key) {
+        Some(value) => string_map_value(value, key),
+        None => Ok(BTreeMap::new()),
+    }
+}
+
+fn string_map_value(
+    value: &Value,
+    key: &str,
+) -> std::result::Result<BTreeMap<String, String>, String> {
+    let Some(object) = value.as_object() else {
+        return Err(format!("{key} must be an object"));
+    };
+    object
+        .iter()
+        .map(|(name, value)| {
+            value
+                .as_str()
+                .map(|value| (name.clone(), value.to_string()))
+                .ok_or_else(|| format!("{key}.{name} must be a string"))
+        })
+        .collect()
+}
+
+fn valid_toolset_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
 fn load_hook_file(path: &Path) -> Result<Value> {
@@ -415,6 +1122,44 @@ fn resolve_manifest_path(root: &Path, raw: &str) -> std::result::Result<PathBuf,
                 .map_err(|err| format!("path parent cannot be canonicalized: {err}"))?;
             if !parent.starts_with(&root_canonical) {
                 return Err("resolved path escapes plugin root".to_string());
+            }
+        }
+        Ok(candidate)
+    }
+}
+
+fn resolve_manifest_cwd(root: &Path, raw: &str) -> std::result::Result<PathBuf, String> {
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        return Err("must not be absolute".to_string());
+    }
+    for component in path.components() {
+        if matches!(component, Component::ParentDir) {
+            return Err("must not contain ..".to_string());
+        }
+    }
+    let candidate = root.join(path);
+    let root_canonical = root
+        .canonicalize()
+        .map_err(|err| format!("plugin root cannot be canonicalized: {err}"))?;
+    if candidate.exists() {
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|err| format!("cwd cannot be canonicalized: {err}"))?;
+        if !canonical.starts_with(&root_canonical) {
+            return Err("resolved cwd escapes plugin root".to_string());
+        }
+        Ok(canonical)
+    } else {
+        let parent = candidate
+            .parent()
+            .ok_or_else(|| "cwd has no parent".to_string())?;
+        if parent.exists() {
+            let parent = parent
+                .canonicalize()
+                .map_err(|err| format!("cwd parent cannot be canonicalized: {err}"))?;
+            if !parent.starts_with(&root_canonical) {
+                return Err("resolved cwd escapes plugin root".to_string());
             }
         }
         Ok(candidate)

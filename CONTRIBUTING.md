@@ -16,6 +16,28 @@ Documentation-only and changelog-only changes do not need code tests unless
 they change executable examples, generated artifacts, or validation
 instructions.
 
+## Contribution Placement
+
+Put a contribution in the narrowest surface that can do the job:
+
+- Use core runtime code when the change affects invocation assembly, accepted
+  tools, context projection, evidence, permissions, provider behavior, storage,
+  or UI/API contracts.
+- Use a skill for reusable model instructions and supporting files that do not
+  need new runtime authority.
+- Use an agent definition for a reusable execution identity with instructions,
+  model preference, tool policy, skills, hooks, MCP scope, or child-agent use.
+- Use a hook for event-scoped observation, review, feedback, or bounded effects
+  around existing runtime events.
+- Use a plugin package when distribution or package policy matters, or when one
+  package must bundle multiple declarations such as skills, agents, hooks, MCP
+  servers, worker tools, providers, commands, or toolsets.
+
+Do not introduce a plugin just to ship one local skill, agent, or hook unless
+the package lifecycle is part of the requirement. Do not add a registry or
+shared abstraction until multiple existing surfaces need the same host-owned
+interface.
+
 ## Validation
 
 Use deterministic local validation by default. The Rust workspace broad entry

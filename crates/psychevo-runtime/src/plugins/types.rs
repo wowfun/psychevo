@@ -1,12 +1,13 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::PluginPolicyEntry;
+use crate::config::{CustomToolsetConfig, PluginPolicyEntry, ToolsetContribution};
+use crate::contribution_projection::ContributionProjection;
 use crate::hooks::HookSourceDescriptor;
-use crate::types::RuntimeTool;
+use crate::types::{McpServerInput, RuntimeTool};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -89,12 +90,47 @@ pub struct LoadedPluginManifest {
     pub skill_roots: Vec<PathBuf>,
     pub agent_roots: Vec<PathBuf>,
     pub hooks: Option<Value>,
+    pub mcp_servers: Vec<McpServerInput>,
     pub worker: Option<PluginWorkerSpec>,
-    pub interface: Option<Value>,
+    pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
+    pub interface: Option<PluginInterfaceMetadata>,
     pub manifest_resources: BTreeSet<String>,
     pub psychevo_extensions: BTreeSet<String>,
     pub supported_fields: BTreeSet<String>,
     pub ignored_fields: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInterfaceMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub developer_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub website_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub privacy_policy_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terms_of_service_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brand_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composer_icon: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo_dark: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screenshots: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,8 +170,11 @@ pub(crate) struct PluginRuntimeAssembly {
     pub(crate) skill_inputs: Vec<PathBuf>,
     pub(crate) agent_inputs: Vec<String>,
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
+    pub(crate) mcp_servers: Vec<McpServerInput>,
+    pub(crate) toolsets: Vec<ToolsetContribution>,
     pub(crate) runtime_tools: Vec<RuntimeTool>,
     pub(crate) warnings: Vec<crate::types::RunWarning>,
+    pub(crate) projection: ContributionProjection,
 }
 
 pub(crate) struct EnabledPluginManifest {

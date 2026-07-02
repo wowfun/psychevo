@@ -121,6 +121,7 @@ pub(crate) mod tests {
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
+            extension_inputs: Default::default(),
             allowed_agent_names: None,
             denied_agent_names: BTreeSet::new(),
             required_agent_names: Vec::new(),

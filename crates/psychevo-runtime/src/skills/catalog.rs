@@ -23,6 +23,10 @@ pub struct Skill {
     pub compatibility: Option<String>,
     pub license: Option<String>,
     pub allowed_tools: Vec<String>,
+    pub required_tools: Vec<String>,
+    pub fallback_for_tools: Vec<String>,
+    pub required_toolsets: Vec<String>,
+    pub fallback_for_toolsets: Vec<String>,
     pub supported_on_current_platform: bool,
 }
 
@@ -441,6 +445,75 @@ pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
         .iter()
         .filter(|skill| !skill.disable_model_invocation && skill.supported_on_current_platform)
         .collect::<Vec<_>>();
+    format_skill_prompt_entries(&visible)
+}
+
+pub fn skills_visible_for_prompt_with_tools<T, I>(
+    skills: &[Skill],
+    available_tools: I,
+) -> Vec<Skill>
+where
+    T: AsRef<str>,
+    I: IntoIterator<Item = T>,
+{
+    skills_visible_for_prompt_with_tools_and_toolsets(
+        skills,
+        available_tools,
+        std::iter::empty::<&str>(),
+    )
+}
+
+pub fn skills_visible_for_prompt_with_tools_and_toolsets<T, I, U, J>(
+    skills: &[Skill],
+    available_tools: I,
+    accepted_toolsets: J,
+) -> Vec<Skill>
+where
+    T: AsRef<str>,
+    I: IntoIterator<Item = T>,
+    U: AsRef<str>,
+    J: IntoIterator<Item = U>,
+{
+    let available_tools = available_tools
+        .into_iter()
+        .map(|tool| tool.as_ref().to_string())
+        .collect::<HashSet<_>>();
+    let accepted_toolsets = accepted_toolsets
+        .into_iter()
+        .map(|toolset| toolset.as_ref().to_string())
+        .collect::<HashSet<_>>();
+    skills
+        .iter()
+        .filter(|skill| !skill.disable_model_invocation && skill.supported_on_current_platform)
+        .filter(|skill| skill_prompt_visible_for_tools(skill, &available_tools, &accepted_toolsets))
+        .cloned()
+        .collect()
+}
+
+fn skill_prompt_visible_for_tools(
+    skill: &Skill,
+    available_tools: &HashSet<String>,
+    accepted_toolsets: &HashSet<String>,
+) -> bool {
+    skill
+        .required_tools
+        .iter()
+        .all(|tool| available_tools.contains(tool))
+        && !skill
+            .fallback_for_tools
+            .iter()
+            .any(|tool| available_tools.contains(tool))
+        && skill
+            .required_toolsets
+            .iter()
+            .all(|toolset| accepted_toolsets.contains(toolset))
+        && !skill
+            .fallback_for_toolsets
+            .iter()
+            .any(|toolset| accepted_toolsets.contains(toolset))
+}
+
+fn format_skill_prompt_entries(visible: &[&Skill]) -> String {
     if visible.is_empty() {
         return String::new();
     }
@@ -570,6 +643,19 @@ pub fn list_skills_value_with_options(
                 object.insert("compatibility".to_string(), json!(skill.compatibility));
                 object.insert("license".to_string(), json!(skill.license));
                 object.insert("allowed_tools".to_string(), json!(skill.allowed_tools));
+                object.insert("required_tools".to_string(), json!(skill.required_tools));
+                object.insert(
+                    "fallback_for_tools".to_string(),
+                    json!(skill.fallback_for_tools),
+                );
+                object.insert(
+                    "required_toolsets".to_string(),
+                    json!(skill.required_toolsets),
+                );
+                object.insert(
+                    "fallback_for_toolsets".to_string(),
+                    json!(skill.fallback_for_toolsets),
+                );
             }
             value
         })
@@ -670,6 +756,10 @@ pub fn view_skill_value(
         "compatibility": skill.compatibility,
         "license": skill.license,
         "allowed_tools": skill.allowed_tools,
+        "required_tools": skill.required_tools,
+        "fallback_for_tools": skill.fallback_for_tools,
+        "required_toolsets": skill.required_toolsets,
+        "fallback_for_toolsets": skill.fallback_for_toolsets,
         "content": content,
         "linked_files": linked_files(&skill.base_dir),
     }))

@@ -114,8 +114,7 @@ impl PermissionRuntime {
             ));
         }
         if let Some(hook_runtime) = &self.inner.hook_runtime {
-            let hook_response = hook_runtime.run_event(
-                "PermissionRequest",
+            let hook_outcome = hook_runtime.run_permission_request(
                 &json!({
                     "tool": tool_name,
                     "tool_call_id": tool_call_id,
@@ -126,14 +125,15 @@ impl PermissionRuntime {
                     "allow_always": false,
                 }),
             );
-            if let Some(decision) = hook_response.approval_decision() {
+            if let Some(decision) = hook_outcome.approval_decision() {
                 if decision.outcome == PermissionApprovalOutcome::Deny {
-                    let hook_reason = hook_response
+                    let hook_reason = hook_outcome
+                        .response
                         .feedback
                         .first()
                         .cloned()
-                        .or(hook_response.blocked_reason)
-                        .or_else(|| hook_response.diagnostics.first().cloned())
+                        .or(hook_outcome.response.blocked_reason)
+                        .or_else(|| hook_outcome.response.diagnostics.first().cloned())
                         .unwrap_or_else(|| "PermissionRequest hook denied permission".to_string());
                     return Err(permission_error(
                         "denied",

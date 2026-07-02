@@ -28,7 +28,7 @@ pub(crate) use crate::messages::assistant_text;
 pub(crate) use crate::permissions::PermissionRuntime;
 pub(crate) use crate::prompt_assembly::{
     PromptPrefixRecordInput, assemble_child_prompt_prefix, context_evidence_for_request,
-    prompt_prefix_record, tool_declarations_hash,
+    prompt_prefix_record, tool_declarations_hash_with_search,
 };
 pub(crate) use crate::prompt_templates;
 pub(crate) use crate::skills::resolve_skills_home;

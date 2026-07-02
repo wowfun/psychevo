@@ -1,4 +1,5 @@
 include!("agents_settings/agents_backends.rs");
+include!("agents_settings/plugins.rs");
 include!("agents_settings/completion.rs");
 include!("agents_settings/settings_model_state.rs");
 include!("agents_settings/channels.rs");

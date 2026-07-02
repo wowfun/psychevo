@@ -356,6 +356,10 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
         compatibility: None,
         license: None,
         allowed_tools: Vec::new(),
+        required_tools: Vec::new(),
+        fallback_for_tools: Vec::new(),
+        required_toolsets: Vec::new(),
+        fallback_for_toolsets: Vec::new(),
         supported_on_current_platform: true,
     };
     let tools = apply_agent_tool_policy(

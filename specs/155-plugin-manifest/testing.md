@@ -47,6 +47,24 @@ acceptance coverage should come from focused manifest loader tests.
 - Unknown fields produce ignored-field diagnostics.
 - Shared fields and Psychevo extension fields with invalid shape skip the
   affected declaration.
+- Codex-compatible `hooks` declarations load as candidate hook declarations and
+  do not imply trust or execution.
+- Codex-compatible `mcpServers` object and package-relative path declarations
+  parse valid siblings while reporting malformed siblings as diagnostics.
+- Default `hooks/hooks.json` and `.mcp.json` files are recognized only when the
+  manifest omits explicit fields for that family.
+- `psychevo.toolsets` uses configured custom-toolset shape and leaves expansion
+  to the tool surface.
+- Codex-compatible `interface` metadata is parsed into typed display fields,
+  including media fields that use package-local path safety.
+- Invalid `interface` display fields emit diagnostics, skip only the malformed
+  display field, and keep the rest of the manifest loadable.
+- Hermes `plugin.yaml` is diagnostic/descriptive input only and never causes
+  Psychevo to import or execute Hermes dynamic `register(ctx)` behavior.
+- `apps`, `psychevo.commands`, and `psychevo.providers` are recorded as
+  inert/descriptive until an owning runtime defines behavior.
+- Static `psychevo.tools` is unsupported; executable plugin tools must come
+  from worker discovery, MCP listing, or a future owning static-tool path.
 - Local path values must start with `./`.
 - Absolute paths are rejected.
 - Paths containing `..` are rejected.

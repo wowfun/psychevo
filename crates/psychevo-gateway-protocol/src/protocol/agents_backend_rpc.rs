@@ -225,6 +225,30 @@ pub struct BackendDeleteParams {
     pub scope: Option<GatewayRequestScope>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginReadParams {
+    pub selector: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDoctorParams {
+    #[serde(default)]
+    pub selector: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendConfigView {
@@ -476,6 +500,12 @@ pub enum ClientRequest {
     BackendWrite(BackendWriteParams),
     #[serde(rename = "backend/delete")]
     BackendDelete(BackendDeleteParams),
+    #[serde(rename = "plugin/list")]
+    PluginList(PluginListParams),
+    #[serde(rename = "plugin/read")]
+    PluginRead(PluginReadParams),
+    #[serde(rename = "plugin/doctor")]
+    PluginDoctor(PluginDoctorParams),
     #[serde(rename = "channel/list")]
     ChannelList(ChannelListParams),
     #[serde(rename = "channel/show")]

@@ -23,7 +23,8 @@ pub use marketplace::{
 };
 pub use types::{
     LoadedPluginManifest, PluginDiagnostic, PluginInstallOptions, PluginInstallRecord,
-    PluginManifestKind, PluginMarketplaceEntry, PluginScope, PluginWorkerSpec,
+    PluginInterfaceMetadata, PluginManifestKind, PluginMarketplaceEntry, PluginScope,
+    PluginWorkerSpec,
 };
 
 #[cfg(test)]

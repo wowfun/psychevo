@@ -5,6 +5,7 @@ use crate::skills::{
     discover_skills, format_skills_for_prompt, list_skill_bundles, list_skills_value,
     save_skill_bundle, scan_skill_path, select_explicit_skills, select_skills_for_prompt,
     set_skill_config_value, set_skill_enabled, skill_context_fragments, skill_context_messages,
+    skills_visible_for_prompt_with_tools, skills_visible_for_prompt_with_tools_and_toolsets,
     view_skill_value,
 };
 use crate::tools::skill_tools_for_mode;
@@ -193,6 +194,82 @@ pub(crate) fn skills_prompt_escapes_xml_and_uses_view_skill_wording() {
     assert!(prompt.contains("do not reload the same SKILL.md just to start"));
     assert!(prompt.contains("&lt;tags&gt; &amp; &quot;quotes&quot;"));
     assert!(!prompt.contains("<tags>"));
+}
+
+#[test]
+pub(crate) fn skills_prompt_applies_hermes_tool_activation_hints() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
+    let root = home.join("skills");
+    fs::create_dir_all(&root).expect("root");
+    fs::write(
+        root.join("needs-web.md"),
+        "---\nname: needs-web\ndescription: needs web fetch\nmetadata:\n  hermes:\n    requires_tools: [web_fetch]\n---\n\nbody\n",
+    )
+    .expect("requires skill");
+    fs::write(
+        root.join("fallback-edit.md"),
+        "---\nname: fallback-edit\ndescription: fallback edit guidance\nmetadata:\n  hermes:\n    fallback_for_tools: [edit]\n---\n\nbody\n",
+    )
+    .expect("fallback skill");
+
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
+    let read_only_skills = skills_visible_for_prompt_with_tools(&catalog.skills, ["read"]);
+    let read_only_prompt = format_skills_for_prompt(&read_only_skills);
+    assert!(!read_only_prompt.contains("<name>needs-web</name>"));
+    assert!(read_only_prompt.contains("<name>fallback-edit</name>"));
+
+    let full_skills =
+        skills_visible_for_prompt_with_tools(&catalog.skills, ["read", "web_fetch", "edit"]);
+    let full_prompt = format_skills_for_prompt(&full_skills);
+    assert!(full_prompt.contains("<name>needs-web</name>"));
+    assert!(!full_prompt.contains("<name>fallback-edit</name>"));
+}
+
+#[test]
+pub(crate) fn skills_prompt_applies_hermes_toolset_activation_hints() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
+    let root = home.join("skills");
+    fs::create_dir_all(&root).expect("root");
+    fs::write(
+        root.join("needs-writer.md"),
+        "---\nname: needs-writer\ndescription: needs writer toolset\nmetadata:\n  hermes:\n    requires_toolsets: [writer]\n---\n\nbody\n",
+    )
+    .expect("requires toolset skill");
+    fs::write(
+        root.join("fallback-web.md"),
+        "---\nname: fallback-web\ndescription: fallback web guidance\nmetadata:\n  hermes:\n    fallback_for_toolsets: [web]\n---\n\nbody\n",
+    )
+    .expect("fallback toolset skill");
+
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
+    let no_toolset_skills = skills_visible_for_prompt_with_tools_and_toolsets(
+        &catalog.skills,
+        ["read"],
+        std::iter::empty::<&str>(),
+    );
+    let no_toolset_prompt = format_skills_for_prompt(&no_toolset_skills);
+    assert!(!no_toolset_prompt.contains("<name>needs-writer</name>"));
+    assert!(no_toolset_prompt.contains("<name>fallback-web</name>"));
+
+    let writer_skills =
+        skills_visible_for_prompt_with_tools_and_toolsets(&catalog.skills, ["read"], ["writer"]);
+    let writer_prompt = format_skills_for_prompt(&writer_skills);
+    assert!(writer_prompt.contains("<name>needs-writer</name>"));
+    assert!(writer_prompt.contains("<name>fallback-web</name>"));
+
+    let web_skills =
+        skills_visible_for_prompt_with_tools_and_toolsets(&catalog.skills, ["read"], ["web"]);
+    let web_prompt = format_skills_for_prompt(&web_skills);
+    assert!(!web_prompt.contains("<name>needs-writer</name>"));
+    assert!(!web_prompt.contains("<name>fallback-web</name>"));
 }
 
 #[test]

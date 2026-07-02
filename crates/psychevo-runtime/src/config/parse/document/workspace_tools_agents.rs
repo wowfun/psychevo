@@ -56,6 +56,9 @@ pub(crate) fn parse_tool_selection_config(value: &Value) -> Result<ToolSelection
         .as_object()
         .ok_or_else(|| Error::Config("tools must be an object".to_string()))?;
     let mut config = ToolSelectionConfig::default();
+    if let Some(tool_search) = object.get("tool_search") {
+        config.tool_search = parse_tool_search_config(tool_search)?;
+    }
     if let Some(modes) = object.get("modes") {
         let modes = modes
             .as_object()
@@ -72,6 +75,19 @@ pub(crate) fn parse_tool_selection_config(value: &Value) -> Result<ToolSelection
         }
     }
     Ok(config)
+}
+
+fn parse_tool_search_config(value: &Value) -> Result<ToolSearchConfig> {
+    match value {
+        Value::Bool(enabled) => Ok(ToolSearchConfig { enabled: *enabled }),
+        Value::Object(object) => Ok(ToolSearchConfig {
+            enabled: optional_bool_field(object, "enabled")?
+                .unwrap_or_else(|| ToolSearchConfig::default().enabled),
+        }),
+        _ => Err(Error::Config(
+            "tools.tool_search must be a boolean or object".to_string(),
+        )),
+    }
 }
 
 pub(crate) fn parse_tool_mode_config(mode: &str, value: &Value) -> Result<ToolModeConfig> {

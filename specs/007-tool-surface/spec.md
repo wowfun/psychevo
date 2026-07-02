@@ -65,6 +65,19 @@ reconstruction must be labeled approximate.
 
 Tool surface facts may contribute to durable evidence for agent-invocation inspection. These facts may include selected toolsets, expanded tool names, declaration hashes, refresh facts, omitted unavailable tools, execution bindings, tool requests, execution outcomes, and tool-result relationships. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which relationships must be representable. Ordinary durable evidence does not require persisting a full capability snapshot or full model-visible tool declaration payload.
 
+The runtime tool surface is assembled through a source-aware tool registry. Each
+tool entry records source identity, source family, tool name, execution binding,
+exposure state, optional owning toolsets, and conflict or omission reason. The
+registry must preserve existing effective tool order for unchanged inputs while
+making source-qualified acceptance facts available internally.
+
+Built-in tools, clarify tools, skill tools, MCP tools, plugin worker tools, and
+agent tools enter the same registry interface. A contributed tool name becomes
+model-visible only when its execution binding is registered for the accepted
+invocation and the current mode permits it. Duplicate model-visible names are
+conflicts; later duplicates are omitted with source-qualified facts rather than
+silently replacing earlier bindings.
+
 ## Toolsets
 
 A toolset is a named grouping of tools or other toolsets used during runtime selection.
@@ -88,6 +101,19 @@ binding with that name exists.
 
 When expansion produces a tool declaration, runtime must still verify that a matching execution binding exists for the same agent invocation and for any generation-request snapshot that exposes that declaration.
 
+Accepted toolset facts are the toolset names whose expansion produced at least
+one accepted tool binding after disabled-toolset subtraction, mode filtering,
+include resolution, and conflict handling. Skill prompt-visibility rules that
+refer to toolsets must use these accepted toolset facts, not raw configuration
+names.
+
+Capability sources may declare toolsets. A contributed toolset may include
+built-in, configured, or other contributed toolsets, but it must not expose a
+tool without a registered execution binding. Plugin and MCP toolset membership
+is accepted only after the owning tool binding exists. Contributed toolsets are
+selection metadata only; they are never executable handlers and never become
+model-visible declarations.
+
 This spec owns expansion semantics. [050 Capability Extensions](../050-capability-extensions/spec.md) owns source identity, activation, availability, degraded state, and conflicts for declared toolsets and tools.
 
 ## Request and Execution Boundary
@@ -95,6 +121,34 @@ This spec owns expansion semantics. [050 Capability Extensions](../050-capabilit
 A tool request is an assistant-requested tool call normalized by [003 AI Protocol](../003-ai-protocol/spec.md). Tool requests are model output, not direct execution authority.
 
 A tool declaration says what the model may request. It does not authorize execution.
+
+Tool exposure is invocation-scoped:
+
+- `direct` declarations are included in the next generation-request tool
+  snapshot.
+- `deferred` declarations have accepted execution bindings but are omitted from
+  the snapshot until the tool router activates them.
+- `hidden` declarations are never model-visible and may only be used by
+  host-owned runtime paths that explicitly target them.
+
+When the accepted invocation surface contains deferred declarations and
+`tool_search` is enabled, runtime exposes a single direct `tool_search`
+declaration. `tool_search` searches deferred tool names, descriptions, and
+schemas. A successful search activates the matching deferred tools in the same
+agent invocation, so later generation-request snapshots can include those
+concrete tool declarations. The activation state belongs to the agent loop's
+mutable tool router, not to plugin manifests, MCP servers, or persistent
+configuration. `tool_search` is enabled by default; explicit configuration may
+disable it for an invocation.
+
+Exposure policy is source-family aware. Direct MCP tools and plugin worker
+tools enter the router as deferred bindings when `tool_search` is enabled.
+Host-owned runtime tools remain direct unless their own execution binding or
+another owning policy marks them deferred, hidden, or omitted. Existing
+`deferred` and `hidden` binding exposure must be preserved. When `tool_search`
+is disabled, accepted direct MCP and plugin worker bindings are ordinary direct
+tools subject to the same mode, conflict, permission, and agent policy checks as
+other tools.
 
 Agent execution observes assistant-requested tool calls and invokes runtime-supplied execution bindings through its tool execution flow. [002 Agent Execution](../002-agent-execution/spec.md) owns tool execution lifecycle events, ordering, scheduling latitude, causal linkage, and outcome semantics.
 

@@ -55,6 +55,28 @@ for line in sys.stdin:
     }
 }
 
+fn write_display_plugin(root: &Path) {
+    std::fs::create_dir_all(root.join(".psychevo-plugin")).expect("manifest dir");
+    std::fs::create_dir_all(root.join("assets")).expect("assets");
+    std::fs::write(root.join("assets/icon.png"), "icon").expect("icon");
+    std::fs::write(
+        root.join(".psychevo-plugin/plugin.json"),
+        r#"{
+          "name": "display-plugin",
+          "version": "1.0.0",
+          "description": "Display plugin",
+          "interface": {
+            "displayName": "Display Plugin",
+            "shortDescription": "Adds display metadata.",
+            "category": "productivity",
+            "capabilities": ["tools", "hooks"],
+            "composerIcon": "./assets/icon.png"
+          }
+        }"#,
+    )
+    .expect("manifest");
+}
+
 fn sse_tool_call(call_id: &str, tool_name: &str, arguments: &str) -> String {
     format!(
         "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"id\":{},\"function\":{{\"name\":{},\"arguments\":{}}}}}]}},\"finish_reason\":\"tool_calls\"}}]}}\n\n\
@@ -63,6 +85,43 @@ fn sse_tool_call(call_id: &str, tool_name: &str, arguments: &str) -> String {
         serde_json::to_string(tool_name).expect("tool name"),
         serde_json::to_string(arguments).expect("arguments")
     )
+}
+
+#[test]
+pub(crate) fn cli_plugin_view_human_output_includes_interface_summary() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let cwd = temp.path().join("work");
+    let source = temp.path().join("display-plugin-source");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    init_skill_home(temp.path(), &psychevo_home);
+    write_display_plugin(&source);
+
+    let install = plugin_cmd(temp.path(), &psychevo_home, &cwd)
+        .args(["plugin", "install", source.to_str().expect("source")])
+        .output()
+        .expect("pevo plugin install");
+    assert!(
+        install.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&install.stderr)
+    );
+
+    let view = plugin_cmd(temp.path(), &psychevo_home, &cwd)
+        .args(["plugin", "view", "display-plugin"])
+        .output()
+        .expect("pevo plugin view");
+    assert!(
+        view.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&view.stderr)
+    );
+    let stdout = String::from_utf8(view.stdout).expect("stdout");
+    assert!(stdout.contains("display-plugin 1.0.0 [global]"));
+    assert!(stdout.contains("Display: Display Plugin"));
+    assert!(stdout.contains("Category: productivity"));
+    assert!(stdout.contains("Capabilities: tools, hooks"));
+    assert!(stdout.contains("Adds display metadata."));
 }
 
 #[test]
@@ -205,8 +264,13 @@ pub(crate) fn cli_plugin_local_enable_targets_profile_installed_plugin() {
 }
 
 #[test]
-pub(crate) fn cli_run_can_execute_enabled_plugin_worker_tool() {
+pub(crate) fn cli_run_can_search_and_execute_enabled_plugin_worker_tool_by_default() {
     let server = MockSseServer::start(vec![
+        sse_tool_call(
+            "call_search",
+            "tool_search",
+            r#"{"query":"cleanup_status"}"#,
+        ),
         sse_tool_call("call_cleanup", "cleanup_status", "{}"),
         sse_text("cleanup checked"),
     ]);
@@ -272,4 +336,12 @@ enabled = true
         )
         .expect("plugin tool results");
     assert_eq!(plugin_tool_results, 1);
+    let tool_search_results: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE role = 'tool_result' AND tool_name = 'tool_search' AND outcome = 'normal'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("tool search results");
+    assert_eq!(tool_search_results, 1);
 }

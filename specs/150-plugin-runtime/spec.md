@@ -87,6 +87,23 @@ The owning runtime boundary decides whether each descriptor is usable. Duplicate
 model-visible tool names are conflict-resolved by the existing tool surface
 rules, with plugin identity included in diagnostics.
 
+Plugin MCP descriptors are parsed into source-scoped MCP server inputs before
+MCP startup. Invalid descriptors omit only the affected server and produce
+plugin diagnostics. Accepted plugin MCP inputs still pass through MCP startup
+permission, MCP tool listing, MCP tool naming, and tool-surface conflict
+handling.
+
+Plugin toolset descriptors are parsed as source-scoped toolset candidates.
+They are accepted only by 007 Tool Surface after include resolution, disabled
+toolset subtraction, mode filtering, and execution-binding checks. A toolset
+descriptor does not create a model-visible tool by itself.
+
+Command descriptors, provider descriptors, and apps remain inert or descriptive
+in the current implementation slice unless another owning module defines
+acceptance semantics. Typed interface metadata is supported for package display
+only. `plugin doctor` may report inert descriptors as recognized and
+unsupported without implying runtime support.
+
 Plugin hook sources are loaded only when the plugin package is enabled. Loading
 a plugin hook source does not trust or execute its handlers. Runtime passes
 plugin hook declarations to 140 Hook Runtime, where they normalize to the
@@ -119,6 +136,13 @@ handler. Missing worker metadata, missing worker process, method-not-found
 responses, malformed worker responses, and worker timeouts become structured
 hook diagnostics and affect only the hook run.
 
+Worker tools are accepted through the shared extension assembly and tool
+surface. Plugin worker tools are source-qualified as plugin tools. When
+synthetic `tool_search` is enabled, direct plugin worker tools enter the router
+as deferred bindings by default; explicit invocation configuration may disable
+`tool_search` and expose otherwise direct worker tools directly. Plugin
+manifests do not decide direct model visibility by themselves.
+
 ## CLI Operations
 
 `pevo plugin` owns:
@@ -135,12 +159,20 @@ hook diagnostics and affect only the hook run.
 - `marketplace remove`
 
 All read and diagnostic commands accept `--json` and emit secret-free
-structured output. Human output is concise and action-oriented.
+structured output. Human output is concise and action-oriented, using typed
+interface metadata when present for display name, short description, category,
+developer, and capabilities.
 
 `plugin doctor` reports discovered packages, manifest path, supported and
 ignored fields, manifest resources, Psychevo extensions, install source, active
 version, enabled state, skipped reason, owning-surface policy state, worker
 failures, and data root.
+
+Gateway exposes read-only plugin metadata methods for product surfaces:
+`plugin/list`, `plugin/read`, and `plugin/doctor`. These methods use the same
+runtime read helpers as the CLI, honor the resolved scope/profile rules, return
+typed interface metadata, and do not install, enable, disable, uninstall, or
+mutate plugin state in this slice.
 
 ## Related Topics
 

@@ -803,6 +803,12 @@ pub(crate) fn load_skill_file(
             .or(frontmatter.allowed_tools_underscore.as_ref()),
         None,
     );
+    let required_tools = string_values(metadata_pointer(&metadata, "/hermes/requires_tools"));
+    let fallback_for_tools =
+        string_values(metadata_pointer(&metadata, "/hermes/fallback_for_tools"));
+    let required_toolsets = string_values(metadata_pointer(&metadata, "/hermes/requires_toolsets"));
+    let fallback_for_toolsets =
+        string_values(metadata_pointer(&metadata, "/hermes/fallback_for_toolsets"));
     Ok(Some(Skill {
         name,
         description,
@@ -820,6 +826,10 @@ pub(crate) fn load_skill_file(
         compatibility: frontmatter.compatibility,
         license: frontmatter.license,
         allowed_tools,
+        required_tools,
+        fallback_for_tools,
+        required_toolsets,
+        fallback_for_toolsets,
         supported_on_current_platform,
     }))
 }

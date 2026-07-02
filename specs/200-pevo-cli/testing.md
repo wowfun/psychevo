@@ -58,6 +58,9 @@ come from the focused command and smoke tests below.
 - budget exhaustion emits a structured `turn.failed.terminalReason`, writes a
   default-format diagnostic to stderr, and exits non-zero.
 - long tool workflows can exceed 32 tool turns before a final assistant answer.
+  Long tool-turn smoke tests may serialize their local fake-provider subprocess
+  loops so default parallel test execution does not make the mock SSE boundary
+  nondeterministic.
 - removed old `run` flags are rejected by argument parsing.
 - `-m provider/model` works, while unqualified `-m model` rejects.
 - `--variant` accepts the supported set, passes enabled values, and suppresses

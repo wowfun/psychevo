@@ -42,6 +42,11 @@ ACP-provided MCP servers are session-scoped sources. Future configured MCP
 servers may have broader scope, but they must still enter the same runtime
 normalization path.
 
+Plugin-provided MCP servers are package-scoped sources. Enabling a plugin only
+makes its MCP server declarations candidates for acceptance. The MCP module
+still owns normalization, startup approval, tool listing, model-visible naming,
+tool execution, and diagnostics.
+
 ## Transports
 
 The first supported client transports are:
@@ -55,6 +60,12 @@ be observable to the caller and must not produce model-visible tools.
 Stdio MCP startup is a local runtime action. Streamable HTTP MCP calls are
 runtime network actions. Neither transport delegates filesystem or terminal
 authority to an ACP client or other interface.
+
+Plugin MCP declarations may use a literal stdio command name or a package
+relative command path beginning with `./`. Package-relative command paths and
+`cwd` values must stay inside the plugin root. Relative `cwd` values are
+resolved beneath the plugin root. Unsupported or malformed transport fields
+must omit only the affected server when sibling server declarations are valid.
 
 ## Identity And Naming
 

@@ -30,27 +30,28 @@ pub(crate) fn assistant_tool_calls(message: &Message) -> Vec<ToolCallBlock> {
 }
 
 pub(crate) async fn execute_tool_batch(
-    tools: &[Arc<dyn ToolBinding>],
+    router: &mut ToolRouter,
     tool_calls: &[ToolCallBlock],
     sink: Arc<dyn EventSink>,
     abort: AbortSignal,
 ) -> Result<Vec<Message>> {
-    let router = ToolRouter::from_tools(tools.iter().cloned());
     let has_sequential = router.has_sequential_call(tool_calls);
 
     let outputs = if has_sequential {
         let mut outputs = Vec::new();
         for call in tool_calls {
             let output =
-                execute_one_tool(&router, call.clone(), Arc::clone(&sink), abort.clone()).await?;
+                execute_one_tool_mut(router, call.clone(), Arc::clone(&sink), abort.clone())
+                    .await?;
             outputs.push(output);
         }
         outputs
     } else {
+        let router_snapshot = router.clone();
         let futures = tool_calls
             .iter()
             .cloned()
-            .map(|call| execute_one_tool(&router, call, Arc::clone(&sink), abort.clone()));
+            .map(|call| execute_one_tool(&router_snapshot, call, Arc::clone(&sink), abort.clone()));
         let joined = join_all(futures).await;
         let mut outputs = Vec::new();
         for output in joined {
@@ -68,6 +69,62 @@ pub(crate) async fn execute_tool_batch(
     }
     result_messages.extend(attachment_messages);
     Ok(result_messages)
+}
+
+pub(crate) async fn execute_one_tool_mut(
+    router: &mut ToolRouter,
+    call: ToolCallBlock,
+    sink: Arc<dyn EventSink>,
+    abort: AbortSignal,
+) -> Result<(ToolCallBlock, ToolOutput)> {
+    if router.is_tool_search_call(&call.name) {
+        return execute_tool_search(router, call, sink).await;
+    }
+    execute_one_tool(router, call, sink, abort).await
+}
+
+async fn execute_tool_search(
+    router: &mut ToolRouter,
+    call: ToolCallBlock,
+    sink: Arc<dyn EventSink>,
+) -> Result<(ToolCallBlock, ToolOutput)> {
+    let started_at_ms = now_ms();
+    let started = Instant::now();
+    let display = router.display_spec(&call.name);
+    emit(
+        &sink,
+        AgentEvent::ToolExecutionStart {
+            tool_call_id: call.id.clone(),
+            tool_name: call.name.clone(),
+            args: call.arguments.clone(),
+            started_at_ms,
+            display: Some(display.clone()),
+        },
+    )
+    .await?;
+    let output = if let Some(err) = &call.arguments_error {
+        ToolOutput::error(format!("invalid tool arguments JSON: {err}"))
+    } else {
+        router.execute_tool_search(&call.arguments)
+    };
+    let outcome = if output.is_error {
+        Outcome::Failed
+    } else {
+        Outcome::Normal
+    };
+    emit(
+        &sink,
+        AgentEvent::ToolExecutionEnd {
+            tool_call_id: call.id.clone(),
+            tool_name: call.name.clone(),
+            result: output.json.clone(),
+            outcome,
+            elapsed_ms: duration_ms_u64(started.elapsed()),
+            display: Some(display),
+        },
+    )
+    .await?;
+    Ok((call, output))
 }
 
 pub(crate) async fn execute_one_tool(

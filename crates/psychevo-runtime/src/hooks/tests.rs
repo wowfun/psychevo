@@ -168,6 +168,49 @@ fn project_hooks_require_trusted_hash_and_detect_modification() {
 }
 
 #[test]
+fn capability_root_hooks_are_source_qualified_and_fail_closed() {
+    let temp = tempdir().expect("temp");
+    let marker = temp.path().join("capability-root-ran");
+    let hooks = json!({"SessionStart": [{"hooks": [{
+        "type": "command",
+        "command": format!("printf ok > {}", marker.display())
+    }]}]});
+    let untrusted = HookRuntime::new(
+        temp.path().to_path_buf(),
+        HookRuntimeConfig {
+            sources: vec![source("capability_root", hooks.clone())],
+            ..HookRuntimeConfig::default()
+        },
+    );
+    let metadata = untrusted.metadata()[0].clone();
+
+    assert_eq!(metadata.source_kind, "capability_root");
+    assert_eq!(metadata.trust_status, HookTrustStatus::Untrusted);
+    assert_eq!(metadata.skipped_reason.as_deref(), Some("untrusted"));
+    let result = untrusted.run_event("SessionStart", &json!({}));
+    assert_eq!(result.summaries[0].status, HookRunStatus::Skipped);
+    assert!(!marker.exists());
+
+    let mut state = HookStateStore::default();
+    state.state.insert(
+        metadata.key.clone(),
+        HookStateRecord {
+            enabled: true,
+            trusted_hash: Some(metadata.current_hash.clone()),
+        },
+    );
+    let trusted = HookRuntime::new(
+        temp.path().to_path_buf(),
+        HookRuntimeConfig {
+            sources: vec![source("capability_root", hooks)],
+            state,
+            ..HookRuntimeConfig::default()
+        },
+    );
+    assert_eq!(trusted.metadata()[0].trust_status, HookTrustStatus::Trusted);
+}
+
+#[test]
 fn hook_keys_ignore_unrelated_sources_events_and_matcher_groups() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo ok"}]}]});
@@ -375,6 +418,89 @@ fn prompt_handlers_contribute_typed_context_without_transcript_output() {
     assert!(result.blocked_reason.is_none());
 }
 
+#[test]
+fn typed_lifecycle_outcomes_stop_and_preserve_turn_local_context() {
+    let temp = tempdir().expect("temp");
+    let runtime = HookRuntime::new(
+        temp.path().to_path_buf(),
+        HookRuntimeConfig {
+            sources: vec![source(
+                "agent",
+                json!({
+                    "SessionStart": [{"hooks": [{"type": "command", "command": "printf '{\"continue\":false,\"stopReason\":\"session paused\"}'"}]}],
+                    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "printf '{\"context\":\"prefer narrow validation\"}'"}]}],
+                    "PreCompact": [{"hooks": [{"type": "command", "command": "printf '{\"continue\":false,\"stopReason\":\"compact later\"}'"}]}],
+                    "PostCompact": [{"hooks": [{"type": "command", "command": "printf '{\"continue\":false,\"stopReason\":\"post compact review\"}'"}]}],
+                    "Stop": [{"hooks": [{"type": "command", "command": "printf '{\"continue\":false,\"stopReason\":\"continue work\",\"context\":\"run focused tests\",\"feedback\":\"inspect diagnostics\"}'"}]}]
+                }),
+            )],
+            ..HookRuntimeConfig::default()
+        },
+    );
+
+    let session = runtime.run_session_start(&json!({"source": "startup"}));
+    assert!(session.should_stop());
+    assert_eq!(session.stop_reason.as_deref(), Some("session paused"));
+
+    let prompt = runtime.run_user_prompt_submit(&json!({"prompt": "ship"}));
+    assert!(!prompt.is_blocked());
+    assert_eq!(prompt.context[0]["text"], "prefer narrow validation");
+
+    let pre_compact = runtime.run_pre_compact(&json!({"trigger": "manual"}));
+    assert_eq!(pre_compact.stop_reason.as_deref(), Some("compact later"));
+    let post_compact = runtime.run_post_compact(&json!({"trigger": "manual"}));
+    assert_eq!(
+        post_compact.stop_reason.as_deref(),
+        Some("post compact review")
+    );
+
+    let stop = runtime.run_stop(&json!({"outcome": "normal"}));
+    assert!(stop.is_blocked());
+    assert_eq!(stop.block_reason.as_deref(), Some("continue work"));
+    assert!(
+        stop.continuation_context
+            .iter()
+            .any(|entry| entry["text"] == "run focused tests")
+    );
+    assert!(
+        stop.continuation_context
+            .iter()
+            .any(|entry| entry["text"] == "inspect diagnostics")
+    );
+}
+
+#[test]
+fn typed_subagent_outcomes_can_block_start_and_stop() {
+    let temp = tempdir().expect("temp");
+    let runtime = HookRuntime::new(
+        temp.path().to_path_buf(),
+        HookRuntimeConfig {
+            sources: vec![source(
+                "agent",
+                json!({
+                    "SubagentStart": [{"matcher": "reviewer", "hooks": [{"type": "command", "command": "printf '{\"continue\":false,\"stopReason\":\"reviewer unavailable\"}'"}]}],
+                    "SubagentStop": [{"matcher": "reviewer", "hooks": [{"type": "command", "command": "printf '{\"continue\":false,\"stopReason\":\"needs parent continuation\",\"feedback\":\"summarize unresolved work\"}'"}]}]
+                }),
+            )],
+            ..HookRuntimeConfig::default()
+        },
+    );
+
+    let start = runtime.run_subagent_start(&json!({"agent": "reviewer"}));
+    assert_eq!(start.stop_reason.as_deref(), Some("reviewer unavailable"));
+
+    let stop = runtime.run_subagent_stop(&json!({"agent": "reviewer"}));
+    assert_eq!(
+        stop.block_reason.as_deref(),
+        Some("needs parent continuation")
+    );
+    assert!(
+        stop.continuation_context
+            .iter()
+            .any(|entry| entry["text"] == "summarize unresolved work")
+    );
+}
+
 #[tokio::test]
 async fn pre_tool_use_updated_input_reaches_permission_before_inner_tool() {
     let temp = tempdir().expect("temp");
@@ -569,4 +695,29 @@ for line in sys.stdin:
 
     assert_eq!(result.feedback, vec!["worker saw hook"]);
     assert_eq!(result.summaries[0].status, HookRunStatus::Completed);
+}
+
+#[test]
+fn post_tool_use_model_content_is_parsed_as_current_result_transform() {
+    let temp = tempfile::tempdir().expect("temp");
+    let runtime = HookRuntime::new(
+        temp.path().to_path_buf(),
+        HookRuntimeConfig {
+            sources: vec![source(
+                "profile",
+                json!({"PostToolUse": [{"hooks": [{
+                    "type": "command",
+                    "command": "printf '{\"modelContent\":\"redacted result\"}'"
+                }]}]}),
+            )],
+            ..HookRuntimeConfig::default()
+        },
+    );
+
+    let result = runtime.run_event(
+        "PostToolUse",
+        &json!({"tool": "exec_command", "is_error": false}),
+    );
+
+    assert_eq!(result.model_content.as_deref(), Some("redacted result"));
 }

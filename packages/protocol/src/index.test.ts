@@ -93,8 +93,7 @@ describe("ThreadSnapshotSchema", () => {
         }
       ],
       activity: { running: false, activeTurnId: null, queuedTurns: 0 },
-      pendingPermissions: [],
-      pendingClarifies: []
+      pendingActions: []
     });
 
     expect(parsed.thread?.id).toBe("s1");

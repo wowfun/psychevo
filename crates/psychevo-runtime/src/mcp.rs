@@ -170,9 +170,16 @@ pub(crate) async fn connect_mcp_server(
     cwd: &Path,
 ) -> Result<RunningService<RoleClient, ()>, String> {
     match &input.transport {
-        McpTransportInput::Stdio { command, args, env } => {
+        McpTransportInput::Stdio {
+            command,
+            args,
+            env,
+            cwd: server_cwd,
+        } => {
             let mut cmd = Command::new(command);
-            cmd.args(args).envs(env).current_dir(cwd);
+            cmd.args(args)
+                .envs(env)
+                .current_dir(server_cwd.as_deref().unwrap_or(cwd));
             let transport = TokioChildProcess::new(cmd).map_err(|err| err.to_string())?;
             ().serve(transport).await.map_err(|err| err.to_string())
         }

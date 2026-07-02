@@ -30,6 +30,8 @@ pub async fn run_agent_loop(
     context.extend(request.context_messages.iter().cloned());
     let mut new_messages = Vec::new();
     let mut turn_index = 0usize;
+    let mut tool_router =
+        ToolRouter::from_tools(request.tools.clone()).with_tool_search(request.tool_search);
 
     emit(&sink, AgentEvent::TurnStart { turn_index }).await?;
     for message in request.prompt_messages.iter().cloned() {
@@ -117,6 +119,7 @@ pub async fn run_agent_loop(
         let assistant = stream_assistant(
             Arc::clone(&provider),
             &request,
+            &tool_router,
             &context,
             Arc::clone(&sink),
             control.abort_signal(),
@@ -163,7 +166,7 @@ pub async fn run_agent_loop(
         let tool_calls = assistant_tool_calls(&assistant);
         if !tool_calls.is_empty() {
             let tool_results = execute_tool_batch(
-                &request.tools,
+                &mut tool_router,
                 &tool_calls,
                 Arc::clone(&sink),
                 control.abort_signal(),

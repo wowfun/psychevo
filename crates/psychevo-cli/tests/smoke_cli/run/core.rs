@@ -314,6 +314,7 @@ pub(crate) fn cli_run_dir_controls_tool_cwd() {
 
 #[test]
 pub(crate) fn cli_run_allows_more_than_thirty_two_tool_turns_before_final_answer() {
+    let _guard = long_tool_turn_smoke_guard();
     let mut responses = (0..33)
         .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
         .collect::<Vec<_>>();
@@ -368,6 +369,7 @@ pub(crate) fn cli_run_allows_more_than_thirty_two_tool_turns_before_final_answer
 
 #[test]
 pub(crate) fn cli_run_budget_exhaustion_reports_model_turn_limit() {
+    let _guard = long_tool_turn_smoke_guard();
     let responses = (0..128)
         .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
         .collect::<Vec<_>>();
@@ -406,6 +408,7 @@ pub(crate) fn cli_run_budget_exhaustion_reports_model_turn_limit() {
 
 #[test]
 pub(crate) fn cli_run_json_budget_exhaustion_includes_terminal_reason() {
+    let _guard = long_tool_turn_smoke_guard();
     let responses = (0..128)
         .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
         .collect::<Vec<_>>();

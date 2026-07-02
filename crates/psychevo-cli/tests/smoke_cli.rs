@@ -107,6 +107,11 @@ impl MockSseServer {
     }
 }
 
+pub(crate) fn long_tool_turn_smoke_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub(crate) fn read_http_request(stream: &mut std::net::TcpStream) -> String {
     let mut data = Vec::new();
     let mut buf = [0u8; 1024];

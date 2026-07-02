@@ -110,6 +110,18 @@ impl Default for WorkspacesConfig {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ToolSelectionConfig {
     pub(crate) modes: BTreeMap<String, ToolModeConfig>,
+    pub(crate) tool_search: ToolSearchConfig,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ToolSearchConfig {
+    pub(crate) enabled: bool,
+}
+
+impl Default for ToolSearchConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -118,11 +130,19 @@ pub(crate) struct ToolModeConfig {
     pub(crate) disabled_toolsets: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CustomToolsetConfig {
     pub(crate) description: Option<String>,
     pub(crate) tools: Vec<String>,
     pub(crate) includes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ToolsetContribution {
+    pub(crate) source_id: String,
+    pub(crate) source_kind: String,
+    pub(crate) name: String,
+    pub(crate) config: CustomToolsetConfig,
 }
 
 #[derive(Debug, Clone, Default)]

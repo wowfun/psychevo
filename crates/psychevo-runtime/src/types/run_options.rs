@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -10,7 +11,7 @@ use psychevo_agent_core::{
 };
 use psychevo_ai::{AbortSignal, Outcome};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use crate::error::Result;
@@ -66,11 +67,29 @@ pub struct RunOptions {
 #[derive(Clone)]
 pub struct RuntimeTool {
     inner: Arc<dyn ToolBinding>,
+    source_id: Option<String>,
+    source_kind: Option<String>,
 }
 
 impl RuntimeTool {
     pub fn new(inner: Arc<dyn ToolBinding>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            source_id: None,
+            source_kind: None,
+        }
+    }
+
+    pub fn with_source(
+        inner: Arc<dyn ToolBinding>,
+        source_id: impl Into<String>,
+        source_kind: impl Into<String>,
+    ) -> Self {
+        Self {
+            inner,
+            source_id: Some(source_id.into()),
+            source_kind: Some(source_kind.into()),
+        }
     }
 
     pub(crate) fn binding(&self) -> Arc<dyn ToolBinding> {
@@ -79,6 +98,14 @@ impl RuntimeTool {
 
     pub fn name(&self) -> &str {
         self.inner.name()
+    }
+
+    pub(crate) fn source_id(&self) -> Option<&str> {
+        self.source_id.as_deref()
+    }
+
+    pub(crate) fn source_kind(&self) -> Option<&str> {
+        self.source_kind.as_deref()
     }
 }
 
@@ -173,7 +200,34 @@ pub enum ImageInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpServerInput {
     pub name: String,
+    pub source_id: Option<String>,
+    pub source_kind: Option<String>,
     pub transport: McpTransportInput,
+}
+
+impl McpServerInput {
+    pub fn new(name: impl Into<String>, transport: McpTransportInput) -> Self {
+        Self {
+            name: name.into(),
+            source_id: None,
+            source_kind: None,
+            transport,
+        }
+    }
+
+    pub fn with_source(
+        name: impl Into<String>,
+        transport: McpTransportInput,
+        source_id: impl Into<String>,
+        source_kind: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            source_id: Some(source_id.into()),
+            source_kind: Some(source_kind.into()),
+            transport,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +236,7 @@ pub enum McpTransportInput {
         command: PathBuf,
         args: Vec<String>,
         env: BTreeMap<String, String>,
+        cwd: Option<PathBuf>,
     },
     StreamableHttp {
         url: String,

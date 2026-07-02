@@ -46,7 +46,7 @@ pub async fn run_user_shell_command_streaming_controlled(
         .unwrap_or_else(crate::sandbox::SandboxPolicy::disabled);
 
     let tool_call_id = "user_shell".to_string();
-    stream(RunStreamEvent::Event(json!({
+    stream(RunStreamEvent::value(json!({
         "type": "tool_execution_start",
         "session_id": stream_session_id.clone(),
         "tool_call_id": tool_call_id,
@@ -89,7 +89,7 @@ pub async fn run_user_shell_command_streaming_controlled(
         Outcome::Normal
     };
     let elapsed = started.elapsed();
-    stream(RunStreamEvent::Event(json!({
+    stream(RunStreamEvent::value(json!({
         "type": "tool_execution_end",
         "session_id": stream_session_id,
         "tool_call_id": tool_call_id,

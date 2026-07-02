@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use psychevo_agent_core::ToolBinding;
 use psychevo_agent_core::{ContextualUserBlock, ContextualUserMessage, PromptInstruction};
+use psychevo_agent_core::{ToolBinding, ToolRouter, ToolSearchOptions};
 use serde_json::{Value, json};
 
 use crate::agents::{
@@ -489,13 +489,22 @@ pub(crate) fn context_evidence_for_request(
 }
 
 pub(crate) fn tool_declarations_hash(tools: &[Arc<dyn ToolBinding>]) -> String {
-    let declarations = tools
-        .iter()
-        .map(|tool| {
+    tool_declarations_hash_with_search(tools, ToolSearchOptions::disabled())
+}
+
+pub(crate) fn tool_declarations_hash_with_search(
+    tools: &[Arc<dyn ToolBinding>],
+    tool_search: ToolSearchOptions,
+) -> String {
+    let declarations = ToolRouter::from_tools(tools.iter().cloned())
+        .with_tool_search(tool_search)
+        .declarations()
+        .into_iter()
+        .map(|declaration| {
             json!({
-                "name": tool.name(),
-                "description": tool.description(),
-                "parameters": tool.parameters(),
+                "name": declaration.name,
+                "description": declaration.description,
+                "parameters": declaration.parameters,
             })
         })
         .collect::<Vec<_>>();

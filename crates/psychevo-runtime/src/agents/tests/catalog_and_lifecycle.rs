@@ -75,6 +75,7 @@ Coordinate.
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
+            extension_inputs: Default::default(),
             allowed_agent_names: coordinator.tool_policy.allowed_agents.clone(),
             denied_agent_names: coordinator.tool_policy.denied_agents.clone(),
             required_agent_names: Vec::new(),

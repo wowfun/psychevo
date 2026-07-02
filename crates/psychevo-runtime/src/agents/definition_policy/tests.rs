@@ -11,6 +11,10 @@ impl ToolBinding for HookedTool {
         self.inner.parameters()
     }
 
+    fn exposure(&self) -> psychevo_agent_core::ToolExposure {
+        self.inner.exposure()
+    }
+
     fn execution_mode(&self) -> ToolExecutionMode {
         self.inner.execution_mode()
     }
@@ -35,8 +39,8 @@ impl ToolBinding for HookedTool {
                 "tool_call_id": tool_call_id.clone(),
                 "arguments": args.clone(),
             });
-            let pre_result = hook_runtime.run_event("PreToolUse", &pre_payload);
-            if let Some(blocked) = pre_result.blocked_reason {
+            let pre_result = hook_runtime.run_pre_tool_use(&pre_payload);
+            if let Some(blocked) = pre_result.block_reason {
                 return ToolOutput::error(blocked);
             }
             let effective_args = pre_result.updated_input.unwrap_or(args);
@@ -52,8 +56,11 @@ impl ToolBinding for HookedTool {
                 "output": output.json.clone(),
                 "is_error": output.is_error,
             });
-            let _ = hook_runtime.run_event("PostToolUse", &post_payload);
-            output
+            let post_result = hook_runtime.run_post_tool_use(&post_payload);
+            match post_result.model_content {
+                Some(model_content) => output.with_model_content(model_content),
+                None => output,
+            }
         })
     }
 }

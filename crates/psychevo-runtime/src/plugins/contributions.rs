@@ -9,9 +9,12 @@ use super::types::{
     EnabledPluginManifest, LoadedPluginManifest, PluginInstallRecord, PluginRuntimeAssembly,
 };
 use super::worker::{PluginWorkerTool, worker_tools};
-use crate::config::{PluginPolicyConfig, PluginPolicyEntry};
+use crate::config::{PluginPolicyConfig, PluginPolicyEntry, ToolsetContribution};
+use crate::contribution_projection::{
+    ContributionFact, ContributionProjection, ContributionStatus,
+};
 use crate::hooks::{HookSourceDescriptor, HookWorkerAdapter};
-use crate::types::RuntimeTool;
+use crate::types::{McpServerInput, RuntimeTool};
 
 pub(crate) fn load_enabled_plugin_contributions(
     home: &Path,
@@ -23,8 +26,11 @@ pub(crate) fn load_enabled_plugin_contributions(
         skill_inputs: Vec::new(),
         agent_inputs: Vec::new(),
         hook_sources: Vec::new(),
+        mcp_servers: Vec::new(),
+        toolsets: Vec::new(),
         runtime_tools: Vec::new(),
         warnings: Vec::new(),
+        projection: ContributionProjection::new(),
     };
     let enabled = enabled_plugin_manifests(home, cwd, policy, &mut assembly.warnings);
     for enabled in enabled {
@@ -38,19 +44,45 @@ pub(crate) fn load_enabled_plugin_contributions(
         if let Some(worker) = enabled.manifest.worker.clone() {
             match worker_tools(&enabled.record, &enabled.manifest, &worker, env) {
                 Ok(tools) => {
-                    assembly.runtime_tools.extend(tools.into_iter().map(|tool| {
-                        RuntimeTool::new(Arc::new(PluginWorkerTool {
-                            record: enabled.record.clone(),
-                            spec: worker.clone(),
-                            descriptor: tool,
-                            env: env.clone(),
-                        }))
-                    }));
+                    for tool in tools {
+                        let tool_name = tool.name.clone();
+                        assembly.projection.record(ContributionFact::new(
+                            plugin_source_id(&enabled.record),
+                            "plugin",
+                            "worker_tool",
+                            "tool_surface",
+                            format!("tool:{tool_name}"),
+                            ContributionStatus::Accepted,
+                        ));
+                        assembly.runtime_tools.push(RuntimeTool::with_source(
+                            Arc::new(PluginWorkerTool {
+                                record: enabled.record.clone(),
+                                spec: worker.clone(),
+                                descriptor: tool,
+                                env: env.clone(),
+                            }),
+                            plugin_source_id(&enabled.record),
+                            "plugin",
+                        ));
+                    }
                 }
-                Err(err) => assembly.warnings.push(plugin_warning(format!(
-                    "plugin `{}` worker unavailable: {err}",
-                    enabled.record.name
-                ))),
+                Err(err) => {
+                    assembly.projection.record(
+                        ContributionFact::new(
+                            plugin_source_id(&enabled.record),
+                            "plugin",
+                            "worker_tool",
+                            "tool_surface",
+                            "worker".to_string(),
+                            ContributionStatus::Unavailable,
+                        )
+                        .with_reason(err.clone()),
+                    );
+                    assembly.warnings.push(plugin_warning(format!(
+                        "plugin `{}` worker unavailable: {err}",
+                        enabled.record.name
+                    )));
+                }
             }
         }
     }
@@ -121,14 +153,99 @@ fn add_static_contributions(
     policy: &PluginPolicyEntry,
     env: &BTreeMap<String, String>,
 ) {
-    assembly
-        .skill_inputs
-        .extend(manifest.skill_roots.iter().cloned());
-    assembly
-        .agent_inputs
-        .extend(agent_files_from_roots(&manifest.agent_roots));
+    let source_id = plugin_source_id(record);
+    for diagnostic in &manifest.diagnostics {
+        if diagnostic.kind == "invalid" {
+            assembly.projection.record(
+                ContributionFact::new(
+                    source_id.clone(),
+                    "plugin",
+                    "manifest",
+                    "plugin_runtime",
+                    record.manifest_path.display().to_string(),
+                    ContributionStatus::Invalid,
+                )
+                .with_reason(diagnostic.message.clone()),
+            );
+        }
+    }
+    for root in &manifest.skill_roots {
+        assembly.skill_inputs.push(root.clone());
+        assembly.projection.record(ContributionFact::new(
+            source_id.clone(),
+            "plugin",
+            "skill_root",
+            "skills",
+            root.display().to_string(),
+            ContributionStatus::Accepted,
+        ));
+    }
+    for agent in agent_files_from_roots(&manifest.agent_roots) {
+        assembly.projection.record(ContributionFact::new(
+            source_id.clone(),
+            "plugin",
+            "agent_root",
+            "agents",
+            agent.clone(),
+            ContributionStatus::Accepted,
+        ));
+        assembly.agent_inputs.push(agent);
+    }
     if let Some(source) = hook_source_from_manifest(record, manifest, policy, env) {
+        assembly.projection.record(ContributionFact::new(
+            source_id.clone(),
+            "plugin",
+            "hook_source",
+            "hook_runtime",
+            source.source_id.clone(),
+            ContributionStatus::Accepted,
+        ));
         assembly.hook_sources.push(source);
+    }
+    for server in &manifest.mcp_servers {
+        assembly.mcp_servers.push(McpServerInput::with_source(
+            server.name.clone(),
+            server.transport.clone(),
+            source_id.clone(),
+            "plugin",
+        ));
+        assembly.projection.record(ContributionFact::new(
+            source_id.clone(),
+            "plugin",
+            "mcp_server",
+            "mcp",
+            format!("mcp:{}", server.name),
+            ContributionStatus::Accepted,
+        ));
+    }
+    for (name, config) in &manifest.toolsets {
+        assembly.toolsets.push(ToolsetContribution {
+            source_id: source_id.clone(),
+            source_kind: "plugin".to_string(),
+            name: name.clone(),
+            config: config.clone(),
+        });
+        assembly.projection.record(ContributionFact::new(
+            source_id.clone(),
+            "plugin",
+            "toolset",
+            "tool_surface",
+            format!("toolset:{name}"),
+            ContributionStatus::Accepted,
+        ));
+    }
+    for family in inert_descriptor_families(manifest) {
+        assembly.projection.record(
+            ContributionFact::new(
+                source_id.clone(),
+                "plugin",
+                family,
+                "plugin_runtime",
+                family,
+                ContributionStatus::Unsupported,
+            )
+            .with_reason("descriptor recognized but no owning runtime registry is implemented"),
+        );
     }
 }
 
@@ -192,4 +309,25 @@ fn plugin_warning(message: String) -> crate::types::RunWarning {
         source_path: None,
         suggestion: None,
     }
+}
+
+fn plugin_source_id(record: &PluginInstallRecord) -> String {
+    format!("plugin:{}@{}", record.name, record.source_slug)
+}
+
+fn inert_descriptor_families(manifest: &LoadedPluginManifest) -> Vec<&'static str> {
+    let mut families = Vec::new();
+    if manifest.manifest_resources.contains("apps") {
+        families.push("apps");
+    }
+    if manifest.manifest_resources.contains("interface") {
+        families.push("interface");
+    }
+    if manifest.psychevo_extensions.contains("commands") {
+        families.push("commands");
+    }
+    if manifest.psychevo_extensions.contains("providers") {
+        families.push("providers");
+    }
+    families
 }

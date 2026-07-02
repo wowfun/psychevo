@@ -129,6 +129,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
     pub(crate) tool_selection: ToolSelectionConfig,
     pub(crate) custom_toolsets: BTreeMap<String, CustomToolsetConfig>,
+    pub(crate) extension_inputs: crate::extensions::AcceptedExtensionInputs,
     pub(crate) allowed_agent_names: Option<BTreeSet<String>>,
     pub(crate) denied_agent_names: BTreeSet<String>,
     pub(crate) required_agent_names: Vec<String>,
@@ -586,25 +587,6 @@ pub(crate) fn apply_runtime_hooks(
     match build_hook_runtime(agent, plugin_hook_sources, config, cwd) {
         Some(runtime) => apply_hook_runtime(tools, runtime),
         None => tools,
-    }
-}
-
-pub(crate) fn run_agent_hook_event(
-    agent: Option<&AgentDefinition>,
-    event: &str,
-    cwd: &Path,
-    payload: Value,
-) {
-    let Some(agent) = agent else {
-        return;
-    };
-    let payload = json!({
-        "event": event,
-        "agent": agent.name.clone(),
-        "payload": payload,
-    });
-    if let Some(source) = crate::hooks::agent_hook_source(&agent.name, agent.hooks.as_ref()) {
-        let _ = crate::hooks::run_hook_sources(&[source], event, cwd, &payload);
     }
 }
 

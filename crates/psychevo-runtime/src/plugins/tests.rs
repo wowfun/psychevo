@@ -4,11 +4,20 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use psychevo_agent_core::ToolBinding;
+use psychevo_agent_core::{ToolBinding, ToolRouter, ToolSearchOptions};
 use psychevo_ai::AbortSignal;
 use serde_json::{Value, json};
 
 use tempfile::tempdir;
+
+use crate::RunMode;
+use crate::config::{PluginPolicyConfig, PluginPolicyEntry, ToolSelectionConfig};
+use crate::contribution_projection::ContributionStatus;
+use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
+use crate::tool_surface::{
+    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
+};
+use crate::types::McpTransportInput;
 
 use super::*;
 
@@ -73,7 +82,7 @@ fn malformed_preferred_manifest_does_not_fall_back_to_compat() {
 }
 
 #[test]
-fn manifest_loads_path_and_default_hook_files_additively() {
+fn manifest_uses_explicit_hooks_before_default_hook_file() {
     let temp = tempdir().expect("temp");
     let root = temp.path().join("plugin");
     write_plugin(
@@ -105,9 +114,297 @@ fn manifest_loads_path_and_default_hook_files_additively() {
             .get("PreToolUse")
             .and_then(Value::as_array)
             .map(Vec::len),
-        Some(2)
+        Some(1)
     );
+    let matcher = hooks["PreToolUse"][0]["matcher"].as_str();
+    assert_eq!(matcher, Some("Write"));
     assert!(manifest.manifest_resources.contains("hooks"));
+}
+
+#[test]
+fn manifest_loads_default_hook_file_when_hooks_field_is_absent() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    write_plugin(
+        &root,
+        r#"{
+              "name": "hooked",
+              "version": "1.0.0",
+              "description": "hooked"
+            }"#,
+    );
+    fs::create_dir_all(root.join("hooks")).expect("hooks");
+    fs::write(
+            root.join("hooks/hooks.json"),
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"echo default"}]}]}}"#,
+        )
+        .expect("default hooks");
+
+    let manifest = load_plugin_manifest(&root, true).expect("manifest");
+
+    let hooks = manifest.hooks.expect("hooks");
+    assert_eq!(hooks["PreToolUse"][0]["matcher"], "Edit");
+    assert!(manifest.manifest_resources.contains("hooks"));
+}
+
+#[test]
+fn manifest_parses_codex_interface_metadata_with_path_safety() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    fs::create_dir_all(root.join("assets")).expect("assets");
+    for file in ["icon.png", "logo.png", "logo-dark.png", "screen.png"] {
+        fs::write(root.join("assets").join(file), "asset").expect("asset");
+    }
+    write_plugin(
+        &root,
+        r##"{
+              "name": "display-plugin",
+              "version": "1.0.0",
+              "description": "display plugin",
+              "interface": {
+                "displayName": "Display Plugin",
+                "shortDescription": 7,
+                "longDescription": "A longer description",
+                "developerName": "Psychevo",
+                "category": "productivity",
+                "capabilities": ["tools", "hooks"],
+                "websiteURL": "https://example.test",
+                "privacyPolicyUrl": "https://example.test/privacy",
+                "termsOfServiceURL": "https://example.test/terms",
+                "brandColor": "#336699",
+                "composerIcon": "./assets/icon.png",
+                "logo": "./assets/logo.png",
+                "logoDark": "./assets/logo-dark.png",
+                "screenshots": ["./assets/screen.png", "./../escape.png", 4]
+              }
+            }"##,
+    );
+
+    let manifest = load_plugin_manifest(&root, true).expect("manifest");
+    let interface = manifest.interface.expect("interface");
+
+    assert_eq!(interface.display_name.as_deref(), Some("Display Plugin"));
+    assert_eq!(interface.short_description, None);
+    assert_eq!(interface.category.as_deref(), Some("productivity"));
+    assert_eq!(interface.capabilities, vec!["tools", "hooks"]);
+    assert_eq!(
+        interface.website_url.as_deref(),
+        Some("https://example.test")
+    );
+    assert!(
+        interface
+            .composer_icon
+            .is_some_and(|path| path.starts_with(&root))
+    );
+    assert!(interface.logo.is_some_and(|path| path.starts_with(&root)));
+    assert!(
+        interface
+            .logo_dark
+            .is_some_and(|path| path.starts_with(&root))
+    );
+    assert_eq!(interface.screenshots.len(), 1);
+    assert!(manifest.manifest_resources.contains("interface"));
+    assert!(manifest.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == "invalid"
+            && diagnostic
+                .message
+                .contains("interface.shortDescription must be a string")
+    }));
+    assert!(manifest.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == "invalid" && diagnostic.message.contains("must not contain ..")
+    }));
+    assert!(manifest.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == "invalid"
+            && diagnostic
+                .message
+                .contains("interface.screenshots must contain string paths")
+    }));
+}
+
+#[test]
+fn hermes_plugin_yaml_is_diagnostic_only() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    fs::create_dir_all(&root).expect("root");
+    fs::write(
+        root.join("plugin.yaml"),
+        "name: hermes\nversion: 1.0.0\nmain: index.js\n",
+    )
+    .expect("hermes");
+
+    let err = load_plugin_manifest(&root, true).expect_err("dynamic hermes unsupported");
+
+    assert!(
+        err.to_string()
+            .contains("dynamic register(ctx) plugins are unsupported")
+    );
+
+    write_plugin(
+        &root,
+        r#"{
+              "name": "native",
+              "version": "1.0.0",
+              "description": "native"
+            }"#,
+    );
+    let manifest = load_plugin_manifest(&root, true).expect("native manifest");
+    assert!(
+        manifest
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("Hermes plugin.yaml is ignored") })
+    );
+}
+
+#[test]
+fn manifest_parses_mcp_servers_object_without_discarding_valid_siblings() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    write_plugin(
+        &root,
+        r#"{
+              "name": "mcp-plugin",
+              "version": "1.0.0",
+              "description": "mcp plugin",
+              "mcpServers": {
+                "stdio": {"command": "node", "args": ["server.js"], "env": {"TOKEN": "x"}, "cwd": "."},
+                "http": {"type": "http", "url": "https://example.test/mcp", "headers": {"Authorization": "Bearer x"}},
+                "future": {"type": "sse", "url": "https://example.test/sse"},
+                "bad": {"command": 7}
+              }
+            }"#,
+    );
+
+    let manifest = load_plugin_manifest(&root, true).expect("manifest");
+
+    assert_eq!(manifest.mcp_servers.len(), 3);
+    assert!(manifest.manifest_resources.contains("mcpServers"));
+    let stdio = manifest
+        .mcp_servers
+        .iter()
+        .find(|server| server.name == "stdio")
+        .expect("stdio");
+    match &stdio.transport {
+        McpTransportInput::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        } => {
+            assert_eq!(command, &PathBuf::from("node"));
+            assert_eq!(args, &vec!["server.js".to_string()]);
+            assert_eq!(env.get("TOKEN").map(String::as_str), Some("x"));
+            assert!(cwd.as_ref().is_some_and(|cwd| cwd.starts_with(&root)));
+        }
+        other => panic!("unexpected stdio transport: {other:?}"),
+    }
+    let http = manifest
+        .mcp_servers
+        .iter()
+        .find(|server| server.name == "http")
+        .expect("http");
+    assert!(matches!(
+        &http.transport,
+        McpTransportInput::StreamableHttp { url, headers }
+            if url == "https://example.test/mcp"
+                && headers.get("Authorization").map(String::as_str) == Some("Bearer x")
+    ));
+    let unsupported = manifest
+        .mcp_servers
+        .iter()
+        .find(|server| server.name == "future")
+        .expect("future");
+    assert!(matches!(
+        &unsupported.transport,
+        McpTransportInput::Unsupported { kind } if kind == "sse"
+    ));
+    assert!(manifest.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == "invalid" && diagnostic.message.contains("mcpServers.bad.command")
+    }));
+}
+
+#[test]
+fn manifest_uses_explicit_mcp_servers_path_before_default_mcp_json() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    write_plugin(
+        &root,
+        r#"{
+              "name": "mcp-plugin",
+              "version": "1.0.0",
+              "description": "mcp plugin"
+            }"#,
+    );
+    fs::create_dir_all(root.join("bin")).expect("bin");
+    fs::write(
+        root.join(".mcp.json"),
+        r#"{"mcpServers":{"default":{"command":"./bin/default-server"}}}"#,
+    )
+    .expect("default mcp");
+
+    let manifest = load_plugin_manifest(&root, true).expect("default manifest");
+    assert_eq!(manifest.mcp_servers.len(), 1);
+    assert_eq!(manifest.mcp_servers[0].name, "default");
+
+    write_plugin(
+        &root,
+        r#"{
+              "name": "mcp-plugin",
+              "version": "1.0.0",
+              "description": "mcp plugin",
+              "mcpServers": "./mcp.json"
+            }"#,
+    );
+    fs::write(
+        root.join("mcp.json"),
+        r#"{"from-path":{"url":"https://example.test/path"}}"#,
+    )
+    .expect("path mcp");
+
+    let manifest = load_plugin_manifest(&root, true).expect("path manifest");
+    assert_eq!(manifest.mcp_servers.len(), 1);
+    assert_eq!(manifest.mcp_servers[0].name, "from-path");
+    assert!(matches!(
+        &manifest.mcp_servers[0].transport,
+        McpTransportInput::StreamableHttp { url, .. } if url == "https://example.test/path"
+    ));
+}
+
+#[test]
+fn manifest_parses_psychevo_toolsets_and_reports_invalid_siblings() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    write_plugin(
+        &root,
+        r#"{
+              "name": "toolset-plugin",
+              "version": "1.0.0",
+              "description": "toolset plugin",
+              "psychevo": {
+                "toolsets": {
+                  "review-pack": {"description": "review tools", "tools": ["review"], "includes": ["coding-core"]},
+                  "bad name": {"tools": ["x"]},
+                  "bad-tools": {"tools": [1]}
+                }
+              }
+            }"#,
+    );
+
+    let manifest = load_plugin_manifest(&root, true).expect("manifest");
+
+    let review_pack = manifest.toolsets.get("review-pack").expect("review-pack");
+    assert_eq!(review_pack.description.as_deref(), Some("review tools"));
+    assert_eq!(review_pack.tools, vec!["review".to_string()]);
+    assert_eq!(review_pack.includes, vec!["coding-core".to_string()]);
+    assert!(!manifest.toolsets.contains_key("bad name"));
+    assert!(!manifest.toolsets.contains_key("bad-tools"));
+    assert!(manifest.psychevo_extensions.contains("toolsets"));
+    assert!(manifest.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == "invalid" && diagnostic.message.contains("invalid toolset name")
+    }));
+    assert!(manifest.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == "invalid" && diagnostic.message.contains("tools must contain strings")
+    }));
 }
 
 #[test]
@@ -353,6 +650,169 @@ fn local_policy_can_target_profile_installed_plugin() {
     assert!(local_config.contains("[plugins.cleanup]"));
     assert!(local_config.contains("enabled = true"));
     assert!(!home.join("config.toml").exists());
+}
+
+#[test]
+fn enabled_plugin_contributions_materialize_mcp_servers_toolsets_and_projection() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+              "name": "contributor",
+              "version": "1.0.0",
+              "description": "contributor",
+              "mcpServers": {
+                "stdio": {"command": "node", "args": ["server.js"]}
+              },
+              "psychevo": {
+                "toolsets": {
+                  "contrib-tools": {"tools": ["mcp__stdio__review"]}
+                }
+              }
+            }"#,
+    );
+    install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            scope: PluginScope::Global,
+            git_ref: None,
+            force: false,
+        },
+    )
+    .expect("install");
+    let mut policy = PluginPolicyConfig::default();
+    policy.plugins.insert(
+        "contributor".to_string(),
+        PluginPolicyEntry {
+            enabled: Some(true),
+        },
+    );
+
+    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy);
+
+    assert_eq!(assembly.mcp_servers.len(), 1);
+    assert_eq!(assembly.mcp_servers[0].name, "stdio");
+    assert_eq!(
+        assembly.mcp_servers[0].source_kind.as_deref(),
+        Some("plugin")
+    );
+    assert!(
+        assembly.mcp_servers[0]
+            .source_id
+            .as_deref()
+            .is_some_and(|source| source.starts_with("plugin:contributor@"))
+    );
+    assert_eq!(assembly.toolsets.len(), 1);
+    assert_eq!(assembly.toolsets[0].name, "contrib-tools");
+    assert!(assembly.projection.facts().iter().any(|fact| {
+        fact.status == ContributionStatus::Accepted
+            && fact.declaration_family == "mcp_server"
+            && fact.effect_target == "mcp:stdio"
+    }));
+    assert!(assembly.projection.facts().iter().any(|fact| {
+        fact.status == ContributionStatus::Accepted
+            && fact.declaration_family == "toolset"
+            && fact.effect_target == "toolset:contrib-tools"
+    }));
+}
+
+#[test]
+fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+              "name": "cleanup",
+              "version": "1.0.0",
+              "description": "cleanup",
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
+            }"#,
+    );
+    write_worker(
+        &source,
+        r#"#!/usr/bin/env python3
+import json, sys
+for line in sys.stdin:
+    req=json.loads(line)
+    method=req.get("method")
+    if method=="initialize":
+        result={"ok": True}
+    elif method=="contributions/list":
+        result={"tools":[{"name":"cleanup_status","description":"status","parameters":{"type":"object","properties":{}}}]}
+    else:
+        result={}
+    print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
+"#,
+    );
+    install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            scope: PluginScope::Global,
+            git_ref: None,
+            force: false,
+        },
+    )
+    .expect("install");
+    let mut policy = PluginPolicyConfig::default();
+    policy.plugins.insert(
+        "cleanup".to_string(),
+        PluginPolicyEntry {
+            enabled: Some(true),
+        },
+    );
+
+    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy);
+
+    assert_eq!(assembly.runtime_tools.len(), 1);
+    assert_eq!(assembly.runtime_tools[0].name(), "cleanup_status");
+    assert_eq!(assembly.runtime_tools[0].source_kind(), Some("plugin"));
+    assert!(
+        assembly.runtime_tools[0]
+            .source_id()
+            .is_some_and(|source| source.starts_with("plugin:cleanup@"))
+    );
+
+    let surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
+        cwd,
+        task_id: "test".to_string(),
+        mode: RunMode::Default,
+        lsp: Default::default(),
+        allow_login_shell: false,
+        stream_events: None,
+        env: BTreeMap::new(),
+        path_prefixes: Vec::new(),
+        sandbox_policy: SandboxPolicy::disabled(),
+        sandbox_grants: SandboxWriteGrants::default(),
+        tool_selection: ToolSelectionConfig::default(),
+        custom_toolsets: BTreeMap::new(),
+        contributed_toolsets: assembly.toolsets,
+        clarify: ClarifyToolSurface::Disabled,
+        skills: None,
+        extension_tools: assembly.runtime_tools,
+        agents: None,
+    });
+    let declarations = ToolRouter::from_tools(surface.tools)
+        .with_tool_search(ToolSearchOptions::enabled())
+        .declarations();
+    let names = declarations
+        .into_iter()
+        .map(|declaration| declaration.name)
+        .collect::<Vec<_>>();
+
+    assert!(names.contains(&"tool_search".to_string()));
+    assert!(!names.contains(&"cleanup_status".to_string()));
 }
 
 #[test]

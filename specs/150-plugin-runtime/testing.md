@@ -28,10 +28,10 @@ Define acceptance expectations and validation scenarios for plugin runtime.
 ## Current Implementation Slice
 
 The current slice covers local directory and local Git installs, JSON store
-records, TOML policy overlay, static skill/agent/hook roots, and stdio
-JSON-RPC worker tools. MCP, provider, command, and toolset descriptors may be
-recognized as declared resources, but executable routing remains owned by
-their future boundaries.
+records, TOML policy overlay, static skill/agent/hook roots, source-scoped MCP
+and toolset descriptors, stdio JSON-RPC worker tools, and worker hook handlers.
+Provider, command, app, and interface descriptors may be recognized as declared
+resources, but executable routing remains owned by their future boundaries.
 
 Manual broad validation for code changes is still the Rust workspace gate
 defined by [065 CI/CD](../065-ci-cd/spec.md), but this topic's
@@ -55,22 +55,39 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - Static skill roots, hook sources, and worker tool descriptors are loaded only
   when the plugin package is enabled, then routed through the owning runtime
   module.
+- CLI `plugin view` human output shows typed package display metadata from
+  Codex-compatible `interface` without exposing executable assumptions.
+- Gateway `plugin/list`, `plugin/read`, and `plugin/doctor` return the same
+  read-only runtime plugin values as CLI JSON output and never mutate plugin
+  policy or install records.
 - Plugin hook sources are listed but not executed when their normalized hook
   hashes are untrusted or modified.
-- Worker-provided hook handlers are either routed through 140 Hook Runtime or
-  reported as unsupported diagnostics until the worker hook adapter exists.
+- Worker-provided hook handlers are routed through 140 Hook Runtime after
+  plugin enablement and hook trust select the handler.
+- Prompt hook declarations from plugin hook sources contribute only turn-local
+  context through 140 Hook Runtime.
+- Agent hook declarations from plugin hook sources list and skip with
+  adapter-unavailable diagnostics.
 - Worker `contributions/list` receives the effective loaded environment so
   config-parent and project `.env` variables are available during discovery.
+- Worker tool descriptors enter the shared tool surface as plugin-source
+  bindings and are searchable/deferred by default when `tool_search` is
+  enabled for the invocation.
 - Worker startup failures and discovery timeouts are reported by
   `plugin doctor` without crashing runtime assembly.
 - Worker tool execution succeeds through the public tool surface adapter.
 - Worker tool execution failures and timeouts return tool errors and keep
   diagnostics source-qualified.
+- Contribution projection facts from plugin declarations feed owning
+  diagnostics such as `plugin doctor`; they do not create a generic
+  contributions-inspection command.
 
 ## CLI Coverage
 
 - Singular `pevo plugin` parses and obsolete plural `pevo plugins` rejects.
 - `plugin list`, `view`, and `doctor` support secret-free JSON output.
+- `plugin view` human output includes display name, category, capabilities, and
+  short description when typed `interface` metadata is present.
 - `plugin install`, `uninstall`, `enable`, and `disable` honor default,
   `--local`, and `--global` scope semantics.
 - `plugin marketplace list/add/remove` manages local/Git source catalogs

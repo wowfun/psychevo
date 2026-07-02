@@ -40,6 +40,20 @@ MCP startup, skill loading, hook trust, and provider setup can be complex, but
 accepted effects must reach runtime through typed contributors or owning
 runtime modules.
 
+Host code must assemble those accepted effects through one runtime-owned
+extension assembly step before downstream runtime modules consume them. The
+assembly input includes the invocation cwd, effective environment, plugin
+policy, selected capability roots, static MCP inputs, and static runtime tools.
+The assembly output contains a frozen `ExtensionRegistry` plus owning-module
+inputs for skills, agents, hooks, toolsets, warnings, and compact contribution
+projection facts.
+
+Run entrypoints, reload/reconstruction entrypoints, and child-agent entrypoints
+must consume this assembly output instead of each reloading plugins, selected
+capability roots, MCP inputs, and runtime tools independently. This preserves a
+single source of truth for Codex-style host-owned extensibility while still
+letting skills, hooks, MCP, agents, and tool surface own their final semantics.
+
 ## ExtensionData
 
 `ExtensionData` is the scoped store for extension-private state.
@@ -106,6 +120,19 @@ Tool exposure, dispatch, permission checks, resource checks, provider
 resolution, context projection, persistence, and hook execution remain owned by
 their runtime modules. Contributors may provide inputs or observations to those
 modules, but the owning module decides the final effect.
+
+The registry may carry tools whose model exposure is `direct`, `deferred`, or
+`hidden`. `direct` tools are eligible for the next generation-request tool
+snapshot. `deferred` tools have execution bindings in the accepted invocation
+surface but are not model-visible until the agent loop activates them through
+the tool router. `hidden` tools are executable only through host-owned routes
+that explicitly bypass model-visible dispatch.
+
+Tool exposure remains a property of the accepted execution binding plus
+runtime source-family policy, not of a plugin manifest. When synthetic
+`tool_search` is enabled, direct MCP and plugin-worker bindings may be adapted
+to `deferred`; host-owned runtime tools stay direct by default. Bindings that
+already declare `deferred` or `hidden` keep that exposure.
 
 Registry selection and execution permission are separate. A selected tool,
 hook, MCP server, context fragment, approval reviewer, or turn item contributor

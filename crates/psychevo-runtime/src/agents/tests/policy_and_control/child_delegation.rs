@@ -45,6 +45,30 @@ fn write_trusted_hook_config(
     fs::write(config_path, text).expect("trusted hook config");
 }
 
+#[derive(Clone, Default)]
+struct ChildRequestCaptureProvider {
+    requests: Arc<Mutex<Vec<psychevo_ai::GenerationRequest>>>,
+}
+
+impl GenerationProvider for ChildRequestCaptureProvider {
+    fn stream(
+        &self,
+        request: psychevo_ai::GenerationRequest,
+        _abort: AbortSignal,
+    ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
+        self.requests.lock().expect("requests").push(request);
+        Box::pin(async {
+            let stream: psychevo_ai::GenerationStream = Box::pin(futures::stream::iter([Ok(
+                psychevo_ai::StreamEvent::Done {
+                    outcome: Outcome::Normal,
+                    finish_reason: Some("stop".to_string()),
+                },
+            )]));
+            Ok(stream)
+        })
+    }
+}
+
 #[tokio::test]
 pub(crate) async fn background_completion_records_mailbox_event_without_parent_user_message() {
     let tmp = TempDir::new().expect("tmp");
@@ -586,7 +610,7 @@ for line in sys.stdin:
             env: BTreeMap::new(),
         }),
     };
-    write_trusted_hook_config(&home, &cwd, &[plugin_source]);
+    write_trusted_hook_config(&home, &cwd, std::slice::from_ref(&plugin_source));
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -612,6 +636,7 @@ for line in sys.stdin:
         ("HOME".to_string(), tmp.path().display().to_string()),
         ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
     ]);
+    context.extension_inputs.hook_sources.push(plugin_source);
     let _output = spawn_subagent(
         context,
         SpawnAgentArgs {
@@ -634,6 +659,63 @@ for line in sys.stdin:
     let plugin_log =
         fs::read_to_string(record.data_root.join("child-hook.jsonl")).expect("plugin hook log");
     assert!(plugin_log.contains("PostToolUse"), "{plugin_log}");
+}
+
+#[tokio::test]
+pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extension_tools() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
+        shadowed_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let provider = ChildRequestCaptureProvider::default();
+    let requests = Arc::clone(&provider.requests);
+    let (_tx, rx) = watch::channel(false);
+    let mut context =
+        test_agent_tool_context(&tmp, Arc::new(provider), store, db_path, parent, catalog);
+    context
+        .extension_inputs
+        .runtime_tools
+        .push(crate::types::RuntimeTool::with_source(
+            test_tool("plugin_lookup"),
+            "plugin:demo@local",
+            "plugin",
+        ));
+
+    spawn_subagent(
+        context,
+        SpawnAgentArgs {
+            agent_type: Some("worker".to_string()),
+            message: "Use tools only if needed.".to_string(),
+            task_name: "search_child_tools".to_string(),
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: Some(1),
+            max_spawn_depth: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("spawn");
+
+    let requests = requests.lock().expect("requests");
+    let names = requests[0]
+        .tools
+        .iter()
+        .map(|tool| tool.name.clone())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"read".to_string()), "{names:?}");
+    assert!(names.contains(&"tool_search".to_string()), "{names:?}");
+    assert!(!names.contains(&"plugin_lookup".to_string()), "{names:?}");
 }
 
 #[tokio::test]

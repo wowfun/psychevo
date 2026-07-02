@@ -31,6 +31,10 @@ impl ToolBinding for PermissionTool {
         self.tool.parameters()
     }
 
+    fn exposure(&self) -> psychevo_agent_core::ToolExposure {
+        self.tool.exposure()
+    }
+
     fn execution_mode(&self) -> ToolExecutionMode {
         self.tool.execution_mode()
     }

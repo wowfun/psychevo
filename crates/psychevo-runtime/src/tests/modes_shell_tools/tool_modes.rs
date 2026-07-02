@@ -209,6 +209,38 @@ pub(crate) fn valid_clarify_args() -> Value {
     })
 }
 
+fn clarify_action_request(event: &RunStreamEvent) -> Option<(&str, &Value)> {
+    match event {
+        RunStreamEvent::Event(event) => match &event.payload {
+            crate::types::SessionEventPayload::BlockingActionRequested {
+                action_id,
+                kind,
+                payload,
+            } if *kind == crate::types::BlockingActionKind::Clarify => {
+                Some((action_id.as_str(), payload))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn clarify_action_resolution(event: &RunStreamEvent) -> Option<(&str, &str)> {
+    match event {
+        RunStreamEvent::Event(event) => match &event.payload {
+            crate::types::SessionEventPayload::BlockingActionResolved {
+                action_id,
+                kind,
+                reason,
+            } if *kind == crate::types::BlockingActionKind::Clarify => {
+                Some((action_id.as_str(), reason.as_str()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 #[tokio::test]
 pub(crate) async fn clarify_tool_validates_schema_and_is_sequential() {
     assert_eq!(
@@ -341,12 +373,10 @@ pub(crate) async fn clarify_tool_round_trips_answer_and_rejects_late_response() 
             .expect("captured stream lock")
             .iter()
             .any(|event| {
-                matches!(
-                    event,
-                    RunStreamEvent::ClarifyRequest(request)
-                        if request.call_id == "call_clarify"
-                            && request.questions[0].question == "Which mode should we use?"
-                )
+                clarify_action_request(event).is_some_and(|(action_id, payload)| {
+                    action_id == "call_clarify"
+                        && payload["questions"][0]["question"] == "Which mode should we use?"
+                })
             })
     })
     .await;
@@ -381,12 +411,11 @@ pub(crate) async fn clarify_tool_round_trips_answer_and_rejects_late_response() 
             .lock()
             .expect("captured stream lock")
             .iter()
-            .any(|event| matches!(
-                event,
-                RunStreamEvent::ClarifyResolved(resolved)
-                    if resolved.call_id == "call_clarify"
-                        && resolved.reason == ClarifyResolvedReason::Answered
-            ),)
+            .any(|event| {
+                clarify_action_resolution(event).is_some_and(|(action_id, reason)| {
+                    action_id == "call_clarify" && reason == "answered"
+                })
+            })
     );
 }
 
@@ -411,7 +440,7 @@ pub(crate) async fn clarify_tool_cancel_and_timeout_emit_resolution() {
             .lock()
             .expect("captured stream lock")
             .iter()
-            .any(|event| matches!(event, RunStreamEvent::ClarifyRequest(_))))
+            .any(|event| clarify_action_request(event).is_some()))
         .await
     );
 
@@ -424,11 +453,9 @@ pub(crate) async fn clarify_tool_cancel_and_timeout_emit_resolution() {
             .lock()
             .expect("captured stream lock")
             .iter()
-            .any(|event| matches!(
-                event,
-                RunStreamEvent::ClarifyResolved(resolved)
-                    if resolved.reason == ClarifyResolvedReason::Cancelled
-            ),)
+            .any(|event| {
+                clarify_action_resolution(event).is_some_and(|(_, reason)| reason == "cancelled")
+            })
     );
 
     let timed_out_events = Arc::new(Mutex::new(Vec::new()));
@@ -461,11 +488,9 @@ pub(crate) async fn clarify_tool_cancel_and_timeout_emit_resolution() {
             .lock()
             .expect("timed out stream lock")
             .iter()
-            .any(|event| matches!(
-                event,
-                RunStreamEvent::ClarifyResolved(resolved)
-                    if resolved.reason == ClarifyResolvedReason::TimedOut
-            ))
+            .any(|event| {
+                clarify_action_resolution(event).is_some_and(|(_, reason)| reason == "timed_out")
+            })
     );
 }
 
@@ -809,7 +834,7 @@ pub(crate) async fn exec_command_yields_long_running_session() {
 
 pub(crate) fn run_stream_event_value(event: &crate::types::RunStreamEvent) -> Option<&Value> {
     match event {
-        crate::types::RunStreamEvent::Event(value) => Some(value),
+        crate::types::RunStreamEvent::Event(value) => Some(value.as_value()),
         crate::types::RunStreamEvent::Scoped { event, .. } => run_stream_event_value(event),
         _ => None,
     }

@@ -37,6 +37,9 @@ import { clientRequestBackendListSchema } from './rpc/client-request/backend-lis
 import { clientRequestBackendDoctorSchema } from './rpc/client-request/backend-doctor';
 import { clientRequestBackendWriteSchema } from './rpc/client-request/backend-write';
 import { clientRequestBackendDeleteSchema } from './rpc/client-request/backend-delete';
+import { clientRequestPluginListSchema } from './rpc/client-request/plugin-list';
+import { clientRequestPluginReadSchema } from './rpc/client-request/plugin-read';
+import { clientRequestPluginDoctorSchema } from './rpc/client-request/plugin-doctor';
 import { clientRequestChannelListSchema } from './rpc/client-request/channel-list';
 import { clientRequestChannelShowSchema } from './rpc/client-request/channel-show';
 import { clientRequestChannelEnableSchema } from './rpc/client-request/channel-enable';
@@ -384,6 +387,15 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/backend-delete.json"
     },
     {
+      "$ref": "ClientRequest/plugin-list.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-read.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-doctor.json"
+    },
+    {
       "$ref": "ClientRequest/channel-list.json"
     },
     {
@@ -558,6 +570,9 @@ export const rpcSchemaRefs = [
   clientRequestBackendDoctorSchema,
   clientRequestBackendWriteSchema,
   clientRequestBackendDeleteSchema,
+  clientRequestPluginListSchema,
+  clientRequestPluginReadSchema,
+  clientRequestPluginDoctorSchema,
   clientRequestChannelListSchema,
   clientRequestChannelShowSchema,
   clientRequestChannelEnableSchema,

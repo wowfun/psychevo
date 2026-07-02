@@ -76,6 +76,9 @@ fn schema_group_module(name: &str) -> &'static str {
     if matches!(name, "BackendKind" | "GatewayBackendInfo") {
         return "gateway/backend/core";
     }
+    if name.starts_with("Plugin") {
+        return "gateway/plugins/requests";
+    }
     if matches!(
         name,
         "ChannelDoctorParams"
@@ -108,6 +111,9 @@ fn schema_group_module(name: &str) -> &'static str {
     }
     if name.starts_with("Channel") {
         return "gateway/channels/results";
+    }
+    if name == "PendingActionView" || name.starts_with("GatewayAction") {
+        return "interaction";
     }
     if matches!(
         name,
@@ -264,6 +270,7 @@ fn schema_group_const(module: &str) -> &'static str {
         "gateway/channels/results" => "gatewayChannelResultSchemas",
         "gateway/core" => "gatewayCoreSchemas",
         "gateway/events" => "gatewayEventSchemas",
+        "gateway/plugins/requests" => "gatewayPluginRequestSchemas",
         "interaction" => "interactionSchemas",
         "launch" => "launchSchemas",
         "model/catalog" => "modelCatalogSchemas",
@@ -316,6 +323,7 @@ fn schema_group_refs_const(module: &str) -> &'static str {
         "gateway/channels/results" => "gatewayChannelResultSchemaRefs",
         "gateway/core" => "gatewayCoreSchemaRefs",
         "gateway/events" => "gatewayEventSchemaRefs",
+        "gateway/plugins/requests" => "gatewayPluginRequestSchemaRefs",
         "interaction" => "interactionSchemaRefs",
         "launch" => "launchSchemaRefs",
         "model/catalog" => "modelCatalogSchemaRefs",

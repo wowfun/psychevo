@@ -113,6 +113,15 @@
       "$ref": "ClientRequest/backend-delete.json"
     },
     {
+      "$ref": "ClientRequest/plugin-list.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-read.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-doctor.json"
+    },
+    {
       "$ref": "ClientRequest/channel-list.json"
     },
     {

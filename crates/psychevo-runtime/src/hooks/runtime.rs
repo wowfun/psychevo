@@ -129,6 +129,78 @@ impl HookRuntime {
                 ..HookResponse::default()
             };
         };
+        self.run_event_name(event, payload)
+    }
+
+    pub fn run_session_start(&self, payload: &Value) -> HookLifecycleOutcome {
+        HookLifecycleOutcome::from_response(
+            self.run_event_name(HookEventName::SessionStart, payload),
+        )
+    }
+
+    pub fn run_session_end(&self, payload: &Value) -> HookReadOnlyOutcome {
+        HookReadOnlyOutcome::from_response(self.run_event_name(HookEventName::SessionEnd, payload))
+    }
+
+    pub fn run_subagent_start(&self, payload: &Value) -> HookLifecycleOutcome {
+        HookLifecycleOutcome::from_response(
+            self.run_event_name(HookEventName::SubagentStart, payload),
+        )
+    }
+
+    pub fn run_subagent_stop(&self, payload: &Value) -> HookStopOutcome {
+        HookStopOutcome::from_response(self.run_event_name(HookEventName::SubagentStop, payload))
+    }
+
+    pub fn run_user_prompt_submit(&self, payload: &Value) -> HookUserPromptSubmitOutcome {
+        HookUserPromptSubmitOutcome::from_response(
+            self.run_event_name(HookEventName::UserPromptSubmit, payload),
+        )
+    }
+
+    pub fn run_pre_tool_use(&self, payload: &Value) -> HookPreToolUseOutcome {
+        HookPreToolUseOutcome::from_response(
+            self.run_event_name(HookEventName::PreToolUse, payload),
+        )
+    }
+
+    pub fn run_permission_request(&self, payload: &Value) -> HookPermissionRequestOutcome {
+        HookPermissionRequestOutcome::from_response(
+            self.run_event_name(HookEventName::PermissionRequest, payload),
+        )
+    }
+
+    pub fn run_post_tool_use(&self, payload: &Value) -> HookPostToolUseOutcome {
+        HookPostToolUseOutcome::from_response(
+            self.run_event_name(HookEventName::PostToolUse, payload),
+        )
+    }
+
+    pub fn run_post_llm_call(&self, payload: &Value) -> HookReadOnlyOutcome {
+        HookReadOnlyOutcome::from_response(self.run_event_name(HookEventName::PostLLMCall, payload))
+    }
+
+    pub fn run_pre_compact(&self, payload: &Value) -> HookLifecycleOutcome {
+        HookLifecycleOutcome::from_response(self.run_event_name(HookEventName::PreCompact, payload))
+    }
+
+    pub fn run_post_compact(&self, payload: &Value) -> HookLifecycleOutcome {
+        HookLifecycleOutcome::from_response(
+            self.run_event_name(HookEventName::PostCompact, payload),
+        )
+    }
+
+    pub fn run_notification(&self, payload: &Value) -> HookReadOnlyOutcome {
+        HookReadOnlyOutcome::from_response(
+            self.run_event_name(HookEventName::Notification, payload),
+        )
+    }
+
+    pub fn run_stop(&self, payload: &Value) -> HookStopOutcome {
+        HookStopOutcome::from_response(self.run_event_name(HookEventName::Stop, payload))
+    }
+
+    fn run_event_name(&self, event: HookEventName, payload: &Value) -> HookResponse {
         let mut response = HookResponse::default();
         let mut command_jobs = Vec::new();
         let (tx, rx) = mpsc::channel();
@@ -442,6 +514,9 @@ fn fold_summary(event: HookEventName, response: &mut HookResponse, summary: Hook
             })),
             "feedback" => response.feedback.push(entry.message.clone()),
             "compaction_guidance" => response.compaction_guidance.push(entry.message.clone()),
+            "model_content" if event == HookEventName::PostToolUse => {
+                response.model_content = Some(entry.message.clone());
+            }
             "error" | "warning" => response.diagnostics.push(entry.message.clone()),
             _ => {}
         }

@@ -8,8 +8,7 @@ export * from "./generated";
 export type {
   GatewayActivityView as GatewayActivity,
   JsonRpcNotification as RpcNotification,
-  PendingClarifyView as PendingClarify,
-  PendingPermissionView as PendingPermission,
+  PendingActionView as PendingAction,
   SessionSummaryView as SessionSummary,
   TurnResultPayload as TurnResultNotification
 } from "./generated";

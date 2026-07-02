@@ -24,10 +24,11 @@ Hooks are a runtime-owned extension module. Sources contribute hook
 declarations; runtime normalizes, trusts, matches, and executes them through the
 shared hook module.
 
-A hook source is a managed policy, profile, selected-agent, project, plugin,
-plugin worker, or runtime-owned source that declares handlers for named runtime
-events. A hook declaration is a candidate handler. Discovery does not make it
-trusted, executable, model-visible, or allowed to mutate runtime state.
+A hook source is a managed policy, profile, selected-agent, selected capability
+root, project, plugin, plugin worker, or runtime-owned source that declares
+handlers for named runtime events. A hook declaration is a candidate handler.
+Discovery does not make it trusted, executable, model-visible, or allowed to
+mutate runtime state.
 
 The canonical declaration shape is Codex-style: `hooks.<Event>[]` contains
 matcher groups, and each matcher group contains a `matcher` plus a `hooks[]`
@@ -67,10 +68,11 @@ Profile hooks and selected-agent hooks are trusted configuration for the active
 invocation. They still produce metadata and run summaries, but do not require
 per-hook hash review.
 
-Project hooks and plugin hooks require accepted source policy plus per-hook
-normalized-hash review before they run. Project hooks require trusted project
-configuration. Plugin hooks require the plugin package to be enabled and the
-hook definition to be trusted.
+Project hooks, selected capability root hooks, and plugin hooks require
+accepted source policy plus per-hook normalized-hash review before they run.
+Project hooks require trusted project configuration. Selected capability root
+hooks require the root to be selected for the invocation. Plugin hooks require
+the plugin package to be enabled and the hook definition to be trusted.
 
 Hook trust status values are:
 
@@ -81,8 +83,8 @@ Hook trust status values are:
 
 Untrusted and modified hooks are listed for review and skipped at execution
 time. A current invocation may opt into a dangerous one-shot trust bypass for
-project and plugin hooks, but disabled hooks remain disabled and the bypass must
-not persist trusted hashes or enablement state.
+project, selected capability root, and plugin hooks, but disabled hooks remain
+disabled and the bypass must not persist trusted hashes or enablement state.
 
 Profile-owned hook state is stored in active profile configuration under
 `hooks.state.<hook_key>`. Each state record contains `enabled` and
@@ -138,6 +140,15 @@ retroactively change the permission decision.
 while preserving raw provider output and signed reasoning. `PreCompact` may
 contribute compaction guidance. `Notification` payloads must be redacted to the
 minimum actionable message.
+
+Lifecycle hook effects are Codex-aligned for the current event catalog. Runtime
+may stop `SessionStart`, `SubagentStart`, `UserPromptSubmit`, `PreCompact`, and
+`PostCompact` at their owning call sites. `Stop` and `SubagentStop` may block
+completion and provide a turn-local continuation prompt through the hook runtime
+adapter. `SessionEnd`, `PostLLMCall`, and `Notification` remain non-mutating
+unless another owning spec defines a concrete consumer. Psychevo does not add
+Hermes-only hook events such as `pre_llm_call`, `transform_llm_output`, or
+`pre_verify` in this slice.
 
 ## Execution
 

@@ -68,16 +68,26 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             })),
         )?;
     }
-    run_agent_hook_event(
-        Some(&child.agent),
-        "SubagentStart",
-        &child.context.cwd,
-        json!({
-            "id": child.id.clone(),
-            "child_session_id": child_session.clone(),
-            "parent_session_id": child.context.parent_session_id.clone(),
-        }),
-    );
+    let hook_runtime = child_hook_runtime(&child)?;
+    if let Some(runtime) = &hook_runtime {
+        let outcome = runtime.run_subagent_start(
+            &json!({
+                "id": child.id.clone(),
+                "agent": child.agent.name.clone(),
+                "child_session_id": child_session.clone(),
+                "parent_session_id": child.context.parent_session_id.clone(),
+            }),
+        );
+        if let Some(reason) = outcome.stop_reason {
+            update_run_failed(&child.id, &reason);
+            let _ = child
+                .context
+                .state
+                .store()
+                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
+            return Err(Error::Message(reason));
+        }
+    }
 
     if child.existing_child_session.is_some() && child.previous_messages_override.is_none() {
         maybe_preflight_child_compaction(&child.context, &child_session, &child_model).await?;
@@ -99,27 +109,6 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     child_agent_tool_context.required_agent_names = Vec::new();
     child_agent_tool_context.spawn_depth_remaining = Some(child.spawn_depth_remaining);
     let sandbox_grants = crate::sandbox::SandboxWriteGrants::default();
-    let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
-        cwd: child.context.cwd.clone(),
-        task_id: child_session.clone(),
-        mode: child.context.mode,
-        lsp: child.context.lsp.clone(),
-        allow_login_shell: child.context.permission_config.allow_login_shell,
-        stream_events: child.context.stream_events.clone(),
-        env: child.context.env.clone(),
-        path_prefixes: child.context.path_prefixes.clone(),
-        sandbox_policy: child.context.sandbox_policy.clone(),
-        sandbox_grants: sandbox_grants.clone(),
-        tool_selection: child.context.tool_selection.clone(),
-        custom_toolsets: child.context.custom_toolsets.clone(),
-        clarify: ClarifyToolSurface::Disabled,
-        skills: None,
-        extension_tools: Vec::new(),
-        agents: Some(child_agent_tool_context),
-    });
-    let mut tools = tool_surface.tools;
-    tools = apply_agent_tool_policy(tools, Some(&child.agent), child.context.mode);
-    let hook_runtime = child_hook_runtime(&child)?;
     let permission_mode =
         narrow_permission_mode_for_agent(child.context.permission_mode, Some(&child.agent));
     let permission_runtime = PermissionRuntime::new(
@@ -136,13 +125,57 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         None => permission_runtime,
     };
     let permission_runtime =
-        permission_runtime.with_sandbox(child.context.sandbox_policy.clone(), sandbox_grants);
+        permission_runtime.with_sandbox(child.context.sandbox_policy.clone(), sandbox_grants.clone());
+    let (mcp_tools, mcp_warnings) = crate::mcp::mcp_tool_bindings(
+        &child.context.extension_inputs.mcp_servers,
+        &child.context.cwd,
+        Some(&permission_runtime),
+    )
+    .await;
+    emit_child_warning_events(&child, &child_session, &mcp_warnings);
+    let mut extension_tools = mcp_tools
+        .into_iter()
+        .map(|tool| {
+            let source_id = crate::mcp::mcp_tool_name_parts(tool.name())
+                .map(|(server, _)| format!("mcp:{server}"))
+                .unwrap_or_else(|| "mcp:unknown".to_string());
+            RuntimeTool::with_source(tool, source_id, "mcp")
+        })
+        .collect::<Vec<_>>();
+    extension_tools.extend(child.context.extension_inputs.runtime_tools.clone());
+    let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
+        cwd: child.context.cwd.clone(),
+        task_id: child_session.clone(),
+        mode: child.context.mode,
+        lsp: child.context.lsp.clone(),
+        allow_login_shell: child.context.permission_config.allow_login_shell,
+        stream_events: child.context.stream_events.clone(),
+        env: child.context.env.clone(),
+        path_prefixes: child.context.path_prefixes.clone(),
+        sandbox_policy: child.context.sandbox_policy.clone(),
+        sandbox_grants: sandbox_grants.clone(),
+        tool_selection: child.context.tool_selection.clone(),
+        custom_toolsets: child.context.custom_toolsets.clone(),
+        contributed_toolsets: child.context.extension_inputs.toolsets.clone(),
+        clarify: ClarifyToolSurface::Disabled,
+        skills: None,
+        extension_tools,
+        agents: Some(child_agent_tool_context),
+    });
+    emit_child_warning_events(&child, &child_session, &tool_surface.warnings);
+    let mut tools = tool_surface.tools;
+    tools = apply_agent_tool_policy(tools, Some(&child.agent), child.context.mode);
     tools = permission_runtime.wrap_tools(tools);
-    if let Some(runtime) = hook_runtime {
+    if let Some(runtime) = hook_runtime.clone() {
         tools = apply_hook_runtime(tools, runtime);
     }
     let effective_tool_names = effective_tool_names(&tools);
-    let tool_declarations_hash = tool_declarations_hash(&tools);
+    let tool_search_options = if child.context.tool_selection.tool_search.enabled {
+        psychevo_agent_core::ToolSearchOptions::enabled()
+    } else {
+        psychevo_agent_core::ToolSearchOptions::disabled()
+    };
+    let tool_declarations_hash = tool_declarations_hash_with_search(&tools, tool_search_options);
     let selected_agent = SelectedAgent {
         name: child.agent.name.clone(),
         source: child.agent.source.as_str().to_string(),
@@ -231,6 +264,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         turn_contextual_user_messages: Vec::new(),
         prompt_messages: vec![user_text_message(child.prompt.clone())],
         tools,
+        tool_search: tool_search_options,
         max_turns: child
             .max_turns
             .or(child.agent.max_turns)
@@ -285,16 +319,16 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 .state
                 .store()
                 .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
-            run_agent_hook_event(
-                Some(&child.agent),
-                "SubagentStop",
-                &child.context.cwd,
-                json!({
-                    "id": child.id.clone(),
-                    "outcome": "failed",
-                    "error": err.to_string(),
-                }),
-            );
+            if let Some(runtime) = &hook_runtime {
+                let _ = runtime.run_subagent_stop(
+                    &json!({
+                        "id": child.id.clone(),
+                        "agent": child.agent.name.clone(),
+                        "outcome": "failed",
+                        "error": err.to_string(),
+                    }),
+                );
+            }
             return Err(err.into());
         }
     };
@@ -304,22 +338,31 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         .rev()
         .find_map(assistant_text)
         .unwrap_or_default();
+    if let Some(runtime) = &hook_runtime {
+        let stop = runtime.run_subagent_stop(
+            &json!({
+                "id": child.id.clone(),
+                "agent": child.agent.name.clone(),
+                "outcome": completion.outcome.as_str(),
+                "final_answer": final_answer.clone(),
+            }),
+        );
+        if let Some(reason) = stop.block_reason {
+            update_run_failed(&child.id, &reason);
+            let _ = child
+                .context
+                .state
+                .store()
+                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
+            return Err(Error::Message(reason));
+        }
+    }
     let record = update_run_completed(&child.id, completion.outcome, final_answer.clone());
     let _ = child
         .context
         .state
         .store()
         .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
-    run_agent_hook_event(
-        Some(&child.agent),
-        "SubagentStop",
-        &child.context.cwd,
-        json!({
-            "id": child.id.clone(),
-            "outcome": completion.outcome.as_str(),
-            "final_answer": final_answer.clone(),
-        }),
-    );
     if child.background {
         let _ = append_parent_agent_mailbox_event(
             &parent_store,
@@ -336,7 +379,7 @@ pub(crate) fn emit_agent_session_start(child: &ChildRun, child_session_id: &str)
     let Some(stream) = &child.context.stream_events else {
         return;
     };
-    stream(RunStreamEvent::Event(json!({
+    stream(RunStreamEvent::value(json!({
         "type": "agent_session_start",
         "tool_call_id": child.parent_tool_call_id.clone(),
         "agent_id": child.id.clone(),
@@ -357,6 +400,18 @@ pub(crate) fn emit_agent_session_start(child: &ChildRun, child_session_id: &str)
     })));
 }
 
+fn emit_child_warning_events(child: &ChildRun, child_session_id: &str, warnings: &[RunWarning]) {
+    let Some(stream) = &child.context.stream_events else {
+        return;
+    };
+    for warning in warnings {
+        stream(RunStreamEvent::scoped(
+            child_session_id.to_string(),
+            RunStreamEvent::value(crate::run::warning_event(warning)),
+        ));
+    }
+}
+
 struct ExternalAgentSessionStart<'a> {
     context: &'a AgentToolContext,
     agent: &'a AgentDefinition,
@@ -372,7 +427,7 @@ fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
     let Some(stream) = &event.context.stream_events else {
         return;
     };
-    stream(RunStreamEvent::Event(json!({
+    stream(RunStreamEvent::value(json!({
         "type": "agent_session_start",
         "tool_call_id": event.tool_call_id,
         "agent_id": event.id,
@@ -404,7 +459,7 @@ fn child_hook_runtime(child: &ChildRun) -> Result<Option<crate::hooks::HookRunti
     };
     Ok(build_hook_runtime(
         Some(&child.agent),
-        Vec::new(),
+        child.context.extension_inputs.hook_sources.clone(),
         config,
         &child.context.cwd,
     ))
@@ -448,7 +503,7 @@ fn child_hook_runtime_config(
         mcp_servers: Vec::new(),
         runtime_tools: Vec::new(),
     };
-    crate::hooks::hook_runtime_config_with_plugin_sources_from_options(&options, &context.cwd)
+    crate::hooks::hook_runtime_config_from_options(&options, &context.cwd)
 }
 
 pub(crate) fn child_model(child: &ChildRun) -> String {

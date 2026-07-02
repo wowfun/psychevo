@@ -13,11 +13,11 @@ pub(crate) fn display_spec_for_tool(router: &ToolRouter, name: &str) -> ToolDisp
 pub(crate) async fn stream_assistant(
     provider: Arc<dyn GenerationProvider>,
     request: &AgentLoopRequest,
+    tool_router: &ToolRouter,
     context: &[Message],
     sink: Arc<dyn EventSink>,
     abort: AbortSignal,
 ) -> Result<Message> {
-    let tool_router = ToolRouter::from_tools(request.tools.clone());
     let mut messages = request
         .prompt_instructions
         .iter()
@@ -209,7 +209,7 @@ pub(crate) async fn stream_assistant(
                         arguments_json: String::new(),
                         content_index,
                         call_index,
-                        display: Some(display_spec_for_tool(&tool_router, &pending_name)),
+                        display: Some(display_spec_for_tool(tool_router, &pending_name)),
                     },
                 )
                 .await?;
@@ -247,7 +247,7 @@ pub(crate) async fn stream_assistant(
                             arguments_json: builder.arguments_json.clone(),
                             content_index: builder.content_index,
                             call_index: builder.call_index,
-                            display: Some(display_spec_for_tool(&tool_router, &builder.name)),
+                            display: Some(display_spec_for_tool(tool_router, &builder.name)),
                         },
                     )
                     .await?;

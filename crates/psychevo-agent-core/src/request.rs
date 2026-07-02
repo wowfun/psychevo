@@ -69,7 +69,38 @@ pub struct AgentLoopRequest {
     pub turn_contextual_user_messages: Vec<ContextualUserMessage>,
     pub prompt_messages: Vec<Message>,
     pub tools: Vec<Arc<dyn ToolBinding>>,
+    pub tool_search: ToolSearchOptions,
     pub max_turns: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolSearchOptions {
+    pub enabled: bool,
+    pub default_limit: usize,
+    pub max_limit: usize,
+}
+
+impl ToolSearchOptions {
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            default_limit: 8,
+            max_limit: 20,
+        }
+    }
+
+    pub fn enabled() -> Self {
+        Self {
+            enabled: true,
+            ..Self::disabled()
+        }
+    }
+}
+
+impl Default for ToolSearchOptions {
+    fn default() -> Self {
+        Self::disabled()
+    }
 }
 
 #[derive(Debug, Clone)]

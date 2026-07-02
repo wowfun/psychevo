@@ -8,6 +8,7 @@ pub(crate) mod compaction;
 pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod context_usage;
+pub(crate) mod contribution_projection;
 pub(crate) mod error;
 pub(crate) mod events;
 pub mod extensions;
@@ -108,10 +109,11 @@ pub use model_state::{
 pub use paths::{canonicalize_cwd, workspace_snapshot_id};
 pub use plugins::{
     LoadedPluginManifest, PluginDiagnostic, PluginInstallOptions, PluginInstallRecord,
-    PluginManifestKind, PluginMarketplaceEntry, PluginScope, PluginWorkerSpec, install_plugin,
-    load_plugin_manifest, plugin_doctor_value, plugin_install_value, plugin_list_value,
-    plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
-    plugin_set_enabled_value, plugin_uninstall_value, plugin_view_value,
+    PluginInterfaceMetadata, PluginManifestKind, PluginMarketplaceEntry, PluginScope,
+    PluginWorkerSpec, install_plugin, load_plugin_manifest, plugin_doctor_value,
+    plugin_install_value, plugin_list_value, plugin_marketplace_add_value,
+    plugin_marketplace_list_value, plugin_marketplace_remove_value, plugin_set_enabled_value,
+    plugin_uninstall_value, plugin_view_value,
 };
 pub use prompt_image::{
     extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,

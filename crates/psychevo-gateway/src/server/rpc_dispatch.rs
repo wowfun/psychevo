@@ -245,6 +245,19 @@ async fn handle_rpc(
                 }
                 None => None,
             };
+            let requested_side_conversation_thread = requested_thread_id
+                .as_deref()
+                .map(|thread_id| {
+                    state
+                        .inner
+                        .state
+                        .store()
+                        .session_summary(thread_id)?
+                        .map(|summary| side_conversation_session_source(&summary.source))
+                        .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))
+                })
+                .transpose()?
+                .unwrap_or(false);
             let mode = params
                 .mode
                 .as_deref()
@@ -266,7 +279,11 @@ async fn handle_rpc(
             mention_validation.runtime_ref = params.runtime_ref.clone();
             apply_mentions_to_run_options(&mut mention_validation, &params.mentions)?;
 
-            let thread_id = ensure_turn_start_thread(&state, &scope, requested_thread_id)?;
+            let thread_id = if requested_side_conversation_thread {
+                requested_thread_id
+            } else {
+                ensure_turn_start_thread(&state, &scope, requested_thread_id)?
+            };
             let mut options = state.run_options(scope.cwd.clone(), thread_id.clone());
             options.model = params.model;
             options.reasoning_effort = params.reasoning_effort;
@@ -281,7 +298,7 @@ async fn handle_rpc(
             }
             options.agent = params.agent_name.clone();
             apply_mentions_to_run_options(&mut options, &params.mentions)?;
-            let source = scope.source.clone();
+            let source = (!requested_side_conversation_thread).then(|| scope.source.clone());
             let event_selector = thread_id
                 .as_ref()
                 .map(GatewayThreadSelector::thread_id)
@@ -299,14 +316,15 @@ async fn handle_rpc(
                 let _ = event_tx.send(rpc_notification("gateway/event", json!(display_event)));
             });
             let gateway = state.inner.gateway.clone();
-            let bind_source = cwd_source(&scope.cwd);
+            let bind_source =
+                (!requested_side_conversation_thread).then(|| cwd_source(&scope.cwd));
             let requested_thread_id = thread_id.clone();
             tokio::spawn(async move {
                 let result = gateway
                     .send_turn(crate::SendTurnRequest {
                         thread_id,
-                        source: Some(source),
-                        bind_source: Some(bind_source),
+                        source,
+                        bind_source,
                         reset_source_binding: false,
                         input,
                         options,
@@ -615,6 +633,24 @@ async fn handle_rpc(
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             delete_backend_config(&state, &scope, params)
         }
+        "plugin/list" => {
+            let params = request.params::<wire::PluginListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let options = plugin_runtime_options(&state, scope.cwd);
+            plugin_list_value(&options)
+        }
+        "plugin/read" => {
+            let params = request.required_params::<wire::PluginReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let options = plugin_runtime_options(&state, scope.cwd);
+            plugin_view_value(&options, &params.selector)
+        }
+        "plugin/doctor" => {
+            let params = request.params::<wire::PluginDoctorParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let options = plugin_runtime_options(&state, scope.cwd);
+            plugin_doctor_value(&options, params.selector.as_deref())
+        }
         "channel/list" => {
             let params = request.params::<wire::ChannelListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
@@ -880,6 +916,17 @@ async fn handle_rpc(
         }
         method => Err(Error::Message(format!("method not found: {method}"))),
     }
+}
+
+fn plugin_runtime_options(state: &WebState, cwd: PathBuf) -> RunOptions {
+    let mut options = state.run_options(cwd, None);
+    let mut inherited_env = options.inherited_env.take().unwrap_or_default();
+    inherited_env.insert(
+        "PSYCHEVO_HOME".to_string(),
+        state.inner.home.display().to_string(),
+    );
+    options.inherited_env = Some(inherited_env);
+    options
 }
 
 include!("rpc_dispatch/model_scope.rs");

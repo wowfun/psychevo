@@ -184,9 +184,18 @@ fn print_plugin_value(value: &Value, json_output: bool) -> Result<()> {
                 let version = row.get("version").and_then(Value::as_str).unwrap_or("");
                 let scope = row.get("scope").and_then(Value::as_str).unwrap_or("");
                 let enabled = row.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+                let display_name = plugin
+                    .get("manifest")
+                    .and_then(|manifest| manifest.get("interface"))
+                    .and_then(|interface| interface.get("displayName"))
+                    .and_then(Value::as_str);
+                let display_suffix = display_name
+                    .filter(|display| *display != name)
+                    .map(|display| format!(" - {display}"))
+                    .unwrap_or_default();
                 println!(
-                    "{name} {version} [{scope}] {}",
-                    if enabled { "enabled" } else { "disabled" }
+                    "{name} {version} [{scope}] {}{display_suffix}",
+                    if enabled { "enabled" } else { "disabled" },
                 );
             }
         }
@@ -200,8 +209,35 @@ fn print_plugin_value(value: &Value, json_output: bool) -> Result<()> {
         let version = plugin.get("version").and_then(Value::as_str).unwrap_or("");
         let scope = plugin.get("scope").and_then(Value::as_str).unwrap_or("");
         println!("{name} {version} [{scope}]");
+        if let Some(interface) = value
+            .get("manifest")
+            .and_then(|manifest| manifest.get("interface"))
+            .and_then(Value::as_object)
+        {
+            print_interface_summary(interface);
+        }
         return Ok(());
     }
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+
+fn print_interface_summary(interface: &serde_json::Map<String, Value>) {
+    if let Some(display_name) = interface.get("displayName").and_then(Value::as_str) {
+        println!("Display: {display_name}");
+    }
+    if let Some(category) = interface.get("category").and_then(Value::as_str) {
+        println!("Category: {category}");
+    }
+    if let Some(capabilities) = interface
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+        .filter(|items| !items.is_empty())
+    {
+        println!("Capabilities: {}", capabilities.join(", "));
+    }
+    if let Some(description) = interface.get("shortDescription").and_then(Value::as_str) {
+        println!("{description}");
+    }
 }
