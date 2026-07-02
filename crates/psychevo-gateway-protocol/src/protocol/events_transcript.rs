@@ -30,15 +30,6 @@ pub enum GatewayEvent {
         #[serde(rename = "committedEntries", default)]
         committed_entries: Vec<TranscriptEntry>,
     },
-    EntryDelta {
-        #[serde(rename = "turnId")]
-        turn_id: String,
-        #[serde(rename = "entryId")]
-        entry_id: Option<String>,
-        #[serde(rename = "blockId")]
-        block_id: Option<String>,
-        delta: String,
-    },
     EntryStarted {
         #[serde(rename = "turnId")]
         turn_id: String,
@@ -54,72 +45,25 @@ pub enum GatewayEvent {
         turn_id: String,
         entry: TranscriptEntry,
     },
-    PermissionRequested {
-        #[serde(rename = "requestId")]
-        request_id: String,
-        #[serde(rename = "toolName")]
-        tool_name: String,
-        summary: String,
-        reason: String,
-        #[serde(rename = "matchedRule")]
-        matched_rule: Option<String>,
-        #[serde(rename = "suggestedRule")]
-        suggested_rule: Option<String>,
-        #[serde(rename = "allowAlways")]
-        allow_always: bool,
-        #[serde(rename = "timeoutSecs")]
-        timeout_secs: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        thread_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        turn_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        activity_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        source_key: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        owner_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        lease_expires_at_ms: Option<i64>,
+    ActionRequested {
+        action: PendingActionView,
     },
-    PermissionResolved {
-        #[serde(rename = "requestId")]
-        request_id: String,
-        decision: PermissionDecision,
+    ActionUpdated {
+        action: PendingActionView,
     },
-    ClarifyRequested {
-        #[serde(rename = "requestId")]
-        request_id: String,
+    ActionResolved {
+        #[serde(rename = "actionId")]
+        action_id: String,
+        kind: GatewayActionKind,
+        outcome: GatewayActionOutcome,
+        #[serde(default)]
         #[ts(type = "unknown")]
-        raw: Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        thread_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        turn_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        activity_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        source_key: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        owner_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        lease_expires_at_ms: Option<i64>,
+        payload: Value,
     },
-    ClarifyResolved {
-        #[serde(rename = "requestId")]
-        request_id: String,
+    ActionCancelled {
+        #[serde(rename = "actionId")]
+        action_id: String,
+        kind: GatewayActionKind,
         reason: String,
     },
     Warning {
@@ -157,6 +101,25 @@ pub enum PermissionDecision {
     AllowSession,
     AllowAlways,
     Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum GatewayActionKind {
+    Permission,
+    Clarify,
+    CustomTool,
+    UserInput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum GatewayActionOutcome {
+    Accepted,
+    Rejected,
+    Cancelled,
+    TimedOut,
+    Completed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -298,45 +261,18 @@ pub struct GatewayActivityView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct PendingPermissionView {
-    pub request_id: String,
-    pub tool_name: String,
-    pub summary: String,
-    pub reason: String,
+pub struct PendingActionView {
+    pub action_id: String,
+    pub kind: GatewayActionKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub matched_rule: Option<String>,
+    pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub suggested_rule: Option<String>,
-    pub allow_always: bool,
-    pub timeout_secs: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub thread_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub turn_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub activity_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub source_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub owner_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub lease_expires_at_ms: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PendingClarifyView {
-    pub request_id: String,
+    pub summary: Option<String>,
+    #[serde(default)]
     #[ts(type = "unknown")]
-    pub raw: Value,
+    pub payload: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub thread_id: Option<String>,
@@ -366,8 +302,7 @@ pub struct ThreadSnapshot {
     pub thread: Option<GatewayThread>,
     pub entries: Vec<TranscriptEntry>,
     pub activity: GatewayActivityView,
-    pub pending_permissions: Vec<PendingPermissionView>,
-    pub pending_clarifies: Vec<PendingClarifyView>,
+    pub pending_actions: Vec<PendingActionView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

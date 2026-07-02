@@ -319,7 +319,17 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         no_skills: false,
     };
     let catalog = discover_skills(&skill_options)?;
-    let skills_prompt = format_skills_for_prompt(&catalog.skills);
+    let mut tools = coding_core_tools_for_mode(&cwd, mode);
+    tools.extend(skill_tools_for_mode(skill_options, mode));
+    let effective_tool_names = tools
+        .iter()
+        .map(|tool| tool.name().to_string())
+        .collect::<Vec<_>>();
+    let prompt_skills = skills_visible_for_prompt_with_tools(
+        &catalog.skills,
+        effective_tool_names.iter().map(String::as_str),
+    );
+    let skills_prompt = format_skills_for_prompt(&prompt_skills);
     let mut request_messages = vec![json!({
         "role": "system",
         "content": mode_instruction(mode),
@@ -360,8 +370,6 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     for message in &messages {
         request_messages.push(serde_json::to_value(message)?);
     }
-    let mut tools = coding_core_tools_for_mode(&cwd, mode);
-    tools.extend(skill_tools_for_mode(skill_options, mode));
     let request = GenerationRequest {
         model: ModelTarget {
             provider: summary.provider.clone(),
@@ -373,11 +381,11 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
             "context_counting": {
                 "system_prompt_message_count": 2,
                 "base_policy_message_count": 2,
-                "skill_index_message_count": if catalog.skills.is_empty() { 0 } else { 1 },
+                "skill_index_message_count": if prompt_skills.is_empty() { 0 } else { 1 },
                 "previous_message_count": messages.len(),
                 "project_instruction_context_message_count": 0,
                 "selected_skill_context_message_count": 0,
-                "skill_names": catalog.skills.iter().map(|skill| skill.name.clone()).collect::<Vec<_>>(),
+                "skill_names": prompt_skills.iter().map(|skill| skill.name.clone()).collect::<Vec<_>>(),
             }
         }),
     };

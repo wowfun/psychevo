@@ -1,6 +1,6 @@
 import { ArrowUp, Plus, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import type { CompletionItem, CompletionListResult, GatewayMention, PendingClarify } from "@psychevo/protocol";
+import type { CompletionItem, CompletionListResult, GatewayMention, PendingAction } from "@psychevo/protocol";
 import { IconButton } from "./primitives";
 
 export interface ComposerProps {
@@ -575,20 +575,24 @@ function ClarifyRequest({
   request,
   onSubmit
 }: {
-  request: PendingClarify;
+  request: PendingAction;
   onSubmit(requestId: string, answer: string): void;
 }) {
   const [answer, setAnswer] = useState("");
+  const payload = request.payload && typeof request.payload === "object"
+    ? request.payload as Record<string, unknown>
+    : {};
+  const raw = payload.raw ?? request.payload;
   return (
     <form
       className="pevo-request"
       onSubmit={(event) => {
         event.preventDefault();
-        onSubmit(request.requestId, answer);
+        onSubmit(request.actionId, answer);
         setAnswer("");
       }}
     >
-      <pre>{JSON.stringify(request.raw, null, 2)}</pre>
+      <pre>{JSON.stringify(raw, null, 2)}</pre>
       <input value={answer} onChange={(event) => setAnswer(event.target.value)} />
       <button type="submit">Submit</button>
     </form>

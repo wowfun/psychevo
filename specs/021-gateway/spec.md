@@ -460,14 +460,17 @@ ordinary Gateway stream unless another spec assigns them explicit typed
 semantics.
 
 Gateway events are live observations, not durable evidence. Durable records
-remain owned by runtime and storage specs.
+remain owned by runtime and storage specs. [035 Event
+Stream](../035-event-stream/spec.md) defines the canonical runtime event stream,
+blocking-action lifecycle, and projection/delivery separation that Gateway
+implements.
 
 Web and GUI clients must apply typed live entry observations to their in-memory
 transcript while a turn is running. `entryStarted`, `entryUpdated`, and
 `entryCompleted` upsert the event entry by id; the completed entry replaces the
 running entry until the committed turn slice or next snapshot refresh arrives.
-`entryDelta` may update an existing live entry when it names an entry id, but
-clients must not invent durable records from deltas alone. A subsequent
+Preview text and incremental updates may only update an existing live entry by
+id; clients must not invent durable records from previews alone. A subsequent
 `thread/read` or `thread/resume` snapshot remains authoritative and may replace
 live ids with message-derived entry ids.
 

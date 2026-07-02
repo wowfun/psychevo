@@ -184,8 +184,7 @@ afterEach(() => {
     backend: { kind: "psychevo" as const, nativeId: "thread-1" },
     sourceKey: "source-key"
   };
-  gatewayMock.snapshot.pendingPermissions = [];
-  gatewayMock.snapshot.pendingClarifies = [];
+  gatewayMock.snapshot.pendingActions = [];
   gatewayMock.snapshot.entries = [];
   gatewayMock.snapshot.activity = { running: false, activeTurnId: null, queuedTurns: 0 };
   gatewayMock.workspaceDiffResult = {

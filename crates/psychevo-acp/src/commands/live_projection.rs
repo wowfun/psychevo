@@ -14,11 +14,6 @@ pub(crate) fn send_gateway_event_update(
     projection: &mut AcpLiveProjection,
 ) {
     match event {
-        GatewayEvent::EntryDelta { delta, .. } => send_session_update(
-            cx,
-            session_id.clone(),
-            agent_thought_update(session_id, delta),
-        ),
         GatewayEvent::EntryStarted { entry, .. }
         | GatewayEvent::EntryUpdated { entry, .. }
         | GatewayEvent::EntryCompleted { entry, .. } => {
@@ -44,10 +39,10 @@ pub(crate) fn send_gateway_event_update(
         }
         GatewayEvent::TurnStarted { .. }
         | GatewayEvent::TurnQueued { .. }
-        | GatewayEvent::PermissionRequested { .. }
-        | GatewayEvent::PermissionResolved { .. }
-        | GatewayEvent::ClarifyRequested { .. }
-        | GatewayEvent::ClarifyResolved { .. }
+        | GatewayEvent::ActionRequested { .. }
+        | GatewayEvent::ActionUpdated { .. }
+        | GatewayEvent::ActionResolved { .. }
+        | GatewayEvent::ActionCancelled { .. }
         | GatewayEvent::ActivityChanged { .. }
         | GatewayEvent::TitleChanged { .. } => {}
     }

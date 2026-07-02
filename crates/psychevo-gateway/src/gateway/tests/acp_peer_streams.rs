@@ -373,8 +373,10 @@ tools: [read]
 
         loop {
             let event = event_rx.recv().await.expect("gateway event");
-            if let GatewayEvent::PermissionRequested { request_id, .. } = event {
-                assert_eq!(request_id, "permission-1");
+            if let GatewayEvent::ActionRequested { action } = event
+                && action.kind == GatewayActionKind::Permission
+            {
+                assert_eq!(action.action_id, "permission-1");
                 break;
             }
         }
@@ -389,10 +391,12 @@ tools: [read]
         let resolved = event_rx.recv().await.expect("permission resolved event");
         assert!(matches!(
             resolved,
-            GatewayEvent::PermissionResolved {
-                decision: PermissionDecision::AllowOnce,
+            GatewayEvent::ActionResolved {
+                kind: GatewayActionKind::Permission,
+                outcome: GatewayActionOutcome::Accepted,
+                payload,
                 ..
-            }
+            } if payload["decision"] == "allowOnce"
         ));
     }
 
@@ -414,8 +418,10 @@ tools: [read]
 
         loop {
             let event = event_rx.recv().await.expect("gateway event");
-            if let GatewayEvent::PermissionRequested { request_id, .. } = event {
-                assert_eq!(request_id, "permission-1");
+            if let GatewayEvent::ActionRequested { action } = event
+                && action.kind == GatewayActionKind::Permission
+            {
+                assert_eq!(action.action_id, "permission-1");
                 break;
             }
         }

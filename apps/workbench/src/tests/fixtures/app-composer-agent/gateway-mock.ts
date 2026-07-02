@@ -28,8 +28,7 @@ const gatewayMock = vi.hoisted(() => {
     },
     entries: [],
     activity: { running: false, activeTurnId: null, queuedTurns: 0 },
-    pendingPermissions: [] as Array<Record<string, unknown>>,
-    pendingClarifies: [] as Array<Record<string, unknown>>
+    pendingActions: [] as Array<Record<string, unknown>>
   };
   function mergeMockModelOptions(
     current: Array<Record<string, unknown>>,

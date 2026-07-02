@@ -274,6 +274,8 @@ request and response hooks may observe a request before it is shown and after
 it resolves; hooks must not be required for the approval result and must not
 write durable transcript events. Session cleanup, TUI exit, and abort paths
 must release all pending approvals with deny/abort semantics and wake suspended
+calls. [035 Event Stream](../035-event-stream/spec.md) defines the shared
+blocking-action projection lifecycle used by public streams.
 tool calls.
 
 Session grants are scoped to one runtime session. `allow always` persists

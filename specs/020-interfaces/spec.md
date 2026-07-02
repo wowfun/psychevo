@@ -75,7 +75,10 @@ Session lifecycle observations, when an entrypoint exposes them, are separate in
 
 Observation streams are not durable evidence. Durable evidence records final facts for inspection and future replay work; observation is the caller-facing progress surface during execution.
 
-This spec does not define event payload schemas, transport framing, buffering, replay, ordering beyond agent execution semantics, or terminal rendering.
+This spec does not define event payload schemas, transport framing, buffering,
+replay, ordering beyond agent execution semantics, or terminal rendering. [035
+Event Stream](../035-event-stream/spec.md) defines the canonical runtime event
+stream and projection contract.
 
 ## Completion
 

@@ -4,6 +4,25 @@ export const serverNotificationGatewayEventSchema = {
   "$id": "ServerNotification/gateway-event.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewayActionKind": {
+      "enum": [
+        "permission",
+        "clarify",
+        "customTool",
+        "userInput"
+      ],
+      "type": "string"
+    },
+    "GatewayActionOutcome": {
+      "enum": [
+        "accepted",
+        "rejected",
+        "cancelled",
+        "timedOut",
+        "completed"
+      ],
+      "type": "string"
+    },
     "GatewayActivityView": {
       "properties": {
         "activeTurnId": {
@@ -167,40 +186,6 @@ export const serverNotificationGatewayEventSchema = {
         },
         {
           "properties": {
-            "blockId": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "delta": {
-              "type": "string"
-            },
-            "entryId": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "turnId": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "entryDelta"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "delta",
-            "turnId",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
             "entry": {
               "$ref": "#/definitions/TranscriptEntry"
             },
@@ -267,190 +252,91 @@ export const serverNotificationGatewayEventSchema = {
         },
         {
           "properties": {
-            "activity_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "action": {
+              "$ref": "#/definitions/PendingActionView"
             },
-            "allowAlways": {
-              "type": "boolean"
+            "type": {
+              "enum": [
+                "actionRequested"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/PendingActionView"
             },
-            "lease_expires_at_ms": {
-              "format": "int64",
-              "type": [
-                "integer",
-                "null"
-              ]
+            "type": {
+              "enum": [
+                "actionUpdated"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "actionId": {
+              "type": "string"
             },
-            "matchedRule": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "kind": {
+              "$ref": "#/definitions/GatewayActionKind"
             },
-            "owner_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "outcome": {
+              "$ref": "#/definitions/GatewayActionOutcome"
+            },
+            "payload": {
+              "default": null
+            },
+            "type": {
+              "enum": [
+                "actionResolved"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "actionId",
+            "kind",
+            "outcome",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "actionId": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/GatewayActionKind"
             },
             "reason": {
               "type": "string"
             },
-            "requestId": {
-              "type": "string"
-            },
-            "source_key": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "suggestedRule": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "summary": {
-              "type": "string"
-            },
-            "thread_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "timeoutSecs": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "toolName": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "type": {
               "enum": [
-                "permissionRequested"
+                "actionCancelled"
               ],
               "type": "string"
             }
           },
           "required": [
-            "allowAlways",
+            "actionId",
+            "kind",
             "reason",
-            "requestId",
-            "summary",
-            "timeoutSecs",
-            "toolName",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "decision": {
-              "$ref": "#/definitions/PermissionDecision"
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "permissionResolved"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "decision",
-            "requestId",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "activity_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "lease_expires_at_ms": {
-              "format": "int64",
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "owner_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "raw": true,
-            "requestId": {
-              "type": "string"
-            },
-            "source_key": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "thread_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "turn_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "type": {
-              "enum": [
-                "clarifyRequested"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "raw",
-            "requestId",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "reason": {
-              "type": "string"
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "clarifyResolved"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "reason",
-            "requestId",
             "type"
           ],
           "type": "object"
@@ -635,14 +521,72 @@ export const serverNotificationGatewayEventSchema = {
       ],
       "type": "string"
     },
-    "PermissionDecision": {
-      "enum": [
-        "allowOnce",
-        "allowSession",
-        "allowAlways",
-        "deny"
+    "PendingActionView": {
+      "properties": {
+        "actionId": {
+          "type": "string"
+        },
+        "activityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/GatewayActionKind"
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "default": null
+        },
+        "sourceKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "actionId",
+        "kind"
       ],
-      "type": "string"
+      "type": "object"
     },
     "TranscriptBlock": {
       "properties": {

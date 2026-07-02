@@ -12,28 +12,59 @@ export const interactionSchemas = {
   "title": "PermissionDecision",
   "type": "string"
 },
-  PendingPermissionView: {
+  GatewayActionKind: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "permission",
+    "clarify",
+    "customTool",
+    "userInput"
+  ],
+  "title": "GatewayActionKind",
+  "type": "string"
+},
+  GatewayActionOutcome: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "accepted",
+    "rejected",
+    "cancelled",
+    "timedOut",
+    "completed"
+  ],
+  "title": "GatewayActionOutcome",
+  "type": "string"
+},
+  PendingActionView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayActionKind": {
+      "enum": [
+        "permission",
+        "clarify",
+        "customTool",
+        "userInput"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
+    "actionId": {
+      "type": "string"
+    },
     "activityId": {
       "type": [
         "string",
         "null"
       ]
     },
-    "allowAlways": {
-      "type": "boolean"
+    "kind": {
+      "$ref": "#/definitions/GatewayActionKind"
     },
     "leaseExpiresAtMs": {
       "format": "int64",
       "type": [
         "integer",
-        "null"
-      ]
-    },
-    "matchedRule": {
-      "type": [
-        "string",
         "null"
       ]
     },
@@ -43,92 +74,28 @@ export const interactionSchemas = {
         "null"
       ]
     },
-    "reason": {
-      "type": "string"
-    },
-    "requestId": {
-      "type": "string"
+    "payload": {
+      "default": null
     },
     "sourceKey": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "suggestedRule": {
       "type": [
         "string",
         "null"
       ]
     },
     "summary": {
-      "type": "string"
-    },
-    "threadId": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "timeoutSecs": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
-    "toolName": {
-      "type": "string"
-    },
-    "turnId": {
-      "type": [
-        "string",
-        "null"
-      ]
-    }
-  },
-  "required": [
-    "allowAlways",
-    "reason",
-    "requestId",
-    "summary",
-    "timeoutSecs",
-    "toolName"
-  ],
-  "title": "PendingPermissionView",
-  "type": "object"
-},
-  PendingClarifyView: {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "properties": {
-    "activityId": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "leaseExpiresAtMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "ownerId": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "raw": true,
-    "requestId": {
-      "type": "string"
-    },
-    "sourceKey": {
       "type": [
         "string",
         "null"
       ]
     },
     "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
       "type": [
         "string",
         "null"
@@ -142,10 +109,10 @@ export const interactionSchemas = {
     }
   },
   "required": [
-    "raw",
-    "requestId"
+    "actionId",
+    "kind"
   ],
-  "title": "PendingClarifyView",
+  "title": "PendingActionView",
   "type": "object"
 },
   PermissionRespondParams: {

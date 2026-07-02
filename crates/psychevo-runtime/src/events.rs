@@ -255,7 +255,7 @@ fn emit_trace_warning_once(
             .push(value.clone());
     }
     if let Some(stream_events) = stream_events {
-        stream_events(RunStreamEvent::Event(value));
+        stream_events(RunStreamEvent::value(value));
     }
 }
 
@@ -468,7 +468,7 @@ pub(crate) fn project_run_stream_event_with_accounting(
             {
                 object.insert("display".to_string(), serde_json::to_value(display).ok()?);
             }
-            Some(RunStreamEvent::Event(value))
+            Some(RunStreamEvent::value(value))
         }
         AgentEvent::MessageEnd {
             message,
@@ -494,8 +494,8 @@ pub(crate) fn project_run_stream_event_with_accounting(
             {
                 object.insert("accounting".to_string(), accounting.public_json());
             }
-            Some(RunStreamEvent::Event(value))
+            Some(RunStreamEvent::value(value))
         }
-        _ => project_agent_event(event, false).map(RunStreamEvent::Event),
+        _ => project_agent_event(event, false).map(RunStreamEvent::value),
     }
 }

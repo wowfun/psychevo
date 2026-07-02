@@ -21,6 +21,7 @@ import { gatewayChannelRequestSchemas } from './gateway/channels/requests';
 import { gatewayChannelResultSchemas } from './gateway/channels/results';
 import { gatewayCoreSchemas } from './gateway/core';
 import { gatewayEventSchemas } from './gateway/events';
+import { gatewayPluginRequestSchemas } from './gateway/plugins/requests';
 import { interactionSchemas } from './interaction';
 import { launchSchemas } from './launch';
 import { modelCatalogSchemas } from './model/catalog';
@@ -68,6 +69,8 @@ export const gatewaySchemas = {
   GatewaySelectedSkill: gatewayEventSchemas.GatewaySelectedSkill,
   GatewayEvent: gatewayEventSchemas.GatewayEvent,
   PermissionDecision: interactionSchemas.PermissionDecision,
+  GatewayActionKind: interactionSchemas.GatewayActionKind,
+  GatewayActionOutcome: interactionSchemas.GatewayActionOutcome,
   TranscriptEntryRole: transcriptSchemas.TranscriptEntryRole,
   TranscriptBlockKind: transcriptSchemas.TranscriptBlockKind,
   TranscriptBlockStatus: transcriptSchemas.TranscriptBlockStatus,
@@ -75,8 +78,7 @@ export const gatewaySchemas = {
   TranscriptBlock: transcriptSchemas.TranscriptBlock,
   TranscriptEntry: transcriptSchemas.TranscriptEntry,
   GatewayActivityView: threadSessionSchemas.GatewayActivityView,
-  PendingPermissionView: interactionSchemas.PendingPermissionView,
-  PendingClarifyView: interactionSchemas.PendingClarifyView,
+  PendingActionView: interactionSchemas.PendingActionView,
   ThreadSnapshot: threadSnapshotSchemas.ThreadSnapshot,
   SessionProjectView: threadSessionSchemas.SessionProjectView,
   SessionSummaryView: threadSessionSchemas.SessionSummaryView,
@@ -134,6 +136,9 @@ export const gatewaySchemas = {
   BackendDoctorParams: gatewayBackendDoctorSchemas.BackendDoctorParams,
   BackendWriteParams: gatewayBackendConfigSchemas.BackendWriteParams,
   BackendDeleteParams: gatewayBackendConfigSchemas.BackendDeleteParams,
+  PluginListParams: gatewayPluginRequestSchemas.PluginListParams,
+  PluginReadParams: gatewayPluginRequestSchemas.PluginReadParams,
+  PluginDoctorParams: gatewayPluginRequestSchemas.PluginDoctorParams,
   BackendConfigView: gatewayBackendConfigSchemas.BackendConfigView,
   BackendListResult: gatewayBackendConfigSchemas.BackendListResult,
   BackendDiagnosticView: gatewayBackendConfigSchemas.BackendDiagnosticView,

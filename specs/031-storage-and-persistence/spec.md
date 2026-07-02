@@ -79,6 +79,9 @@ Generic runtime debug observations are not part of the baseline persistence
 boundary. Persisting raw runtime/provider payloads or hidden event diagnostics
 requires a separate domain-specific sidecar spec with explicit retention and
 payload policy.
+The canonical runtime event and projection contract is defined by [035 Event
+Stream](../035-event-stream/spec.md). This storage topic does not require a
+durable full event log for ordinary transcript replay.
 
 Per-message metadata may carry durable metric facts for the message they
 annotate. For tool-result messages, implementations may persist tool execution

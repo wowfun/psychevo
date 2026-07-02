@@ -515,6 +515,130 @@
     }
 
     #[tokio::test]
+    async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
+        let backend = Arc::new(AutomationFakeBackend::default());
+        let (_temp, state) = web_state_with_automation_backend(backend);
+        let resolved_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+        let scope = resolved_scope.to_wire_scope();
+        let parent_session = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(
+                &state.inner.cwd,
+                "web",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .expect("parent session");
+        state
+            .inner
+            .state
+            .store()
+            .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
+            .expect("parent message");
+        bind_source_to_thread(&state, &resolved_scope, &parent_session).expect("bind parent");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/btw explain this",
+                    "threadId": parent_session.clone()
+                })),
+            },
+        )
+        .await
+        .expect("command/execute btw");
+        let side_thread_id = result["action"]["threadId"]
+            .as_str()
+            .expect("side thread id")
+            .to_string();
+
+        let accepted = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "turn/start".to_string(),
+                params: Some(json!({
+                    "scope": resolved_scope.to_wire_scope(),
+                    "threadId": side_thread_id.clone(),
+                    "agentName": null,
+                    "runtimeRef": "native",
+                    "runtimeSessionId": null,
+                    "runtimeOptions": {},
+                    "input": [{"type": "text", "text": "explain this"}],
+                    "mentions": [],
+                    "text": null,
+                    "model": "fake-model",
+                    "reasoningEffort": null,
+                    "mode": null,
+                    "permissionMode": null
+                })),
+            },
+        )
+        .await
+        .expect("turn/start");
+        assert_eq!(accepted["accepted"], true);
+
+        let turn_result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while let Some(message) = rx.recv().await {
+                if message.contains("\"method\":\"turn/result\"") {
+                    return message;
+                }
+            }
+            panic!("turn/result notification channel closed");
+        })
+        .await
+        .expect("turn/result notification");
+        assert!(turn_result.contains(&side_thread_id), "{turn_result}");
+        assert_eq!(
+            state
+                .inner
+                .gateway
+                .resolve_source_thread(&resolved_scope.source)
+                .expect("source binding")
+                .as_deref(),
+            Some(parent_session.as_str())
+        );
+
+        let deleted = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "thread/delete".to_string(),
+                params: Some(json!({ "threadId": side_thread_id.clone() })),
+            },
+        )
+        .await
+        .expect("delete side thread");
+        assert_eq!(deleted["deleted"], true);
+        assert!(
+            state
+                .inner
+                .state
+                .store()
+                .session_summary(&side_thread_id)
+                .expect("side summary")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn command_execute_undo_redo_restores_session_snapshot() {
         let (_temp, state) = web_state();
         git(&state.inner.cwd, ["init"]);

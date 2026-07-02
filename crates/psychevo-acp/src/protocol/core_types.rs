@@ -322,7 +322,7 @@ struct AcpAccountingAccumulator {
 impl AcpUsageAccumulator {
     pub(crate) fn record_stream_event(&mut self, event: &RunStreamEvent) {
         match event {
-            RunStreamEvent::Event(value) => self.record_runtime_value(value),
+            RunStreamEvent::Event(value) => self.record_runtime_value(value.as_value()),
             RunStreamEvent::Scoped { event, .. } => self.record_stream_event(event),
             RunStreamEvent::ReasoningDelta { .. }
             | RunStreamEvent::ReasoningEnd
@@ -662,42 +662,43 @@ pub(crate) fn acp_mcp_servers(servers: Vec<McpServer>) -> Vec<McpServerInput> {
         .map(|server| match server {
             McpServer::Http(McpServerHttp {
                 name, url, headers, ..
-            }) => McpServerInput {
+            }) => McpServerInput::new(
                 name,
-                transport: McpTransportInput::StreamableHttp {
+                McpTransportInput::StreamableHttp {
                     url,
                     headers: headers
                         .into_iter()
                         .map(|header| (header.name, header.value))
                         .collect(),
                 },
-            },
+            ),
             McpServer::Stdio(McpServerStdio {
                 name,
                 command,
                 args,
                 env,
                 ..
-            }) => McpServerInput {
+            }) => McpServerInput::new(
                 name,
-                transport: McpTransportInput::Stdio {
+                McpTransportInput::Stdio {
                     command,
                     args,
                     env: env_variable_map(env),
+                    cwd: None,
                 },
-            },
-            McpServer::Acp(server) => McpServerInput {
-                name: server.name,
-                transport: McpTransportInput::Unsupported {
+            ),
+            McpServer::Acp(server) => McpServerInput::new(
+                server.name,
+                McpTransportInput::Unsupported {
                     kind: "acp".to_string(),
                 },
-            },
-            _ => McpServerInput {
-                name: "unknown".to_string(),
-                transport: McpTransportInput::Unsupported {
+            ),
+            _ => McpServerInput::new(
+                "unknown",
+                McpTransportInput::Unsupported {
                     kind: "unknown".to_string(),
                 },
-            },
+            ),
         })
         .collect()
 }

@@ -75,7 +75,7 @@ pub(crate) mod tests {
     #[test]
     fn synthesizes_usage_from_runtime_accounting() {
         let mut usage = AcpUsageAccumulator::default();
-        usage.record_stream_event(&RunStreamEvent::Event(json!({
+        usage.record_stream_event(&RunStreamEvent::value(json!({
             "type": "message_end",
             "accounting": {
                 "billable_input_tokens": 8,

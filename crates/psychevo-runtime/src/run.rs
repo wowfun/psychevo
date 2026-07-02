@@ -45,7 +45,8 @@ pub(crate) use crate::prompt_assembly::{
     MainPromptPrefixInput, PROMPT_PREFIX_NOTICE_METADATA_KEY, PromptPrefixRecordInput,
     assemble_main_prompt_prefix, assembly_from_prefix_record, context_evidence_for_request,
     developer_provider_role, prompt_prefix_record, skill_contextual_user_messages,
-    tool_declarations_hash, turn_prefix_notice_instruction, turn_required_agent_instruction,
+    tool_declarations_hash, tool_declarations_hash_with_search, turn_prefix_notice_instruction,
+    turn_required_agent_instruction,
 };
 pub(crate) use crate::prompt_image::prompt_message_from_inputs_with_options;
 pub(crate) use crate::prompt_templates;
@@ -53,6 +54,7 @@ pub(crate) use crate::session_trace::SessionTraceSink;
 pub(crate) use crate::skills::{
     SelectedSkill, SkillCatalog, SkillDiscoveryOptions, discover_skills, resolve_skills_home,
     select_explicit_skills, select_skills_for_prompt, skill_context_fragments,
+    skills_visible_for_prompt_with_tools_and_toolsets,
 };
 pub(crate) use crate::snapshot::SnapshotStore;
 pub(crate) use crate::store::{PromptPrefixRecord, SqliteStore};
@@ -64,7 +66,7 @@ pub(crate) use crate::types::{
     AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ModelMetadata,
     PermissionApprovalDecision, PermissionApprovalRequest, PermissionConfig, ReloadContextOptions,
     ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
-    RunWarning, SelectedAgent, SmokeControl,
+    RunWarning, RuntimeTool, SelectedAgent, SmokeControl,
 };
 
 #[allow(unused_imports)]

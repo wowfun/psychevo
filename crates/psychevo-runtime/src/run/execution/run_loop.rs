@@ -23,16 +23,17 @@ pub(crate) async fn run_live_internal(
     }
     let loaded = load_run_config(&options, &cwd)?;
     let home = crate::config::resolve_psychevo_home(&loaded.env)?;
-    let plugin_assembly = crate::plugins::load_enabled_plugin_contributions(
-        &home,
-        &cwd,
-        &loaded.env,
-        &loaded.config.plugins,
-    );
-    let selected_root_contributions =
-        crate::extensions::selected_root_contributions(&cwd, &options.selected_capability_roots);
-    let mut plugin_warnings = plugin_assembly.warnings.clone();
-    plugin_warnings.extend(selected_root_contributions.warnings.clone());
+    let extension_assembly =
+        crate::extensions::assemble_extensions(crate::extensions::ExtensionAssemblyInput {
+            home: &home,
+            cwd: &cwd,
+            env: &loaded.env,
+            plugin_policy: &loaded.config.plugins,
+            selected_capability_roots: &options.selected_capability_roots,
+            mcp_servers: options.mcp_servers.clone(),
+            runtime_tools: options.runtime_tools.clone(),
+        });
+    let extension_warnings = extension_assembly.warnings.clone();
     let project_context_mode = loaded.config.project_context.instructions;
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
@@ -62,8 +63,7 @@ pub(crate) async fn run_live_internal(
         session_metadata_for_agent.as_ref(),
     );
     let mut agent_explicit_inputs = agent_input.iter().cloned().collect::<Vec<_>>();
-    agent_explicit_inputs.extend(plugin_assembly.agent_inputs.clone());
-    agent_explicit_inputs.extend(selected_root_contributions.agent_inputs.clone());
+    agent_explicit_inputs.extend(extension_assembly.agent_inputs.clone());
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
         cwd: cwd.clone(),
@@ -110,12 +110,7 @@ pub(crate) async fn run_live_internal(
         config_path: options.config_path.clone(),
         env: loaded.env.clone(),
         explicit_inputs: explicit_skill_inputs.clone(),
-        additional_roots: plugin_assembly
-            .skill_inputs
-            .iter()
-            .cloned()
-            .chain(selected_root_contributions.skill_inputs.iter().cloned())
-            .collect(),
+        additional_roots: extension_assembly.skill_inputs.clone(),
         no_skills: options.no_skills,
     };
     let skill_catalog = discover_skills(&skill_options)?;
@@ -238,15 +233,29 @@ pub(crate) async fn run_live_internal(
             .ok()
             .flatten()
     });
+    let sandbox_profile = options.sandbox_override.as_ref().map(|sandbox| {
+        json!({
+            "enabled": sandbox.enabled,
+            "mode": match sandbox.mode {
+                crate::types::RunSandboxMode::WorkspaceWrite => "workspace-write",
+                crate::types::RunSandboxMode::ReadOnly => "read-only",
+            },
+            "writable_roots": sandbox.writable_roots.clone(),
+            "include_tmp": sandbox.include_tmp,
+            "include_common_caches": sandbox.include_common_caches,
+        })
+    });
 
     let run_start = json!({
         "type": "run_start",
         "source": source,
         "session_id": session_id.clone(),
+        "thread_id": session_id.clone(),
         "provider": resolved.provider.clone(),
         "model": resolved.model.clone(),
         "db": options.state.db_path().to_path_buf(),
         "cwd": cwd.clone(),
+        "root": cwd.clone(),
         "base_url": resolved.base_url.clone(),
         "api_key_env": resolved.api_key_env.clone(),
         "reasoning_effort": resolved.reasoning_effort.clone(),
@@ -255,16 +264,29 @@ pub(crate) async fn run_live_internal(
         "mode": options.mode.as_str(),
         "permission_mode": permission_mode.as_str(),
         "approval_mode": approval_mode.as_str(),
+        "permission_profile": {
+            "mode": permission_mode.as_str(),
+            "approval_mode": approval_mode.as_str(),
+            "sandbox": sandbox_profile,
+        },
         "project_context": {
             "instructions": project_context_mode.as_str(),
+        },
+        "resume_seed": {
+            "requested_session_id": options.session,
+            "continue_latest": options.continue_latest,
+            "resolved_session_id": session_id.clone(),
+            "created_session": created_session,
+            "source": if created_session { "startup" } else { "resume" },
         },
         "selected_agent": selected_agent_summary.clone(),
         "agents_enabled": !options.no_agents,
         "agent_count": agent_catalog.agents.len(),
         "selected_skills": selected_skills.clone(),
+        "selected_capability_roots": options.selected_capability_roots.clone(),
     });
     if let Some(stream) = &stream_events {
-        stream(RunStreamEvent::Event(run_start.clone()));
+        stream(RunStreamEvent::value(run_start.clone()));
     }
     let events = Arc::new(Mutex::new(vec![run_start]));
     let mut trace_warnings = Vec::new();
@@ -303,7 +325,7 @@ pub(crate) async fn run_live_internal(
         &events,
         stream_events.as_ref(),
     );
-    emit_warning_events(&plugin_warnings, &events, stream_events.as_ref());
+    emit_warning_events(&extension_warnings, &events, stream_events.as_ref());
 
     let previous_messages =
         load_projected_messages(&store, &session_id, options.max_context_messages)?;
@@ -398,6 +420,7 @@ pub(crate) async fn run_live_internal(
             sandbox_policy: sandbox_policy.clone(),
             tool_selection: loaded.config.tools.clone(),
             custom_toolsets: loaded.config.toolsets.clone(),
+            extension_inputs: extension_assembly.accepted_inputs(),
             allowed_agent_names: selected_agent
                 .as_ref()
                 .and_then(|agent| agent.tool_policy.allowed_agents.clone()),
@@ -428,23 +451,24 @@ pub(crate) async fn run_live_internal(
     );
     let permission_runtime =
         permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
-    let extension_registry = crate::extensions::registry_from_static_inputs(
-        options.mcp_servers.clone(),
-        options
-            .runtime_tools
-            .iter()
-            .cloned()
-            .chain(plugin_assembly.runtime_tools.iter().cloned())
-            .collect(),
-    );
-    let mcp_server_inputs = extension_registry.mcp_servers();
-    let (mut extension_tools, mcp_warnings) =
+    let mcp_server_inputs = extension_assembly.registry.mcp_servers();
+    let (mcp_tools, mcp_warnings) =
         crate::mcp::mcp_tool_bindings(&mcp_server_inputs, &cwd, Some(&permission_runtime)).await;
+    let mut extension_tools = mcp_tools
+        .into_iter()
+        .map(|tool| {
+            let source_id = crate::mcp::mcp_tool_name_parts(tool.name())
+                .map(|(server, _)| format!("mcp:{server}"))
+                .unwrap_or_else(|| "mcp:unknown".to_string());
+            RuntimeTool::with_source(tool, source_id, "mcp")
+        })
+        .collect::<Vec<_>>();
     extension_tools.extend(
-        extension_registry
+        extension_assembly
+            .registry
             .runtime_tools()
             .iter()
-            .map(|tool| tool.binding()),
+            .cloned(),
     );
     emit_warning_events(&mcp_warnings, &events, stream_events.as_ref());
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
@@ -460,6 +484,7 @@ pub(crate) async fn run_live_internal(
         sandbox_grants,
         tool_selection: loaded.config.tools.clone(),
         custom_toolsets: loaded.config.toolsets.clone(),
+        contributed_toolsets: extension_assembly.toolsets.clone(),
         clarify: if options.clarify_enabled {
             ClarifyToolSurface::enabled(clarify_control, stream_events.clone())
         } else {
@@ -470,29 +495,30 @@ pub(crate) async fn run_live_internal(
         agents: agent_tools,
     });
     emit_warning_events(&tool_surface.warnings, &events, stream_events.as_ref());
+    let mut contribution_projection = extension_assembly.projection.clone();
+    contribution_projection.extend(tool_surface.projection.clone());
+    let _contribution_fact_count = contribution_projection.facts().len();
+    let _accepted_tool_count = tool_surface.accepted_tool_names.len();
     let mut tool_surface_warnings = tool_surface.warnings;
     let hook_config = crate::hooks::hook_runtime_config_from_options(&options, &cwd)?;
     let hook_runtime = build_hook_runtime(
         selected_agent.as_ref(),
-        plugin_assembly
-            .hook_sources
-            .iter()
-            .cloned()
-            .chain(selected_root_contributions.hook_sources.iter().cloned())
-            .collect(),
+        extension_assembly.hook_sources.clone(),
         hook_config,
         &cwd,
     );
     let hook_runtime_for_lifecycle = hook_runtime.clone();
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let _ = runtime.run_event(
-            "SessionStart",
+        let outcome = runtime.run_session_start(
             &json!({
                 "session_id": session_id,
                 "source": if created_session { "startup" } else { "resume" },
                 "cwd": cwd,
             }),
         );
+        if let Some(reason) = outcome.stop_reason {
+            return Err(Error::Message(reason));
+        }
     }
     let mut tools = tool_surface.tools;
     tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
@@ -511,7 +537,11 @@ pub(crate) async fn run_live_internal(
         agent_catalog_for_prompt(&agent_catalog.agents, selected_agent.as_ref(), &tools)
     };
     let prompt_skills = if skill_catalog_visible_for_tools(&tools) {
-        skill_catalog.skills.clone()
+        skills_visible_for_prompt_with_tools_and_toolsets(
+            &skill_catalog.skills,
+            effective_tool_names.iter().map(String::as_str),
+            tool_surface.accepted_toolset_names.iter().map(String::as_str),
+        )
     } else {
         Vec::new()
     };
@@ -523,7 +553,12 @@ pub(crate) async fn run_live_internal(
     };
     let project_instructions_role = (!prompt_project_instructions.is_empty())
         .then(|| developer_provider_role(&resolved.metadata.capabilities).to_string());
-    let tool_declarations_hash = tool_declarations_hash(&tools);
+    let tool_search_options = if loaded.config.tools.tool_search.enabled {
+        psychevo_agent_core::ToolSearchOptions::enabled()
+    } else {
+        psychevo_agent_core::ToolSearchOptions::disabled()
+    };
+    let tool_declarations_hash = tool_declarations_hash_with_search(&tools, tool_search_options);
     let prefix_metadata = json!({
         "mode": options.mode.as_str(),
         "permission_mode": permission_mode.as_str(),
@@ -535,6 +570,7 @@ pub(crate) async fn run_live_internal(
         "selected_agent": selected_agent_summary.clone(),
         "agents_enabled": !options.no_agents,
         "effective_tools": effective_tool_names,
+        "accepted_toolsets": tool_surface.accepted_toolset_names,
         "agent_catalog_visible": !prompt_agents.is_empty(),
         "visible_agents": prompt_agents.iter().map(|agent| agent.name.clone()).collect::<Vec<_>>(),
         "selected_skills": selected_skills.clone(),
@@ -603,7 +639,24 @@ pub(crate) async fn run_live_internal(
     ) {
         turn_prompt_instructions.push(instruction);
     }
-    let turn_contextual_user_messages = skill_contextual_user_messages(&skill_context_fragments);
+    let mut turn_contextual_user_messages =
+        skill_contextual_user_messages(&skill_context_fragments);
+    let mut hook_context_message_count = 0usize;
+    if let Some(runtime) = &hook_runtime_for_lifecycle {
+        let prompt_hook = runtime.run_user_prompt_submit(
+            &json!({
+                "session_id": session_id,
+                "prompt": options.prompt,
+                "cwd": cwd,
+            }),
+        );
+        if let Some(reason) = prompt_hook.block_reason {
+            return Err(Error::Message(reason));
+        }
+        let hook_context_messages = hook_contextual_user_messages(&prompt_hook.context);
+        hook_context_message_count = hook_context_messages.len();
+        turn_contextual_user_messages.extend(hook_context_messages);
+    }
     let prompt_context_evidence = context_evidence_for_request(
         &prompt_assembly.prompt_instructions,
         &turn_prompt_instructions,
@@ -652,33 +705,24 @@ pub(crate) async fn run_live_internal(
     });
     if let Some(object) = generation_metadata.as_object_mut() {
         object.insert("prompt_prefix".to_string(), prompt_prefix_metadata);
-        object.insert(
-            "context_counting".to_string(),
-            context_counting_metadata(
-                &prompt_assembly.prompt_instructions,
-                turn_prompt_instructions.len(),
-                previous_messages.len(),
-                prompt_assembly.prefix_contextual_user_messages.len(),
-                selected_skill_context_message_count,
-                prompt_skills
-                    .iter()
-                    .map(|skill| skill.name.clone())
-                    .collect(),
-            ),
+        let mut context_counting = context_counting_metadata(
+            &prompt_assembly.prompt_instructions,
+            turn_prompt_instructions.len(),
+            previous_messages.len(),
+            prompt_assembly.prefix_contextual_user_messages.len(),
+            selected_skill_context_message_count,
+            prompt_skills
+                .iter()
+                .map(|skill| skill.name.clone())
+                .collect(),
         );
-    }
-    if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let prompt_hook = runtime.run_event(
-            "UserPromptSubmit",
-            &json!({
-                "session_id": session_id,
-                "prompt": options.prompt,
-                "cwd": cwd,
-            }),
-        );
-        if let Some(reason) = prompt_hook.blocked_reason {
-            return Err(Error::Message(reason));
+        if let Some(context_counting) = context_counting.as_object_mut() {
+            context_counting.insert(
+                "hook_context_message_count".to_string(),
+                json!(hook_context_message_count),
+            );
         }
+        object.insert("context_counting".to_string(), context_counting);
     }
     let request = AgentLoopRequest {
         model_provider: resolved.provider.clone(),
@@ -701,6 +745,7 @@ pub(crate) async fn run_live_internal(
             .message,
         ],
         tools,
+        tool_search: tool_search_options,
         max_turns: DEFAULT_AGENT_MAX_TURNS,
     };
     let completion = match run_agent_loop(Arc::clone(&provider), request, sink, control_receivers)
@@ -768,21 +813,22 @@ pub(crate) async fn run_live_internal(
         .find_map(assistant_text)
         .unwrap_or_default();
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let _ = runtime.run_event(
-            "PostLLMCall",
+        let _ = runtime.run_post_llm_call(
             &json!({
                 "session_id": session_id,
                 "outcome": completion.outcome.as_str(),
                 "assistant_text": final_answer,
             }),
         );
-        let _ = runtime.run_event(
-            "Stop",
+        let stop = runtime.run_stop(
             &json!({
                 "session_id": session_id,
                 "outcome": completion.outcome.as_str(),
             }),
         );
+        if let Some(reason) = stop.block_reason {
+            return Err(Error::Message(reason));
+        }
     }
     let tool_failures = completion
         .messages
@@ -813,16 +859,15 @@ pub(crate) async fn run_live_internal(
         let value = serde_json::to_value(snapshot)?;
         events.push(value.clone());
         if let Some(stream) = stream_events_after {
-            stream(RunStreamEvent::Event(value));
+            stream(RunStreamEvent::value(value));
         }
     }
     let mut warnings = project_instructions.warnings;
-    warnings.extend(plugin_warnings);
+    warnings.extend(extension_warnings);
     warnings.extend(mcp_warnings);
     warnings.append(&mut tool_surface_warnings);
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let _ = runtime.run_event(
-            "SessionEnd",
+        let _ = runtime.run_session_end(
             &json!({
                 "session_id": session_id,
                 "outcome": completion.outcome.as_str(),
@@ -849,6 +894,60 @@ pub(crate) async fn run_live_internal(
         events,
         warnings,
     })
+}
+
+fn hook_contextual_user_messages(
+    context: &[Value],
+) -> Vec<psychevo_agent_core::ContextualUserMessage> {
+    let blocks = context
+        .iter()
+        .filter_map(hook_context_block)
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        Vec::new()
+    } else {
+        vec![psychevo_agent_core::ContextualUserMessage::new_with_category(
+            "hook_context",
+            "turn_context",
+            blocks,
+        )]
+    }
+}
+
+fn hook_context_block(value: &Value) -> Option<psychevo_agent_core::ContextualUserBlock> {
+    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+        return Some(psychevo_agent_core::ContextualUserBlock::new(
+            "hook_context",
+            None,
+            None,
+            text.to_string(),
+        ));
+    }
+    let object = value.as_object()?;
+    let text = object
+        .get("text")
+        .or_else(|| object.get("message"))
+        .or_else(|| object.get("content"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())?;
+    let source_name = object
+        .get("source")
+        .or_else(|| object.get("source_name"))
+        .or_else(|| object.get("sourceName"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let source_path = object
+        .get("source_path")
+        .or_else(|| object.get("sourcePath"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Some(psychevo_agent_core::ContextualUserBlock::new(
+        "hook_context",
+        source_name,
+        source_path,
+        text.to_string(),
+    ))
 }
 
 include!("run_loop/helpers.rs");

@@ -349,9 +349,440 @@ pub struct TuiMessageSummary {
     pub accounting: Option<Value>,
 }
 
+static SESSION_EVENT_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionEvent {
+    pub event_id: String,
+    pub session_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub sequence: Option<i64>,
+    pub payload: SessionEventPayload,
+    value: Value,
+}
+
+impl SessionEvent {
+    pub fn from_legacy_value(value: Value) -> Self {
+        let kind = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("runtime_event")
+            .to_string();
+        let generated_sequence = next_session_event_sequence();
+        let session_id = value
+            .get("session_id")
+            .or_else(|| value.get("sessionId"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        let thread_id = value
+            .get("thread_id")
+            .or_else(|| value.get("threadId"))
+            .or_else(|| value.get("session_id"))
+            .or_else(|| value.get("sessionId"))
+            .or_else(|| value.get("parent_thread_id"))
+            .or_else(|| value.get("child_thread_id"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        let turn_id = value
+            .get("turn_id")
+            .or_else(|| value.get("turnId"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        let sequence = value
+            .get("sequence")
+            .or_else(|| value.get("seq"))
+            .and_then(Value::as_i64)
+            .or_else(|| i64::try_from(generated_sequence).ok());
+        let event_id = value
+            .get("event_id")
+            .or_else(|| value.get("eventId"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| session_event_id(&kind, generated_sequence));
+        let payload = SessionEventPayload::from_legacy_value(&kind, &value);
+        Self {
+            event_id,
+            session_id,
+            thread_id,
+            turn_id,
+            sequence,
+            payload,
+            value,
+        }
+    }
+
+    pub fn new(payload: SessionEventPayload) -> Self {
+        let value = payload.to_legacy_value();
+        let mut event = Self::from_legacy_value(value);
+        event.payload = payload;
+        event
+    }
+
+    pub fn kind(&self) -> &'static str {
+        self.payload.kind()
+    }
+
+    pub fn as_value(&self) -> &Value {
+        &self.value
+    }
+
+    pub fn into_value(self) -> Value {
+        self.value
+    }
+}
+
+impl std::ops::Deref for SessionEvent {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_value()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionEventPayload {
+    SessionConfigured { data: Value },
+    TurnStarted { data: Value },
+    TurnCompleted { data: Value },
+    MessageStarted { message: Value },
+    MessageUpdated { message: Value },
+    MessageCompleted {
+        message: Value,
+        usage: Option<Value>,
+        metadata: Option<Value>,
+        accounting: Option<Value>,
+    },
+    ReasoningDelta { text: String },
+    ReasoningCompleted { text: Option<String> },
+    ToolCallPending { data: Value },
+    ToolExecutionStarted { data: Value },
+    ToolExecutionUpdated { data: Value },
+    ToolExecutionCompleted { data: Value },
+    AgentSessionStarted { data: Value },
+    ContextSnapshot { data: Value },
+    Warning { data: Value },
+    BlockingActionRequested {
+        action_id: String,
+        kind: BlockingActionKind,
+        payload: Value,
+    },
+    BlockingActionUpdated {
+        action_id: String,
+        kind: BlockingActionKind,
+        payload: Value,
+    },
+    BlockingActionResolved {
+        action_id: String,
+        kind: BlockingActionKind,
+        reason: String,
+    },
+    BlockingActionCancelled {
+        action_id: String,
+        kind: BlockingActionKind,
+        reason: String,
+    },
+    DeliveryDiagnostic {
+        status: DeliveryDiagnosticStatus,
+        data: Value,
+    },
+    Diagnostic { kind: String, data: Value },
+}
+
+impl SessionEventPayload {
+    pub fn from_legacy_value(kind: &str, value: &Value) -> Self {
+        match kind {
+            "run_start" => Self::SessionConfigured {
+                data: value.clone(),
+            },
+            "agent_start" | "task_started" | "turn_started" => Self::TurnStarted {
+                data: value.clone(),
+            },
+            "task_complete" | "turn_complete" | "agent_end" | "run_end" => {
+                Self::TurnCompleted {
+                    data: value.clone(),
+                }
+            }
+            "message_start" => Self::MessageStarted {
+                message: value.get("message").cloned().unwrap_or(Value::Null),
+            },
+            "message_update" => Self::MessageUpdated {
+                message: value.get("message").cloned().unwrap_or(Value::Null),
+            },
+            "message_end" => Self::MessageCompleted {
+                message: value.get("message").cloned().unwrap_or(Value::Null),
+                usage: value.get("usage").cloned(),
+                metadata: value.get("metadata").cloned(),
+                accounting: value.get("accounting").cloned(),
+            },
+            "reasoning_delta" => Self::ReasoningDelta {
+                text: value
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+            "reasoning_end" => Self::ReasoningCompleted {
+                text: value
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+            },
+            "tool_call_pending" => Self::ToolCallPending {
+                data: value.clone(),
+            },
+            "tool_execution_start" => Self::ToolExecutionStarted {
+                data: value.clone(),
+            },
+            "tool_execution_update" => Self::ToolExecutionUpdated {
+                data: value.clone(),
+            },
+            "tool_execution_end" => Self::ToolExecutionCompleted {
+                data: value.clone(),
+            },
+            "agent_session_start" => Self::AgentSessionStarted {
+                data: value.clone(),
+            },
+            "context_snapshot" => Self::ContextSnapshot {
+                data: value.clone(),
+            },
+            "warning" => Self::Warning {
+                data: value.clone(),
+            },
+            "action_requested" => Self::BlockingActionRequested {
+                action_id: action_id_from_value(value),
+                kind: blocking_action_kind_from_value(value),
+                payload: value.get("payload").cloned().unwrap_or(Value::Null),
+            },
+            "action_updated" => Self::BlockingActionUpdated {
+                action_id: action_id_from_value(value),
+                kind: blocking_action_kind_from_value(value),
+                payload: value.get("payload").cloned().unwrap_or(Value::Null),
+            },
+            "action_resolved" => Self::BlockingActionResolved {
+                action_id: action_id_from_value(value),
+                kind: blocking_action_kind_from_value(value),
+                reason: value
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .or_else(|| value.get("outcome").and_then(Value::as_str))
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+            "action_cancelled" => Self::BlockingActionCancelled {
+                action_id: action_id_from_value(value),
+                kind: blocking_action_kind_from_value(value),
+                reason: value
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+            "delivery_started" => Self::DeliveryDiagnostic {
+                status: DeliveryDiagnosticStatus::Started,
+                data: value.clone(),
+            },
+            "delivery_updated" => Self::DeliveryDiagnostic {
+                status: DeliveryDiagnosticStatus::Updated,
+                data: value.clone(),
+            },
+            "delivery_completed" => Self::DeliveryDiagnostic {
+                status: DeliveryDiagnosticStatus::Completed,
+                data: value.clone(),
+            },
+            "delivery_failed" => Self::DeliveryDiagnostic {
+                status: DeliveryDiagnosticStatus::Failed,
+                data: value.clone(),
+            },
+            _ => Self::Diagnostic {
+                kind: kind.to_string(),
+                data: value.clone(),
+            },
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::SessionConfigured { .. } => "run_start",
+            Self::TurnStarted { .. } => "turn_started",
+            Self::TurnCompleted { .. } => "turn_complete",
+            Self::MessageStarted { .. } => "message_start",
+            Self::MessageUpdated { .. } => "message_update",
+            Self::MessageCompleted { .. } => "message_end",
+            Self::ReasoningDelta { .. } => "reasoning_delta",
+            Self::ReasoningCompleted { .. } => "reasoning_end",
+            Self::ToolCallPending { .. } => "tool_call_pending",
+            Self::ToolExecutionStarted { .. } => "tool_execution_start",
+            Self::ToolExecutionUpdated { .. } => "tool_execution_update",
+            Self::ToolExecutionCompleted { .. } => "tool_execution_end",
+            Self::AgentSessionStarted { .. } => "agent_session_start",
+            Self::ContextSnapshot { .. } => "context_snapshot",
+            Self::Warning { .. } => "warning",
+            Self::BlockingActionRequested { .. } => "action_requested",
+            Self::BlockingActionUpdated { .. } => "action_updated",
+            Self::BlockingActionResolved { .. } => "action_resolved",
+            Self::BlockingActionCancelled { .. } => "action_cancelled",
+            Self::DeliveryDiagnostic { status, .. } => status.as_event_type(),
+            Self::Diagnostic { .. } => "runtime_event",
+        }
+    }
+
+    pub fn to_legacy_value(&self) -> Value {
+        match self {
+            Self::SessionConfigured { data }
+            | Self::TurnStarted { data }
+            | Self::TurnCompleted { data }
+            | Self::ToolCallPending { data }
+            | Self::ToolExecutionStarted { data }
+            | Self::ToolExecutionUpdated { data }
+            | Self::ToolExecutionCompleted { data }
+            | Self::AgentSessionStarted { data }
+            | Self::ContextSnapshot { data }
+            | Self::Warning { data }
+            | Self::DeliveryDiagnostic { data, .. }
+            | Self::Diagnostic { data, .. } => data.clone(),
+            Self::MessageStarted { message } => json!({
+                "type": "message_start",
+                "message": message,
+            }),
+            Self::MessageUpdated { message } => json!({
+                "type": "message_update",
+                "message": message,
+            }),
+            Self::MessageCompleted {
+                message,
+                usage,
+                metadata,
+                accounting,
+            } => {
+                let mut value = json!({
+                    "type": "message_end",
+                    "message": message,
+                });
+                if let Some(object) = value.as_object_mut() {
+                    if let Some(usage) = usage {
+                        object.insert("usage".to_string(), usage.clone());
+                    }
+                    if let Some(metadata) = metadata {
+                        object.insert("metadata".to_string(), metadata.clone());
+                    }
+                    if let Some(accounting) = accounting {
+                        object.insert("accounting".to_string(), accounting.clone());
+                    }
+                }
+                value
+            }
+            Self::ReasoningDelta { text } => json!({
+                "type": "reasoning_delta",
+                "text": text,
+            }),
+            Self::ReasoningCompleted { text } => {
+                let mut value = json!({ "type": "reasoning_end" });
+                if let Some(text) = text
+                    && let Some(object) = value.as_object_mut()
+                {
+                    object.insert("text".to_string(), Value::String(text.clone()));
+                }
+                value
+            }
+            Self::BlockingActionRequested {
+                action_id,
+                kind,
+                payload,
+            } => json!({
+                "type": "action_requested",
+                "action_id": action_id,
+                "kind": kind,
+                "payload": payload,
+            }),
+            Self::BlockingActionUpdated {
+                action_id,
+                kind,
+                payload,
+            } => json!({
+                "type": "action_updated",
+                "action_id": action_id,
+                "kind": kind,
+                "payload": payload,
+            }),
+            Self::BlockingActionResolved {
+                action_id,
+                kind,
+                reason,
+            } => json!({
+                "type": "action_resolved",
+                "action_id": action_id,
+                "kind": kind,
+                "reason": reason,
+            }),
+            Self::BlockingActionCancelled {
+                action_id,
+                kind,
+                reason,
+            } => json!({
+                "type": "action_cancelled",
+                "action_id": action_id,
+                "kind": kind,
+                "reason": reason,
+            }),
+        }
+    }
+}
+
+fn action_id_from_value(value: &Value) -> String {
+    value
+        .get("action_id")
+        .or_else(|| value.get("actionId"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn blocking_action_kind_from_value(value: &Value) -> BlockingActionKind {
+    match value
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "permission" => BlockingActionKind::Permission,
+        "custom_tool" | "customTool" => BlockingActionKind::CustomTool,
+        "user_input" | "userInput" => BlockingActionKind::UserInput,
+        _ => BlockingActionKind::Clarify,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockingActionKind {
+    Permission,
+    Clarify,
+    CustomTool,
+    UserInput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryDiagnosticStatus {
+    Started,
+    Updated,
+    Completed,
+    Failed,
+}
+
+impl DeliveryDiagnosticStatus {
+    fn as_event_type(self) -> &'static str {
+        match self {
+            Self::Started => "delivery_started",
+            Self::Updated => "delivery_updated",
+            Self::Completed => "delivery_completed",
+            Self::Failed => "delivery_failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunStreamEvent {
-    Event(Value),
+    Event(Box<SessionEvent>),
     ReasoningDelta {
         text: String,
     },
@@ -365,12 +796,36 @@ pub enum RunStreamEvent {
 }
 
 impl RunStreamEvent {
+    pub fn value(value: Value) -> Self {
+        Self::Event(Box::new(SessionEvent::from_legacy_value(value)))
+    }
+
+    pub fn session(event: SessionEvent) -> Self {
+        Self::Event(Box::new(event))
+    }
+
     pub fn scoped(session_id: impl Into<String>, event: RunStreamEvent) -> Self {
         Self::Scoped {
             session_id: session_id.into(),
             event: Box::new(event),
         }
     }
+
+    pub fn legacy_value(&self) -> Option<&Value> {
+        match self {
+            Self::Event(event) => Some(event.as_value()),
+            Self::Scoped { event, .. } => event.legacy_value(),
+            _ => None,
+        }
+    }
+}
+
+fn next_session_event_sequence() -> u64 {
+    SESSION_EVENT_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+fn session_event_id(kind: &str, sequence: u64) -> String {
+    format!("sevt_{kind}_{sequence}")
 }
 
 pub type RunStreamSink = Arc<dyn Fn(RunStreamEvent) + Send + Sync>;

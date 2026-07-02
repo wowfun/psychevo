@@ -125,21 +125,32 @@ impl ApprovalHandler for GatewayApprovalHandler {
                     },
                 );
             }
-            event_sink(GatewayEvent::PermissionRequested {
-                request_id: request_id.clone(),
-                tool_name: request.tool_name.clone(),
-                summary: request.summary.clone(),
-                reason: request.reason.clone(),
-                matched_rule: request.matched_rule.clone(),
-                suggested_rule: request.suggested_rule.clone(),
-                allow_always: request.allow_always,
-                timeout_secs: request.timeout_secs,
-                thread_id: None,
-                turn_id: None,
-                activity_id: None,
-                source_key: None,
-                owner_id: None,
-                lease_expires_at_ms: None,
+            event_sink(GatewayEvent::ActionRequested {
+                action: PendingActionView {
+                    action_id: request_id.clone(),
+                    kind: GatewayActionKind::Permission,
+                    title: Some(request.tool_name.clone()),
+                    summary: Some(if request.summary.trim().is_empty() {
+                        request.reason.clone()
+                    } else {
+                        request.summary.clone()
+                    }),
+                    payload: json!({
+                        "toolName": request.tool_name,
+                        "summary": request.summary,
+                        "reason": request.reason,
+                        "matchedRule": request.matched_rule,
+                        "suggestedRule": request.suggested_rule,
+                        "allowAlways": request.allow_always,
+                        "timeoutSecs": request.timeout_secs,
+                    }),
+                    thread_id: None,
+                    turn_id: None,
+                    activity_id: None,
+                    source_key: None,
+                    owner_id: None,
+                    lease_expires_at_ms: None,
+                },
             });
             let decision = timeout(Duration::from_secs(timeout_secs), receiver)
                 .await
@@ -152,9 +163,13 @@ impl ApprovalHandler for GatewayApprovalHandler {
                     .expect("gateway pending permission map poisoned");
                 pending.remove(&request_id);
             }
-            event_sink(GatewayEvent::PermissionResolved {
-                request_id,
-                decision: permission_decision_from_runtime(&decision),
+            event_sink(GatewayEvent::ActionResolved {
+                action_id: request_id,
+                kind: GatewayActionKind::Permission,
+                outcome: permission_action_outcome(&decision),
+                payload: json!({
+                    "decision": permission_decision_from_runtime(&decision),
+                }),
             });
             decision
         })

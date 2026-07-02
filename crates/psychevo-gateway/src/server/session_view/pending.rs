@@ -1,37 +1,42 @@
-fn prune_pending_permissions(
+fn prune_pending_actions(
     state: &WebState,
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Vec<PendingPermissionView>> {
+) -> psychevo_runtime::Result<Vec<PendingActionView>> {
     let pending = state
         .inner
-        .pending_permissions
+        .pending_actions
         .lock()
-        .expect("web pending permissions poisoned")
+        .expect("web pending actions poisoned")
         .values()
         .cloned()
         .collect::<Vec<_>>();
     let mut visible = Vec::new();
-    let mut stale_request_ids = Vec::new();
-    for permission in pending {
-        match pending_permission_state(state, selector, thread_id, &permission)? {
-            PendingInteractionState::Visible => visible.push(permission),
+    let mut stale_action_ids = Vec::new();
+    for action in pending {
+        match pending_action_state(state, selector, thread_id, &action)? {
+            PendingInteractionState::Visible => visible.push(action),
             PendingInteractionState::Hidden => {}
             PendingInteractionState::Stale => {
-                stale_request_ids.push(permission.request_id);
+                stale_action_ids.push(action.action_id);
             }
         }
     }
-    if !stale_request_ids.is_empty() {
+    if !stale_action_ids.is_empty() {
         let mut pending = state
             .inner
-            .pending_permissions
+            .pending_actions
             .lock()
-            .expect("web pending permissions poisoned");
-        for request_id in stale_request_ids {
-            pending.remove(&request_id);
+            .expect("web pending actions poisoned");
+        for action_id in stale_action_ids {
+            pending.remove(&action_id);
         }
     }
+    visible.sort_by(|left, right| {
+        left.turn_id
+            .cmp(&right.turn_id)
+            .then_with(|| left.action_id.cmp(&right.action_id))
+    });
     Ok(visible)
 }
 
@@ -42,75 +47,23 @@ enum PendingInteractionState {
     Stale,
 }
 
-fn prune_pending_clarifies(
+fn pending_action_state(
     state: &WebState,
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Vec<PendingClarifyView>> {
-    let pending = state
-        .inner
-        .pending_clarifies
-        .lock()
-        .expect("web pending clarifies poisoned")
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut visible = Vec::new();
-    let mut stale_request_ids = Vec::new();
-    for clarify in pending {
-        match pending_interaction_context_state(
-            state,
-            selector,
-            thread_id,
-            PendingInteractionRoute {
-                thread_id: clarify.thread_id.as_deref(),
-                source_key: clarify.source_key.as_deref(),
-                activity_id: clarify.activity_id.as_deref(),
-                owner_id: clarify.owner_id.as_deref(),
-                lease_expires_at_ms: clarify.lease_expires_at_ms,
-            },
-        )? {
-            PendingInteractionState::Visible => visible.push(clarify),
-            PendingInteractionState::Hidden => {}
-            PendingInteractionState::Stale => stale_request_ids.push(clarify.request_id),
-        }
-    }
-    if !stale_request_ids.is_empty() {
-        let mut pending = state
-            .inner
-            .pending_clarifies
-            .lock()
-            .expect("web pending clarifies poisoned");
-        for request_id in stale_request_ids {
-            pending.remove(&request_id);
-        }
-    }
-    Ok(visible)
-}
-
-fn pending_permission_state(
-    state: &WebState,
-    selector: &GatewayThreadSelector,
-    thread_id: Option<&str>,
-    permission: &PendingPermissionView,
+    action: &PendingActionView,
 ) -> psychevo_runtime::Result<PendingInteractionState> {
-    if let (Some(current_thread_id), Some(permission_thread_id)) =
-        (thread_id, permission.thread_id.as_deref())
-        && current_thread_id != permission_thread_id
-    {
-        return Ok(PendingInteractionState::Hidden);
-    }
-    if source_selector_mismatch(selector, permission.source_key.as_deref()) {
-        return Ok(PendingInteractionState::Hidden);
-    }
-    if state
-        .inner
-        .gateway
-        .has_pending_permission_for_selector(selector, &permission.request_id)
+    if action.kind == GatewayActionKind::Permission
+        && state
+            .inner
+            .gateway
+            .has_pending_permission_for_selector(selector, &action.action_id)
     {
         return Ok(PendingInteractionState::Visible);
     }
-    if permission.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
+    if action.kind == GatewayActionKind::Permission
+        && action.owner_id.as_deref() == Some(state.inner.gateway.owner_id())
+    {
         return Ok(PendingInteractionState::Stale);
     }
     pending_interaction_context_state(
@@ -118,11 +71,11 @@ fn pending_permission_state(
         selector,
         thread_id,
         PendingInteractionRoute {
-            thread_id: permission.thread_id.as_deref(),
-            source_key: permission.source_key.as_deref(),
-            activity_id: permission.activity_id.as_deref(),
-            owner_id: permission.owner_id.as_deref(),
-            lease_expires_at_ms: permission.lease_expires_at_ms,
+            thread_id: action.thread_id.as_deref(),
+            source_key: action.source_key.as_deref(),
+            activity_id: action.activity_id.as_deref(),
+            owner_id: action.owner_id.as_deref(),
+            lease_expires_at_ms: action.lease_expires_at_ms,
         },
     )
 }

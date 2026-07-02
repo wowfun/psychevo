@@ -104,6 +104,8 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
 
     let run_options = compaction_run_options(&options, &summary.provider, &summary.model, &cwd);
     let loaded = load_run_config(&run_options, &cwd)?;
+    let hook_runtime = crate::hooks::hook_runtime_config_from_options(&run_options, &cwd)
+        .map(|config| crate::agents::build_hook_runtime(None, Vec::new(), config, &cwd))?;
     let compression_config = loaded.config.compression.clone();
     if !compression_config.enabled {
         return Ok(skipped_result(
@@ -172,6 +174,20 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
             summary_model: None,
         });
     };
+    if let Some(runtime) = &hook_runtime {
+        let pre = runtime.run_pre_compact(&json!({
+            "session_id": summary.id.clone(),
+            "reason": options.reason.as_str(),
+            "trigger": options.reason.as_str(),
+            "cwd": cwd.clone(),
+            "first_kept_session_seq": first_kept_session_seq,
+            "tokens_before": preparation.tokens_before,
+            "tokens_after_without_summary": preparation.tokens_after_without_summary,
+        }));
+        if let Some(reason) = pre.stop_reason {
+            return Ok(skipped_result(&summary.id, options.reason, &reason));
+        }
+    }
 
     let compression = resolve_compression_config(&run_options, &loaded, &current)?;
 
@@ -214,6 +230,21 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
             "previous_compaction_id": previous.as_ref().map(|record| record.id),
         })),
     })?;
+    if let Some(runtime) = &hook_runtime {
+        let post = runtime.run_post_compact(&json!({
+            "session_id": summary.id.clone(),
+            "reason": options.reason.as_str(),
+            "trigger": options.reason.as_str(),
+            "cwd": cwd.clone(),
+            "checkpoint_id": record.id,
+            "first_kept_session_seq": record.first_kept_session_seq,
+            "tokens_before": record.tokens_before,
+            "tokens_after": record.tokens_after,
+        }));
+        if let Some(reason) = post.stop_reason {
+            return Err(Error::Message(reason));
+        }
+    }
     Ok(CompactionResult {
         session_id: summary.id,
         compacted: true,

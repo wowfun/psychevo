@@ -51,11 +51,12 @@ use psychevo_runtime::{
     load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
     main_agent_metadata, model_catalog_entry_is_free, model_catalog_provider,
     model_catalog_providers, next_run_at_ms, normalize_provider_id, normalize_reasoning_effort,
-    read_cached_model_catalog, redo_session, remove_config_value, render_session_export,
-    resolve_agent_definition, selected_configured_model, session_usage_summary,
-    set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value,
-    set_default_model_with_reasoning, set_provider_api_key, side_conversation_boundary_prompt,
-    undo_session, usage_read, valid_agent_name,
+    plugin_doctor_value, plugin_list_value, plugin_view_value, read_cached_model_catalog,
+    redo_session, remove_config_value, render_session_export, resolve_agent_definition,
+    selected_configured_model, session_usage_summary, set_auxiliary_model_with_reasoning,
+    set_channel_enabled, set_config_value, set_default_model_with_reasoning, set_provider_api_key,
+    side_conversation_boundary_prompt, side_conversation_session_source, undo_session, usage_read,
+    valid_agent_name,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -64,11 +65,12 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
-    ACP_PEER_METADATA_KEY, BackendKind, Gateway, GatewayActivity, GatewayBackendInfo, GatewayEvent,
-    GatewayEventSink, GatewayInputPart, GatewayShellResult, GatewaySource, GatewaySourceLifetime,
-    GatewayThread, GatewayThreadSelector, GatewayTurnResult, PermissionDecision, SendShellRequest,
-    SourceKey, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
-    TranscriptEntryRole, gateway_now_ms, transcript,
+    ACP_PEER_METADATA_KEY, BackendKind, Gateway, GatewayActionKind, GatewayActivity,
+    GatewayBackendInfo, GatewayEvent, GatewayEventSink, GatewayInputPart, GatewayShellResult,
+    GatewaySource, GatewaySourceLifetime, GatewayThread, GatewayThreadSelector, GatewayTurnResult,
+    PendingActionView, PermissionDecision, SendShellRequest, SourceKey, TranscriptBlock,
+    TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
+    gateway_now_ms, transcript,
 };
 #[cfg(test)]
 use crate::{GatewayTurn, GatewayTurnError, GatewayTurnStatus};

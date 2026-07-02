@@ -235,8 +235,7 @@ struct WebStateInner {
     browser_sessions: Mutex<HashMap<String, BrowserSession>>,
     terminals: TerminalManager,
     review: WorkspaceReviewState,
-    pending_permissions: Mutex<HashMap<String, PendingPermissionView>>,
-    pending_clarifies: Mutex<HashMap<String, PendingClarifyView>>,
+    pending_actions: Mutex<HashMap<String, PendingActionView>>,
     wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
 }
@@ -287,8 +286,7 @@ impl WebState {
                 browser_sessions: Mutex::new(HashMap::new()),
                 terminals: TerminalManager::default(),
                 review: WorkspaceReviewState::default(),
-                pending_permissions: Mutex::new(HashMap::new()),
-                pending_clarifies: Mutex::new(HashMap::new()),
+                pending_actions: Mutex::new(HashMap::new()),
                 wechat_qr_sessions: Mutex::new(HashMap::new()),
                 channel_runtime,
             }),
@@ -382,95 +380,29 @@ impl WebState {
 
     fn record_event_with_context(&self, event: &GatewayEvent, context: PendingInteractionContext) {
         match event {
-            GatewayEvent::PermissionRequested {
-                request_id,
-                tool_name,
-                summary,
-                reason,
-                matched_rule,
-                suggested_rule,
-                allow_always,
-                timeout_secs,
-                thread_id,
-                turn_id,
-                activity_id,
-                source_key,
-                owner_id,
-                lease_expires_at_ms,
-                ..
-            } => {
+            GatewayEvent::ActionRequested { action }
+            | GatewayEvent::ActionUpdated { action } => {
                 self.inner
-                    .pending_permissions
+                    .pending_actions
                     .lock()
-                    .expect("web pending permissions poisoned")
+                    .expect("web pending actions poisoned")
                     .insert(
-                        request_id.clone(),
-                        PendingPermissionView {
-                            request_id: request_id.clone(),
-                            tool_name: tool_name.clone(),
-                            summary: summary.clone(),
-                            reason: reason.clone(),
-                            matched_rule: matched_rule.clone(),
-                            suggested_rule: suggested_rule.clone(),
-                            allow_always: *allow_always,
-                            timeout_secs: *timeout_secs,
-                            thread_id: thread_id.clone().or(context.thread_id),
-                            turn_id: turn_id.clone().or(context.turn_id),
-                            activity_id: activity_id.clone().or(context.activity_id),
-                            source_key: source_key.clone().or(context.source_key),
-                            owner_id: owner_id.clone().or(context.owner_id),
-                            lease_expires_at_ms: lease_expires_at_ms
-                                .or(context.lease_expires_at_ms),
-                        },
+                        action.action_id.clone(),
+                        pending_action_with_context(action.clone(), context),
                     );
             }
-            GatewayEvent::PermissionResolved { request_id, .. } => {
+            GatewayEvent::ActionResolved { action_id, .. }
+            | GatewayEvent::ActionCancelled { action_id, .. } => {
                 self.inner
-                    .pending_permissions
+                    .pending_actions
                     .lock()
-                    .expect("web pending permissions poisoned")
-                    .remove(request_id);
+                    .expect("web pending actions poisoned")
+                    .remove(action_id);
             }
             GatewayEvent::TurnCompleted {
                 thread_id, turn_id, ..
             } => {
-                self.remove_pending_permissions_for_completed_turn(thread_id.as_deref(), turn_id);
-            }
-            GatewayEvent::ClarifyRequested {
-                request_id,
-                raw,
-                thread_id,
-                turn_id,
-                activity_id,
-                source_key,
-                owner_id,
-                lease_expires_at_ms,
-            } => {
-                self.inner
-                    .pending_clarifies
-                    .lock()
-                    .expect("web pending clarifies poisoned")
-                    .insert(
-                        request_id.clone(),
-                        PendingClarifyView {
-                            request_id: request_id.clone(),
-                            raw: raw.clone(),
-                            thread_id: thread_id.clone().or(context.thread_id),
-                            turn_id: turn_id.clone().or(context.turn_id),
-                            activity_id: activity_id.clone().or(context.activity_id),
-                            source_key: source_key.clone().or(context.source_key),
-                            owner_id: owner_id.clone().or(context.owner_id),
-                            lease_expires_at_ms: lease_expires_at_ms
-                                .or(context.lease_expires_at_ms),
-                        },
-                    );
-            }
-            GatewayEvent::ClarifyResolved { request_id, .. } => {
-                self.inner
-                    .pending_clarifies
-                    .lock()
-                    .expect("web pending clarifies poisoned")
-                    .remove(request_id);
+                self.remove_pending_actions_for_completed_turn(thread_id.as_deref(), turn_id);
             }
             _ => {}
         }
@@ -536,55 +468,11 @@ impl WebState {
         context: &PendingInteractionContext,
     ) -> GatewayEvent {
         match event {
-            GatewayEvent::PermissionRequested {
-                request_id,
-                tool_name,
-                summary,
-                reason,
-                matched_rule,
-                suggested_rule,
-                allow_always,
-                timeout_secs,
-                thread_id,
-                turn_id,
-                activity_id,
-                source_key,
-                owner_id,
-                lease_expires_at_ms,
-            } => GatewayEvent::PermissionRequested {
-                request_id,
-                tool_name,
-                summary,
-                reason,
-                matched_rule,
-                suggested_rule,
-                allow_always,
-                timeout_secs,
-                thread_id: thread_id.or_else(|| context.thread_id.clone()),
-                turn_id: turn_id.or_else(|| context.turn_id.clone()),
-                activity_id: activity_id.or_else(|| context.activity_id.clone()),
-                source_key: source_key.or_else(|| context.source_key.clone()),
-                owner_id: owner_id.or_else(|| context.owner_id.clone()),
-                lease_expires_at_ms: lease_expires_at_ms.or(context.lease_expires_at_ms),
+            GatewayEvent::ActionRequested { action } => GatewayEvent::ActionRequested {
+                action: pending_action_with_context(action, context.clone()),
             },
-            GatewayEvent::ClarifyRequested {
-                request_id,
-                raw,
-                thread_id,
-                turn_id,
-                activity_id,
-                source_key,
-                owner_id,
-                lease_expires_at_ms,
-            } => GatewayEvent::ClarifyRequested {
-                request_id,
-                raw,
-                thread_id: thread_id.or_else(|| context.thread_id.clone()),
-                turn_id: turn_id.or_else(|| context.turn_id.clone()),
-                activity_id: activity_id.or_else(|| context.activity_id.clone()),
-                source_key: source_key.or_else(|| context.source_key.clone()),
-                owner_id: owner_id.or_else(|| context.owner_id.clone()),
-                lease_expires_at_ms: lease_expires_at_ms.or(context.lease_expires_at_ms),
+            GatewayEvent::ActionUpdated { action } => GatewayEvent::ActionUpdated {
+                action: pending_action_with_context(action, context.clone()),
             },
             event => event,
         }
@@ -592,27 +480,27 @@ impl WebState {
 
     fn remove_pending_permission(&self, request_id: &str) {
         self.inner
-            .pending_permissions
+            .pending_actions
             .lock()
-            .expect("web pending permissions poisoned")
+            .expect("web pending actions poisoned")
             .remove(request_id);
     }
 
-    fn remove_pending_permissions_for_completed_turn(
+    fn remove_pending_actions_for_completed_turn(
         &self,
         thread_id: Option<&str>,
         turn_id: &str,
     ) {
         self.inner
-            .pending_permissions
+            .pending_actions
             .lock()
-            .expect("web pending permissions poisoned")
-            .retain(|_, permission| {
-                if permission.turn_id.as_deref() == Some(turn_id) {
+            .expect("web pending actions poisoned")
+            .retain(|_, action| {
+                if action.turn_id.as_deref() == Some(turn_id) {
                     return false;
                 }
                 if let Some(thread_id) = thread_id
-                    && permission.thread_id.as_deref() == Some(thread_id)
+                    && action.thread_id.as_deref() == Some(thread_id)
                 {
                     return false;
                 }
@@ -637,33 +525,6 @@ impl WebState {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PendingPermissionView {
-    request_id: String,
-    tool_name: String,
-    summary: String,
-    reason: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    matched_rule: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    suggested_rule: Option<String>,
-    allow_always: bool,
-    timeout_secs: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thread_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    turn_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    activity_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    lease_expires_at_ms: Option<i64>,
-}
-
 #[derive(Debug, Clone, Default)]
 struct PendingInteractionContext {
     thread_id: Option<String>,
@@ -674,21 +535,15 @@ struct PendingInteractionContext {
     lease_expires_at_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PendingClarifyView {
-    request_id: String,
-    raw: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thread_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    turn_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    activity_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    lease_expires_at_ms: Option<i64>,
+fn pending_action_with_context(
+    mut action: PendingActionView,
+    context: PendingInteractionContext,
+) -> PendingActionView {
+    action.thread_id = action.thread_id.or(context.thread_id);
+    action.turn_id = action.turn_id.or(context.turn_id);
+    action.activity_id = action.activity_id.or(context.activity_id);
+    action.source_key = action.source_key.or(context.source_key);
+    action.owner_id = action.owner_id.or(context.owner_id);
+    action.lease_expires_at_ms = action.lease_expires_at_ms.or(context.lease_expires_at_ms);
+    action
 }

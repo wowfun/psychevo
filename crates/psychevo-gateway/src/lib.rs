@@ -33,11 +33,12 @@ use uuid::Uuid;
 use projection::GatewayLiveProjector;
 pub use projection::gateway_event_from_run_stream;
 pub use protocol::{
-    BackendKind, GatewayActivityView, GatewayBackendInfo, GatewayEvent, GatewayImageInput,
-    GatewayInputPart, GatewaySelectedSkill, GatewaySource, GatewaySourceLifetime, GatewayThread,
-    GatewayThreadSelector, GatewayTurn, GatewayTurnError, GatewayTurnStatus, PermissionDecision,
-    SourceKey, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
-    TranscriptEntryRole, TranscriptToolResult,
+    BackendKind, GatewayActionKind, GatewayActionOutcome, GatewayActivityView, GatewayBackendInfo,
+    GatewayEvent, GatewayImageInput, GatewayInputPart, GatewaySelectedSkill, GatewaySource,
+    GatewaySourceLifetime, GatewayThread, GatewayThreadSelector, GatewayTurn, GatewayTurnError,
+    GatewayTurnStatus, PendingActionView, PermissionDecision, SourceKey, TranscriptBlock,
+    TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
+    TranscriptToolResult,
 };
 pub use server::{BoundGatewayWebServer, GatewayWebServerConfig, bind_gateway_web_server};
 

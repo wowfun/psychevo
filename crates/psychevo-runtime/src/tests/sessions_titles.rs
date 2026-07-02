@@ -468,6 +468,10 @@ pub(crate) fn title_skill_catalog(
         compatibility: None,
         license: None,
         allowed_tools: Vec::new(),
+        required_tools: Vec::new(),
+        fallback_for_tools: Vec::new(),
+        required_toolsets: Vec::new(),
+        fallback_for_toolsets: Vec::new(),
         supported_on_current_platform: true,
     };
     let selected = vec![crate::skills::SelectedSkill {

@@ -79,3 +79,12 @@ fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> Pe
         PermissionApprovalOutcome::Deny => PermissionDecision::Deny,
     }
 }
+
+fn permission_action_outcome(decision: &PermissionApprovalDecision) -> GatewayActionOutcome {
+    match decision.outcome {
+        PermissionApprovalOutcome::AllowOnce
+        | PermissionApprovalOutcome::AllowSession
+        | PermissionApprovalOutcome::AllowAlways => GatewayActionOutcome::Accepted,
+        PermissionApprovalOutcome::Deny => GatewayActionOutcome::Rejected,
+    }
+}

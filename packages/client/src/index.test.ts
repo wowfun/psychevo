@@ -45,8 +45,7 @@ describe("parseThreadSnapshot", () => {
 
     expect(parsed.entries).toEqual([]);
     expect(parsed.activity).toEqual({ running: false, activeTurnId: null, queuedTurns: 0 });
-    expect(parsed.pendingPermissions).toEqual([]);
-    expect(parsed.pendingClarifies).toEqual([]);
+    expect(parsed.pendingActions).toEqual([]);
   });
 
   it("preserves optional activity fields when applying defaults", () => {
@@ -135,8 +134,7 @@ describe("parseThreadSnapshot", () => {
         }
       ],
       activity: { running: false, activeTurnId: null, queuedTurns: 0 },
-      pendingPermissions: [],
-      pendingClarifies: []
+      pendingActions: []
     });
 
     expect(parsed.entries).toHaveLength(1);

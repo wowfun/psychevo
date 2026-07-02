@@ -14,8 +14,7 @@ fn thread_snapshot(
     let selector = thread_id
         .map(GatewayThreadSelector::thread_id)
         .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
-    let pending_permissions = prune_pending_permissions(state, &selector, thread_id)?;
-    let pending_clarifies = prune_pending_clarifies(state, &selector, thread_id)?;
+    let pending_actions = prune_pending_actions(state, &selector, thread_id)?;
     let activity = state.activity(&scope.source, thread_id);
     let entries = match thread_id {
         Some(thread_id) => {
@@ -42,8 +41,7 @@ fn thread_snapshot(
         "thread": thread,
         "entries": entries,
         "activity": activity,
-        "pendingPermissions": pending_permissions,
-        "pendingClarifies": pending_clarifies,
+        "pendingActions": pending_actions,
     }))
 }
 
@@ -229,27 +227,76 @@ fn anchor_live_tool_block(
 }
 
 fn merge_live_tool_block(current: &mut TranscriptBlock, live: &TranscriptBlock) {
-    current.status = live.status;
-    if live.title.is_some() {
-        current.title = live.title.clone();
-    }
-    if live.body.is_some() {
-        current.body = live.body.clone();
-    }
-    if live.preview.is_some() {
-        current.preview = live.preview.clone();
-    }
-    if live.detail.is_some() {
-        current.detail = live.detail.clone();
-    }
-    if !live.artifact_ids.is_empty() {
+    let original_status = current.status;
+    let live_can_replace = live_overlay_can_replace(original_status, live.status);
+    current.status = monotonic_tool_status(original_status, live.status);
+    merge_optional_string(&mut current.title, &live.title, live_can_replace);
+    merge_optional_string(&mut current.body, &live.body, live_can_replace);
+    merge_optional_string(&mut current.preview, &live.preview, live_can_replace);
+    merge_optional_string(&mut current.detail, &live.detail, live_can_replace);
+    if !live.artifact_ids.is_empty() && (live_can_replace || current.artifact_ids.is_empty()) {
         current.artifact_ids = live.artifact_ids.clone();
     }
-    current.metadata = merge_metadata_values(current.metadata.take(), live.metadata.clone());
-    if live.result.is_some() {
+    current.metadata = if live_can_replace {
+        merge_metadata_values(current.metadata.take(), live.metadata.clone())
+    } else {
+        merge_metadata_values(live.metadata.clone(), current.metadata.take())
+    };
+    if live.result.is_some() && (live_can_replace || current.result.is_none()) {
         current.result = live.result.clone();
     }
     current.updated_at_ms = current.updated_at_ms.max(live.updated_at_ms);
+}
+
+fn merge_optional_string(current: &mut Option<String>, live: &Option<String>, live_can_replace: bool) {
+    let Some(live) = live.as_ref() else {
+        return;
+    };
+    let current_missing = current.as_deref().is_none_or(|value| value.trim().is_empty());
+    if live_can_replace || current_missing {
+        *current = Some(live.clone());
+    }
+}
+
+fn live_overlay_can_replace(
+    current: TranscriptBlockStatus,
+    live: TranscriptBlockStatus,
+) -> bool {
+    !terminal_tool_status(current) && status_rank(live) >= status_rank(current)
+}
+
+fn monotonic_tool_status(
+    current: TranscriptBlockStatus,
+    live: TranscriptBlockStatus,
+) -> TranscriptBlockStatus {
+    if terminal_tool_status(current) {
+        return current;
+    }
+    if status_rank(live) > status_rank(current) {
+        return live;
+    }
+    current
+}
+
+fn terminal_tool_status(status: TranscriptBlockStatus) -> bool {
+    matches!(
+        status,
+        TranscriptBlockStatus::Completed
+            | TranscriptBlockStatus::Failed
+            | TranscriptBlockStatus::Cancelled
+            | TranscriptBlockStatus::Info
+    )
+}
+
+fn status_rank(status: TranscriptBlockStatus) -> u8 {
+    match status {
+        TranscriptBlockStatus::Pending => 0,
+        TranscriptBlockStatus::Running | TranscriptBlockStatus::NeedsInput => 1,
+        TranscriptBlockStatus::Completed
+        | TranscriptBlockStatus::Failed
+        | TranscriptBlockStatus::Cancelled
+        | TranscriptBlockStatus::Info => 2,
+    }
 }
 
 fn merge_metadata_values(left: Option<Value>, right: Option<Value>) -> Option<Value> {

@@ -416,8 +416,7 @@ function withThreadSnapshotDefaults(value: unknown): unknown {
     scope: record.scope ?? defaultScopeFromSource(record.source),
     thread: Object.prototype.hasOwnProperty.call(record, "thread") ? record.thread : null,
     activity: withActivityDefaults(record.activity),
-    pendingPermissions: Array.isArray(record.pendingPermissions) ? record.pendingPermissions : [],
-    pendingClarifies: Array.isArray(record.pendingClarifies) ? record.pendingClarifies : []
+    pendingActions: Array.isArray(record.pendingActions) ? record.pendingActions : []
   };
 }
 

@@ -11,6 +11,15 @@ export const threadSnapshotSchemas = {
       ],
       "type": "string"
     },
+    "GatewayActionKind": {
+      "enum": [
+        "permission",
+        "clarify",
+        "customTool",
+        "userInput"
+      ],
+      "type": "string"
+    },
     "GatewayActivityView": {
       "properties": {
         "activeTurnId": {
@@ -205,13 +214,19 @@ export const threadSnapshotSchemas = {
       ],
       "type": "object"
     },
-    "PendingClarifyView": {
+    "PendingActionView": {
       "properties": {
+        "actionId": {
+          "type": "string"
+        },
         "activityId": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "kind": {
+          "$ref": "#/definitions/GatewayActionKind"
         },
         "leaseExpiresAtMs": {
           "format": "int64",
@@ -226,85 +241,20 @@ export const threadSnapshotSchemas = {
             "null"
           ]
         },
-        "raw": true,
-        "requestId": {
-          "type": "string"
+        "payload": {
+          "default": null
         },
         "sourceKey": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "threadId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "turnId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "raw",
-        "requestId"
-      ],
-      "type": "object"
-    },
-    "PendingPermissionView": {
-      "properties": {
-        "activityId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "allowAlways": {
-          "type": "boolean"
-        },
-        "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "matchedRule": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "ownerId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reason": {
-          "type": "string"
-        },
-        "requestId": {
-          "type": "string"
-        },
-        "sourceKey": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "suggestedRule": {
           "type": [
             "string",
             "null"
           ]
         },
         "summary": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "threadId": {
           "type": [
@@ -312,13 +262,11 @@ export const threadSnapshotSchemas = {
             "null"
           ]
         },
-        "timeoutSecs": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "toolName": {
-          "type": "string"
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "turnId": {
           "type": [
@@ -328,12 +276,8 @@ export const threadSnapshotSchemas = {
         }
       },
       "required": [
-        "allowAlways",
-        "reason",
-        "requestId",
-        "summary",
-        "timeoutSecs",
-        "toolName"
+        "actionId",
+        "kind"
       ],
       "type": "object"
     },
@@ -568,15 +512,9 @@ export const threadSnapshotSchemas = {
       },
       "type": "array"
     },
-    "pendingClarifies": {
+    "pendingActions": {
       "items": {
-        "$ref": "#/definitions/PendingClarifyView"
-      },
-      "type": "array"
-    },
-    "pendingPermissions": {
-      "items": {
-        "$ref": "#/definitions/PendingPermissionView"
+        "$ref": "#/definitions/PendingActionView"
       },
       "type": "array"
     },
@@ -601,8 +539,7 @@ export const threadSnapshotSchemas = {
   "required": [
     "activity",
     "entries",
-    "pendingClarifies",
-    "pendingPermissions",
+    "pendingActions",
     "scope",
     "source"
   ],

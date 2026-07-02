@@ -1,9 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 use crate::types::{
-    ClarifyControl, ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent,
-    ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResult,
-    RunStreamEvent as ClarifyRunStreamEvent, RunStreamSink as ClarifyRunStreamSink,
+    BlockingActionKind, ClarifyControl, ClarifyQuestion, ClarifyQuestionOption,
+    ClarifyRequestEvent, ClarifyResolvedReason, ClarifyResult,
+    RunStreamEvent as ClarifyRunStreamEvent, RunStreamSink as ClarifyRunStreamSink, SessionEvent,
+    SessionEventPayload,
 };
 
 #[cfg(not(test))]
@@ -115,7 +116,7 @@ impl ToolBinding for ClarifyTool {
             };
 
             let receiver = control.register(tool_call_id.clone());
-            stream(ClarifyRunStreamEvent::ClarifyRequest(request));
+            stream(clarify_action_requested(&tool_call_id, &request));
             let timeout = time::sleep(clarify_timeout());
             tokio::pin!(timeout);
 
@@ -162,12 +163,36 @@ pub(crate) fn emit_clarify_resolved(
     call_id: &str,
     reason: ClarifyResolvedReason,
 ) {
-    stream(ClarifyRunStreamEvent::ClarifyResolved(
-        ClarifyResolvedEvent {
-            call_id: call_id.to_string(),
-            reason,
+    stream(clarify_action_resolved(call_id, reason));
+}
+
+fn clarify_action_requested(call_id: &str, request: &ClarifyRequestEvent) -> ClarifyRunStreamEvent {
+    ClarifyRunStreamEvent::session(SessionEvent::new(
+        SessionEventPayload::BlockingActionRequested {
+            action_id: call_id.to_string(),
+            kind: BlockingActionKind::Clarify,
+            payload: serde_json::to_value(request).unwrap_or(Value::Null),
         },
-    ));
+    ))
+}
+
+fn clarify_action_resolved(call_id: &str, reason: ClarifyResolvedReason) -> ClarifyRunStreamEvent {
+    ClarifyRunStreamEvent::session(SessionEvent::new(
+        SessionEventPayload::BlockingActionResolved {
+            action_id: call_id.to_string(),
+            kind: BlockingActionKind::Clarify,
+            reason: clarify_resolution_reason(reason).to_string(),
+        },
+    ))
+}
+
+fn clarify_resolution_reason(reason: ClarifyResolvedReason) -> &'static str {
+    match reason {
+        ClarifyResolvedReason::Answered => "answered",
+        ClarifyResolvedReason::Cancelled => "cancelled",
+        ClarifyResolvedReason::TimedOut => "timed_out",
+        ClarifyResolvedReason::TurnFinished => "turn_finished",
+    }
 }
 
 #[derive(Deserialize)]

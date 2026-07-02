@@ -80,6 +80,8 @@ reported as tool errors visible to the model.
 Runtime emits a typed resolved/cleanup event when a pending clarify request is
 answered, cancelled, times out, or is cleared because the turn ended. Late
 answers are no-ops and are reported back to the control caller as not accepted.
+Public streams project clarify through the shared blocking-action lifecycle
+defined by [035 Event Stream](../035-event-stream/spec.md).
 
 ## TUI Behavior
 

@@ -1,4 +1,4 @@
-import type { ThreadSnapshot, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
+import type { ThreadSnapshot, TranscriptBlock, TranscriptBlockStatus, TranscriptEntry } from "@psychevo/protocol";
 
 import {
   LIVE_SOURCE,
@@ -216,7 +216,7 @@ function mergeLiveToolBlockIntoMessageBlock(
   const liveArtifactIds = artifactIdsForBlock(liveBlock);
   return {
     ...current,
-    status: liveBlock.status,
+    status: monotonicBlockStatus(current.status, liveBlock.status),
     title: liveBlock.title ?? current.title,
     body: liveBlock.body ?? current.body,
     preview: liveBlock.preview ?? current.preview,
@@ -226,6 +226,29 @@ function mergeLiveToolBlockIntoMessageBlock(
     result: liveBlock.result ?? current.result,
     updatedAtMs: Math.max(current.updatedAtMs, liveBlock.updatedAtMs)
   };
+}
+
+function monotonicBlockStatus(
+  current: TranscriptBlockStatus,
+  next: TranscriptBlockStatus
+): TranscriptBlockStatus {
+  return blockStatusRank(next) < blockStatusRank(current) ? current : next;
+}
+
+function blockStatusRank(status: TranscriptBlockStatus): number {
+  switch (status) {
+    case "pending":
+      return 0;
+    case "running":
+    case "needsInput":
+      return 1;
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return 2;
+    case "info":
+      return 3;
+  }
 }
 
 function removeSnapshotCoveredBlocks(

@@ -50,16 +50,21 @@ describe("Workbench runtime and agent controls", () => {
   });
 
   it("shows composer feedback when a permission response is rejected", async () => {
-    gatewayMock.snapshot.pendingPermissions = [
+    gatewayMock.snapshot.pendingActions = [
       {
-        requestId: "permission-1",
-        toolName: "exec_command",
+        actionId: "permission-1",
+        kind: "permission",
+        title: "exec_command",
         summary: "Run exec_command",
-        reason: "requires approval",
-        matchedRule: "exec:python3 -c",
-        suggestedRule: null,
-        allowAlways: false,
-        timeoutSecs: 300,
+        payload: {
+          toolName: "exec_command",
+          summary: "Run exec_command",
+          reason: "requires approval",
+          matchedRule: "exec:python3 -c",
+          suggestedRule: null,
+          allowAlways: false,
+          timeoutSecs: 300
+        },
         threadId: "thread-1",
         turnId: "turn-1",
         activityId: "activity-1",
@@ -94,18 +99,25 @@ describe("Workbench runtime and agent controls", () => {
     gatewayMock.subscribers.forEach((subscriber) => subscriber({
       method: "gateway/event",
       params: {
-        type: "permissionRequested",
-        requestId: "permission-draft",
-        toolName: "exec_command",
-        summary: "inline Python could not be statically reduced",
-        reason: "requires approval",
-        matchedRule: "exec:python3 -c",
-        suggestedRule: "exec:python3 -c",
-        allowAlways: true,
-        timeoutSecs: 300,
-        turnId: "turn-draft",
-        activityId: "activity-draft",
-        sourceKey: "web:draft"
+        type: "actionRequested",
+        action: {
+          actionId: "permission-draft",
+          kind: "permission",
+          title: "exec_command",
+          summary: "inline Python could not be statically reduced",
+          payload: {
+            toolName: "exec_command",
+            summary: "inline Python could not be statically reduced",
+            reason: "requires approval",
+            matchedRule: "exec:python3 -c",
+            suggestedRule: "exec:python3 -c",
+            allowAlways: true,
+            timeoutSecs: 300
+          },
+          turnId: "turn-draft",
+          activityId: "activity-draft",
+          sourceKey: "web:draft"
+        }
       }
     }));
 
@@ -134,29 +146,34 @@ describe("Workbench runtime and agent controls", () => {
     gatewayMock.subscribers.forEach((subscriber) => subscriber({
       method: "gateway/event",
       params: {
-        type: "clarifyRequested",
-        requestId: "clarify-draft",
-        raw: {
-          questions: [
-            {
-              question: "Which environment should I use?",
-              options: [
-                { label: "Local", description: "Use local files" },
-                { label: "Remote", description: "Use remote API" }
-              ]
-            },
-            {
-              question: "How should I proceed?",
-              options: [
-                { label: "Fix", description: "Apply the patch" },
-                { label: "Explain", description: "Only explain" }
+        type: "actionRequested",
+        action: {
+          actionId: "clarify-draft",
+          kind: "clarify",
+          payload: {
+            raw: {
+              questions: [
+                {
+                  question: "Which environment should I use?",
+                  options: [
+                    { label: "Local", description: "Use local files" },
+                    { label: "Remote", description: "Use remote API" }
+                  ]
+                },
+                {
+                  question: "How should I proceed?",
+                  options: [
+                    { label: "Fix", description: "Apply the patch" },
+                    { label: "Explain", description: "Only explain" }
+                  ]
+                }
               ]
             }
-          ]
-        },
-        turnId: "turn-draft",
-        activityId: "activity-draft",
-        sourceKey: "web:draft"
+          },
+          turnId: "turn-draft",
+          activityId: "activity-draft",
+          sourceKey: "web:draft"
+        }
       }
     }));
 
@@ -184,9 +201,11 @@ describe("Workbench runtime and agent controls", () => {
     gatewayMock.subscribers.forEach((subscriber) => subscriber({
       method: "gateway/event",
       params: {
-        type: "clarifyResolved",
-        requestId: "clarify-draft",
-        reason: "answered"
+        type: "actionResolved",
+        actionId: "clarify-draft",
+        kind: "clarify",
+        outcome: "accepted",
+        payload: { reason: "answered" }
       }
     }));
     await waitFor(() => {
@@ -197,21 +216,26 @@ describe("Workbench runtime and agent controls", () => {
     gatewayMock.subscribers.forEach((subscriber) => subscriber({
       method: "gateway/event",
       params: {
-        type: "clarifyRequested",
-        requestId: "clarify-cancel",
-        raw: {
-          questions: [
-            {
-              question: "Cancel this request?",
-              options: [
-                { label: "Yes", description: "" },
-                { label: "No", description: "" }
+        type: "actionRequested",
+        action: {
+          actionId: "clarify-cancel",
+          kind: "clarify",
+          payload: {
+            raw: {
+              questions: [
+                {
+                  question: "Cancel this request?",
+                  options: [
+                    { label: "Yes", description: "" },
+                    { label: "No", description: "" }
+                  ]
+                }
               ]
             }
-          ]
-        },
-        activityId: "activity-cancel",
-        sourceKey: "web:draft"
+          },
+          activityId: "activity-cancel",
+          sourceKey: "web:draft"
+        }
       }
     }));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));

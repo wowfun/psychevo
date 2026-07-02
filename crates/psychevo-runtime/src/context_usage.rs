@@ -20,6 +20,7 @@ pub(crate) use crate::prompt_assembly::runtime_environment_prompt;
 pub(crate) use crate::prompt_templates;
 pub(crate) use crate::skills::{
     SkillDiscoveryOptions, discover_skills, format_skills_for_prompt, resolve_skills_home,
+    skills_visible_for_prompt_with_tools,
 };
 pub(crate) use crate::state_runtime::StateRuntime;
 pub(crate) use crate::tool_surface::tool_declarations;

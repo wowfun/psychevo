@@ -46,7 +46,7 @@ pub(crate) fn emit_warning_events(
             .expect("event lock poisoned")
             .push(value.clone());
         if let Some(stream) = stream_events {
-            stream(RunStreamEvent::Event(value));
+            stream(RunStreamEvent::value(value));
         }
     }
 }
@@ -143,6 +143,7 @@ pub(crate) async fn generate_session_title(
             skill_catalog,
         ))],
         tools: Vec::new(),
+        tool_search: psychevo_agent_core::ToolSearchOptions::disabled(),
         max_turns: 1,
     };
     let completion = run_agent_loop(provider, request, Arc::new(NoopEventSink), control).await?;

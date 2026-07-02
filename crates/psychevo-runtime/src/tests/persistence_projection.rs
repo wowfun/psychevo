@@ -207,7 +207,7 @@ pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
     .expect("agent end");
 
     let event = match captured.lock().expect("captured stream lock").as_slice() {
-        [RunStreamEvent::Event(value)] => value.clone(),
+        [RunStreamEvent::Event(value)] => value.as_value().clone(),
         other => panic!("unexpected stream events: {other:?}"),
     };
     assert_eq!(event["type"], "agent_end");
@@ -766,7 +766,11 @@ pub(crate) fn json_projection_hides_reasoning_unless_included() {
         RunStreamEvent::Event(value) => {
             assert_eq!(value["usage"]["total_tokens"], 2);
             assert_eq!(value["metadata"]["provider_response_id"], "resp");
-            assert!(!serde_json::to_string(&value).unwrap().contains("private"));
+            assert!(
+                !serde_json::to_string(value.as_value())
+                    .unwrap()
+                    .contains("private")
+            );
         }
         other => panic!("unexpected stream event: {other:?}"),
     }

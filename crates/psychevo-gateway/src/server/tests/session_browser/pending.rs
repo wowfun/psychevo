@@ -15,20 +15,25 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
         .expect("session");
     state
         .inner
-        .pending_permissions
+        .pending_actions
         .lock()
-        .expect("pending permissions")
+        .expect("pending actions")
         .insert(
             "permission-1".to_string(),
-            PendingPermissionView {
-                request_id: "permission-1".to_string(),
-                tool_name: "exec_command".to_string(),
-                summary: "exec_command".to_string(),
-                reason: "requires approval".to_string(),
-                matched_rule: None,
-                suggested_rule: None,
-                allow_always: false,
-                timeout_secs: 300,
+            PendingActionView {
+                action_id: "permission-1".to_string(),
+                kind: GatewayActionKind::Permission,
+                title: Some("exec_command".to_string()),
+                summary: Some("exec_command".to_string()),
+                payload: json!({
+                    "toolName": "exec_command",
+                    "summary": "exec_command",
+                    "reason": "requires approval",
+                    "matchedRule": null,
+                    "suggestedRule": null,
+                    "allowAlways": false,
+                    "timeoutSecs": 300,
+                }),
                 thread_id: Some(session_id.clone()),
                 turn_id: Some("turn-1".to_string()),
                 activity_id: Some("missing-activity".to_string()),
@@ -45,18 +50,18 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
     let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
 
     assert_eq!(
-        snapshot["pendingPermissions"]
+        snapshot["pendingActions"]
             .as_array()
-            .expect("pending permissions")
+            .expect("pending actions")
             .len(),
         0
     );
     assert!(
         !state
             .inner
-            .pending_permissions
+            .pending_actions
             .lock()
-            .expect("pending permissions")
+            .expect("pending actions")
             .contains_key("permission-1")
     );
 }
@@ -92,20 +97,25 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
         .expect("claim activity");
     state
         .inner
-        .pending_permissions
+        .pending_actions
         .lock()
-        .expect("pending permissions")
+        .expect("pending actions")
         .insert(
             "permission-1".to_string(),
-            PendingPermissionView {
-                request_id: "permission-1".to_string(),
-                tool_name: "exec_command".to_string(),
-                summary: "exec_command".to_string(),
-                reason: "requires approval".to_string(),
-                matched_rule: None,
-                suggested_rule: None,
-                allow_always: false,
-                timeout_secs: 300,
+            PendingActionView {
+                action_id: "permission-1".to_string(),
+                kind: GatewayActionKind::Permission,
+                title: Some("exec_command".to_string()),
+                summary: Some("exec_command".to_string()),
+                payload: json!({
+                    "toolName": "exec_command",
+                    "summary": "exec_command",
+                    "reason": "requires approval",
+                    "matchedRule": null,
+                    "suggestedRule": null,
+                    "allowAlways": false,
+                    "timeoutSecs": 300,
+                }),
                 thread_id: Some(session_id.clone()),
                 turn_id: Some("turn-1".to_string()),
                 activity_id: Some(activity.activity_id.clone()),
@@ -121,9 +131,9 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
 
     let running = thread_snapshot(&state, &scope, Some(&session_id)).expect("running snapshot");
     assert_eq!(
-        running["pendingPermissions"]
+        running["pendingActions"]
             .as_array()
-            .expect("running permissions")
+            .expect("running actions")
             .len(),
         1
     );
@@ -139,18 +149,18 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
     let finished = thread_snapshot(&state, &scope, Some(&session_id)).expect("finished snapshot");
 
     assert_eq!(
-        finished["pendingPermissions"]
+        finished["pendingActions"]
             .as_array()
-            .expect("finished permissions")
+            .expect("finished actions")
             .len(),
         0
     );
     assert!(
         !state
             .inner
-            .pending_permissions
+            .pending_actions
             .lock()
-            .expect("pending permissions")
+            .expect("pending actions")
             .contains_key("permission-1")
     );
 }
@@ -171,21 +181,28 @@ async fn turn_completed_event_removes_pending_permission_panel() {
         )
         .expect("session");
     state.record_event_with_context(
-        &GatewayEvent::PermissionRequested {
-            request_id: "permission-1".to_string(),
-            tool_name: "exec_command".to_string(),
-            summary: "exec_command".to_string(),
-            reason: "requires approval".to_string(),
-            matched_rule: None,
-            suggested_rule: None,
-            allow_always: true,
-            timeout_secs: 300,
-            thread_id: None,
-            turn_id: None,
-            activity_id: None,
-            source_key: None,
-            owner_id: None,
-            lease_expires_at_ms: None,
+        &GatewayEvent::ActionRequested {
+            action: PendingActionView {
+                action_id: "permission-1".to_string(),
+                kind: GatewayActionKind::Permission,
+                title: Some("exec_command".to_string()),
+                summary: Some("exec_command".to_string()),
+                payload: json!({
+                    "toolName": "exec_command",
+                    "summary": "exec_command",
+                    "reason": "requires approval",
+                    "matchedRule": null,
+                    "suggestedRule": null,
+                    "allowAlways": true,
+                    "timeoutSecs": 300,
+                }),
+                thread_id: None,
+                turn_id: None,
+                activity_id: None,
+                source_key: None,
+                owner_id: None,
+                lease_expires_at_ms: None,
+            },
         },
         PendingInteractionContext {
             thread_id: Some(session_id.clone()),
@@ -220,18 +237,18 @@ async fn turn_completed_event_removes_pending_permission_panel() {
     let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
 
     assert_eq!(
-        snapshot["pendingPermissions"]
+        snapshot["pendingActions"]
             .as_array()
-            .expect("pending permissions")
+            .expect("pending actions")
             .len(),
         0
     );
     assert!(
         !state
             .inner
-            .pending_permissions
+            .pending_actions
             .lock()
-            .expect("pending permissions")
+            .expect("pending actions")
             .contains_key("permission-1")
     );
 }
@@ -262,20 +279,25 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
         .expect("claim activity");
     state
         .inner
-        .pending_permissions
+        .pending_actions
         .lock()
-        .expect("pending permissions")
+        .expect("pending actions")
         .insert(
             "permission-draft".to_string(),
-            PendingPermissionView {
-                request_id: "permission-draft".to_string(),
-                tool_name: "exec_command".to_string(),
-                summary: "exec_command".to_string(),
-                reason: "requires approval".to_string(),
-                matched_rule: Some("prompt".to_string()),
-                suggested_rule: Some("exec:python".to_string()),
-                allow_always: true,
-                timeout_secs: 300,
+            PendingActionView {
+                action_id: "permission-draft".to_string(),
+                kind: GatewayActionKind::Permission,
+                title: Some("exec_command".to_string()),
+                summary: Some("exec_command".to_string()),
+                payload: json!({
+                    "toolName": "exec_command",
+                    "summary": "exec_command",
+                    "reason": "requires approval",
+                    "matchedRule": "prompt",
+                    "suggestedRule": "exec:python",
+                    "allowAlways": true,
+                    "timeoutSecs": 300,
+                }),
                 thread_id: None,
                 turn_id: Some("turn-draft".to_string()),
                 activity_id: Some(activity.activity_id.clone()),
@@ -291,18 +313,18 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
     };
     let canonical = thread_snapshot(&state, &canonical_scope, None).expect("canonical snapshot");
     assert_eq!(
-        canonical["pendingPermissions"]
+        canonical["pendingActions"]
             .as_array()
-            .expect("canonical permissions")
+            .expect("canonical actions")
             .len(),
         0
     );
     assert!(
         state
             .inner
-            .pending_permissions
+            .pending_actions
             .lock()
-            .expect("pending permissions")
+            .expect("pending actions")
             .contains_key("permission-draft")
     );
 
@@ -312,15 +334,15 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
     };
     let draft = thread_snapshot(&state, &draft_scope, None).expect("draft snapshot");
     assert_eq!(
-        draft["pendingPermissions"][0]["requestId"],
+        draft["pendingActions"][0]["actionId"],
         "permission-draft"
     );
     assert_eq!(
-        draft["pendingPermissions"][0]["sourceKey"],
+        draft["pendingActions"][0]["sourceKey"],
         draft_source_key
     );
-    assert_eq!(draft["pendingPermissions"][0]["allowAlways"], true);
-    assert_eq!(draft["pendingPermissions"][0]["matchedRule"], "prompt");
+    assert_eq!(draft["pendingActions"][0]["payload"]["allowAlways"], true);
+    assert_eq!(draft["pendingActions"][0]["payload"]["matchedRule"], "prompt");
 }
 
 #[tokio::test]
@@ -349,21 +371,26 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
         .expect("claim activity");
     state
         .inner
-        .pending_clarifies
+        .pending_actions
         .lock()
-        .expect("pending clarifies")
+        .expect("pending actions")
         .insert(
             "clarify-draft".to_string(),
-            PendingClarifyView {
-                request_id: "clarify-draft".to_string(),
-                raw: json!({
-                    "questions": [{
-                        "question": "Choose mode",
-                        "options": [
-                            {"label": "Fast", "description": "Short answer"},
-                            {"label": "Deep", "description": "More detail"}
-                        ]
-                    }]
+            PendingActionView {
+                action_id: "clarify-draft".to_string(),
+                kind: GatewayActionKind::Clarify,
+                title: Some("Clarify".to_string()),
+                summary: Some("Choose mode".to_string()),
+                payload: json!({
+                    "raw": {
+                        "questions": [{
+                            "question": "Choose mode",
+                            "options": [
+                                {"label": "Fast", "description": "Short answer"},
+                                {"label": "Deep", "description": "More detail"}
+                            ]
+                        }]
+                    }
                 }),
                 thread_id: None,
                 turn_id: Some("turn-draft".to_string()),
@@ -380,18 +407,18 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
     };
     let canonical = thread_snapshot(&state, &canonical_scope, None).expect("canonical snapshot");
     assert_eq!(
-        canonical["pendingClarifies"]
+        canonical["pendingActions"]
             .as_array()
-            .expect("canonical clarifies")
+            .expect("canonical actions")
             .len(),
         0
     );
     assert!(
         state
             .inner
-            .pending_clarifies
+            .pending_actions
             .lock()
-            .expect("pending clarifies")
+            .expect("pending actions")
             .contains_key("clarify-draft")
     );
 
@@ -400,8 +427,8 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
         source: draft_source,
     };
     let draft = thread_snapshot(&state, &draft_scope, None).expect("draft snapshot");
-    assert_eq!(draft["pendingClarifies"][0]["requestId"], "clarify-draft");
-    assert_eq!(draft["pendingClarifies"][0]["sourceKey"], draft_source_key);
+    assert_eq!(draft["pendingActions"][0]["actionId"], "clarify-draft");
+    assert_eq!(draft["pendingActions"][0]["sourceKey"], draft_source_key);
 }
 
 #[tokio::test]

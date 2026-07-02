@@ -51,13 +51,24 @@ pub(super) fn channel_event_sink(
 
 fn channel_event_reply_text(event: &GatewayEvent) -> Option<String> {
     match event {
-        GatewayEvent::PermissionRequested {
-            request_id,
-            tool_name,
-            summary,
-            reason,
-            ..
-        } => {
+        GatewayEvent::ActionRequested { action }
+            if action.kind == GatewayActionKind::Permission =>
+        {
+            let tool_name = action
+                .payload
+                .get("toolName")
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            let summary = action
+                .payload
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let reason = action
+                .payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let detail = if !summary.trim().is_empty() {
                 summary.trim()
             } else if !reason.trim().is_empty() {
@@ -66,12 +77,12 @@ fn channel_event_reply_text(event: &GatewayEvent) -> Option<String> {
                 "approval requested"
             };
             Some(format!(
-                "Permission required for {tool_name}: {detail}. Reply /approve {request_id} to allow once or /deny {request_id} to deny."
+                "Permission required for {tool_name}: {detail}. Reply /approve {} to allow once or /deny {} to deny.",
+                action.action_id, action.action_id
             ))
         }
-        GatewayEvent::ClarifyRequested {
-            request_id, raw, ..
-        } => {
+        GatewayEvent::ActionRequested { action } if action.kind == GatewayActionKind::Clarify => {
+            let raw = action.payload.get("raw").unwrap_or(&action.payload);
             let question = raw
                 .get("questions")
                 .and_then(Value::as_array)
@@ -81,7 +92,8 @@ fn channel_event_reply_text(event: &GatewayEvent) -> Option<String> {
                 .filter(|question| !question.trim().is_empty())
                 .unwrap_or("Please provide more information.");
             Some(format!(
-                "Psychevo asks: {question}. Reply /answer {request_id} <answer> or /cancel {request_id}."
+                "Psychevo asks: {question}. Reply /answer {} <answer> or /cancel {}.",
+                action.action_id, action.action_id
             ))
         }
         _ => None,
@@ -90,18 +102,10 @@ fn channel_event_reply_text(event: &GatewayEvent) -> Option<String> {
 
 fn channel_event_thread_id(event: &GatewayEvent, fallback_source_key: &SourceKey) -> String {
     match event {
-        GatewayEvent::PermissionRequested {
-            thread_id,
-            source_key,
-            ..
-        }
-        | GatewayEvent::ClarifyRequested {
-            thread_id,
-            source_key,
-            ..
-        } => thread_id
+        GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => action
+            .thread_id
             .clone()
-            .or_else(|| source_key.clone())
+            .or_else(|| action.source_key.clone())
             .unwrap_or_else(|| fallback_source_key.0.clone()),
         _ => fallback_source_key.0.clone(),
     }

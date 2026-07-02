@@ -636,19 +636,26 @@ async fn channel_event_sink_sends_clarify_prompt() {
         SourceKey("im.wechat:fallback".to_string()),
     );
 
-    sink(GatewayEvent::ClarifyRequested {
-        request_id: "ask-1".to_string(),
-        raw: json!({
-            "questions": [
-                { "question": "Which workspace should I use?" }
-            ]
-        }),
-        thread_id: Some("thread-1".to_string()),
-        turn_id: None,
-        activity_id: None,
-        source_key: None,
-        owner_id: None,
-        lease_expires_at_ms: None,
+    sink(GatewayEvent::ActionRequested {
+        action: PendingActionView {
+            action_id: "ask-1".to_string(),
+            kind: GatewayActionKind::Clarify,
+            title: Some("Clarify".to_string()),
+            summary: Some("Which workspace should I use?".to_string()),
+            payload: json!({
+                "raw": {
+                    "questions": [
+                        { "question": "Which workspace should I use?" }
+                    ]
+                }
+            }),
+            thread_id: Some("thread-1".to_string()),
+            turn_id: None,
+            activity_id: None,
+            source_key: None,
+            owner_id: None,
+            lease_expires_at_ms: None,
+        },
     });
 
     let sent = wait_for_sent(&adapter, 1).await;

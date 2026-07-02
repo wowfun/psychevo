@@ -31,8 +31,7 @@ import {
   threadForTurn
 } from "./transcript/common";
 import {
-  pendingClarifyFromEvent,
-  pendingPermissionFromEvent,
+  pendingActionFromEvent,
   removePendingInteractionsForTurn,
   upsertPendingInteraction
 } from "./transcript/pending";
@@ -44,7 +43,7 @@ import {
 
 type LiveTranscriptObservationEvent = Extract<
   GatewayEvent,
-  { type: "entryStarted" | "entryUpdated" | "entryCompleted" | "entryDelta" }
+  { type: "entryStarted" | "entryUpdated" | "entryCompleted" }
 >;
 
 export function applyLiveTranscriptEvent(
@@ -78,14 +77,6 @@ export function applyLiveTranscriptEvent(
         entries: sortTranscriptEntries(entries)
       };
     }
-    case "entryDelta":
-      if (!event.entryId) {
-        return snapshot;
-      }
-      return {
-        ...snapshot,
-        entries: sortTranscriptEntries(applyEntryDelta(snapshot.entries, event.entryId, event.blockId, event.delta))
-      };
     case "turnStarted":
       return {
         ...snapshot,
@@ -120,12 +111,8 @@ export function applyLiveTranscriptEvent(
         ...snapshot,
         thread: threadForTurn(snapshot, terminalThreadId),
         entries,
-        pendingPermissions: removePendingInteractionsForTurn(
-          snapshot.pendingPermissions,
-          event.turnId
-        ),
-        pendingClarifies: removePendingInteractionsForTurn(
-          snapshot.pendingClarifies,
+        pendingActions: removePendingInteractionsForTurn(
+          snapshot.pendingActions,
           event.turnId
         ),
         activity: snapshot.activity.activeTurnId === event.turnId
@@ -137,34 +124,21 @@ export function applyLiveTranscriptEvent(
           : snapshot.activity
       };
     }
-    case "permissionRequested":
+    case "actionRequested":
+    case "actionUpdated":
       return {
         ...snapshot,
-        pendingPermissions: upsertPendingInteraction(
-          snapshot.pendingPermissions,
-          pendingPermissionFromEvent(event)
+        pendingActions: upsertPendingInteraction(
+          snapshot.pendingActions,
+          pendingActionFromEvent(event)
         )
       };
-    case "permissionResolved":
+    case "actionResolved":
+    case "actionCancelled":
       return {
         ...snapshot,
-        pendingPermissions: snapshot.pendingPermissions.filter((request) =>
-          request.requestId !== event.requestId
-        )
-      };
-    case "clarifyRequested":
-      return {
-        ...snapshot,
-        pendingClarifies: upsertPendingInteraction(
-          snapshot.pendingClarifies,
-          pendingClarifyFromEvent(event)
-        )
-      };
-    case "clarifyResolved":
-      return {
-        ...snapshot,
-        pendingClarifies: snapshot.pendingClarifies.filter((request) =>
-          request.requestId !== event.requestId
+        pendingActions: snapshot.pendingActions.filter((request) =>
+          request.actionId !== event.actionId
         )
       };
     case "activityChanged":
@@ -232,7 +206,7 @@ export function reconcileThreadSnapshot(
     return normalizeSnapshotEntries(incoming);
   }
 
-  const entries = incoming.entries.filter((entry) => !isHiddenTranscriptEntry(entry));
+  const entries = normalizeIncomingSnapshotEntries(incoming.entries);
   for (const entry of current.entries) {
     if (isHiddenTranscriptEntry(entry)) {
       continue;
@@ -309,8 +283,7 @@ function isOlderSameEntryLiveUpdate(entries: TranscriptEntry[], next: Transcript
 function isLiveTranscriptObservation(event: GatewayEvent): event is LiveTranscriptObservationEvent {
   return event.type === "entryStarted" ||
     event.type === "entryUpdated" ||
-    event.type === "entryCompleted" ||
-    event.type === "entryDelta";
+    event.type === "entryCompleted";
 }
 
 function eventThreadIdForEvent(event: GatewayEvent): string | null {
@@ -331,9 +304,9 @@ function eventThreadIdForEvent(event: GatewayEvent): string | null {
       return event.entry.threadId || null;
     case "activityChanged":
       return event.threadId || null;
-    case "permissionRequested":
-    case "clarifyRequested":
-      return event.threadId || null;
+    case "actionRequested":
+    case "actionUpdated":
+      return event.action.threadId || null;
     case "titleChanged":
       return event.threadId || null;
     default:
@@ -569,37 +542,6 @@ function mergeBlock(current: TranscriptBlock, next: TranscriptBlock): Transcript
   };
 }
 
-function applyEntryDelta(
-  entries: TranscriptEntry[],
-  entryId: string,
-  blockId: string | null,
-  delta: string
-): TranscriptEntry[] {
-  return entries.map((entry) => {
-    if (entry.id !== entryId) {
-      return entry;
-    }
-    const blocks = blocksForEntry(entry).map((block, index) => {
-      if ((blockId && block.id !== blockId) || (!blockId && index !== 0)) {
-        return block;
-      }
-      const body = `${block.body ?? ""}${delta}`;
-      return {
-        ...block,
-        body,
-        detail: `${block.detail ?? ""}${delta}`,
-        preview: compactText(body, 240),
-        updatedAtMs: Date.now()
-      };
-    });
-    return {
-      ...entry,
-      blocks,
-      updatedAtMs: Date.now()
-    };
-  });
-}
-
 function isUnreconciledOptimisticPrompt(entry: TranscriptEntry, incoming: TranscriptEntry[]): boolean {
   if (entry.source !== OPTIMISTIC_SOURCE || entry.role !== "user") {
     return false;
@@ -614,6 +556,21 @@ function isUnreconciledOptimisticPrompt(entry: TranscriptEntry, incoming: Transc
 function normalizeSnapshotEntries(snapshot: ThreadSnapshot): ThreadSnapshot {
   return {
     ...snapshot,
-    entries: sortTranscriptEntries(snapshot.entries.filter((entry) => !isHiddenTranscriptEntry(entry)))
+    entries: sortTranscriptEntries(normalizeIncomingSnapshotEntries(snapshot.entries))
   };
+}
+
+function normalizeIncomingSnapshotEntries(incomingEntries: TranscriptEntry[]): TranscriptEntry[] {
+  let entries: TranscriptEntry[] = [];
+  for (const candidate of incomingEntries) {
+    if (isHiddenTranscriptEntry(candidate)) {
+      continue;
+    }
+    const reconciled = reconcileIncomingEntryForSnapshot(entries, candidate);
+    entries = reconciled.entries;
+    if (reconciled.entry && !isHiddenTranscriptEntry(reconciled.entry)) {
+      entries = upsertEntry(entries, reconciled.entry);
+    }
+  }
+  return entries;
 }

@@ -3,8 +3,7 @@ import { Check, GitBranch, Pin, ShieldCheck, ShieldPlus, X } from "lucide-react"
 import type {
   ContextReadResult,
   InitializeResult,
-  PendingClarify,
-  PendingPermission,
+  PendingActionView,
   PermissionDecision,
   SessionUsageSummaryView,
   SettingsReadResult
@@ -18,10 +17,10 @@ export function ComposerRequests({
   onClarify,
   onPermission
 }: {
-  clarifies: PendingClarify[];
-  permissions: PendingPermission[];
-  onClarify(request: PendingClarify, answers: string[][] | null, cancel: boolean): void;
-  onPermission(request: PendingPermission, decision: PermissionDecision): void;
+  clarifies: PendingActionView[];
+  permissions: PendingActionView[];
+  onClarify(request: PendingActionView, answers: string[][] | null, cancel: boolean): void;
+  onPermission(request: PendingActionView, decision: PermissionDecision): void;
 }) {
   if (permissions.length === 0 && clarifies.length === 0) {
     return null;
@@ -29,19 +28,19 @@ export function ComposerRequests({
   return (
     <div className="composerRequests" aria-label="Pending requests">
       {permissions.map((permission) => (
-        <div className="composerRequest" key={permission.requestId}>
+        <div className="composerRequest" key={permission.actionId}>
           <div className="composerRequestHeader">
-            <strong>{permission.toolName}</strong>
-            {permission.timeoutSecs ? <span>{permission.timeoutSecs}s</span> : null}
+            <strong>{permissionTitle(permission)}</strong>
+            {permissionTimeoutSecs(permission) ? <span>{permissionTimeoutSecs(permission)}s</span> : null}
           </div>
-          <p>{permission.summary || permission.reason}</p>
-          {permission.summary && permission.reason && permission.summary !== permission.reason ? (
-            <p>{permission.reason}</p>
+          <p>{permissionSummary(permission)}</p>
+          {permissionReason(permission) && permissionSummary(permission) !== permissionReason(permission) ? (
+            <p>{permissionReason(permission)}</p>
           ) : null}
-          {(permission.matchedRule || permission.suggestedRule) ? (
+          {(permissionMatchedRule(permission) || permissionSuggestedRule(permission)) ? (
             <div className="composerRequestMeta">
-              {permission.matchedRule ? <code>{permission.matchedRule}</code> : null}
-              {permission.suggestedRule ? <code>{permission.suggestedRule}</code> : null}
+              {permissionMatchedRule(permission) ? <code>{permissionMatchedRule(permission)}</code> : null}
+              {permissionSuggestedRule(permission) ? <code>{permissionSuggestedRule(permission)}</code> : null}
             </div>
           ) : null}
           <div className="composerRequestActions">
@@ -53,7 +52,7 @@ export function ComposerRequests({
               <ShieldCheck size={14} />
               <span>Session</span>
             </button>
-            {permission.allowAlways ? (
+            {permissionAllowAlways(permission) ? (
               <button onClick={() => onPermission(permission, "allowAlways")} type="button">
                 <ShieldPlus size={14} />
                 <span>Always</span>
@@ -67,7 +66,7 @@ export function ComposerRequests({
         </div>
       ))}
       {clarifies.map((clarify) => (
-        <ClarifyComposerRequest key={clarify.requestId} request={clarify} onSubmit={onClarify} />
+        <ClarifyComposerRequest key={clarify.actionId} request={clarify} onSubmit={onClarify} />
       ))}
     </div>
   );
@@ -77,17 +76,17 @@ function ClarifyComposerRequest({
   request,
   onSubmit
 }: {
-  request: PendingClarify;
-  onSubmit(request: PendingClarify, answers: string[][] | null, cancel: boolean): void;
+  request: PendingActionView;
+  onSubmit(request: PendingActionView, answers: string[][] | null, cancel: boolean): void;
 }) {
-  const questions = useMemo(() => parseClarifyQuestions(request.raw), [request.raw]);
+  const questions = useMemo(() => parseClarifyQuestions(clarifyRawPayload(request)), [request.payload]);
   const [answers, setAnswers] = useState<ClarifyAnswerState[]>(() => initialClarifyAnswers(questions));
   const [fallbackAnswer, setFallbackAnswer] = useState("");
 
   useEffect(() => {
     setAnswers(initialClarifyAnswers(questions));
     setFallbackAnswer("");
-  }, [questions, request.requestId]);
+  }, [questions, request.actionId]);
 
   const resolvedAnswers = questions.map((question, index) => {
     const answer = answers[index] ?? defaultClarifyAnswer(question);
@@ -131,7 +130,7 @@ function ClarifyComposerRequest({
           {questions.map((question, questionIndex) => {
             const answer = answers[questionIndex] ?? defaultClarifyAnswer(question);
             return (
-              <fieldset className="composerClarifyQuestion" key={`${request.requestId}:${questionIndex}`}>
+              <fieldset className="composerClarifyQuestion" key={`${request.actionId}:${questionIndex}`}>
                 <legend>{question.question}</legend>
                 {[...question.options, OTHER_OPTION].map((option) => {
                   const isOther = option.label === OTHER_OPTION.label;
@@ -142,7 +141,7 @@ function ClarifyComposerRequest({
                     <label className="composerClarifyOption" key={option.label}>
                       <input
                         checked={checked}
-                        name={`${request.requestId}:${questionIndex}`}
+                        name={`${request.actionId}:${questionIndex}`}
                         type="radio"
                         onChange={() => {
                           setAnswers((current) => replaceClarifyAnswer(
@@ -254,6 +253,57 @@ function replaceClarifyAnswer(
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function actionPayload(action: PendingActionView): Record<string, unknown> {
+  return asRecord(action.payload);
+}
+
+function actionPayloadString(action: PendingActionView, key: string): string {
+  const value = actionPayload(action)[key];
+  return typeof value === "string" ? value : "";
+}
+
+function actionPayloadNumber(action: PendingActionView, key: string): number {
+  const value = actionPayload(action)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function actionPayloadBool(action: PendingActionView, key: string): boolean {
+  return actionPayload(action)[key] === true;
+}
+
+function permissionTitle(permission: PendingActionView): string {
+  return permission.title ?? (actionPayloadString(permission, "toolName") || "permission");
+}
+
+function permissionSummary(permission: PendingActionView): string {
+  return permission.summary ?? (actionPayloadString(permission, "summary") || permissionReason(permission));
+}
+
+function permissionReason(permission: PendingActionView): string {
+  return actionPayloadString(permission, "reason");
+}
+
+function permissionMatchedRule(permission: PendingActionView): string {
+  return actionPayloadString(permission, "matchedRule");
+}
+
+function permissionSuggestedRule(permission: PendingActionView): string {
+  return actionPayloadString(permission, "suggestedRule");
+}
+
+function permissionAllowAlways(permission: PendingActionView): boolean {
+  return actionPayloadBool(permission, "allowAlways");
+}
+
+function permissionTimeoutSecs(permission: PendingActionView): number {
+  return actionPayloadNumber(permission, "timeoutSecs");
+}
+
+function clarifyRawPayload(action: PendingActionView): unknown {
+  const payload = actionPayload(action);
+  return payload.raw ?? action.payload;
 }
 
 export function ComposerSubmitControls({

@@ -452,29 +452,42 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
 
   it("upserts and resolves pending permission requests from live events", () => {
     const requested = applyLiveTranscriptEvent(detachedSnapshot(), {
-      type: "permissionRequested",
-      requestId: "permission-draft",
-      toolName: "exec_command",
-      summary: "inline Python could not be reduced",
-      reason: "requires approval",
-      matchedRule: "exec:python3 -c",
-      suggestedRule: null,
-      allowAlways: true,
-      timeoutSecs: 300,
-      turnId: "turn-draft",
-      activityId: "activity-draft",
-      sourceKey: "web:draft"
+      type: "actionRequested",
+      action: {
+        actionId: "permission-draft",
+        kind: "permission",
+        title: "exec_command",
+        summary: "inline Python could not be reduced",
+        payload: {
+          toolName: "exec_command",
+          summary: "inline Python could not be reduced",
+          reason: "requires approval",
+          matchedRule: "exec:python3 -c",
+          suggestedRule: null,
+          allowAlways: true,
+          timeoutSecs: 300
+        },
+        turnId: "turn-draft",
+        activityId: "activity-draft",
+        sourceKey: "web:draft"
+      }
     });
 
-    expect(requested.pendingPermissions).toEqual([
+    expect(requested.pendingActions).toEqual([
       {
-        requestId: "permission-draft",
-        toolName: "exec_command",
+        actionId: "permission-draft",
+        kind: "permission",
+        title: "exec_command",
         summary: "inline Python could not be reduced",
-        reason: "requires approval",
-        matchedRule: "exec:python3 -c",
-        allowAlways: true,
-        timeoutSecs: 300,
+        payload: {
+          toolName: "exec_command",
+          summary: "inline Python could not be reduced",
+          reason: "requires approval",
+          matchedRule: "exec:python3 -c",
+          suggestedRule: null,
+          allowAlways: true,
+          timeoutSecs: 300
+        },
         turnId: "turn-draft",
         activityId: "activity-draft",
         sourceKey: "web:draft"
@@ -482,12 +495,14 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     ]);
 
     const resolved = applyLiveTranscriptEvent(requested, {
-      type: "permissionResolved",
-      requestId: "permission-draft",
-      decision: "allowAlways"
+      type: "actionResolved",
+      actionId: "permission-draft",
+      kind: "permission",
+      outcome: "accepted",
+      payload: { decision: "allowAlways" }
     });
 
-    expect(resolved.pendingPermissions).toEqual([]);
+    expect(resolved.pendingActions).toEqual([]);
   });
 
   it("upserts pending clarify requests and clears same-turn pending requests on completion", () => {
@@ -500,34 +515,48 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
       }
     };
     const withClarify = applyLiveTranscriptEvent(draftRunning, {
-      type: "clarifyRequested",
-      requestId: "clarify-draft",
-      raw: { questions: [{ question: "Which path?", options: [{ label: "A" }, { label: "B" }] }] },
-      turnId: "turn-draft",
-      activityId: "activity-draft",
-      sourceKey: "web:draft"
+      type: "actionRequested",
+      action: {
+        actionId: "clarify-draft",
+        kind: "clarify",
+        title: "Clarify",
+        summary: "Which path?",
+        payload: {
+          raw: { questions: [{ question: "Which path?", options: [{ label: "A" }, { label: "B" }] }] }
+        },
+        turnId: "turn-draft",
+        activityId: "activity-draft",
+        sourceKey: "web:draft"
+      }
     });
     const withBoth = applyLiveTranscriptEvent(withClarify, {
-      type: "permissionRequested",
-      requestId: "permission-draft",
-      toolName: "exec_command",
-      summary: "needs approval",
-      reason: "requires approval",
-      matchedRule: null,
-      suggestedRule: null,
-      allowAlways: false,
-      timeoutSecs: 300,
-      turnId: "turn-draft",
-      activityId: "activity-draft",
-      sourceKey: "web:draft"
+      type: "actionRequested",
+      action: {
+        actionId: "permission-draft",
+        kind: "permission",
+        title: "exec_command",
+        summary: "needs approval",
+        payload: {
+          toolName: "exec_command",
+          summary: "needs approval",
+          reason: "requires approval",
+          matchedRule: null,
+          suggestedRule: null,
+          allowAlways: false,
+          timeoutSecs: 300
+        },
+        turnId: "turn-draft",
+        activityId: "activity-draft",
+        sourceKey: "web:draft"
+      }
     });
 
-    expect(withBoth.pendingClarifies[0]).toMatchObject({
-      requestId: "clarify-draft",
+    expect(withBoth.pendingActions.find((action) => action.kind === "clarify")).toMatchObject({
+      actionId: "clarify-draft",
       activityId: "activity-draft",
       sourceKey: "web:draft"
     });
-    expect(withBoth.pendingPermissions[0]?.requestId).toBe("permission-draft");
+    expect(withBoth.pendingActions.find((action) => action.kind === "permission")?.actionId).toBe("permission-draft");
 
     const completed = applyLiveTranscriptEvent(withBoth, {
       type: "turnCompleted",
@@ -537,8 +566,7 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
       committedEntries: []
     });
 
-    expect(completed.pendingClarifies).toEqual([]);
-    expect(completed.pendingPermissions).toEqual([]);
+    expect(completed.pendingActions).toEqual([]);
   });
 
   it("does not treat spawn_agent args as a live overlay identity", () => {
@@ -836,6 +864,248 @@ describe("reconcileThreadSnapshot", () => {
     expect(next.entries[0]?.source).toBe("runtime.message");
   });
 
+  it("self-reconciles stale live assistant entries already present in an incoming snapshot", () => {
+    const incoming = {
+      ...threadSnapshot(),
+      activity: {
+        running: true,
+        activeTurnId: "turn-1",
+        queuedTurns: 0
+      },
+      entries: [
+        entry({
+          id: "message:6",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: 6,
+          source: "runtime.message",
+          status: "completed",
+          metadata: { liveOrder: 0 },
+          blocks: [
+            block({
+              id: "message:6:block:0",
+              source: "runtime.message",
+              status: "completed",
+              body: "committed final answer",
+              detail: "committed final answer"
+            })
+          ]
+        }),
+        entry({
+          id: "live:turn-1:assistant:0",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: null,
+          source: "runtime.stream",
+          status: "completed",
+          metadata: { projection: "assistant_segment", liveOrder: 0, streamSeq: 13 },
+          blocks: [
+            block({
+              id: "live:turn-1:assistant:0:text",
+              source: "runtime.stream",
+              status: "completed",
+              body: "stale live final text",
+              detail: "stale live final text"
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(threadSnapshot(), incoming);
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:6"]);
+    expect(next.entries[0]?.source).toBe("runtime.message");
+  });
+
+  it("self-reconciles stale pending tool overlays already present in an incoming snapshot", () => {
+    const incoming = {
+      ...threadSnapshot(),
+      activity: {
+        running: true,
+        activeTurnId: "turn-1",
+        queuedTurns: 0
+      },
+      entries: [
+        entry({
+          id: "message:8",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: 8,
+          source: "runtime.message",
+          status: "completed",
+          blocks: [
+            block({
+              id: "message:8:tool:0",
+              kind: "shell",
+              source: "runtime.message",
+              status: "completed",
+              title: "exec_command python fetch.py",
+              body: "done\n",
+              detail: "done\n",
+              metadata: {
+                projection: "tool",
+                tool_name: "exec_command",
+                tool_call_id: "call_exec",
+                args: { cmd: "python fetch.py" },
+                result: { exit_code: 0, output: "done\n" }
+              }
+            })
+          ]
+        }),
+        entry({
+          id: "live:turn-1:assistant:0",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: null,
+          source: "runtime.stream",
+          status: "running",
+          blocks: [
+            block({
+              id: "live:turn-1:tool:call_exec",
+              kind: "shell",
+              source: "runtime.stream",
+              status: "pending",
+              title: "exec_command python fetch.py",
+              metadata: {
+                projection: "tool",
+                tool_name: "exec_command",
+                tool_call_id: "call_exec",
+                args: { cmd: "python fetch.py" }
+              }
+            })
+          ]
+        })
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(threadSnapshot(), incoming);
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:8"]);
+    expect(next.entries[0]?.blocks[0]?.status).toBe("completed");
+  });
+
+  it("replays a normalized ledger when incoming snapshots contain committed rows and stale live overlays", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:current",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: null,
+          source: "runtime.stream",
+          blocks: [
+            block({
+              id: "live:turn-1:tool:call_exec:current",
+              kind: "shell",
+              source: "runtime.stream",
+              status: "pending",
+              title: "exec_command python fetch.py",
+              metadata: {
+                projection: "tool",
+                tool_name: "exec_command",
+                tool_call_id: "call_exec",
+                args: { cmd: "python fetch.py" }
+              }
+            })
+          ]
+        })
+      ]
+    };
+    const incoming = {
+      ...threadSnapshot(),
+      entries: [
+        completedExecEntry(),
+        entry({
+          id: "live:turn-1:assistant:stale",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: null,
+          source: "runtime.stream",
+          status: "running",
+          blocks: [
+            block({
+              id: "live:turn-1:tool:call_exec:stale",
+              kind: "shell",
+              source: "runtime.stream",
+              status: "running",
+              title: "exec_command python fetch.py",
+              metadata: {
+                projection: "tool",
+                tool_name: "exec_command",
+                tool_call_id: "call_exec",
+                args: { cmd: "python fetch.py" }
+              }
+            })
+          ]
+        })
+      ]
+    };
+    const before = runtimeLedger(current);
+
+    const next = reconcileThreadSnapshot(current, incoming);
+    const after = runtimeLedger(next);
+
+    assertRuntimeLedgerIdentity(after, "snapshot stale overlay replay");
+    assertRuntimeLedgerMonotonic(before, after, "snapshot stale overlay replay");
+    expect(after).toMatchObject([
+      {
+        entryId: "message:8",
+        blockId: "message:8:tool:0",
+        source: "runtime.message",
+        toolCallId: "call_exec",
+        status: "completed",
+        hasResult: true,
+        activeElapsedOwner: false
+      }
+    ]);
+    expect(after.some((row) => row.source === "runtime.stream" && row.toolCallId === "call_exec")).toBe(false);
+  });
+
+  it("drops current live pending overlays covered by a completed tool snapshot", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:0",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          source: "runtime.stream",
+          blocks: [
+            block({
+              id: "live:turn-1:tool:call_exec",
+              kind: "shell",
+              source: "runtime.stream",
+              status: "pending",
+              title: "exec_command python fetch.py",
+              metadata: {
+                projection: "tool",
+                tool_name: "exec_command",
+                tool_call_id: "call_exec",
+                args: { cmd: "python fetch.py" }
+              }
+            })
+          ]
+        })
+      ]
+    };
+    const incoming = {
+      ...threadSnapshot(),
+      entries: [completedExecEntry()]
+    };
+    const before = runtimeLedger(current);
+
+    const next = reconcileThreadSnapshot(current, incoming);
+    const after = runtimeLedger(next);
+
+    assertRuntimeLedgerIdentity(after, "completed snapshot covers live pending");
+    assertRuntimeLedgerMonotonic(before, after, "completed snapshot covers live pending");
+    expect(after.map((row) => `${row.source}:${row.toolCallId}:${row.status}`)).toEqual([
+      "runtime.message:call_exec:completed"
+    ]);
+  });
+
   it("drops side-inherited parent context from thread snapshots and live entries", () => {
     const incoming = {
       ...threadSnapshot(),
@@ -908,8 +1178,7 @@ function detachedSnapshot(): ThreadSnapshot {
       activeTurnId: null,
       queuedTurns: 0
     },
-    pendingPermissions: [],
-    pendingClarifies: []
+    pendingActions: []
   };
 }
 
@@ -966,6 +1235,143 @@ function completedTurn(id: string, threadId: string | null) {
     startedAtMs: 1,
     completedAtMs: 2
   };
+}
+
+type RuntimeLedgerRow = {
+  turnId: string | null;
+  entryId: string;
+  blockId: string;
+  source: string | null;
+  toolName: string | null;
+  toolCallId: string | null;
+  status: TranscriptBlock["status"];
+  order: number;
+  title: string | null;
+  hasResult: boolean;
+  activeElapsedOwner: boolean;
+};
+
+function runtimeLedger(snapshot: ThreadSnapshot): RuntimeLedgerRow[] {
+  return snapshot.entries.flatMap((candidate) => candidate.blocks.map((candidateBlock) => {
+    const metadata = record(candidateBlock.metadata);
+    const result = metadata.result ?? candidateBlock.result ?? null;
+    return {
+      turnId: candidate.turnId,
+      entryId: candidate.id,
+      blockId: candidateBlock.id,
+      source: candidateBlock.source || candidate.source,
+      toolName: stringValue(metadata.tool_name),
+      toolCallId: stringValue(metadata.tool_call_id),
+      status: candidateBlock.status,
+      order: candidateBlock.order,
+      title: candidateBlock.title,
+      hasResult: result !== null && result !== undefined,
+      activeElapsedOwner: candidateBlock.status === "running" &&
+        candidateBlock.kind !== "text" &&
+        candidateBlock.kind !== "reasoning" &&
+        (candidateBlock.source || candidate.source) === "runtime.stream"
+    };
+  }));
+}
+
+function assertRuntimeLedgerIdentity(rows: RuntimeLedgerRow[], checkpoint: string) {
+  const blockIds = new Set<string>();
+  const liveToolIds = new Set<string>();
+  for (const row of rows) {
+    const blockKey = `${row.turnId ?? ""}:${row.blockId}`;
+    expect(blockIds.has(blockKey), `${checkpoint}: duplicate block identity ${blockKey}`).toBe(false);
+    blockIds.add(blockKey);
+    if (!row.toolName || !row.toolCallId) {
+      continue;
+    }
+    expect(row.toolCallId, `${checkpoint}: tool_call_id fell back to bare tool name`).not.toBe(row.toolName);
+    if (row.source === "runtime.stream") {
+      const toolKey = `${row.turnId ?? ""}:${row.toolName}:${row.toolCallId}`;
+      expect(liveToolIds.has(toolKey), `${checkpoint}: duplicate live tool identity ${toolKey}`).toBe(false);
+      liveToolIds.add(toolKey);
+    }
+  }
+}
+
+function assertRuntimeLedgerMonotonic(
+  before: RuntimeLedgerRow[],
+  after: RuntimeLedgerRow[],
+  checkpoint: string
+) {
+  for (const row of after) {
+    if (!row.toolCallId) {
+      continue;
+    }
+    const prior = before.find((candidate) => candidate.toolCallId === row.toolCallId);
+    if (!prior) {
+      continue;
+    }
+    expect(
+      statusRank(row.status),
+      `${checkpoint}: status downgraded from ${prior.status} to ${row.status}`
+    ).toBeGreaterThanOrEqual(statusRank(prior.status));
+    if (prior.hasResult) {
+      expect(row.hasResult, `${checkpoint}: result fact disappeared`).toBe(true);
+    }
+    if (statusRank(row.status) >= statusRank("completed")) {
+      expect(row.activeElapsedOwner, `${checkpoint}: terminal row kept active elapsed ownership`).toBe(false);
+    }
+  }
+}
+
+function statusRank(status: TranscriptBlock["status"]): number {
+  switch (status) {
+    case "pending":
+      return 0;
+    case "running":
+    case "needsInput":
+      return 1;
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return 2;
+    case "info":
+      return 3;
+  }
+}
+
+function completedExecEntry(): TranscriptEntry {
+  return entry({
+    id: "message:8",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    messageSeq: 8,
+    source: "runtime.message",
+    status: "completed",
+    blocks: [
+      block({
+        id: "message:8:tool:0",
+        kind: "shell",
+        source: "runtime.message",
+        status: "completed",
+        title: "exec_command python fetch.py",
+        body: "done\n",
+        detail: "done\n",
+        metadata: {
+          projection: "tool",
+          tool_name: "exec_command",
+          tool_call_id: "call_exec",
+          args: { cmd: "python fetch.py" },
+          result: { exit_code: 0, output: "done\n" }
+        }
+      })
+    ]
+  });
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function entry(overrides: Partial<TranscriptEntry> = {}): TranscriptEntry {

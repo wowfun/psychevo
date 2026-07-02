@@ -602,6 +602,9 @@ fn gateway_event_thread_id(event: &GatewayEvent) -> Option<String> {
                 Some(entry.thread_id.clone())
             }
         }
+        GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
+            action.thread_id.clone()
+        }
         GatewayEvent::TitleChanged { thread_id, .. } => Some(thread_id.clone()),
         _ => None,
     }
@@ -614,8 +617,10 @@ fn gateway_event_turn_id(event: &GatewayEvent) -> Option<&str> {
         | GatewayEvent::TurnCompleted { turn_id, .. }
         | GatewayEvent::EntryStarted { turn_id, .. }
         | GatewayEvent::EntryUpdated { turn_id, .. }
-        | GatewayEvent::EntryCompleted { turn_id, .. }
-        | GatewayEvent::EntryDelta { turn_id, .. } => Some(turn_id.as_str()),
+        | GatewayEvent::EntryCompleted { turn_id, .. } => Some(turn_id.as_str()),
+        GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
+            action.turn_id.as_deref()
+        }
         _ => None,
     }
 }
@@ -634,10 +639,10 @@ fn should_append_gateway_live_event(activity: &DurableGatewayActivity, event: &G
         GatewayEvent::TurnStarted { .. }
             | GatewayEvent::TurnQueued { .. }
             | GatewayEvent::TurnCompleted { .. }
-            | GatewayEvent::PermissionRequested { .. }
-            | GatewayEvent::PermissionResolved { .. }
-            | GatewayEvent::ClarifyRequested { .. }
-            | GatewayEvent::ClarifyResolved { .. }
+            | GatewayEvent::ActionRequested { .. }
+            | GatewayEvent::ActionUpdated { .. }
+            | GatewayEvent::ActionResolved { .. }
+            | GatewayEvent::ActionCancelled { .. }
             | GatewayEvent::Warning { .. }
             | GatewayEvent::ActivityChanged { .. }
             | GatewayEvent::TitleChanged { .. }
