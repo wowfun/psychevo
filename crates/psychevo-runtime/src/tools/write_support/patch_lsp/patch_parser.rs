@@ -630,12 +630,12 @@ impl LspManager {
             }
             if let Some(stream) = stream {
                 match result {
-                    Ok(()) => stream(RunStreamEvent::Event(json!({
+                    Ok(()) => stream(RunStreamEvent::value(json!({
                         "type": "lsp_status",
                         "status": "install_finished",
                         "server_id": server_id,
                     }))),
-                    Err(err) => stream(RunStreamEvent::Event(json!({
+                    Err(err) => stream(RunStreamEvent::value(json!({
                         "type": "lsp_status",
                         "status": "install_failed",
                         "server_id": server_id,

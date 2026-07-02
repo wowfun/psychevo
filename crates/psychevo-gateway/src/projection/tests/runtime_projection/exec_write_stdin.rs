@@ -4,7 +4,7 @@ fn live_projector_merges_write_stdin_polls_into_yielded_exec_command() {
     let pending = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_call_pending",
                 "tool_name": "exec_command",
                 "tool_call_id": "call_exec",
@@ -27,7 +27,7 @@ fn live_projector_merges_write_stdin_polls_into_yielded_exec_command() {
     let yielded = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "exec_command",
                 "tool_call_id": "call_exec",
@@ -47,7 +47,7 @@ fn live_projector_merges_write_stdin_polls_into_yielded_exec_command() {
 
     let hidden_poll = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "tool_call_pending",
             "tool_name": "write_stdin",
             "tool_call_id": "call_poll",
@@ -60,7 +60,7 @@ fn live_projector_merges_write_stdin_polls_into_yielded_exec_command() {
     let polled = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "write_stdin",
                 "tool_call_id": "call_poll",
@@ -80,7 +80,7 @@ fn live_projector_merges_write_stdin_polls_into_yielded_exec_command() {
 
     let _ = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "tool_call_pending",
             "tool_name": "write_stdin",
             "tool_call_id": "call_done",
@@ -91,7 +91,7 @@ fn live_projector_merges_write_stdin_polls_into_yielded_exec_command() {
     let completed = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "write_stdin",
                 "tool_call_id": "call_done",
@@ -115,7 +115,7 @@ fn live_projector_merges_background_exec_session_finish_into_yielded_exec_comman
     let mut projector = GatewayLiveProjector::default();
     let _ = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "tool_call_pending",
             "tool_name": "exec_command",
             "tool_call_id": "call_exec",
@@ -126,7 +126,7 @@ fn live_projector_merges_background_exec_session_finish_into_yielded_exec_comman
     let yielded = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "exec_command",
                 "tool_call_id": "call_exec",
@@ -147,7 +147,7 @@ fn live_projector_merges_background_exec_session_finish_into_yielded_exec_comman
     let delta = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "exec_session_output_delta",
                 "session_id": 7,
                 "tool_call_id": "call_exec",
@@ -168,7 +168,7 @@ fn live_projector_merges_background_exec_session_finish_into_yielded_exec_comman
     let finished = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "exec_session_finished",
                 "session_id": 7,
                 "tool_call_id": "call_exec",
@@ -189,11 +189,61 @@ fn live_projector_merges_background_exec_session_finish_into_yielded_exec_comman
 }
 
 #[test]
+fn live_projector_hides_failed_write_stdin_targeting_yielded_exec_command() {
+    let mut projector = GatewayLiveProjector::default();
+    let _ = projector.project(
+        "turn-1",
+        &RunStreamEvent::value(json!({
+            "type": "tool_call_pending",
+            "tool_name": "exec_command",
+            "tool_call_id": "call_exec",
+            "args": {"cmd": "python fetch.py"},
+            "outcome": "normal"
+        })),
+    );
+    let yielded = projector.project(
+        "turn-1",
+        &RunStreamEvent::value(json!({
+            "type": "tool_execution_end",
+            "tool_name": "exec_command",
+            "tool_call_id": "call_exec",
+            "result": {"session_id": 2, "exit_code": null, "output": "start\n"},
+            "outcome": "normal"
+        })),
+    );
+    assert!(yielded.is_some());
+
+    let pending_stdin = projector.project(
+        "turn-1",
+        &RunStreamEvent::value(json!({
+            "type": "tool_call_pending",
+            "tool_name": "write_stdin",
+            "tool_call_id": "call_stdin",
+            "args": {"session_id": 2, "yield_time_ms": 30000, "chars": "\n"},
+            "outcome": "normal"
+        })),
+    );
+    assert!(pending_stdin.is_none());
+
+    let failed_stdin = projector.project(
+        "turn-1",
+        &RunStreamEvent::value(json!({
+            "type": "tool_execution_end",
+            "tool_name": "write_stdin",
+            "tool_call_id": "call_stdin",
+            "result": {"error": "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"},
+            "outcome": "failed"
+        })),
+    );
+    assert!(failed_stdin.is_none());
+}
+
+#[test]
 fn live_projector_hides_unmatched_successful_write_stdin_but_keeps_failed_one() {
     let mut projector = GatewayLiveProjector::default();
     let success = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "tool_execution_end",
             "tool_name": "write_stdin",
             "tool_call_id": "call_poll",
@@ -206,7 +256,7 @@ fn live_projector_hides_unmatched_successful_write_stdin_but_keeps_failed_one() 
     let failed = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "write_stdin",
                 "tool_call_id": "call_poll",
@@ -230,7 +280,7 @@ fn live_projector_hides_assistant_write_stdin_tool_call_block() {
     let mut projector = GatewayLiveProjector::default();
     let hidden = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",

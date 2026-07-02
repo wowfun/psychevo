@@ -107,7 +107,7 @@ pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion()
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "message_end",
         "message": {
             "role": "assistant",
@@ -118,14 +118,14 @@ pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion()
         }
     })))
     .expect("send answer");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_start",
         "tool_call_id": "call_read_fixture",
         "tool_name": "read",
         "args": {"path": "fixture.txt"}
     })))
     .expect("send start");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_read_fixture",
         "tool_name": "read",
@@ -193,7 +193,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "run_start",
         "session_id": "streamed-session",
         "provider": "xiaomi-token-plan",
@@ -201,7 +201,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
         "mode": "default"
     })))
     .expect("send run start");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_sqlite",
         "tool_name": "exec_command",
@@ -210,7 +210,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
         "outcome": "failed"
     })))
     .expect("send tool end");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "message_end",
         "message": {
             "role": "assistant",
@@ -277,7 +277,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
         ui.transcript
     );
 
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "agent_end",
         "outcome": "normal",
         "messages": []
@@ -307,7 +307,7 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
             .to_string(),
     })
     .expect("send reasoning");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "message_end",
         "message": {
             "role": "assistant",
@@ -336,7 +336,7 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
         }
     })))
     .expect("send message end");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_start",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -346,7 +346,7 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
         }
     })))
     .expect("send start");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_write_report",
         "tool_name": "write",

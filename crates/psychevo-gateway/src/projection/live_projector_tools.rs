@@ -11,7 +11,7 @@ impl GatewayLiveProjector {
         let tool_call_id = if tool_name == "spawn_agent" {
             self.strict_agent_tool_call_id(turn_id, &raw_tool_call_id, value)
         } else {
-            self.canonical_tool_call_id(&raw_tool_call_id, tool_name, args.as_ref())
+            self.canonical_tool_call_id(turn_id, &raw_tool_call_id, tool_name, args.as_ref())
         };
         if tool_call_id != raw_tool_call_id
             && let Some(args) = args.clone()
@@ -30,6 +30,12 @@ impl GatewayLiveProjector {
                 Some("tool_call_pending" | "tool_execution_start" | "tool_execution_update"),
                 "write_stdin",
             ) => None,
+            (Some("tool_execution_end"), "write_stdin")
+                if tool_event_failed(value)
+                    && self.write_stdin_targets_known_exec_session(&tool_call_id, value) =>
+            {
+                None
+            }
             (Some("tool_execution_end"), "write_stdin") if !tool_event_failed(value) => {
                 self.project_write_stdin_success(turn_id, &tool_call_id, value)
             }
@@ -148,6 +154,14 @@ impl GatewayLiveProjector {
             metadata,
             completed: status == TranscriptBlockStatus::Completed,
         }))
+    }
+
+    fn write_stdin_targets_known_exec_session(&self, tool_call_id: &str, value: &Value) -> bool {
+        self.tool_args
+            .get(tool_call_id)
+            .and_then(exec_session_id_from_args_value)
+            .or_else(|| exec_session_id_from_result_value(value))
+            .is_some_and(|session_id| self.exec_sessions.contains_key(&session_id))
     }
 
     fn project_exec_session_event(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
@@ -273,6 +287,7 @@ impl GatewayLiveProjector {
 
     fn canonical_tool_call_id(
         &mut self,
+        turn_id: &str,
         raw_tool_call_id: &str,
         tool_name: &str,
         args: Option<&Value>,
@@ -289,9 +304,10 @@ impl GatewayLiveProjector {
         let candidates = args
             .map(|args| self.matching_open_tool_candidates(tool_name, args))
             .unwrap_or_default();
+        let allow_name_match = !temporary_tool_call_id(raw_tool_call_id);
         let candidates = if candidates.len() == 1 {
             candidates
-        } else if candidates.is_empty() {
+        } else if candidates.is_empty() && allow_name_match {
             self.matching_open_tool_name_candidates(tool_name)
         } else {
             Vec::new()
@@ -300,6 +316,14 @@ impl GatewayLiveProjector {
             return raw_tool_call_id.to_string();
         }
         let (canonical, segment) = candidates[0].clone();
+        if temporary_tool_call_id(&canonical) && !temporary_tool_call_id(raw_tool_call_id) {
+            self.migrate_tool_identity(turn_id, segment, &canonical, raw_tool_call_id);
+            self.tool_aliases
+                .insert(canonical.clone(), raw_tool_call_id.to_string());
+            self.tool_owners
+                .insert(raw_tool_call_id.to_string(), segment);
+            return raw_tool_call_id.to_string();
+        }
         self.tool_aliases
             .insert(raw_tool_call_id.to_string(), canonical.clone());
         self.tool_owners
@@ -309,7 +333,15 @@ impl GatewayLiveProjector {
 
     fn raw_tool_call_id_for_event(&self, tool_name: &str, value: &Value) -> String {
         if tool_name != "spawn_agent" {
-            return tool_call_id_from_value(value, tool_name).to_string();
+            if let Some(tool_call_id) = explicit_tool_call_id_from_value(value) {
+                return tool_call_id.to_string();
+            }
+            return temporary_tool_call_id_for_value(
+                tool_name,
+                self.assistant_segment,
+                value,
+                self.stream_seq.saturating_add(1),
+            );
         }
         if let Some(tool_call_id) = value
             .get("tool_call_id")
@@ -338,9 +370,16 @@ impl GatewayLiveProjector {
         metadata: &mut Value,
     ) -> String {
         if tool_name != "spawn_agent" {
-            self.tool_owners
-                .insert(raw_tool_call_id.to_string(), segment);
-            return raw_tool_call_id.to_string();
+            let tool_call_id = self.canonical_tool_content_id_for_segment(
+                turn_id,
+                segment,
+                raw_tool_call_id,
+                tool_name,
+                metadata,
+            );
+            set_metadata_field(metadata, "tool_call_id", json!(tool_call_id.clone()));
+            self.tool_owners.insert(tool_call_id.clone(), segment);
+            return tool_call_id;
         }
         let tool_call_id =
             self.strict_agent_tool_call_id_for_segment(turn_id, segment, raw_tool_call_id, metadata);
@@ -395,6 +434,65 @@ impl GatewayLiveProjector {
                 .insert(position_key, raw_tool_call_id.to_string());
         }
         raw_tool_call_id.to_string()
+    }
+
+    fn canonical_tool_content_id_for_segment(
+        &mut self,
+        turn_id: &str,
+        segment: usize,
+        raw_tool_call_id: &str,
+        tool_name: &str,
+        metadata: &Value,
+    ) -> String {
+        let raw_tool_call_id = raw_tool_call_id.trim();
+        let raw_tool_call_id = if raw_tool_call_id.is_empty() {
+            temporary_tool_call_id_for_value(
+                tool_name,
+                segment,
+                metadata,
+                self.stream_seq.saturating_add(1),
+            )
+        } else {
+            raw_tool_call_id.to_string()
+        };
+        if let Some(canonical) = self.tool_aliases.get(&raw_tool_call_id) {
+            return canonical.clone();
+        }
+        if self.tool_owners.contains_key(&raw_tool_call_id) {
+            return raw_tool_call_id;
+        }
+        let Some(position_key) = tool_position_key(segment, metadata) else {
+            return raw_tool_call_id;
+        };
+        let Some(existing) = self.tool_positions.get(&position_key).cloned() else {
+            self.tool_positions
+                .insert(position_key, raw_tool_call_id.clone());
+            return raw_tool_call_id;
+        };
+        if existing == raw_tool_call_id {
+            return raw_tool_call_id;
+        }
+        let existing_temporary = temporary_tool_call_id(&existing);
+        let raw_temporary = temporary_tool_call_id(&raw_tool_call_id);
+        if existing_temporary && !raw_temporary {
+            self.migrate_tool_identity(turn_id, segment, &existing, &raw_tool_call_id);
+            self.tool_aliases
+                .insert(existing.clone(), raw_tool_call_id.clone());
+            self.tool_positions
+                .insert(position_key, raw_tool_call_id.clone());
+            return raw_tool_call_id;
+        }
+        if !existing_temporary && raw_temporary {
+            self.tool_aliases
+                .insert(raw_tool_call_id.clone(), existing.clone());
+            self.tool_owners.insert(raw_tool_call_id, segment);
+            return existing;
+        }
+        self.migrate_tool_identity(turn_id, segment, &existing, &raw_tool_call_id);
+        self.tool_aliases
+            .insert(existing.clone(), raw_tool_call_id.clone());
+        self.tool_positions.insert(position_key, raw_tool_call_id.clone());
+        raw_tool_call_id
     }
 
     fn migrate_tool_identity(

@@ -33,8 +33,7 @@ export function snapshot(): ThreadSnapshot {
       activeTurnId: "turn-1",
       queuedTurns: 0
     },
-    pendingPermissions: [],
-    pendingClarifies: []
+    pendingActions: []
   };
 }
 

@@ -147,7 +147,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                             TranscriptBlockStatus::Pending,
                             index as i64,
                             "runtime.message",
-                            Some(call.name.clone()),
+                            Some(tool_call_title(&call.name, &call.arguments)),
                             None,
                             Some(call.arguments_json.clone()),
                             Some(Value::Object(metadata)),
@@ -168,6 +168,37 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
         }
         Message::ToolResult { .. } => None,
     }
+}
+
+fn tool_call_title(tool_name: &str, arguments: &Value) -> String {
+    if tool_name == "exec_command"
+        && let Some(command) = arguments
+            .get("cmd")
+            .or_else(|| arguments.get("command"))
+            .and_then(Value::as_str)
+            .map(first_effective_command)
+            .filter(|command| !command.is_empty())
+    {
+        return compact_text(&format!("exec_command {command}"), 180);
+    }
+    if tool_name == "write_stdin"
+        && let Some(session_id) = arguments
+            .get("session_id")
+            .and_then(|value| value.as_u64().map(|value| value.to_string()))
+            .filter(|session_id| !session_id.is_empty())
+    {
+        return compact_text(&format!("write_stdin {session_id}"), 180);
+    }
+    tool_name.to_string()
+}
+
+fn first_effective_command(command: &str) -> String {
+    command
+        .split('\n')
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
+        .unwrap_or_else(|| command.trim())
+        .to_string()
 }
 
 fn user_shell_block(summary: &TuiMessageSummary, timestamp_ms: i64) -> Option<TranscriptBlock> {

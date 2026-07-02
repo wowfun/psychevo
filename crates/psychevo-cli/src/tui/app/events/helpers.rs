@@ -20,6 +20,18 @@ pub(crate) fn stream_event_session_id(event: &RunStreamEvent) -> Option<&str> {
     }
 }
 
+pub(crate) fn stream_event_is_clarify_request(event: &RunStreamEvent) -> bool {
+    match event {
+        RunStreamEvent::ClarifyRequest(_) => true,
+        RunStreamEvent::Event(value) => {
+            value.get("type").and_then(Value::as_str) == Some("action_requested")
+                && value.get("kind").and_then(Value::as_str) == Some("clarify")
+        }
+        RunStreamEvent::Scoped { event, .. } => stream_event_is_clarify_request(event),
+        _ => false,
+    }
+}
+
 pub(crate) fn buffer_session_live_event(
     ui: &mut FullscreenUi<'_>,
     session_id: &str,

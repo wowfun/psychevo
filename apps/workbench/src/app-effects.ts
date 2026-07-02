@@ -418,8 +418,10 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
               void params.refreshSnapshot(nextClient, threadId, undefined, true, eventEpoch);
             }, 750);
           }
-          if (["permissionRequested", "permissionResolved", "clarifyRequested", "clarifyResolved"].includes(event.type)) {
-            const threadId = "threadId" in event && event.threadId ? event.threadId : null;
+          if (["actionRequested", "actionUpdated", "actionResolved", "actionCancelled"].includes(event.type)) {
+            const threadId = "action" in event && event.action.threadId
+              ? event.action.threadId
+              : params.selectedThreadIdRef.current;
             if (threadId) {
               void params.refreshSnapshot(nextClient, threadId, undefined, true, params.viewEpochRef.current);
             }

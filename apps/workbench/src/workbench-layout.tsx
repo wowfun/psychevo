@@ -78,8 +78,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     openRightWorkspaceTab,
     onModelAssignmentSaved,
     onModelCatalogLoaded,
-    pendingClarifies,
-    pendingPermissions,
+    pendingClarifyActions,
+    pendingPermissionActions,
     permissionMode,
     pinnedSessionIds,
     pinnedSessions,
@@ -510,13 +510,13 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   onVariantChange={setSelectedVariant}
                 />
               )}
-              requestPanel={(pendingClarifies.length > 0 || pendingPermissions.length > 0) ? (
+              requestPanel={(pendingClarifyActions.length > 0 || pendingPermissionActions.length > 0) ? (
                 <ComposerRequests
-                  clarifies={pendingClarifies}
-                  permissions={pendingPermissions}
+                  clarifies={pendingClarifyActions}
+                  permissions={pendingPermissionActions}
                   onClarify={(request, answers, cancel) => void runAction(async () => {
                     const response = await client?.request("clarify/respond", {
-                      requestId: request.requestId,
+                      requestId: request.actionId,
                       threadId: request.threadId ?? snapshot.thread?.id ?? null,
                       sourceKey: request.sourceKey ?? null,
                       activityId: request.activityId ?? null,
@@ -537,7 +537,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   })}
                   onPermission={(request, decision) => void runAction(async () => {
                     const response = await client?.request("permission/respond", {
-                      requestId: request.requestId,
+                      requestId: request.actionId,
                       threadId: request.threadId ?? snapshot.thread?.id ?? null,
                       sourceKey: request.sourceKey ?? null,
                       activityId: request.activityId ?? null,

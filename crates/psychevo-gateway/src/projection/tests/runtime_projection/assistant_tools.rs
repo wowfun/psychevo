@@ -4,7 +4,7 @@ fn assistant_tool_call_text_projects_as_assistant_phase_text() {
     let event = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "message_end",
                 "message": {
                     "role": "assistant",
@@ -58,7 +58,7 @@ fn assistant_tool_call_without_text_projects_tool_without_empty_assistant_phase(
     let event = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "message_end",
                 "message": {
                     "role": "assistant",
@@ -104,7 +104,7 @@ fn live_projector_reorders_tool_pending_after_reasoning_and_phase_text() {
     let _ = projector.project("turn-1", &RunStreamEvent::ReasoningEnd);
     let _ = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "tool_call_pending",
             "tool_name": "exec_command",
             "tool_call_id": "call_fetch",
@@ -116,7 +116,7 @@ fn live_projector_reorders_tool_pending_after_reasoning_and_phase_text() {
     let completed_message = projector
             .project(
                 "turn-1",
-                &RunStreamEvent::Event(json!({
+                &RunStreamEvent::value(json!({
                     "type": "message_end",
                     "message": {
                         "role": "assistant",
@@ -175,7 +175,7 @@ fn live_projector_reorders_tool_pending_after_reasoning_and_phase_text() {
     let running_tool = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "exec_command",
                 "tool_call_id": "call_fetch",
@@ -206,7 +206,7 @@ fn live_projector_aliases_runtime_tool_id_to_matching_authoritative_tool_call() 
     let completed_message = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "message_end",
                 "message": {
                     "role": "assistant",
@@ -233,7 +233,7 @@ fn live_projector_aliases_runtime_tool_id_to_matching_authoritative_tool_call() 
     let running_tool = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "exec_command",
                 "tool_call_id": "runtime_call_fetch",
@@ -265,11 +265,144 @@ fn live_projector_aliases_runtime_tool_id_to_matching_authoritative_tool_call() 
 }
 
 #[test]
+fn live_projector_does_not_collapse_missing_tool_call_ids_by_tool_name() {
+    let mut projector = GatewayLiveProjector::default();
+    let first = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "tool_call_pending",
+                "tool_name": "exec_command",
+                "args": {"cmd": "python fetch.py"},
+                "outcome": "normal"
+            })),
+        )
+        .expect("first pending tool");
+    let first_entry = gateway_entry(&first);
+    let first_block = first_entry.blocks.first().expect("first block");
+    let first_id = first_block
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .expect("first tool id")
+        .to_string();
+
+    let second = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "tool_call_pending",
+                "tool_name": "exec_command",
+                "args": {"cmd": "sqlite3 feeds/.cache/x.db 'select 1'"},
+                "outcome": "normal"
+            })),
+        )
+        .expect("second pending tool");
+    let second_entry = gateway_entry(&second);
+    let second_block = second_entry.blocks.last().expect("second block");
+    let second_id = second_block
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .expect("second tool id")
+        .to_string();
+
+    assert_ne!(first_id, "exec_command");
+    assert_ne!(second_id, "exec_command");
+    assert_ne!(first_id, second_id);
+    assert_eq!(second_entry.blocks.len(), 2);
+    assert!(second_entry.blocks.iter().any(|block| block.id == first_block.id));
+    assert!(second_entry.blocks.iter().any(|block| block.id == second_block.id));
+}
+
+#[test]
+fn live_projector_message_end_tool_call_does_not_downgrade_completed_tool_block() {
+    let mut projector = GatewayLiveProjector::default();
+    let _ = projector.project(
+        "turn-1",
+        &RunStreamEvent::value(json!({
+            "type": "tool_call_pending",
+            "tool_name": "exec_command",
+            "tool_call_id": "call_fetch",
+            "args": {"cmd": "python fetch.py"},
+            "outcome": "normal"
+        })),
+    );
+    let completed_tool = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "tool_execution_end",
+                "tool_name": "exec_command",
+                "tool_call_id": "call_fetch",
+                "args": {"cmd": "python fetch.py"},
+                "result": {"session_id": 7, "exit_code": 0, "output": "done\n"},
+                "outcome": "normal"
+            })),
+        )
+        .expect("completed tool");
+    assert_exec_event(
+        &completed_tool,
+        "call_fetch",
+        TranscriptBlockStatus::Completed,
+        "done\n",
+        Some("exec_command python fetch.py"),
+        Some(0),
+    );
+
+    let message_end = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Fetched the data.", "content_index": 0},
+                        {
+                            "type": "tool_call",
+                            "id": "call_fetch",
+                            "name": "exec_command",
+                            "arguments": {"cmd": "python fetch.py"},
+                            "arguments_json": "{\"cmd\":\"python fetch.py\"}",
+                            "content_index": 1,
+                            "call_index": 0
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                    "outcome": "normal"
+                }
+            })),
+        )
+        .expect("message end");
+    let entry = gateway_entry(&message_end);
+    let block = entry
+        .blocks
+        .iter()
+        .find(|block| {
+            block
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("tool_call_id"))
+                .and_then(Value::as_str)
+                == Some("call_fetch")
+        })
+        .expect("tool block");
+    assert_eq!(block.status, TranscriptBlockStatus::Completed);
+    assert!(block.body.as_deref().is_some_and(|body| body.contains("done")));
+    let metadata = block.metadata.as_ref().expect("metadata");
+    assert_eq!(metadata["result"]["exit_code"], 0);
+    assert_eq!(metadata["result"]["output"], "done\n");
+}
+
+#[test]
 fn live_projector_projects_completed_agent_as_openable_agent_block() {
     let mut projector = GatewayLiveProjector::new(Some("thread-1".to_string()));
     let _ = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "tool_call_pending",
             "tool_name": "spawn_agent",
             "tool_call_id": "call_agent",
@@ -281,7 +414,7 @@ fn live_projector_projects_completed_agent_as_openable_agent_block() {
     let completed = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call_agent",
@@ -336,7 +469,7 @@ fn live_projector_authoritative_message_end_preserves_runtime_reasoning() {
     let _ = projector.project("turn-1", &RunStreamEvent::ReasoningEnd);
     let _ = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "tool_call_pending",
             "tool_name": "exec_command",
             "tool_call_id": "call_fetch",
@@ -348,7 +481,7 @@ fn live_projector_authoritative_message_end_preserves_runtime_reasoning() {
     let completed = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "message_end",
                 "message": {
                     "role": "assistant",
@@ -418,7 +551,7 @@ fn live_projector_replaces_running_message_update_snapshot_when_content_position
     let first_update = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "message_update",
                 "message": {
                     "role": "assistant",
@@ -443,7 +576,7 @@ fn live_projector_replaces_running_message_update_snapshot_when_content_position
     let shifted_update = projector
         .project(
             "turn-1",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "message_update",
                 "message": {
                     "role": "assistant",

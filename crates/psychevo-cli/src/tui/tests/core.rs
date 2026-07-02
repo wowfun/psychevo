@@ -62,7 +62,7 @@ pub(crate) fn turn_printer_renders_project_instruction_warning() {
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "warning",
                 "kind": "project_instruction",
                 "message": "Detected CLAUDE.md",
@@ -83,7 +83,7 @@ pub(crate) fn turn_printer_preserves_bash_command_title_until_tool_end() {
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "tool_execution_start",
                 "tool_call_id": "call_bash",
                 "tool_name": "exec_command",
@@ -94,7 +94,7 @@ pub(crate) fn turn_printer_preserves_bash_command_title_until_tool_end() {
         .expect("start");
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "tool_execution_end",
                 "tool_call_id": "call_bash",
                 "tool_name": "exec_command",
@@ -117,7 +117,7 @@ pub(crate) fn turn_printer_announces_streaming_tool_preparation_once() {
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "message_update",
                 "message": {
                     "role": "assistant",
@@ -138,7 +138,7 @@ pub(crate) fn turn_printer_announces_streaming_tool_preparation_once() {
         .expect("pending");
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "message_update",
                 "message": {
                     "role": "assistant",
@@ -159,7 +159,7 @@ pub(crate) fn turn_printer_announces_streaming_tool_preparation_once() {
         .expect("pending update");
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "tool_execution_start",
                 "tool_call_id": "call_write",
                 "tool_name": "write",
@@ -170,7 +170,7 @@ pub(crate) fn turn_printer_announces_streaming_tool_preparation_once() {
         .expect("start");
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "tool_execution_end",
                 "tool_call_id": "call_write",
                 "tool_name": "write",
@@ -194,7 +194,7 @@ pub(crate) fn turn_printer_scopes_reused_tool_positions_across_messages() {
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "message_end",
                 "message": {
                     "role": "assistant",
@@ -215,7 +215,7 @@ pub(crate) fn turn_printer_scopes_reused_tool_positions_across_messages() {
         .expect("first");
     printer
         .render_event(
-            &RunStreamEvent::Event(serde_json::json!({
+            &RunStreamEvent::value(serde_json::json!({
                 "type": "message_end",
                 "message": {
                     "role": "assistant",

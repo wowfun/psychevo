@@ -14,13 +14,10 @@ describe("applyTurnCompletionQueueBarrier", () => {
       id: "live:turn-1:assistant:late",
       blocks: [block({ id: "live:turn-1:assistant:late:text", body: "late" })]
     }));
-    const sameTurnDelta: GatewayEvent = {
-      type: "entryDelta",
-      turnId: "turn-1",
-      entryId: "live:turn-1:assistant:late",
-      blockId: "live:turn-1:assistant:late:text",
-      delta: " stale"
-    };
+    const sameTurnUpdate = eventWithEntry("entryUpdated", entry({
+      id: "live:turn-1:assistant:late",
+      blocks: [block({ id: "live:turn-1:assistant:late:text", body: "late stale" })]
+    }));
     const otherTurnEntry = eventWithEntry("entryUpdated", entry({
       id: "live:turn-2:assistant",
       turnId: "turn-2",
@@ -36,7 +33,7 @@ describe("applyTurnCompletionQueueBarrier", () => {
 
     expect(applyTurnCompletionQueueBarrier([
       sameTurnEntry,
-      sameTurnDelta,
+      sameTurnUpdate,
       otherTurnEntry
     ], completion)).toEqual([otherTurnEntry]);
   });

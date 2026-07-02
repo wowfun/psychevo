@@ -89,7 +89,7 @@ fn peer_native_session_id(metadata: &Value, backend_id: &str) -> Option<String> 
 
 fn emit_runtime_event(stream: &Option<psychevo_runtime::RunStreamSink>, value: Value) {
     if let Some(stream) = stream {
-        stream(RunStreamEvent::Event(value));
+        stream(RunStreamEvent::value(value));
     }
 }
 

@@ -477,6 +477,67 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
 }
 
 #[test]
+pub(crate) fn load_history_drops_stale_foreign_gateway_pending_for_completed_tool() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let session_id = store
+        .create_session_with_metadata(
+            &app.cwd,
+            "web",
+            "mimo-v2.5-pro",
+            "xiaomi-token-plan",
+            None,
+        )
+        .expect("session");
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    insert_unfinished_write_call(&conn, &session_id);
+    insert_tui_message(
+        &conn,
+        &session_id,
+        2,
+        "tool_result",
+        2,
+        serde_json::json!({
+            "role": "tool_result",
+            "tool_call_id": "call_write_report",
+            "tool_name": "write",
+            "content": "{\"bytes_written\":26779,\"dirs_created\":false,\"error\":null,\"path\":\"feeds/2026-05-10/hackernews-hot-06-42.md\"}",
+            "is_error": false,
+            "timestamp_ms": 2
+        }),
+    );
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000);
+    append_foreign_gateway_event(
+        &store,
+        &session_id,
+        GatewayEvent::EntryUpdated {
+            turn_id: "turn-web".to_string(),
+            entry: gateway_tool_entry(
+                &session_id,
+                "turn-web",
+                "call_write_report",
+                TranscriptBlockStatus::Pending,
+                "",
+            ),
+        },
+    );
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui).expect("history");
+
+    let rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.tool_call_id.as_deref() == Some("call_write_report"))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1, "{:?}", ui.transcript);
+    assert!(rows[0].tool_started.is_none(), "{:?}", rows[0]);
+    assert!(!ui.tool_rows.contains_key(&tool_id_key("call_write_report")));
+}
+
+#[test]
 pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);

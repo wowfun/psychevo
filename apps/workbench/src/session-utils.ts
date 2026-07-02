@@ -60,8 +60,7 @@ export function normalizeSnapshot(snapshot: ThreadSnapshot): ThreadSnapshot {
     ...snapshot,
     entries: Array.isArray(snapshot.entries) ? snapshot.entries : [],
     activity: normalizeActivity(snapshot.activity),
-    pendingPermissions: Array.isArray(snapshot.pendingPermissions) ? snapshot.pendingPermissions : [],
-    pendingClarifies: Array.isArray(snapshot.pendingClarifies) ? snapshot.pendingClarifies : []
+    pendingActions: Array.isArray(snapshot.pendingActions) ? snapshot.pendingActions : []
   };
 }
 

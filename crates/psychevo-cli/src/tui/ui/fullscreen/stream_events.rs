@@ -42,7 +42,7 @@ impl<'a> FullscreenUi<'a> {
                 self.apply_clarify_resolved(event);
                 false
             }
-            RunStreamEvent::Event(value) => self.apply_value_event(&value, debug),
+            RunStreamEvent::Event(value) => self.apply_value_event(value.as_value(), debug),
             RunStreamEvent::Scoped { event, .. } => {
                 self.apply_stream_event(*event, thinking_visible, debug)
             }
@@ -111,6 +111,19 @@ impl<'a> FullscreenUi<'a> {
                 }
                 if let Some(suggestion) = value.get("suggestion").and_then(Value::as_str) {
                     self.push_status(format!("suggestion: {suggestion}"));
+                }
+                false
+            }
+            "action_requested" => {
+                if let Some(request) = clarify_request_from_action_value(value) {
+                    self.open_clarify_panel(request);
+                    return true;
+                }
+                false
+            }
+            "action_resolved" | "action_cancelled" => {
+                if let Some(event) = clarify_resolved_from_action_value(value) {
+                    self.apply_clarify_resolved(event);
                 }
                 false
             }
@@ -595,6 +608,42 @@ impl<'a> FullscreenUi<'a> {
             }
             _ => false,
         }
+    }
+}
+
+fn clarify_request_from_action_value(value: &Value) -> Option<ClarifyRequestEvent> {
+    if value.get("kind").and_then(Value::as_str) != Some("clarify") {
+        return None;
+    }
+    let payload = value.get("payload")?.clone();
+    let request = payload.get("raw").cloned().unwrap_or(payload);
+    serde_json::from_value(request).ok()
+}
+
+fn clarify_resolved_from_action_value(value: &Value) -> Option<ClarifyResolvedEvent> {
+    if value.get("kind").and_then(Value::as_str) != Some("clarify") {
+        return None;
+    }
+    let call_id = value
+        .get("action_id")
+        .or_else(|| value.get("actionId"))
+        .and_then(Value::as_str)?
+        .to_string();
+    let reason = value
+        .get("reason")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("outcome").and_then(Value::as_str))
+        .map(clarify_resolved_reason_from_str)
+        .unwrap_or(ClarifyResolvedReason::TurnFinished);
+    Some(ClarifyResolvedEvent { call_id, reason })
+}
+
+fn clarify_resolved_reason_from_str(value: &str) -> ClarifyResolvedReason {
+    match value {
+        "answered" | "accepted" => ClarifyResolvedReason::Answered,
+        "cancelled" | "canceled" => ClarifyResolvedReason::Cancelled,
+        "timed_out" | "timedOut" => ClarifyResolvedReason::TimedOut,
+        _ => ClarifyResolvedReason::TurnFinished,
     }
 }
 

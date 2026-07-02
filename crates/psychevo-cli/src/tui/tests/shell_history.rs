@@ -494,7 +494,7 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
 
     app.apply_fullscreen_stream_event(
         &mut ui,
-        RunStreamEvent::Event(serde_json::json!({
+        RunStreamEvent::value(serde_json::json!({
             "type": "run_start",
             "session_id": session_id,
             "provider": "mock",
@@ -555,7 +555,7 @@ pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_
     ui.start_assistant();
     app.apply_fullscreen_stream_event(
         &mut ui,
-        RunStreamEvent::Event(serde_json::json!({
+        RunStreamEvent::value(serde_json::json!({
             "type": "run_start",
             "session_id": session_id,
             "provider": "mock",

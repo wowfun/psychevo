@@ -118,11 +118,47 @@
         );
         let tool = &entries[0].blocks[2];
         assert_eq!(tool.status, TranscriptBlockStatus::Completed);
+        assert_eq!(tool.title.as_deref(), Some("exec_command date"));
         assert_eq!(tool.result.as_ref().unwrap().result_message_seq, 2);
         assert_eq!(tool.metadata.as_ref().unwrap()["args"]["cmd"], "date");
         assert_eq!(
             tool.metadata.as_ref().unwrap()["result"]["output"],
             "today\n"
+        );
+    }
+
+    #[test]
+    fn projector_titles_pending_exec_command_from_arguments() {
+        let command = "sqlite3 /home/kevin/Projects/feedgarden/feeds/.cache/hn.db \"SELECT id, title FROM stories ORDER BY score DESC;\"";
+        let summaries = vec![summary(
+            1,
+            Message::Assistant {
+                content: vec![tool_call(
+                    "call_exec",
+                    "exec_command",
+                    json!({"cmd": command, "yield_time_ms": 1000}),
+                )],
+                timestamp_ms: 10,
+                finish_reason: Some("tool_calls".to_string()),
+                outcome: Outcome::Normal,
+                model: Some("model".to_string()),
+                provider: Some("provider".to_string()),
+            },
+        )];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+        let block = &entries[0].blocks[0];
+
+        assert_eq!(block.status, TranscriptBlockStatus::Pending);
+        assert_eq!(
+            block.title.as_deref(),
+            Some(format!("exec_command {command}").as_str())
+        );
+        assert_eq!(block.metadata.as_ref().unwrap()["tool_call_id"], "call_exec");
+        assert_eq!(block.metadata.as_ref().unwrap()["args"]["cmd"], command);
+        assert_eq!(
+            block.detail.as_deref(),
+            Some(json!({"cmd": command, "yield_time_ms": 1000}).to_string().as_str())
         );
     }
 
@@ -445,12 +481,12 @@
         let exec = entries
             .iter()
             .flat_map(|entry| entry.blocks.iter())
-            .find(|block| block.title.as_deref() == Some("exec_command"))
+            .find(|block| block.title.as_deref() == Some("exec_command printf first"))
             .expect("exec block");
         let poll = entries
             .iter()
             .flat_map(|entry| entry.blocks.iter())
-            .find(|block| block.title.as_deref() == Some("write_stdin"))
+            .find(|block| block.title.as_deref() == Some("write_stdin 7"))
             .expect("write_stdin block");
 
         assert_eq!(exec.status, TranscriptBlockStatus::Completed);
@@ -460,6 +496,125 @@
         );
         assert_eq!(exec.metadata.as_ref().unwrap()["result"]["exit_code"], 0);
         assert_eq!(poll.metadata.as_ref().unwrap()["hidden"], true);
+    }
+
+    #[test]
+    fn projector_keeps_exec_command_invocation_title_when_result_display_is_json() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_exec",
+                        "exec_command",
+                        json!({"cmd": "sqlite3 feeds/.cache/x.db \"SELECT date FROM daily_picks;\""}),
+                    )],
+                    timestamp_ms: 1,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call_exec".to_string(),
+                    tool_name: "exec_command".to_string(),
+                    content: serde_json::to_string(&json!({
+                        "chunk_id": 0,
+                        "exit_code": 0,
+                        "output": "2072155613925437769|fchollet|Francois Chollet\n",
+                        "display": "{\"chunk_id\":0,\"exit_code\":0,\"output\":\"2072155613925437769|fchollet|Francois Chollet\\n\"}"
+                    }))
+                    .expect("result json"),
+                    is_error: false,
+                    timestamp_ms: 2,
+                },
+            ),
+        ];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+        let block = entries
+            .iter()
+            .flat_map(|entry| entry.blocks.iter())
+            .find(|block| block.metadata.as_ref().unwrap()["tool_call_id"] == "call_exec")
+            .expect("exec block");
+
+        assert_eq!(
+            block.title.as_deref(),
+            Some("exec_command sqlite3 feeds/.cache/x.db \"SELECT date FROM daily_picks;\"")
+        );
+        assert_eq!(
+            block.metadata.as_ref().unwrap()["args"]["cmd"],
+            "sqlite3 feeds/.cache/x.db \"SELECT date FROM daily_picks;\""
+        );
+        assert_ne!(
+            block.title.as_deref(),
+            block
+                .metadata
+                .as_ref()
+                .unwrap()
+                .get("display")
+                .and_then(Value::as_str)
+        );
+        assert!(block.metadata.as_ref().unwrap().get("display").is_none());
+        assert!(
+            block.metadata.as_ref().unwrap()["result"]["display"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("chunk_id")
+        );
+    }
+
+    #[test]
+    fn projector_promotes_acp_peer_result_display_title() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_visual",
+                        "exec_command",
+                        json!({"cmd": "echo done"}),
+                    )],
+                    timestamp_ms: 1,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call_visual".to_string(),
+                    tool_name: "exec_command".to_string(),
+                    content: serde_json::to_string(&json!({
+                        "source": "acp_peer",
+                        "display": "Run visual tool",
+                        "output": "done\n"
+                    }))
+                    .expect("result json"),
+                    is_error: false,
+                    timestamp_ms: 2,
+                },
+            ),
+        ];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+        let block = entries
+            .iter()
+            .flat_map(|entry| entry.blocks.iter())
+            .find(|block| block.metadata.as_ref().unwrap()["tool_call_id"] == "call_visual")
+            .expect("tool block");
+
+        assert_eq!(block.title.as_deref(), Some("Run visual tool"));
+        assert_eq!(
+            block.metadata.as_ref().unwrap()["display"],
+            "Run visual tool"
+        );
+        assert_eq!(block.metadata.as_ref().unwrap()["source"], "acp_peer");
     }
 
     #[test]

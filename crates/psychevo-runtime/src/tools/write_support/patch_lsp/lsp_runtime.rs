@@ -479,7 +479,7 @@ pub(crate) fn emit_lsp_status(
     if let Some(message) = message {
         event.insert("message".to_string(), json!(message));
     }
-    stream(RunStreamEvent::Event(Value::Object(event)));
+    stream(RunStreamEvent::value(Value::Object(event)));
 }
 
 #[cfg(test)]

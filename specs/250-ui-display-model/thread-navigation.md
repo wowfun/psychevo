@@ -71,13 +71,15 @@ deleting the side thread does not revert them.
 
 Surfaces may open side chats as an entered view, a split/tab, or another
 native child-thread container. The side transcript and composer submit to the
-side thread. The visible side transcript starts at the side-chat
-boundary: inherited parent messages and hidden boundary instructions remain
-model-visible reference context but must not render as ordinary transcript
-entries. Closing a temporary side chat deletes only the temporary side
-thread transcript and messages, clears any retained live-event backlog for that
-side thread, and returns/focuses the parent. If side work is running,
-interrupting the side work takes precedence over deleting the side thread.
+side thread. Turns submitted to a side-conversation thread are thread-scoped and
+must not bind or rebind the caller-facing Gateway source. The visible side
+transcript starts at the side-chat boundary: inherited parent messages and
+hidden boundary instructions remain model-visible reference context but must not
+render as ordinary transcript entries. Closing a temporary side chat deletes
+only the temporary side thread transcript and messages, clears any retained
+live-event backlog for that side thread, and returns/focuses the parent. If side
+work is running, interrupting the side work takes precedence over deleting the
+side thread.
 
 When `/btw` includes an inline prompt, the surface must open the side thread
 view and submit the prompt to the side thread, not the parent. The first side

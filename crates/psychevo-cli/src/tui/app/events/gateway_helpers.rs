@@ -150,11 +150,11 @@ fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
         }
         GatewayEvent::ActivityChanged { thread_id, .. } => thread_id.as_deref(),
         GatewayEvent::TitleChanged { thread_id, .. } => Some(thread_id.as_str()),
-        GatewayEvent::EntryDelta { .. }
-        | GatewayEvent::PermissionRequested { .. }
-        | GatewayEvent::PermissionResolved { .. }
-        | GatewayEvent::ClarifyRequested { .. }
-        | GatewayEvent::ClarifyResolved { .. }
+        GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
+            action.thread_id.as_deref()
+        }
+        GatewayEvent::ActionResolved { .. }
+        | GatewayEvent::ActionCancelled { .. }
         | GatewayEvent::Warning { .. } => None,
     }
 }

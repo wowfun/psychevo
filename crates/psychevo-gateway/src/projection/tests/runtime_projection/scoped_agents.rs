@@ -38,7 +38,7 @@ fn live_projector_routes_scoped_child_entries_to_child_thread() {
     let parent_agent = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "agent_session_start",
                 "tool_call_id": "call_agent",
                 "agent_name": "explore",
@@ -100,7 +100,7 @@ fn live_projector_routes_scoped_child_entries_to_child_thread() {
             "turn-child",
             &RunStreamEvent::scoped(
                 "child-thread",
-                RunStreamEvent::Event(json!({
+                RunStreamEvent::value(json!({
                     "type": "turn_complete",
                     "session_id": "parent-thread",
                     "outcome": "normal"
@@ -143,7 +143,7 @@ fn live_projector_merges_agent_session_start_into_existing_agent_block() {
     let started = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_start",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call_agent_translate",
@@ -168,7 +168,7 @@ fn live_projector_merges_agent_session_start_into_existing_agent_block() {
     let session_start = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "agent_session_start",
                 "tool_call_id": "call_agent_translate",
                 "agent_id": "agent-run-1",
@@ -204,7 +204,7 @@ fn live_projector_merges_agent_session_start_into_existing_agent_block() {
     let completed = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call_agent_translate",
@@ -237,7 +237,7 @@ fn live_projector_treats_background_agent_running_result_as_handoff() {
     let pending = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_call_pending",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call_agent_translate",
@@ -256,7 +256,7 @@ fn live_projector_treats_background_agent_running_result_as_handoff() {
     let handoff = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call_agent_translate",
@@ -293,7 +293,7 @@ fn live_projector_treats_background_agent_running_result_as_handoff() {
     let session_start = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "agent_session_start",
                 "tool_call_id": "call_agent_translate",
                 "agent_id": "agent-run-1",
@@ -334,7 +334,7 @@ fn live_projector_does_not_alias_parallel_spawn_agent_execution_by_agent_name() 
     let pending_cn = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_call_pending",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call-cn",
@@ -350,7 +350,7 @@ fn live_projector_does_not_alias_parallel_spawn_agent_execution_by_agent_name() 
     let start_en = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_start",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call-en",
@@ -366,7 +366,7 @@ fn live_projector_does_not_alias_parallel_spawn_agent_execution_by_agent_name() 
     let session_start_en = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "agent_session_start",
                 "tool_call_id": "call-en",
                 "agent_name": "translate",
@@ -385,7 +385,7 @@ fn live_projector_does_not_alias_parallel_spawn_agent_execution_by_agent_name() 
     let handoff_cn = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call-cn",
@@ -420,7 +420,7 @@ fn live_projector_upgrades_spawn_agent_position_id_without_metadata_mix() {
     let pending = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_call_pending",
                 "tool_name": "spawn_agent",
                 "arguments": args,
@@ -434,7 +434,7 @@ fn live_projector_upgrades_spawn_agent_position_id_without_metadata_mix() {
     let start = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_start",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call-cn",
@@ -452,7 +452,7 @@ fn live_projector_upgrades_spawn_agent_position_id_without_metadata_mix() {
     let handoff = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "spawn_agent",
                 "tool_call_id": "call-cn",
@@ -489,7 +489,7 @@ fn live_projector_keeps_parallel_spawn_agent_pending_without_ids_separate_by_pos
 
     let _ = projector.project(
         "turn-parent",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "tool_call_pending",
             "tool_name": "spawn_agent",
             "arguments": cn_args,
@@ -500,7 +500,7 @@ fn live_projector_keeps_parallel_spawn_agent_pending_without_ids_separate_by_pos
     let pending = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_call_pending",
                 "tool_name": "spawn_agent",
                 "arguments": en_args,
@@ -523,21 +523,19 @@ fn live_projector_merges_unidentified_wait_agent_placeholder() {
     let pending = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_call_pending",
                 "tool_name": "wait_agent"
             })),
         )
         .expect("wait pending");
-    assert_eq!(
-        gateway_entry(&pending).blocks[0].id,
-        "live:turn-parent:tool:wait_agent"
-    );
+    let pending_block_id = gateway_entry(&pending).blocks[0].id.clone();
+    assert!(pending_block_id.starts_with("live:turn-parent:tool:live-temp:wait_agent:"));
 
     let completed = projector
         .project(
             "turn-parent",
-            &RunStreamEvent::Event(json!({
+            &RunStreamEvent::value(json!({
                 "type": "tool_execution_end",
                 "tool_name": "wait_agent",
                 "tool_call_id": "call_wait_agent",
@@ -552,11 +550,11 @@ fn live_projector_merges_unidentified_wait_agent_placeholder() {
         .expect("wait completed");
     let entry = gateway_entry(&completed);
     assert_eq!(entry.blocks.len(), 1);
-    assert_eq!(entry.blocks[0].id, "live:turn-parent:tool:wait_agent");
+    assert_eq!(entry.blocks[0].id, "live:turn-parent:tool:call_wait_agent");
     assert_eq!(entry.blocks[0].status, TranscriptBlockStatus::Completed);
     assert_eq!(
         entry.blocks[0].metadata.as_ref().unwrap()["tool_call_id"],
-        "wait_agent"
+        "call_wait_agent"
     );
     assert_eq!(
         entry.blocks[0].metadata.as_ref().unwrap()["result"]["message"],

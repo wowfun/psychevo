@@ -25,16 +25,13 @@ describe("applyLiveTranscriptEvent", () => {
     expect(afterRunning.entries[0]?.blocks[0]?.body).toBe("hel");
     expect(afterRunning.entries[0]?.status).toBe("running");
 
-    const afterDelta = applyLiveTranscriptEvent(afterRunning, {
-      type: "entryDelta",
-      turnId: "turn-1",
-      entryId: "live:turn-1:assistant",
-      blockId: "live:turn-1:assistant:text",
-      delta: "lo"
-    });
-    expect(afterDelta.entries[0]?.blocks[0]?.body).toBe("hello");
-    expect(afterDelta.entries[0]?.blocks[0]?.detail).toBe("hello");
-    expect(afterDelta.entries[0]?.blocks[0]?.preview).toBe("hello");
+    const afterUpdate = applyLiveTranscriptEvent(afterRunning, eventWithEntry("entryUpdated", entry({
+      blocks: [block({ body: "hello", detail: "hello", preview: "hello", status: "running" })],
+      status: "running"
+    })));
+    expect(afterUpdate.entries[0]?.blocks[0]?.body).toBe("hello");
+    expect(afterUpdate.entries[0]?.blocks[0]?.detail).toBe("hello");
+    expect(afterUpdate.entries[0]?.blocks[0]?.preview).toBe("hello");
   });
 
   it("replaces live overlay with committed entries on turn completion", () => {

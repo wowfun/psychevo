@@ -366,6 +366,7 @@ pub(crate) fn reconstructed_tool_declarations(
         sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
         tool_selection: Default::default(),
         custom_toolsets: BTreeMap::new(),
+        contributed_toolsets: Vec::new(),
         clarify: ClarifyToolSurface::declaration_only(),
         skills: Some(SkillDiscoveryOptions {
             home: cwd.join(".psychevo"),
@@ -418,6 +419,7 @@ pub(crate) fn reconstructed_tool_declarations(
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
+            extension_inputs: Default::default(),
             allowed_agent_names: None,
             denied_agent_names: BTreeSet::new(),
             required_agent_names: Vec::new(),

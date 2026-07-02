@@ -251,8 +251,7 @@ function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
       : null,
     entries: [],
     activity: idleActivity(),
-    pendingPermissions: [],
-    pendingClarifies: []
+    pendingActions: []
   };
 }
 

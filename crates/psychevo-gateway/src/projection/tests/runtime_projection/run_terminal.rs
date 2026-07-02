@@ -2,7 +2,7 @@
 fn run_start_projects_selected_skills() {
     let event = gateway_event_from_run_stream(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "run_start",
             "session_id": "thread-1",
             "selected_skills": [
@@ -29,7 +29,7 @@ fn run_start_projects_selected_skills() {
 fn turn_complete_projects_terminal_turn_status() {
     let event = gateway_event_from_run_stream(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "turn_complete",
             "session_id": "thread-1",
             "outcome": "failed",

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 import { TranscriptPanel } from "./transcript";
+import { evidenceDisplay } from "./toolEvidence";
 
 beforeAll(() => {
   Element.prototype.scrollTo = vi.fn();
@@ -135,6 +136,33 @@ describe("TranscriptPanel inline diff evidence", () => {
 
     expect(screen.getByText("write feeds/report.md")).toBeTruthy();
     expect(screen.queryByLabelText("Inline diff")).toBeNull();
+  });
+
+  it("derives pending exec_command titles from metadata args when block title is bare", () => {
+    const block = transcriptBlock({
+      kind: "shell",
+      status: "pending",
+      title: "exec_command",
+      metadata: {
+        projection: "tool",
+        tool_name: "exec_command",
+        tool_call_id: "call-exec",
+        args: {
+          cmd: "sqlite3 /home/kevin/Projects/feedgarden/feeds/.cache/hn.db \"SELECT id FROM stories;\""
+        }
+      }
+    });
+
+    const display = evidenceDisplay(block, "");
+
+    expect(display.title).toBe(
+      "exec_command sqlite3 /home/kevin/Projects/feedgarden/feeds/.cache/hn.db \"SELECT id FROM stories;\""
+    );
+    expect(display.sections[0]).toMatchObject({
+      kind: "text",
+      text: "sqlite3 /home/kevin/Projects/feedgarden/feeds/.cache/hn.db \"SELECT id FROM stories;\"",
+      title: "Command"
+    });
   });
 
   it("falls back to raw diff detail when update diff parsing fails", () => {

@@ -645,7 +645,7 @@ impl TuiApp {
         if let Some(session_id) = event_session.as_deref()
             && self.current_session.as_deref() != Some(session_id)
         {
-            if matches!(event, RunStreamEvent::ClarifyRequest(_)) {
+            if stream_event_is_clarify_request(&event) {
                 ui.push_status(format!(
                     "clarify pending in session {}",
                     short_session(session_id)
@@ -706,7 +706,8 @@ impl TuiApp {
         let event_session = event_session_id.as_deref();
         if let RunStreamEvent::Event(value) = &event {
             if value.get("type").and_then(Value::as_str) == Some("context_snapshot")
-                && let Ok(snapshot) = serde_json::from_value::<ContextSnapshot>(value.clone())
+                && let Ok(snapshot) =
+                    serde_json::from_value::<ContextSnapshot>(value.as_value().clone())
             {
                 self.last_context_snapshot = Some(snapshot.clone());
                 ui.last_context_snapshot = Some(snapshot);

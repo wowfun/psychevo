@@ -4,7 +4,7 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "message_update",
         "message": {
             "role": "assistant",
@@ -17,7 +17,7 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
         }
     })))
     .expect("send text");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_call_pending",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -26,7 +26,7 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
         "call_index": 0
     })))
     .expect("send pending");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_start",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -36,7 +36,7 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
         }
     })))
     .expect("send start");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -219,6 +219,71 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
 }
 
 #[test]
+pub(crate) fn stale_gateway_running_exec_does_not_reactivate_completed_exec_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("typed-session".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    let completed = gateway_exec_entry_for_test(
+        "typed-session",
+        "turn-1",
+        "live:turn-1:tool:call_exec",
+        TranscriptBlockStatus::Completed,
+        serde_json::json!({
+            "session_id": 7,
+            "exit_code": 0,
+            "output": "done\n"
+        }),
+    );
+    let _ = app.apply_gateway_event(
+        &mut ui,
+        Some("typed-session"),
+        GatewayEvent::EntryUpdated {
+            turn_id: "turn-1".to_string(),
+            entry: completed,
+        },
+    );
+    let completed_rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.tool_call_id.as_deref() == Some("call_exec"))
+        .collect::<Vec<_>>();
+    assert_eq!(completed_rows.len(), 1, "{:?}", ui.transcript);
+    assert!(completed_rows[0].tool_started.is_none());
+
+    let stale_running = gateway_exec_entry_for_test(
+        "typed-session",
+        "turn-1",
+        "live:turn-1:tool:call_exec:stale",
+        TranscriptBlockStatus::Running,
+        serde_json::json!({
+            "session_id": 7,
+            "exit_code": null,
+            "output": "still running\n"
+        }),
+    );
+    assert!(!app.apply_gateway_event(
+        &mut ui,
+        Some("typed-session"),
+        GatewayEvent::EntryUpdated {
+            turn_id: "turn-1".to_string(),
+            entry: stale_running,
+        },
+    ));
+
+    let rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.tool_call_id.as_deref() == Some("call_exec"))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1, "{:?}", ui.transcript);
+    assert!(rows[0].tool_started.is_none(), "{:?}", rows[0]);
+    assert!(!ui.tool_rows.contains_key(&tool_id_key("call_exec")));
+    assert!(!ui.exec_session_rows.contains_key(&7));
+}
+
+#[test]
 pub(crate) fn multi_message_turn_preserves_answer_rows_across_tool_cycles() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
@@ -329,7 +394,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "run_start",
         "session_id": "streamed-session",
         "provider": "mock",
@@ -337,7 +402,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
         "mode": "default"
     })))
     .expect("send run start");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "message_end",
         "message": {
             "role": "assistant",
@@ -350,7 +415,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
         }
     })))
     .expect("send answer");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "agent_end",
         "outcome": "normal",
         "messages": []
@@ -413,6 +478,54 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
     assert!(!text.contains("15s · Esc"), "{text}");
     assert!(!text.contains("Esc"), "{text}");
     let _ = done_tx.send(());
+}
+
+fn gateway_exec_entry_for_test(
+    session_id: &str,
+    turn_id: &str,
+    block_id: &str,
+    status: TranscriptBlockStatus,
+    result: serde_json::Value,
+) -> TranscriptEntry {
+    TranscriptEntry {
+        id: format!("entry-{block_id}"),
+        thread_id: session_id.to_string(),
+        turn_id: Some(turn_id.to_string()),
+        message_seq: None,
+        role: TranscriptEntryRole::Assistant,
+        status,
+        source: "runtime.stream".to_string(),
+        blocks: vec![TranscriptBlock {
+            id: block_id.to_string(),
+            kind: TranscriptBlockKind::Shell,
+            status,
+            order: 0,
+            source: "runtime.stream".to_string(),
+            title: Some("exec_command python fetch.py".to_string()),
+            body: result
+                .get("output")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            preview: None,
+            detail: None,
+            artifact_ids: Vec::new(),
+            metadata: Some(serde_json::json!({
+                "projection": "tool",
+                "tool_name": "exec_command",
+                "tool_call_id": "call_exec",
+                "args": {"cmd": "python fetch.py"},
+                "result": result,
+            })),
+            result: None,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        }],
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: 1,
+        updated_at_ms: 2,
+    }
 }
 
 #[tokio::test]

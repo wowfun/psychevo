@@ -34,8 +34,7 @@ type GatewayLiveEventsParams = {
 function pacedGatewayEvent(event: GatewayEvent): boolean {
   return event.type === "entryStarted" ||
     event.type === "entryUpdated" ||
-    event.type === "entryCompleted" ||
-    event.type === "entryDelta";
+    event.type === "entryCompleted";
 }
 
 export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {

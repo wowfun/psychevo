@@ -753,7 +753,7 @@ pub(crate) async fn running_enter_steers_without_immediate_transcript_row() {
 
     let pending_id = ui.pending_steers[0].id.as_u64();
     ui.apply_stream_event_for_session(
-        RunStreamEvent::Event(serde_json::json!({
+        RunStreamEvent::value(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "user",

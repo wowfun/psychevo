@@ -28,16 +28,12 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
         else {
             continue;
         };
-        let status = if *is_error {
-            TranscriptBlockStatus::Failed
-        } else {
-            TranscriptBlockStatus::Completed
-        };
         let result_value = serde_json::from_str::<Value>(content).unwrap_or_else(|_| {
             json!({
                 "content": content,
             })
         });
+        let status = tool_result_status(tool_name, *is_error, &result_value);
         let mut metadata = metadata_object(block.metadata.take());
         metadata.insert("projection".to_string(), json!("tool"));
         metadata.insert("tool_name".to_string(), json!(tool_name));
@@ -57,14 +53,9 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
                 metadata.insert("elapsed_ms".to_string(), elapsed_ms.clone());
             }
         }
-        if let Some(display) = result_value
-            .get("display")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|display| !display.is_empty())
-        {
+        if let Some(display) = promoted_result_display(&result_value) {
             metadata.insert("display".to_string(), json!(display));
-            block.title = Some(display.to_string());
+            block.title = Some(display);
         }
         if let Some(source) = result_value
             .get("source")
@@ -94,9 +85,56 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
         block.preview = Some(compact_text(content, 240));
         block.updated_at_ms = *timestamp_ms;
         if let Some(entry) = entries.get_mut(entry_index) {
+            entry.status = entry_status_for_tool_result(&entry.blocks, entry.status);
             entry.updated_at_ms = entry.updated_at_ms.max(*timestamp_ms);
         }
     }
+}
+
+fn tool_result_status(tool_name: &str, is_error: bool, result: &Value) -> TranscriptBlockStatus {
+    if is_error {
+        return TranscriptBlockStatus::Failed;
+    }
+    if tool_name == "exec_command" && exec_result_value_running(result) {
+        return TranscriptBlockStatus::Running;
+    }
+    TranscriptBlockStatus::Completed
+}
+
+fn exec_result_value_running(result: &Value) -> bool {
+    result.get("session_id").and_then(Value::as_u64).is_some()
+        && result.get("exit_code").is_none_or(Value::is_null)
+}
+
+fn entry_status_for_tool_result(
+    blocks: &[TranscriptBlock],
+    fallback: TranscriptBlockStatus,
+) -> TranscriptBlockStatus {
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Failed)
+    {
+        return TranscriptBlockStatus::Failed;
+    }
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Running)
+    {
+        return TranscriptBlockStatus::Running;
+    }
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Pending)
+    {
+        return TranscriptBlockStatus::Pending;
+    }
+    if blocks
+        .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Completed)
+    {
+        return TranscriptBlockStatus::Completed;
+    }
+    fallback
 }
 
 fn merge_write_stdin_blocks(entries: &mut [TranscriptEntry]) {
@@ -155,6 +193,9 @@ fn merge_write_stdin_blocks(entries: &mut [TranscriptEntry]) {
             metadata.insert("hidden".to_string(), Value::Bool(true));
             block.metadata = Some(Value::Object(metadata));
         }
+    }
+    for entry in entries {
+        entry.status = entry_status_for_tool_result(&entry.blocks, entry.status);
     }
 }
 
@@ -273,4 +314,16 @@ fn tool_result_output(value: &Value) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+fn promoted_result_display(result_value: &Value) -> Option<String> {
+    if result_value.get("source").and_then(Value::as_str) != Some("acp_peer") {
+        return None;
+    }
+    result_value
+        .get("display")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|display| !display.is_empty())
+        .map(ToString::to_string)
 }

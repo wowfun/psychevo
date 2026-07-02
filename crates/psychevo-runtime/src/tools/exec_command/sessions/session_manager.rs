@@ -562,7 +562,7 @@ impl ExecSession {
             return;
         };
         if let Some(stream) = &self.stream_events {
-            stream(RunStreamEvent::Event(event));
+            stream(RunStreamEvent::value(event));
         }
     }
 

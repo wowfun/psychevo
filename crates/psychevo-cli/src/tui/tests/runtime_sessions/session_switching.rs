@@ -164,7 +164,7 @@ pub(crate) async fn fullscreen_new_with_unresolved_running_session_hides_unowned
             .all(|row| !row.text.contains("unresolved old session thinking"))
     );
 
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "run_start",
         "session_id": "old-session",
         "provider": "mock",
@@ -449,7 +449,7 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
         None
     );
 
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_start",
         "session_id": first,
         "tool_call_id": "user_shell",
@@ -458,7 +458,7 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
         "source": "user_shell",
     })))
     .expect("send shell start");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "tool_execution_end",
         "session_id": first,
         "tool_call_id": "user_shell",

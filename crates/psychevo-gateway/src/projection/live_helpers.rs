@@ -315,12 +315,30 @@ fn live_tool_block_id(turn_id: &str, tool_call_id: &str) -> String {
     format!("live:{turn_id}:tool:{tool_call_id}")
 }
 
+fn temporary_tool_call_id_for_value(
+    tool_name: &str,
+    segment: usize,
+    value: &Value,
+    event_seq: u64,
+) -> String {
+    tool_position_key(segment, value)
+        .map(|position_key| format!("live-temp:{tool_name}:position:{position_key}"))
+        .unwrap_or_else(|| format!("live-temp:{tool_name}:event:{event_seq}"))
+}
+
+fn temporary_tool_call_id(tool_call_id: &str) -> bool {
+    tool_call_id.starts_with("live-temp:")
+}
+
 fn tool_position_key(segment: usize, value: &Value) -> Option<String> {
     let content_index = value
         .get("content_index")
         .or_else(|| value.get("content_array_index"))
         .and_then(Value::as_i64)?;
-    let call_index = value.get("call_index").and_then(Value::as_i64)?;
+    let call_index = value
+        .get("call_index")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     Some(format!("{segment}:{content_index}:{call_index}"))
 }
 
@@ -345,11 +363,10 @@ fn tool_message_block_metadata(block: &Value, index: usize) -> Option<(String, S
         .or_else(|| block.get("tool_call_id"))
         .or_else(|| block.get("call_id"))
         .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|tool_call_id| !tool_call_id.is_empty())
         .map(ToString::to_string)
-        .unwrap_or_else(|| format!("{tool_name}:{index}"));
-    if tool_call_id.trim().is_empty() {
-        return None;
-    }
+        .unwrap_or_default();
     let arguments_json = block
         .get("arguments_json")
         .or_else(|| {

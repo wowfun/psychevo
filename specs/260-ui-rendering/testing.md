@@ -40,14 +40,46 @@ validated by [210 pevo TUI Testing](../210-pevo-tui/testing.md) and
 
 Manual real-provider validation is opt-in only.
 
+## Runtime Transcript Oracle
+
+Transcript runtime tests use normalized semantic ledgers as the primary oracle.
+Each sampled Gateway, Web, TUI, or Workbench checkpoint should capture
+`turnId`, `entryId`, `blockId`, `source`, `toolName`, `toolCallId`, `status`,
+`order`, `title`, `hasResult`, and `activeElapsedOwner` when the surface can
+observe the field.
+
+The core assertions are stable tool identity, no duplicate live overlay for one
+tool, monotonic `pending < running < terminal` status, terminal facts preserved
+after late previews, committed snapshots as the authoritative truth, and no
+active spinner or elapsed owner after a row has reached terminal state. These
+checks run before screenshots are evaluated.
+
+Workbench Playwright specs that exercise running turns should sample transcript
+rows every 250-500ms while the task is active and attach JSON samples on
+failure. The samples must include DOM identity attributes such as
+`data-entry-id`, `data-block-id`, `data-block-kind`, `data-turn-id`, and
+`data-source` when present. Screenshot and VHS artifacts remain layout evidence,
+not the sole transcript correctness oracle.
+
+Projection diagnostics use the vocabulary from
+[035 Event Stream](../035-event-stream/spec.md). Deterministic tests fail on any
+undeclared diagnostic count. Live sweeps may attach analyzer summaries for real
+provider or transport drift, but fake-provider replay remains the correctness
+gate.
+
 ## Scenario Matrix
 
 - Tool rows only render from typed tool/execution/display blocks, never from
   reasoning or assistant prose.
 - `exec_command` titles preserve the first actual command line and survive
   start-to-end updates that omit arguments.
+- A pending `exec_command` row whose visible title is only bare `exec_command`
+  and whose sampled data lacks recoverable `args.cmd`/`arguments.cmd` is a
+  projection defect, not an acceptable loading state.
 - Yielded `exec_command` plus matching `write_stdin` output renders as one exec
   chain across live updates and history reload.
+- Failed `write_stdin` calls that target an existing yielded `exec_command`
+  session do not render as standalone primary transcript rows.
 - Empty reasoning completions close existing Thinking rows without creating
   placeholder rows.
 - Agent invocation handoff, stale pending blocks, child previews, and

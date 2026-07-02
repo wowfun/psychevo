@@ -25,9 +25,11 @@ impl GatewayLiveProjector {
                 self.project_reasoning_delta(turn_id, text)?
             }
             RunStreamEvent::ReasoningEnd => self.project_reasoning_end(turn_id)?,
-            RunStreamEvent::Event(value) => self
-                .project_runtime_value(turn_id, value)
-                .or_else(|| gateway_event_from_runtime_value(turn_id, value))?,
+            RunStreamEvent::Event(value) => match self.project_runtime_value(turn_id, value) {
+                Some(event) => event,
+                None if suppress_stateless_fallback(value) => return None,
+                None => gateway_event_from_runtime_value(turn_id, value)?,
+            },
             _ => gateway_event_from_run_stream(turn_id, event)?,
         };
         let turn_completed = matches!(event, GatewayEvent::TurnCompleted { .. });
@@ -146,4 +148,11 @@ impl GatewayLiveProjector {
         self.upsert_block(segment, block);
         Some(self.emit_entry_event(turn_id, segment, false, false))
     }
+}
+
+fn suppress_stateless_fallback(value: &Value) -> bool {
+    matches!(
+        value.get("type").and_then(Value::as_str),
+        Some("tool_call_pending" | "tool_execution_start" | "tool_execution_update" | "tool_execution_end")
+    ) && tool_name_from_value(value) == "write_stdin"
 }

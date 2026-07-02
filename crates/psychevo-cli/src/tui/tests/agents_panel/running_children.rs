@@ -758,7 +758,7 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
     });
     tx.send(RunStreamEvent::scoped(
         child.clone(),
-        RunStreamEvent::Event(serde_json::json!({
+        RunStreamEvent::value(serde_json::json!({
             "type": "tool_execution_end",
             "tool_name": "read",
             "tool_call_id": "read-1",
@@ -770,7 +770,7 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
     .expect("send child tool event");
     tx.send(RunStreamEvent::scoped(
         child.clone(),
-        RunStreamEvent::Event(serde_json::json!({
+        RunStreamEvent::value(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",

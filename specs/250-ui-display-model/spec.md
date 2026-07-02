@@ -54,6 +54,9 @@ Gateway transcript projection materializes the completed turn from durable
 messages; clients discard live overlay state for that turn and replace it with
 those committed entries. Client-local optimistic prompt rows are part of the
 same live overlay and must be replaced by the committed user entry for the turn.
+The canonical runtime event stream, live-preview contract, snapshot recovery,
+and delivery diagnostics are defined by [035 Event
+Stream](../035-event-stream/spec.md).
 Live assistant `message_update` observations carry the current assistant
 segment snapshot. Gateway must not treat them as additive block deltas: when
 the current snapshot changes block positions, removed or moved provisional
@@ -111,6 +114,18 @@ message-derived block use the message-derived entry as the display anchor.
 Covered live text/reasoning blocks are dropped; covered live tool updates may
 refresh the matching message-derived tool block's transient status/output, but
 must not create a second live tool row.
+Active snapshot replay follows the same monotonic rule as streaming. A
+message-derived tool block that already reached completed, failed, or cancelled
+status must not be reactivated by retained live `pending` or `running` overlay.
+Retained overlay may only fill missing display fields. It must not replace
+existing result/body/title data, and pending message-derived tool blocks must
+retain `tool_call_id`, `tool_name`, and `args`/`arguments` so an invocation such
+as `exec_command <cmd>` can be rendered without waiting for the final
+`tool_result`.
+Runtime transcript behavior is tested with the normalized ledger and diagnostics
+contract in [035 Event Stream](../035-event-stream/spec.md). Browser and TUI
+rendering tests may sample DOM rows or `TranscriptRow`s, but they assert these
+semantic display facts before relying on screenshots or terminal frame output.
 
 Display-only command output and observational artifacts, including `/diff`,
 must not become model context, session export message content, usage/cost
@@ -148,6 +163,11 @@ Display surfaces render shell-command rows with the invocation-style title
 combined invocation to avoid duplicating the command across tool-name and
 summary columns. The original invocation must remain available in row metadata
 or expanded detail.
+Committed tool-result projection must not let arbitrary result `display`
+strings replace invocation-derived titles for built-in tools. Source-scoped
+display titles, such as ACP peer titles that carry `source: "acp_peer"`, may be
+promoted into display metadata; ordinary tool result payload fields stay result
+detail and must not become explicit tool titles.
 
 Ordinary tool rows require an explicit typed tool call, execution observation,
 or message-derived tool-result relationship. Reasoning or assistant text that
@@ -161,6 +181,9 @@ session identity. The binding uses the `write_stdin` call arguments when the
 terminal result has a null `session_id`. Unmatched `write_stdin` observations
 are diagnostic material rather than ordinary transcript blocks unless they
 represent a failed tool call that must be surfaced to explain the turn failure.
+Failed `write_stdin` calls that target a known yielded `exec_command` session
+remain auxiliary exec-chain diagnostics and must not create standalone primary
+transcript rows.
 
 Reasoning completion observations without text close an existing live Thinking
 block; they must not create an empty Thinking block. Completed reasoning blocks

@@ -11,12 +11,18 @@ fn live_tool_entry(
     let tool_call_id = value
         .get("tool_call_id")
         .and_then(Value::as_str)
-        .unwrap_or(tool_name);
-    let metadata = tool_value_metadata(value);
+        .map(str::trim)
+        .filter(|tool_call_id| !tool_call_id.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            temporary_tool_call_id_for_value(tool_name, 0, value, crate::gateway_now_ms() as u64)
+        });
+    let mut metadata = tool_value_metadata(value);
+    set_metadata_field(&mut metadata, "tool_call_id", json!(tool_call_id.clone()));
     let title = live_tool_title(tool_name, &metadata);
     live_entry(
         turn_id,
-        &format!("tool:{tool_call_id}"),
+        &format!("tool:{}", tool_call_id),
         TranscriptEntryRole::Assistant,
         tool_kind(tool_name),
         status,
@@ -240,11 +246,12 @@ fn tool_name_from_value(value: &Value) -> &str {
         .unwrap_or("tool")
 }
 
-fn tool_call_id_from_value<'a>(value: &'a Value, fallback: &'a str) -> &'a str {
+fn explicit_tool_call_id_from_value(value: &Value) -> Option<&str> {
     value
         .get("tool_call_id")
         .and_then(Value::as_str)
-        .unwrap_or(fallback)
+        .map(str::trim)
+        .filter(|tool_call_id| !tool_call_id.is_empty())
 }
 
 fn tool_args_from_value(value: &Value) -> Option<Value> {

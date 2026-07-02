@@ -14,7 +14,7 @@ pub(crate) fn completed_streaming_write_stdin_poll_placeholder_is_removed() {
     ui.exec_session_rows.insert(0, 0);
 
     ui.apply_stream_event(
-        RunStreamEvent::Event(serde_json::json!({
+        RunStreamEvent::value(serde_json::json!({
             "type": "message_update",
             "message": {
                 "role": "assistant",
@@ -38,7 +38,7 @@ pub(crate) fn completed_streaming_write_stdin_poll_placeholder_is_removed() {
     );
 
     ui.apply_stream_event(
-        RunStreamEvent::Event(serde_json::json!({
+        RunStreamEvent::value(serde_json::json!({
             "type": "message_update",
             "message": {
                 "role": "assistant",
@@ -78,7 +78,7 @@ pub(crate) fn non_empty_stdin_renders_as_compact_terminal_interaction() {
     ui.exec_session_rows.insert(7, 0);
 
     ui.apply_stream_event(
-        RunStreamEvent::Event(serde_json::json!({
+        RunStreamEvent::value(serde_json::json!({
             "type": "exec_session_stdin",
             "session_id": 7,
             "tool_call_id": "call_exec",

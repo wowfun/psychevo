@@ -10,7 +10,7 @@ fn live_projector_hidden_assistant_message_end_closes_segment() {
     let _ = projector.project("turn-1", &RunStreamEvent::ReasoningEnd);
     let hidden = projector.project(
         "turn-1",
-        &RunStreamEvent::Event(json!({
+        &RunStreamEvent::value(json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",

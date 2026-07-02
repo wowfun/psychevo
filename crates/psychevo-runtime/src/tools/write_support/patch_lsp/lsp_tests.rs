@@ -143,7 +143,10 @@ pub(crate) mod lsp_tests {
         let sink_events = Arc::clone(&events);
         let stream: RunStreamSink = Arc::new(move |event| {
             if let RunStreamEvent::Event(value) = event {
-                sink_events.lock().expect("events").push(value);
+                sink_events
+                    .lock()
+                    .expect("events")
+                    .push(value.into_value());
             }
         });
         let tool = test_tool(
@@ -449,7 +452,10 @@ while True:
         let sink_events = Arc::clone(&events);
         let stream: RunStreamSink = Arc::new(move |event| {
             if let RunStreamEvent::Event(value) = event {
-                sink_events.lock().expect("events").push(value);
+                sink_events
+                    .lock()
+                    .expect("events")
+                    .push(value.into_value());
             }
         });
         let tool = test_tool(

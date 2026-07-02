@@ -60,7 +60,7 @@ impl TurnPrinter {
                     }
                 }
             }
-            RunStreamEvent::Event(value) => self.render_value_event(value, out)?,
+            RunStreamEvent::Event(value) => self.render_value_event(value.as_value(), out)?,
             RunStreamEvent::ClarifyRequest(_) | RunStreamEvent::ClarifyResolved(_) => {}
             RunStreamEvent::Scoped { event, .. } => self.render_event(event, out)?,
         }
@@ -73,15 +73,6 @@ impl TurnPrinter {
         out: &mut impl Write,
     ) -> io::Result<()> {
         match event {
-            GatewayEvent::EntryDelta { delta, .. } => {
-                if self.thinking_enabled {
-                    if !self.reasoning_active {
-                        self.reasoning_active = true;
-                        write!(out, "Thinking: ")?;
-                    }
-                    write!(out, "{}", self.renderer.dim(delta))?;
-                }
-            }
             GatewayEvent::EntryStarted { entry, .. }
             | GatewayEvent::EntryUpdated { entry, .. }
             | GatewayEvent::EntryCompleted { entry, .. } => {
@@ -114,10 +105,10 @@ impl TurnPrinter {
             }
             GatewayEvent::TurnStarted { .. }
             | GatewayEvent::TurnQueued { .. }
-            | GatewayEvent::PermissionRequested { .. }
-            | GatewayEvent::PermissionResolved { .. }
-            | GatewayEvent::ClarifyRequested { .. }
-            | GatewayEvent::ClarifyResolved { .. }
+            | GatewayEvent::ActionRequested { .. }
+            | GatewayEvent::ActionUpdated { .. }
+            | GatewayEvent::ActionResolved { .. }
+            | GatewayEvent::ActionCancelled { .. }
             | GatewayEvent::ActivityChanged { .. }
             | GatewayEvent::TitleChanged { .. } => {}
         }

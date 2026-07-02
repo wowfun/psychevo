@@ -11,7 +11,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "run_start",
         "session_id": session_id.clone(),
         "provider": "mock",
@@ -19,7 +19,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
         "mode": "default"
     })))
     .expect("send run start");
-    tx.send(RunStreamEvent::Event(serde_json::json!({
+    tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "agent_end",
         "outcome": "normal",
         "messages": []

@@ -4,9 +4,9 @@ use psychevo_runtime::{RunStreamEvent, RunWarning};
 use serde_json::{Value, json};
 
 use crate::protocol::{
-    GatewayEvent, GatewaySelectedSkill, GatewayTurn, GatewayTurnError, GatewayTurnStatus,
-    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
-    TranscriptEntryRole,
+    GatewayActionKind, GatewayActionOutcome, GatewayEvent, GatewaySelectedSkill, GatewayTurn,
+    GatewayTurnError, GatewayTurnStatus, PendingActionView, TranscriptBlock, TranscriptBlockKind,
+    TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
 };
 
 #[derive(Debug, Default)]

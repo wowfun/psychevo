@@ -8,6 +8,5 @@ export const EMPTY_SNAPSHOT: ThreadSnapshot = {
   thread: null,
   entries: [],
   activity: idleActivity(),
-  pendingPermissions: [],
-  pendingClarifies: []
+  pendingActions: []
 };

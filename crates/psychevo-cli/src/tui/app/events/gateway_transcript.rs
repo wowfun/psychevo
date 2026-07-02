@@ -13,7 +13,11 @@ impl TuiApp {
                     .as_deref()
                     .is_some_and(|current| current != session_id))
         {
-            if matches!(event, GatewayEvent::ClarifyRequested { .. }) {
+            if matches!(
+                &event,
+                GatewayEvent::ActionRequested { action }
+                    if action.kind == GatewayActionKind::Clarify
+            ) {
                 ui.push_status(format!(
                     "clarify pending in session {}",
                     short_session(session_id)
@@ -76,52 +80,51 @@ impl TuiApp {
                 ui.update_turn_meta(self.debug, true, true, true);
                 false
             }
-            GatewayEvent::EntryDelta { delta, .. } => {
-                if delta.trim().is_empty() {
-                    return false;
-                }
-                ui.turn_had_reasoning = true;
-                ui.remove_turn_meta();
-                let idx = ui.reasoning_row.unwrap_or_else(|| {
-                    let mut row = TranscriptRow::with_title(
-                        TranscriptKind::Thinking,
-                        "Thinking",
-                        String::new(),
-                    );
-                    row.tool_started = Some(Instant::now());
-                    let idx = ui.insert_evidence_row(row);
-                    ui.reasoning_row = Some(idx);
-                    idx
-                });
-                ui.append_thinking_text(idx, &delta);
-                let reasoning = ui.thinking_full_text(idx);
-                self.thinking_visible && ui.apply_visible_tool_intent(&reasoning)
-            }
             GatewayEvent::EntryStarted { entry, .. }
             | GatewayEvent::EntryUpdated { entry, .. }
             | GatewayEvent::EntryCompleted { entry, .. } => {
                 self.apply_gateway_transcript_entry(ui, owner_session, entry)
             }
-            GatewayEvent::PermissionRequested {
-                request_id,
-                tool_name,
-                summary,
-                reason,
-                matched_rule,
-                suggested_rule,
-                allow_always,
-                timeout_secs,
-                ..
-            } => {
+            GatewayEvent::ActionRequested { action }
+                if action.kind == GatewayActionKind::Permission =>
+            {
+                let payload = &action.payload;
+                let action_id = action.action_id.clone();
                 let request = PermissionApprovalRequest {
-                    tool_call_id: request_id.clone(),
-                    tool_name,
-                    summary,
-                    reason,
-                    matched_rule,
-                    suggested_rule,
-                    allow_always,
-                    timeout_secs,
+                    tool_call_id: action.action_id.clone(),
+                    tool_name: payload
+                        .get("toolName")
+                        .and_then(Value::as_str)
+                        .or(action.title.as_deref())
+                        .unwrap_or("tool")
+                        .to_string(),
+                    summary: payload
+                        .get("summary")
+                        .and_then(Value::as_str)
+                        .or(action.summary.as_deref())
+                        .unwrap_or_default()
+                        .to_string(),
+                    reason: payload
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    matched_rule: payload
+                        .get("matchedRule")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string),
+                    suggested_rule: payload
+                        .get("suggestedRule")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string),
+                    allow_always: payload
+                        .get("allowAlways")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    timeout_secs: payload
+                        .get("timeoutSecs")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(300),
                 };
                 let selector = ui
                     .running
@@ -145,12 +148,16 @@ impl TuiApp {
                     let decision = rx
                         .await
                         .unwrap_or_else(|_| PermissionApprovalDecision::deny());
-                    gateway.submit_permission(selector, &request_id, decision);
+                    gateway.submit_permission(selector, &action_id, decision);
                 });
                 ui.open_next_permission_approval()
             }
-            GatewayEvent::PermissionResolved { .. } => false,
-            GatewayEvent::ClarifyRequested { raw, .. } => {
+            GatewayEvent::ActionRequested { action } if action.kind == GatewayActionKind::Clarify => {
+                let raw = action
+                    .payload
+                    .get("raw")
+                    .cloned()
+                    .unwrap_or_else(|| action.payload.clone());
                 match serde_json::from_value::<ClarifyRequestEvent>(raw) {
                     Ok(request) => {
                         ui.open_clarify_panel(request);
@@ -162,20 +169,33 @@ impl TuiApp {
                     }
                 }
             }
-            GatewayEvent::ClarifyResolved { request_id, reason } => {
-                let reason = match reason.as_str() {
-                    "Answered" | "answered" => ClarifyResolvedReason::Answered,
-                    "Cancelled" | "cancelled" | "canceled" => ClarifyResolvedReason::Cancelled,
-                    "TimedOut" | "timed_out" => ClarifyResolvedReason::TimedOut,
-                    "TurnFinished" | "turn_finished" => ClarifyResolvedReason::TurnFinished,
-                    _ => ClarifyResolvedReason::TurnFinished,
-                };
+            GatewayEvent::ActionResolved {
+                action_id,
+                kind: GatewayActionKind::Clarify,
+                outcome,
+                payload,
+            } => {
                 ui.apply_clarify_resolved(ClarifyResolvedEvent {
-                    call_id: request_id,
-                    reason,
+                    call_id: action_id,
+                    reason: clarify_reason_from_action(outcome, &payload),
                 });
                 false
             }
+            GatewayEvent::ActionCancelled {
+                action_id,
+                kind: GatewayActionKind::Clarify,
+                ..
+            } => {
+                ui.apply_clarify_resolved(ClarifyResolvedEvent {
+                    call_id: action_id,
+                    reason: ClarifyResolvedReason::Cancelled,
+                });
+                false
+            }
+            GatewayEvent::ActionRequested { .. }
+            | GatewayEvent::ActionUpdated { .. }
+            | GatewayEvent::ActionResolved { .. }
+            | GatewayEvent::ActionCancelled { .. } => false,
             GatewayEvent::ActivityChanged { .. } | GatewayEvent::TitleChanged { .. } => false,
             GatewayEvent::Warning {
                 message,
@@ -534,6 +554,26 @@ impl TuiApp {
                 tag_gateway_transcript_row(ui, idx, entry_meta, &block);
                 active
             }
+        }
+    }
+}
+
+fn clarify_reason_from_action(outcome: GatewayActionOutcome, payload: &Value) -> ClarifyResolvedReason {
+    if let Some(reason) = payload.get("reason").and_then(Value::as_str) {
+        return match reason {
+            "Answered" | "answered" => ClarifyResolvedReason::Answered,
+            "Cancelled" | "cancelled" | "canceled" => ClarifyResolvedReason::Cancelled,
+            "TimedOut" | "timed_out" => ClarifyResolvedReason::TimedOut,
+            "TurnFinished" | "turn_finished" => ClarifyResolvedReason::TurnFinished,
+            _ => ClarifyResolvedReason::TurnFinished,
+        };
+    }
+    match outcome {
+        GatewayActionOutcome::Accepted => ClarifyResolvedReason::Answered,
+        GatewayActionOutcome::Cancelled => ClarifyResolvedReason::Cancelled,
+        GatewayActionOutcome::TimedOut => ClarifyResolvedReason::TimedOut,
+        GatewayActionOutcome::Completed | GatewayActionOutcome::Rejected => {
+            ClarifyResolvedReason::TurnFinished
         }
     }
 }

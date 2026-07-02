@@ -3,25 +3,37 @@ pub fn gateway_event_from_run_stream(
     event: &RunStreamEvent,
 ) -> Option<GatewayEvent> {
     Some(match event {
-        RunStreamEvent::ReasoningDelta { text } => GatewayEvent::EntryDelta {
+        RunStreamEvent::ReasoningDelta { text } => GatewayEvent::EntryUpdated {
             turn_id: turn_id.to_string(),
-            entry_id: None,
-            block_id: None,
-            delta: text.clone(),
+            entry: live_entry(
+                turn_id,
+                "assistant:reasoning",
+                TranscriptEntryRole::Assistant,
+                TranscriptBlockKind::Reasoning,
+                TranscriptBlockStatus::Running,
+                Some("Thinking".to_string()),
+                Some(text.clone()),
+                Some(json!({
+                    "projection": "reasoning",
+                    "origin": "run_stream_reasoning",
+                })),
+            ),
         },
-        RunStreamEvent::ClarifyRequest(request) => GatewayEvent::ClarifyRequested {
-            request_id: request.call_id.clone(),
-            raw: serde_json::to_value(request).unwrap_or(Value::Null),
-            thread_id: None,
-            turn_id: None,
-            activity_id: None,
-            source_key: None,
-            owner_id: None,
-            lease_expires_at_ms: None,
+        RunStreamEvent::ClarifyRequest(request) => GatewayEvent::ActionRequested {
+            action: clarify_action(
+                request.call_id.clone(),
+                serde_json::to_value(request).unwrap_or(Value::Null),
+                None,
+                Some(turn_id.to_string()),
+            ),
         },
-        RunStreamEvent::ClarifyResolved(resolved) => GatewayEvent::ClarifyResolved {
-            request_id: resolved.call_id.clone(),
-            reason: format!("{:?}", resolved.reason),
+        RunStreamEvent::ClarifyResolved(resolved) => GatewayEvent::ActionResolved {
+            action_id: resolved.call_id.clone(),
+            kind: GatewayActionKind::Clarify,
+            outcome: clarify_resolution_outcome(&resolved.reason),
+            payload: json!({
+                "reason": format!("{:?}", resolved.reason),
+            }),
         },
         RunStreamEvent::Scoped { event, .. } => {
             return gateway_event_from_run_stream(turn_id, event);
@@ -266,55 +278,266 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
                 source_path: None,
                 suggestion: None,
             }),
+        Some("action_requested") => GatewayEvent::ActionRequested {
+            action: action_view_from_runtime_value(value, turn_id)?,
+        },
+        Some("action_updated") => GatewayEvent::ActionUpdated {
+            action: action_view_from_runtime_value(value, turn_id)?,
+        },
+        Some("action_resolved") => GatewayEvent::ActionResolved {
+            action_id: action_id_from_runtime_value(value)?,
+            kind: gateway_action_kind_from_runtime_value(value),
+            outcome: action_outcome_from_runtime_value(value),
+            payload: action_resolution_payload(value),
+        },
+        Some("action_cancelled") => GatewayEvent::ActionCancelled {
+            action_id: action_id_from_runtime_value(value)?,
+            kind: gateway_action_kind_from_runtime_value(value),
+            reason: value
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        },
         Some("exec_approval_request") | Some("apply_patch_approval_request") => {
-            GatewayEvent::PermissionRequested {
-                request_id: value
-                    .get("call_id")
-                    .or_else(|| value.get("id"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                tool_name: value
-                    .get("tool_name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool")
-                    .to_string(),
-                summary: value
-                    .get("summary")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                reason: value
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                matched_rule: value
-                    .get("matched_rule")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-                suggested_rule: value
-                    .get("suggested_rule")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-                allow_always: value
-                    .get("allow_always")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                timeout_secs: value
-                    .get("timeout_secs")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
-                thread_id: None,
-                turn_id: None,
-                activity_id: None,
-                source_key: None,
-                owner_id: None,
-                lease_expires_at_ms: None,
+            GatewayEvent::ActionRequested {
+                action: permission_action(
+                    value
+                        .get("call_id")
+                        .or_else(|| value.get("id"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    value
+                        .get("tool_name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("tool")
+                        .to_string(),
+                    value
+                        .get("summary")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    value
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    value
+                        .get("matched_rule")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string),
+                    value
+                        .get("suggested_rule")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string),
+                    value
+                        .get("allow_always")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    value
+                        .get("timeout_secs")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                    None,
+                    Some(turn_id.to_string()),
+                ),
             }
         }
         _ => return None,
     })
+}
+
+fn action_view_from_runtime_value(value: &Value, turn_id: &str) -> Option<PendingActionView> {
+    let action_id = action_id_from_runtime_value(value)?;
+    let kind = gateway_action_kind_from_runtime_value(value);
+    let payload = value.get("payload").cloned().unwrap_or(Value::Null);
+    let thread_id = value
+        .get("thread_id")
+        .or_else(|| value.get("threadId"))
+        .or_else(|| value.get("session_id"))
+        .or_else(|| value.get("sessionId"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let turn_id = value
+        .get("turn_id")
+        .or_else(|| value.get("turnId"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .or_else(|| Some(turn_id.to_string()));
+    Some(match kind {
+        GatewayActionKind::Clarify => {
+            let raw = payload.get("raw").cloned().unwrap_or_else(|| payload.clone());
+            clarify_action(action_id, raw, thread_id, turn_id)
+        }
+        GatewayActionKind::Permission => PendingActionView {
+            action_id,
+            kind,
+            title: action_payload_string(&payload, "toolName")
+                .or_else(|| action_payload_string(&payload, "tool_name")),
+            summary: action_payload_string(&payload, "summary")
+                .or_else(|| action_payload_string(&payload, "reason")),
+            payload,
+            thread_id,
+            turn_id,
+            activity_id: None,
+            source_key: None,
+            owner_id: None,
+            lease_expires_at_ms: None,
+        },
+        GatewayActionKind::CustomTool | GatewayActionKind::UserInput => PendingActionView {
+            action_id,
+            kind,
+            title: action_payload_string(&payload, "title"),
+            summary: action_payload_string(&payload, "summary"),
+            payload,
+            thread_id,
+            turn_id,
+            activity_id: None,
+            source_key: None,
+            owner_id: None,
+            lease_expires_at_ms: None,
+        },
+    })
+}
+
+fn action_id_from_runtime_value(value: &Value) -> Option<String> {
+    value
+        .get("action_id")
+        .or_else(|| value.get("actionId"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .filter(|id| !id.is_empty())
+}
+
+fn gateway_action_kind_from_runtime_value(value: &Value) -> GatewayActionKind {
+    match value
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "permission" => GatewayActionKind::Permission,
+        "custom_tool" | "customTool" => GatewayActionKind::CustomTool,
+        "user_input" | "userInput" => GatewayActionKind::UserInput,
+        _ => GatewayActionKind::Clarify,
+    }
+}
+
+fn action_payload_string(payload: &Value, key: &str) -> Option<String> {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn action_outcome_from_runtime_value(value: &Value) -> GatewayActionOutcome {
+    match value
+        .get("reason")
+        .or_else(|| value.get("outcome"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "accepted" | "answered" | "allow_once" | "allow_session" | "allow_always" => {
+            GatewayActionOutcome::Accepted
+        }
+        "rejected" | "denied" | "deny" => GatewayActionOutcome::Rejected,
+        "cancelled" | "canceled" => GatewayActionOutcome::Cancelled,
+        "timed_out" | "timedOut" => GatewayActionOutcome::TimedOut,
+        _ => GatewayActionOutcome::Completed,
+    }
+}
+
+fn action_resolution_payload(value: &Value) -> Value {
+    value.get("payload").cloned().unwrap_or_else(|| {
+        json!({
+            "reason": value.get("reason").and_then(Value::as_str),
+        })
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn permission_action(
+    action_id: String,
+    tool_name: String,
+    summary: String,
+    reason: String,
+    matched_rule: Option<String>,
+    suggested_rule: Option<String>,
+    allow_always: bool,
+    timeout_secs: u64,
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+) -> PendingActionView {
+    PendingActionView {
+        action_id,
+        kind: GatewayActionKind::Permission,
+        title: Some(tool_name.clone()),
+        summary: Some(if summary.trim().is_empty() {
+            reason.clone()
+        } else {
+            summary.clone()
+        }),
+        payload: json!({
+            "toolName": tool_name,
+            "summary": summary,
+            "reason": reason,
+            "matchedRule": matched_rule,
+            "suggestedRule": suggested_rule,
+            "allowAlways": allow_always,
+            "timeoutSecs": timeout_secs,
+        }),
+        thread_id,
+        turn_id,
+        activity_id: None,
+        source_key: None,
+        owner_id: None,
+        lease_expires_at_ms: None,
+    }
+}
+
+fn clarify_action(
+    action_id: String,
+    raw: Value,
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+) -> PendingActionView {
+    PendingActionView {
+        action_id,
+        kind: GatewayActionKind::Clarify,
+        title: Some("Clarify".to_string()),
+        summary: clarify_summary(&raw),
+        payload: json!({ "raw": raw }),
+        thread_id,
+        turn_id,
+        activity_id: None,
+        source_key: None,
+        owner_id: None,
+        lease_expires_at_ms: None,
+    }
+}
+
+fn clarify_summary(raw: &Value) -> Option<String> {
+    raw.get("questions")
+        .and_then(Value::as_array)
+        .and_then(|questions| questions.first())
+        .and_then(|question| question.get("question"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|question| !question.is_empty())
+        .map(ToString::to_string)
+}
+
+fn clarify_resolution_outcome(
+    reason: &psychevo_runtime::ClarifyResolvedReason,
+) -> GatewayActionOutcome {
+    match reason {
+        psychevo_runtime::ClarifyResolvedReason::Answered => GatewayActionOutcome::Accepted,
+        psychevo_runtime::ClarifyResolvedReason::Cancelled => GatewayActionOutcome::Cancelled,
+        psychevo_runtime::ClarifyResolvedReason::TimedOut => GatewayActionOutcome::TimedOut,
+        psychevo_runtime::ClarifyResolvedReason::TurnFinished => GatewayActionOutcome::Completed,
+    }
 }
 
 fn gateway_turn_status_from_runtime_outcome(outcome: Option<&str>) -> GatewayTurnStatus {

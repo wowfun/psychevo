@@ -60,8 +60,7 @@ function detachedSnapshot(): ThreadSnapshot {
       activeTurnId: null,
       queuedTurns: 0
     },
-    pendingPermissions: [],
-    pendingClarifies: []
+    pendingActions: []
   };
 }
 

@@ -60,6 +60,14 @@ impl TuiApp {
                 remove_visible_write_stdin_row(ui, tool_call_id);
                 return false;
             }
+            if gateway_pending_tool_overlay_is_stale(
+                ui,
+                entry_meta.turn_id,
+                tool_call_id,
+                &block.id,
+            ) {
+                return false;
+            }
             let idx = gateway_block_row_index(ui, &block.id)
                 .or_else(|| ui.tool_rows.get(&key).copied())
                 .unwrap_or_else(|| {
@@ -210,6 +218,14 @@ impl TuiApp {
             && let Some(session_id) = exec_session_id_from_result(&value)
             && exec_result_running(&value)
         {
+            if gateway_pending_tool_overlay_is_stale(
+                ui,
+                entry_meta.turn_id,
+                tool_call_id,
+                &block.id,
+            ) {
+                return false;
+            }
             let idx = ui
                 .tool_rows
                 .get(&key)
@@ -389,7 +405,7 @@ impl TuiApp {
         if session_live_event_ends_backlog(&event) {
             ui.session_live_event_backlog.remove(session_id);
         } else {
-            if matches!(event, RunStreamEvent::ClarifyRequest(_)) {
+            if stream_event_is_clarify_request(&event) {
                 ui.push_status(format!(
                     "clarify pending in session {}",
                     short_session(session_id)
@@ -508,4 +524,45 @@ impl TuiApp {
             ui.push_error(format!("error: {err:#}"));
         }
     }
+}
+
+fn gateway_pending_tool_overlay_is_stale(
+    ui: &mut FullscreenUi<'_>,
+    event_turn_id: Option<&str>,
+    tool_call_id: &str,
+    block_id: &str,
+) -> bool {
+    if let Some(idx) = gateway_block_row_index(ui, block_id)
+        && ui
+            .transcript
+            .get(idx)
+            .is_some_and(|row| terminal_tool_projection_row(row, event_turn_id))
+    {
+        return true;
+    }
+    if tool_call_id.is_empty() {
+        return false;
+    }
+    ui.transcript.iter().any(|row| {
+        row.tool_call_id.as_deref() == Some(tool_call_id)
+            && terminal_tool_projection_row(row, event_turn_id)
+    })
+}
+
+fn terminal_tool_projection_row(row: &TranscriptRow, event_turn_id: Option<&str>) -> bool {
+    if let (Some(row_turn_id), Some(event_turn_id)) =
+        (row.transcript_turn_id.as_deref(), event_turn_id)
+        && row_turn_id != event_turn_id
+    {
+        return false;
+    }
+    row.tool_started.is_none()
+        && !active_tool_row(row)
+        && !matches!(row.text.as_str(), "" | "preparing" | "running")
+        && (row.tool_elapsed.is_some()
+            || row.failed
+            || row.interrupted
+            || row.transcript_block_id.is_some()
+            || row.transcript_message_seq.is_some()
+            || row.transcript_source.as_deref() == Some("runtime.message"))
 }
