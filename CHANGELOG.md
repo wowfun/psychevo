@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-07-02
+
+- Fixed Workbench side-thread submission and transcript recovery so temporary
+  source tabs close cleanly, yielded `exec_command` blocks preserve identity
+  and titles, and stale live overlays cannot downgrade completed tool rows.
+- Added semantic transcript runtime ledgers across Gateway, Web, TUI, and
+  Workbench validation to catch duplicate, stale-overlay, status-downgrade, and
+  pseudo-running regressions before visual review.
+- Unified the workspace `reqwest` dependency on `0.13.3` across Runtime,
+  Gateway, CLI, and provider HTTP clients.
+
+## 2026-07-01
+
+- Added the canonical Runtime-owned event stream and Gateway action lifecycle,
+  including `SessionConfigured`, unified `pendingActions`, and snapshot-first
+  reconnect semantics.
+- Added source-aware extension assembly for plugins, MCP servers, runtime tools,
+  toolsets, hooks, child agents, and Hermes-compatible skill/tool activation
+  hints.
+- Added Codex-compatible plugin interface metadata, read-only Gateway plugin
+  RPCs, CLI plugin summaries, plugin MCP server materialization,
+  `PostToolUse` result transforms, and source-qualified hook trust review.
+- Added contributor placement guidance for choosing between core runtime,
+  skills, agents, hooks, plugins, and owning extension surfaces.
+- Added runner-owned xtask entrypoints for deterministic visual and ACP server
+  live validation with CI Playwright screenshots and quieter worker color logs.
+- Fixed Workbench transcript projection for ordinary `exec_command` result
+  displays and failed `write_stdin` updates that target yielded command
+  sessions.
+- Improved `peval-py` HTML comparison/report UX with stable selection scroll
+  positions, `Analysised` filtering, `.xlsx` table export, synced comparison
+  scrolling, active-source analysis reloads, and richer cached `analysis.md`
+  rendering.
+
 ## 2026-06-30
 
 - Fixed TUI ordering for selected-skill turn notices so `skill loaded` rows stay
