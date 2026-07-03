@@ -117,10 +117,12 @@ impl PermissionAction {
                             .to_string(),
                     })
             }
-            _ => crate::mcp::mcp_tool_name_parts(tool_name).map(|(server, tool)| Self::Mcp {
-                server: server.to_string(),
-                tool: tool.to_string(),
-            }),
+            _ => crate::mcp::mcp_utility_action(tool_name, args)
+                .or_else(|| {
+                    crate::mcp::mcp_tool_name_parts(tool_name)
+                        .map(|(server, tool)| (server.to_string(), tool.to_string()))
+                })
+                .map(|(server, tool)| Self::Mcp { server, tool }),
         }
     }
 

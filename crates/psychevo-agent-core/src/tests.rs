@@ -181,6 +181,39 @@ impl ToolBinding for DeferredTool {
     }
 }
 
+pub(crate) struct NamespacedTool;
+
+impl ToolBinding for NamespacedTool {
+    fn name(&self) -> &str {
+        "mcp__repo__search"
+    }
+
+    fn canonical_tool_name(&self) -> psychevo_ai::ToolName {
+        psychevo_ai::ToolName::namespaced("mcp__repo", "search")
+    }
+
+    fn description(&self) -> &str {
+        "Searches a repository MCP server."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {}, "additionalProperties": false})
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Sequential
+    }
+
+    fn execute(
+        &self,
+        _tool_call_id: String,
+        _args: Value,
+        _abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        Box::pin(async { ToolOutput::ok(json!({"ok": true})) })
+    }
+}
+
 #[tokio::test]
 pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
     let provider = RequestCaptureProvider::default();
@@ -227,6 +260,22 @@ pub(crate) fn tool_search_activates_deferred_tools_for_later_declarations() {
         .map(|declaration| declaration.name)
         .collect::<Vec<_>>();
     assert_eq!(activated_names, vec!["deferred_lookup"]);
+}
+
+#[test]
+pub(crate) fn router_declarations_preserve_canonical_tool_identity() {
+    let router = ToolRouter::from_tools(vec![Arc::new(NamespacedTool) as Arc<dyn ToolBinding>]);
+    let declarations = router.declarations();
+
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(declarations[0].name, "mcp__repo__search");
+    assert_eq!(declarations[0].namespace.as_deref(), Some("mcp__repo"));
+    assert_eq!(declarations[0].canonical_name.as_deref(), Some("search"));
+    assert!(
+        router
+            .tool_by_canonical_name(&psychevo_ai::ToolName::namespaced("mcp__repo", "search"))
+            .is_some()
+    );
 }
 
 #[tokio::test]

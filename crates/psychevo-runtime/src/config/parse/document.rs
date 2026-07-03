@@ -55,6 +55,12 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(toolsets) = object.get("toolsets") {
         config.toolsets = parse_custom_toolsets(toolsets)?;
     }
+    if let Some(mcp_servers) = object
+        .get("mcp_servers")
+        .or_else(|| object.get("mcpServers"))
+    {
+        config.mcp_servers = parse_profile_mcp_servers(mcp_servers)?;
+    }
     if let Some(agents) = object.get("agents") {
         config.agent_backends = parse_agent_backend_configs(agents)?;
     }

@@ -503,6 +503,8 @@ pub(crate) fn tool_declarations_hash_with_search(
         .map(|declaration| {
             json!({
                 "name": declaration.name,
+                "namespace": declaration.namespace,
+                "canonical_name": declaration.canonical_name,
                 "description": declaration.description,
                 "parameters": declaration.parameters,
             })

@@ -162,8 +162,12 @@ user approval writes through a capability-specific adapter:
 - skill grants write to the active profile tools section.
 
 External capability tools may define additional rule families when the owning
-capability spec requires them. MCP startup and MCP tool calls use server/tool
-approval metadata rather than legacy `Tool(pattern)` strings.
+capability spec requires them. MCP startup, MCP tool calls, MCP resource reads,
+MCP prompt gets, MCP elicitation, and MCP sampling use MCP action metadata
+rather than legacy `Tool(pattern)` strings. The first MCP implementation slice
+uses the existing `mcp` granular approval family for all MCP sub-actions while
+retaining the sub-action label for review prompts, evidence, and future policy
+specialization.
 
 ## Policy
 

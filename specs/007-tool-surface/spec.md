@@ -34,6 +34,13 @@ A model-visible tool declaration snapshot is the subset and provider-neutral sha
 
 A tool declaration is a model-visible semantic capability promise. It describes a tool the model may request. This spec does not define declaration fields, input schemas, provider-specific encoding, or prompt text.
 
+Every execution binding has a canonical tool identity. The canonical identity
+contains an optional namespace and a local tool name. Built-in tools may use an
+empty namespace; external families such as MCP should use source-derived
+namespaces so raw source identity, provider-visible fallback names, and dispatch
+identity do not collapse into one string. Provider-specific flattened names are
+lookup aliases for one generation request, not the owning runtime identity.
+
 An execution binding is the runtime-supplied executable handler for a tool request. It connects a requested tool to behavior supplied by a built-in or external source. This spec does not define handler signatures, process boundaries, or implementation APIs.
 
 Tool display metadata is UI-only metadata associated with an execution binding
@@ -56,12 +63,13 @@ defines agent tool-policy normalization.
 
 Tool implementations may come from built-in or external sources, but source mechanics do not define the tool surface contract.
 
-The AI generation request may include a refreshable tool snapshot from the agent-invocation scoped tool surface. The model-visible snapshot contains only declaration material required by the provider-facing tool API, such as the tool name, description, and input parameters. UI-only display metadata must remain outside this generation-request tool snapshot. Tool refresh does not define a dynamic tool API, hook API, plugin API, or model-visible toolset concept. [003 AI Protocol](../003-ai-protocol/spec.md) owns provider-neutral generation request semantics and provider-facing normalization.
-Prompt-prefix metadata may retain the effective tool names and declaration
-hash used for request reconstruction. The full declaration payload is
-reconstructable from the current registry by default; if the reconstructed
-payload does not match the recorded declaration hash, the request
-reconstruction must be labeled approximate.
+The AI generation request may include a refreshable tool snapshot from the agent-invocation scoped tool surface. The model-visible snapshot contains only declaration material required by the provider-facing tool API, such as the canonical tool identity, provider fallback name, description, and input parameters. UI-only display metadata must remain outside this generation-request tool snapshot. Tool refresh does not define a dynamic tool API, hook API, plugin API, or model-visible toolset concept. [003 AI Protocol](../003-ai-protocol/spec.md) owns provider-neutral generation request semantics and provider-facing normalization.
+Prompt-prefix metadata may retain the effective canonical tool identities,
+provider fallback names, declaration hash, and MCP runtime snapshot hash used
+for request reconstruction. The full declaration payload is reconstructable
+from the current registry by default; if the reconstructed payload or runtime
+snapshot does not match the recorded hashes, the request reconstruction must be
+labeled approximate.
 
 Tool surface facts may contribute to durable evidence for agent-invocation inspection. These facts may include selected toolsets, expanded tool names, declaration hashes, refresh facts, omitted unavailable tools, execution bindings, tool requests, execution outcomes, and tool-result relationships. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which relationships must be representable. Ordinary durable evidence does not require persisting a full capability snapshot or full model-visible tool declaration payload.
 
@@ -133,13 +141,14 @@ Tool exposure is invocation-scoped:
 
 When the accepted invocation surface contains deferred declarations and
 `tool_search` is enabled, runtime exposes a single direct `tool_search`
-declaration. `tool_search` searches deferred tool names, descriptions, and
-schemas. A successful search activates the matching deferred tools in the same
-agent invocation, so later generation-request snapshots can include those
-concrete tool declarations. The activation state belongs to the agent loop's
-mutable tool router, not to plugin manifests, MCP servers, or persistent
-configuration. `tool_search` is enabled by default; explicit configuration may
-disable it for an invocation.
+declaration. `tool_search` searches deferred canonical identities,
+provider-visible fallback names, descriptions, and schemas. A successful search
+returns loadable declaration specifications and activates the matching deferred
+tools in the same agent invocation, so later generation-request snapshots can
+include those concrete tool declarations. The activation state belongs to the
+agent loop's mutable tool router, not to plugin manifests, MCP servers, or
+persistent configuration. `tool_search` is enabled by default; explicit
+configuration may disable it for an invocation.
 
 Exposure policy is source-family aware. Direct MCP tools and plugin worker
 tools enter the router as deferred bindings when `tool_search` is enabled.

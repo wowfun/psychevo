@@ -46,11 +46,77 @@ pub struct GenerationRequest {
     pub metadata: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ToolName {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    pub name: String,
+}
+
+impl ToolName {
+    pub fn plain(name: impl Into<String>) -> Self {
+        Self {
+            namespace: None,
+            name: name.into(),
+        }
+    }
+
+    pub fn namespaced(namespace: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            namespace: Some(namespace.into()),
+            name: name.into(),
+        }
+    }
+
+    pub fn provider_fallback_name(&self) -> String {
+        match &self.namespace {
+            Some(namespace) if !namespace.is_empty() => {
+                format!("{namespace}__{}", self.name)
+            }
+            _ => self.name.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDeclaration {
+    /// Provider-visible fallback name for adapter families that do not support
+    /// tool namespaces.
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_name: Option<String>,
     pub description: String,
     pub parameters: Value,
+}
+
+impl ToolDeclaration {
+    pub fn new(name: impl Into<String>, description: impl Into<String>, parameters: Value) -> Self {
+        Self {
+            name: name.into(),
+            namespace: None,
+            canonical_name: None,
+            description: description.into(),
+            parameters,
+        }
+    }
+
+    pub fn with_canonical_name(mut self, canonical: ToolName) -> Self {
+        self.namespace = canonical.namespace;
+        self.canonical_name = Some(canonical.name);
+        self
+    }
+
+    pub fn canonical_tool_name(&self) -> ToolName {
+        ToolName {
+            namespace: self.namespace.clone(),
+            name: self
+                .canonical_name
+                .clone()
+                .unwrap_or_else(|| self.name.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

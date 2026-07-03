@@ -143,6 +143,81 @@ pub(crate) fn validate_toolset_name(name: &str) -> Result<()> {
     }
 }
 
+pub(crate) fn parse_profile_mcp_servers(value: &Value) -> Result<Vec<McpServerInput>> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("mcp_servers must be an object".to_string()))?;
+    let mut out = Vec::new();
+    for (name, value) in object {
+        let trimmed_name = name.trim();
+        if trimmed_name.is_empty() {
+            return Err(Error::Config(
+                "mcp_servers keys must not be empty".to_string(),
+            ));
+        }
+        let server = value
+            .as_object()
+            .ok_or_else(|| Error::Config(format!("mcp_servers.{name} must be an object")))?;
+        let transport = optional_string_field(server, "transport")?;
+        let command = optional_string_field(server, "command")?;
+        let url = optional_string_field(server, "url")?;
+        let transport_input = match transport.as_deref() {
+            Some("stdio") => {
+                let command = command.ok_or_else(|| {
+                    Error::Config(format!("mcp_servers.{name}.command is required"))
+                })?;
+                McpTransportInput::Stdio {
+                    command: PathBuf::from(command),
+                    args: string_array_field(server, "args", &format!("mcp_servers.{name}.args"))?,
+                    env: string_map_field(server, "env", &format!("mcp_servers.{name}.env"))?,
+                    cwd: optional_string_field(server, "cwd")?.map(PathBuf::from),
+                }
+            }
+            Some("streamable_http" | "http") => {
+                let url = url
+                    .ok_or_else(|| Error::Config(format!("mcp_servers.{name}.url is required")))?;
+                McpTransportInput::StreamableHttp {
+                    url,
+                    headers: string_map_field(
+                        server,
+                        "headers",
+                        &format!("mcp_servers.{name}.headers"),
+                    )?,
+                }
+            }
+            Some(kind) => McpTransportInput::Unsupported {
+                kind: kind.to_string(),
+            },
+            None if command.is_some() => McpTransportInput::Stdio {
+                command: PathBuf::from(command.expect("checked is_some")),
+                args: string_array_field(server, "args", &format!("mcp_servers.{name}.args"))?,
+                env: string_map_field(server, "env", &format!("mcp_servers.{name}.env"))?,
+                cwd: optional_string_field(server, "cwd")?.map(PathBuf::from),
+            },
+            None if url.is_some() => McpTransportInput::StreamableHttp {
+                url: url.expect("checked is_some"),
+                headers: string_map_field(
+                    server,
+                    "headers",
+                    &format!("mcp_servers.{name}.headers"),
+                )?,
+            },
+            None => {
+                return Err(Error::Config(format!(
+                    "mcp_servers.{name} must declare command or url"
+                )));
+            }
+        };
+        out.push(McpServerInput::with_source(
+            trimmed_name.to_string(),
+            transport_input,
+            format!("profile:mcp:{trimmed_name}"),
+            "profile",
+        ));
+    }
+    Ok(out)
+}
+
 pub(crate) fn parse_agent_backend_configs(
     value: &Value,
 ) -> Result<BTreeMap<String, AgentBackendConfig>> {

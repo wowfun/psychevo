@@ -352,6 +352,7 @@ pub(crate) fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> Extensio
         selected_root_contributions(input.cwd, input.selected_capability_roots);
 
     let mut mcp_servers = input.mcp_servers;
+    mcp_servers.extend(selected_root_contributions.mcp_servers.iter().cloned());
     mcp_servers.extend(plugin_assembly.mcp_servers.iter().cloned());
     let mut runtime_tools = input.runtime_tools;
     runtime_tools.extend(plugin_assembly.runtime_tools.iter().cloned());
@@ -380,7 +381,12 @@ pub(crate) fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> Extensio
             .cloned()
             .chain(selected_root_contributions.hook_sources)
             .collect(),
-        toolsets: plugin_assembly.toolsets.clone(),
+        toolsets: plugin_assembly
+            .toolsets
+            .iter()
+            .cloned()
+            .chain(selected_root_contributions.toolsets)
+            .collect(),
         warnings,
         projection: plugin_assembly.projection.clone(),
     }
@@ -391,6 +397,8 @@ pub(crate) struct SelectedRootContributions {
     pub(crate) skill_inputs: Vec<PathBuf>,
     pub(crate) agent_inputs: Vec<String>,
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
+    pub(crate) mcp_servers: Vec<McpServerInput>,
+    pub(crate) toolsets: Vec<ToolsetContribution>,
     pub(crate) warnings: Vec<RunWarning>,
 }
 
@@ -421,6 +429,23 @@ pub(crate) fn selected_root_contributions(
                         path: Some(manifest.manifest_path.clone()),
                         hooks,
                         worker: None,
+                    });
+                }
+                let source_id = format!("capability-root:{}", root.id);
+                for server in &manifest.mcp_servers {
+                    out.mcp_servers.push(McpServerInput::with_source(
+                        server.name.clone(),
+                        server.transport.clone(),
+                        source_id.clone(),
+                        "selected_capability_root",
+                    ));
+                }
+                for (name, config) in &manifest.toolsets {
+                    out.toolsets.push(ToolsetContribution {
+                        source_id: source_id.clone(),
+                        source_kind: "selected_capability_root".to_string(),
+                        name: name.clone(),
+                        config: config.clone(),
                     });
                 }
                 if manifest.worker.is_some() {
@@ -595,11 +620,17 @@ mod tests {
               "version": "1.0.0",
               "description": "cleanup",
               "skills": ["./skills"],
+              "mcpServers": {
+                "repo": { "command": "./mcp-server" }
+              },
               "hooks": {
                 "PostToolUse": [{"hooks": [{"type": "command", "command": "echo ok"}]}]
               },
               "psychevo": {
                 "agents": ["./agents"],
+                "toolsets": {
+                  "repo-tools": { "tools": ["mcp__repo__search"] }
+                },
                 "runtime": {"worker": {"command": "./worker.py"}}
               }
             }"#,
@@ -621,6 +652,13 @@ mod tests {
         );
         assert_eq!(contributions.hook_sources.len(), 1);
         assert!(contributions.hook_sources[0].worker.is_none());
+        assert_eq!(contributions.mcp_servers.len(), 1);
+        assert_eq!(
+            contributions.mcp_servers[0].source_kind.as_deref(),
+            Some("selected_capability_root")
+        );
+        assert_eq!(contributions.toolsets.len(), 1);
+        assert_eq!(contributions.toolsets[0].name, "repo-tools");
         assert_eq!(contributions.warnings.len(), 1);
     }
 

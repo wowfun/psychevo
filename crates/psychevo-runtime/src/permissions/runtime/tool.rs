@@ -23,6 +23,10 @@ impl ToolBinding for PermissionTool {
         self.tool.name()
     }
 
+    fn canonical_tool_name(&self) -> psychevo_ai::ToolName {
+        self.tool.canonical_tool_name()
+    }
+
     fn description(&self) -> &str {
         self.tool.description()
     }

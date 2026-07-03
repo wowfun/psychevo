@@ -23,6 +23,8 @@ pub(crate) async fn run_live_internal(
     }
     let loaded = load_run_config(&options, &cwd)?;
     let home = crate::config::resolve_psychevo_home(&loaded.env)?;
+    let mut mcp_inputs = options.mcp_servers.clone();
+    mcp_inputs.extend(loaded.config.mcp_servers.clone());
     let extension_assembly =
         crate::extensions::assemble_extensions(crate::extensions::ExtensionAssemblyInput {
             home: &home,
@@ -30,7 +32,7 @@ pub(crate) async fn run_live_internal(
             env: &loaded.env,
             plugin_policy: &loaded.config.plugins,
             selected_capability_roots: &options.selected_capability_roots,
-            mcp_servers: options.mcp_servers.clone(),
+            mcp_servers: mcp_inputs,
             runtime_tools: options.runtime_tools.clone(),
         });
     let extension_warnings = extension_assembly.warnings.clone();
@@ -452,24 +454,26 @@ pub(crate) async fn run_live_internal(
     let permission_runtime =
         permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
     let mcp_server_inputs = extension_assembly.registry.mcp_servers();
-    let (mcp_tools, mcp_warnings) =
-        crate::mcp::mcp_tool_bindings(&mcp_server_inputs, &cwd, Some(&permission_runtime)).await;
-    let mut extension_tools = mcp_tools
+    let mcp_snapshot =
+        crate::mcp::mcp_runtime_snapshot(&mcp_server_inputs, &cwd, Some(&permission_runtime)).await;
+    let mcp_snapshot_hash = mcp_snapshot.snapshot_hash.clone();
+    let mcp_catalog_hash = mcp_snapshot.catalog_hash.clone();
+    let mcp_accepted_servers = mcp_snapshot.accepted_servers.clone();
+    let mcp_resources_available = mcp_snapshot.resources_available;
+    let mcp_prompts_available = mcp_snapshot.prompts_available;
+    let mcp_sampling_config = mcp_snapshot.sampling_config.clone();
+    let mcp_elicitation_policy = mcp_snapshot.elicitation_policy.clone();
+    let mcp_warnings = mcp_snapshot.warnings.clone();
+    let mut extension_tools = mcp_snapshot
+        .tools
         .into_iter()
         .map(|tool| {
-            let source_id = crate::mcp::mcp_tool_name_parts(tool.name())
-                .map(|(server, _)| format!("mcp:{server}"))
-                .unwrap_or_else(|| "mcp:unknown".to_string());
-            RuntimeTool::with_source(tool, source_id, "mcp")
+            let source_id = crate::mcp::mcp_tool_source_id(tool.name());
+            let source_kind = crate::mcp::mcp_tool_source_kind(tool.name());
+            RuntimeTool::with_source(tool, source_id, source_kind)
         })
         .collect::<Vec<_>>();
-    extension_tools.extend(
-        extension_assembly
-            .registry
-            .runtime_tools()
-            .iter()
-            .cloned(),
-    );
+    extension_tools.extend(extension_assembly.registry.runtime_tools().iter().cloned());
     emit_warning_events(&mcp_warnings, &events, stream_events.as_ref());
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         cwd: cwd.clone(),
@@ -509,13 +513,11 @@ pub(crate) async fn run_live_internal(
     );
     let hook_runtime_for_lifecycle = hook_runtime.clone();
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let outcome = runtime.run_session_start(
-            &json!({
-                "session_id": session_id,
-                "source": if created_session { "startup" } else { "resume" },
-                "cwd": cwd,
-            }),
-        );
+        let outcome = runtime.run_session_start(&json!({
+            "session_id": session_id,
+            "source": if created_session { "startup" } else { "resume" },
+            "cwd": cwd,
+        }));
         if let Some(reason) = outcome.stop_reason {
             return Err(Error::Message(reason));
         }
@@ -540,7 +542,10 @@ pub(crate) async fn run_live_internal(
         skills_visible_for_prompt_with_tools_and_toolsets(
             &skill_catalog.skills,
             effective_tool_names.iter().map(String::as_str),
-            tool_surface.accepted_toolset_names.iter().map(String::as_str),
+            tool_surface
+                .accepted_toolset_names
+                .iter()
+                .map(String::as_str),
         )
     } else {
         Vec::new()
@@ -571,6 +576,15 @@ pub(crate) async fn run_live_internal(
         "agents_enabled": !options.no_agents,
         "effective_tools": effective_tool_names,
         "accepted_toolsets": tool_surface.accepted_toolset_names,
+        "mcp_runtime": {
+            "snapshot_hash": mcp_snapshot_hash,
+            "catalog_hash": mcp_catalog_hash,
+            "accepted_servers": mcp_accepted_servers,
+            "resources_available": mcp_resources_available,
+            "prompts_available": mcp_prompts_available,
+            "sampling": mcp_sampling_config,
+            "elicitation": mcp_elicitation_policy,
+        },
         "agent_catalog_visible": !prompt_agents.is_empty(),
         "visible_agents": prompt_agents.iter().map(|agent| agent.name.clone()).collect::<Vec<_>>(),
         "selected_skills": selected_skills.clone(),
@@ -643,13 +657,11 @@ pub(crate) async fn run_live_internal(
         skill_contextual_user_messages(&skill_context_fragments);
     let mut hook_context_message_count = 0usize;
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let prompt_hook = runtime.run_user_prompt_submit(
-            &json!({
-                "session_id": session_id,
-                "prompt": options.prompt,
-                "cwd": cwd,
-            }),
-        );
+        let prompt_hook = runtime.run_user_prompt_submit(&json!({
+            "session_id": session_id,
+            "prompt": options.prompt,
+            "cwd": cwd,
+        }));
         if let Some(reason) = prompt_hook.block_reason {
             return Err(Error::Message(reason));
         }
@@ -813,19 +825,15 @@ pub(crate) async fn run_live_internal(
         .find_map(assistant_text)
         .unwrap_or_default();
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let _ = runtime.run_post_llm_call(
-            &json!({
-                "session_id": session_id,
-                "outcome": completion.outcome.as_str(),
-                "assistant_text": final_answer,
-            }),
-        );
-        let stop = runtime.run_stop(
-            &json!({
-                "session_id": session_id,
-                "outcome": completion.outcome.as_str(),
-            }),
-        );
+        let _ = runtime.run_post_llm_call(&json!({
+            "session_id": session_id,
+            "outcome": completion.outcome.as_str(),
+            "assistant_text": final_answer,
+        }));
+        let stop = runtime.run_stop(&json!({
+            "session_id": session_id,
+            "outcome": completion.outcome.as_str(),
+        }));
         if let Some(reason) = stop.block_reason {
             return Err(Error::Message(reason));
         }
@@ -867,12 +875,10 @@ pub(crate) async fn run_live_internal(
     warnings.extend(mcp_warnings);
     warnings.append(&mut tool_surface_warnings);
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let _ = runtime.run_session_end(
-            &json!({
-                "session_id": session_id,
-                "outcome": completion.outcome.as_str(),
-            }),
-        );
+        let _ = runtime.run_session_end(&json!({
+            "session_id": session_id,
+            "outcome": completion.outcome.as_str(),
+        }));
     }
     Ok(RunResult {
         session_id,
@@ -906,16 +912,22 @@ fn hook_contextual_user_messages(
     if blocks.is_empty() {
         Vec::new()
     } else {
-        vec![psychevo_agent_core::ContextualUserMessage::new_with_category(
-            "hook_context",
-            "turn_context",
-            blocks,
-        )]
+        vec![
+            psychevo_agent_core::ContextualUserMessage::new_with_category(
+                "hook_context",
+                "turn_context",
+                blocks,
+            ),
+        ]
     }
 }
 
 fn hook_context_block(value: &Value) -> Option<psychevo_agent_core::ContextualUserBlock> {
-    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+    if let Some(text) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
         return Some(psychevo_agent_core::ContextualUserBlock::new(
             "hook_context",
             None,

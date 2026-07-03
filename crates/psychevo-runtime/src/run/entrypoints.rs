@@ -366,6 +366,8 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     };
     let loaded = load_run_config(&run_options, &cwd)?;
     let home = crate::config::resolve_psychevo_home(&loaded.env)?;
+    let mut mcp_inputs = options.mcp_servers.clone();
+    mcp_inputs.extend(loaded.config.mcp_servers.clone());
     let extension_assembly =
         crate::extensions::assemble_extensions(crate::extensions::ExtensionAssemblyInput {
             home: &home,
@@ -373,7 +375,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             env: &loaded.env,
             plugin_policy: &loaded.config.plugins,
             selected_capability_roots: &options.selected_capability_roots,
-            mcp_servers: options.mcp_servers.clone(),
+            mcp_servers: mcp_inputs,
             runtime_tools: Vec::new(),
         });
     let permission_mode = options.permission_mode.unwrap_or_default();

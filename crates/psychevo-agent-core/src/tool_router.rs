@@ -5,6 +5,7 @@ pub(crate) use super::*;
 pub struct ToolRouter {
     tools: Vec<Arc<dyn ToolBinding>>,
     by_name: BTreeMap<String, Arc<dyn ToolBinding>>,
+    by_canonical_name: BTreeMap<psychevo_ai::ToolName, Arc<dyn ToolBinding>>,
     exposure_overrides: BTreeMap<String, ToolExposure>,
     tool_search: ToolSearchOptions,
 }
@@ -20,6 +21,9 @@ impl ToolRouter {
                 continue;
             }
             router.by_name.insert(name, Arc::clone(&tool));
+            router
+                .by_canonical_name
+                .insert(tool.canonical_tool_name(), Arc::clone(&tool));
             router.tools.push(tool);
         }
         router
@@ -32,6 +36,13 @@ impl ToolRouter {
 
     pub fn tool(&self, name: &str) -> Option<Arc<dyn ToolBinding>> {
         self.by_name.get(name).cloned()
+    }
+
+    pub fn tool_by_canonical_name(
+        &self,
+        name: &psychevo_ai::ToolName,
+    ) -> Option<Arc<dyn ToolBinding>> {
+        self.by_canonical_name.get(name).cloned()
     }
 
     pub fn display_spec(&self, name: &str) -> ToolDisplaySpec {
@@ -69,6 +80,8 @@ impl ToolRouter {
             })
             .map(|tool| ToolDeclaration {
                 name: tool.name().to_string(),
+                namespace: tool.canonical_tool_name().namespace,
+                canonical_name: Some(tool.canonical_tool_name().name),
                 description: tool.description().to_string(),
                 parameters: tool.parameters(),
             })
@@ -103,8 +116,9 @@ impl ToolRouter {
             .filter(|tool| self.effective_exposure(tool.name()) == Some(ToolExposure::Deferred))
             .filter_map(|tool| {
                 let haystack = format!(
-                    "{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}",
                     tool.name(),
+                    canonical_name_for_search(&tool.canonical_tool_name()),
                     tool.description(),
                     serde_json::to_string(&tool.parameters()).unwrap_or_default()
                 )
@@ -131,10 +145,26 @@ impl ToolRouter {
             .into_iter()
             .map(|(_, name, description)| {
                 let is_activated = activated.contains(&name);
+                let canonical = self
+                    .tool(&name)
+                    .map(|tool| tool.canonical_tool_name())
+                    .unwrap_or_else(|| psychevo_ai::ToolName::plain(name.clone()));
+                let declaration = self.tool(&name).map(|tool| ToolDeclaration {
+                    name: tool.name().to_string(),
+                    namespace: canonical.namespace.clone(),
+                    canonical_name: Some(canonical.name.clone()),
+                    description: tool.description().to_string(),
+                    parameters: tool.parameters(),
+                });
                 json!({
                     "name": name,
+                    "canonical": {
+                        "namespace": canonical.namespace,
+                        "name": canonical.name,
+                    },
                     "description": description,
                     "activated": is_activated,
+                    "declaration": declaration,
                 })
             })
             .collect::<Vec<_>>();
@@ -170,12 +200,10 @@ impl ToolRouter {
 }
 
 fn tool_search_declaration() -> ToolDeclaration {
-    ToolDeclaration {
-        name: TOOL_SEARCH_NAME.to_string(),
-        description:
-            "Search deferred tools by name, description, or schema and activate relevant matches for later tool calls."
-                .to_string(),
-        parameters: json!({
+    ToolDeclaration::new(
+        TOOL_SEARCH_NAME,
+        "Search deferred tools by name, description, or schema and activate relevant matches for later tool calls.",
+        json!({
             "type": "object",
             "properties": {
                 "query": {
@@ -191,6 +219,13 @@ fn tool_search_declaration() -> ToolDeclaration {
             "required": ["query"],
             "additionalProperties": false
         }),
+    )
+}
+
+fn canonical_name_for_search(name: &psychevo_ai::ToolName) -> String {
+    match &name.namespace {
+        Some(namespace) => format!("{namespace}/{}", name.name),
+        None => name.name.clone(),
     }
 }
 

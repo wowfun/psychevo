@@ -96,6 +96,19 @@ the missing attachment instead of aborting request construction.
 
 The tool declaration snapshot describes what the model may request for this generation request. [007 Tool Surface](../007-tool-surface/spec.md) defines declaration snapshot and execution binding semantics. Tool declarations do not define concrete tool behavior, resource gate semantics, permission rules, or execution scheduling.
 
+A provider-neutral tool declaration may carry a canonical tool identity made of
+an optional namespace and a local tool name. The canonical identity is the
+runtime and replay identity. Provider adapters may encode it directly when a
+provider family supports tool namespaces; otherwise they must derive a stable
+provider-visible fallback name from the canonical identity and keep that mapping
+inside request construction. The fallback name is a provider wire concern and
+must not replace the canonical runtime identity.
+
+Provider adapters that flatten names for `OpenAI-compatible` Chat-style tool
+calls must preserve the declaration's canonical identity in the runtime lookup
+map. A flattened provider name returned by the model resolves back to exactly
+one runtime execution binding for the current generation request.
+
 Generation controls constrain the model invocation. They do not define provider-specific options or transport-level behavior.
 
 ## Normalized Stream

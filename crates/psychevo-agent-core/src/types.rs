@@ -440,6 +440,9 @@ impl ToolOutput {
 
 pub trait ToolBinding: Send + Sync {
     fn name(&self) -> &str;
+    fn canonical_tool_name(&self) -> psychevo_ai::ToolName {
+        psychevo_ai::ToolName::plain(self.name())
+    }
     fn description(&self) -> &str;
     fn parameters(&self) -> Value;
     fn exposure(&self) -> ToolExposure {

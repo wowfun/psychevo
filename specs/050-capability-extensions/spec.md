@@ -90,6 +90,13 @@ owner, effect, and reason facts used by tests and owning diagnostics surfaces.
 It is not a second runtime and does not decide domain
 semantics. Owning modules still accept or omit declarations.
 
+MCP server declarations feed a source-aware MCP catalog before they produce
+tools or adjacent MCP utility surfaces. The MCP catalog is owned by
+[056 MCP](../056-mcp/spec.md). Capability extension assembly supplies candidate
+server declarations with source identity; the MCP module resolves precedence,
+conflicts, runtime snapshots, connection state, and tool/resource/prompt
+normalization before anything becomes model-visible or executable.
+
 Projection acceptance status values are:
 
 - `accepted`
@@ -225,19 +232,20 @@ normalization layer.
 
 Tool declarations enter a runtime-owned tool router. The router owns the
 model-visible tool declaration snapshot, dispatch lookup, duplicate visible-name
-rejection, and current invocation dispatch facts. It may represent direct,
-deferred, and hidden exposure. The current slice enables one runtime-owned
-`tool_search` declaration by default when accepted deferred tools exist. Calling
-`tool_search` searches source-qualified deferred declarations and activates
-matching tools for later generation-request snapshots in the same agent
-invocation. Explicit invocation configuration may disable synthetic
-`tool_search`; it must not change install, package, or manifest semantics.
+rejection, canonical identity aliases, and current invocation dispatch facts. It
+may represent direct, deferred, and hidden exposure. The current slice enables
+one runtime-owned `tool_search` declaration by default when accepted deferred
+tools exist. Calling `tool_search` searches source-qualified deferred
+declarations and activates matching tools for later generation-request
+snapshots in the same agent invocation. Explicit invocation configuration may
+disable synthetic `tool_search`; it must not change install, package, or
+manifest semantics.
 
 Prompt-prefix records freeze the request reconstruction boundary. They retain
-prompt slots, prompt hash, model-visible tool declaration hash, and minimal
-runtime metadata needed to reconstruct or mark approximate a later provider
-request. Ordinary selected/omitted extension lists are not a separate durable
-truth source.
+prompt slots, prompt hash, model-visible tool declaration hash, MCP runtime
+snapshot hash, and minimal runtime metadata needed to reconstruct or mark
+approximate a later provider request. Ordinary selected/omitted extension lists
+are not a separate durable truth source.
 
 Conflicts, unavailable sources, rejected declarations, degraded sources, or
 deferred activation outcomes may be surfaced as current-run warnings or future

@@ -17,10 +17,10 @@ pub(crate) use crate::types::{
     ApprovalPolicy, ApprovalsReviewer, AutoReviewConfig, ConfigScope, ConfiguredModel,
     CustomProviderInput, CustomProviderResult, ExecPolicyConfig, ExecPolicyDecision,
     ExecPolicyExample, ExecPolicyHostExecutable, ExecPolicyPatternToken, ExecPolicyRule,
-    GranularApprovalConfig, ModelCapabilities, ModelCatalogEntry, ModelCatalogProvider, ModelCost,
-    ModelCostTier, ModelLimits, ModelMetadata, ModelMetadataCacheTarget, PermissionAccess,
-    PermissionConfig, PermissionProfileConfig, ProjectContextInstructionMode, RunMode, RunOptions,
-    ScopedCustomProviderInput,
+    GranularApprovalConfig, McpServerInput, McpTransportInput, ModelCapabilities,
+    ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier, ModelLimits, ModelMetadata,
+    ModelMetadataCacheTarget, PermissionAccess, PermissionConfig, PermissionProfileConfig,
+    ProjectContextInstructionMode, RunMode, RunOptions, ScopedCustomProviderInput,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -36,6 +36,7 @@ pub(crate) struct RunConfig {
     pub(crate) workspaces: WorkspacesConfig,
     pub(crate) tools: ToolSelectionConfig,
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
+    pub(crate) mcp_servers: Vec<McpServerInput>,
     pub(crate) agent_backends: BTreeMap<String, AgentBackendConfig>,
     pub(crate) channels: ChannelsConfig,
     pub(crate) plugins: PluginPolicyConfig,
