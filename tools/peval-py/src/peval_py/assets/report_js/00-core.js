@@ -39,7 +39,7 @@ function initialAdapterDefaults() {
 function adapterDefaults() {
   return state.adapterDefaults || {};
 }
-const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], adapterDefaults: initialAdapterDefaults(), notesEditor: null };
+const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], selectedSourceKey: null, adapterDefaults: initialAdapterDefaults(), notesEditor: null };
 const SUBMENU_DETAILS_SELECTOR = ".export-menu,.filter-control";
 const OPEN_SUBMENU_DETAILS_SELECTOR = ".export-menu[open],.filter-control[open]";
 function closeOpenSubmenus(except = null) {
@@ -112,12 +112,19 @@ function render(view) {
     const firstFailed = reportRows().find(row => lower(row.status) !== "passed");
     state.selectedTrial = (firstFailed || reportRows()[0])?.trial_key || view.trajectory_meta?.[0]?.trial_key || null;
   }
+  if (serveMode()) syncSelectedSourceFromView();
   if (serveMode()) renderServeSources();
   bindGlobalControls();
   renderReportNotes(view.annotations?.report_notes || []);
   renderComparison();
   renderTrace();
   renderStepDrawer();
+}
+function syncSelectedSourceFromView() {
+  const trialKey = selectedKey();
+  if (!trialKey) return;
+  const source = activeServeSources().find(item => item?.trial_key === trialKey);
+  if (source?.source_key) state.selectedSourceKey = source.source_key;
 }
 function renderReportNotes(notes) {
   $("report-notes").innerHTML = notes.length ? `<div class="report-note-list">${notes.map(note => `<article class="report-note"><strong>${esc(note.label || t("report_note", "Report note"))}</strong><div class="note-body">${renderMarkdown(note.markdown || "")}</div></article>`).join("")}</div>` : "";
@@ -168,6 +175,12 @@ function activeServeSources() {
 }
 function sourceForTrialKey(trialKey) {
   if (!serveMode()) return null;
+  const exact = activeServeSources().find(source => source?.trial_key === trialKey);
+  if (exact) return exact;
+  if (state.selectedSourceKey) {
+    const selected = activeServeSources().find(source => source?.source_key === state.selectedSourceKey);
+    if (selected) return selected;
+  }
   const index = trialIndexFor(trialKey);
   if (index < 0) return null;
   return activeServeSources()[index] || null;

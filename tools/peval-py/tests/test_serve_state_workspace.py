@@ -568,3 +568,70 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 self.assertEqual(store.source_payload(), [])
             finally:
                 store.close()
+
+    def test_missing_artifact_source_stays_listed_and_reports_skip_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode")
+            report = sample_report(config)
+            store = open_workspace_state(str(root))
+            try:
+                source_key = store.ingest_upload("saved-report.json", json.dumps(report), config)[0]
+                source = store.source_payload()[0]
+                artifact_dir = root / source["artifact_dir"]
+                backup_dir = Path(tmp) / "backup-cell"
+                shutil.copytree(artifact_dir, backup_dir)
+
+                shutil.rmtree(artifact_dir)
+                missing_source = store.source_payload()[0]
+                self.assertEqual(missing_source["source_key"], source_key)
+                self.assertEqual(missing_source["last_status"], "missing")
+                self.assertIn("Trial cell artifacts not found", missing_source["last_error"])
+                self.assertEqual(store.active_report(config)["trajectory"], [])
+
+                shutil.copytree(backup_dir, artifact_dir)
+                store.set_source_alias(source_key, "Restored cell")
+                first_sync = store.sync_artifact_sources(config)
+                second_sync = store.sync_artifact_sources(config)
+                self.assertIn(source_key, first_sync)
+                self.assertEqual(first_sync, second_sync)
+                restored_sources = store.source_payload()
+                self.assertEqual(len(restored_sources), 1)
+                self.assertEqual(restored_sources[0]["source_key"], source_key)
+                self.assertEqual(restored_sources[0]["source_alias"], "Restored cell")
+                self.assertNotEqual(restored_sources[0]["last_status"], "missing")
+                self.assertEqual(
+                    store.active_report(config)["trajectory"][0]["trajectory_id"],
+                    report["trajectory"][0]["trajectory_id"],
+                )
+            finally:
+                store.close()
+
+    def test_sync_artifact_sources_discovers_unregistered_trial_cells(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode")
+            report = sample_report(config)
+            store = open_workspace_state(str(root))
+            try:
+                source_key = store.ingest_upload("saved-report.json", json.dumps(report), config)[0]
+                artifact_dir = root / store.source_payload()[0]["artifact_dir"]
+                store.conn.execute("DELETE FROM peval_py_refresh_log")
+                store.conn.execute("DELETE FROM peval_py_sources")
+                store.conn.commit()
+                self.assertEqual(store.source_payload(), [])
+
+                synced = store.sync_artifact_sources(config)
+                self.assertEqual(synced, [source_key])
+                sources = store.source_payload()
+                self.assertEqual(len(sources), 1)
+                self.assertEqual(sources[0]["source_key"], source_key)
+                self.assertEqual(sources[0]["kind"], "trial-artifact")
+                self.assertFalse(sources[0]["refreshable"])
+                self.assertTrue(sources[0]["snapshot"])
+                self.assertEqual(sources[0]["trial_key"], "session:t001")
+
+                store.sync_artifact_sources(config)
+                self.assertEqual(len(store.source_payload()), 1)
+            finally:
+                store.close()

@@ -13,7 +13,7 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
             root = Path(tmp) / "workspace"
             result = init_workspace(str(root))
 
-            self.assertEqual(result.schema_version, 3)
+            self.assertEqual(result.schema_version, 4)
             self.assertEqual(result.root, root.resolve())
             config_text = (root / "peval-py.toml").read_text(encoding="utf-8")
             self.assertIn('state_db = "state.db"\n', config_text)
@@ -89,7 +89,7 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
                 sorted(data),
                 ["peval_py_config", "root", "schema_version", "state_db"],
             )
-            self.assertEqual(data["schema_version"], 3)
+            self.assertEqual(data["schema_version"], 4)
             self.assertEqual(data["root"], str(json_root.resolve()))
             self.assertEqual(data["state_db"], str(json_root.resolve() / "state.db"))
 

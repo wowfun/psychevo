@@ -376,7 +376,7 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(len(body["sources"]), 2)
-                self.assertEqual(len(body["report"]["trajectory"]), 2)
+                self.assertEqual(len(body["report"]["trajectory"]), 1)
                 source_keys = [source["source_key"] for source in body["sources"]]
                 artifact_dirs = {
                     source["source_key"]: root / source["artifact_dir"]
@@ -464,6 +464,66 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(body["sources"], [])
                 self.assertFalse(artifact_dirs[source_keys[1]].exists())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_reload_discovers_cells_and_missing_report_is_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode")
+            report = sample_report(config)
+            store = open_workspace_state(str(root))
+            source_key = store.ingest_upload("saved-report.json", json.dumps(report), config)[0]
+            source = store.source_payload()[0]
+            artifact_dir = root / source["artifact_dir"]
+            store.conn.execute("DELETE FROM peval_py_refresh_log")
+            store.conn.execute("DELETE FROM peval_py_sources")
+            store.conn.commit()
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources/reload",
+                    {},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(len(body["sources"]), 1)
+                self.assertEqual(body["sources"][0]["source_key"], source_key)
+                self.assertEqual(body["sources"][0]["kind"], "trial-artifact")
+
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/api/report?source_key={source_key}")
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+                conn.close()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(len(payload["trajectory"]), 1)
+
+                shutil.rmtree(artifact_dir)
+                status, _, html = request_text(port, "/")
+                self.assertEqual(status, 200)
+                options = script_json(html, "peval-py-render-options")
+                self.assertEqual(options["sources"][0]["last_status"], "missing")
+
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", f"/api/report?source_key={source_key}")
+                response = conn.getresponse()
+                missing = json.loads(response.read().decode("utf-8"))
+                conn.close()
+                self.assertEqual(response.status, 400)
+                self.assertIn("Trial cell artifacts not found", missing["error"])
             finally:
                 server.shutdown()
                 server.server_close()

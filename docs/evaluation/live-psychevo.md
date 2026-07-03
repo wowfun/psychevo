@@ -16,7 +16,7 @@ pevo run "hello"
 Install `peval` if needed:
 
 ```bash
-sh scripts/install.sh --with-peval
+cargo install --locked --path crates/psychevo-eval --force
 ```
 
 Create or choose a peval workspace:

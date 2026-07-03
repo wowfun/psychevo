@@ -9,11 +9,14 @@ wide or narrow validation paths.
 
 ## Install
 
-From a checkout, install both product CLIs:
+From a checkout, install the evaluation CLI with Cargo:
 
 ```bash
-sh scripts/install.sh --with-peval
+cargo install --locked --path crates/psychevo-eval --force
 ```
+
+See the [Installation Guide](../install.md) for source-install prerequisites,
+diagnostics, and platform notes.
 
 From source without installing, use Cargo:
 

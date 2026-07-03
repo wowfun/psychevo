@@ -59,9 +59,11 @@ from peval_py._state.sources import (
 
 PEVAL_PY_CONFIG = "peval-py.toml"
 PEVAL_ROOT_ENV = "PEVAL_ROOT"
-STATE_SCHEMA_VERSION = 3
+STATE_SCHEMA_VERSION = 4
 UPLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 REFRESH_LOG_LIMIT = 200
+SOURCE_STATUS_MISSING = "missing"
+SOURCE_STATUS_OK = "ok"
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,19 @@ class WorkspacePaths:
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def trial_summary(
+    trajectory: dict[str, Any] | None,
+    meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    trajectory = trajectory or {}
+    meta = meta or {}
+    return {
+        "trial_key": optional_str(meta.get("trial_key") or trajectory.get("trajectory_id")),
+        "trial_session_id": optional_str(trajectory.get("session_id")),
+        "last_turn_finished_at_ms": optional_int(meta.get("finished_at_ms")),
+    }
 
 
 def resolve_workspace_root(explicit_root: str | None = None) -> Path:
@@ -174,6 +189,9 @@ class ServeStateStore:
                 model TEXT,
                 artifact_dir TEXT,
                 artifact_updated_at_ms INTEGER,
+                trial_key TEXT,
+                trial_session_id TEXT,
+                last_turn_finished_at_ms INTEGER,
                 refreshable INTEGER NOT NULL,
                 active INTEGER NOT NULL,
                 snapshot INTEGER NOT NULL,
@@ -193,7 +211,24 @@ class ServeStateStore:
             );
             """
         )
+        self.ensure_source_columns()
         self.conn.commit()
+
+    def ensure_source_columns(self) -> None:
+        existing = {
+            str(row["name"])
+            for row in self.conn.execute("PRAGMA table_info(peval_py_sources)").fetchall()
+        }
+        columns = {
+            "trial_key": "TEXT",
+            "trial_session_id": "TEXT",
+            "last_turn_finished_at_ms": "INTEGER",
+        }
+        for name, sql_type in columns.items():
+            if name not in existing:
+                self.conn.execute(
+                    f"ALTER TABLE peval_py_sources ADD COLUMN {name} {sql_type}"
+                )
 
     def upsert_loaded_sources(
         self,
@@ -254,11 +289,13 @@ class ServeStateStore:
                     source,
                     artifact_dir,
                     timestamp,
+                    trajectory=trajectory,
+                    meta=meta,
                     refreshable=True,
                     snapshot=False,
-                    status="ok",
+                    status=SOURCE_STATUS_OK,
                 )
-                self.log_refresh(source_key, "ok", warning_count, None, timestamp)
+                self.log_refresh(source_key, SOURCE_STATUS_OK, warning_count, None, timestamp)
             self.conn.commit()
         except Exception:
             self.conn.rollback()
@@ -272,20 +309,24 @@ class ServeStateStore:
         artifact_dir: str,
         timestamp: int,
         *,
+        trajectory: dict[str, Any] | None = None,
+        meta: dict[str, Any] | None = None,
         refreshable: bool,
         snapshot: bool,
         status: str,
         error: str | None = None,
     ) -> None:
+        summary = trial_summary(trajectory, meta)
         self.conn.execute(
             """
             INSERT INTO peval_py_sources
             (source_key, kind, adapter, label, input_path, db_path, session_id,
              source_alias, agent_name, agent_version, model,
              artifact_dir, artifact_updated_at_ms,
+             trial_key, trial_session_id, last_turn_finished_at_ms,
              refreshable, active, snapshot, created_at_ms, updated_at_ms,
              last_status, last_error, last_refreshed_at_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source_key) DO UPDATE SET
                 kind = excluded.kind,
                 adapter = excluded.adapter,
@@ -299,6 +340,9 @@ class ServeStateStore:
                 model = excluded.model,
                 artifact_dir = excluded.artifact_dir,
                 artifact_updated_at_ms = excluded.artifact_updated_at_ms,
+                trial_key = excluded.trial_key,
+                trial_session_id = excluded.trial_session_id,
+                last_turn_finished_at_ms = excluded.last_turn_finished_at_ms,
                 refreshable = excluded.refreshable,
                 snapshot = excluded.snapshot,
                 active = 1,
@@ -321,6 +365,9 @@ class ServeStateStore:
                 source.get("model"),
                 artifact_dir,
                 timestamp,
+                summary["trial_key"],
+                summary["trial_session_id"],
+                summary["last_turn_finished_at_ms"],
                 1 if refreshable else 0,
                 1 if snapshot else 0,
                 timestamp,
@@ -359,9 +406,10 @@ class ServeStateStore:
                     updated_at_ms = ?
                 WHERE source_key = ?
                 """,
-                (artifact_dir, timestamp, "ok", timestamp, timestamp, source_key),
+                (artifact_dir, timestamp, SOURCE_STATUS_OK, timestamp, timestamp, source_key),
             )
-            self.log_refresh(source_key, "ok", warning_count, None, timestamp)
+            self.update_source_summary(source_key, report["trajectory"][0], report["trajectory_meta"][0])
+            self.log_refresh(source_key, SOURCE_STATUS_OK, warning_count, None, timestamp)
         except Exception as exc:  # noqa: BLE001 - state boundary.
             self.conn.execute(
                 """
@@ -587,13 +635,15 @@ class ServeStateStore:
                     source,
                     artifact_dir,
                     timestamp,
+                    trajectory=trajectory,
+                    meta=meta,
                     refreshable=False,
                     snapshot=True,
-                    status="ok",
+                    status=SOURCE_STATUS_OK,
                 )
                 self.log_refresh(
                     source_key,
-                    "ok",
+                    SOURCE_STATUS_OK,
                     warning_count,
                     None,
                     timestamp,
@@ -627,24 +677,43 @@ class ServeStateStore:
         if analysis_markdown:
             write_text_file(cell_dir / "analysis.md", analysis_markdown)
 
-    def active_report(self, config: ToolConfig | None = None) -> dict[str, Any]:
+    def active_report(
+        self,
+        config: ToolConfig | None = None,
+        *,
+        source_keys: list[str] | None = None,
+    ) -> dict[str, Any]:
         annotation_config = self.annotation_config(config)
-        rows = self.conn.execute(
-            """
-            SELECT *
-            FROM peval_py_sources
-            WHERE active = 1 AND artifact_dir IS NOT NULL
-            ORDER BY created_at_ms ASC, source_key ASC
-            """
-        ).fetchall()
+        rows = self.source_rows(
+            source_keys=source_keys,
+            active_only=source_keys is None,
+        )
+        rows = [row for row in rows if row.get("artifact_dir")]
+        if source_keys:
+            found = {str(row.get("source_key")) for row in rows}
+            missing = [key for key in source_keys if key not in found]
+            if missing:
+                raise ValueError(f"unknown source: {missing[0]}")
         if not rows:
             return empty_report("serve")
-        stored = [self.read_trial_artifacts(dict(row)) for row in rows]
+        readable_rows: list[dict[str, Any]] = []
+        stored: list[dict[str, dict[str, Any]]] = []
+        errors: list[str] = []
+        for row in rows:
+            try:
+                stored.append(self.read_trial_artifacts(row))
+                readable_rows.append(row)
+            except Exception as exc:  # noqa: BLE001 - tolerate missing artifacts in full serve reports.
+                errors.append(f"{row.get('source_key')}: {exc}")
+        if errors and source_keys:
+            raise ValueError(errors[0])
+        if not readable_rows:
+            return empty_report("serve")
         trajectories = [item["trajectory"] for item in stored]
         metas = uniquify_trial_keys(
             [
-                meta_with_source_alias(item["meta"], row["source_alias"])
-                for row, item in zip(rows, stored, strict=True)
+                meta_with_source_alias(item["meta"], row.get("source_alias"))
+                for row, item in zip(readable_rows, stored, strict=True)
             ]
         )
         reports = [
@@ -655,7 +724,7 @@ class ServeStateStore:
                 annotation_config,
             )
             for row, trajectory, meta in zip(
-                rows,
+                readable_rows,
                 trajectories,
                 metas,
                 strict=True,
@@ -729,21 +798,17 @@ class ServeStateStore:
         payload: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
-            trajectory = {}
-            meta = {}
-            artifact_dir = item.get("artifact_dir")
-            if artifact_dir:
-                artifacts = self.read_trial_artifacts(item)
-                trajectory = artifacts["trajectory"]
-                meta = artifacts["meta"]
             item["refreshable"] = bool(item["refreshable"])
             item["active"] = bool(item["active"])
             item["snapshot"] = bool(item["snapshot"])
-            item["trial_key"] = optional_str(
-                meta.get("trial_key") or trajectory.get("trajectory_id")
+            item["trial_key"] = optional_str(item.get("trial_key"))
+            item["trial_session_id"] = optional_str(item.get("trial_session_id"))
+            item["last_turn_finished_at_ms"] = optional_int(
+                item.get("last_turn_finished_at_ms")
             )
-            item["trial_session_id"] = optional_str(trajectory.get("session_id"))
-            item["last_turn_finished_at_ms"] = optional_int(meta.get("finished_at_ms"))
+            if item.get("artifact_dir") and self.artifact_missing(item):
+                item["last_status"] = SOURCE_STATUS_MISSING
+                item["last_error"] = self.missing_artifact_message(item)
             payload.append(item)
         return payload
 
@@ -751,6 +816,8 @@ class ServeStateStore:
         artifact_dir = row.get("artifact_dir")
         if not artifact_dir:
             raise ValueError(f"trial has no artifact directory: {row.get('source_key')}")
+        if self.artifact_missing(row):
+            raise ValueError(self.missing_artifact_message(row))
         artifacts = trial_artifacts(self.resolve_artifact_dir(str(artifact_dir)))
         return {
             "trajectory": read_json_object(artifacts.trajectory_path),
@@ -762,6 +829,192 @@ class ServeStateStore:
         if not path.is_absolute():
             path = self.paths.root / path
         return path.resolve()
+
+    def artifact_missing(self, row: dict[str, Any]) -> bool:
+        artifact_dir = row.get("artifact_dir")
+        if not artifact_dir:
+            return False
+        artifacts = trial_artifacts(self.resolve_artifact_dir(str(artifact_dir)))
+        return not (artifacts.trajectory_path.is_file() and artifacts.meta_path.is_file())
+
+    def missing_artifact_message(self, row: dict[str, Any]) -> str:
+        artifact_dir = row.get("artifact_dir")
+        return f"Trial cell artifacts not found: {artifact_dir or row.get('source_key')}"
+
+    def update_source_summary(
+        self,
+        source_key: str,
+        trajectory: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> None:
+        summary = trial_summary(trajectory, meta)
+        self.conn.execute(
+            """
+            UPDATE peval_py_sources
+            SET trial_key = ?, trial_session_id = ?, last_turn_finished_at_ms = ?
+            WHERE source_key = ?
+            """,
+            (
+                summary["trial_key"],
+                summary["trial_session_id"],
+                summary["last_turn_finished_at_ms"],
+                source_key,
+            ),
+        )
+
+    def sync_artifact_sources(self, config: ToolConfig | None = None) -> list[str]:
+        eval_slug = (
+            config.analysis_eval_slug
+            if config is not None
+            else workspace_analysis_eval_slug(self.paths)
+        )
+        timestamp = now_ms()
+        seen_keys: list[str] = []
+        try:
+            for cell_dir in self.discover_trial_cell_dirs(eval_slug):
+                artifacts = trial_artifacts(cell_dir)
+                try:
+                    trajectory = read_json_object(artifacts.trajectory_path)
+                    meta = read_json_object(artifacts.meta_path)
+                except Exception:
+                    continue
+                source = self.source_row_for_artifact_cell(cell_dir, trajectory, meta)
+                source_key = source_key_for_trial(eval_slug, source, trajectory, meta)
+                artifact_dir = relative_to_root(self.paths.root, cell_dir)
+                if self.source_exists(source_key):
+                    self.update_existing_artifact_source(
+                        source_key,
+                        artifact_dir,
+                        timestamp,
+                        trajectory,
+                        meta,
+                    )
+                else:
+                    self.upsert_source_row(
+                        source_key,
+                        source,
+                        artifact_dir,
+                        timestamp,
+                        trajectory=trajectory,
+                        meta=meta,
+                        refreshable=False,
+                        snapshot=True,
+                        status=SOURCE_STATUS_OK,
+                    )
+                seen_keys.append(source_key)
+            self.mark_missing_artifact_sources(timestamp)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return seen_keys
+
+    def discover_trial_cell_dirs(self, eval_slug: str) -> list[Path]:
+        run_root = self.paths.root / "runs" / eval_slug
+        if not run_root.is_dir():
+            return []
+        cells: list[Path] = []
+        for agent_dir in sorted(run_root.iterdir()):
+            if not agent_dir.is_dir():
+                continue
+            for session_dir in sorted(agent_dir.iterdir()):
+                if not session_dir.is_dir():
+                    continue
+                for cell_dir in sorted(session_dir.iterdir()):
+                    if not cell_dir.is_dir():
+                        continue
+                    artifacts = trial_artifacts(cell_dir)
+                    if artifacts.trajectory_path.is_file() and artifacts.meta_path.is_file():
+                        cells.append(cell_dir)
+        return cells
+
+    def source_row_for_artifact_cell(
+        self,
+        cell_dir: Path,
+        trajectory: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        agent = trajectory.get("agent") if isinstance(trajectory.get("agent"), dict) else {}
+        adapter = optional_str(meta.get("adapter") or agent.get("name")) or "artifact"
+        return {
+            "kind": "trial-artifact",
+            "adapter": adapter,
+            "label": relative_to_root(self.paths.root, cell_dir),
+            "input_path": str(cell_dir.resolve()),
+            "db_path": None,
+            "session_id": optional_str(trajectory.get("session_id")),
+            "source_alias": None,
+            "agent_name": optional_str(agent.get("name")),
+            "agent_version": None,
+            "model": optional_str(agent.get("model_name")),
+        }
+
+    def source_exists(self, source_key: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM peval_py_sources WHERE source_key = ?",
+            (source_key,),
+        ).fetchone()
+        return row is not None
+
+    def update_existing_artifact_source(
+        self,
+        source_key: str,
+        artifact_dir: str,
+        timestamp: int,
+        trajectory: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> None:
+        summary = trial_summary(trajectory, meta)
+        self.conn.execute(
+            """
+            UPDATE peval_py_sources
+            SET artifact_dir = ?,
+                artifact_updated_at_ms = ?,
+                trial_key = ?,
+                trial_session_id = ?,
+                last_turn_finished_at_ms = ?,
+                last_status = CASE
+                    WHEN last_status = ? THEN ?
+                    ELSE last_status
+                END,
+                last_error = CASE
+                    WHEN last_status = ? THEN NULL
+                    ELSE last_error
+                END,
+                updated_at_ms = ?
+            WHERE source_key = ?
+            """,
+            (
+                artifact_dir,
+                timestamp,
+                summary["trial_key"],
+                summary["trial_session_id"],
+                summary["last_turn_finished_at_ms"],
+                SOURCE_STATUS_MISSING,
+                SOURCE_STATUS_OK,
+                SOURCE_STATUS_MISSING,
+                timestamp,
+                source_key,
+            ),
+        )
+
+    def mark_missing_artifact_sources(self, timestamp: int) -> None:
+        for row in self.source_rows(active_only=False):
+            if not row.get("artifact_dir") or not self.artifact_missing(row):
+                continue
+            self.conn.execute(
+                """
+                UPDATE peval_py_sources
+                SET last_status = ?, last_error = ?, updated_at_ms = ?
+                WHERE source_key = ?
+                """,
+                (
+                    SOURCE_STATUS_MISSING,
+                    self.missing_artifact_message(row),
+                    timestamp,
+                    row["source_key"],
+                ),
+            )
 
     def set_source_active(self, source_key: str, active: bool) -> None:
         cursor = self.conn.execute(

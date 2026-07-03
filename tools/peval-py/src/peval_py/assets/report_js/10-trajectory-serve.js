@@ -295,9 +295,17 @@ function bindServeSourceControls() {
         return;
       }
       const button = event.target?.closest?.("[data-source-action]");
-      if (!button) return;
+      if (button) {
+        event.preventDefault();
+        mutateServeSource(button.dataset.sourceKey, button.dataset.sourceAction);
+        return;
+      }
+      if (event.target?.closest?.("button,input,select,textarea,label")) return;
+      const row = event.target?.closest?.("[data-source-row]");
+      const sourceKey = row?.dataset?.sourceKey;
+      if (!sourceKey) return;
       event.preventDefault();
-      mutateServeSource(button.dataset.sourceKey, button.dataset.sourceAction);
+      loadServeSourceReport(sourceKey);
     });
   }
 }
@@ -444,7 +452,7 @@ function renderServeSources() {
       rows,
       tableClass: "source-table",
       shellClass: "source-table-shell",
-      rowClass: source => `source-table-row ${source?.active === false ? "archived" : ""}`,
+      rowClass: source => ["source-table-row", source?.active === false ? "archived" : "", source?.last_status === "missing" ? "missing" : "", source?.source_key && source.source_key === state.selectedSourceKey ? "selected-row" : ""].filter(Boolean).join(" "),
       rowAttrs: source => `data-source-row data-source-key="${esc(source?.source_key || "")}"`,
       rowTitle: source => source?.source_key || source?.label || ""
     })}</li>`;
@@ -727,25 +735,69 @@ function setAdapterChoice(form, adapter) {
 }
 async function refreshServeReportFromServer(options = {}) {
   try {
+    const sourceKey = state.selectedSourceKey || sourceForTrialKey(selectedKey())?.source_key;
     const payload = options.refresh
       ? await serveApi("/api/refresh", { method: "POST", body: {} })
-      : { report: await serveApi("/api/report") };
+      : sourceKey
+        ? { report: await serveApi(`/api/report?source_key=${encodeURIComponent(sourceKey)}`), report_source_key: sourceKey }
+        : { report: await serveApi("/api/report") };
     applyServeMutationPayload(payload);
+    if (options.refresh && !payload?.report && sourceKey) {
+      await loadServeSourceReport(sourceKey);
+    }
   } catch (error) {
     setServeStatus(error.message || String(error), true);
   }
 }
 async function refreshServeSourcesFromServer() {
   try {
-    const payload = await serveApi("/api/sources");
+    const preserveSourceKey = state.selectedSourceKey || sourceForTrialKey(selectedKey())?.source_key;
+    const payload = await serveApi("/api/sources/reload", { method: "POST", body: {} });
     if (Array.isArray(payload.sources)) {
       state.serveSources = payload.sources;
       renderServeSources();
       setServeStatus(t("serve_latest_snapshots", "Latest snapshots"));
+      const nextSourceKey = readableSourceKey(preserveSourceKey) || readableSourceKey();
+      if (nextSourceKey) {
+        await loadServeSourceReport(nextSourceKey);
+      } else {
+        applyServeMutationPayload(
+          { report: emptyServeReport(), report_source_key: null },
+          { selectedSourceKey: null }
+        );
+      }
     }
   } catch (error) {
     setServeStatus(error.message || String(error), true);
   }
+}
+async function loadServeSourceReport(sourceKey) {
+  if (!sourceKey) return;
+  try {
+    setServeStatus(t("serve_latest_snapshots", "Latest snapshots"));
+    const report = await serveApi(`/api/report?source_key=${encodeURIComponent(sourceKey)}`);
+    applyServeMutationPayload({ report, report_source_key: sourceKey }, { selectedSourceKey: sourceKey });
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+    showServeNotice(error.message || String(error), true);
+  }
+}
+function readableSourceKey(preferred = null) {
+  const sources = Array.isArray(state.serveSources) ? state.serveSources : [];
+  const usable = source => source?.source_key && source?.active !== false && source?.artifact_dir && source?.last_status !== "missing";
+  if (preferred) {
+    const match = sources.find(source => source?.source_key === preferred && usable(source));
+    if (match) return match.source_key;
+  }
+  return sources.find(usable)?.source_key || null;
+}
+function emptyServeReport() {
+  return {
+    schema_version: state.view?.schema_version || data()?.schema_version || 19,
+    includes: ["core"],
+    trajectory: [],
+    trajectory_meta: []
+  };
 }
 async function serveApi(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -774,6 +826,13 @@ function applyServeMutationPayload(payload, options = {}) {
     renderServeSources();
   }
   if (payload?.report) {
+    if (Object.prototype.hasOwnProperty.call(options, "selectedSourceKey")) {
+      state.selectedSourceKey = options.selectedSourceKey;
+    } else if (Object.prototype.hasOwnProperty.call(payload, "report_source_key")) {
+      state.selectedSourceKey = payload.report_source_key || null;
+    } else {
+      state.selectedSourceKey = state.selectedSourceKey || null;
+    }
     state.selectedTrial = options.preserveTrial || null;
     state.selectedStep = null;
     state.rowSelection.clear();

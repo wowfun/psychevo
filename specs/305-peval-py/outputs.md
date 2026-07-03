@@ -290,14 +290,18 @@ paths and do not upload file contents. The DB Inspect action still inspects
   they must not use pink or tinted filled panel backgrounds, while text inputs,
   uploads, and menu surfaces remain solid enough to read.
 
-`serve` does not refresh sources on startup unless source flags were supplied on
-that invocation. The page opens from the latest canonical Trial artifacts
-and marks sources with their latest status. When composing the active served
-report for the initial `/` page render or `/api/report`, `serve` re-reads
-current workspace-side cell `analysis.json`, `analysis.md`, and `notes.md` from
-each active source's stored Trial artifact cell path and overlays those
-annotations on the stored artifacts without mutating the stored trajectory or
-requiring the original source file/DB session to refresh successfully. This
+`serve` does not refresh original path or DB sources on startup unless source
+flags were supplied on that invocation. It does scan the current
+`runs/<analysis_eval_slug>` tree on startup and explicit source reload, so a
+complete Trial cell moved into the workspace appears in source management
+without a separate import command. The page opens from the latest canonical
+Trial artifacts and marks sources with their latest status. Missing or
+unreadable cell paths are shown in source management and skipped by multi-source
+report composition instead of failing page load. When composing a served report,
+`serve` re-reads current workspace-side cell `analysis.json`, `analysis.md`,
+and `notes.md` from each selected readable Trial artifact cell path and overlays
+those annotations on the stored artifacts without mutating the stored trajectory
+or requiring the original source file/DB session to refresh successfully. This
 scan includes non-refreshable report snapshots and observes both added and
 deleted analysis files on the next page/API reload.
 Refresh is explicit from the source manager or through source flags on the
@@ -359,14 +363,23 @@ already persisted source keeps the existing artifact directory when conversion
 fails, and records the latest status/error/log entry. If refreshing a persisted
 source converts to a different canonical cell identity, refresh fails and keeps
 the existing source/artifact unchanged instead of silently changing one source
-into another Trial. `POST
+into another Trial.
+
+`POST /api/sources/reload` scans the workspace `runs/<analysis_eval_slug>` tree
+for complete Trial cells, registers new artifact sources, updates lightweight
+source summaries, marks missing registered artifacts, and returns `{ sources }`
+without forcing a full report rebuild. `GET /api/report?source_key=KEY` returns
+a report for one readable source; missing or unreadable sources fail with a
+clear JSON error. `GET /api/report` remains available for explicit full-report
+loads and exports, but ordinary source mutations may return only `{ sources }`
+plus a selected-source report when the browser needs one. `POST
 /api/sources/{source_key}/alias` accepts JSON `{ "alias": "..." }`, updates only
-the display alias for that source, rebuilds the composed report payload from
-stored snapshots, and does not refresh or mutate the original source file or DB.
-An empty alias clears the alias. `POST /api/sources/{source_key}/delete` deletes
-only peval-py state for that source and refresh-log rows; it never deletes the
-original local file or DB. Because serve enforces one source per Trial cell, it
-also deletes that source's persisted Trial cell artifacts.
+the display alias for that source, and does not refresh or mutate the original
+source file or DB. An empty alias clears the alias. `POST
+/api/sources/{source_key}/delete` deletes only peval-py state for that source
+and refresh-log rows; it never deletes the original local file or DB. Because
+serve enforces one source per Trial cell, it also deletes that source's
+persisted Trial cell artifacts.
 
 `POST /api/sources/{source_key}/notes` accepts JSON `{ "markdown": "..." }`,
 requires the same JSON POST and same-origin checks as other mutating APIs, and

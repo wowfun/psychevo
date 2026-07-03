@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 from urllib.request import urlopen
 
 from peval_py.adapters import available_adapter_ids, normalize_adapter_id
@@ -29,6 +29,7 @@ from peval_py.inputs import (
     validate_selected_adapter,
 )
 from peval_py.i18n import normalize_locale
+from peval_py.report import empty_report
 from peval_py.session_select import list_adapter_sessions
 from peval_py.state import (
     UPLOAD_LIMIT_BYTES,
@@ -71,6 +72,7 @@ def run_serve_command(
     try:
         loaded_inputs = load_serve_inputs(args, adapter_assignments, config)
         store.import_loaded_sources(loaded_inputs, config)
+        store.sync_artifact_sources(config)
 
         handler = make_handler(store, config)
         server = bind_server(host, getattr(args, "port", None), handler)
@@ -129,12 +131,13 @@ def make_handler(
             return
 
         def do_GET(self) -> None:  # noqa: N802
-            path = urlsplit(self.path).path
+            parsed_url = urlsplit(self.path)
+            path = parsed_url.path
             try:
                 if path == "/":
                     self.write_html(
                         render_serve_html(
-                            store.active_report(runtime.config),
+                            first_readable_report(store, runtime.config),
                             locale=runtime.config.locale,
                             sources=store.source_payload(),
                             adapter_defaults=runtime.config.adapter_default_db_paths,
@@ -145,7 +148,16 @@ def make_handler(
                     self.write_js(cached_echarts_asset(store))
                     return
                 if path == "/api/report":
-                    self.write_json(store.active_report(runtime.config))
+                    source_key = single_query_value(parsed_url.query, "source_key")
+                    try:
+                        self.write_json(
+                            store.active_report(
+                                runtime.config,
+                                source_keys=[source_key] if source_key else None,
+                            )
+                        )
+                    except ValueError as exc:
+                        raise HttpError(400, str(exc)) from exc
                     return
                 if path == "/api/sources":
                     self.write_json({"sources": store.source_payload()})
@@ -194,8 +206,18 @@ def make_handler(
                     self.write_json(db_sessions_payload(store, payload))
                     return
                 if path == "/api/sources":
-                    add_source_payload(store, runtime.config, payload)
-                    self.write_json(mutation_payload(store, runtime.config))
+                    keys = add_source_payload(store, runtime.config, payload)
+                    self.write_json(
+                        mutation_payload(
+                            store,
+                            runtime.config,
+                            source_key=keys[0] if keys else None,
+                        )
+                    )
+                    return
+                if path == "/api/sources/reload":
+                    store.sync_artifact_sources(runtime.config)
+                    self.write_json({"sources": store.source_payload()})
                     return
                 if path == "/api/upload":
                     filename = required_string(payload, "filename")
@@ -211,11 +233,24 @@ def make_handler(
                     if upload_alias is not None:
                         for source_key in keys:
                             store.set_source_alias(source_key, upload_alias)
-                    self.write_json(mutation_payload(store, runtime.config))
+                    self.write_json(
+                        mutation_payload(
+                            store,
+                            runtime.config,
+                            source_key=keys[0] if keys else None,
+                        )
+                    )
                     return
                 if path == "/api/refresh":
-                    store.refresh_sources(source_keys_payload(payload), runtime.config)
-                    self.write_json(mutation_payload(store, runtime.config))
+                    source_keys = source_keys_payload(payload)
+                    store.refresh_sources(source_keys, runtime.config)
+                    self.write_json(
+                        mutation_payload(
+                            store,
+                            runtime.config,
+                            source_key=source_keys[0] if source_keys else None,
+                        )
+                    )
                     return
 
                 source_action = source_action_path(path)
@@ -239,7 +274,13 @@ def make_handler(
                         )
                     else:
                         raise HttpError(404, "unknown source action")
-                    self.write_json(mutation_payload(store, runtime.config))
+                    self.write_json(
+                        mutation_payload(
+                            store,
+                            runtime.config,
+                            source_key=None if action == "delete" else source_key,
+                        )
+                    )
                     return
 
                 raise HttpError(404, "not found")
@@ -344,11 +385,66 @@ def download_echarts_asset() -> bytes:
         return response.read()
 
 
-def mutation_payload(store: ServeStateStore, config: ToolConfig) -> dict[str, Any]:
-    return {
-        "sources": store.source_payload(),
-        "report": store.active_report(config),
-    }
+def first_readable_report(store: ServeStateStore, config: ToolConfig) -> dict[str, Any]:
+    for source in store.source_payload():
+        source_key = source.get("source_key")
+        if not source_key or source.get("active") is False or not source.get("artifact_dir"):
+            continue
+        if source.get("last_status") == "missing":
+            continue
+        try:
+            return store.active_report(config, source_keys=[str(source_key)])
+        except Exception:
+            continue
+    return empty_report("serve")
+
+
+def mutation_payload(
+    store: ServeStateStore,
+    config: ToolConfig,
+    *,
+    source_key: str | None = None,
+) -> dict[str, Any]:
+    sources = store.source_payload()
+    payload: dict[str, Any] = {"sources": sources}
+    report_key = source_key or first_readable_source_key(sources)
+    if report_key:
+        try:
+            payload["report"] = store.active_report(config, source_keys=[report_key])
+            payload["report_source_key"] = report_key
+        except Exception:
+            fallback = first_readable_source_key(sources, exclude={report_key})
+            if fallback:
+                payload["report"] = store.active_report(config, source_keys=[fallback])
+                payload["report_source_key"] = fallback
+    return payload
+
+
+def first_readable_source_key(
+    sources: list[dict[str, Any]],
+    *,
+    exclude: set[str] | None = None,
+) -> str | None:
+    excluded = exclude or set()
+    for source in sources:
+        source_key = str(source.get("source_key") or "")
+        if not source_key or source_key in excluded:
+            continue
+        if source.get("active") is False or not source.get("artifact_dir"):
+            continue
+        if source.get("last_status") == "missing":
+            continue
+        return source_key
+    return None
+
+
+def single_query_value(query: str, key: str) -> str | None:
+    values = parse_qs(query).get(key) or []
+    for value in values:
+        text = str(value).strip()
+        if text:
+            return text
+    return None
 
 
 def add_source_payload(
