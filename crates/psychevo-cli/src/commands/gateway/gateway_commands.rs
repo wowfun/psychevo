@@ -7,7 +7,9 @@ use psychevo_runtime::{
 };
 use serde_json::{Value, json};
 
-use crate::args::{GatewayArgs, GatewayCommand, GatewayOpenArgs, GatewayStartArgs};
+use crate::args::{
+    GatewayArgs, GatewayCommand, GatewayOpenArgs, GatewayStartArgs, WebArgs, WebCommand,
+};
 use crate::commands::serve::resolve_static_dir_diagnostic;
 use crate::env::resolve_explicit_path;
 
@@ -40,8 +42,13 @@ pub(crate) async fn run_gateway_command(args: GatewayArgs) -> Result<ExitCode> {
     }
 }
 
-pub(crate) async fn run_web_command(args: GatewayOpenArgs) -> Result<ExitCode> {
-    open(args).await
+pub(crate) async fn run_web_command(args: WebArgs) -> Result<ExitCode> {
+    match args.command {
+        Some(WebCommand::Start(args)) => start(args).await,
+        Some(WebCommand::Stop) => stop().await,
+        Some(WebCommand::Restart(args)) => restart(args).await,
+        None => open(args.open).await,
+    }
 }
 
 pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {

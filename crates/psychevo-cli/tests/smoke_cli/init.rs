@@ -21,7 +21,7 @@ pub(crate) fn cli_help_lists_aligned_command_descriptions() {
     assert!(stdout.contains("List, inspect, create, switch, and manage local profiles"));
     assert!(stdout.contains("Run one coding-agent turn"));
     assert!(stdout.contains("Open the fullscreen terminal UI"));
-    assert!(stdout.contains("Open the managed local Web UI"));
+    assert!(stdout.contains("Open or manage the managed local Web UI"));
     assert!(stdout.contains("Run local deterministic diagnostics"));
     assert!(stdout.contains("Inspect local context-window usage for a session"));
 }
@@ -53,9 +53,11 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
         temp.path(),
         &["web", "--help"],
         &[
-            "Open the managed local Web UI",
+            "start, stop, and restart the managed Web server",
             "--no-browser",
             "--print-url",
+            "start",
+            "restart",
         ],
     );
     assert_help_contains(
@@ -270,6 +272,85 @@ pub(crate) fn cli_web_opens_current_cwd_with_json_output() {
 }
 
 #[test]
+pub(crate) fn cli_web_lifecycle_aliases_stop_and_restart_managed_server() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let cwd = temp.path().join("work");
+    let dist = temp.path().join("dist");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(&dist).expect("dist");
+    std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
+
+    let init = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .arg("init")
+        .output()
+        .expect("pevo init");
+    assert!(
+        init.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let initial_stop = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .current_dir(&cwd)
+        .args(["web", "stop"])
+        .output()
+        .expect("pevo web stop");
+    assert!(
+        initial_stop.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&initial_stop.stderr)
+    );
+    let initial_stop_json: Value =
+        serde_json::from_slice(&initial_stop.stdout).expect("initial stop json");
+    assert_eq!(initial_stop_json["ok"], true);
+    assert_eq!(initial_stop_json["stopped"], false);
+
+    let restart = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .env("PSYCHEVO_WEB_DIST", &dist)
+        .current_dir(&cwd)
+        .args(["web", "restart"])
+        .output()
+        .expect("pevo web restart");
+    assert!(
+        restart.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    let restart_json: Value = serde_json::from_slice(&restart.stdout).expect("restart json");
+    assert_eq!(restart_json["ok"], true);
+    assert_eq!(restart_json["running"], true);
+    assert_eq!(restart_json["restarted"], true);
+    assert!(
+        restart_json["baseUrl"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("http://"),
+        "{restart_json}"
+    );
+
+    let final_stop = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .current_dir(&cwd)
+        .args(["web", "stop"])
+        .output()
+        .expect("pevo web stop after restart");
+    assert!(
+        final_stop.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&final_stop.stderr)
+    );
+    let final_stop_json: Value =
+        serde_json::from_slice(&final_stop.stdout).expect("final stop json");
+    assert_eq!(final_stop_json["ok"], true);
+    assert_eq!(final_stop_json["stopped"], true);
+    assert!(!psychevo_home.join("gateway/server.json").exists());
+}
+
+#[test]
 pub(crate) fn cli_init_reset_state_stops_managed_gateway_before_recreating_state() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
@@ -398,8 +479,7 @@ pub(crate) fn cli_init_creates_home_tree_and_is_idempotent() {
     assert!(home.join("cache").is_dir());
 
     let config = std::fs::read_to_string(home.join("config.toml")).expect("config");
-    assert!(config.contains("model = \"deepseek/deepseek-chat\""));
-    assert!(config.contains("api = \"https://api.deepseek.com/v1\""));
+    assert_starter_config_template(&config);
     let env_template = std::fs::read_to_string(home.join(".env")).expect("env");
     assert!(env_template.contains("DEEPSEEK_API_KEY=sk-..."));
     assert!(!stdout.contains("sk-"));

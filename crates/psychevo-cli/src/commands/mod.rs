@@ -7,6 +7,7 @@ pub(crate) mod doctor;
 pub(crate) mod gateway;
 pub(crate) mod hooks;
 pub(crate) mod init;
+pub(crate) mod mcp;
 pub(crate) mod model;
 pub(crate) mod plugin;
 pub(crate) mod profile;

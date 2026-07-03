@@ -12,14 +12,7 @@ use crate::commands::gateway::stop_managed_for_home;
 use crate::env::{inherited_env, resolve_psychevo_home};
 use crate::profiles::protect_env_file;
 
-pub(crate) const STARTER_CONFIG: &str = r#"model = "deepseek/deepseek-chat"
-
-[provider.deepseek]
-api = "https://api.deepseek.com/v1"
-
-[provider.deepseek.models.deepseek-chat]
-reasoning_effort = "medium"
-"#;
+pub(crate) const STARTER_CONFIG: &str = include_str!("../../templates/starter-config.toml");
 
 pub(crate) const STARTER_ENV: &str = r#"# Psychevo live provider credentials.
 # Keep raw API keys here or in your shell environment, not in config.toml.

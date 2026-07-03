@@ -412,7 +412,7 @@ fn maybe_install_web_assets(
         return Ok(());
     };
     if !command_exists("pnpm") {
-        println!("pnpm not found; install pnpm or run scripts/install.sh --no-web.");
+        println!("pnpm not found; install pnpm before building Web UI assets.");
         return Ok(());
     }
     if !confirm_default("build and install Web UI assets now", true)? {

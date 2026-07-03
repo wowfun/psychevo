@@ -58,6 +58,9 @@ The initialized home tree contains:
 Named profiles additionally contain `profile.toml` when created through
 `pevo profile create`.
 
+When `config.toml` is absent, `pevo init` writes it from the compiled starter
+config template. Existing `config.toml` files are not overwritten.
+
 `state.db` is the only first-slice session/message store. The reserved
 `sessions/` directory is not used for JSON or JSONL transcript sidecars in this
 slice.
@@ -174,10 +177,15 @@ metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
 
-`pevo web` is the convenience entrypoint for the managed local Web UI. It is
-equivalent to `pevo gateway open`, defaults to the current working directory,
-keeps stdout as exactly one JSON object, and accepts the same first-slice open
-flags: `--dir`, `--bind`, `--no-browser`, and `--print-url`.
+`pevo web` is the convenience entrypoint for the managed local Web UI. With no
+subcommand it is equivalent to `pevo gateway open`, defaults to the current
+working directory, keeps stdout as exactly one JSON object, and accepts the same
+first-slice open flags: `--dir`, `--bind`, `--no-browser`, and `--print-url`.
+`pevo web start [--bind <ADDR>]`, `pevo web stop`, and
+`pevo web restart [--bind <ADDR>]` are Web-facing aliases for the matching
+managed Gateway lifecycle commands. `pevo web restart` stops the current
+profile's managed server when one is running, then starts it; if no server is
+running, it starts one.
 When `--bind` is omitted, the managed Web UI prefers `127.0.0.1:58080` and may
 fall back through `127.0.0.1:58099` if earlier ports are already in use. The
 JSON response always reports the actual bound URL in `baseUrl`. An explicit
@@ -419,9 +427,9 @@ default and support `--json`. JSON errors use:
 {"type":"error","message":"..."}
 ```
 
-`scripts/install.sh` owns source-based installation of the `pevo` binary. It
-supports installing from a local checkout or a cloned Git repository, verifies
-the installed binary, and optionally initializes the global Psychevo home.
+`scripts/install.sh` owns checkout-local source installation and source
+reinstallation of the `pevo` binary. It verifies the installed binary, builds
+and installs Workbench assets, and initializes the global Psychevo home.
 
 ## Attachments
 

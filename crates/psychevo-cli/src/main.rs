@@ -23,6 +23,7 @@ use commands::doctor::run_doctor_command;
 use commands::gateway::run_gateway_command;
 use commands::hooks::run_hooks_command;
 use commands::init::run_init_command;
+use commands::mcp::run_mcp_command;
 use commands::model::run_model_command;
 use commands::plugin::run_plugin_command;
 use commands::profile::run_profile_command;
@@ -81,6 +82,7 @@ pub(crate) async fn run() -> Result<ExitCode> {
             psychevo_acp::run_stdio(psychevo_acp::AcpOptions::from_env_map(env_map, cwd)).await?;
             Ok(ExitCode::SUCCESS)
         }
+        Some(Commands::Mcp(args)) => run_mcp_command(args).await,
         Some(Commands::Tui(args)) => tui::run_tui_command(&args).await,
         Some(Commands::Web(args)) => commands::gateway::run_web_command(args).await,
         Some(Commands::Serve(args)) => run_serve_command(args).await,

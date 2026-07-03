@@ -58,15 +58,20 @@ pub(crate) enum Commands {
     )]
     Acp(AcpArgs),
     #[command(
+        about = "Run the Model Context Protocol stdio server",
+        long_about = "Run Psychevo as a minimal MCP stdio server exposing the psychevo and psychevo-reply tools for MCP-speaking clients."
+    )]
+    Mcp(McpArgs),
+    #[command(
         about = "Open the fullscreen terminal UI",
         long_about = "Open the fullscreen terminal UI for interactive coding-agent work. In non-terminal stdin/stdout, each input line is processed deterministically as a prompt, slash command, or shell escape."
     )]
     Tui(TuiArgs),
     #[command(
-        about = "Open the managed local Web UI",
-        long_about = "Open the managed local Web UI for the current cwd. The command is equivalent to `pevo gateway open` and emits exactly one JSON object on stdout."
+        about = "Open or manage the managed local Web UI",
+        long_about = "Open the managed local Web UI for the current cwd, or start, stop, and restart the managed Web server. The default command is equivalent to `pevo gateway open` and emits exactly one JSON object on stdout."
     )]
-    Web(GatewayOpenArgs),
+    Web(WebArgs),
     #[command(
         about = "Run the headless local Gateway API server",
         long_about = "Run the headless local Gateway API server on loopback. The command emits one ready JSON object on stdout and writes logs to stderr."

@@ -4,6 +4,15 @@ pub(crate) struct GatewayArgs {
     pub(crate) command: Option<GatewayCommand>,
 }
 
+#[derive(Debug, Parser)]
+#[command(args_conflicts_with_subcommands = true)]
+pub(crate) struct WebArgs {
+    #[command(flatten)]
+    pub(crate) open: GatewayOpenArgs,
+    #[command(subcommand)]
+    pub(crate) command: Option<WebCommand>,
+}
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum GatewayCommand {
     #[command(about = "Open the managed Gateway Web Shell")]
@@ -17,6 +26,16 @@ pub(crate) enum GatewayCommand {
     #[command(about = "Stop the managed Gateway server")]
     Stop,
     #[command(about = "Restart the managed Gateway server")]
+    Restart(GatewayStartArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum WebCommand {
+    #[command(about = "Start the managed Web server without opening a browser")]
+    Start(GatewayStartArgs),
+    #[command(about = "Stop the managed Web server")]
+    Stop,
+    #[command(about = "Restart the managed Web server")]
     Restart(GatewayStartArgs),
 }
 

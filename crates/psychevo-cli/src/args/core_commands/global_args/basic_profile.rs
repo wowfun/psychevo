@@ -8,6 +8,86 @@ pub(crate) struct AcpArgs {
 }
 
 #[derive(Debug, Parser)]
+pub(crate) struct McpArgs {
+    #[command(subcommand)]
+    pub(crate) command: McpCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum McpCommand {
+    #[command(about = "Run the Psychevo MCP stdio server")]
+    Serve(McpServeArgs),
+}
+
+#[derive(Debug, Parser, Clone)]
+pub(crate) struct McpServeArgs {
+    #[arg(
+        long = "dir",
+        value_name = "DIR",
+        help = "Run tools and resolve project config from this cwd"
+    )]
+    pub(crate) dir: Option<PathBuf>,
+    #[arg(
+        short = 'm',
+        long,
+        value_name = "PROVIDER/MODEL",
+        help = "Use this provider-qualified model for MCP-triggered turns"
+    )]
+    pub(crate) model: Option<String>,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "VARIANT",
+        help = "Override reasoning effort for MCP-triggered turns"
+    )]
+    pub(crate) variant: Option<VariantArg>,
+    #[arg(
+        long = "permission-mode",
+        value_enum,
+        value_name = "MODE",
+        help = "Override permission mode: default, acceptEdits, plan, dontAsk, or bypassPermissions"
+    )]
+    pub(crate) permission_mode: Option<PermissionModeArg>,
+    #[arg(
+        long = "dangerously-skip-permissions",
+        conflicts_with = "permission_mode",
+        help = "Skip prompt-level permission prompts for MCP-triggered turns; hard denies still apply"
+    )]
+    pub(crate) dangerously_skip_permissions: bool,
+    #[arg(
+        long = "project-context",
+        value_enum,
+        value_name = "MODE",
+        conflicts_with = "isolated",
+        help = "Override project instruction discovery: git-root, cwd, or off"
+    )]
+    pub(crate) project_context: Option<ProjectContextArg>,
+    #[arg(
+        long,
+        conflicts_with = "project_context",
+        help = "Alias for --project-context cwd"
+    )]
+    pub(crate) isolated: bool,
+    #[arg(
+        long,
+        value_name = "NAME_OR_PATH",
+        conflicts_with = "no_agents",
+        help = "Run MCP-triggered turns with a selected agent definition"
+    )]
+    pub(crate) agent: Option<String>,
+    #[arg(long, help = "Disable agent discovery and the spawn_agent tool")]
+    pub(crate) no_agents: bool,
+    #[arg(long, help = "Disable default and configured skill discovery")]
+    pub(crate) no_skills: bool,
+    #[arg(
+        long = "skill",
+        value_name = "NAME_OR_PATH",
+        help = "Add an explicit skill by name or filesystem path; repeatable"
+    )]
+    pub(crate) skill: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
 pub(crate) struct InitArgs {
     #[arg(
         long,

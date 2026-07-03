@@ -97,7 +97,8 @@ Selecting a missing named profile fails with a clear local error that points to
 ## Initialization
 
 `pevo init` initializes the active profile home. A newly created named profile
-is immediately usable and contains at least:
+is immediately usable and, unless cloned from another profile, uses the same
+starter config and env templates as `pevo init`. It contains at least:
 
 - `config.toml`
 - `.env`

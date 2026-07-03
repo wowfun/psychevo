@@ -201,7 +201,9 @@ come from the focused command and smoke tests below.
   printed without modifying proxy, registry, mirror, or CA configuration.
   Cargo install coverage verifies subprocess-scoped timeout/retry defaults,
   user overrides for those values, Windows Git Bash revocation-check defaults,
-  and effective Cargo network diagnostics.
+  effective Cargo network diagnostics, and Windows locked-`pevo.exe`
+  replacement failures that produce targeted close-and-rerun guidance instead
+  of generic network or build-tool guidance.
 - Local checkout preflight failures for native and Web build prerequisites
   include the optional `cargo xtask doctor deps check --only install`
   diagnostic hint. Missing Cargo bootstrap failures do not require `xtask`.

@@ -1,0 +1,10 @@
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek]
+api = "https://api.deepseek.com/v1"
+
+[provider.deepseek.models.deepseek-chat]
+reasoning_effort = "medium"
+
+[tui.slash_aliases]
+"/export -i lpr,last-provider-response -f json" = ["/expr"]

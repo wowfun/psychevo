@@ -282,6 +282,45 @@ fn write_home_skill(home: &Path, name: &str, description: &str, body: &str) {
     .expect("skill");
 }
 
+pub(crate) fn assert_starter_config_template(config: &str) {
+    let parsed: toml::Value = toml::from_str(config).expect("starter config toml");
+    assert_eq!(
+        parsed.get("model").and_then(toml::Value::as_str),
+        Some("deepseek/deepseek-chat")
+    );
+    assert_eq!(
+        parsed
+            .get("provider")
+            .and_then(|provider| provider.get("deepseek"))
+            .and_then(|deepseek| deepseek.get("api"))
+            .and_then(toml::Value::as_str),
+        Some("https://api.deepseek.com/v1")
+    );
+    assert_eq!(
+        parsed
+            .get("provider")
+            .and_then(|provider| provider.get("deepseek"))
+            .and_then(|deepseek| deepseek.get("models"))
+            .and_then(|models| models.get("deepseek-chat"))
+            .and_then(|model| model.get("reasoning_effort"))
+            .and_then(toml::Value::as_str),
+        Some("medium")
+    );
+    let alias = parsed
+        .get("tui")
+        .and_then(|tui| tui.get("slash_aliases"))
+        .and_then(|aliases| aliases.get("/export -i lpr,last-provider-response -f json"))
+        .and_then(toml::Value::as_array)
+        .expect("default /expr alias");
+    assert_eq!(
+        alias
+            .iter()
+            .map(|value| value.as_str().expect("alias string"))
+            .collect::<Vec<_>>(),
+        vec!["/expr"]
+    );
+}
+
 // Scenario chunks share this integration-test harness.
 #[path = "smoke_cli/init.rs"]
 mod smoke_cli_init;

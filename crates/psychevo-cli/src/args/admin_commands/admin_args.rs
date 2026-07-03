@@ -121,7 +121,25 @@ pub(crate) mod tests {
                 .command
                 .is_none()
         );
-        assert!(Cli::try_parse_from(["pevo", "web", "--no-browser", "--print-url"]).is_ok());
+        let cli = Cli::try_parse_from(["pevo", "web", "--no-browser", "--print-url"])
+            .expect("web open");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Web(WebArgs {
+                command: None,
+                open: GatewayOpenArgs {
+                    no_browser: true,
+                    print_url: true,
+                    ..
+                }
+            }))
+        ));
+        assert!(Cli::try_parse_from(["pevo", "web", "start"]).is_ok());
+        assert!(Cli::try_parse_from(["pevo", "web", "stop"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["pevo", "web", "restart", "--bind", "127.0.0.1:58081"])
+                .is_ok()
+        );
         assert!(Cli::try_parse_from(["pevo", "doctor", "--json"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "doctor", "--live"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "setup", "--dry-run"]).is_ok());

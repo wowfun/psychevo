@@ -32,6 +32,8 @@ pub(crate) fn cli_profile_create_use_and_select_home() {
     assert!(coder_home.join("skills").is_dir());
     assert!(coder_home.join("agents").is_dir());
     assert!(coder_home.join("profile.toml").is_file());
+    let config = std::fs::read_to_string(coder_home.join("config.toml")).expect("config");
+    assert_starter_config_template(&config);
     let alias = temp.path().join(".local/bin/coder");
     assert!(alias.is_file());
     assert!(

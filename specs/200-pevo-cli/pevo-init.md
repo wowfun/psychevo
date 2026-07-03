@@ -52,7 +52,8 @@ command still must not overwrite existing `config.toml` or `.env` files.
 
 ## Starter Config
 
-The generated `config.toml` is DeepSeek-only:
+The generated `config.toml` is written from the compiled starter config
+template:
 
 ```toml
 model = "deepseek/deepseek-chat"
@@ -62,6 +63,9 @@ api = "https://api.deepseek.com/v1"
 
 [provider.deepseek.models.deepseek-chat]
 reasoning_effort = "medium"
+
+[tui.slash_aliases]
+"/export -i lpr,last-provider-response -f json" = ["/expr"]
 ```
 
 The generated `.env` is a comment-only template and must not contain raw API

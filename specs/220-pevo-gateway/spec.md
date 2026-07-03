@@ -32,10 +32,15 @@ Out of scope:
 Lifecycle commands emit exactly one JSON object to stdout so tests, desktop
 shells, and automation can parse them without scraping human text.
 
-`pevo web` is a top-level convenience alias for `pevo gateway open`. It keeps
-the same JSON-only stdout contract and defaults to opening the current working
-directory. GUI or desktop-shell no-project entrypoints may request the default
-workspace cwd instead of the launcher cwd.
+`pevo web` is a top-level convenience alias for managed Web lifecycle commands.
+With no subcommand it is equivalent to `pevo gateway open`, keeps the same
+JSON-only stdout contract, and defaults to opening the current working
+directory. `pevo web start [--bind <ADDR>]`, `pevo web stop`, and
+`pevo web restart [--bind <ADDR>]` are aliases for the matching
+`pevo gateway` lifecycle commands. `pevo web restart` stops the current
+profile's managed server when one is running, then starts it; if no server is
+running, it starts one. GUI or desktop-shell no-project entrypoints may request
+the default workspace cwd instead of the launcher cwd.
 
 Managed state lives under `$PSYCHEVO_HOME/gateway/`:
 
