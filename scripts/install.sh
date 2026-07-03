@@ -310,6 +310,13 @@ run_pnpm() {
   COREPACK_ENABLE_PROJECT_SPEC=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm "$@"
 }
 
+read_text_file() {
+  file=$1
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$line"
+  done <"$file"
+}
+
 cargo_install_http_timeout_default() {
   printf '120\n'
 }
@@ -334,7 +341,7 @@ cargo_install_net_retry_value() {
   fi
 }
 
-run_cargo_install() {
+run_cargo_install_command() {
   cargo_http_timeout=$(cargo_install_http_timeout_value)
   cargo_net_retry=$(cargo_install_net_retry_value)
   if is_windows_shell && [ -z "${CARGO_HTTP_CHECK_REVOKE+x}" ]; then
@@ -342,11 +349,61 @@ run_cargo_install() {
       CARGO_NET_RETRY="$cargo_net_retry" \
       CARGO_HTTP_CHECK_REVOKE=false \
       cargo install "$@"
+    return $?
   else
     CARGO_HTTP_TIMEOUT="$cargo_http_timeout" \
       CARGO_NET_RETRY="$cargo_net_retry" \
       cargo install "$@"
+    return $?
   fi
+}
+
+run_cargo_install() {
+  cargo_install_output=
+  if have_cmd tee; then
+    cargo_output_file="${TMPDIR:-/tmp}/pevo-install-cargo-output-$$.log"
+    cargo_status_file="${TMPDIR:-/tmp}/pevo-install-cargo-status-$$.log"
+    : >"$cargo_output_file"
+    : >"$cargo_status_file"
+    (
+      set +e
+      run_cargo_install_command "$@"
+      printf '%s\n' "$?" >"$cargo_status_file"
+    ) 2>&1 | tee "$cargo_output_file" >&2
+    cargo_status=1
+    if [ -f "$cargo_status_file" ]; then
+      IFS= read -r cargo_status <"$cargo_status_file" || cargo_status=1
+    fi
+    cargo_install_output=$(read_text_file "$cargo_output_file")
+    if have_cmd rm; then
+      rm -f "$cargo_output_file" "$cargo_status_file"
+    fi
+    return "$cargo_status"
+  fi
+
+  set +e
+  cargo_install_output=$(run_cargo_install_command "$@" 2>&1)
+  cargo_status=$?
+  set -e
+  if [ "$cargo_status" -eq 0 ]; then
+    [ -z "$cargo_install_output" ] || printf '%s\n' "$cargo_install_output" >&2
+    return 0
+  fi
+  [ -z "$cargo_install_output" ] || printf '%s\n' "$cargo_install_output" >&2
+  return "$cargo_status"
+}
+
+windows_pevo_replace_access_denied() {
+  is_windows_shell || return 1
+  output=$1
+  case "$output" in
+    *"failed to move "*pevo.exe*) ;;
+    *) return 1 ;;
+  esac
+  case "$output" in
+    *"os error 5"*|*"Access is denied"*|*"access is denied"*|*"拒绝访问"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 detect_pnpm_version() {
@@ -638,6 +695,14 @@ resolve_pevo_bin() {
   return 1
 }
 
+stop_existing_windows_gateway() {
+  is_windows_shell || return 0
+  pevo_bin=$(resolve_pevo_bin 2>/dev/null || true)
+  [ -n "$pevo_bin" ] || return 0
+  step "stopping existing managed Gateway"
+  "$pevo_bin" gateway stop >/dev/null 2>&1 || true
+}
+
 print_path_hint_if_needed() {
   bin_dir=$(cargo_bin_dir)
   if path_contains_dir "$bin_dir"; then
@@ -688,6 +753,7 @@ valid_source_dir "$source_dir" || die "not a Psychevo source checkout: $source_d
 ensure_cargo
 ensure_native_build_tools
 ensure_web_toolchain
+stop_existing_windows_gateway
 
 step "installing pevo from $source_dir"
 if run_cargo_install --locked --path "$source_dir/crates/psychevo-cli" --force; then
@@ -696,6 +762,9 @@ else
   cargo_status=1
 fi
 if [ "$cargo_status" -ne 0 ]; then
+  if windows_pevo_replace_access_denied "$cargo_install_output"; then
+    die "cargo install failed: the installed pevo.exe could not be replaced because Windows denied access. Close running pevo, TUI, Web, Gateway, or serve processes, then rerun scripts/install.sh. If the failure persists after all pevo processes are closed, check endpoint protection or permission policy for Cargo's bin directory."
+  fi
   print_enterprise_diagnostics "cargo install failed"
   if is_windows_shell; then
     die "cargo install failed. On Windows Git Bash/MSYS/MINGW, install Rust and native C/C++ build tools such as Visual Studio Build Tools or a compatible MinGW setup. If registry fetches time out after partial progress, try CARGO_HTTP_MULTIPLEXING=false or configure Cargo proxy, CA, or registry mirror settings."

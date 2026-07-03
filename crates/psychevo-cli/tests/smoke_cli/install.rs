@@ -480,6 +480,11 @@ pub(crate) fn install_windows_cargo_install_defaults_revocation_check_off() {
     write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
     write_fake_command(
         &bin,
+        "tee",
+        "out=$1\n: > \"$out\"\nwhile IFS= read -r line || [ -n \"$line\" ]; do\n  printf '%s\\n' \"$line\"\n  printf '%s\\n' \"$line\" >> \"$out\"\ndone",
+    );
+    write_fake_command(
+        &bin,
         "cargo",
         "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ \"${CARGO_HTTP_CHECK_REVOKE:-}\" = false ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
@@ -531,6 +536,96 @@ pub(crate) fn install_windows_cargo_install_preserves_explicit_revocation_settin
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cargo revoke=true"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_windows_locked_pevo_exe_failure_gets_targeted_guidance() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf '   Replacing C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\pevo.exe\\n' >&2; printf 'error: failed to move `C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\cargo-installU8ZJRb\\\\pevo.exe` to `C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\pevo.exe`\\n\\nCaused by:\\n  Access is denied. (os error 5)\\n' >&2; exit 101 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install cargo");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr
+            .contains("the installed pevo.exe could not be replaced because Windows denied access"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("Close running pevo, TUI, Web, Gateway, or serve processes"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("Enterprise network diagnostics (cargo install failed)"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("native C/C++ build tools"), "{stderr}");
+    assert!(
+        !stderr.contains("CARGO_HTTP_MULTIPLEXING=false"),
+        "{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_windows_preflight_stops_existing_managed_gateway() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    let home = temp.path().join("home");
+    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
+    write_fake_command(
+        &home.join(".cargo/bin"),
+        "pevo.exe",
+        "printf '%s\\n' \"$*\" >> \"$HOME/gateway-stop.log\"\nexit 0",
+    );
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'fake cargo failed\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+
+    let output = install_preflight_command(&bin, &home)
+        .output()
+        .expect("install cargo");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("pevo install: stopping existing managed Gateway"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("Enterprise network diagnostics (cargo install failed)"),
+        "{stderr}"
+    );
+    let stop_log = std::fs::read_to_string(home.join("gateway-stop.log")).expect("stop log");
+    assert_eq!(stop_log.trim(), "gateway stop");
 }
 
 #[cfg(unix)]

@@ -34,6 +34,19 @@ pevo run "summarize this repository"
 pevo web
 ```
 
+## Upgrade From a Source Checkout
+
+For source installs, update the checkout yourself, then rerun the same
+checkout-local installer:
+
+```bash
+git pull --ff-only
+sh scripts/install.sh
+```
+
+There is intentionally no `pevo update` command yet. That name is reserved for
+a future binary release updater with download and verification semantics.
+
 ## Prerequisites
 
 The source installer expects these tools:
@@ -150,6 +163,14 @@ CARGO_HTTP_MULTIPLEXING=false sh scripts/install.sh
 
 If timeouts continue, configure Cargo proxy, CA, or a company crates mirror
 outside the installer.
+
+On Windows Git Bash/MSYS/MINGW, a source reinstall can fail after compilation
+with `failed to move ... pevo.exe` and `os error 5` if Windows is still holding
+the installed binary open. The installer first tries to stop the managed
+Gateway. If replacement still fails, close running `pevo`, TUI, Web, Gateway,
+or `serve` processes and rerun `sh scripts/install.sh`. If it still fails after
+all `pevo` processes are closed, inspect endpoint protection or permission
+policy for Cargo's bin directory.
 
 If a Windows install fails while compiling `landlock`, update to a newer
 checkout and rerun the installer. Native Windows source installs do not compile

@@ -16,6 +16,7 @@ source paths, install release binaries, or model package-manager workflows.
 ## Scope
 
 - checkout-local full source install helper
+- source-checkout reinstall and upgrade UX
 - Rust/Cargo, native compiler, Node.js, and pnpm dependency detection
 - Workbench asset build and install
 - post-install `pevo` verification and global home initialization
@@ -68,6 +69,11 @@ potentially slow or host-dependent stage. The breadcrumb prefix is
 `pevo install:` and must include enough stage context to identify where a hang
 occurred.
 
+Rerunning `scripts/install.sh` from an updated checkout is the supported source
+upgrade path. The script must not expose `pevo update`; that command name is
+reserved for a future release updater with binary download and verification
+semantics.
+
 ## Dependency Handling
 
 When `cargo` or `rustc` is missing, the script fails with a manual Rust
@@ -106,15 +112,30 @@ developers to `cargo xtask doctor deps check --only install` for a complete
 non-mutating dependency report. It must not give that `xtask` hint for missing
 Cargo bootstrap failures where `xtask` cannot run.
 
-If `cargo install` fails under Windows Git Bash/MSYS/MINGW, the failure text
-must mention that Rust and native C/C++ build tools, such as Visual Studio Build
-Tools or a compatible MinGW setup, may be required. Windows Git
-Bash/MSYS/MINGW installs may default the `cargo install` subprocess to
-`CARGO_HTTP_CHECK_REVOKE=false` so corporate networks that block certificate
-revocation checks can still fetch the registry index. This default is scoped to
-the installer subprocess only; the script must not write Cargo configuration,
-shell profiles, or other persistent settings. If the user explicitly sets
-`CARGO_HTTP_CHECK_REVOKE`, the script must preserve that value.
+Before running `cargo install` on Windows Git Bash/MSYS/MINGW, the script may
+best-effort stop the managed Gateway by running the existing installed
+`pevo.exe gateway stop`. This preflight is diagnostic and cleanup-oriented: it
+must ignore missing `pevo.exe` and failed stop attempts, and it must not stop
+unmanaged user processes.
+
+If `cargo install` fails under Windows Git Bash/MSYS/MINGW while replacing the
+installed `pevo.exe` with an access-denied move error, the failure text must
+identify the target binary as locked and guide the user to close running
+`pevo`, TUI, Web, Gateway, or `serve` processes before rerunning the installer.
+If the replacement failure persists after those processes are closed, the text
+may point to endpoint protection or permission policy as the next area to
+inspect. This locked-binary case must not be reported as a network, Rust, or
+native build-tool failure.
+
+Other `cargo install` failures under Windows Git Bash/MSYS/MINGW must mention
+that Rust and native C/C++ build tools, such as Visual Studio Build Tools or a
+compatible MinGW setup, may be required. Windows Git Bash/MSYS/MINGW installs
+may default the `cargo install` subprocess to `CARGO_HTTP_CHECK_REVOKE=false`
+so corporate networks that block certificate revocation checks can still fetch
+the registry index. This default is scoped to the installer subprocess only;
+the script must not write Cargo configuration, shell profiles, or other
+persistent settings. If the user explicitly sets `CARGO_HTTP_CHECK_REVOKE`, the
+script must preserve that value.
 
 The installer may also give the `cargo install` subprocess more tolerant
 network defaults for intermittent registry fetches: `CARGO_HTTP_TIMEOUT=120`
@@ -125,7 +146,8 @@ environment values. The installer must not default
 proxy mishandles HTTP/2 multiplexing.
 
 When Cargo install or pnpm install/build steps fail, the script prints a compact
-enterprise-network diagnostics block. The block reports relevant npm/pnpm
+enterprise-network diagnostics block, except for the Windows locked-binary
+replacement case described above. The block reports relevant npm/pnpm
 registry, Cargo registry/source configuration presence, proxy variables, and
 CA-related environment variables, including effective Cargo install network
 values for `CARGO_HTTP_TIMEOUT`, `CARGO_NET_RETRY`,
