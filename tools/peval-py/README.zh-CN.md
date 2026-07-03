@@ -80,9 +80,10 @@ peval-py view tr -a opencode -p session.jsonl
 Inspect 输出是固定的紧凑 JSON digest，包含 session 身份、token totals、秒级
 active duration、step/tool duration distributions、最耗时或 token-heavy 的行，以及
 可用的 tool errors。`--head` 和 `--tail` 默认都是 2，`--top` 默认是 5；
-`--step <step_id>` 会加入指定 step 证据，`--tool-call <tool_call_id>` 可独立显示
-对应 tool call 及其匹配的 tool result。裸 `-o` 会写入带时间戳的报告文件，并在
-stdout 打印保存路径。
+`--steps <ids>` 会加入指定 step 证据，并支持 `1,3:5` 这样的逗号和 range
+selector；`--tool-call <tool_call_id>` 可独立显示对应 tool call 及其匹配的 tool
+result。`--max-content-chars` 会限制 inspect preview 文本长度。裸 `-o` 会写入
+带时间戳的报告文件，并在 stdout 打印保存路径。
 
 需要完整 peval JSON 或 HTML report 时使用 `-m raw`：
 

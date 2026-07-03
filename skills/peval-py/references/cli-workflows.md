@@ -21,7 +21,7 @@ peval-py export tr \
   -o <workspace>/trajectory.json
 ```
 
-For an exact Trial cell directory containing `agent/trajectory.json` and `agent/trajectory_meta.json`, `peval-py export tr -p <cell-dir>` can export the retained trajectory without reading the original source DB.
+For a Trial cell containing `agent/trajectory.json` and `agent/trajectory_meta.json`, `peval-py export tr -p <cell-dir>` can export the retained trajectory without reading the original source DB. Cell glob or descendant paths are canonicalized to the cell directory.
 
 Use `view tr -m raw`, not `export tr`, for multi-session comparison reports.
 

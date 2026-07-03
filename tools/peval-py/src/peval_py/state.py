@@ -759,6 +759,7 @@ class ServeStateStore:
             agent_version=config.agent_version,
             model=config.model,
             max_content_chars=config.max_content_chars,
+            max_content_chars_explicit=config.max_content_chars_explicit,
             redact=config.redact,
             db=config.db,
             adapter_options=config.adapter_options,

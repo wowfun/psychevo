@@ -354,6 +354,10 @@ peval-py view tr -r .local/peval-py -d @opencode --list
 peval-py export tr -r .local/peval-py -d @opencode -s <session-id> -o
 ```
 
+当 `-p` 指向 Trial cell 时，`view tr` 和 `export tr` 也接受 `<cell-dir>/**`、
+`<cell-dir>/**/*` 以及 cell 内部的 descendant path。识别出的 Trial cell path
+优先于冲突的 source flags，例如 `-r`、`-a`、`-d`、`-s` 和 `-i`。
+
 静态 HTML 报告仍然是规范的离线报告。`peval-py serve` 复用同一套报告主体，
 而不是另做一个 dashboard：Report Notes、Leaderboard、Trajectory Overview 和
 选中 Trial trajectory 会保持静态报告中的顺序和样式。
@@ -503,7 +507,8 @@ Trial Steps 明细区也保留英文。
   `1..N` 表示对应顺序的 session。
 - `--source-alias N=TEXT`：为 `view tr` 或 `serve` 中展开后的第 N 个输入 session
   添加仅用于显示的别名。
-- `--max-content-chars N`：限制大型 message 或 tool payload 的显示长度。
+- `--max-content-chars N`：限制大型 message、tool payload 和 inspect preview
+  文本长度。
 - `--no-redact`：关闭默认 secret redaction。
 
 默认情况下，报告会隐藏明显包含 secret 的 key、authorization header、bearer token

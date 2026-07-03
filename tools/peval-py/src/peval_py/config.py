@@ -43,6 +43,7 @@ class ToolConfig:
     agent_version: str = "0.1.0"
     model: str | None = None
     max_content_chars: int = 128 * 1024
+    max_content_chars_explicit: bool = field(default=False, repr=False)
     redact: bool = True
     db: DbMapping = DbMapping()
     adapter_options: dict[str, Any] = field(default_factory=dict)
@@ -141,6 +142,7 @@ def apply_toml_config(
             updates["model"] = _optional_string(defaults.get("model"))
         if "max_content_chars" in defaults:
             updates["max_content_chars"] = int(defaults.get("max_content_chars"))
+            updates["max_content_chars_explicit"] = True
         if "redact" in defaults:
             updates["redact"] = bool(defaults.get("redact"))
         config = replace(
@@ -202,6 +204,8 @@ def apply_overrides(config: ToolConfig, args: Any) -> ToolConfig:
         value = getattr(args, field, None)
         if value is not None:
             updates[field] = value
+            if field == "max_content_chars":
+                updates["max_content_chars_explicit"] = True
     if getattr(args, "no_redact", False):
         updates["redact"] = False
     adapter = str(updates.get("adapter", config.adapter))

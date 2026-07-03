@@ -17,13 +17,13 @@ Recognize only the input class needed for the command:
 - **Workspace root**: contains `peval-py.toml`; pass it as `-r <workspace>` when workspace config, saved snapshots, or imported analysis files must be discovered.
 - **Saved workspace snapshots**: `<workspace>/state.db` is only a saved snapshot input when used with explicit `-r <workspace>`. Use it for `view tr --list`, bounded inspection, or exporting a selected stored trajectory.
 - **Adapter DB input**: use a real adapter-owned database path with `-d <adapter-db>`, or `-d @adapter` when the workspace config has a default adapter DB.
-- **Trajectory path input**: use `-p <path-to-jsonl-or-atif-trajectory-or-cell-dir>` for JSONL, ATIF `trajectory.json`, or an exact Trial cell directory containing `agent/trajectory.json` and `agent/trajectory_meta.json`.
-- **Trial cell or session artifact path**: under `runs/<eval>/<agent>/<session>/...`. If it names a cell, `view tr -p <cell-dir>` and `export tr -p <cell-dir>` are supported convenience inputs; raw reports preserve original source labels and add `artifact_ref` for the cell path. Read `agent/trajectory.json`, `agent/trajectory_meta.json`, and existing `analysis.json` / `analysis.md` directly when accuracy matters. If it names a session directory with exactly one cell, use that cell; if it contains multiple cells, ask which cell to target.
+- **Trajectory path input**: use `-p <path-to-jsonl-or-atif-trajectory-or-cell-dir>` for JSONL, ATIF `trajectory.json`, or a Trial cell containing `agent/trajectory.json` and `agent/trajectory_meta.json`.
+- **Trial cell or session artifact path**: under `runs/<eval>/<agent>/<session>/...`. If it names a cell, `view tr -p <cell-dir>` and `export tr -p <cell-dir>` are supported convenience inputs; `<cell-dir>/**`, `<cell-dir>/**/*`, and descendants inside the cell are accepted and override conflicting source flags. Raw reports preserve original source labels and add `artifact_ref` for the cell path. Read `agent/trajectory.json`, `agent/trajectory_meta.json`, and existing `analysis.json` / `analysis.md` directly when accuracy matters. If it names a session directory with exactly one cell, use that cell; if it contains multiple cells, ask which cell to target.
 - **Report output**: static reports are outputs, not places to write analysis by hand. Use `references/view-tr.md` for raw JSON/HTML report flags after choosing full report output.
 
 Choose the smallest CLI workflow:
 
-- **Inspect first**: `peval-py view tr <source-flags>` for a compact trajectory digest. Use `--step <step_id>` or `--tool-call <tool_call_id>` only when the digest points to a specific step or tool call that needs more evidence. Use `references/view-tr.md` for saved snapshots, adapter DB listing, targeted evidence, or raw reports.
+- **Inspect first**: `peval-py view tr <source-flags>` for a compact trajectory digest. Use `--steps <step_ids>` or `--tool-call <tool_call_id>` only when the digest points to specific steps or a tool call that needs more evidence. Use `references/view-tr.md` for saved snapshots, adapter DB listing, targeted evidence, or raw reports.
 - **List sessions or saved sources**: `peval-py view tr --list` with adapter DB flags or with `-r <workspace> -d <workspace>/state.db`.
 - **Export one trajectory**: `peval-py export tr`; it is single-session output. Use `references/cli-workflows.md` for full export, `init`, and `serve` recipes.
 - **Import analysis**: `peval-py import analysis -r <workspace> --run-path <cell-path> -p <analysis-report>` when an existing JSON or Markdown analysis report should be published into a Trial cell. Use `references/cli-workflows.md` for import examples.
@@ -34,11 +34,11 @@ CLI guardrails:
 - Do not mutate source session databases or original trajectory inputs.
 - Treat `view tr` inspect output as an exploration aid, not an authoritative evaluation. Its summaries depend on the retained trajectory format and adapter mapping, so counts, timing, token/cost, and error statistics may be approximate or incomplete. When accuracy matters, narrow with `view tr` first, then read the targeted trajectory, metadata, JSONL, or report evidence directly.
 - If `peval-py` cannot satisfy the user's request, explain whether the gap is in CLI/report behavior, skill guidance, or both. Ask whether to improve the relevant surface instead of inventing an unsupported workaround.
-- Do not read large trajectory/report JSON or JSONL files all at once. Start with `view tr`, narrow with `--step` or `--tool-call` when useful, then read only targeted evidence.
+- Do not read large trajectory/report JSON or JSONL files all at once. Start with `view tr`, narrow with `--steps` or `--tool-call` when useful, then read only targeted evidence.
 - Do not treat `<workspace>/state.db` as an adapter DB.
 - Do not omit `-r <workspace>` when reading saved snapshots from `<workspace>/state.db`.
 - Do not scan orphaned `runs/` directories to invent saved sources.
-- Do not pass a session artifact directory to `view tr -p`; pass the exact Trial cell directory or ask which cell to target.
+- Do not pass a session artifact directory to `view tr -p`; pass the Trial cell directory, a descendant inside it, or ask which cell to target.
 - Use `scripts/report_tools.py subjects` only when the target cell path is missing; `references/analysis-guide.md` shows the report-based identity workflow.
 - Do not assume every task needs `analysis.json`, `analysis.md`, a report, or `serve`.
 - Preserve canonical session ids in reports; use aliases only as display aids.

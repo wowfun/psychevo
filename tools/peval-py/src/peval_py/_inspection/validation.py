@@ -19,6 +19,7 @@ def validate_inspect_args(args: argparse.Namespace) -> None:
     output = getattr(args, "output", None)
     if output and output is not DEFAULT_OUTPUT and Path(str(output)).suffix.lower() == ".html":
         raise ValueError("view tr inspect mode writes JSON; use -m raw for HTML reports")
+    parse_step_selectors(getattr(args, "steps", None) or [])
 
 
 def validate_inspect_raw_only_args(args: argparse.Namespace) -> None:
@@ -41,10 +42,9 @@ def validate_raw_args(args: argparse.Namespace) -> None:
         ("head", getattr(args, "head", None) is not None),
         ("tail", getattr(args, "tail", None) is not None),
         ("top", getattr(args, "top", None) is not None),
-        ("step", getattr(args, "step", None) is not None),
+        ("steps", getattr(args, "steps", None) is not None),
         ("tool_call", getattr(args, "tool_call", None) is not None),
         ("source", getattr(args, "source", None) is not None),
-        ("preview_chars", getattr(args, "preview_chars", None) is not None),
     ]
     used = [name for name, was_used in inspect_flags if was_used]
     if used:
@@ -61,6 +61,53 @@ def positive_int(value: Any, default: int) -> int:
     if result < 0:
         raise ValueError("inspect count options must be non-negative")
     return result
+
+
+def parse_step_selectors(values: list[Any]) -> list[str]:
+    selectors: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value)
+        parts = text.split(",")
+        if any(not part.strip() for part in parts):
+            raise ValueError("--steps selectors cannot contain empty segments")
+        for raw_part in parts:
+            part = raw_part.strip()
+            expanded = expand_step_selector(part)
+            for selector in expanded:
+                if selector not in seen:
+                    selectors.append(selector)
+                    seen.add(selector)
+    return selectors
+
+
+def expand_step_selector(value: str) -> list[str]:
+    if ":" not in value:
+        return [value]
+    parts = value.split(":")
+    if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+        raise ValueError(f"invalid --steps range {value!r}; use start:end")
+    start = parse_step_range_endpoint(parts[0], value)
+    end = parse_step_range_endpoint(parts[1], value)
+    if start > end:
+        raise ValueError(f"invalid descending --steps range: {value}")
+    return [str(index) for index in range(start, end + 1)]
+
+
+def parse_step_range_endpoint(value: str, raw_range: str) -> int:
+    text = value.strip()
+    if not text.isdigit():
+        raise ValueError(
+            f"invalid --steps range {raw_range!r}; "
+            "range endpoints must be positive integers"
+        )
+    number = int(text)
+    if number <= 0:
+        raise ValueError(
+            f"invalid --steps range {raw_range!r}; "
+            "range endpoints must be positive integers"
+        )
+    return number
 
 
 def positive_list(values: list[Any], label: str) -> list[int]:

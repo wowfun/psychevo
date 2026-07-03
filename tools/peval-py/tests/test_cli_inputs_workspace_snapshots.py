@@ -657,6 +657,137 @@ default_db_path = "state.db"
             self.assertNotIn("artifact_ref", export_payload)
             self.assertNotIn("trajectory_meta", export_payload)
 
+    def test_cli_trial_cell_path_inputs_accept_globs_and_descendants(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            outside = root / "outside"
+            outside.mkdir()
+            write_peval_workspace(workspace)
+            cell_dir = (
+                workspace
+                / "runs"
+                / "default"
+                / "psychevo"
+                / "artifact-session"
+                / "session_t001"
+            )
+            write_trial_cell_artifacts(
+                cell_dir,
+                session_id="artifact-session",
+                trial_key="session_t001",
+            )
+            glob_out = root / "glob-inspect.json"
+            descendant_out = root / "descendant-inspect.json"
+            export_out = root / "descendant-export.json"
+
+            with contextlib.chdir(outside):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        f"{cell_dir}/**",
+                        "-p",
+                        f"{cell_dir}/**/*",
+                        "-o",
+                        str(glob_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        str(cell_dir / "agent"),
+                        "-p",
+                        str(cell_dir / "agent" / "trajectory.json"),
+                        "-o",
+                        str(descendant_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+                result = main(
+                    [
+                        "export",
+                        "tr",
+                        "-p",
+                        str(cell_dir / "agent" / "trajectory.json"),
+                        "-o",
+                        str(export_out),
+                    ]
+                )
+                self.assertEqual(result, 0)
+
+            glob_payload = json.loads(glob_out.read_text(encoding="utf-8"))
+            self.assertEqual(len(glob_payload["sources"]), 1)
+            self.assertEqual(glob_payload["sources"][0]["session_id"], "artifact-session")
+            descendant_payload = json.loads(descendant_out.read_text(encoding="utf-8"))
+            self.assertEqual(len(descendant_payload["sources"]), 1)
+            self.assertEqual(
+                descendant_payload["sources"][0]["session_id"],
+                "artifact-session",
+            )
+            export_payload = json.loads(export_out.read_text(encoding="utf-8"))
+            self.assertEqual(export_payload["session_id"], "artifact-session")
+
+    def test_cli_trial_cell_path_ignores_conflicting_input_selectors(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            other_workspace = root / "other-workspace"
+            outside = root / "outside"
+            outside.mkdir()
+            write_peval_workspace(workspace)
+            write_peval_workspace(other_workspace)
+            cell_dir = (
+                workspace
+                / "runs"
+                / "default"
+                / "psychevo"
+                / "artifact-session"
+                / "session_t001"
+            )
+            write_trial_cell_artifacts(cell_dir, session_id="artifact-session")
+            inspect_out = root / "cell-wins.json"
+
+            with contextlib.chdir(outside):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        str(cell_dir),
+                        "-p",
+                        str(root / "not-a-cell.jsonl"),
+                        "-r",
+                        str(other_workspace),
+                        "-a",
+                        "missing-adapter",
+                        "-d",
+                        str(root / "missing.db"),
+                        "-s",
+                        "missing-session",
+                        "-i",
+                        str(root / "missing.csv"),
+                        "--list",
+                        "-o",
+                        str(inspect_out),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            payload = json.loads(inspect_out.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["sources"]), 1)
+            self.assertEqual(payload["sources"][0]["session_id"], "artifact-session")
+
     def test_cli_trial_cell_path_accepts_windows_drive_path_with_wsl_mapping(self) -> None:
         from peval_py.cli import main
 
@@ -726,16 +857,14 @@ default_db_path = "state.db"
                 self.assertIsNone(resolved_local_path(r"C:\Users\kevin\workspace"))
                 self.assertIsNone(resolved_local_path(r"\\server\share\workspace"))
 
-    def test_cli_trial_cell_path_root_conflict_is_clear(self) -> None:
+    def test_cli_trial_cell_path_malformed_descendant_error_is_actionable(self) -> None:
         from peval_py.cli import main
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             workspace = root / "workspace"
-            other_workspace = root / "other-workspace"
             write_peval_workspace(workspace)
-            write_peval_workspace(other_workspace)
-            cell_dir = (
+            malformed = (
                 workspace
                 / "runs"
                 / "default"
@@ -743,7 +872,7 @@ default_db_path = "state.db"
                 / "artifact-session"
                 / "session_t001"
             )
-            write_trial_cell_artifacts(cell_dir)
+            (malformed / "agent").mkdir(parents=True)
 
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
@@ -751,17 +880,16 @@ default_db_path = "state.db"
                     [
                         "view",
                         "tr",
-                        "-r",
-                        str(other_workspace),
                         "-p",
-                        str(cell_dir),
+                        str(malformed / "agent"),
                     ]
                 )
 
+            message = stderr.getvalue()
             self.assertNotEqual(result, 0)
-            self.assertIn("conflicts with inferred workspace root", stderr.getvalue())
-            self.assertIn(str(workspace), stderr.getvalue())
-            self.assertIn(str(other_workspace), stderr.getvalue())
+            self.assertIn("Trial cell artifact directory", message)
+            self.assertIn("agent/trajectory.json", message)
+            self.assertIn("agent/trajectory_meta.json", message)
 
     def test_cli_trial_cell_path_malformed_directory_error_is_actionable(self) -> None:
         from peval_py.cli import main

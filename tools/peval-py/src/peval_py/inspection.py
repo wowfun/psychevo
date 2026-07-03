@@ -8,6 +8,7 @@ from peval_py._inspection.frames import InspectFrames
 from peval_py._inspection.payload import parse_source_indexes, source_payload
 from peval_py._inspection.reports import inspect_report_for_args
 from peval_py._inspection.validation import (
+    parse_step_selectors,
     positive_int,
     resolve_inspect_output,
     validate_inspect_args,
@@ -16,6 +17,7 @@ from peval_py._inspection.validation import (
 )
 
 INSPECT_SCHEMA_VERSION = 2
+DEFAULT_INSPECT_PREVIEW_CHARS = 3000
 
 
 def build_inspect_payload(
@@ -23,14 +25,19 @@ def build_inspect_payload(
     adapter_assignments: AdapterAssignments,
     config: object,
 ) -> dict[str, Any]:
+    step_ids = parse_step_selectors(getattr(args, "steps", None) or [])
     report = inspect_report_for_args(args, adapter_assignments, config)
-    preview_chars = positive_int(getattr(args, "preview_chars", None), 240)
+    preview_default = (
+        getattr(config, "max_content_chars")
+        if getattr(config, "max_content_chars_explicit", False)
+        else DEFAULT_INSPECT_PREVIEW_CHARS
+    )
+    preview_chars = positive_int(getattr(args, "max_content_chars", None), preview_default)
     frames = InspectFrames.from_report(report, preview_chars=preview_chars)
     source_indexes = parse_source_indexes(getattr(args, "source", None) or [], frames)
     head = positive_int(getattr(args, "head", None), 2)
     tail = positive_int(getattr(args, "tail", None), 2)
     top = positive_int(getattr(args, "top", None), 5)
-    step_ids = [str(value) for value in getattr(args, "step", None) or []]
     tool_call_ids = [str(value) for value in getattr(args, "tool_call", None) or []]
     return {
         "inspect_schema_version": INSPECT_SCHEMA_VERSION,
@@ -43,6 +50,7 @@ def build_inspect_payload(
                 top=top,
                 step_ids=step_ids,
                 tool_call_ids=tool_call_ids,
+                steps_only=bool(step_ids),
             )
             for source_index in source_indexes
         ],

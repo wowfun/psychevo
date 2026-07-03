@@ -14,6 +14,7 @@ from peval_py.config import (
 )
 from peval_py.html import render_html
 from peval_py.inputs import (
+    canonical_trial_cell_paths_for_inputs,
     infer_workspace_root_from_trial_cell_paths,
     load_inputs,
     parse_adapter_assignments,
@@ -41,8 +42,9 @@ from peval_py.session_select import (
 )
 
 INSPECT_EPILOG = """\
-Inspect mode emits a compact fixed JSON digest for triage. Use -m raw for the
-full peval-compatible JSON or HTML report.
+Inspect mode emits a compact fixed JSON digest for triage. Use --steps for
+selected step evidence, --max-content-chars to bound previews, or -m raw for
+the full peval-compatible JSON or HTML report.
 """
 
 
@@ -50,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        args = rewrite_trial_cell_path_args(args)
         if args.command == "init":
             from peval_py.workspace import run_init_command
 
@@ -157,6 +160,31 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - CLI boundary.
         print(f"peval-py: {exc}", file=sys.stderr)
         return 1
+
+
+def rewrite_trial_cell_path_args(args: argparse.Namespace) -> argparse.Namespace:
+    if getattr(args, "command", None) not in {"view", "export"}:
+        return args
+    cell_paths = canonical_trial_cell_paths_for_inputs(
+        list(getattr(args, "path", None) or [])
+    )
+    if not cell_paths:
+        return args
+    values = vars(args).copy()
+    values.update(
+        {
+            "path": [str(path) for path in cell_paths],
+            "root": None,
+            "adapter": None,
+            "db": None,
+            "session_id": None,
+            "input_table": None,
+        }
+    )
+    if getattr(args, "command", None) == "view":
+        values["list_sessions"] = False
+        values["list_interactive"] = False
+    return argparse.Namespace(**values)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -402,7 +430,10 @@ def add_shared_args(
         "--path",
         action="append",
         metavar="PATH",
-        help="JSONL session path; repeatable for view trajectory",
+        help=(
+            "source path: JSONL, report JSON, trajectory artifact, Trial cell, "
+            "or descendant; repeatable"
+        ),
     )
     parser.add_argument(
         "-d",
@@ -425,7 +456,11 @@ def add_shared_args(
         metavar="PATH",
         help="CSV, JSON, or .xlsx input manifest; repeatable",
     )
-    parser.add_argument("--max-content-chars", type=int, help="truncate large content")
+    parser.add_argument(
+        "--max-content-chars",
+        type=int,
+        help="bound source content and inspect preview text",
+    )
     if include_output:
         parser.add_argument(
             "-o",
@@ -492,10 +527,10 @@ def add_inspect_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tail", type=int, help="inspect last N steps per source; defaults to 2")
     parser.add_argument("--top", type=int, help="inspect top N ranked rows per source; defaults to 5")
     parser.add_argument(
-        "--step",
+        "--steps",
         action="append",
-        metavar="ID",
-        help="include compact evidence for a trajectory step_id; repeatable",
+        metavar="IDS",
+        help="show selected step_id evidence only; comma lists and start:end ranges supported",
     )
     parser.add_argument(
         "--tool-call",
@@ -510,12 +545,6 @@ def add_inspect_args(parser: argparse.ArgumentParser) -> None:
         metavar="N",
         help="inspect only a one-based source index; repeatable",
     )
-    parser.add_argument(
-        "--preview-chars",
-        type=int,
-        help="maximum characters per preview field in inspect output",
-    )
-
 
 def print_session_lists(
     args: argparse.Namespace,

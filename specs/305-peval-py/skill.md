@@ -27,9 +27,10 @@ Agents should read that target's `agent/trajectory.json`,
 `agent/trajectory_meta.json`, and existing analysis artifacts for direct
 evidence when accuracy matters instead of generating a report to rediscover the
 same identity. `view tr -p <cell-dir>` and `export tr -p <cell-dir>` are
-supported convenience inputs for exact Trial cell artifact directories that
-contain the retained `agent/trajectory.json` and `agent/trajectory_meta.json`;
-session artifact directories still require choosing the target cell first. The
+supported convenience inputs for Trial cell artifact directories that contain
+the retained `agent/trajectory.json` and `agent/trajectory_meta.json`; tolerant
+cell globs and descendants are canonicalized by the CLI. Session artifact
+directories still require choosing the target cell first. The
 top-level skill instructions must stay compact: they may include minimal
 workspace path recognition, but they should not embed Trial-cell path
 derivation rules, compiled artifact field semantics, or the JSON `extra` merge

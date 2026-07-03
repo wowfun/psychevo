@@ -374,6 +374,11 @@ peval-py view tr -r .local/peval-py -d @opencode --list
 peval-py export tr -r .local/peval-py -d @opencode -s <session-id> -o
 ```
 
+When `-p` points to a Trial cell, `view tr` and `export tr` also tolerate
+`<cell-dir>/**`, `<cell-dir>/**/*`, and descendants inside the cell. A
+recognized Trial cell path takes precedence over conflicting source flags such
+as `-r`, `-a`, `-d`, `-s`, and `-i`.
+
 The static HTML report remains the canonical offline report. `peval-py serve`
 uses the same report body instead of a separate dashboard layout: Report Notes,
 Leaderboard, Trajectory Overview, and the selected Trial trajectory keep the
@@ -544,7 +549,8 @@ detail section also remains English.
   `view tr`.
 - `--source-alias N=TEXT`: add a display-only alias for a one-based expanded
   input session in `view tr` or `serve`.
-- `--max-content-chars N`: bound large message/tool payloads.
+- `--max-content-chars N`: bound large message/tool payloads and inspect
+  preview text.
 - `--no-redact`: disable default secret redaction.
 
 By default, reports redact obvious secret-bearing keys, authorization headers,

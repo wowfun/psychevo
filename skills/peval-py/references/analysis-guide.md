@@ -7,7 +7,7 @@ Use this guide when the user asks to evaluate one agent session, compare multipl
 Start from the task, then inspect the trajectory evidence:
 
 1. Identify the user's goal, success criteria, constraints, and any expected deliverable.
-2. For large JSON/JSONL inputs, use `view tr` inspection and `--step` / `--tool-call` only when a specific step or tool call needs more evidence before reading raw files or rendering a full report.
+2. For large JSON/JSONL inputs, use `view tr` inspection and `--steps` / `--tool-call` only when specific steps or a tool call need more evidence before reading raw files or rendering a full report.
 3. Read the final response and outcome first, then trace backward through major steps, tool calls, warnings, and retries.
 4. Choose the relevant analysis dimensions instead of applying every metric mechanically.
 5. Write evidence-backed findings with step ids, tool names, final metrics, trajectory metadata, or report sections.
@@ -23,9 +23,9 @@ Use whichever source the user provided:
 - ATIF `trajectory.json`
 - JSONL trajectory input
 - saved workspace snapshot inspected with default `view tr` or rendered as a full report when needed
-- exact Trial cell artifact path under `runs/<eval>/<agent>/<session>/<cell>`
+- Trial cell artifact path under `runs/<eval>/<agent>/<session>/<cell>`
 
-When the user provides an exact Trial cell path, use `view tr -p <cell-dir>` to narrow large trajectory evidence when helpful, then read `agent/trajectory.json`, `agent/trajectory_meta.json`, and existing `analysis.json` / `analysis.md` directly for accuracy-critical findings. If the path names a session directory and it contains exactly one cell, analyze that cell; if it contains multiple cells, ask which cell to target.
+When the user provides a Trial cell path, glob under it, or descendant inside it, use `view tr -p <cell-dir>` to narrow large trajectory evidence when helpful, then read `agent/trajectory.json`, `agent/trajectory_meta.json`, and existing `analysis.json` / `analysis.md` directly for accuracy-critical findings. If the path names a session directory and it contains exactly one cell, analyze that cell; if it contains multiple cells, ask which cell to target.
 
 ## Analysis Dimensions
 

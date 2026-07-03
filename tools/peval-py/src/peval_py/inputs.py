@@ -15,6 +15,7 @@ from peval_py._inputs.types import AdapterAssignments, LoadedInputs, LoadedSessi
 from peval_py._inputs.workspace_snapshots import (
     TRIAL_META_RELATIVE_PATH,
     TRIAL_TRAJECTORY_RELATIVE_PATH,
+    canonical_trial_cell_paths_for_inputs,
     infer_workspace_root_from_trial_cell_path,
     infer_workspace_root_from_trial_cell_paths,
     is_peval_py_state_db_input,

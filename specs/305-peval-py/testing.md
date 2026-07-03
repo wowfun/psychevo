@@ -69,6 +69,9 @@ Coverage must verify:
   and `-a dN=ADAPTER` override individual path and DB inputs.
 - invalid adapter selectors, duplicate selectors, out-of-range selectors, and
   unknown effective adapter ids fail with clear diagnostics.
+- CLI help describes `-p/--path` as a generic source path that accepts JSONL,
+  report JSON, trajectory artifacts, Trial cells, and descendants rather than
+  as JSONL-only input.
 - path adapters can handle `-p/--path` without the default JSONL loader.
 - `-p/--path` can read an exported ATIF JSON trajectory object directly without
   reparsing it through a message adapter, and does not require the configured
@@ -77,8 +80,10 @@ Coverage must verify:
   `agent/trajectory.json` and `agent/trajectory_meta.json` for `view trajectory`
   inspect/raw output and `export trajectory`. Tests cover direct unregistered
   artifact snapshots, registered artifact paths that preserve workspace source
-  metadata, inferred workspace context from `<workspace>/runs/...`, explicit
-  `-r` conflicts with the inferred workspace, and malformed `runs/...` cell
+  metadata, inferred workspace context from `<workspace>/runs/...`,
+  canonicalization of literal `<cell-dir>/**` and `<cell-dir>/**/*` inputs,
+  shell-expanded descendant inputs inside a cell, cell-path precedence over
+  unrelated `-r/-a/-d/-s/-i` and DB listing flags, and malformed `runs/...` cell
   directories that report the missing artifact files instead of adapter DB
   lookup errors. Git Bash and WSL coverage includes accessible `C:/...` Trial
   cell artifact paths mapped through `/mnt/<drive>/...`, workspace state DB
@@ -166,9 +171,10 @@ Coverage must verify:
 - `view trajectory --list/-l` prints `#`, `session_id`, and `name` for DB
   inputs and exits without rendering a report.
 - inspect-mode tool error summaries list `step_id`, `tool_call_id`, and tool
-  name. `--step ID` adds matching `selected_steps`; `--tool-call ID` works
-  independently and adds matching `selected_tool_calls` with the corresponding
-  tool result when retained data provides one.
+  name. `--steps VALUE` adds matching `selected_steps` and accepts comma lists
+  or inclusive `start:end` ranges; `--tool-call ID` works independently and
+  adds matching `selected_tool_calls` with the corresponding tool result when
+  retained data provides one.
 - `view trajectory --list-interactive/-li` requires a TTY and exactly one DB,
   accepts comma/range input such as `1,3-4` and `all`, treats blank input as
   cancel, and renders the selected sessions.
@@ -475,13 +481,16 @@ Coverage must verify:
   `view trajectory -m raw` preserves the full JSON/HTML report behavior.
   Inspect tests cover direct report/trajectory/trajectory_meta JSON inputs,
   JSONL, DB sessions, saved workspace snapshots, default `--head 2` and
-  `--tail 2`, `--top`, `--source`, `--preview-chars`, `--step`,
-  independently used `--tool-call`, omitted empty fields, second-based
-  duration values, step/tool duration distributions, tool errors, and raw-mode
-  rejection for inspect-only flags. CLI tests also cover raw-only rejection for
-  `--agent-name`, `--agent-version`, `--model`, and `--no-redact` in default
-  inspect mode, plus successful use of those flags with `view trajectory -m
-  raw`.
+  `--tail 2`, `--top`, `--source`, default 3000-character inspect previews,
+  `--max-content-chars` preview bounding, `--steps` exact and comma/range
+  selection, `--steps` suppressing default digest sections, malformed step
+  selector diagnostics, help text for `--max-content-chars` and `--steps`,
+  independently used `--tool-call`, omitted empty fields, second-based duration
+  values, step/tool duration distributions, tool errors, and raw-mode rejection
+  for inspect-only flags. CLI tests also cover raw-only rejection for
+  `--agent-name`, `--agent-version`, `--model`, and `--no-redact`
+  in default inspect mode, plus successful use of those flags with `view
+  trajectory -m raw`.
 - CLI and config tests verify `--trajectory-id` is not exposed by `view`,
   `export`, or `serve` help and is not parsed as a defaults override, while
   conversion still emits a generated ATIF `trajectory_id` and existing

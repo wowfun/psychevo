@@ -18,8 +18,6 @@ class PevalPyCliInputInspectTests(unittest.TestCase):
                     str(FIXTURES / "common_session.jsonl"),
                     "--top",
                     "1",
-                    "--preview-chars",
-                    "12",
                 ]
             )
 
@@ -42,10 +40,153 @@ class PevalPyCliInputInspectTests(unittest.TestCase):
         self.assertNotIn("status", source)
         self.assertEqual(len(source["steps"]["head"]), 2)
         self.assertEqual(len(source["steps"]["tail"]), 2)
-        self.assertIn("[truncated]", source["steps"]["tail"][1]["message_preview"])
+        self.assertNotIn("[truncated]", source["steps"]["tail"][1]["message_preview"])
         self.assertEqual(source["steps"]["top_tokens"][0]["step_id"], 3)
         self.assertEqual(source["tools"]["top_durations"][0]["duration"], 0.1)
         self.assertEqual(source["tools"]["duration_distribution"]["sum"], 0.1)
+
+    def test_cli_view_inspect_default_preview_is_3000(self) -> None:
+        from peval_py.cli import main
+
+        message = "x" * 3200
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            config_path = Path(tmp) / "peval-py.toml"
+            config_path.write_text("[defaults]\nmax_content_chars = 10\n", encoding="utf-8")
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "trajectory": [
+                            {
+                                "schema_version": "ATIF-v1.7",
+                                "session_id": "long-session",
+                                "agent": {"name": "direct-agent"},
+                                "steps": [
+                                    {
+                                        "step_id": 1,
+                                        "source": "agent",
+                                        "message": message,
+                                    }
+                                ],
+                                "final_metrics": {},
+                            }
+                        ],
+                        "trajectory_meta": [{"steps": [{"step_id": 1}]}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                result = main(["view", "tr", "-p", str(report_path)])
+
+            bounded_stdout = io.StringIO()
+            with contextlib.redirect_stdout(bounded_stdout):
+                bounded_result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        str(report_path),
+                        "--max-content-chars",
+                        "12",
+                    ]
+                )
+
+            config_stdout = io.StringIO()
+            with contextlib.redirect_stdout(config_stdout):
+                config_result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-c",
+                        str(config_path),
+                        "-p",
+                        str(report_path),
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        preview = json.loads(stdout.getvalue())["sources"][0]["steps"]["head"][0][
+            "message_preview"
+        ]
+        self.assertTrue(preview.startswith("x" * 3000))
+        self.assertTrue(preview.endswith("...[truncated]"))
+        self.assertEqual(len(preview), 3014)
+        self.assertEqual(bounded_result, 0)
+        bounded_preview = json.loads(bounded_stdout.getvalue())["sources"][0]["steps"][
+            "head"
+        ][0]["message_preview"]
+        self.assertEqual(bounded_preview, "x" * 12 + "...[truncated]")
+        self.assertEqual(config_result, 0)
+        config_preview = json.loads(config_stdout.getvalue())["sources"][0]["steps"][
+            "head"
+        ][0]["message_preview"]
+        self.assertEqual(config_preview, "x" * 10 + "...[truncated]")
+
+    def test_cli_view_inspect_steps_accepts_comma_ranges_and_suppresses_digest(self) -> None:
+        from peval_py.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "trajectory": [
+                            {
+                                "schema_version": "ATIF-v1.7",
+                                "session_id": "range-session",
+                                "agent": {"name": "direct-agent"},
+                                "steps": [
+                                    {
+                                        "step_id": "alpha" if index == 2 else index,
+                                        "source": "agent",
+                                        "message": f"step {index}",
+                                    }
+                                    for index in range(1, 10)
+                                ],
+                                "final_metrics": {"total_prompt_tokens": 99},
+                            }
+                        ],
+                        "trajectory_meta": [
+                            {
+                                "steps": [
+                                    {"step_id": index, "duration_ms": index * 100}
+                                    for index in range(1, 10)
+                                ]
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                result = main(
+                    [
+                        "view",
+                        "tr",
+                        "-p",
+                        str(report_path),
+                        "--steps",
+                        "alpha,3:5",
+                        "--steps",
+                        "5,7:9",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        source = json.loads(stdout.getvalue())["sources"][0]
+        self.assertEqual(source["session_id"], "range-session")
+        self.assertNotIn("steps", source)
+        self.assertNotIn("tools", source)
+        self.assertNotIn("total_tokens", source)
+        self.assertEqual(
+            [item["step_id"] for item in source["selected_steps"]],
+            ["alpha", 3, 4, 5, 7, 8, 9],
+        )
 
     def test_cli_view_inspect_output_paths_are_reported(self) -> None:
         from peval_py.cli import main
@@ -161,13 +302,50 @@ class PevalPyCliInputInspectTests(unittest.TestCase):
                     str(FIXTURES / "common_session.jsonl"),
                     "--head",
                     "0",
+                    "--steps",
+                    "1",
                     "--tool-call",
                     "tool-1",
                 ]
             )
         self.assertNotEqual(raw_result, 0)
         self.assertIn("inspect-only option(s)", stderr.getvalue())
+        self.assertIn("--steps", stderr.getvalue())
         self.assertIn("--tool-call", stderr.getvalue())
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            bad_steps_result = main(
+                [
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(FIXTURES / "common_session.jsonl"),
+                    "--steps",
+                    "3:1",
+                ]
+            )
+        self.assertNotEqual(bad_steps_result, 0)
+        self.assertIn("invalid descending --steps range", stderr.getvalue())
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            bad_range_result = main(
+                [
+                    "view",
+                    "tr",
+                    "-a",
+                    "opencode",
+                    "-p",
+                    str(FIXTURES / "common_session.jsonl"),
+                    "--steps",
+                    "a:b",
+                ]
+            )
+        self.assertNotEqual(bad_range_result, 0)
+        self.assertIn("range endpoints must be positive integers", stderr.getvalue())
 
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
@@ -320,7 +498,7 @@ class PevalPyCliInputInspectTests(unittest.TestCase):
                         str(report_path),
                         "-p",
                         str(meta_path),
-                        "--step",
+                        "--steps",
                         "2",
                         "--tool-call",
                         "call-1",
@@ -346,28 +524,10 @@ class PevalPyCliInputInspectTests(unittest.TestCase):
         self.assertEqual(first["session_id"], "direct-session")
         self.assertEqual(first["agent"], "direct-agent")
         self.assertEqual(first["model"], "direct-model")
-        self.assertEqual(first["status"], "failed")
-        self.assertEqual(first["score"], 0)
-        self.assertEqual(first["active_duration"], 4)
-        self.assertEqual(first["total_tokens"], 18)
-        self.assertEqual(first["total_input_tokens"], 12)
-        self.assertEqual(first["total_output_tokens"], 6)
-        self.assertEqual(first["total_cached_tokens"], 1)
-        self.assertEqual(first["total_tool_calls"], 1)
-        self.assertEqual(first["total_tool_errors"], 1)
-        self.assertEqual(first["total_turns"], 1)
-        self.assertEqual(first["steps"]["top_durations"][0], {"step_id": 2, "duration": 3})
-        self.assertEqual(
-            first["steps"]["top_tokens"][0],
-            {"step_id": 2, "input": 9, "output": 4, "cached": 0},
-        )
-        self.assertEqual(first["steps"]["duration_distribution"]["sum"], 4)
-        self.assertEqual(
-            first["tools"]["errors"],
-            [{"step_id": 2, "tool_call_id": "call-1", "tool_name": "shell"}],
-        )
-        self.assertEqual(first["tools"]["top_durations"][0]["duration"], 2.5)
-        self.assertEqual(first["tools"]["duration_distribution"]["sum"], 2.5)
+        self.assertNotIn("status", first)
+        self.assertNotIn("total_tokens", first)
+        self.assertNotIn("steps", first)
+        self.assertNotIn("tools", first)
         self.assertEqual(first["selected_steps"][0]["step_id"], 2)
         self.assertEqual(first["selected_steps"][0]["tool_calls"][0]["tool_call_id"], "call-1")
         self.assertEqual(
@@ -386,6 +546,13 @@ class PevalPyCliInputInspectTests(unittest.TestCase):
 
         self.assertEqual(tool_only_result, 0)
         tool_only = json.loads(tool_only_stdout.getvalue())["sources"][0]
+        self.assertEqual(tool_only["status"], "failed")
+        self.assertEqual(tool_only["total_tokens"], 18)
+        self.assertEqual(tool_only["steps"]["top_durations"][0], {"step_id": 2, "duration": 3})
+        self.assertEqual(
+            tool_only["tools"]["errors"],
+            [{"step_id": 2, "tool_call_id": "call-1", "tool_name": "shell"}],
+        )
         self.assertNotIn("selected_steps", tool_only)
         self.assertEqual(tool_only["selected_tool_calls"][0]["tool_call_id"], "call-1")
         self.assertEqual(

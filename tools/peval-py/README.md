@@ -83,10 +83,12 @@ peval-py view tr -a opencode -p session.jsonl
 Inspect output is a compact fixed JSON digest with session identity, token
 totals, active duration in seconds, step/tool duration distributions, top
 duration/token rows, and tool errors when available. `--head` and `--tail`
-default to 2, `--top` defaults to 5, `--step <step_id>` adds step evidence, and
-`--tool-call <tool_call_id>` independently shows a tool call with its matching
-tool result when retained data provides one. Bare `-o` writes a timestamped
-report file and prints the saved path to stdout.
+default to 2, `--top` defaults to 5, `--steps <ids>` adds selected step
+evidence and accepts comma/range selectors such as `1,3:5`, and `--tool-call
+<tool_call_id>` independently shows a tool call with its matching tool result
+when retained data provides one. `--max-content-chars` bounds inspect preview
+text. Bare `-o` writes a timestamped report file and prints the saved path to
+stdout.
 
 Use `-m raw` when you want the full peval JSON or HTML report:
 

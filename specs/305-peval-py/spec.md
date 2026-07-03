@@ -70,7 +70,11 @@ paths without peval-py joining them to the current working directory.
 
 The peval-py behavior contract is split by responsibility to keep each source
 file reviewable. The files linked in Attachments are normative parts of this
-spec and share this document's scope and out-of-scope boundaries.
+spec and share this document's scope and out-of-scope boundaries. `view
+trajectory` inspect selector syntax and content-bound behavior are owned by
+[Inputs and Adapters](inputs.md), as is Trial cell path tolerance and input
+precedence for `view/export trajectory`; deterministic coverage is defined by
+[Testing](testing.md).
 
 ## Redaction
 

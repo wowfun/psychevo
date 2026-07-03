@@ -75,6 +75,9 @@ Common trajectory flags use both long and short forms:
 - `-c, --config PATH`
 - `-r, --root DIR`
 - `-a, --adapter ADAPTER`
+- `-p, --path PATH` for JSONL, report JSON, ATIF trajectory JSON, trajectory
+  artifact files/directories, Trial cell directories, or descendants inside
+  Trial cells; repeatable
 - `-i, --input-table PATH`
 - `-o, --output [PATH]`
 - `-m, --mode inspect|raw` for `view trajectory`; `inspect` is the default and
@@ -89,11 +92,19 @@ Common trajectory flags use both long and short forms:
   is non-empty.
 - Inspect evidence controls for `view trajectory`: `--head N` and `--tail N`
   default to 2, `--top N` defaults to 5, `--source N` restricts output to
-  one-based source indexes, and `--preview-chars N` bounds preview text.
-  `--step ID` adds `selected_steps` evidence for matching trajectory
-  `step_id` values. `--tool-call ID` independently adds `selected_tool_calls`
-  evidence with the matching tool call and corresponding tool result when
-  retained trajectory data provides one.
+  one-based source indexes, and `--max-content-chars N` bounds inspect preview
+  text. Inspect preview text defaults to 3000 characters when neither CLI nor
+  config sets `max_content_chars`; raw report and export content bounding keeps
+  the normal configured default. `--steps VALUE` adds `selected_steps` evidence
+  for matching trajectory `step_id` values. `VALUE` may be repeated, may contain
+  comma-separated selectors, and supports inclusive positive integer ranges
+  with `start:end` syntax, such as `1,3:5,7:9`. Exact non-range selectors are
+  preserved as strings so non-numeric `step_id` values remain selectable. When
+  `--steps` is present, inspect output omits the default `steps` and `tools`
+  digest sections and keeps source identity plus selected evidence.
+  `--tool-call ID` independently adds `selected_tool_calls` evidence with the
+  matching tool call and corresponding tool result when retained trajectory data
+  provides one; using `--tool-call` alone does not suppress the default digest.
 - `-n, --note N=TEXT` for `view trajectory`, where `0` is report-level and
   positive one-based indexes attach to the ordered input sessions
 - `--source-alias N=TEXT` for `view trajectory` and `serve`, where positive
@@ -167,7 +178,17 @@ fails with a selection diagnostic.
 For direct Trial cell artifact directory input, `view trajectory -p
 W/runs/E/A/S/C` and `export trajectory -p W/runs/E/A/S/C` read
 `agent/trajectory.json` and `agent/trajectory_meta.json` from that cell. If the
-cell path is under an inferred or explicit workspace and a matching
+`-p` value is literal `<cell-dir>/**`, literal `<cell-dir>/**/*`, or a
+shell-expanded descendant inside the cell such as `<cell-dir>/agent` or
+`<cell-dir>/agent/trajectory.json`, peval-py canonicalizes it back to
+`<cell-dir>`. If any `-p` value resolves to a Trial cell for `view trajectory`
+or `export trajectory`, the command enters cell-path mode: it keeps the
+recognized Trial cells, deduplicates repeated references in input order, ignores
+non-cell `-p` values, and ignores `-r`, `-a`, `-d`, `-s`, `-i`, `--list`, and
+`--list-interactive`. In cell-path mode no warning is emitted for ignored input
+selectors because the Trial cell path is the stronger explicit source.
+
+If the canonical cell path is under an inferred workspace and a matching
 `peval_py_sources.artifact_dir` row exists, peval-py uses that saved source row
 so source aliases, current cell-local notes, and cached analysis overlays remain
 consistent with workspace snapshot rendering. If no matching row exists, peval-py
@@ -176,7 +197,7 @@ workspace state. A path under `runs/...` that looks like a Trial cell but lacks
 either required agent artifact must fail with an actionable diagnostic naming
 `agent/trajectory.json` and `agent/trajectory_meta.json`.
 
-When the input was an exact Trial cell directory, the rendered report metadata
+When the input was canonicalized to a Trial cell directory, the rendered report metadata
 may preserve the original `data_ref` from the retained trajectory, such as the
 source DB label. It must also add a separate `artifact_ref` object to the Trial
 metadata in raw reports so the current artifact input remains visible without

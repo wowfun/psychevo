@@ -4,12 +4,13 @@ Use this guide when the user asks to inspect, list, render, or compare retained 
 
 ## Choose Input
 
-- Use `-p <path-to-jsonl-or-atif-trajectory-or-cell-dir>` for JSONL session files, ATIF `trajectory.json`, or an exact Trial cell directory containing `agent/trajectory.json` and `agent/trajectory_meta.json`.
+- Use `-p <path-to-jsonl-or-atif-trajectory-or-cell-dir>` for JSONL session files, ATIF `trajectory.json`, or a Trial cell containing `agent/trajectory.json` and `agent/trajectory_meta.json`.
+- Trial cell paths are tolerant: `<cell-dir>/**`, `<cell-dir>/**/*`, and descendants inside the cell are canonicalized to `<cell-dir>` and override conflicting `-r/-a/-d/-s/-i` source flags.
 - Use `-d <adapter-db>` for a real adapter-owned DB.
 - Use `-d @adapter` when the workspace config has a default DB for that adapter.
 - Use `-r <workspace> -d <workspace>/state.db` for saved workspace snapshots.
 - Use `-i <manifest.csv|json|xlsx>` when multiple sources are easier to maintain as rows.
-- Do not pass a session artifact directory to `view tr -p`; pass the exact Trial cell directory or choose the target cell first.
+- Do not pass a session artifact directory to `view tr -p`; pass the Trial cell directory, a descendant inside it, or choose the target cell first.
 
 Pass `-r <workspace>` whenever workspace config, saved snapshots, or imported analysis overlays must be discovered from outside the workspace.
 
@@ -32,10 +33,10 @@ Use selectors to keep output bounded:
 
 - `--head N` and `--tail N` show first and last steps per source; both default to 2.
 - `--top N` controls top duration/token lists; it defaults to 5.
-- `--step ID` adds `selected_steps` for matching `step_id` values.
-- `--tool-call ID` adds `selected_tool_calls` for matching `tool_call_id` values and the corresponding tool result when retained data provides one. It works without `--step`.
+- `--steps VALUE` adds `selected_steps` for matching `step_id` values, suppresses the default digest, and accepts repeated comma/range selectors such as `1,3:5,7:9`.
+- `--tool-call ID` adds `selected_tool_calls` for matching `tool_call_id` values and the corresponding tool result when retained data provides one. It works without `--steps`.
 - `--source N` restricts output to one one-based source.
-- `--preview-chars N` changes preview length.
+- `--max-content-chars N` changes inspect preview length.
 
 Example:
 
@@ -44,7 +45,7 @@ peval-py view tr \
   -r <workspace> \
   -a <adapter> \
   -p <path-to-jsonl-or-atif-trajectory> \
-  --step <step_id> \
+  --steps <step_id> \
   --tool-call <tool_call_id>
 ```
 

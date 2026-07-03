@@ -12,6 +12,7 @@ from peval_py._inputs.types import LoadedSession
 
 TRIAL_TRAJECTORY_RELATIVE_PATH = Path("agent") / "trajectory.json"
 TRIAL_META_RELATIVE_PATH = Path("agent") / "trajectory_meta.json"
+TRIAL_CELL_GLOB_SUFFIXES = ("/**/*", "\\**\\*", "/**", "\\**")
 
 def is_workspace_state_db_input(raw_db: str, config: object | None) -> bool:
     state_db_path = getattr(config, "workspace_state_db_path", None)
@@ -44,23 +45,12 @@ def loaded_trial_cell_artifact_session(
     raw_path: str,
     config: object | None,
 ) -> LoadedSession | None:
-    cell_path = resolved_local_path(raw_path)
+    cell_path = canonical_trial_cell_path_for_input(raw_path)
     if cell_path is None:
         return None
     artifacts = trial_cell_artifact_paths(cell_path)
     if artifacts is None:
-        if looks_like_trial_cell_artifact_path(cell_path):
-            required = " and ".join(
-                [
-                    TRIAL_TRAJECTORY_RELATIVE_PATH.as_posix(),
-                    TRIAL_META_RELATIVE_PATH.as_posix(),
-                ]
-            )
-            raise ValueError(
-                f"{cell_path} looks like a Trial cell artifact directory but "
-                f"is missing {required}"
-            )
-        return None
+        raise_missing_trial_cell_artifacts(cell_path)
 
     workspace_row = workspace_snapshot_source_for_artifact_path(cell_path, config)
     if workspace_row is not None:
@@ -98,6 +88,46 @@ def loaded_trial_cell_artifact_session(
     )
 
 
+def canonical_trial_cell_paths_for_inputs(raw_paths: list[str]) -> list[Path]:
+    cells: list[Path] = []
+    for raw_path in raw_paths:
+        cell_path = canonical_trial_cell_path_for_input(
+            raw_path,
+            raise_on_malformed=False,
+        )
+        if cell_path is None:
+            continue
+        if not any(same_local_path(str(cell_path), str(item)) for item in cells):
+            cells.append(cell_path)
+    return cells
+
+
+def canonical_trial_cell_path_for_input(
+    raw_path: str,
+    *,
+    raise_on_malformed: bool = True,
+) -> Path | None:
+    path = resolved_local_path(strip_trial_cell_glob_suffix(raw_path))
+    if path is None:
+        return None
+    for candidate in [path, *path.parents]:
+        if trial_cell_artifact_paths(candidate) is not None:
+            return candidate
+    if raise_on_malformed:
+        malformed = malformed_trial_cell_candidate(path)
+        if malformed is not None:
+            raise_missing_trial_cell_artifacts(malformed)
+    return None
+
+
+def strip_trial_cell_glob_suffix(raw_path: str) -> str:
+    text = str(raw_path).strip()
+    for suffix in TRIAL_CELL_GLOB_SUFFIXES:
+        if text.endswith(suffix):
+            return text[: -len(suffix)]
+    return text
+
+
 def trial_cell_artifact_paths(cell_path: Path) -> tuple[Path, Path] | None:
     if not cell_path.is_dir():
         return None
@@ -106,6 +136,26 @@ def trial_cell_artifact_paths(cell_path: Path) -> tuple[Path, Path] | None:
     if trajectory_path.is_file() and meta_path.is_file():
         return trajectory_path, meta_path
     return None
+
+
+def malformed_trial_cell_candidate(path: Path) -> Path | None:
+    for candidate in [path, *path.parents]:
+        if looks_like_trial_cell_artifact_path(candidate):
+            return candidate
+    return None
+
+
+def raise_missing_trial_cell_artifacts(cell_path: Path) -> None:
+    required = " and ".join(
+        [
+            TRIAL_TRAJECTORY_RELATIVE_PATH.as_posix(),
+            TRIAL_META_RELATIVE_PATH.as_posix(),
+        ]
+    )
+    raise ValueError(
+        f"{cell_path} looks like a Trial cell artifact directory but "
+        f"is missing {required}"
+    )
 
 
 def looks_like_trial_cell_artifact_path(path: Path) -> bool:
@@ -136,7 +186,9 @@ def infer_workspace_root_from_trial_cell_paths(raw_paths: list[str]) -> Path | N
 
 
 def infer_workspace_root_from_trial_cell_path(raw_path: str) -> Path | None:
-    path = resolved_local_path(raw_path)
+    path = canonical_trial_cell_path_for_input(raw_path, raise_on_malformed=False)
+    if path is None:
+        path = resolved_local_path(strip_trial_cell_glob_suffix(raw_path))
     if path is None:
         return None
     for candidate in [path, *path.parents]:

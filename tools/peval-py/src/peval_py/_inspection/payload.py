@@ -41,6 +41,7 @@ def source_payload(
     top: int,
     step_ids: list[str],
     tool_call_ids: list[str],
+    steps_only: bool = False,
 ) -> dict[str, Any]:
     source = frame_row(frames.sources, "source_index", source_index)
     source_steps = rows_for_source(frames.steps, source_index)
@@ -50,18 +51,6 @@ def source_payload(
         "session_id": source.get("session_id"),
         "agent": source.get("agent"),
         "model": source.get("model"),
-        "total_tokens": source.get("total_tokens"),
-        "status": inspect_status(source.get("status")),
-        "score": inspect_score(source.get("score")),
-        "active_duration": milliseconds_to_seconds(source.get("duration_ms")),
-        "total_input_tokens": source.get("total_prompt_tokens"),
-        "total_output_tokens": source.get("total_completion_tokens"),
-        "total_cached_tokens": source.get("total_cached_tokens"),
-        "total_tool_calls": source.get("total_tool_calls"),
-        "total_tool_errors": source.get("total_tool_errors"),
-        "total_turns": source.get("total_turns"),
-        "steps": steps_digest(source_steps, head=head, tail=tail, top=top),
-        "tools": tools_digest(source_tools, top=top),
         "selected_steps": selected_step_items(
             source_steps,
             source_tools,
@@ -74,6 +63,23 @@ def source_payload(
             tool_call_ids,
         ),
     }
+    if not steps_only:
+        payload.update(
+            {
+                "total_tokens": source.get("total_tokens"),
+                "status": inspect_status(source.get("status")),
+                "score": inspect_score(source.get("score")),
+                "active_duration": milliseconds_to_seconds(source.get("duration_ms")),
+                "total_input_tokens": source.get("total_prompt_tokens"),
+                "total_output_tokens": source.get("total_completion_tokens"),
+                "total_cached_tokens": source.get("total_cached_tokens"),
+                "total_tool_calls": source.get("total_tool_calls"),
+                "total_tool_errors": source.get("total_tool_errors"),
+                "total_turns": source.get("total_turns"),
+                "steps": steps_digest(source_steps, head=head, tail=tail, top=top),
+                "tools": tools_digest(source_tools, top=top),
+            }
+        )
     return compact_json(payload)
 
 
