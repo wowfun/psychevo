@@ -149,12 +149,26 @@ Cygwin, or WSL drive spellings are compatibility inputs and should normalize at
 the host boundary into an explicit native-path or path-convention value before
 storage, permission matching, or durable evidence.
 
+Supported Windows extended/verbatim prefixes are input compatibility syntax,
+not product identity or display syntax. Runtime must normalize them away before
+durable cwd identity, Gateway cwd identity, user-facing cwd displays, and
+model-visible tool metadata. Low-level diagnostics may show a raw verbatim path
+only when diagnosing host filesystem API behavior explicitly requires it.
+
 Generic POSIX shell tokenization must not be the first parser for unquoted
 Windows drive or UNC paths because backslashes are valid path separators there.
 Drive and UNC detection should run before shell-unescape fallback. Windows
 process launches must also preserve case-insensitive environment-variable
 semantics and provide Windows lookup essentials such as `COMSPEC` and `PATHEXT`
 when the child process path depends on native shell lookup.
+
+Configured executable names that are entered as shell-like product settings,
+such as ACP peer backend commands, must be resolved at the host boundary before
+native process launch. On Windows this resolution must search `PATH`/`Path`,
+honor `PATHEXT` with the standard `.COM`, `.EXE`, `.BAT`, and `.CMD` fallback,
+and normalize Git Bash drive-style path entries where possible. Persisted
+configuration keeps the user's command string; resolved executable paths are
+launch-time facts and diagnostics only.
 
 User-visible shell guidance must name the actual configured shell family. If a
 Windows run uses Git Bash, the guidance should use POSIX examples and explain

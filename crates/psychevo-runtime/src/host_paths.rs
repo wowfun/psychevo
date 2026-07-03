@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
-use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::{env, fs};
 
 use crate::error::{Error, Result};
 
@@ -74,6 +74,11 @@ impl<'a> PathResolveOptions<'a> {
             cygpath: None,
         }
     }
+}
+
+pub struct ExecutableResolveOptions<'a> {
+    pub platform: HostPlatform,
+    pub env: &'a BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +166,39 @@ pub fn path_ref_for_native_path(path: &Path) -> PathRef {
     posix_path_ref(&normalize_posix_path(&raw))
 }
 
+pub fn normalized_native_path(path: &Path) -> PathBuf {
+    path_ref_for_native_path(path).native_path()
+}
+
+pub fn display_path_for_native_path(path: &Path) -> String {
+    path_ref_for_native_path(path).display
+}
+
+pub fn resolve_executable_path(
+    command: &str,
+    cwd: &Path,
+    options: &ExecutableResolveOptions<'_>,
+) -> Option<PathBuf> {
+    let command = command.trim();
+    if command.is_empty() {
+        return None;
+    }
+
+    if command_has_path_separator(command) {
+        let path = executable_command_path(command, cwd, options.platform);
+        return executable_candidate(path, command_has_extension(command), options);
+    }
+
+    let path_value = env_value(options.env, "PATH")?;
+    for entry in path_entries(path_value, options.platform) {
+        let dir = path_entry_for_platform(&entry, options.platform);
+        if let Some(path) = executable_candidate(dir.join(command), false, options) {
+            return Some(path);
+        }
+    }
+    None
+}
+
 pub fn resolve_host_path(
     raw: &str,
     cwd: &Path,
@@ -241,6 +279,179 @@ pub fn shell_is_git_bash(shell: &str) -> bool {
         || normalized.ends_with("/bash")
         || normalized == "bash.exe"
         || normalized == "bash"
+}
+
+fn executable_command_path(command: &str, cwd: &Path, platform: HostPlatform) -> PathBuf {
+    if platform == HostPlatform::Windows {
+        if let Ok(Some(path_ref)) = parse_absolute_input(command) {
+            return path_ref.native_path();
+        }
+        if !Path::new(command).is_absolute() {
+            let cwd_ref = path_ref_for_native_path(cwd);
+            if normalize_windows_absolute(&cwd_ref.native).is_ok() {
+                return PathBuf::from(join_windows_path(&cwd_ref.native, command));
+            }
+        }
+    }
+
+    let path = Path::new(command);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    }
+}
+
+fn executable_candidate(
+    path: PathBuf,
+    command_has_extension: bool,
+    options: &ExecutableResolveOptions<'_>,
+) -> Option<PathBuf> {
+    match options.platform {
+        HostPlatform::Posix => existing_file(path, options.platform),
+        HostPlatform::Windows => {
+            if command_has_extension {
+                return existing_file(path, options.platform);
+            }
+            for extension in windows_pathext(options.env) {
+                if let Some(path) = existing_file(
+                    path_with_appended_extension(&path, &extension),
+                    options.platform,
+                ) {
+                    return Some(path);
+                }
+            }
+            existing_file(path, options.platform)
+        }
+    }
+}
+
+fn path_with_appended_extension(path: &Path, extension: &str) -> PathBuf {
+    let mut raw = path.as_os_str().to_os_string();
+    raw.push(extension);
+    PathBuf::from(raw)
+}
+
+fn existing_file(path: PathBuf, platform: HostPlatform) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path);
+    }
+    if platform == HostPlatform::Windows {
+        return existing_file_case_insensitive(&path);
+    }
+    None
+}
+
+fn existing_file_case_insensitive(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let expected = path.file_name()?.to_string_lossy();
+    for entry in fs::read_dir(parent).ok()? {
+        let entry = entry.ok()?;
+        let name = entry.file_name();
+        if name.to_string_lossy().eq_ignore_ascii_case(&expected) && entry.path().is_file() {
+            return Some(entry.path());
+        }
+    }
+    None
+}
+
+fn path_entry_for_platform(raw: &str, platform: HostPlatform) -> PathBuf {
+    if platform == HostPlatform::Windows
+        && let Ok(Some(path_ref)) = parse_absolute_input(raw)
+    {
+        return path_ref.native_path();
+    }
+    PathBuf::from(raw)
+}
+
+fn path_entries(value: &str, platform: HostPlatform) -> Vec<String> {
+    if platform == HostPlatform::Windows {
+        let entries: Vec<_> = if value.contains(';') {
+            value.split(';').collect()
+        } else {
+            split_git_bash_style_windows_path(value)
+        };
+        return entries
+            .into_iter()
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(str::to_string)
+            .collect();
+    }
+    env::split_paths(value)
+        .map(|path| path.to_string_lossy().to_string())
+        .collect()
+}
+
+fn split_git_bash_style_windows_path(value: &str) -> Vec<&str> {
+    let mut entries = Vec::new();
+    let mut start = 0;
+    for (index, ch) in value.char_indices() {
+        if ch == ':' && !is_windows_drive_colon(value, start, index) {
+            entries.push(&value[start..index]);
+            start = index + ch.len_utf8();
+        }
+    }
+    entries.push(&value[start..]);
+    entries
+}
+
+fn is_windows_drive_colon(value: &str, entry_start: usize, colon_index: usize) -> bool {
+    if colon_index != entry_start + 1 {
+        return false;
+    }
+    let Some(drive) = value[entry_start..colon_index].chars().next() else {
+        return false;
+    };
+    if !drive.is_ascii_alphabetic() {
+        return false;
+    }
+    matches!(value[colon_index + 1..].chars().next(), Some('\\' | '/'))
+}
+
+fn windows_pathext(env_map: &BTreeMap<String, String>) -> Vec<String> {
+    let values = env_value(env_map, "PATHEXT")
+        .map(|value| value.split(';').collect::<Vec<_>>())
+        .filter(|values| values.iter().any(|value| !value.trim().is_empty()))
+        .unwrap_or_else(|| vec![".COM", ".EXE", ".BAT", ".CMD"]);
+    values
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .flat_map(|value| {
+            let extension = if value.starts_with('.') {
+                value.to_string()
+            } else {
+                format!(".{value}")
+            };
+            let lower = extension.to_ascii_lowercase();
+            if lower == extension {
+                vec![extension]
+            } else {
+                vec![extension, lower]
+            }
+        })
+        .collect()
+}
+
+fn env_value<'a>(env_map: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
+    env_map
+        .get(key)
+        .or_else(|| {
+            env_map
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+                .map(|(_, value)| value)
+        })
+        .map(String::as_str)
+}
+
+fn command_has_path_separator(command: &str) -> bool {
+    command.contains('/') || command.contains('\\')
+}
+
+fn command_has_extension(command: &str) -> bool {
+    Path::new(command).extension().is_some()
 }
 
 fn parse_absolute_input(raw: &str) -> Result<Option<PathRef>> {
@@ -645,7 +856,137 @@ mod tests {
         let verbatim = resolve_host_path(r"\\?\C:\repo\file.txt", cwd, &windows_options(None))
             .expect("verbatim");
         assert_eq!(verbatim.native, r"C:\repo\file.txt");
+        assert_eq!(verbatim.display, "/c/repo/file.txt");
         assert_eq!(verbatim.uri, "file:///C:/repo/file.txt");
+
+        let verbatim_unc =
+            resolve_host_path(r"\\?\UNC\server\share\dir", cwd, &windows_options(None))
+                .expect("verbatim unc");
+        assert_eq!(verbatim_unc.native, r"\\server\share\dir");
+        assert_eq!(verbatim_unc.display, "//server/share/dir");
+        assert_eq!(verbatim_unc.uri, "file://server/share/dir");
+    }
+
+    #[test]
+    fn path_ref_normalizes_windows_verbatim_native_paths() {
+        let drive = path_ref_for_native_path(Path::new(r"\\?\C:\Users\Ada\project"));
+        assert_eq!(drive.native, r"C:\Users\Ada\project");
+        assert_eq!(drive.display, "/c/Users/Ada/project");
+        assert_eq!(drive.uri, "file:///C:/Users/Ada/project");
+
+        let slash_drive = path_ref_for_native_path(Path::new("//?/C:/Users/Ada/project"));
+        assert_eq!(slash_drive.native, r"C:\Users\Ada\project");
+        assert_eq!(slash_drive.display, "/c/Users/Ada/project");
+        assert_eq!(slash_drive.uri, "file:///C:/Users/Ada/project");
+
+        let unc = path_ref_for_native_path(Path::new(r"\\?\UNC\server\share\project"));
+        assert_eq!(unc.native, r"\\server\share\project");
+        assert_eq!(unc.display, "//server/share/project");
+        assert_eq!(unc.uri, "file://server/share/project");
+    }
+
+    #[test]
+    fn windows_path_entries_preserve_drive_colons_and_split_git_bash_paths() {
+        assert_eq!(
+            path_entries(r"C:\Tools", HostPlatform::Windows),
+            [r"C:\Tools"]
+        );
+        assert_eq!(
+            path_entries(r"C:\Tools;D:\Bin", HostPlatform::Windows),
+            [r"C:\Tools", r"D:\Bin"]
+        );
+        assert_eq!(
+            path_entries("/c/Tools:/usr/bin", HostPlatform::Windows),
+            ["/c/Tools", "/usr/bin"]
+        );
+        assert_eq!(
+            path_entries("C:/Tools:/usr/bin", HostPlatform::Windows),
+            ["C:/Tools", "/usr/bin"]
+        );
+    }
+
+    #[test]
+    fn resolves_windows_pathext_command_shims() {
+        let temp = tempfile::tempdir().expect("temp");
+        let bin = temp.path().join("bin");
+        std::fs::create_dir_all(&bin).expect("bin");
+        let shim = bin.join("opencode.cmd");
+        std::fs::write(&shim, "@echo off\n").expect("shim");
+        let env = BTreeMap::from([("PATH".to_string(), bin.display().to_string())]);
+
+        let resolved = resolve_executable_path(
+            "opencode",
+            temp.path(),
+            &ExecutableResolveOptions {
+                platform: HostPlatform::Windows,
+                env: &env,
+            },
+        )
+        .expect("resolved");
+
+        assert_eq!(resolved, shim);
+    }
+
+    #[test]
+    fn resolves_windows_executable_before_extensionless_shell_shim() {
+        let temp = tempfile::tempdir().expect("temp");
+        let bin = temp.path().join("bin");
+        std::fs::create_dir_all(&bin).expect("bin");
+        std::fs::write(bin.join("opencode"), "#!/bin/sh\n").expect("shell shim");
+        let exe = bin.join("opencode.exe");
+        std::fs::write(&exe, "").expect("exe");
+        let env = BTreeMap::from([("PATH".to_string(), bin.display().to_string())]);
+
+        let resolved = resolve_executable_path(
+            "opencode",
+            temp.path(),
+            &ExecutableResolveOptions {
+                platform: HostPlatform::Windows,
+                env: &env,
+            },
+        )
+        .expect("resolved");
+
+        assert_eq!(resolved, exe);
+    }
+
+    #[test]
+    fn resolves_configured_relative_executable_with_windows_pathext() {
+        let temp = tempfile::tempdir().expect("temp");
+        let tools = temp.path().join("tools");
+        std::fs::create_dir_all(&tools).expect("tools");
+        let shim = tools.join("opencode.cmd");
+        std::fs::write(&shim, "@echo off\n").expect("shim");
+        let env = BTreeMap::new();
+
+        let resolved = resolve_executable_path(
+            "tools/opencode",
+            temp.path(),
+            &ExecutableResolveOptions {
+                platform: HostPlatform::Windows,
+                env: &env,
+            },
+        )
+        .expect("resolved");
+
+        assert_eq!(resolved, shim);
+    }
+
+    #[test]
+    fn unresolved_executable_returns_none() {
+        let temp = tempfile::tempdir().expect("temp");
+        let env = BTreeMap::new();
+
+        let resolved = resolve_executable_path(
+            "opencode",
+            temp.path(),
+            &ExecutableResolveOptions {
+                platform: HostPlatform::Windows,
+                env: &env,
+            },
+        );
+
+        assert!(resolved.is_none());
     }
 
     #[test]

@@ -289,6 +289,7 @@ impl SandboxPolicy {
         }
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) fn shell_writable_roots(&self) -> Vec<PathBuf> {
         let mut roots = self.writable_roots.clone();
         for root in &self.shell_extra_roots {

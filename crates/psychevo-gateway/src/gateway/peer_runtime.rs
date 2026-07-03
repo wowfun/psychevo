@@ -2,6 +2,7 @@
 pub(crate) struct ResolvedPeerTurn {
     pub(crate) agent: psychevo_runtime::AgentDefinition,
     pub(crate) backend: psychevo_runtime::AgentBackendConfig,
+    pub(crate) env: BTreeMap<String, String>,
 }
 
 pub(crate) fn resolve_peer_turn(
@@ -103,7 +104,11 @@ pub(crate) fn resolve_peer_turn(
             backend.id
         )));
     }
-    Ok(Some(ResolvedPeerTurn { agent, backend }))
+    Ok(Some(ResolvedPeerTurn {
+        agent,
+        backend,
+        env,
+    }))
 }
 
 fn clear_acp_peer_usage_update(

@@ -18,6 +18,7 @@ pub(crate) fn query_terminal_default_colors(_timeout: Duration) -> Option<Termin
     None
 }
 
+#[cfg(any(unix, test))]
 pub(crate) fn parse_terminal_default_colors(buffer: &[u8]) -> Option<TerminalDefaultColors> {
     let text = String::from_utf8_lossy(buffer);
     let foreground = parse_osc_color(&text, "10;")?;
@@ -28,6 +29,7 @@ pub(crate) fn parse_terminal_default_colors(buffer: &[u8]) -> Option<TerminalDef
     })
 }
 
+#[cfg(any(unix, test))]
 pub(crate) fn parse_osc_color(text: &str, slot: &str) -> Option<(u8, u8, u8)> {
     let start = text.find(&format!("]{slot}"))?;
     let after_slot = &text[start + slot.len() + 1..];
@@ -41,6 +43,7 @@ pub(crate) fn parse_osc_color(text: &str, slot: &str) -> Option<(u8, u8, u8)> {
     Some((r, g, b))
 }
 
+#[cfg(any(unix, test))]
 pub(crate) fn parse_hex_color_component(value: &str) -> Option<u8> {
     let value = value.trim();
     if value.is_empty() || value.len() > 4 {

@@ -6,7 +6,7 @@ pub(crate) async fn read_acp_peer_runtime_options(
     match read_acp_peer_runtime_options_v2(&peer, cwd.clone(), native_session_id.clone()).await
     {
         Ok(result) => Ok(result),
-        Err(v2_error) => {
+        Err(v2_error) if v2_error.fallback_safe => {
             match read_acp_peer_runtime_options_v1(&peer, cwd, native_session_id).await {
                 Ok(result) => Ok(result),
                 Err(v1_error) => Err(Error::Message(format!(
@@ -15,6 +15,7 @@ pub(crate) async fn read_acp_peer_runtime_options(
                 ))),
             }
         }
+        Err(v2_error) => Err(v2_error.error),
     }
 }
 
@@ -23,33 +24,13 @@ async fn read_acp_peer_runtime_options_v2(
     cwd: PathBuf,
     native_session_id: Option<String>,
 ) -> Result<AcpPeerRuntimeOptions, AcpProtocolAttemptError> {
-    let command = peer
-        .backend
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|command| !command.is_empty())
-        .ok_or_else(|| AcpProtocolAttemptError {
-            fallback_safe: false,
-            error: Error::Message(format!(
-                "agent backend `{}` is missing command",
-                peer.backend.id
-            )),
-        })?;
-    let cwd = backend_cwd(&peer.backend.cwd, &cwd);
-    let mut child = Command::new(command);
-    child
-        .args(&peer.backend.args)
-        .envs(&peer.backend.env)
-        .current_dir(&cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    let (mut child, cwd) = acp_backend_attempt_command(peer, &cwd)?;
     let mut child = child.spawn().map_err(|err| AcpProtocolAttemptError {
         fallback_safe: false,
         error: Error::Message(format!(
-            "failed to spawn ACP backend `{}` ({command}): {err}",
-            peer.backend.id
+            "failed to spawn ACP backend `{}` ({}): {err}",
+            peer.backend.id,
+            acp_backend_command_text(peer).unwrap_or("<missing>")
         )),
     })?;
     let stdin = child.stdin.take().ok_or_else(|| AcpProtocolAttemptError {
@@ -125,31 +106,12 @@ async fn read_acp_peer_runtime_options_v1(
     cwd: PathBuf,
     native_session_id: Option<String>,
 ) -> psychevo_runtime::Result<AcpPeerRuntimeOptions> {
-    let command = peer
-        .backend
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|command| !command.is_empty())
-        .ok_or_else(|| {
-            Error::Message(format!(
-                "agent backend `{}` is missing command",
-                peer.backend.id
-            ))
-        })?;
-    let cwd = backend_cwd(&peer.backend.cwd, &cwd);
-    let mut child = Command::new(command);
-    child
-        .args(&peer.backend.args)
-        .envs(&peer.backend.env)
-        .current_dir(&cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    let (mut child, cwd) = acp_backend_command(peer, &cwd)?;
     let mut child = child.spawn().map_err(|err| {
         Error::Message(format!(
-            "failed to spawn ACP backend `{}` ({command}): {err}",
-            peer.backend.id
+            "failed to spawn ACP backend `{}` ({}): {err}",
+            peer.backend.id,
+            acp_backend_command_text(peer).unwrap_or("<missing>")
         ))
     })?;
     let stdin = child.stdin.take().ok_or_else(|| {

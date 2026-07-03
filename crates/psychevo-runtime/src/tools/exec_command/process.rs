@@ -196,7 +196,7 @@ pub(crate) fn resolve_exec_cwd(accepted_cwd: &Path, raw: Option<&str>) -> Result
         Some(raw) => crate::host_paths::resolve_input_path(raw, accepted_cwd)?,
         None => accepted_cwd.to_path_buf(),
     };
-    let path = path.canonicalize()?;
+    let path = crate::paths::normalize_canonical_cwd(path.canonicalize()?);
     if !path.is_dir() {
         return Err(Error::Message(format!(
             "cwd is not a directory: {}",
@@ -371,4 +371,14 @@ pub(crate) fn kill_process_group_by_pid(pid: u32) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn exec_command_cwd_normalizer_removes_windows_verbatim_prefix() {
+        let cwd = crate::paths::normalize_canonical_cwd(std::path::PathBuf::from(r"\\?\C:\repo"));
+
+        assert_eq!(cwd, std::path::PathBuf::from(r"C:\repo"));
+    }
 }

@@ -57,6 +57,14 @@ the effective label and then the backend id, so an enabled backend can generate
 a model-visible agent without duplicating the backend name in a description
 field.
 
+`command` is a user-facing executable setting, not an arbitrary shell command
+line. Gateway resolves it against the effective launch environment before
+starting the ACP process. On Windows Git Bash, a bare command such as
+`opencode` must resolve through native executable lookup including `PATHEXT`
+entries like `opencode.cmd`, while the persisted config continues to store the
+bare command string. `args` remain structured process arguments and are not
+joined into shell text.
+
 Profile-global and project config use the normal deep-merge behavior. The active
 profile's `$PSYCHEVO_HOME/config.toml` supplies reusable backends for that
 profile, while the current cwd's `.psychevo/config.toml` may add or

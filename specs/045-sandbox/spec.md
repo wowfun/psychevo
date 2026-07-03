@@ -135,6 +135,12 @@ Shell enforcement is selected by platform:
 - WSL2 uses the Linux Landlock path
 - native Windows is unsupported in v1
 
+The Linux Landlock crate is a Linux-only dependency. Native Windows builds must
+not compile or link Landlock; they report the sandbox backend as `unsupported`
+and fail closed when sandbox enforcement is enabled.
+Landlock and Seatbelt shell-enforcement helper code must be compiled only on
+the platforms that can use those backends.
+
 If `[sandbox].enabled = true` and the platform backend is unsupported, missing,
 or reports that policy was not enforced, shell execution fails closed. It must
 not silently run unconfined.
@@ -196,7 +202,9 @@ surface; v1 does not add new RPC request fields.
   roots.
 - Sandboxed shell children include the `PSYCHEVO_SANDBOX*` markers.
 - Sandbox-enabled `tty=true` is rejected before spawn.
-- Backend-unavailable and native Windows cases fail closed.
+- Backend-unavailable and native Windows cases fail closed without compiling
+  Linux-only Landlock dependencies or unused native shell-enforcement helpers
+  into native Windows builds.
 - macOS and Linux/WSL smoke tests verify inside-root write allowed and
   outside-root write denied when the backend is available.
 - User shell and Gateway `shell/start` use the same effective sandbox policy as

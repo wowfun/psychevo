@@ -174,7 +174,11 @@ fn resolve_peer_delegate(
             backend.id
         )));
     }
-    Ok(ResolvedPeerTurn { agent, backend })
+    Ok(ResolvedPeerTurn {
+        agent,
+        backend,
+        env,
+    })
 }
 
 #[derive(Debug)]

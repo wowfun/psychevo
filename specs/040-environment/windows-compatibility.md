@@ -118,6 +118,11 @@ scopes, and terminal cwd values must normalize user or shell input before using
 native filesystem APIs. Session/workspace and automation cwd lookups compare the
 stored canonical native cwd string. `/c/repo`, `C:\repo`, and `C:/repo` should
 normalize to the same native cwd before storage or lookup on native Windows.
+Supported verbatim inputs such as `\\?\C:\repo` and
+`\\?\UNC\server\share\repo` normalize to the same native cwd strings as their
+non-verbatim drive or UNC forms. Verbatim prefixes must not appear in stored cwd
+identity, Gateway cwd identity, Workbench cwd display, or model-visible tool
+metadata unless an explicit low-level diagnostic is showing raw host API output.
 
 ## Storage and Wire
 

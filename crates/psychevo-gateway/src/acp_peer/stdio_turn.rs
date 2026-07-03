@@ -177,33 +177,13 @@ async fn run_acp_stdio_turn_v2(
     peer: &ResolvedPeerTurn,
     turn: &AcpPeerTurnContext,
 ) -> Result<AcpTurnOutput, AcpProtocolAttemptError> {
-    let command = peer
-        .backend
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|command| !command.is_empty())
-        .ok_or_else(|| AcpProtocolAttemptError {
-            fallback_safe: false,
-            error: Error::Message(format!(
-                "agent backend `{}` is missing command",
-                peer.backend.id
-            )),
-        })?;
-    let cwd = backend_cwd(&peer.backend.cwd, &turn.cwd);
-    let mut child = Command::new(command);
-    child
-        .args(&peer.backend.args)
-        .envs(&peer.backend.env)
-        .current_dir(&cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    let (mut child, _launch_cwd) = acp_backend_attempt_command(peer, &turn.cwd)?;
     let mut child = child.spawn().map_err(|err| AcpProtocolAttemptError {
         fallback_safe: false,
         error: Error::Message(format!(
-            "failed to spawn ACP backend `{}` ({command}): {err}",
-            peer.backend.id
+            "failed to spawn ACP backend `{}` ({}): {err}",
+            peer.backend.id,
+            acp_backend_command_text(peer).unwrap_or("<missing>")
         )),
     })?;
     let stdin = child.stdin.take().ok_or_else(|| AcpProtocolAttemptError {
@@ -460,31 +440,12 @@ async fn run_acp_stdio_turn_v1(
     peer: &ResolvedPeerTurn,
     turn: &AcpPeerTurnContext,
 ) -> psychevo_runtime::Result<AcpTurnOutput> {
-    let command = peer
-        .backend
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|command| !command.is_empty())
-        .ok_or_else(|| {
-            Error::Message(format!(
-                "agent backend `{}` is missing command",
-                peer.backend.id
-            ))
-        })?;
-    let cwd = backend_cwd(&peer.backend.cwd, &turn.cwd);
-    let mut child = Command::new(command);
-    child
-        .args(&peer.backend.args)
-        .envs(&peer.backend.env)
-        .current_dir(&cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    let (mut child, _launch_cwd) = acp_backend_command(peer, &turn.cwd)?;
     let mut child = child.spawn().map_err(|err| {
         Error::Message(format!(
-            "failed to spawn ACP backend `{}` ({command}): {err}",
-            peer.backend.id
+            "failed to spawn ACP backend `{}` ({}): {err}",
+            peer.backend.id,
+            acp_backend_command_text(peer).unwrap_or("<missing>")
         ))
     })?;
     let stdin = child.stdin.take().ok_or_else(|| {
