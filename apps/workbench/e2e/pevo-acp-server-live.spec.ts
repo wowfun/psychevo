@@ -117,8 +117,8 @@ function spawnPevoAcp(root: string, baseUrl: string, pevoBin?: string): ChildPro
   const configPath = path.join(root, "config.toml");
   const config = `model = "mock/default"
 
-[provider.mock.options]
-base_url = "${baseUrl}/v1"
+[provider.mock]
+api = "${baseUrl}/v1"
 no_auth = true
 
 [provider.mock.models.default]

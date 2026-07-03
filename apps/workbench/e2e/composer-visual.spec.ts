@@ -13,8 +13,8 @@ const MANY_MODEL_CONFIG = `
 [provider.lmstudio.models."epsilon-5"]
 [provider.lmstudio.models."zeta-6"]
 
-[provider.opencode-zen.options]
-base_url = "https://opencode.ai/zen/v1"
+[provider.opencode-zen]
+api = "https://opencode.ai/zen/v1"
 no_auth = true
 
 [provider.opencode-zen.models."big-pickle"]

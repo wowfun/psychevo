@@ -425,9 +425,9 @@ fn write_tui_capture_config(path: &Path, port: &str) -> Result<()> {
         format!(
             r#"model = "mock/mock-model"
 
-[provider.mock.options]
-base_url = "http://127.0.0.1:{port}/v1"
-api_key_env = "TEST_PROVIDER_KEY"
+[provider.mock]
+api = "http://127.0.0.1:{port}/v1"
+no_auth = true
 
 [provider.mock.models.mock-model]
 reasoning_effort = "high"

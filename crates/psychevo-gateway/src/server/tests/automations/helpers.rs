@@ -70,6 +70,9 @@ fn live_xiaomi_token_plan_web_state() -> (tempfile::TempDir, WebState) {
     .into_iter()
     .find(|key| env.get(*key).is_some_and(|value| !value.trim().is_empty()))
     .unwrap_or("XIAOMI_TOKEN_PLAN_API_KEY");
+    if let Some(api_key) = env.get(api_key_env).cloned() {
+        env.insert("XIAOMI_TOKEN_PLAN_API_KEY".to_string(), api_key);
+    }
     let base_url = env
         .get("XIAOMI_TOKEN_PLAN_BASE_URL")
         .map(String::as_str)
@@ -79,9 +82,8 @@ fn live_xiaomi_token_plan_web_state() -> (tempfile::TempDir, WebState) {
         home.join("config.toml"),
         format!(
             r#"
-[provider.xiaomi-token-plan.options]
-base_url = "{base_url}"
-api_key_env = "{api_key_env}"
+[provider.xiaomi-token-plan]
+api = "{base_url}"
 
 [provider.xiaomi-token-plan.models."mimo-v2.5-pro"]
 "#

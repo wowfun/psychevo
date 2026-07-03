@@ -110,13 +110,12 @@ test.describe("pevo Web Workbench", () => {
       live: false,
       model: "mock/automation",
       configAppend: `
-[provider.mock.options]
-base_url = "${mockProvider.baseUrl}"
-api_key_env = "MOCK_PROVIDER_KEY"
+[provider.mock]
+api = "${mockProvider.baseUrl}"
 
 [provider.mock.models.automation]
 `,
-      envFile: "MOCK_PROVIDER_KEY=test-key\n"
+      envFile: "MOCK_API_KEY=test-key\n"
     });
     try {
       await page.goto(server.url);

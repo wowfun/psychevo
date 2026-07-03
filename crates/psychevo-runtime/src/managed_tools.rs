@@ -260,15 +260,18 @@ pub(crate) fn is_executable_file(path: &Path) -> bool {
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn make_executable(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::PermissionsExt;
 
-        let mut permissions = fs::metadata(path)?.permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)?;
-    }
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub(crate) fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 

@@ -80,8 +80,8 @@ pub use config::{
     resolve_workspace_root, selected_configured_model, set_auxiliary_model,
     set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value, set_default_model,
     set_default_model_with_reasoning, set_local_toolset_enabled, set_provider_api_key,
-    setup_channel_connection, toolsets_value, update_channel_connection, upsert_channel_connection,
-    write_cached_model_catalog,
+    set_provider_model_config, setup_channel_connection, toolsets_value, update_channel_connection,
+    upsert_channel_connection, write_cached_model_catalog,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -100,7 +100,9 @@ pub use extensions::{
     TurnInputContributor, TurnItemContributor, TurnLifecycleContributor,
 };
 pub use host_paths::{
-    GitBashRuntime, PSYCHEVO_GIT_BASH_PATH, resolve_input_path, shell_is_git_bash,
+    ExecutableResolveOptions, GitBashRuntime, HostPlatform, PSYCHEVO_GIT_BASH_PATH,
+    display_path_for_native_path, normalized_native_path, resolve_executable_path,
+    resolve_input_path, shell_is_git_bash,
 };
 pub use model_state::{
     MODEL_STATE_FILE, MODEL_STATE_RECENT_LIMIT, MODEL_STATE_VERSION, ModelCwdState,
