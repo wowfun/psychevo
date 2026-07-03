@@ -600,6 +600,16 @@ fn backend_diagnostics(backend: &AgentBackendConfig) -> Vec<wire::BackendDiagnos
 pub(super) fn backend_doctor_value(
     backend: &AgentBackendConfig,
     env: &BTreeMap<String, String>,
+    cwd: &Path,
+) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
+    backend_doctor_value_for_platform(backend, env, cwd, HostPlatform::current())
+}
+
+pub(super) fn backend_doctor_value_for_platform(
+    backend: &AgentBackendConfig,
+    env: &BTreeMap<String, String>,
+    cwd: &Path,
+    platform: HostPlatform,
 ) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
     let mut checks = Vec::new();
     checks.push(wire::BackendDoctorCheck {
@@ -629,7 +639,7 @@ pub(super) fn backend_doctor_value(
         path: None,
     });
     let command_check = match backend.command.as_deref() {
-        Some(command) => match resolve_command_path(command, env) {
+        Some(command) => match resolve_command_path(command, env, cwd, platform) {
             Some(path) => wire::BackendDoctorCheck {
                 name: "command".to_string(),
                 ok: true,
@@ -660,16 +670,11 @@ pub(super) fn backend_doctor_value(
     })
 }
 
-fn resolve_command_path(command: &str, env: &BTreeMap<String, String>) -> Option<PathBuf> {
-    let command_path = PathBuf::from(command);
-    if command_path.components().count() > 1 {
-        return command_path.is_file().then_some(command_path);
-    }
-    let path_var = env
-        .get("PATH")
-        .cloned()
-        .or_else(|| std::env::var("PATH").ok())?;
-    std::env::split_paths(&path_var)
-        .map(|dir| dir.join(command))
-        .find(|path| path.is_file())
+fn resolve_command_path(
+    command: &str,
+    env: &BTreeMap<String, String>,
+    cwd: &Path,
+    platform: HostPlatform,
+) -> Option<PathBuf> {
+    resolve_executable_path(command, cwd, &ExecutableResolveOptions { platform, env })
 }

@@ -621,6 +621,7 @@ async fn handle_rpc(
             Ok(serde_json::to_value(backend_doctor_value(
                 backend,
                 &state.inner.inherited_env,
+                &scope.cwd,
             )?)?)
         }
         "backend/write" => {

@@ -175,6 +175,50 @@ command = "cursor-agent"
     assert_eq!(delete["deleted"], true);
 }
 
+#[test]
+fn backend_doctor_resolves_windows_pathext_command_shim() {
+    let temp = tempfile::tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    std::fs::create_dir_all(&bin).expect("bin");
+    let shim = bin.join("opencode.cmd");
+    std::fs::write(&shim, "@echo off\n").expect("shim");
+    let backend = AgentBackendConfig {
+        id: "opencode".to_string(),
+        kind: psychevo_runtime::AgentBackendKind::Acp,
+        enabled: true,
+        label: "OpenCode".to_string(),
+        description: None,
+        command: Some("opencode".to_string()),
+        args: vec!["acp".to_string()],
+        env: BTreeMap::new(),
+        cwd: "invocation".to_string(),
+        entrypoints: [AgentEntrypoint::Peer].into_iter().collect(),
+        client_capabilities: std::collections::BTreeSet::new(),
+        mcp_servers: std::collections::BTreeSet::new(),
+    };
+    let env = BTreeMap::from([
+        ("PATH".to_string(), bin.display().to_string()),
+        ("PATHEXT".to_string(), ".CMD".to_string()),
+    ]);
+
+    let result = super::agents::backend_doctor_value_for_platform(
+        &backend,
+        &env,
+        temp.path(),
+        HostPlatform::Windows,
+    )
+    .expect("doctor");
+    let command = result
+        .checks
+        .iter()
+        .find(|check| check.name == "command")
+        .expect("command check");
+
+    assert!(command.ok);
+    assert_eq!(command.message, "command resolved");
+    assert_eq!(command.path.as_deref(), Some(shim.to_string_lossy().as_ref()));
+}
+
 #[tokio::test]
 async fn backend_profile_write_uses_explicit_config_when_set() {
     let temp = tempfile::tempdir().expect("tempdir");
