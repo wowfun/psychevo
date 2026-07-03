@@ -138,9 +138,9 @@ describe("Workbench settings and backend controls", () => {
     expect(gatewayMock.requestLog.some((entry) => entry.method === "model/settings/read")).toBe(true);
 
     const zenRow = within(modelsPanel).getByText("OpenCode Zen").closest(".modelProviderRow") as HTMLElement;
-    fireEvent.click(within(zenRow).getByRole("button", { name: "Fetch" }));
-    expect(await within(modelsPanel).findByText("OpenCode Zen: catalog updated")).toBeTruthy();
-    expect(within(zenRow).getByRole("button", { name: "2 models" })).toBeTruthy();
+    fireEvent.click(within(zenRow).getByRole("button", { name: "Edit" }));
+    fireEvent.click(within(modelsPanel).getByRole("button", { name: "Fetch models" }));
+    expect(await within(modelsPanel).findByText("OpenCode Zen catalog updated")).toBeTruthy();
     expect(gatewayMock.requestLog).toContainEqual({
       method: "model/provider/catalog",
       params: expect.objectContaining({
@@ -250,8 +250,9 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Models" }));
     const modelsPanel = await within(settingsRegion).findByRole("region", { name: "Models" });
     const zenRow = within(modelsPanel).getByText("OpenCode Zen").closest(".modelProviderRow") as HTMLElement;
-    fireEvent.click(within(zenRow).getByRole("button", { name: "Fetch" }));
-    expect(await within(modelsPanel).findByText("OpenCode Zen: catalog updated")).toBeTruthy();
+    fireEvent.click(within(zenRow).getByRole("button", { name: "Edit" }));
+    fireEvent.click(within(modelsPanel).getByRole("button", { name: "Fetch models" }));
+    expect(await within(modelsPanel).findByText("OpenCode Zen catalog updated")).toBeTruthy();
 
     const defaultRow = within(modelsPanel).getByText("Default model").closest(".modelAssignmentRow") as HTMLElement;
     fireEvent.click(within(defaultRow).getByRole("button", { name: "Default model" }));
@@ -298,7 +299,7 @@ describe("Workbench settings and backend controls", () => {
       defaultReasoningEffort: "high",
       modelOptions: [
         ...(gatewayMock.modelSettings.modelOptions as Array<Record<string, unknown>>),
-        { provider: "opencode-zen", id: "big-pickle", value: "opencode-zen/big-pickle", label: null, providerLabel: "OpenCode Zen", free: true, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
+        { provider: "opencode-zen", id: "big-pickle", value: "opencode-zen/big-pickle", name: null, providerName: "OpenCode Zen", free: true, limit: { context: null, output: null }, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
       ]
     };
 

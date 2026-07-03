@@ -57,10 +57,10 @@ afterEach(() => {
     providers: [
       {
         id: "opencode-zen",
-        label: "OpenCode Zen",
+        name: "OpenCode Zen",
         builtIn: true,
         configured: false,
-        baseUrl: "https://opencode.ai/zen/v1",
+        api: "https://opencode.ai/zen/v1",
         apiKeyEnv: "OPENCODE_ZEN_API_KEY",
         credentialStatus: "notRequired",
         noAuth: true,
@@ -69,10 +69,10 @@ afterEach(() => {
       },
       {
         id: "xiaomi-token-plan",
-        label: "Xiaomi Token Plan",
+        name: "Xiaomi Token Plan",
         builtIn: true,
         configured: true,
-        baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+        api: "https://token-plan-cn.xiaomimimo.com/v1",
         apiKeyEnv: "XIAOMI_TOKEN_PLAN_API_KEY",
         credentialStatus: "present",
         noAuth: false,
@@ -81,10 +81,10 @@ afterEach(() => {
       },
       {
         id: "custom",
-        label: "Custom",
+        name: "Custom",
         builtIn: false,
         configured: false,
-        baseUrl: null,
+        api: null,
         apiKeyEnv: null,
         credentialStatus: "missing",
         noAuth: false,
@@ -97,13 +97,13 @@ afterEach(() => {
       { task: "compression", label: "Context compression", provider: "xiaomi-token-plan", model: "mimo-v2.5-pro", reasoningEffort: null, effectiveModel: "xiaomi-token-plan/mimo-v2.5-pro" }
     ],
     modelOptions: [
-      { provider: "xiaomi-token-plan", id: "mimo-v2.5-pro", value: "xiaomi-token-plan/mimo-v2.5-pro", label: null, providerLabel: "Xiaomi Token Plan", free: false, contextLimit: 1048576, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] },
-      { provider: "xiaomi", id: "xiaomi-token-high", value: "xiaomi/xiaomi-token-high", label: null, providerLabel: "Xiaomi", free: false, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
+      { provider: "xiaomi-token-plan", id: "mimo-v2.5-pro", value: "xiaomi-token-plan/mimo-v2.5-pro", name: null, providerName: "Xiaomi Token Plan", free: false, limit: { context: 1048576, output: null }, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] },
+      { provider: "xiaomi", id: "xiaomi-token-high", value: "xiaomi/xiaomi-token-high", name: null, providerName: "Xiaomi", free: false, limit: { context: null, output: null }, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
     ]
   };
   gatewayMock.modelCatalog = [
-    { provider: "opencode-zen", id: "mimo-v2.5-free", value: "opencode-zen/mimo-v2.5-free", label: null, providerLabel: "OpenCode Zen", free: true, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] },
-    { provider: "opencode-zen", id: "deepseek-v4-pro", value: "opencode-zen/deepseek-v4-pro", label: null, providerLabel: "OpenCode Zen", free: false, contextLimit: null, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
+    { provider: "opencode-zen", id: "mimo-v2.5-free", value: "opencode-zen/mimo-v2.5-free", name: null, providerName: "OpenCode Zen", free: true, limit: { context: null, output: null }, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] },
+    { provider: "opencode-zen", id: "deepseek-v4-pro", value: "opencode-zen/deepseek-v4-pro", name: null, providerName: "OpenCode Zen", free: false, limit: { context: null, output: null }, reasoningSupported: true, reasoningEfforts: ["none", "low", "medium", "high"] }
   ];
   gatewayMock.observabilityRead = null;
   gatewayMock.usageRead = null;
@@ -114,6 +114,7 @@ afterEach(() => {
   gatewayMock.optimisticLog.length = 0;
   gatewayMock.projectBranch = "main";
   gatewayMock.requestLog.length = 0;
+  gatewayMock.xtermTerminalOptions.length = 0;
   gatewayMock.subscribers = [];
   gatewayMock.archivedSessionSummaries = [];
   gatewayMock.browserWorkspaces = null;

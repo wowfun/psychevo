@@ -100,7 +100,7 @@ reasoning = false
         .expect("selected model detail");
     assert_eq!(selected_detail["provider"].as_str(), Some("deepseek"));
     assert_eq!(selected_detail["id"].as_str(), Some("deepseek-chat"));
-    assert_eq!(selected_detail["providerLabel"].as_str(), Some("DeepSeek"));
+    assert_eq!(selected_detail["providerName"].as_str(), Some("DeepSeek"));
     assert_eq!(selected_detail["reasoningSupported"].as_bool(), None);
     assert!(
         selected_detail["reasoningEfforts"]

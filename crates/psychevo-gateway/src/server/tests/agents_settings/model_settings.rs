@@ -16,11 +16,17 @@ async fn model_settings_rpc_saves_zen_no_auth_and_auxiliary_assignment() {
             params: Some(json!({
                 "scope": "global",
                 "providerId": "zen",
-                "label": "OpenCode Zen",
-                "baseUrl": "https://opencode.ai/zen/v1",
-                "apiKeyEnv": null,
+                "name": "OpenCode Zen",
+                "api": "https://opencode.ai/zen/v1",
                 "apiKey": null,
-                "noAuth": true
+                "noAuth": true,
+                "model": {
+                    "id": "mimo-v2.5-free",
+                    "name": "MiMo Free",
+                    "limit": { "context": 131072, "output": 8192 },
+                    "advancedFormat": "json",
+                    "advanced": "{\"reasoning\":true}"
+                }
             })),
         },
     )
@@ -61,9 +67,14 @@ async fn model_settings_rpc_saves_zen_no_auth_and_auxiliary_assignment() {
     assert_eq!(assignment["reasoningEffort"], "high");
 
     let config = std::fs::read_to_string(state.inner.home.join("config.toml")).expect("config");
-    assert!(config.contains("[provider.opencode-zen.options]"));
+    assert!(config.contains("[provider.opencode-zen]"));
+    assert!(config.contains("api = \"https://opencode.ai/zen/v1\""));
     assert!(config.contains("no_auth = true"));
     assert!(!config.contains("api_key_env"));
+    assert!(config.contains("name = \"MiMo Free\""));
+    assert!(config.contains("context = 131072"));
+    assert!(config.contains("output = 8192"));
+    assert!(config.contains("reasoning = true"));
     assert!(config.contains("[auxiliary.title_generation]"));
     assert!(config.contains("provider = \"opencode-zen\""));
     assert!(config.contains("id = \"mimo-v2.5-free\""));
@@ -122,10 +133,8 @@ async fn model_provider_catalog_rpc_fetches_fake_catalog() {
         format!(
             r#"
 [provider.localmodels]
-label = "Local Models"
-
-[provider.localmodels.options]
-base_url = "{base_url}"
+name = "Local Models"
+api = "{base_url}"
 no_auth = true
 "#
         ),
@@ -230,15 +239,13 @@ async fn model_settings_global_scope_ignores_project_model_override() {
 id = "opencode-zen/big-pickle"
 reasoning_effort = "high"
 
-[provider.opencode-zen.options]
-base_url = "https://opencode.ai/zen/v1"
+[provider.opencode-zen]
+api = "https://opencode.ai/zen/v1"
 no_auth = true
 
 [provider.xiaomi-token-plan]
-label = "Xiaomi Token Plan"
-
-[provider.xiaomi-token-plan.options]
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+name = "Xiaomi Token Plan"
+api = "https://token-plan-cn.xiaomimimo.com/v1"
 no_auth = true
 "#,
     )

@@ -323,9 +323,9 @@ function modelSearchText(option: ModelOptionView): string {
   return [
     option.value,
     option.id,
-    option.label,
+    option.name,
     option.provider,
-    option.providerLabel
+    option.providerName
   ].filter(Boolean).join(" ").toLocaleLowerCase();
 }
 
@@ -339,7 +339,7 @@ function groupAdjacentModelOptions(options: ModelOptionView[]): ModelOptionGroup
   const groups: ModelOptionGroup[] = [];
   for (const option of options) {
     const provider = option.provider?.trim() || "";
-    const label = option.providerLabel?.trim() || provider || "Unknown provider";
+    const label = option.providerName?.trim() || provider || "Unknown provider";
     const last = groups.at(-1);
     if (last && last.provider === provider) {
       last.options.push(option);
@@ -388,10 +388,10 @@ function fallbackModelOption(value: string): ModelOptionView {
     provider,
     id,
     value,
-    label: null,
-    providerLabel: null,
+    name: null,
+    providerName: null,
     free: false,
-    contextLimit: null,
+    limit: { context: null, output: null },
     reasoningSupported: null,
     reasoningEfforts: []
   };
@@ -413,7 +413,7 @@ function splitProviderModel(value: string): { provider: string; id: string } {
 }
 
 function modelShortLabel(option: ModelOptionView): string {
-  return option.label?.trim() || option.id || splitProviderModel(option.value).id || option.value;
+  return option.name?.trim() || option.id || splitProviderModel(option.value).id || option.value;
 }
 
 export function reasoningEffortsForModelOption(

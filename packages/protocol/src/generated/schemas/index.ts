@@ -223,6 +223,8 @@ export const gatewaySchemas = {
   ModelSettingsScope: modelStateSchemas.ModelSettingsScope,
   ModelSettingsReadParams: modelStateSchemas.ModelSettingsReadParams,
   ModelProviderSaveParams: modelCatalogSchemas.ModelProviderSaveParams,
+  ModelProviderSaveModelParams: modelStateSchemas.ModelProviderSaveModelParams,
+  ModelLimitView: modelStateSchemas.ModelLimitView,
   ModelProviderCatalogParams: modelCatalogSchemas.ModelProviderCatalogParams,
   ModelStateReadParams: modelStateSchemas.ModelStateReadParams,
   ModelStateSetParams: modelStateSchemas.ModelStateSetParams,

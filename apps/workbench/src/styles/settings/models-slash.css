@@ -55,12 +55,15 @@
 .modelSettingsToolbar {
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
   color: var(--pevo-muted);
   font-size: var(--pevo-font-size-xsmall);
 }
 
 .modelSettingsToolbar button,
-.modelProviderActions button,
+.modelProviderRow button,
+.modelProviderEditorRow button,
+.modelProviderEditorActions button,
 .modelAssignmentControls button {
   display: inline-flex;
   align-items: center;
@@ -80,10 +83,19 @@
 }
 
 .modelSettingsToolbar button:disabled,
-.modelProviderActions button:disabled,
+.modelProviderRow button:disabled,
+.modelProviderEditorRow button:disabled,
+.modelProviderEditorActions button:disabled,
 .modelAssignmentControls button:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.modelSettingsToolbar button.is-active,
+.modelProviderRow button.is-active {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
+  box-shadow: var(--pevo-shadow-active);
 }
 
 .modelSettingsMessage {
@@ -244,7 +256,7 @@
 .modelAssignmentPanel,
 .modelProvidersPanel {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -303,64 +315,149 @@
   opacity: 0.55;
 }
 
-.modelProviderRow {
-  grid-template-columns: minmax(160px, 0.28fr) minmax(0, 1fr) auto;
-  padding: 8px 0;
-  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
-}
-
-.modelProviderIdentity,
-.modelProviderFields,
-.modelProviderActions {
-  min-width: 0;
-}
-
-.modelProviderBadges {
+.modelProvidersHeader {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: end;
+  justify-content: space-between;
   min-width: 0;
-  margin-top: 5px;
+  padding-top: 6px;
 }
 
-.modelProviderBadges span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  min-height: 20px;
-  padding: 0 5px;
+.modelProvidersHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.modelProvidersHeader strong {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-session);
+  font-weight: 760;
+}
+
+.modelProvidersHeader span {
   color: var(--pevo-muted);
-  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 42%);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
-  border-radius: var(--pevo-radius-xs);
   font-size: var(--pevo-font-size-xsmall);
 }
 
-.modelProviderFields {
+.modelProviderStack {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 6px;
-}
-
-.modelProviderFields label {
-  display: grid;
-  gap: 3px;
+  gap: 0;
   min-width: 0;
 }
 
-.modelProviderFields label > span {
+.modelProviderRow {
+  grid-template-columns: minmax(168px, 0.34fr) minmax(84px, auto) auto;
+  padding: 9px 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.modelProviderRow button {
+  justify-self: end;
+  width: auto;
+  min-width: 84px;
+}
+
+.modelProviderIdentity,
+.modelProviderStatus,
+.modelProviderEditor {
+  min-width: 0;
+}
+
+.modelProviderStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: 24px;
+  padding: 0 7px;
+  color: color-mix(in oklch, #1f7a5b, var(--pevo-ink) 28%);
+  background: color-mix(in oklch, #1f7a5b, transparent 88%);
+  border: 1px solid color-mix(in oklch, #1f7a5b, transparent 72%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 700;
+}
+
+.modelProviderStatus[data-status="notRequired"] {
+  color: color-mix(in oklch, #5b638a, var(--pevo-ink) 34%);
+  background: color-mix(in oklch, #5b638a, transparent 88%);
+  border-color: color-mix(in oklch, #5b638a, transparent 72%);
+}
+
+.modelProviderEditor {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0 14px 12px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  border-left: 2px solid color-mix(in oklch, var(--pevo-accent), #258a7a 36%);
+}
+
+.modelProviderEditorForm {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.modelProviderEditorRow {
+  display: grid;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.modelProviderEditorRow + .modelProviderEditorRow {
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 70%);
+}
+
+.modelProviderEditorRowProvider {
+  grid-template-columns: minmax(190px, 0.72fr) minmax(180px, 0.58fr);
+}
+
+.modelProviderEditorRowAuth {
+  grid-template-columns: minmax(260px, 1.35fr) minmax(160px, 0.74fr) minmax(170px, 0.78fr) auto;
+}
+
+.modelProviderEditorRowModel {
+  grid-template-columns: minmax(260px, 1.28fr) auto minmax(180px, 0.72fr);
+}
+
+.modelProviderEditorRowLimits {
+  grid-template-columns: minmax(130px, 180px) minmax(130px, 180px) minmax(120px, 160px);
+}
+
+.modelProviderEditorRowAdvanced {
+  align-items: flex-start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.modelProviderEditorRowAdvanced > label {
+  align-self: start;
+}
+
+.modelProviderEditor label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.modelProviderEditor label > span {
   overflow: hidden;
   color: var(--pevo-muted);
   font-size: 0.68rem;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.modelProviderFields input {
+.modelProviderEditor input,
+.modelProviderEditor select,
+.modelProviderEditor textarea {
+  box-sizing: border-box;
   min-width: 0;
   width: 100%;
   min-height: 30px;
+  padding: 0 8px;
   color: var(--pevo-ink);
   background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
   border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
@@ -369,8 +466,16 @@
   font-size: var(--pevo-font-size-small);
 }
 
-.modelProviderFields input {
-  padding: 0 8px;
+.modelProviderEditor input[readonly] {
+  color: var(--pevo-muted);
+}
+
+.modelProviderEditor textarea {
+  min-height: 86px;
+  padding: 7px 8px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  line-height: 1.35;
 }
 
 .modelNoAuthToggle {
@@ -380,8 +485,48 @@
   min-height: 30px;
 }
 
-.modelProviderActions {
+.modelProviderFetchButton {
+  align-self: end;
+  min-height: 30px;
+}
+
+.modelProviderEditorActions {
   display: inline-flex;
-  justify-content: flex-end;
-  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .modelAssignmentRow,
+  .modelProviderRow {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .modelAssignmentControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modelProviderStatus {
+    justify-self: start;
+  }
+
+  .modelProviderRow button {
+    justify-self: start;
+  }
+
+  .modelProviderEditorRow,
+  .modelProviderEditorRowProvider,
+  .modelProviderEditorRowAuth,
+  .modelProviderEditorRowModel,
+  .modelProviderEditorRowLimits,
+  .modelProviderEditorRowAdvanced {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modelProviderFetchButton {
+    justify-self: start;
+  }
 }

@@ -257,28 +257,56 @@ vi.mock("@psychevo/client", async () => {
       if (method === "model/provider/save") {
         const record = params as {
           providerId: string;
-          label: string;
-          baseUrl: string;
-          apiKeyEnv?: string | null;
+          name?: string | null;
+          api: string;
           noAuth?: boolean;
+          model?: {
+            id: string;
+            name?: string | null;
+            limit?: { context?: number | null; output?: number | null };
+          } | null;
         };
+        const providerName = record.name ?? record.providerId;
+        const existingProviders = gatewayMock.modelSettings.providers as Array<Record<string, unknown>>;
+        const nextProvider = {
+          id: record.providerId,
+          name: providerName,
+          builtIn: existingProviders.some((provider) => provider.id === record.providerId && provider.builtIn === true),
+          configured: true,
+          api: record.api,
+          apiKeyEnv: record.noAuth ? null : `${record.providerId.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "")}_API_KEY`,
+          credentialStatus: record.noAuth ? "notRequired" : "present",
+          noAuth: Boolean(record.noAuth),
+          canFetchModels: true,
+          unavailableReason: null
+        };
+        const updatedProviders = existingProviders.some((provider) => provider.id === record.providerId)
+          ? existingProviders.map((provider) => (
+            provider.id === record.providerId ? { ...provider, ...nextProvider } : provider
+          ))
+          : [...existingProviders.filter((provider) => provider.id !== "custom"), nextProvider, ...existingProviders.filter((provider) => provider.id === "custom")];
         gatewayMock.modelSettings = {
           ...gatewayMock.modelSettings,
-          providers: (gatewayMock.modelSettings.providers as Array<Record<string, unknown>>).map((provider) => (
-            provider.id === record.providerId
-              ? {
-                  ...provider,
-                  label: record.label,
-                  configured: true,
-                  baseUrl: record.baseUrl,
-                  apiKeyEnv: record.apiKeyEnv ?? null,
-                  credentialStatus: record.noAuth ? "notRequired" : "present",
-                  noAuth: Boolean(record.noAuth),
-                  canFetchModels: true,
-                  unavailableReason: null
-                }
-              : provider
-          ))
+          providers: updatedProviders,
+          modelOptions: record.model?.id
+            ? gatewayMock.mergeModelOptions(
+                gatewayMock.modelSettings.modelOptions as Array<Record<string, unknown>>,
+                [{
+                  provider: record.providerId,
+                  id: record.model.id,
+                  value: `${record.providerId}/${record.model.id}`,
+                  name: record.model.name ?? null,
+                  providerName,
+                  free: Boolean(record.noAuth && record.providerId === "opencode-zen"),
+                  limit: {
+                    context: record.model.limit?.context ?? null,
+                    output: record.model.limit?.output ?? null
+                  },
+                  reasoningSupported: true,
+                  reasoningEfforts: ["none", "low", "medium", "high"]
+                }]
+              )
+            : gatewayMock.modelSettings.modelOptions
         };
         return gatewayMock.modelSettingsResult();
       }
@@ -1077,6 +1105,7 @@ vi.mock("@xterm/xterm", () => {
 
     constructor(options: Record<string, unknown>) {
       this.options = options;
+      gatewayMock.xtermTerminalOptions.push(options);
     }
 
     dispose = vi.fn();

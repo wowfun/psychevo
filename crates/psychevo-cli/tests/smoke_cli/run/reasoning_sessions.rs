@@ -387,9 +387,8 @@ pub(crate) fn cli_run_errors_use_selected_output_format() {
         r#"
 model = "custom/local"
 
-[provider.custom.options]
-base_url = "https://example.invalid/v1"
-api_key_env = "PSYCHEVO_TEST_MISSING_KEY_SHOULD_NOT_EXIST"
+[provider.custom]
+api = "https://example.invalid/v1"
 
 [provider.custom.models.local]
 "#,

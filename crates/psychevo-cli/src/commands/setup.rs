@@ -690,7 +690,7 @@ mod tests {
             .expect("setup");
 
         let config = fs::read_to_string(home.join("config.toml")).expect("config");
-        assert!(config.contains(&format!("base_url = \"{}\"", server.base_url)));
+        assert!(config.contains(&format!("api = \"{}\"", server.base_url)));
         assert!(config.contains("api_key_env = \"DEEPSEEK_API_KEY\""));
         assert!(config.contains("model = \"deepseek/remote-model\""));
         let env = fs::read_to_string(home.join(".env")).expect("env");
@@ -733,7 +733,7 @@ mod tests {
                 .expect("setup");
 
             let config = fs::read_to_string(home.join("config.toml")).expect("config");
-            assert!(config.contains(&format!("base_url = \"{expected}\"")));
+            assert!(config.contains(&format!("api = \"{expected}\"")));
             assert!(config.contains("api_key_env = \"GLM_API_KEY\""));
             assert!(config.contains("model = \"zai/glm-5.2\""));
             assert!(io.output.contains("Could not fetch models: GLM_API_KEY"));
@@ -814,7 +814,7 @@ mod tests {
 
         let config = fs::read_to_string(home.join("config.toml")).expect("config");
         assert!(config.contains("xiaomi-token-plan"));
-        assert!(config.contains("base_url = \"https://token-plan-sgp.xiaomimimo.com/v1\""));
+        assert!(config.contains("api = \"https://token-plan-sgp.xiaomimimo.com/v1\""));
         assert!(config.contains("api_key_env = \"XIAOMI_TOKEN_PLAN_API_KEY\""));
         assert!(config.contains("model = \"xiaomi-token-plan/mimo-v2.5-pro\""));
     }
@@ -863,7 +863,7 @@ mod tests {
 
         let config = fs::read_to_string(home.join("config.toml")).expect("config");
         assert!(config.contains("mock-custom"));
-        assert!(config.contains(&format!("base_url = \"{}\"", server.base_url)));
+        assert!(config.contains(&format!("api = \"{}\"", server.base_url)));
         assert!(config.contains("api_key_env = \"MOCK_CUSTOM_API_KEY\""));
         assert!(config.contains("model = \"mock-custom/custom-model\""));
         assert!(io.output.contains("No models returned"));

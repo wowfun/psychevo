@@ -1,9 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "ModelOptionView": {
+    "ModelLimitView": {
       "properties": {
-        "contextLimit": {
+        "context": {
           "default": null,
           "format": "uint64",
           "minimum": 0.0,
@@ -12,6 +12,20 @@
             "null"
           ]
         },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelOptionView": {
+      "properties": {
         "free": {
           "default": false,
           "type": "boolean"
@@ -19,7 +33,18 @@
         "id": {
           "type": "string"
         },
-        "label": {
+        "limit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelLimitView"
+            }
+          ],
+          "default": {
+            "context": null,
+            "output": null
+          }
+        },
+        "name": {
           "default": null,
           "type": [
             "string",
@@ -29,7 +54,7 @@
         "provider": {
           "type": "string"
         },
-        "providerLabel": {
+        "providerName": {
           "default": null,
           "type": [
             "string",

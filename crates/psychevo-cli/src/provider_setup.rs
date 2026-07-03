@@ -167,27 +167,29 @@ pub(crate) fn upsert_provider_options(
     api_key_env: &str,
 ) -> Result<()> {
     let base_url = validate_base_url(base_url)?;
-    validate_api_key_env(api_key_env)?;
+    let api_key_env = validate_api_key_env(api_key_env)?;
     let config_dir = config_dir.to_path_buf();
+    let _ = remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.label"))?;
+    let _ = remove_config_value(
+        config_dir.clone(),
+        &format!("provider.{provider_id}.options"),
+    )?;
     set_config_value(
         config_dir.clone(),
-        &format!("provider.{provider_id}.label"),
+        &format!("provider.{provider_id}.name"),
         json!(label.trim()),
     )?;
     set_config_value(
         config_dir.clone(),
-        &format!("provider.{provider_id}.options.base_url"),
+        &format!("provider.{provider_id}.api"),
         json!(base_url),
     )?;
     set_config_value(
         config_dir.clone(),
-        &format!("provider.{provider_id}.options.api_key_env"),
-        json!(api_key_env.trim()),
+        &format!("provider.{provider_id}.api_key_env"),
+        json!(api_key_env),
     )?;
-    let _ = remove_config_value(
-        config_dir,
-        &format!("provider.{provider_id}.options.no_auth"),
-    )?;
+    let _ = remove_config_value(config_dir, &format!("provider.{provider_id}.no_auth"))?;
     Ok(())
 }
 

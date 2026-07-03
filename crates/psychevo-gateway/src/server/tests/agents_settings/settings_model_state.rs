@@ -44,6 +44,34 @@ async fn settings_read_returns_workbench_project_and_controls() {
     );
 }
 
+#[test]
+fn settings_workbench_display_cwd_strips_windows_verbatim_prefixes() {
+    assert_eq!(
+        display_cwd(std::path::Path::new(r"\\?\C:\Users\Ada\project")),
+        "/c/Users/Ada/project"
+    );
+    assert_eq!(
+        display_cwd(std::path::Path::new("//?/C:/Users/Ada/project")),
+        "/c/Users/Ada/project"
+    );
+    assert_eq!(
+        display_cwd(std::path::Path::new(r"\\?\UNC\server\share\project")),
+        "//server/share/project"
+    );
+}
+
+#[test]
+fn settings_workbench_display_cwd_preserves_home_relative_display_after_normalization() {
+    assert_eq!(
+        display_relative_to_home("/c/Users/Ada/project", "/c/Users/Ada"),
+        Some("~/project".to_string())
+    );
+    assert_eq!(
+        display_relative_to_home("/c/Users/Ada", "/c/Users/Ada/"),
+        Some("~".to_string())
+    );
+}
+
 #[tokio::test]
 async fn model_state_rpc_saves_cwd_selection_and_controls_recent_models() {
     let (_temp, state) = web_state();

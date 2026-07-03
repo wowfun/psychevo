@@ -69,16 +69,42 @@ old `tui-state.json` model selections.
 ## Provider Configuration UX
 
 Settings > Models shows built-in providers, configured providers, and custom
-providers in one compact list. Each provider row exposes its display label,
-configured state, base URL, credential state, no-auth state, and model-catalog
-fetch action. Provider API keys may be typed in the page but are sent only to
-Gateway for durable `.env` writes; they are never persisted in frontend storage
-and are never written into TOML.
+providers in one vertical flow. The first section configures saved default,
+title generation, and context compression model assignments. The provider
+section below lists currently usable providers: no-auth/free providers and
+providers whose derived API key is present. Each provider row is compact and has
+an explicit edit action; adding a provider uses the same inline editor. Provider
+API keys may be typed in the page but are sent only to Gateway for durable
+`.env` writes; they are never persisted in frontend storage and are never
+written into TOML.
+Add provider and Edit provider controls act as disclosure toggles: selecting
+one opens its inline editor, selecting the active control again closes it, and
+opening one editor closes the other provider editor mode.
+
+Provider setup is a form aligned with the provider/model schema in
+[120 Provider Registry](../120-provider-registry/spec.md):
+
+- built-in or custom provider id
+- custom provider id when Custom is selected
+- optional provider `name`, used only for display
+- provider `api` URL
+- API key value only, with the derived or configured environment variable shown
+  read-only
+- model id picker populated by explicit catalog fetch, with manual model id
+  fallback in the provider editor only
+- optional model `name`, used only for display
+- model `limit.context` and `limit.output`
+- advanced JSON/TOML metadata applied only to the selected model metadata layer
+
+The inline provider editor groups those fields into semantic rows so the form
+can be scanned without reading a dense column grid: provider id/name, Base
+URL/API key with the derived env and no-auth toggle, model id/fetch/name,
+context/max output/advanced format, and advanced metadata.
 
 Model catalog fetches are explicit user actions. They use runtime provider
 catalog helpers and deterministic timeouts. Free OpenCode Zen selections must
 show a privacy/data-retention warning before save; the provider id, aliases,
-base URL, credential env, no-auth support, and free-model classification are
+API URL, derived credential env, no-auth support, and free-model classification are
 defined by [120 Provider Registry](../120-provider-registry/spec.md).
 
 Fetched catalogs are picker/display candidate models, not persisted model
@@ -96,6 +122,8 @@ The page offers independent save controls for:
 - default model, persisted as top-level `model`
 - title generation, persisted as `auxiliary.title_generation.provider/model`
 - context compression, persisted as `auxiliary.compression.provider/model`
+- provider/model setup, persisted under `provider.<id>` and
+  `provider.<id>.models.<model_id>`
 
 Each assignment row uses catalog-backed pickers only. The GUI does not support
 manual model-id text entry. A model picker is paired with a reasoning-effort
@@ -103,8 +131,9 @@ picker derived from the selected model's capability metadata; `none` is shown as
 `Default`. Saving a reasoning effort persists it with the assignment model
 selection and leaves unrelated assignment rows unchanged. The page avoids
 duplicating values that controls already communicate: selected model,
-inherit/default reasoning, API-key env names, no-auth state, and fetched catalog
-counts should not be repeated as secondary row copy.
+inherit/default reasoning, no-auth state, and fetched catalog counts should not
+be repeated as secondary row copy. The derived API key env is visible only
+inside provider editing because it explains where the typed secret is written.
 
 `compression.*` continues to own compaction thresholds and enabled/auto flags.
 `compression.model` remains a legacy fallback, but new GUI writes use

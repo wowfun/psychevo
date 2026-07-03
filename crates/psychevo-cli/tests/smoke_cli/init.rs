@@ -399,7 +399,7 @@ pub(crate) fn cli_init_creates_home_tree_and_is_idempotent() {
 
     let config = std::fs::read_to_string(home.join("config.toml")).expect("config");
     assert!(config.contains("model = \"deepseek/deepseek-chat\""));
-    assert!(config.contains("api_key_env = \"DEEPSEEK_API_KEY\""));
+    assert!(config.contains("api = \"https://api.deepseek.com/v1\""));
     let env_template = std::fs::read_to_string(home.join(".env")).expect("env");
     assert!(env_template.contains("DEEPSEEK_API_KEY=sk-..."));
     assert!(!stdout.contains("sk-"));

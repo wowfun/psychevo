@@ -68,6 +68,7 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
             provider: provider.clone(),
             provider_label: provider_label(&provider, loaded.config.provider.get(&provider)),
             model,
+            model_name: model_config.and_then(|entry| entry.name.clone()),
             reasoning_effort,
             context_limit: metadata.context_limit(),
             metadata,
@@ -480,6 +481,7 @@ pub(crate) fn selected_configured_model_for_provider(
         provider: provider.clone(),
         provider_label: provider_label(&provider, config_entry),
         model,
+        model_name: model_config.and_then(|entry| entry.name.clone()),
         reasoning_effort,
         context_limit: metadata.context_limit(),
         metadata,
@@ -487,11 +489,11 @@ pub(crate) fn selected_configured_model_for_provider(
 }
 
 pub(crate) fn provider_label(provider: &str, config_entry: Option<&ConfigProviderEntry>) -> String {
-    if let Some(label) = config_entry.and_then(|entry| entry.label.clone()) {
-        return label;
+    if let Some(name) = config_entry.and_then(|entry| entry.name.clone()) {
+        return name;
     }
     built_in_provider(provider)
-        .map(|entry| entry.label.to_string())
+        .map(|entry| entry.name.to_string())
         .unwrap_or_else(|| provider.to_string())
 }
 

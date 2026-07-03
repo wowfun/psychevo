@@ -37,16 +37,27 @@ pub fn create_scoped_custom_provider(
     input: ScopedCustomProviderInput,
 ) -> Result<CustomProviderResult> {
     let provider_id = input.provider_id.trim().to_string();
-    let label = input.label.trim().to_string();
+    let name = input.label.trim().to_string();
     let base_url = input.base_url.trim().trim_end_matches('/').to_string();
+    let requested_api_key_env = input
+        .api_key_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(api_key_env) = &requested_api_key_env
+        && !valid_env_name(api_key_env)
+    {
+        return Err(Error::Config(
+            "api_key_env must be a valid environment variable name".to_string(),
+        ));
+    }
     let api_key_env = if input.no_auth {
         None
     } else {
         Some(
-            input
-                .api_key_env
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
+            requested_api_key_env
+                .clone()
                 .unwrap_or_else(|| custom_provider_api_key_env(&provider_id)),
         )
     };
@@ -56,19 +67,12 @@ pub fn create_scoped_custom_provider(
         .filter(|value| !value.is_empty());
 
     validate_custom_provider_id(&provider_id)?;
-    if label.is_empty() {
-        return Err(Error::Config("provider label is required".to_string()));
+    if name.is_empty() {
+        return Err(Error::Config("provider name is required".to_string()));
     }
     if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
         return Err(Error::Config(
-            "provider base_url must start with http:// or https://".to_string(),
-        ));
-    }
-    if let Some(api_key_env) = &api_key_env
-        && !valid_env_name(api_key_env)
-    {
-        return Err(Error::Config(
-            "provider api_key_env must be a valid environment variable name".to_string(),
+            "provider api must start with http:// or https://".to_string(),
         ));
     }
     if let Some(api_key) = &api_key
@@ -107,9 +111,12 @@ pub fn create_scoped_custom_provider(
         &config_path,
         &mut parsed,
         &provider_id,
-        &label,
+        &name,
         &base_url,
-        api_key_env.as_deref(),
+        requested_api_key_env
+            .is_some()
+            .then_some(api_key_env.as_deref())
+            .flatten(),
         input.no_auth,
     )?;
     let mut wrote_api_key = false;
@@ -123,7 +130,7 @@ pub fn create_scoped_custom_provider(
 
     Ok(CustomProviderResult {
         provider_id,
-        label,
+        label: name,
         base_url,
         api_key_env: api_key_env.unwrap_or_default(),
         wrote_api_key,
@@ -154,21 +161,13 @@ pub fn set_provider_api_key(
     if built_in.is_none() && config_entry.is_none() {
         return Err(Error::Config(format!("unknown provider: {provider_id}")));
     }
-    if config_entry.is_some_and(|entry| entry.options.no_auth) {
+    if config_entry.is_some_and(|entry| entry.no_auth) {
         return Err(Error::Config(format!(
             "provider {provider_id} is configured with no_auth"
         )));
     }
-    let api_key_env = first_string([
-        config_entry.and_then(|entry| entry.options.api_key_env.clone()),
-        built_in.and_then(|provider| provider.api_key_envs.first().map(|key| (*key).to_string())),
-    ])
-    .ok_or_else(|| Error::Config(format!("provider {provider_id} has no api_key_env")))?;
-    if !valid_env_name(&api_key_env) {
-        return Err(Error::Config(format!(
-            "provider {provider_id} has invalid api_key_env {api_key_env}"
-        )));
-    }
+    let api_key_env = provider_api_key_env(&provider_id, config_entry)
+        .ok_or_else(|| Error::Config(format!("provider {provider_id} does not use API keys")))?;
     fs::create_dir_all(&config_dir)?;
     let env_path = config_dir.join(".env");
     let replaced_existing = set_dotenv_value(&env_path, &api_key_env, api_key)?;
@@ -179,6 +178,47 @@ pub fn set_provider_api_key(
         "wrote_api_key": true,
         "replaced_existing": replaced_existing,
     }))
+}
+
+pub fn set_provider_model_config(
+    config_dir: PathBuf,
+    provider_id: &str,
+    model_id: &str,
+    model: Value,
+) -> Result<()> {
+    let provider_id = normalize_provider_id(provider_id);
+    let model_id = model_id.trim();
+    if model_id.is_empty() {
+        return Err(Error::Config("model id is required".to_string()));
+    }
+    let config_path = config_dir.join(CONFIG_FILE_NAME);
+    let mut parsed = load_toml_config_file(&config_path, false)?;
+    ensure_json_object(&mut parsed);
+    let root = parsed
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("config root must be an object".to_string()))?;
+    let providers = root
+        .entry("provider".to_string())
+        .or_insert_with(|| json!({}));
+    ensure_json_object(providers);
+    let providers = providers
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("provider must be an object".to_string()))?;
+    let provider = providers.entry(provider_id).or_insert_with(|| json!({}));
+    ensure_json_object(provider);
+    let provider = provider
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("provider entry must be an object".to_string()))?;
+    let models = provider
+        .entry("models".to_string())
+        .or_insert_with(|| json!({}));
+    ensure_json_object(models);
+    let models = models
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("provider models must be an object".to_string()))?;
+    models.insert(model_id.to_string(), model);
+    fs::create_dir_all(&config_dir)?;
+    write_toml_config_file(&config_path, &parsed)
 }
 
 pub(crate) fn validate_custom_provider_id(provider_id: &str) -> Result<()> {
@@ -206,8 +246,8 @@ pub(crate) fn write_provider_config(
     path: &Path,
     value: &mut Value,
     provider_id: &str,
-    label: &str,
-    base_url: &str,
+    name: &str,
+    api: &str,
     api_key_env: Option<&str>,
     no_auth: bool,
 ) -> Result<()> {
@@ -222,23 +262,18 @@ pub(crate) fn write_provider_config(
     let providers = providers
         .as_object_mut()
         .ok_or_else(|| Error::Config("provider must be an object".to_string()))?;
-    let mut options = json!({
-        "base_url": base_url,
+    let mut provider = json!({
+        "name": name,
+        "api": api,
+        "models": {},
     });
     if let Some(api_key_env) = api_key_env {
-        options["api_key_env"] = json!(api_key_env);
+        provider["api_key_env"] = json!(api_key_env);
     }
     if no_auth {
-        options["no_auth"] = json!(true);
+        provider["no_auth"] = json!(true);
     }
-    providers.insert(
-        provider_id.to_string(),
-        json!({
-            "label": label,
-            "options": options,
-            "models": {},
-        }),
-    );
+    providers.insert(provider_id.to_string(), provider);
     write_toml_config_file(path, value)
 }
 

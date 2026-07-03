@@ -3,11 +3,13 @@ fn settings_read_value(
     cwd: &Path,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
+    let normalized_cwd = psychevo_runtime::normalized_native_path(cwd);
+    let cwd = normalized_cwd.as_path();
     let controls = workbench_controls_value(state, cwd, thread_id)?;
     let project = workbench_project_value(cwd);
     let channels = channel_list_result_for_cwd(state, cwd).unwrap_or_default();
     Ok(json!({
-        "cwd": cwd,
+        "cwd": cwd.display().to_string(),
         "project": project,
         "channels": channels,
         "memoryResources": {"mode": "status_only", "available": true},
@@ -222,26 +224,42 @@ fn update_session_agent_setting(
 }
 
 fn workbench_project_value(cwd: &Path) -> wire::WorkbenchProjectView {
+    let cwd = psychevo_runtime::normalized_native_path(cwd);
     wire::WorkbenchProjectView {
         path: cwd.display().to_string(),
-        display_path: display_cwd(cwd),
-        branch: current_git_branch(cwd),
+        display_path: display_cwd(&cwd),
+        branch: current_git_branch(&cwd),
     }
 }
 
 fn display_cwd(cwd: &Path) -> String {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    if let Some(home) = home
-        && let Ok(relative) = cwd.strip_prefix(&home)
+    let cwd_display = psychevo_runtime::display_path_for_native_path(cwd);
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+        && let Some(display) = display_relative_to_home(
+            &cwd_display,
+            &psychevo_runtime::display_path_for_native_path(&home),
+        )
     {
-        let relative = relative.to_string_lossy();
-        return if relative.is_empty() {
-            "~".to_string()
-        } else {
-            format!("~/{}", relative.replace('\\', "/"))
-        };
+        return display;
     }
-    cwd.to_string_lossy().replace('\\', "/")
+    cwd_display
+}
+
+fn display_relative_to_home(cwd_display: &str, home_display: &str) -> Option<String> {
+    let home = if home_display == "/" {
+        home_display
+    } else {
+        home_display.trim_end_matches('/')
+    };
+    if home.is_empty() {
+        return None;
+    }
+    if cwd_display == home {
+        return Some("~".to_string());
+    }
+    cwd_display
+        .strip_prefix(&format!("{home}/"))
+        .map(|relative| format!("~/{relative}"))
 }
 
 fn current_git_branch(cwd: &Path) -> Option<String> {

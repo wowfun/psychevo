@@ -343,9 +343,9 @@ export const settingsSchemas = {
       ],
       "type": "object"
     },
-    "ModelOptionView": {
+    "ModelLimitView": {
       "properties": {
-        "contextLimit": {
+        "context": {
           "default": null,
           "format": "uint64",
           "minimum": 0.0,
@@ -354,6 +354,20 @@ export const settingsSchemas = {
             "null"
           ]
         },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelOptionView": {
+      "properties": {
         "free": {
           "default": false,
           "type": "boolean"
@@ -361,7 +375,18 @@ export const settingsSchemas = {
         "id": {
           "type": "string"
         },
-        "label": {
+        "limit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelLimitView"
+            }
+          ],
+          "default": {
+            "context": null,
+            "output": null
+          }
+        },
+        "name": {
           "default": null,
           "type": [
             "string",
@@ -371,7 +396,7 @@ export const settingsSchemas = {
         "provider": {
           "type": "string"
         },
-        "providerLabel": {
+        "providerName": {
           "default": null,
           "type": [
             "string",
@@ -621,9 +646,9 @@ export const settingsSchemas = {
   WorkbenchControlsView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "ModelOptionView": {
+    "ModelLimitView": {
       "properties": {
-        "contextLimit": {
+        "context": {
           "default": null,
           "format": "uint64",
           "minimum": 0.0,
@@ -632,6 +657,20 @@ export const settingsSchemas = {
             "null"
           ]
         },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelOptionView": {
+      "properties": {
         "free": {
           "default": false,
           "type": "boolean"
@@ -639,7 +678,18 @@ export const settingsSchemas = {
         "id": {
           "type": "string"
         },
-        "label": {
+        "limit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelLimitView"
+            }
+          ],
+          "default": {
+            "context": null,
+            "output": null
+          }
+        },
+        "name": {
           "default": null,
           "type": [
             "string",
@@ -649,7 +699,7 @@ export const settingsSchemas = {
         "provider": {
           "type": "string"
         },
-        "providerLabel": {
+        "providerName": {
           "default": null,
           "type": [
             "string",

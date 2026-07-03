@@ -183,9 +183,8 @@ pub(crate) fn write_tui_model_config(temp: &tempfile::TempDir) -> PathBuf {
         &path,
         r#"model = "mock/mock-model"
 
-[provider.mock.options]
-base_url = "http://127.0.0.1:9"
-api_key_env = "TEST_PROVIDER_KEY"
+[provider.mock]
+api = "http://127.0.0.1:9"
 
 [provider.mock.models."mock-model"]
 reasoning = true
@@ -222,7 +221,7 @@ reasoning_effort = "high"
 pub(crate) fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
     let mut app = test_app(temp);
     app.env_map
-        .insert("TEST_PROVIDER_KEY".to_string(), "test-key".to_string());
+        .insert("MOCK_API_KEY".to_string(), "test-key".to_string());
     let config_path = write_tui_model_config(temp);
     std::fs::create_dir_all(app.cwd.join(".psychevo")).expect("local config dir");
     std::fs::copy(&config_path, app.cwd.join(".psychevo/config.toml")).expect("local config");

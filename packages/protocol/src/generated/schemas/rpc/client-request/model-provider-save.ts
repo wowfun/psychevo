@@ -4,8 +4,77 @@ export const clientRequestModelProviderSaveSchema = {
   "$id": "ClientRequest/model-provider-save.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ModelLimitView": {
+      "properties": {
+        "context": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelProviderSaveModelParams": {
+      "properties": {
+        "advanced": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "advancedFormat": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelLimitView"
+            }
+          ],
+          "default": {
+            "context": null,
+            "output": null
+          }
+        },
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "ModelProviderSaveParams": {
       "properties": {
+        "api": {
+          "type": "string"
+        },
         "apiKey": {
           "default": null,
           "type": [
@@ -13,18 +82,23 @@ export const clientRequestModelProviderSaveSchema = {
             "null"
           ]
         },
-        "apiKeyEnv": {
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelProviderSaveModelParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
-        },
-        "baseUrl": {
-          "type": "string"
-        },
-        "label": {
-          "type": "string"
         },
         "noAuth": {
           "default": false,
@@ -43,8 +117,7 @@ export const clientRequestModelProviderSaveSchema = {
         }
       },
       "required": [
-        "baseUrl",
-        "label",
+        "api",
         "providerId"
       ],
       "type": "object"

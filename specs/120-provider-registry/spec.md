@@ -50,19 +50,17 @@ The built-in provider ids and aliases are:
 - `custom`
 
 OpenCode Zen's built-in registry facts are: id `opencode-zen`, aliases
-`opencode`, `opencode_zen`, and `zen`, default base URL
-`https://opencode.ai/zen/v1`, credential environment variable
-`OPENCODE_ZEN_API_KEY`, optional base-url environment variable
-`OPENCODE_ZEN_BASE_URL`, and built-in no-auth support.
+`opencode`, `opencode_zen`, and `zen`, display name `OpenCode Zen`, API URL
+`https://opencode.ai/zen/v1`, derived credential environment variable
+`OPENCODE_ZEN_API_KEY`, and built-in no-auth support.
 
 Provider entries define:
 
 - canonical provider id
-- display label
-- default base URL
+- optional display name
+- default API URL
 - accepted alias names
-- credential environment-variable candidates
-- optional base-url environment-variable candidate
+- derived credential environment variable
 - whether a no-auth local placeholder is allowed
 
 Unknown built-in provider ids are rejected before `agent_start`. User-defined
@@ -97,12 +95,14 @@ Configuration may define:
 
 - top-level `model` as a default model string or model object
 - top-level `provider` map keyed by provider id or user provider name
-- optional per-provider `label` for display in human-facing selectors and
+- optional per-provider `name` for display in human-facing selectors and
   status surfaces
-- per-provider `options.base_url`
-- per-provider `options.api_key_env`
-- per-provider `options.no_auth`
+- per-provider `api`, the OpenAI Chat-compatible API URL
+- optional per-provider `api_key_env` override; when absent, the provider uses
+  the derived credential environment variable
+- per-provider `no_auth`
 - per-provider `models` map keyed by configured model id
+- optional per-model `name` for display only
 - optional model `reasoning_effort` as the first-slice model thinking
   intensity hint. Valid values are `none`, `minimal`, `low`, `medium`, `high`,
   `xhigh`, and `max`; `none` disables the request field.
@@ -138,12 +138,16 @@ Example:
 ```toml
 model = "deepseek/deepseek-chat"
 
-[provider.deepseek.options]
-base_url = "https://api.deepseek.com/v1"
-api_key_env = "DEEPSEEK_API_KEY"
+[provider.deepseek]
+api = "https://api.deepseek.com/v1"
 
 [provider.deepseek.models.deepseek-chat]
+name = "DeepSeek Chat"
 reasoning_effort = "medium"
+
+[provider.deepseek.models.deepseek-chat.limit]
+context = 64000
+output = 8192
 ```
 
 When `model` is a string in `provider/model` form and the prefix matches a
@@ -170,27 +174,29 @@ persist compression model assignments under `auxiliary.compression`, while
 leaving threshold and enablement settings under `compression`.
 
 Configuration must not contain raw API keys. Credentials are resolved from the
-local environment map through `api_key_env` or built-in credential environment
-variable candidates.
+local environment map through the provider id's derived API key environment
+variable. The derivation normalizes the provider id to uppercase, replaces each
+non-alphanumeric run with `_`, trims leading and trailing `_`, and appends
+`_API_KEY`. For example, `opencode-zen` resolves to
+`OPENCODE_ZEN_API_KEY`.
 
-`options.no_auth = true` explicitly marks a provider as requiring no bearer
-credential. It conflicts with `options.api_key_env`. It is accepted for
-user-defined providers and for built-in providers whose registry entry permits
-no-auth use. Explicit no-auth may target any base URL, including non-loopback
-URLs, but setup and config diagnostics should warn on non-loopback no-auth
-because requests will be sent without an Authorization header.
+`no_auth = true` explicitly marks a provider as requiring no bearer
+credential. It is accepted for user-defined providers and for built-in providers
+whose registry entry permits no-auth use. Explicit no-auth may target any API
+URL, including non-loopback URLs, but setup and config diagnostics should warn
+on non-loopback no-auth because requests will be sent without an Authorization
+header.
 
-Provider labels are display-only. They do not change provider identity,
+Provider names are display-only. They do not change provider identity,
 selection, config merge keys, or the `provider/model` model-spec form.
 
 Interactive clients and CLI config commands may create user-defined OpenAI
 Chat-compatible providers in the global config or the current cwd's local
 `.psychevo/config.toml`. The created provider id must be a new normalized user
-provider id and must not collide with built-in provider ids or aliases. The
-credential variable is stored in `options.api_key_env`; raw API keys must be
-written only to `.env` files, never TOML configuration. CLI provider/auth
-writes default to the current cwd local scope and use `-g`/`--global` for
-the global scope.
+provider id and must not collide with built-in provider ids or aliases. Raw API
+keys must be written only to the derived key in `.env` files, never TOML
+configuration. CLI provider/auth writes default to the current cwd local scope
+and use `-g`/`--global` for the global scope.
 
 Shared setup flows may initialize a minimal config file before writing provider
 settings. When `PSYCHEVO_CONFIG` points at one file, setup writes provider and
@@ -271,10 +277,9 @@ provider entry with exactly one `models` key supplies that model. If a provider
 entry has multiple configured models, runtime rejects before `agent_start`
 unless the model is explicit.
 
-`base_url` is resolved from provider config, provider-specific base-url
-environment variable, or built-in default. `api_key_env` is resolved from
-provider config or built-in credential environment candidates. `api_key` is
-resolved only from the invocation-local environment map.
+The provider API URL is resolved from provider config `api` or the built-in
+default. The API key environment variable is always derived from the provider
+id. `api_key` is resolved only from the invocation-local environment map.
 
 `reasoning_effort` is resolved from CLI variant override, the selected model
 object, or the selected provider entry's `models.<model>.reasoning_effort`.
@@ -309,7 +314,7 @@ fallback matches, the context limit and other metadata remain unknown.
 Provider matching first uses known provider-id mappings such as `deepseek`,
 `xiaomi`, and `xiaomi-token-plan-cn`. If the configured provider id differs
 from `models.dev`, runtime may infer the registry provider by matching the
-configured base URL to a registry provider `api` URL. This keeps user-defined
+configured API URL to a registry provider `api` URL. This keeps user-defined
 provider ids such as `xiaomi-token-plan` stable while still resolving
 `xiaomi-token-plan-cn` metadata.
 
@@ -320,7 +325,7 @@ reads must not contact provider `/models` endpoints, and provider catalog cache
 entries must not alter runtime metadata precedence. Successful explicit fetches
 store a bounded provider-model picker cache at
 `$PSYCHEVO_HOME/cache/provider_models_cache.json`, keyed by provider identity,
-base URL, and a non-reversible credential fingerprint. The cache may enrich
+API URL, and a non-reversible credential fingerprint. The cache may enrich
 Settings, Workbench, and CLI model picker surfaces with model ids and display
 metadata, but credentials, request payloads, and raw provider response bodies
 are not stored.

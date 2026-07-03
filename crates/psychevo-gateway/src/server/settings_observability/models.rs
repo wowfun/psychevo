@@ -6,10 +6,13 @@ fn configured_model_option_view(
         value: format!("{}/{}", model.provider, model.model),
         provider: model.provider.clone(),
         id: model.model.clone(),
-        label: None,
-        provider_label: Some(model.provider_label.clone()),
+        name: model.model_name.clone(),
+        provider_name: Some(model.provider_label.clone()),
         free: configured_model_is_free(model),
-        context_limit: model.context_limit,
+        limit: wire::ModelLimitView {
+            context: model.context_limit,
+            output: model.metadata.limits.output,
+        },
         reasoning_supported,
         reasoning_efforts: reasoning_efforts_for_model(reasoning_supported),
     }
@@ -93,10 +96,10 @@ fn model_settings_result(
     if !providers.iter().any(|provider| provider.id == "custom") {
         providers.push(wire::ModelProviderView {
             id: "custom".to_string(),
-            label: "Custom".to_string(),
+            name: "Custom".to_string(),
             built_in: false,
             configured: false,
-            base_url: None,
+            api: None,
             api_key_env: None,
             credential_status: wire::ModelCredentialStatus::Missing,
             no_auth: false,
@@ -107,7 +110,7 @@ fn model_settings_result(
     providers.sort_by(|left, right| {
         provider_sort_key(&left.id)
             .cmp(&provider_sort_key(&right.id))
-            .then_with(|| left.label.cmp(&right.label))
+            .then_with(|| left.name.cmp(&right.name))
     });
     let model_options = model_options_with_cached_catalog(state, &options, &configured);
     Ok(wire::ModelSettingsResult {
@@ -135,8 +138,8 @@ fn model_provider_view(
     configured_provider_ids: &std::collections::BTreeSet<String>,
 ) -> Option<wire::ModelProviderView> {
     let id = row.get("provider").and_then(Value::as_str)?.to_string();
-    let base_url = row
-        .get("base_url")
+    let api = row
+        .get("api")
         .and_then(Value::as_str)
         .map(str::to_string);
     let status = match row
@@ -148,7 +151,7 @@ fn model_provider_view(
         "not_required" => wire::ModelCredentialStatus::NotRequired,
         _ => wire::ModelCredentialStatus::Missing,
     };
-    let can_fetch_models = base_url.is_some() && status != wire::ModelCredentialStatus::Missing;
+    let can_fetch_models = api.is_some() && status != wire::ModelCredentialStatus::Missing;
     let unavailable_reason = (!can_fetch_models).then(|| {
         row.get("api_key_env")
             .and_then(Value::as_str)
@@ -157,14 +160,14 @@ fn model_provider_view(
     });
     Some(wire::ModelProviderView {
         id: id.clone(),
-        label: row
-            .get("label")
+        name: row
+            .get("name")
             .and_then(Value::as_str)
             .unwrap_or(id.as_str())
             .to_string(),
         built_in: is_known_builtin_provider(&id),
         configured: configured_provider_ids.contains(&id),
-        base_url,
+        api,
         api_key_env: row
             .get("api_key_env")
             .and_then(Value::as_str)
@@ -268,10 +271,13 @@ fn catalog_model_option_view(
         provider: provider.provider.clone(),
         value: format!("{}/{}", provider.provider, model.id),
         free: model_catalog_entry_is_free(&provider.provider, &model),
-        context_limit: model.context_limit,
+        limit: wire::ModelLimitView {
+            context: model.context_limit,
+            output: model.metadata.limits.output,
+        },
         id: model.id,
-        label: None,
-        provider_label: Some(provider.display_label.clone()),
+        name: None,
+        provider_name: Some(provider.display_label.clone()),
         reasoning_supported,
         reasoning_efforts: reasoning_efforts_for_model(reasoning_supported),
     }
@@ -388,21 +394,28 @@ fn model_provider_save_value(
 ) -> psychevo_runtime::Result<Value> {
     let provider_id = normalize_provider_id(&params.provider_id);
     validate_model_provider_id(&provider_id)?;
-    let label = params.label.trim();
-    if label.is_empty() {
-        return Err(Error::Config("provider label is required".to_string()));
-    }
-    let base_url = validate_model_base_url(&params.base_url)?;
+    let name = params
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let api = validate_model_api(&params.api)?;
     let config_dir = state.inner.home.clone();
+    remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.label"))?;
+    remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.options"))?;
+    if let Some(name) = name {
+        set_config_value(
+            config_dir.clone(),
+            &format!("provider.{provider_id}.name"),
+            json!(name),
+        )?;
+    } else {
+        remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.name"))?;
+    }
     set_config_value(
         config_dir.clone(),
-        &format!("provider.{provider_id}.label"),
-        json!(label),
-    )?;
-    set_config_value(
-        config_dir.clone(),
-        &format!("provider.{provider_id}.options.base_url"),
-        json!(base_url),
+        &format!("provider.{provider_id}.api"),
+        json!(api),
     )?;
     if params.no_auth {
         if params
@@ -414,33 +427,13 @@ fn model_provider_save_value(
                 "no_auth provider save must not include an API key".to_string(),
             ));
         }
-        remove_config_value(
-            config_dir.clone(),
-            &format!("provider.{provider_id}.options.api_key_env"),
-        )?;
         set_config_value(
             config_dir.clone(),
-            &format!("provider.{provider_id}.options.no_auth"),
+            &format!("provider.{provider_id}.no_auth"),
             json!(true),
         )?;
     } else {
-        let api_key_env = params
-            .api_key_env
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| custom_provider_api_key_env(&provider_id));
-        validate_model_api_key_env(&api_key_env)?;
-        set_config_value(
-            config_dir.clone(),
-            &format!("provider.{provider_id}.options.api_key_env"),
-            json!(api_key_env),
-        )?;
-        remove_config_value(
-            config_dir.clone(),
-            &format!("provider.{provider_id}.options.no_auth"),
-        )?;
+        remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.no_auth"))?;
         if let Some(api_key) = params
             .api_key
             .as_deref()
@@ -448,8 +441,13 @@ fn model_provider_save_value(
             .filter(|value| !value.is_empty())
         {
             let options = state.run_options(cwd.to_path_buf(), None);
-            set_provider_api_key(&options, config_dir, &provider_id, api_key)?;
+            set_provider_api_key(&options, config_dir.clone(), &provider_id, api_key)?;
         }
+    }
+    if let Some(model) = params.model {
+        let model_id = validate_model_id(&model.id)?;
+        let model_value = model_config_value(&model)?;
+        set_provider_model_config(config_dir.clone(), &provider_id, &model_id, model_value)?;
     }
     model_settings_value(state, cwd)
 }
@@ -531,28 +529,86 @@ fn validate_model_provider_id(provider_id: &str) -> psychevo_runtime::Result<()>
     }
 }
 
-fn validate_model_base_url(value: &str) -> psychevo_runtime::Result<String> {
+fn validate_model_api(value: &str) -> psychevo_runtime::Result<String> {
     let value = value.trim().trim_end_matches('/').to_string();
     if value.starts_with("http://") || value.starts_with("https://") {
         Ok(value)
     } else {
         Err(Error::Config(
-            "provider base_url must start with http:// or https://".to_string(),
+            "provider api must start with http:// or https://".to_string(),
         ))
     }
 }
 
-fn validate_model_api_key_env(value: &str) -> psychevo_runtime::Result<()> {
-    let mut chars = value.chars();
-    if matches!(chars.next(), Some('A'..='Z' | '_'))
-        && chars.all(|ch| matches!(ch, 'A'..='Z' | '0'..='9' | '_'))
-    {
-        Ok(())
-    } else {
-        Err(Error::Config(
-            "provider api_key_env must be a valid environment variable name".to_string(),
-        ))
+fn validate_model_id(value: &str) -> psychevo_runtime::Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(Error::Config("model id is required".to_string()));
     }
+    if value.contains('\n') || value.contains('\r') {
+        return Err(Error::Config(
+            "model id must be a single line".to_string(),
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn model_config_value(
+    model: &wire::ModelProviderSaveModelParams,
+) -> psychevo_runtime::Result<Value> {
+    let mut object = advanced_model_metadata_object(
+        model.advanced_format.as_deref(),
+        model.advanced.as_deref(),
+    )?;
+    if let Some(name) = model
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        object.insert("name".to_string(), json!(name));
+    }
+    let mut limit = serde_json::Map::new();
+    if let Some(context) = model.limit.context {
+        if context == 0 {
+            return Err(Error::Config("limit.context must be positive".to_string()));
+        }
+        limit.insert("context".to_string(), json!(context));
+    }
+    if let Some(output) = model.limit.output {
+        if output == 0 {
+            return Err(Error::Config("limit.output must be positive".to_string()));
+        }
+        limit.insert("output".to_string(), json!(output));
+    }
+    if !limit.is_empty() {
+        object.insert("limit".to_string(), Value::Object(limit));
+    }
+    Ok(Value::Object(object))
+}
+
+fn advanced_model_metadata_object(
+    format: Option<&str>,
+    raw: Option<&str>,
+) -> psychevo_runtime::Result<serde_json::Map<String, Value>> {
+    let raw = raw.map(str::trim).filter(|value| !value.is_empty());
+    let Some(raw) = raw else {
+        return Ok(serde_json::Map::new());
+    };
+    let value = match format.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("toml") => {
+            let value = toml::from_str::<toml::Value>(raw)
+                .map_err(|err| Error::Config(format!("advanced metadata TOML is invalid: {err}")))?;
+            serde_json::to_value(value)
+                .map_err(|err| Error::Config(format!("advanced metadata TOML is invalid: {err}")))?
+        }
+        _ => serde_json::from_str::<Value>(raw)
+            .map_err(|err| Error::Config(format!("advanced metadata JSON is invalid: {err}")))?,
+    };
+    value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| Error::Config("advanced metadata must be an object".to_string()))
 }
 
 fn configured_model_is_free(model: &psychevo_runtime::ConfiguredModel) -> bool {

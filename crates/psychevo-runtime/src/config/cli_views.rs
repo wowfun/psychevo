@@ -52,10 +52,10 @@ pub fn config_provider_list_value(options: &RunOptions, scope: ConfigScope) -> R
         .map(|(provider, entry)| {
             json!({
                 "provider": provider,
-                "label": provider_label(provider, Some(entry)),
-                "base_url": entry.options.base_url,
-                "api_key_env": entry.options.api_key_env,
-                "no_auth": entry.options.no_auth,
+                "name": provider_label(provider, Some(entry)),
+                "api": entry.api,
+                "api_key_env": provider_api_key_env(provider, Some(entry)),
+                "no_auth": entry.no_auth,
                 "models": entry.models.keys().cloned().collect::<Vec<_>>(),
             })
         })
@@ -199,22 +199,8 @@ pub fn auth_status_value(options: &RunOptions, provider: Option<&str>) -> Result
             return Err(Error::Config(format!("unknown provider: {provider}")));
         }
         let base_url = provider_base_url(&provider, config_entry, &loaded.env);
-        let explicit_no_auth = config_entry.is_some_and(|entry| entry.options.no_auth);
-        let api_key_env = (!explicit_no_auth)
-            .then(|| {
-                first_string([
-                    config_entry.and_then(|entry| entry.options.api_key_env.clone()),
-                    built_in.and_then(|provider| {
-                        provider
-                            .api_key_envs
-                            .iter()
-                            .find(|key| env_value(&loaded.env, key).is_some())
-                            .or_else(|| provider.api_key_envs.first())
-                            .map(|key| (*key).to_string())
-                    }),
-                ])
-            })
-            .flatten();
+        let explicit_no_auth = config_entry.is_some_and(|entry| entry.no_auth);
+        let api_key_env = provider_api_key_env(&provider, config_entry);
         let credential_present = api_key_env
             .as_deref()
             .is_some_and(|key| env_value(&loaded.env, key).is_some());
@@ -230,8 +216,8 @@ pub fn auth_status_value(options: &RunOptions, provider: Option<&str>) -> Result
         };
         rows.push(json!({
             "provider": provider,
-            "label": provider_label(&provider, config_entry),
-            "base_url": base_url,
+            "name": provider_label(&provider, config_entry),
+            "api": base_url,
             "api_key_env": api_key_env,
             "credential_present": credential_present,
             "no_auth": no_auth,

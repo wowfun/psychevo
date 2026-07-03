@@ -57,9 +57,8 @@ The generated `config.toml` is DeepSeek-only:
 ```toml
 model = "deepseek/deepseek-chat"
 
-[provider.deepseek.options]
-base_url = "https://api.deepseek.com/v1"
-api_key_env = "DEEPSEEK_API_KEY"
+[provider.deepseek]
+api = "https://api.deepseek.com/v1"
 
 [provider.deepseek.models.deepseek-chat]
 reasoning_effort = "medium"

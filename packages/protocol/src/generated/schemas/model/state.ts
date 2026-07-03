@@ -39,6 +39,101 @@ export const modelStateSchemas = {
   "title": "ModelSettingsReadParams",
   "type": "object"
 },
+  ModelProviderSaveModelParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelLimitView": {
+      "properties": {
+        "context": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "advanced": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "advancedFormat": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "limit": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelLimitView"
+        }
+      ],
+      "default": {
+        "context": null,
+        "output": null
+      }
+    },
+    "name": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "ModelProviderSaveModelParams",
+  "type": "object"
+},
+  ModelLimitView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "context": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "output": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "ModelLimitView",
+  "type": "object"
+},
   ModelStateReadParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
@@ -249,9 +344,9 @@ export const modelStateSchemas = {
       ],
       "type": "string"
     },
-    "ModelOptionView": {
+    "ModelLimitView": {
       "properties": {
-        "contextLimit": {
+        "context": {
           "default": null,
           "format": "uint64",
           "minimum": 0.0,
@@ -260,6 +355,20 @@ export const modelStateSchemas = {
             "null"
           ]
         },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelOptionView": {
+      "properties": {
         "free": {
           "default": false,
           "type": "boolean"
@@ -267,7 +376,18 @@ export const modelStateSchemas = {
         "id": {
           "type": "string"
         },
-        "label": {
+        "limit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelLimitView"
+            }
+          ],
+          "default": {
+            "context": null,
+            "output": null
+          }
+        },
+        "name": {
           "default": null,
           "type": [
             "string",
@@ -277,7 +397,7 @@ export const modelStateSchemas = {
         "provider": {
           "type": "string"
         },
-        "providerLabel": {
+        "providerName": {
           "default": null,
           "type": [
             "string",
@@ -311,13 +431,13 @@ export const modelStateSchemas = {
     },
     "ModelProviderView": {
       "properties": {
-        "apiKeyEnv": {
+        "api": {
           "type": [
             "string",
             "null"
           ]
         },
-        "baseUrl": {
+        "apiKeyEnv": {
           "type": [
             "string",
             "null"
@@ -338,7 +458,7 @@ export const modelStateSchemas = {
         "id": {
           "type": "string"
         },
-        "label": {
+        "name": {
           "type": "string"
         },
         "noAuth": {
@@ -357,7 +477,7 @@ export const modelStateSchemas = {
         "configured",
         "credentialStatus",
         "id",
-        "label",
+        "name",
         "noAuth"
       ],
       "type": "object"

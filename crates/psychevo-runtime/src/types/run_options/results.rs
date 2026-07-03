@@ -239,6 +239,7 @@ pub struct ConfiguredModel {
     pub provider: String,
     pub provider_label: String,
     pub model: String,
+    pub model_name: Option<String>,
     pub reasoning_effort: Option<String>,
     pub context_limit: Option<u64>,
     pub metadata: ModelMetadata,

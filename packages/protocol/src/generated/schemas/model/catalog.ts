@@ -4,6 +4,72 @@ export const modelCatalogSchemas = {
   ModelProviderSaveParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ModelLimitView": {
+      "properties": {
+        "context": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelProviderSaveModelParams": {
+      "properties": {
+        "advanced": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "advancedFormat": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "limit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelLimitView"
+            }
+          ],
+          "default": {
+            "context": null,
+            "output": null
+          }
+        },
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "ModelSettingsScope": {
       "enum": [
         "global"
@@ -12,6 +78,9 @@ export const modelCatalogSchemas = {
     }
   },
   "properties": {
+    "api": {
+      "type": "string"
+    },
     "apiKey": {
       "default": null,
       "type": [
@@ -19,18 +88,23 @@ export const modelCatalogSchemas = {
         "null"
       ]
     },
-    "apiKeyEnv": {
+    "model": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ModelProviderSaveModelParams"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "name": {
       "default": null,
       "type": [
         "string",
         "null"
       ]
-    },
-    "baseUrl": {
-      "type": "string"
-    },
-    "label": {
-      "type": "string"
     },
     "noAuth": {
       "default": false,
@@ -49,8 +123,7 @@ export const modelCatalogSchemas = {
     }
   },
   "required": [
-    "baseUrl",
-    "label",
+    "api",
     "providerId"
   ],
   "title": "ModelProviderSaveParams",
@@ -109,13 +182,13 @@ export const modelCatalogSchemas = {
     }
   },
   "properties": {
-    "apiKeyEnv": {
+    "api": {
       "type": [
         "string",
         "null"
       ]
     },
-    "baseUrl": {
+    "apiKeyEnv": {
       "type": [
         "string",
         "null"
@@ -136,7 +209,7 @@ export const modelCatalogSchemas = {
     "id": {
       "type": "string"
     },
-    "label": {
+    "name": {
       "type": "string"
     },
     "noAuth": {
@@ -155,7 +228,7 @@ export const modelCatalogSchemas = {
     "configured",
     "credentialStatus",
     "id",
-    "label",
+    "name",
     "noAuth"
   ],
   "title": "ModelProviderView",
@@ -173,16 +246,32 @@ export const modelCatalogSchemas = {
 },
   ModelOptionView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ModelLimitView": {
+      "properties": {
+        "context": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
   "properties": {
-    "contextLimit": {
-      "default": null,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
     "free": {
       "default": false,
       "type": "boolean"
@@ -190,7 +279,18 @@ export const modelCatalogSchemas = {
     "id": {
       "type": "string"
     },
-    "label": {
+    "limit": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelLimitView"
+        }
+      ],
+      "default": {
+        "context": null,
+        "output": null
+      }
+    },
+    "name": {
       "default": null,
       "type": [
         "string",
@@ -200,7 +300,7 @@ export const modelCatalogSchemas = {
     "provider": {
       "type": "string"
     },
-    "providerLabel": {
+    "providerName": {
       "default": null,
       "type": [
         "string",
@@ -274,9 +374,9 @@ export const modelCatalogSchemas = {
   ModelProviderCatalogResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "ModelOptionView": {
+    "ModelLimitView": {
       "properties": {
-        "contextLimit": {
+        "context": {
           "default": null,
           "format": "uint64",
           "minimum": 0.0,
@@ -285,6 +385,20 @@ export const modelCatalogSchemas = {
             "null"
           ]
         },
+        "output": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelOptionView": {
+      "properties": {
         "free": {
           "default": false,
           "type": "boolean"
@@ -292,7 +406,18 @@ export const modelCatalogSchemas = {
         "id": {
           "type": "string"
         },
-        "label": {
+        "limit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelLimitView"
+            }
+          ],
+          "default": {
+            "context": null,
+            "output": null
+          }
+        },
+        "name": {
           "default": null,
           "type": [
             "string",
@@ -302,7 +427,7 @@ export const modelCatalogSchemas = {
         "provider": {
           "type": "string"
         },
-        "providerLabel": {
+        "providerName": {
           "default": null,
           "type": [
             "string",

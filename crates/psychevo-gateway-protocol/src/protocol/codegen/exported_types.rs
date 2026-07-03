@@ -174,6 +174,8 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(ModelSettingsScope),
         exported_type!(ModelSettingsReadParams),
         exported_type!(ModelProviderSaveParams),
+        exported_type!(ModelProviderSaveModelParams),
+        exported_type!(ModelLimitView),
         exported_type!(ModelProviderCatalogParams),
         exported_type!(ModelStateReadParams),
         exported_type!(ModelStateSetParams),

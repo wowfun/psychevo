@@ -45,7 +45,7 @@ pub(crate) fn aliases_and_auto_resolution_use_local_env_map() {
     .expect("config");
     fs::write(
         config_dir.join(".env"),
-        "DEEPSEEK_API_KEY=deepseek-key\nOPENAI_API_KEY=openai-key\n",
+        "DEEPSEEK_API_KEY=deepseek-key\nOPENROUTER_API_KEY=openrouter-key\n",
     )
     .expect("env");
     let loaded = load_run_config(&options, &cwd).expect("config");
@@ -82,16 +82,15 @@ model = "deepseek/ignored"
         r#"
 model = "custom/local"
 
-[provider.custom.options]
-base_url = "http://127.0.0.1:1234/v1"
-api_key_env = "CUSTOM_KEY"
+[provider.custom]
+api = "http://127.0.0.1:1234/v1"
 
 [provider.custom.models.local]
 "#,
     )
     .expect("explicit config");
-    fs::write(explicit_dir.join(".env"), "CUSTOM_KEY=explicit-key\n").expect("explicit env");
-    fs::write(project_dir.join(".env"), "CUSTOM_KEY=project-key\n").expect("project env");
+    fs::write(explicit_dir.join(".env"), "CUSTOM_API_KEY=explicit-key\n").expect("explicit env");
+    fs::write(project_dir.join(".env"), "CUSTOM_API_KEY=project-key\n").expect("project env");
     options.config_path = Some(explicit);
 
     let cwd = canonical_cwd(&options.cwd).expect("cwd");
@@ -186,8 +185,8 @@ model = "deepseek/old"
         r#"
 model = "custom/local"
 
-[provider.custom.options]
-base_url = "http://127.0.0.1:1234/v1"
+[provider.custom]
+api = "http://127.0.0.1:1234/v1"
 
 [provider.custom.models.local]
 "#,
@@ -419,8 +418,8 @@ pub(crate) fn reasoning_effort_values_are_validated_and_none_disables() {
         r#"
 model = "custom/local"
 
-[provider.custom.options]
-base_url = "http://127.0.0.1:1234/v1"
+[provider.custom]
+api = "http://127.0.0.1:1234/v1"
 
 [provider.custom.models.local]
 reasoning_effort = "high"

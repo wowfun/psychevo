@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { RotateCcw, Save, Search } from "lucide-react";
+import { Pencil, Plus, RotateCcw, Save, Search, X } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type { AuxiliaryModelAssignmentView, ModelOptionView, ModelProviderView, ModelSettingsResult } from "@psychevo/protocol";
 import { ModelReasoningSelector, reasoningEffortsForModelOption } from "../model-picker";
 import { errorMessage } from "./common";
 
 type ProviderDraft = {
+  sourceProviderId: string;
   providerId: string;
-  label: string;
-  baseUrl: string;
-  apiKeyEnv: string;
+  name: string;
+  api: string;
   apiKey: string;
   noAuth: boolean;
+  modelId: string;
+  modelName: string;
+  context: string;
+  output: string;
+  advancedFormat: "json" | "toml";
+  advanced: string;
 };
 
 type AssignmentDraft = {
@@ -37,6 +43,9 @@ export function ModelsSettingsPanel({
   const [catalog, setCatalog] = useState<Record<string, ModelOptionView[]>>({});
   const [defaultDraft, setDefaultDraft] = useState<AssignmentDraft>({ model: "", reasoningEffort: "none" });
   const [auxDrafts, setAuxDrafts] = useState<Record<string, AssignmentDraft>>({});
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [addingProvider, setAddingProvider] = useState(false);
+  const [addDraft, setAddDraft] = useState<ProviderDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +78,8 @@ export function ModelsSettingsPanel({
           }
         ];
       })));
-      setProviderDrafts((current) => mergeProviderDrafts(current, result.providers));
+      setProviderDrafts((current) => mergeProviderDrafts(current, result.providers, result.modelOptions));
+      setAddDraft((current) => current ?? initialAddDraft(result.providers));
     } catch (nextError) {
       setError(errorMessage(nextError));
     } finally {
@@ -93,26 +103,41 @@ export function ModelsSettingsPanel({
     }
     return [...merged.values()].sort((left, right) => left.value.localeCompare(right.value));
   }, [catalog, settings]);
+  const providerTemplates = settings?.providers ?? [];
+  const visibleProviders = providerTemplates.filter(providerIsAvailable);
   const freeSelection = modelOptions.find((option) => option.value === defaultDraft.model && option.free && option.provider === "opencode-zen")
     ?? Object.values(auxDrafts)
       .map((value) => modelOptions.find((option) => option.value === value.model && option.free && option.provider === "opencode-zen"))
       .find(Boolean);
 
-  async function fetchProviderCatalog(provider: ModelProviderView) {
+  function patchProviderDraft(providerId: string, patch: Partial<ProviderDraft>) {
+    setProviderDrafts((current) => {
+      const provider = providerTemplates.find((item) => item.id === providerId);
+      const draft = current[providerId] ?? providerDraftFromView(provider ?? customProviderTemplate(), modelOptions);
+      return { ...current, [providerId]: { ...draft, ...patch } };
+    });
+  }
+
+  async function fetchProviderCatalog(draft: ProviderDraft) {
     if (!client) return;
-    setBusyKey(`catalog:${provider.id}`);
+    const providerId = draft.providerId.trim();
+    if (!providerId) {
+      setError("Provider id is required");
+      return;
+    }
+    setBusyKey(`catalog:${providerId}`);
     setError(null);
     setNotice(null);
     try {
       const result = await client.request("model/provider/catalog", {
         scope: "global",
-        providerId: provider.id,
+        providerId,
         refresh: true,
         cwd: cwd
       });
       setCatalog((current) => ({ ...current, [result.providerId]: result.models }));
       onModelCatalogLoaded(result.models);
-      setNotice(`${provider.label}: catalog updated`);
+      setNotice(`${displayProviderName(draft)} catalog updated`);
     } catch (nextError) {
       setError(errorMessage(nextError));
     } finally {
@@ -120,39 +145,46 @@ export function ModelsSettingsPanel({
     }
   }
 
-  async function saveProvider(provider: ModelProviderView) {
+  async function saveProvider(draft: ProviderDraft, mode: "add" | "edit") {
     if (!client) return;
-    const draft = providerDrafts[provider.id];
-    if (!draft) return;
-    setBusyKey(`provider:${provider.id}`);
+    const providerId = draft.providerId.trim();
+    const modelId = draft.modelId.trim();
+    if (!providerId || !modelId) {
+      setError("Provider id and model id are required");
+      return;
+    }
+    setBusyKey(`provider:${providerId}`);
     setError(null);
     setNotice(null);
     try {
       const result = await client.request("model/provider/save", {
         scope: "global",
-        providerId: draft.providerId,
-        label: draft.label,
-        baseUrl: draft.baseUrl,
-        apiKeyEnv: draft.noAuth ? null : draft.apiKeyEnv || null,
-        apiKey: draft.noAuth ? null : draft.apiKey || null,
-        noAuth: draft.noAuth
+        providerId,
+        name: draft.name.trim() || null,
+        api: draft.api.trim(),
+        apiKey: draft.noAuth ? null : draft.apiKey.trim() || null,
+        noAuth: draft.noAuth,
+        model: {
+          id: modelId,
+          name: draft.modelName.trim() || null,
+          limit: {
+            context: positiveIntegerOrNull(draft.context),
+            output: positiveIntegerOrNull(draft.output)
+          },
+          advancedFormat: draft.advancedFormat,
+          advanced: draft.advanced.trim() || null
+        }
       });
       setSettings(result);
-      setProviderDrafts((current) => mergeProviderDrafts(current, result.providers));
-      const savedProvider = result.providers.find((item) => item.id === draft.providerId || item.id === provider.id);
-      if (savedProvider?.id === "opencode-zen" && savedProvider.canFetchModels) {
-        const catalogResult = await client.request("model/provider/catalog", {
-          scope: "global",
-          providerId: savedProvider.id,
-          refresh: true,
-          cwd: cwd
-        });
-        setCatalog((current) => ({ ...current, [catalogResult.providerId]: catalogResult.models }));
-        onModelCatalogLoaded(catalogResult.models);
-        setNotice(`${draft.label}: saved; catalog updated`);
+      setProviderDrafts((current) => mergeProviderDrafts(current, result.providers, result.modelOptions));
+      setNotice(`${displayProviderName(draft)} saved`);
+      if (mode === "add") {
+        setAddingProvider(false);
+        setAddDraft(initialAddDraft(result.providers));
       } else {
-        setNotice(`${draft.label}: saved`);
+        setEditingProviderId(null);
       }
+      await loadModelSettings();
     } catch (nextError) {
       setError(errorMessage(nextError));
     } finally {
@@ -179,7 +211,7 @@ export function ModelsSettingsPanel({
         model: split?.model ?? "",
         reasoningEffort: draft.reasoningEffort || "none"
       });
-      setNotice(target === "default" ? "Default model saved" : `${formatAuxTaskLabel(task ?? "")}: saved`);
+      setNotice(target === "default" ? "Default model saved" : `${formatAuxTaskLabel(task ?? "")} saved`);
       await loadModelSettings();
       if (target === "default") {
         await onModelAssignmentSaved();
@@ -203,6 +235,27 @@ export function ModelsSettingsPanel({
         >
           <RotateCcw size={13} />
           <span>Refresh</span>
+        </button>
+        <button
+          aria-expanded={addingProvider}
+          aria-label="Add provider"
+          aria-pressed={addingProvider}
+          className={`modelProviderAddButton${addingProvider ? " is-active" : ""}`}
+          disabled={disabled || loading || !client}
+          onClick={() => {
+            if (addingProvider) {
+              setAddingProvider(false);
+              return;
+            }
+            setAddingProvider(true);
+            setEditingProviderId(null);
+            setAddDraft((current) => current ?? initialAddDraft(providerTemplates));
+          }}
+          title={addingProvider ? "Close provider editor" : "Add provider"}
+          type="button"
+        >
+          <Plus size={13} />
+          <span>Add</span>
         </button>
       </div>
       {error && <div className="modelSettingsMessage is-error" role="alert">{error}</div>}
@@ -236,120 +289,292 @@ export function ModelsSettingsPanel({
           />
         ))}
       </section>
-      <section className="modelProvidersPanel" aria-label="Providers">
-        {(settings?.providers ?? []).map((provider) => (
-          <ProviderSettingsRow
-            busy={busyKey === `provider:${provider.id}` || busyKey === `catalog:${provider.id}`}
-            catalogCount={catalog[provider.id]?.length ?? 0}
+      <section className="modelProvidersPanel" aria-label="Available providers">
+        <div className="modelProvidersHeader">
+          <div>
+            <strong>Providers</strong>
+            <span>{visibleProviders.length ? `${visibleProviders.length} available` : "No available providers"}</span>
+          </div>
+        </div>
+        {addingProvider && addDraft && (
+          <ProviderEditor
+            busy={busyKey === `provider:${addDraft.providerId}` || busyKey === `catalog:${addDraft.providerId}`}
+            catalogOptions={catalogOptionsForDraft(addDraft, modelOptions, catalog)}
             disabled={disabled || !client}
-            draft={providerDrafts[provider.id] ?? providerDraftFromView(provider)}
-            key={provider.id}
-            provider={provider}
-            onDraftChange={(draft) => setProviderDrafts((current) => ({ ...current, [provider.id]: draft }))}
-            onFetch={() => void fetchProviderCatalog(provider)}
-            onSave={() => void saveProvider(provider)}
+            draft={addDraft}
+            mode="add"
+            providerTemplates={providerTemplates}
+            onCancel={() => setAddingProvider(false)}
+            onDraftChange={setAddDraft}
+            onFetch={() => void fetchProviderCatalog(addDraft)}
+            onProviderTemplateChange={(provider) => setAddDraft(providerDraftFromView(provider, modelOptions))}
+            onSave={() => void saveProvider(addDraft, "add")}
           />
-        ))}
+        )}
+        {visibleProviders.map((provider) => {
+          const draft = providerDrafts[provider.id] ?? providerDraftFromView(provider, modelOptions);
+          const editing = editingProviderId === provider.id;
+          return (
+            <div className="modelProviderStack" key={provider.id}>
+              <ProviderSummaryRow
+                busy={busyKey === `provider:${provider.id}` || busyKey === `catalog:${provider.id}`}
+                disabled={disabled || !client}
+                editing={editing}
+                provider={provider}
+                onEdit={() => {
+                  if (editing) {
+                    setEditingProviderId(null);
+                    return;
+                  }
+                  setAddingProvider(false);
+                  setEditingProviderId(provider.id);
+                }}
+              />
+              {editing && (
+                <ProviderEditor
+                  busy={busyKey === `provider:${draft.providerId}` || busyKey === `catalog:${draft.providerId}`}
+                  catalogOptions={catalogOptionsForDraft(draft, modelOptions, catalog)}
+                  disabled={disabled || !client}
+                  draft={draft}
+                  mode="edit"
+                  providerTemplates={providerTemplates}
+                  onCancel={() => setEditingProviderId(null)}
+                  onDraftChange={(nextDraft) => patchProviderDraft(provider.id, nextDraft)}
+                  onFetch={() => void fetchProviderCatalog(draft)}
+                  onProviderTemplateChange={(template) => patchProviderDraft(provider.id, providerDraftFromView(template, modelOptions))}
+                  onSave={() => void saveProvider(draft, "edit")}
+                />
+              )}
+            </div>
+          );
+        })}
         {!settings && !loading && <div className="modelSettingsMessage">Model settings unavailable</div>}
       </section>
     </section>
   );
 }
 
-function ProviderSettingsRow({
+function ProviderSummaryRow({
   busy,
-  catalogCount,
   disabled,
-  draft,
+  editing,
   provider,
-  onDraftChange,
-  onFetch,
-  onSave
+  onEdit
 }: {
   busy: boolean;
-  catalogCount: number;
   disabled: boolean;
-  draft: ProviderDraft;
+  editing: boolean;
   provider: ModelProviderView;
-  onDraftChange(draft: ProviderDraft): void;
-  onFetch(): void;
-  onSave(): void;
+  onEdit(): void;
 }) {
-  const saveDisabled = disabled || busy || !draft.providerId.trim() || !draft.label.trim() || !draft.baseUrl.trim();
   return (
     <div className="modelProviderRow">
       <div className="modelProviderIdentity">
-        <strong>{provider.label}</strong>
-        {providerSecondaryStatus(provider) && <span>{providerSecondaryStatus(provider)}</span>}
+        <strong>{provider.name}</strong>
+        <span>{provider.id}</span>
       </div>
-      <div className="modelProviderFields">
-        {provider.id === "custom" && (
-          <label>
-            <span>ID</span>
-            <input
-              disabled={disabled || busy}
-              onChange={(event) => onDraftChange({ ...draft, providerId: event.currentTarget.value })}
-              value={draft.providerId}
-            />
-          </label>
-        )}
-        {provider.id === "custom" && (
-          <label>
-            <span>Label</span>
-            <input
-              disabled={disabled || busy}
-              onChange={(event) => onDraftChange({ ...draft, label: event.currentTarget.value })}
-              value={draft.label}
-            />
-          </label>
-        )}
-        <label>
-          <span>Base URL</span>
-          <input
-            disabled={disabled || busy}
-            onChange={(event) => onDraftChange({ ...draft, baseUrl: event.currentTarget.value })}
-            value={draft.baseUrl}
-          />
-        </label>
-        {!draft.noAuth && (
-          <>
+      <div className="modelProviderStatus" data-status={provider.credentialStatus}>
+        {provider.credentialStatus === "notRequired" ? "No auth" : "API key ready"}
+      </div>
+      <button
+        aria-expanded={editing}
+        aria-pressed={editing}
+        className={editing ? "is-active" : undefined}
+        disabled={disabled || busy}
+        onClick={onEdit}
+        title={editing ? `Close ${provider.name} editor` : `Edit ${provider.name}`}
+        type="button"
+      >
+        <Pencil size={13} />
+        <span>Edit</span>
+      </button>
+    </div>
+  );
+}
+
+function ProviderEditor({
+  busy,
+  catalogOptions,
+  disabled,
+  draft,
+  mode,
+  providerTemplates,
+  onCancel,
+  onDraftChange,
+  onFetch,
+  onProviderTemplateChange,
+  onSave
+}: {
+  busy: boolean;
+  catalogOptions: ModelOptionView[];
+  disabled: boolean;
+  draft: ProviderDraft;
+  mode: "add" | "edit";
+  providerTemplates: ModelProviderView[];
+  onCancel(): void;
+  onDraftChange(draft: ProviderDraft): void;
+  onFetch(): void;
+  onProviderTemplateChange(provider: ModelProviderView): void;
+  onSave(): void;
+}) {
+  const providerSelectValue = draft.sourceProviderId === "custom" ? "custom" : draft.providerId;
+  const saveDisabled = disabled
+    || busy
+    || !draft.providerId.trim()
+    || !draft.api.trim()
+    || !draft.modelId.trim()
+    || (!draft.noAuth && mode === "add" && !draft.apiKey.trim());
+  const modelListId = `model-options-${mode}-${draft.providerId || "custom"}`;
+  return (
+    <div className="modelProviderEditor" role="group" aria-label={mode === "add" ? "Add provider" : `Edit ${displayProviderName(draft)}`}>
+      <div className="modelProviderEditorForm">
+        <div className="modelProviderEditorRow modelProviderEditorRowProvider">
+          {draft.sourceProviderId === "custom" ? (
             <label>
-              <span>API key env</span>
+              <span>Provider id</span>
               <input
                 disabled={disabled || busy}
-                onChange={(event) => onDraftChange({ ...draft, apiKeyEnv: event.currentTarget.value })}
-                value={draft.apiKeyEnv}
+                onChange={(event) => onDraftChange({ ...draft, providerId: event.currentTarget.value })}
+                value={draft.providerId}
               />
             </label>
+          ) : (
             <label>
-              <span>API key</span>
-              <input
-                disabled={disabled || busy}
-                onChange={(event) => onDraftChange({ ...draft, apiKey: event.currentTarget.value })}
-                type="password"
-                value={draft.apiKey}
-              />
+              <span>Provider id</span>
+              <select
+                disabled={disabled || busy || mode === "edit"}
+                onChange={(event) => {
+                  const selected = providerTemplates.find((provider) => provider.id === event.currentTarget.value) ?? customProviderTemplate();
+                  onProviderTemplateChange(selected);
+                }}
+                value={providerSelectValue}
+              >
+                {providerTemplates.map((provider) => (
+                  <option key={provider.id} value={provider.id}>{provider.id === "custom" ? "Custom" : provider.id}</option>
+                ))}
+              </select>
             </label>
-          </>
-        )}
-        <label className="modelNoAuthToggle">
-          <input
-            checked={draft.noAuth}
-            disabled={disabled || busy}
-            onChange={(event) => onDraftChange({ ...draft, noAuth: event.currentTarget.checked, apiKey: "" })}
-            type="checkbox"
-          />
-          <span>No auth</span>
-        </label>
+          )}
+          <label>
+            <span>Name</span>
+            <input
+              disabled={disabled || busy}
+              onChange={(event) => onDraftChange({ ...draft, name: event.currentTarget.value })}
+              value={draft.name}
+            />
+          </label>
+        </div>
+        <div className="modelProviderEditorRow modelProviderEditorRowAuth">
+          <label>
+            <span>Base URL</span>
+            <input
+              disabled={disabled || busy}
+              onChange={(event) => onDraftChange({ ...draft, api: event.currentTarget.value })}
+              value={draft.api}
+            />
+          </label>
+          <label>
+            <span>API key</span>
+            <input
+              disabled={disabled || busy || draft.noAuth}
+              onChange={(event) => onDraftChange({ ...draft, apiKey: event.currentTarget.value })}
+              type="password"
+              value={draft.apiKey}
+            />
+          </label>
+          <label>
+            <span>API key env</span>
+            <input readOnly value={defaultApiKeyEnv(draft.providerId)} />
+          </label>
+          <label className="modelNoAuthToggle">
+            <input
+              checked={draft.noAuth}
+              disabled={disabled || busy}
+              onChange={(event) => onDraftChange({ ...draft, noAuth: event.currentTarget.checked, apiKey: "" })}
+              type="checkbox"
+            />
+            <span>No auth</span>
+          </label>
+        </div>
+        <div className="modelProviderEditorRow modelProviderEditorRowModel">
+          <label>
+            <span>Model id</span>
+            <input
+              disabled={disabled || busy}
+              list={modelListId}
+              onChange={(event) => onDraftChange({ ...draft, modelId: event.currentTarget.value })}
+              value={draft.modelId}
+            />
+            <datalist id={modelListId}>
+              {catalogOptions.map((option) => (
+                <option key={option.value} value={option.id}>{option.name ?? option.value}</option>
+              ))}
+            </datalist>
+          </label>
+          <button className="modelProviderFetchButton" disabled={disabled || busy || !draft.providerId.trim()} onClick={onFetch} type="button">
+            <Search size={13} />
+            <span>Fetch models</span>
+          </button>
+          <label>
+            <span>Name</span>
+            <input
+              disabled={disabled || busy}
+              onChange={(event) => onDraftChange({ ...draft, modelName: event.currentTarget.value })}
+              value={draft.modelName}
+            />
+          </label>
+        </div>
+        <div className="modelProviderEditorRow modelProviderEditorRowLimits">
+          <label>
+            <span>Context</span>
+            <input
+              disabled={disabled || busy}
+              inputMode="numeric"
+              onChange={(event) => onDraftChange({ ...draft, context: event.currentTarget.value })}
+              value={draft.context}
+            />
+          </label>
+          <label>
+            <span>Max output</span>
+            <input
+              disabled={disabled || busy}
+              inputMode="numeric"
+              onChange={(event) => onDraftChange({ ...draft, output: event.currentTarget.value })}
+              value={draft.output}
+            />
+          </label>
+          <label>
+            <span>Advanced</span>
+            <select
+              disabled={disabled || busy}
+              onChange={(event) => onDraftChange({ ...draft, advancedFormat: event.currentTarget.value === "toml" ? "toml" : "json" })}
+              value={draft.advancedFormat}
+            >
+              <option value="json">JSON</option>
+              <option value="toml">TOML</option>
+            </select>
+          </label>
+        </div>
+        <div className="modelProviderEditorRow modelProviderEditorRowAdvanced">
+          <label>
+            <span>Advanced Metadata</span>
+            <textarea
+              disabled={disabled || busy}
+              onChange={(event) => onDraftChange({ ...draft, advanced: event.currentTarget.value })}
+              spellCheck={false}
+              value={draft.advanced}
+            />
+          </label>
+        </div>
       </div>
-      <div className="modelProviderActions">
-        <button disabled={disabled || busy || !provider.canFetchModels} onClick={onFetch} type="button">
-          <Search size={13} />
-          <span>{catalogCount ? `${catalogCount} models` : "Fetch"}</span>
-        </button>
+      <div className="modelProviderEditorActions">
         <button disabled={saveDisabled} onClick={onSave} type="button">
           <Save size={13} />
-          <span>{busy ? "Saving" : "Save"}</span>
+          <span>{busy ? "Saving" : "Save provider"}</span>
+        </button>
+        <button disabled={disabled || busy} onClick={onCancel} title="Cancel" type="button">
+          <X size={13} />
+          <span>Cancel</span>
         </button>
       </div>
     </div>
@@ -416,27 +641,93 @@ function ModelAssignmentRow({
   );
 }
 
-function mergeProviderDrafts(current: Record<string, ProviderDraft>, providers: ModelProviderView[]): Record<string, ProviderDraft> {
+function mergeProviderDrafts(
+  current: Record<string, ProviderDraft>,
+  providers: ModelProviderView[],
+  options: ModelOptionView[]
+): Record<string, ProviderDraft> {
   const next = { ...current };
   for (const provider of providers) {
-    next[provider.id] = next[provider.id] ?? providerDraftFromView(provider);
+    next[provider.id] = next[provider.id] ?? providerDraftFromView(provider, options);
   }
   return next;
 }
 
-function providerDraftFromView(provider: ModelProviderView): ProviderDraft {
+function providerDraftFromView(provider: ModelProviderView, options: ModelOptionView[]): ProviderDraft {
+  const firstModel = options.find((option) => option.provider === provider.id);
   return {
+    sourceProviderId: provider.id,
     providerId: provider.id === "custom" ? "" : provider.id,
-    label: provider.id === "custom" ? "" : provider.label,
-    baseUrl: provider.baseUrl ?? (provider.id === "custom" ? "http://127.0.0.1:1234/v1" : ""),
-    apiKeyEnv: provider.apiKeyEnv ?? defaultApiKeyEnv(provider.id),
+    name: provider.id === "custom" ? "" : provider.name,
+    api: provider.api ?? (provider.id === "custom" ? "http://127.0.0.1:1234/v1" : ""),
     apiKey: "",
-    noAuth: provider.noAuth
+    noAuth: provider.noAuth || provider.credentialStatus === "notRequired",
+    modelId: firstModel?.id ?? "",
+    modelName: firstModel?.name ?? "",
+    context: firstModel?.limit.context ? String(firstModel.limit.context) : "",
+    output: firstModel?.limit.output ? String(firstModel.limit.output) : "",
+    advancedFormat: "json",
+    advanced: ""
   };
 }
 
+function customProviderTemplate(): ModelProviderView {
+  return {
+    id: "custom",
+    name: "Custom",
+    builtIn: false,
+    configured: false,
+    api: null,
+    apiKeyEnv: null,
+    credentialStatus: "missing",
+    noAuth: false,
+    canFetchModels: false,
+    unavailableReason: "requires provider setup"
+  };
+}
+
+function initialAddDraft(providers: ModelProviderView[]): ProviderDraft {
+  const custom = providers.find((provider) => provider.id === "custom") ?? customProviderTemplate();
+  return providerDraftFromView(custom, []);
+}
+
+function providerIsAvailable(provider: ModelProviderView): boolean {
+  if (provider.id === "custom") return false;
+  return provider.credentialStatus === "present" || provider.credentialStatus === "notRequired" || provider.noAuth;
+}
+
+function catalogOptionsForDraft(
+  draft: ProviderDraft,
+  options: ModelOptionView[],
+  catalog: Record<string, ModelOptionView[]>
+): ModelOptionView[] {
+  const providerId = draft.providerId.trim();
+  const merged = new Map<string, ModelOptionView>();
+  for (const option of options) {
+    if (option.provider === providerId) {
+      merged.set(option.value, option);
+    }
+  }
+  for (const option of catalog[providerId] ?? []) {
+    merged.set(option.value, option);
+  }
+  return [...merged.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
 function defaultApiKeyEnv(providerId: string): string {
-  return `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "")}_API_KEY`;
+  const normalized = providerId.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return `${normalized || "PROVIDER"}_API_KEY`;
+}
+
+function displayProviderName(draft: ProviderDraft): string {
+  return draft.name.trim() || draft.providerId.trim() || "Provider";
+}
+
+function positiveIntegerOrNull(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function splitModelValue(value: string): { provider: string; model: string } | null {
@@ -465,8 +756,4 @@ function formatAuxTaskLabel(task: string): string {
     default:
       return task;
   }
-}
-
-function providerSecondaryStatus(provider: ModelProviderView): string | null {
-  return provider.configured ? "Configured" : null;
 }

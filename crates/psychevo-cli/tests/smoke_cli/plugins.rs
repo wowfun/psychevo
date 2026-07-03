@@ -288,9 +288,8 @@ pub(crate) fn cli_run_can_search_and_execute_enabled_plugin_worker_tool_by_defau
         format!(
             r#"model = "mock/mock-model"
 
-[provider.mock.options]
-base_url = "{}"
-api_key_env = "TEST_PROVIDER_KEY"
+[provider.mock]
+api = "{}"
 
 [plugins.disk-cleanup]
 enabled = true
@@ -299,7 +298,7 @@ enabled = true
         ),
     )
     .expect("config");
-    std::fs::write(psychevo_home.join(".env"), "TEST_PROVIDER_KEY=test-key\n").expect("env");
+    std::fs::write(psychevo_home.join(".env"), "MOCK_API_KEY=test-key\n").expect("env");
 
     let install = plugin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["plugin", "install", source.to_str().expect("source")])
@@ -314,7 +313,7 @@ enabled = true
     let output = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
         .env("PSYCHEVO_DB", &db)
-        .env("TEST_PROVIDER_KEY", "test-key")
+        .env("MOCK_API_KEY", "test-key")
         .current_dir(&cwd)
         .args(["run", "-f", "json", "check cleanup status"])
         .output()

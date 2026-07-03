@@ -79,8 +79,8 @@ mod tests {
             r#"
 model = "mock/default"
 
-[provider.mock.options]
-base_url = "http://127.0.0.1:9"
+[provider.mock]
+api = "http://127.0.0.1:9"
 no_auth = true
 
 [provider.mock.models.default]

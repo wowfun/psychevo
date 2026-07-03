@@ -893,18 +893,15 @@ pub(crate) fn cli_model_list_current_and_fetch_use_local_config_and_explicit_fet
     std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
     let server = CatalogJsonServer::start(r#"{"data":[{"id":"mock-a"},{"id":"mock-b"}]}"#);
-    std::fs::write(psychevo_home.join(".env"), "MOCK_KEY=test-key\n").expect("env");
+    std::fs::write(psychevo_home.join(".env"), "MOCK_API_KEY=test-key\n").expect("env");
     std::fs::write(
         psychevo_home.join("config.toml"),
         format!(
             r#"model = "mock/mock-a"
 
 [provider.mock]
-label = "Mock"
-
-[provider.mock.options]
-base_url = "{}/v1"
-api_key_env = "MOCK_KEY"
+name = "Mock"
+api = "{}/v1"
 
 [provider.mock.models."mock-a"]
 "#,

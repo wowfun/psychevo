@@ -18,22 +18,8 @@ pub(crate) fn catalog_provider_for(
     }
     let display_label = provider_label(&provider, config_entry);
     let base_url = provider_base_url(&provider, config_entry, &loaded.env);
-    let explicit_no_auth = config_entry.is_some_and(|entry| entry.options.no_auth);
-    let api_key_env = (!explicit_no_auth)
-        .then(|| {
-            first_string([
-                config_entry.and_then(|entry| entry.options.api_key_env.clone()),
-                built_in.and_then(|provider| {
-                    provider
-                        .api_key_envs
-                        .iter()
-                        .find(|key| env_value(&loaded.env, key).is_some())
-                        .or_else(|| provider.api_key_envs.first())
-                        .map(|key| (*key).to_string())
-                }),
-            ])
-        })
-        .flatten();
+    let explicit_no_auth = config_entry.is_some_and(|entry| entry.no_auth);
+    let api_key_env = provider_api_key_env(&provider, config_entry);
     let Some(base_url) = base_url else {
         return Some(ModelCatalogProvider {
             provider,
@@ -105,17 +91,24 @@ pub(crate) fn parse_model_catalog_response(
 pub(crate) fn provider_base_url(
     provider: &str,
     config_entry: Option<&ConfigProviderEntry>,
-    env_map: &BTreeMap<String, String>,
+    _env_map: &BTreeMap<String, String>,
 ) -> Option<String> {
     let built_in = built_in_provider(provider);
     first_string([
-        config_entry.and_then(|entry| entry.options.base_url.clone()),
-        built_in
-            .and_then(|provider| provider.base_url_env)
-            .and_then(|key| env_map.get(key).cloned())
-            .filter(|value| !value.trim().is_empty()),
-        built_in.and_then(|provider| provider.base_url.map(str::to_string)),
+        config_entry.and_then(|entry| entry.api.clone()),
+        built_in.and_then(|provider| provider.api.map(str::to_string)),
     ])
+}
+
+pub(crate) fn provider_api_key_env(
+    provider: &str,
+    config_entry: Option<&ConfigProviderEntry>,
+) -> Option<String> {
+    Some(
+        config_entry
+            .and_then(|entry| entry.api_key_env.clone())
+            .unwrap_or_else(|| custom_provider_api_key_env(provider)),
+    )
 }
 
 pub(crate) fn truncate_error(value: &str) -> String {

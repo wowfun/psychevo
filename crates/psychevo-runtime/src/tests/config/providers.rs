@@ -14,9 +14,8 @@ pub(crate) fn default_global_config_uses_home_psychevo_config_toml() {
         r#"
 model = "deepseek/deepseek-chat"
 
-[provider.deepseek.options]
-base_url = "http://home.example/v1"
-api_key_env = "DEEPSEEK_API_KEY"
+[provider.deepseek]
+api = "http://home.example/v1"
 
 [provider.deepseek.models."deepseek-chat"]
 "#,
@@ -44,8 +43,8 @@ pub(crate) fn opencode_zen_no_auth_resolves_without_api_key() {
         r#"
 model = "opencode-zen/mimo-v2.5-free"
 
-[provider."opencode-zen".options]
-base_url = "https://opencode.ai/zen/v1"
+[provider."opencode-zen"]
+api = "https://opencode.ai/zen/v1"
 no_auth = true
 
 [provider."opencode-zen".models."mimo-v2.5-free"]
@@ -58,8 +57,40 @@ no_auth = true
     let resolved = resolve_run_provider(&options, &loaded).expect("provider");
     assert_eq!(resolved.provider, "opencode-zen");
     assert_eq!(resolved.model, "mimo-v2.5-free");
-    assert_eq!(resolved.api_key_env, None);
+    assert_eq!(
+        resolved.api_key_env.as_deref(),
+        Some("OPENCODE_ZEN_API_KEY")
+    );
     assert_eq!(resolved.api_key, "");
+}
+
+#[test]
+pub(crate) fn provider_api_key_env_override_is_used_for_credentials() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+model = "zai/glm-5.2"
+
+[provider.zai]
+api = "https://api.z.ai/api/paas/v4"
+api_key_env = "GLM_API_KEY"
+
+[provider.zai.models."glm-5.2"]
+"#,
+    )
+    .expect("config");
+    fs::write(config_dir.join(".env"), "GLM_API_KEY=glm-key\n").expect("env");
+
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
+    let resolved = resolve_run_provider(&options, &loaded).expect("provider");
+    assert_eq!(resolved.provider, "zai");
+    assert_eq!(resolved.api_key_env.as_deref(), Some("GLM_API_KEY"));
+    assert_eq!(resolved.api_key, "glm-key");
 }
 
 #[test]
@@ -83,9 +114,8 @@ pub(crate) fn psychevo_home_overrides_default_home() {
         r#"
 model = "deepseek/deepseek-chat"
 
-[provider.deepseek.options]
-base_url = "http://custom-home.example/v1"
-api_key_env = "DEEPSEEK_API_KEY"
+[provider.deepseek]
+api = "http://custom-home.example/v1"
 
 [provider.deepseek.models."deepseek-chat"]
 "#,
@@ -114,9 +144,8 @@ pub(crate) fn config_merge_dotenv_precedence_and_provider_qualified_model() {
 # global default
 model = "deepseek/deepseek-chat"
 
-[provider.deepseek.options]
-base_url = "http://global.example/v1"
-api_key_env = "DEEPSEEK_API_KEY"
+[provider.deepseek]
+api = "http://global.example/v1"
 
 [provider.deepseek.models."deepseek-chat"]
 reasoning_effort = "low"
@@ -127,8 +156,8 @@ reasoning_effort = "low"
     write_config(
         project_dir.join("config.toml"),
         r#"
-[provider.deepseek.options]
-base_url = "http://project.example/v1"
+[provider.deepseek]
+api = "http://project.example/v1"
 
 [provider.deepseek.models."deepseek-chat"]
 reasoning_effort = "high"
@@ -218,9 +247,8 @@ pub(crate) fn selected_configured_model_reports_effective_reasoning_without_cred
         r#"
 model = "custom/local"
 
-[provider.custom.options]
-base_url = "http://127.0.0.1:1234/v1"
-api_key_env = "CUSTOM_KEY"
+[provider.custom]
+api = "http://127.0.0.1:1234/v1"
 
 [provider.custom.models.local]
 reasoning_effort = "high"
@@ -284,11 +312,8 @@ pub(crate) fn models_dev_cache_enriches_configured_model_by_base_url() {
         config_dir.join("config.toml"),
         r#"
 [provider."xiaomi-token-plan"]
-label = "Xiaomi Token Plan"
-
-[provider."xiaomi-token-plan".options]
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-api_key_env = "XIAOMI_KEY"
+name = "Xiaomi Token Plan"
+api = "https://token-plan-cn.xiaomimimo.com/v1"
 
 [provider."xiaomi-token-plan".models."mimo-v2.5-pro"]
 "#,
@@ -345,11 +370,8 @@ pub(crate) fn models_dev_cache_enriches_xiaomi_omni_capabilities_and_modalities(
         config_dir.join("config.toml"),
         r#"
 [provider."xiaomi-token-plan"]
-label = "Xiaomi Token Plan"
-
-[provider."xiaomi-token-plan".options]
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-api_key_env = "XIAOMI_KEY"
+name = "Xiaomi Token Plan"
+api = "https://token-plan-cn.xiaomimimo.com/v1"
 
 [provider."xiaomi-token-plan".models."mimo-v2-omni"]
 "#,
@@ -509,9 +531,8 @@ pub(crate) fn explicit_metadata_config_override_wins_and_disables_reasoning() {
         r#"
 model = "deepseek/deepseek-chat"
 
-[provider.deepseek.options]
-base_url = "http://deepseek.example/v1"
-api_key_env = "DEEPSEEK_API_KEY"
+[provider.deepseek]
+api = "http://deepseek.example/v1"
 
 [provider.deepseek.models."deepseek-chat"]
 reasoning_effort = "high"
@@ -554,8 +575,8 @@ pub(crate) fn legacy_context_limit_config_field_is_rejected() {
         r#"
 model = "custom/local"
 
-[provider.custom.options]
-base_url = "http://127.0.0.1:1234/v1"
+[provider.custom]
+api = "http://127.0.0.1:1234/v1"
 
 [provider.custom.models.local]
 context_limit = 1234
@@ -577,8 +598,8 @@ pub(crate) fn raw_api_keys_are_rejected() {
     write_config(
         config_dir.join("config.toml"),
         r#"
-[provider.custom.options]
-base_url = "http://127.0.0.1:1234/v1"
+[provider.custom]
+api = "http://127.0.0.1:1234/v1"
 api_key = "secret"
 
 [provider.custom.models.local]
@@ -603,17 +624,14 @@ pub(crate) fn provider_label_is_display_only() {
 model = "custom/local"
 
 [provider.custom]
-label = "Xiaomi Token Plan CN"
-
-[provider.custom.options]
-base_url = "http://127.0.0.1:1234/v1"
-api_key_env = "CUSTOM_KEY"
+name = "Xiaomi Token Plan CN"
+api = "http://127.0.0.1:1234/v1"
 
 [provider.custom.models.local]
 "#,
     )
     .expect("config");
-    fs::write(config_dir.join(".env"), "CUSTOM_KEY=custom-key\n").expect("env");
+    fs::write(config_dir.join(".env"), "CUSTOM_API_KEY=custom-key\n").expect("env");
 
     let cwd = canonical_cwd(&options.cwd).expect("cwd");
     let loaded = load_run_config(&options, &cwd).expect("config");
@@ -653,9 +671,9 @@ model = "deepseek/deepseek-chat"
     assert!(result.wrote_api_key);
     assert!(!result.reused_existing_api_key);
     let config = fs::read_to_string(config_dir.join("config.toml")).expect("config");
-    assert!(config.contains("label = \"Xiaomi Token Plan CN\""));
-    assert!(config.contains("base_url = \"https://token-plan-cn.xiaomimimo.com/v1\""));
-    assert!(config.contains("api_key_env = \"XIAOMI_TOKEN_PLAN_CN_API_KEY\""));
+    assert!(config.contains("name = \"Xiaomi Token Plan CN\""));
+    assert!(config.contains("api = \"https://token-plan-cn.xiaomimimo.com/v1\""));
+    assert!(!config.contains("api_key_env"));
     assert!(!config.contains("secret-key"));
     let env = fs::read_to_string(config_dir.join(".env")).expect("env");
     assert_eq!(env, "XIAOMI_TOKEN_PLAN_CN_API_KEY=secret-key\n");
@@ -672,16 +690,16 @@ pub(crate) fn set_default_model_writes_local_by_default_and_global_when_requeste
     write_config(
         home.join("config.toml"),
         r#"
-[provider.mock.options]
-base_url = "http://127.0.0.1:9"
+[provider.mock]
+api = "http://127.0.0.1:9"
 "#,
     )
     .expect("global config");
     write_config(
         cwd.join(".psychevo/config.toml"),
         r#"
-[provider.localmock.options]
-base_url = "http://127.0.0.1:9"
+[provider.localmock]
+api = "http://127.0.0.1:9"
 "#,
     )
     .expect("local config");
@@ -713,8 +731,8 @@ pub(crate) fn set_default_model_with_reasoning_writes_model_object() {
     write_config(
         home.join("config.toml"),
         r#"
-[provider.mock.options]
-base_url = "http://127.0.0.1:9"
+[provider.mock]
+api = "http://127.0.0.1:9"
 "#,
     )
     .expect("global config");
@@ -747,8 +765,8 @@ pub(crate) fn set_default_model_validates_provider_scope_without_catalog_fetch()
     write_config(
         cwd.join(".psychevo/config.toml"),
         r#"
-[provider.localonly.options]
-base_url = "http://127.0.0.1:9"
+[provider.localonly]
+api = "http://127.0.0.1:9"
 "#,
     )
     .expect("local config");
@@ -777,18 +795,18 @@ pub(crate) fn auxiliary_compression_model_precedes_legacy_compression_model() {
         r#"
 model = "main/main-model"
 
-[provider.main.options]
-base_url = "http://127.0.0.1:9/v1"
+[provider.main]
+api = "http://127.0.0.1:9/v1"
 
 [provider.main.models.main-model]
 
-[provider.legacy.options]
-base_url = "http://127.0.0.1:10/v1"
+[provider.legacy]
+api = "http://127.0.0.1:10/v1"
 
 [provider.legacy.models.legacy-model]
 
-[provider.aux.options]
-base_url = "http://127.0.0.1:11/v1"
+[provider.aux]
+api = "http://127.0.0.1:11/v1"
 
 [provider.aux.models.aux-model]
 
@@ -822,8 +840,8 @@ pub(crate) fn auxiliary_model_assignment_writes_hermes_style_task_slot() {
     write_config(
         home.join("config.toml"),
         r#"
-[provider."opencode-zen".options]
-base_url = "https://opencode.ai/zen/v1"
+[provider."opencode-zen"]
+api = "https://opencode.ai/zen/v1"
 no_auth = true
 "#,
     )

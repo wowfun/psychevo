@@ -26,9 +26,19 @@
     }
   },
   "properties": {
-    "free": {
-      "default": false,
-      "type": "boolean"
+    "advanced": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "advancedFormat": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "id": {
       "type": "string"
@@ -50,40 +60,11 @@
         "string",
         "null"
       ]
-    },
-    "provider": {
-      "type": "string"
-    },
-    "providerName": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "reasoningEfforts": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "reasoningSupported": {
-      "default": null,
-      "type": [
-        "boolean",
-        "null"
-      ]
-    },
-    "value": {
-      "type": "string"
     }
   },
   "required": [
-    "id",
-    "provider",
-    "value"
+    "id"
   ],
-  "title": "ModelOptionView",
+  "title": "ModelProviderSaveModelParams",
   "type": "object"
 }

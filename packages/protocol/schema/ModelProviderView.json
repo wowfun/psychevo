@@ -11,13 +11,13 @@
     }
   },
   "properties": {
-    "apiKeyEnv": {
+    "api": {
       "type": [
         "string",
         "null"
       ]
     },
-    "baseUrl": {
+    "apiKeyEnv": {
       "type": [
         "string",
         "null"
@@ -38,7 +38,7 @@
     "id": {
       "type": "string"
     },
-    "label": {
+    "name": {
       "type": "string"
     },
     "noAuth": {
@@ -57,7 +57,7 @@
     "configured",
     "credentialStatus",
     "id",
-    "label",
+    "name",
     "noAuth"
   ],
   "title": "ModelProviderView",

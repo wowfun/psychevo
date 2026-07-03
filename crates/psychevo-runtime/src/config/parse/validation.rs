@@ -1,4 +1,3 @@
-
 pub(crate) fn parse_host_executables(value: &Value) -> Result<Vec<ExecPolicyHostExecutable>> {
     let values = value.as_array().ok_or_else(|| {
         Error::Config("exec_policy.host_executables must be an array".to_string())
@@ -110,27 +109,25 @@ pub(crate) fn parse_config_provider_entry(
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config(format!("provider.{name} must be an object")))?;
+    let api_key_env = optional_string_field(object, "api_key_env")?;
+    if let Some(api_key_env) = &api_key_env
+        && !valid_env_name(api_key_env)
+    {
+        return Err(Error::Config(format!(
+            "provider.{name}.api_key_env must be a valid environment variable name"
+        )));
+    }
     let mut entry = ConfigProviderEntry {
-        label: optional_string_field(object, "label")?,
+        name: optional_string_field(object, "name")?,
+        api: optional_string_field(object, "api")?,
+        api_key_env,
+        no_auth: optional_bool_field(object, "no_auth")?.unwrap_or(false),
         ..Default::default()
     };
-    if let Some(options) = object.get("options") {
-        let options = options
-            .as_object()
-            .ok_or_else(|| Error::Config(format!("provider.{name}.options must be an object")))?;
-        if options.contains_key("api_key") || options.contains_key("apiKey") {
-            return Err(Error::Config(format!(
-                "provider.{name}.options must not contain raw API keys"
-            )));
-        }
-        entry.options.base_url = optional_string_field(options, "base_url")?;
-        entry.options.api_key_env = optional_string_field(options, "api_key_env")?;
-        entry.options.no_auth = optional_bool_field(options, "no_auth")?.unwrap_or(false);
-        if entry.options.no_auth && entry.options.api_key_env.is_some() {
-            return Err(Error::Config(format!(
-                "provider.{name}.options no_auth conflicts with api_key_env"
-            )));
-        }
+    if object.contains_key("api_key") || object.contains_key("apiKey") {
+        return Err(Error::Config(format!(
+            "provider.{name} must not contain raw API keys"
+        )));
     }
     if let Some(models) = object.get("models") {
         let models = models
@@ -160,6 +157,7 @@ pub(crate) fn parse_config_model_entry(
         ))
     })?;
     Ok(ConfigModelEntry {
+        name: optional_string_field(object, "name")?,
         reasoning_effort: validate_reasoning_effort(optional_string_field(
             object,
             "reasoning_effort",

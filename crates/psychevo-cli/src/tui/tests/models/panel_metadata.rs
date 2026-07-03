@@ -137,11 +137,8 @@ pub(crate) fn model_info_tab_renders_cached_xiaomi_omni_capabilities() {
         &config_path,
         r#"
 [provider."xiaomi-token-plan"]
-label = "Xiaomi Token Plan"
-
-[provider."xiaomi-token-plan".options]
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-api_key_env = "XIAOMI_KEY"
+name = "Xiaomi Token Plan"
+api = "https://token-plan-cn.xiaomimimo.com/v1"
 
 [provider."xiaomi-token-plan".models."mimo-v2-omni"]
 "#,
@@ -234,11 +231,8 @@ pub(crate) async fn model_ctrl_r_refreshes_metadata_cache_and_preserves_info_sta
         &config_path,
         r#"
 [provider."xiaomi-token-plan"]
-label = "Xiaomi Token Plan"
-
-[provider."xiaomi-token-plan".options]
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-api_key_env = "XIAOMI_KEY"
+name = "Xiaomi Token Plan"
+api = "https://token-plan-cn.xiaomimimo.com/v1"
 
 [provider."xiaomi-token-plan".models."mimo-v2-omni"]
 "#,
@@ -357,6 +351,7 @@ pub(crate) fn model_info_tab_omits_unknown_and_shows_false_capabilities() {
         provider: "mock".to_string(),
         provider_label: "Mock".to_string(),
         model: "false-caps".to_string(),
+        model_name: None,
         reasoning_effort: Some("low".to_string()),
         context_limit: None,
         metadata: Default::default(),
@@ -424,9 +419,8 @@ pub(crate) async fn model_fetch_all_adds_fetched_rows_and_preserves_query() {
         format!(
             r#"model = "mock/mock-model"
 
-[provider.mock.options]
-base_url = "{}"
-api_key_env = "TEST_PROVIDER_KEY"
+[provider.mock]
+api = "{}"
 
 [provider.mock.models."mock-model"]
 "#,
@@ -436,7 +430,7 @@ api_key_env = "TEST_PROVIDER_KEY"
     .expect("config");
     let mut app = test_app(&temp);
     app.env_map
-        .insert("TEST_PROVIDER_KEY".to_string(), "test-key".to_string());
+        .insert("MOCK_API_KEY".to_string(), "test-key".to_string());
     app.config_path = Some(config_path);
     app.current_model = Some("mock/mock-model".to_string());
     let mut ui = FullscreenUi::new(&app);
@@ -498,9 +492,8 @@ pub(crate) async fn model_fetch_missing_credentials_stays_in_panel() {
         &config_path,
         r#"model = "mock/mock-model"
 
-[provider.mock.options]
-base_url = "http://api.example/v1"
-api_key_env = "TEST_PROVIDER_KEY"
+[provider.mock]
+api = "http://api.example/v1"
 
 [provider.mock.models."mock-model"]
 "#,
@@ -525,7 +518,7 @@ api_key_env = "TEST_PROVIDER_KEY"
         .expect("provider");
     assert_eq!(
         provider.description.as_deref(),
-        Some("missing TEST_PROVIDER_KEY")
+        Some("missing MOCK_API_KEY")
     );
     assert!(matches!(
         provider.value,
@@ -669,9 +662,8 @@ pub(crate) async fn model_add_builtin_deepseek_saves_fetches_and_hides_secret() 
 
     let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
     assert!(config.contains("[provider.deepseek]"));
-    assert!(config.contains("label = \"DeepSeek\""));
-    assert!(config.contains(&format!("base_url = \"{}\"", server.base_url)));
-    assert!(config.contains("api_key_env = \"DEEPSEEK_API_KEY\""));
+    assert!(config.contains("name = \"DeepSeek\""));
+    assert!(config.contains(&format!("api = \"{}\"", server.base_url)));
     assert!(!config.contains("test-key"));
     let env = fs::read_to_string(app.home.join(".env")).expect("env");
     assert_eq!(env, "DEEPSEEK_API_KEY=test-key\n");
@@ -754,9 +746,8 @@ pub(crate) fn model_add_builtin_xiaomi_writes_canonical_provider_options() {
     assert_eq!(provider_id, "xiaomi-token-plan");
     let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
     assert!(config.contains("[provider.xiaomi-token-plan]"));
-    assert!(config.contains("label = \"Xiaomi Token Plan\""));
-    assert!(config.contains("base_url = \"https://token-plan-sgp.xiaomimimo.com/v1\""));
-    assert!(config.contains("api_key_env = \"XIAOMI_TOKEN_PLAN_API_KEY\""));
+    assert!(config.contains("name = \"Xiaomi Token Plan\""));
+    assert!(config.contains("api = \"https://token-plan-sgp.xiaomimimo.com/v1\""));
     assert!(!config.contains("test-key"));
     let env = fs::read_to_string(app.home.join(".env")).expect("env");
     assert_eq!(env, "XIAOMI_TOKEN_PLAN_API_KEY=test-key\n");
@@ -835,8 +826,7 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
 
     let config = fs::read_to_string(app.home.join("config.toml")).expect("config");
     assert!(config.contains("[provider.xiaomi-token-plan-cn]"));
-    assert!(config.contains("label = \"Xiaomi Token Plan CN\""));
-    assert!(config.contains("api_key_env = \"XIAOMI_TOKEN_PLAN_CN_API_KEY\""));
+    assert!(config.contains("name = \"Xiaomi Token Plan CN\""));
     assert!(!config.contains("test-key"));
     let env = fs::read_to_string(app.home.join(".env")).expect("env");
     assert_eq!(env, "XIAOMI_TOKEN_PLAN_CN_API_KEY=test-key\n");
@@ -1078,8 +1068,9 @@ pub(crate) fn model_picker_initial_focus_prefers_model_rows_before_fetch_rows() 
     fs::write(
         &config_path,
         r#"
-[provider.mock.options]
-base_url = "http://127.0.0.1:9"
+[provider.mock]
+api = "http://127.0.0.1:9"
+no_auth = true
 
 [provider.mock.models]
 "#,

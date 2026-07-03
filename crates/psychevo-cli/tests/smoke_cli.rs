@@ -214,16 +214,15 @@ fn write_run_config_with_reasoning(
     reasoning_effort: Option<&str>,
 ) -> PathBuf {
     std::fs::create_dir_all(dir).expect("config dir");
-    std::fs::write(dir.join(".env"), "TEST_PROVIDER_KEY=test-key\n").expect("env");
+    std::fs::write(dir.join(".env"), "MOCK_API_KEY=test-key\n").expect("env");
     let reasoning = reasoning_effort
         .map(|value| format!("reasoning_effort = \"{value}\"\n"))
         .unwrap_or_default();
     let config = format!(
         r#"model = "mock/mock-model"
 
-[provider.mock.options]
-base_url = "{base_url}"
-api_key_env = "TEST_PROVIDER_KEY"
+[provider.mock]
+api = "{base_url}"
 
 [provider.mock.models."mock-model"]
 {reasoning}"#
@@ -235,13 +234,12 @@ api_key_env = "TEST_PROVIDER_KEY"
 
 fn write_multi_model_config(dir: &Path, base_url: &str) -> PathBuf {
     std::fs::create_dir_all(dir).expect("config dir");
-    std::fs::write(dir.join(".env"), "TEST_PROVIDER_KEY=test-key\n").expect("env");
+    std::fs::write(dir.join(".env"), "MOCK_API_KEY=test-key\n").expect("env");
     let config = format!(
         r#"model = "mock/mock-model"
 
-[provider.mock.options]
-base_url = "{base_url}"
-api_key_env = "TEST_PROVIDER_KEY"
+[provider.mock]
+api = "{base_url}"
 
 [provider.mock.models."mock-model"]
 

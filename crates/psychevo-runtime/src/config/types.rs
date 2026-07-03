@@ -9,20 +9,16 @@ pub(crate) struct ModelSelection {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConfigProviderEntry {
-    pub(crate) label: Option<String>,
-    pub(crate) options: ConfigProviderOptions,
+    pub(crate) name: Option<String>,
+    pub(crate) api: Option<String>,
+    pub(crate) api_key_env: Option<String>,
+    pub(crate) no_auth: bool,
     pub(crate) models: BTreeMap<String, ConfigModelEntry>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ConfigProviderOptions {
-    pub(crate) base_url: Option<String>,
-    pub(crate) api_key_env: Option<String>,
-    pub(crate) no_auth: bool,
-}
-
-#[derive(Debug, Clone, Default)]
 pub(crate) struct ConfigModelEntry {
+    pub(crate) name: Option<String>,
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) metadata: ModelMetadata,
 }
@@ -301,10 +297,8 @@ impl ChannelTransport {
 #[derive(Debug, Clone)]
 pub(crate) struct BuiltInProvider {
     pub(crate) id: &'static str,
-    pub(crate) label: &'static str,
-    pub(crate) base_url: Option<&'static str>,
-    pub(crate) api_key_envs: &'static [&'static str],
-    pub(crate) base_url_env: Option<&'static str>,
+    pub(crate) name: &'static str,
+    pub(crate) api: Option<&'static str>,
     pub(crate) allow_no_auth: bool,
 }
 
@@ -361,94 +355,68 @@ pub(crate) const MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
     BuiltInProvider {
         id: "openrouter",
-        label: "OpenRouter",
-        base_url: Some("https://openrouter.ai/api/v1"),
-        api_key_envs: &["OPENROUTER_API_KEY", "OPENAI_API_KEY"],
-        base_url_env: Some("OPENROUTER_BASE_URL"),
+        name: "OpenRouter",
+        api: Some("https://openrouter.ai/api/v1"),
         allow_no_auth: false,
     },
     BuiltInProvider {
         id: "openai",
-        label: "OpenAI",
-        base_url: Some("https://api.openai.com/v1"),
-        api_key_envs: &["OPENAI_API_KEY"],
-        base_url_env: Some("OPENAI_BASE_URL"),
+        name: "OpenAI",
+        api: Some("https://api.openai.com/v1"),
         allow_no_auth: false,
     },
     BuiltInProvider {
         id: "opencode-zen",
-        label: "OpenCode Zen",
-        base_url: Some("https://opencode.ai/zen/v1"),
-        api_key_envs: &["OPENCODE_ZEN_API_KEY"],
-        base_url_env: Some("OPENCODE_ZEN_BASE_URL"),
+        name: "OpenCode Zen",
+        api: Some("https://opencode.ai/zen/v1"),
         allow_no_auth: true,
     },
     BuiltInProvider {
         id: "xai",
-        label: "xAI",
-        base_url: Some("https://api.x.ai/v1"),
-        api_key_envs: &["XAI_API_KEY"],
-        base_url_env: Some("XAI_BASE_URL"),
+        name: "xAI",
+        api: Some("https://api.x.ai/v1"),
         allow_no_auth: false,
     },
     BuiltInProvider {
         id: "zai",
-        label: "Z.AI / GLM",
-        base_url: Some("https://api.z.ai/api/paas/v4"),
-        api_key_envs: &["GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"],
-        base_url_env: Some("GLM_BASE_URL"),
+        name: "Z.AI / GLM",
+        api: Some("https://api.z.ai/api/paas/v4"),
         allow_no_auth: false,
     },
     BuiltInProvider {
         id: "deepseek",
-        label: "DeepSeek",
-        base_url: Some("https://api.deepseek.com/v1"),
-        api_key_envs: &["DEEPSEEK_API_KEY"],
-        base_url_env: Some("DEEPSEEK_BASE_URL"),
+        name: "DeepSeek",
+        api: Some("https://api.deepseek.com/v1"),
         allow_no_auth: false,
     },
     BuiltInProvider {
         id: "dashscope",
-        label: "Alibaba Cloud DashScope",
-        base_url: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
-        api_key_envs: &["DASHSCOPE_API_KEY"],
-        base_url_env: Some("DASHSCOPE_BASE_URL"),
+        name: "Alibaba Cloud DashScope",
+        api: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
         allow_no_auth: false,
     },
     BuiltInProvider {
         id: "xiaomi",
-        label: "Xiaomi MiMo",
-        base_url: Some("https://api.xiaomimimo.com/v1"),
-        api_key_envs: &["XIAOMI_API_KEY"],
-        base_url_env: Some("XIAOMI_BASE_URL"),
+        name: "Xiaomi MiMo",
+        api: Some("https://api.xiaomimimo.com/v1"),
         allow_no_auth: false,
     },
     BuiltInProvider {
         id: "xiaomi-token-plan",
-        label: "Xiaomi Token Plan",
-        base_url: Some("https://token-plan-cn.xiaomimimo.com/v1"),
-        api_key_envs: &[
-            "XIAOMI_TOKEN_PLAN_API_KEY",
-            "XIAOMI_TOKEN_PLAN_CN_API_KEY",
-            "XIAOMI_API_KEY",
-        ],
-        base_url_env: Some("XIAOMI_TOKEN_PLAN_BASE_URL"),
+        name: "Xiaomi Token Plan",
+        api: Some("https://token-plan-cn.xiaomimimo.com/v1"),
         allow_no_auth: false,
     },
     BuiltInProvider {
         id: "lmstudio",
-        label: "LM Studio",
-        base_url: Some("http://127.0.0.1:1234/v1"),
-        api_key_envs: &["LM_API_KEY"],
-        base_url_env: Some("LM_BASE_URL"),
+        name: "LM Studio",
+        api: Some("http://127.0.0.1:1234/v1"),
         allow_no_auth: true,
     },
     BuiltInProvider {
         id: "custom",
-        label: "Custom",
-        base_url: None,
-        api_key_envs: &[],
-        base_url_env: None,
+        name: "Custom",
+        api: None,
         allow_no_auth: false,
     },
 ];

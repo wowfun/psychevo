@@ -31,14 +31,13 @@ pub(crate) fn model_catalog_providers_resolve_auth_and_no_auth() {
         r#"
 model = "openai/gpt-4.1"
 
-[provider.openai.options]
-base_url = "http://api.example/v1"
-api_key_env = "OPENAI_API_KEY"
+[provider.openai]
+api = "http://api.example/v1"
 
 [provider.openai.models."gpt-4.1"]
 
-[provider.lmstudio.options]
-base_url = "http://127.0.0.1:1234/v1"
+[provider.lmstudio]
+api = "http://127.0.0.1:1234/v1"
 
 [provider.lmstudio.models]
 "#,

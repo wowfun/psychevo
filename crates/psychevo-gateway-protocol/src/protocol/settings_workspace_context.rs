@@ -103,14 +103,29 @@ pub struct ModelProviderSaveParams {
     #[serde(default)]
     pub scope: ModelSettingsScope,
     pub provider_id: String,
-    pub label: String,
-    pub base_url: String,
     #[serde(default)]
-    pub api_key_env: Option<String>,
+    pub name: Option<String>,
+    pub api: String,
     #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
     pub no_auth: bool,
+    #[serde(default)]
+    pub model: Option<ModelProviderSaveModelParams>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderSaveModelParams {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub limit: ModelLimitView,
+    #[serde(default)]
+    pub advanced_format: Option<String>,
+    #[serde(default)]
+    pub advanced: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -198,10 +213,10 @@ pub struct ModelSettingsResult {
 #[serde(rename_all = "camelCase")]
 pub struct ModelProviderView {
     pub id: String,
-    pub label: String,
+    pub name: String,
     pub built_in: bool,
     pub configured: bool,
-    pub base_url: Option<String>,
+    pub api: Option<String>,
     pub api_key_env: Option<String>,
     pub credential_status: ModelCredentialStatus,
     pub no_auth: bool,
@@ -224,17 +239,26 @@ pub struct ModelOptionView {
     pub id: String,
     pub value: String,
     #[serde(default)]
-    pub label: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    pub provider_label: Option<String>,
+    pub provider_name: Option<String>,
     #[serde(default)]
     pub free: bool,
     #[serde(default)]
-    pub context_limit: Option<u64>,
+    pub limit: ModelLimitView,
     #[serde(default)]
     pub reasoning_supported: Option<bool>,
     #[serde(default)]
     pub reasoning_efforts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelLimitView {
+    #[serde(default)]
+    pub context: Option<u64>,
+    #[serde(default)]
+    pub output: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

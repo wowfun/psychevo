@@ -346,7 +346,11 @@ export type ModelSettingsScope = "global";
 
 export type ModelSettingsReadParams = { scope: ModelSettingsScope, cwd: string | null, };
 
-export type ModelProviderSaveParams = { scope: ModelSettingsScope, providerId: string, label: string, baseUrl: string, apiKeyEnv: string | null, apiKey: string | null, noAuth: boolean, };
+export type ModelProviderSaveParams = { scope: ModelSettingsScope, providerId: string, name: string | null, api: string, apiKey: string | null, noAuth: boolean, model: ModelProviderSaveModelParams | null, };
+
+export type ModelProviderSaveModelParams = { id: string, name: string | null, limit: ModelLimitView, advancedFormat: string | null, advanced: string | null, };
+
+export type ModelLimitView = { context: number | null, output: number | null, };
 
 export type ModelProviderCatalogParams = { scope: ModelSettingsScope, providerId: string, refresh: boolean, cwd: string | null, };
 
@@ -362,11 +366,11 @@ export type ModelAssignmentSetParams = { scope: ModelSettingsScope, target: Mode
 
 export type ModelSettingsResult = { scope: ModelSettingsScope, cwd: string, defaultModel: string | null, defaultReasoningEffort: string | null, providers: Array<ModelProviderView>, auxiliary: Array<AuxiliaryModelAssignmentView>, modelOptions: Array<ModelOptionView>, };
 
-export type ModelProviderView = { id: string, label: string, builtIn: boolean, configured: boolean, baseUrl: string | null, apiKeyEnv: string | null, credentialStatus: ModelCredentialStatus, noAuth: boolean, canFetchModels: boolean, unavailableReason: string | null, };
+export type ModelProviderView = { id: string, name: string, builtIn: boolean, configured: boolean, api: string | null, apiKeyEnv: string | null, credentialStatus: ModelCredentialStatus, noAuth: boolean, canFetchModels: boolean, unavailableReason: string | null, };
 
 export type ModelCredentialStatus = "present" | "missing" | "notRequired";
 
-export type ModelOptionView = { provider: string, id: string, value: string, label: string | null, providerLabel: string | null, free: boolean, contextLimit: number | null, reasoningSupported: boolean | null, reasoningEfforts: Array<string>, };
+export type ModelOptionView = { provider: string, id: string, value: string, name: string | null, providerName: string | null, free: boolean, limit: ModelLimitView, reasoningSupported: boolean | null, reasoningEfforts: Array<string>, };
 
 export type AuxiliaryModelAssignmentView = { task: string, label: string, provider: string, model: string, reasoningEffort: string | null, effectiveModel: string | null, };
 
