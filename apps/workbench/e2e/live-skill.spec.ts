@@ -457,7 +457,9 @@ async function liveSkillCompleted(page: Page): Promise<boolean> {
     ".pevo-message.is-streaming, .pevo-reasoning.is-streaming, .pevo-evidence.is-running"
   ).count();
   const assistantText = normalize(await page.locator(".pevo-message.is-assistant").last().textContent().catch(() => "") ?? "");
-  return runningRows === 0 && /(x-daily|日报|daily).*(执行完成|已生成|生成|完成|all done|complete)/.test(assistantText);
+  return runningRows === 0 &&
+    /(x-daily|日报|daily)/.test(assistantText) &&
+    /(执行完成|已生成|生成|完成|完成总结|all done|complete)/.test(assistantText);
 }
 
 async function assertNoCompletionPopover(page: Page, sample: number) {
