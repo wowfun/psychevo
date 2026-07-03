@@ -163,27 +163,93 @@ export function TerminalPanel({
 function terminalTheme(appearance: Appearance): ITheme {
   if (appearance === "light") {
     return {
-      background: "transparent",
-      foreground: "#1f2023",
-      cursor: "#1f2023",
-      selectionBackground: "#dedfe3"
+      ...LIGHT_TERMINAL_THEME
     };
   }
   if (appearance === "warm") {
     return {
-      background: "transparent",
-      foreground: "#2d261f",
-      cursor: "#2d261f",
-      selectionBackground: "#eadfce"
+      ...WARM_TERMINAL_THEME
     };
   }
   return {
-    background: "transparent",
-    foreground: "#f3efe7",
-    cursor: "#f3efe7",
-    selectionBackground: "#3f372d"
+    ...DARK_TERMINAL_THEME
   };
 }
+
+const DARK_TERMINAL_THEME: ITheme = {
+  background: "#151410",
+  foreground: "#f3efe7",
+  cursor: "#f3efe7",
+  cursorAccent: "#151410",
+  selectionBackground: "#3f372d",
+  selectionInactiveBackground: "#332d25",
+  black: "#5c554b",
+  red: "#ff6b6b",
+  green: "#7bcf8a",
+  yellow: "#d8b85f",
+  blue: "#82b1ff",
+  magenta: "#d59bf6",
+  cyan: "#75d7d0",
+  white: "#e8ded0",
+  brightBlack: "#8b8173",
+  brightRed: "#ff8a8a",
+  brightGreen: "#9ee6a8",
+  brightYellow: "#f0d987",
+  brightBlue: "#a6c8ff",
+  brightMagenta: "#e7b7ff",
+  brightCyan: "#9cebe5",
+  brightWhite: "#fffaf1"
+};
+
+const LIGHT_TERMINAL_THEME: ITheme = {
+  background: "#f7f5ef",
+  foreground: "#202225",
+  cursor: "#202225",
+  cursorAccent: "#f7f5ef",
+  selectionBackground: "#d8dde5",
+  selectionInactiveBackground: "#e5e8ed",
+  black: "#202225",
+  red: "#a53b3b",
+  green: "#2f7d4f",
+  yellow: "#8a6400",
+  blue: "#245db2",
+  magenta: "#8a4fa3",
+  cyan: "#227c89",
+  white: "#5f6670",
+  brightBlack: "#6a6f78",
+  brightRed: "#bf4c4c",
+  brightGreen: "#388e5d",
+  brightYellow: "#a77a00",
+  brightBlue: "#2f6ecb",
+  brightMagenta: "#9b5eb6",
+  brightCyan: "#2d8d9b",
+  brightWhite: "#3a3f46"
+};
+
+const WARM_TERMINAL_THEME: ITheme = {
+  background: "#f5efe3",
+  foreground: "#2d261f",
+  cursor: "#2d261f",
+  cursorAccent: "#f5efe3",
+  selectionBackground: "#eadfce",
+  selectionInactiveBackground: "#efe7da",
+  black: "#2d261f",
+  red: "#9f4238",
+  green: "#39764c",
+  yellow: "#846217",
+  blue: "#2e5f9f",
+  magenta: "#7a558f",
+  cyan: "#28767c",
+  white: "#62584f",
+  brightBlack: "#756b61",
+  brightRed: "#b75245",
+  brightGreen: "#45875a",
+  brightYellow: "#9b7420",
+  brightBlue: "#3a70b7",
+  brightMagenta: "#8b65a3",
+  brightCyan: "#32888e",
+  brightWhite: "#453d35"
+};
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";

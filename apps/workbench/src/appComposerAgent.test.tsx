@@ -327,4 +327,35 @@ describe("Workbench layout and workspace panels", () => {
     expect(within(terminal).queryByText("/tmp/project")).toBeNull();
     expect(within(terminal).queryByText("running")).toBeNull();
   });
+
+  it("uses a readable light xterm theme for Terminal tabs", async () => {
+    gatewayMock.xtermTerminalOptions.length = 0;
+    window.localStorage.setItem("psychevo.workbench.v0.prefs", JSON.stringify({
+      appearance: "light",
+      appearanceVersion: 1,
+      debug: false,
+      rightWidthPx: 520
+    }));
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Terminal" }));
+    expect(await screen.findByRole("region", { name: "Terminal" })).toBeTruthy();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "terminal/start")).toBe(true);
+    });
+
+    const theme = gatewayMock.xtermTerminalOptions.at(-1)?.theme as Record<string, string> | undefined;
+    expect(theme).toBeTruthy();
+    expect(theme?.background).toBe("#f7f5ef");
+    expect(theme?.foreground).toBe("#202225");
+    expect(theme?.cursor).toBe("#202225");
+    expect(theme?.selectionBackground).toBe("#d8dde5");
+    expect(theme?.black).toBe("#202225");
+    expect(theme?.white).toBe("#5f6670");
+    expect(theme?.brightBlack).toBe("#6a6f78");
+    expect(theme?.brightWhite).toBe("#3a3f46");
+  });
 });

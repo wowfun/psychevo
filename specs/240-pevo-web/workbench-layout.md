@@ -138,6 +138,10 @@ a persistent project title, path, or running badge above the terminal. Apart
 from the shared tab strip, the tab behaves as a full-height immersive terminal
 canvas: the xterm surface blends with the right workspace instead of rendering
 a separate framed code panel or leaving non-terminal background below it.
+The xterm theme is appearance-aware and uses an opaque readable background,
+foreground, cursor, selection color, and ANSI palette for `dark`, `light`, and
+`warm`; light appearances must not inherit xterm's default black surface or
+dark-terminal ANSI palette.
 Transient startup, error, and exit text may appear inside the terminal panel
 only when needed.
 

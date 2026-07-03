@@ -56,6 +56,9 @@ background steps, but semantic roles must always degrade to readable ANSI
 colors. Cyan is the ordinary accent for focus, selection, and actionable hints.
 Magenta is reserved for rare identity or mode moments and must not become the
 primary theme color. Red marks failure words only when failure is the state.
+Terminal palette probing is host-specific: Unix builds may query OSC default
+colors, tests may exercise the parser deterministically, and unsupported native
+platform builds should compile only the fallback path.
 
 Surface hierarchy uses background steps, indentation, spacing, and dim text
 before borders. Borders are exceptional: use them only for hard terminal
