@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
@@ -26,15 +27,30 @@ pub(crate) fn run_hook_command_blocking(
 ) -> HookCommandExecution {
     let started = Instant::now();
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let mut child = match Command::new(shell)
+    let mut process = Command::new(shell);
+    process
         .arg("-lc")
         .arg(command)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    let inherited_env = std::env::vars().collect::<BTreeMap<_, _>>();
+    if let Err(err) = crate::process_env::apply_process_env(
+        &mut process,
+        &inherited_env,
+        crate::process_env::ProcessEnvOptions::new(&[]),
+    ) {
+        return HookCommandExecution {
+            status: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            elapsed_ms: started.elapsed().as_millis(),
+            timed_out: false,
+            error: Some(err.to_string()),
+        };
+    }
+    let mut child = match process.spawn() {
         Ok(child) => child,
         Err(err) => {
             return HookCommandExecution {
@@ -79,7 +95,7 @@ pub(crate) fn run_hook_command_blocking(
                 break;
             }
             Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
+                crate::process_env::terminate_std_child_tree(&mut child);
                 status = child.wait().ok();
                 timed_out = true;
                 break;

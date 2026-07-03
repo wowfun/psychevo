@@ -92,7 +92,7 @@ async fn read_acp_peer_runtime_options_v2(
         })
         .await;
 
-    let _ = child.kill().await;
+    psychevo_runtime::terminate_tokio_child_tree(&mut child).await;
     let _ = child.wait().await;
 
     result.map_err(|err| AcpProtocolAttemptError {
@@ -169,7 +169,7 @@ async fn read_acp_peer_runtime_options_v1(
         .await
         .map_err(|err| Error::Message(format!("ACP peer `{}` v1 failed: {err}", peer.backend.id)));
 
-    let _ = child.kill().await;
+    psychevo_runtime::terminate_tokio_child_tree(&mut child).await;
     let _ = child.wait().await;
     result
 }

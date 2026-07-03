@@ -82,11 +82,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
     .expect("terminal/resize");
     assert_eq!(resize["accepted"], true);
 
-    let command = if cfg!(windows) {
-        "echo pevo-terminal-ok\r\nexit\r\n"
-    } else {
-        "printf pevo-terminal-ok\\n\nexit\n"
-    };
+    let command = "printf pevo-terminal-ok\\n\nexit\n";
     let write = handle_rpc(
         state,
         AuthContext::Bearer,

@@ -329,6 +329,7 @@ pub(crate) struct LspServerCommand {
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) language_id: String,
+    pub(crate) env: BTreeMap<String, String>,
     pub(crate) env_path: Option<OsString>,
 }
 
@@ -661,9 +662,11 @@ pub(crate) fn default_lsp_installer() -> LspInstaller {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        if let Some(path) = combined_path(&request.env, &request.path_prefixes) {
-            command.env("PATH", path);
-        }
+        crate::process_env::apply_process_env(
+            &mut command,
+            &request.env,
+            crate::process_env::ProcessEnvOptions::new(&request.path_prefixes),
+        )?;
         let status = command
             .status()
             .map_err(|err| Error::Message(format!("failed to start npm install: {err}")))?;

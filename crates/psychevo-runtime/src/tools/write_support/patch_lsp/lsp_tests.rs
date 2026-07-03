@@ -309,6 +309,7 @@ while True:
                 program: "python3".to_string(),
                 args: vec![script.to_string_lossy().to_string()],
                 language_id: "plaintext".to_string(),
+                env: BTreeMap::new(),
                 env_path: None,
             },
             temp.path(),

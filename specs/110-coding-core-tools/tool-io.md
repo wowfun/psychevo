@@ -214,6 +214,14 @@ directory is prepended to the subprocess `PATH`.
 If a command is still running after the yield window, the result includes a
 `session_id` and can be continued with `write_stdin`.
 
+Runtime passes the effective run environment to `exec_command` subprocesses.
+Managed tool path prefixes are prepended to that environment's `PATH` before
+launch. On native Windows Git Bash, runtime sets UTF-8 child-process defaults
+only when unset, including `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`,
+`LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and `LC_CTYPE=C.UTF-8`. Model-visible
+stdout/stderr text is decoded as UTF-8 with Windows legacy locale fallback for
+non-UTF-8 output.
+
 `tty=false` uses pipes and closes stdin. `tty=true` uses a PTY and keeps stdin
 writable. If the PTY backend is unavailable, execution falls back to pipe mode,
 keeps stdin writable, and prefixes the first output chunk with a short fallback

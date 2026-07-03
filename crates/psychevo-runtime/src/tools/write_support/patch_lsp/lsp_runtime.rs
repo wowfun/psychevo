@@ -8,6 +8,7 @@ impl LspClient {
         process
             .args(&command.args)
             .current_dir(&cwd)
+            .envs(&command.env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -223,7 +224,7 @@ impl LspClient {
         if let Ok(mut child) = self.child.lock()
             && let Some(mut child) = child.take()
         {
-            let _ = child.kill();
+            crate::process_env::terminate_std_child_tree(&mut child);
             let _ = child.wait();
         }
     }
@@ -314,6 +315,11 @@ pub(crate) fn resolve_lsp_server_with_env(
                 .map(|arg| arg.to_string())
                 .collect(),
             language_id: server_match.language_id.to_string(),
+            env: crate::process_env::effective_process_env(
+                env_map,
+                crate::process_env::ProcessEnvOptions::new(path_prefixes),
+            )
+            .unwrap_or_else(|_| env_map.clone()),
             env_path: combined_path(env_map, path_prefixes),
         });
     }
@@ -428,23 +434,16 @@ pub(crate) fn find_executable_path(
     env_map: &BTreeMap<String, String>,
     path_prefixes: &[PathBuf],
 ) -> Option<PathBuf> {
-    find_on_path(name, combined_path(env_map, path_prefixes))
+    find_on_path(name, combined_path(env_map, path_prefixes), env_map)
 }
 
 pub(crate) fn combined_path(
     env_map: &BTreeMap<String, String>,
     path_prefixes: &[PathBuf],
 ) -> Option<OsString> {
-    let mut paths = path_prefixes.to_vec();
-    if let Some(path) = env_map.get("PATH") {
-        paths.extend(std::env::split_paths(path));
-    } else if let Some(path) = std::env::var_os("PATH") {
-        paths.extend(std::env::split_paths(&path));
-    }
-    if paths.is_empty() {
-        return None;
-    }
-    std::env::join_paths(paths).ok()
+    crate::process_env::combined_path_value(env_map, path_prefixes)
+        .ok()
+        .flatten()
 }
 
 pub(crate) fn hash_content(content: &str) -> u64 {
@@ -602,7 +601,7 @@ pub(crate) fn lsp_diagnostics_with_command(
         json!({ "jsonrpc": "2.0", "id": 2, "method": "shutdown" }),
     );
     let _ = send_lsp(&mut stdin, json!({ "jsonrpc": "2.0", "method": "exit" }));
-    let _ = child.kill();
+    crate::process_env::terminate_std_child_tree(&mut child);
     let _ = child.wait();
     Ok(diagnostics)
 }

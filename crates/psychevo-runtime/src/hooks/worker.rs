@@ -33,16 +33,24 @@ fn call_worker_json(
     method: &str,
     params: Value,
 ) -> std::result::Result<Value, String> {
-    let mut child = Command::new(&worker.command)
+    let mut command = Command::new(&worker.command);
+    command
         .args(&worker.args)
         .current_dir(&worker.plugin_root)
-        .envs(&worker.env)
-        .env("PSYCHEVO_PLUGIN_NAME", &worker.plugin_name)
-        .env("PSYCHEVO_PLUGIN_ROOT", &worker.plugin_root)
-        .env("PSYCHEVO_PLUGIN_DATA", &worker.plugin_data)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::process_env::apply_process_env(
+        &mut command,
+        &worker.env,
+        crate::process_env::ProcessEnvOptions::new(&[]),
+    )
+    .map_err(|err| err.to_string())?;
+    command
+        .env("PSYCHEVO_PLUGIN_NAME", &worker.plugin_name)
+        .env("PSYCHEVO_PLUGIN_ROOT", &worker.plugin_root)
+        .env("PSYCHEVO_PLUGIN_DATA", &worker.plugin_data);
+    let mut child = command
         .spawn()
         .map_err(|err| format!("failed to start worker {}: {err}", worker.command.display()))?;
     let mut stdin = child
@@ -81,8 +89,9 @@ fn call_worker_json(
     });
     let (stderr_tx, stderr_rx) = mpsc::channel();
     thread::spawn(move || {
-        let mut text = String::new();
-        let _ = std::io::BufReader::new(stderr).read_to_string(&mut text);
+        let mut bytes = Vec::new();
+        let _ = std::io::BufReader::new(stderr).read_to_end(&mut bytes);
+        let text = crate::process_env::decode_process_output(&bytes);
         let _ = stderr_tx.send(text);
     });
     send_json_rpc(
@@ -179,6 +188,6 @@ fn wait_worker_exit(child: &mut std::process::Child) -> std::result::Result<Exit
 }
 
 fn terminate_worker(child: &mut std::process::Child) {
-    let _ = child.kill();
+    crate::process_env::terminate_std_child_tree(child);
     let _ = child.wait();
 }

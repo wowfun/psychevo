@@ -42,7 +42,7 @@ pub(crate) fn session_result_json(
             "started_at_ms": session.started_at_ms,
         })));
     }
-    let output = String::from_utf8_lossy(&chunk).to_string();
+    let output = decode_exec_output(&chunk);
     let (output, original_token_count) = truncate_output_tokens(&output, max_output_tokens);
     Ok((
         json!({
@@ -71,6 +71,10 @@ pub(crate) fn truncate_output_tokens(output: &str, max_tokens: usize) -> (String
         .decode_to_string(&tokens[start..])
         .unwrap_or_else(|_| output.chars().rev().take(max_tokens * 4).collect());
     (truncated, original)
+}
+
+pub(crate) fn decode_exec_output(bytes: &[u8]) -> String {
+    crate::process_env::decode_process_output(bytes)
 }
 
 pub(crate) fn truncate_output_chars(output: &str, max_tokens: usize) -> (String, usize) {
@@ -245,17 +249,26 @@ pub(crate) fn shell_args(shell: &str, login: bool, command: &str) -> Result<Vec<
     }
 }
 
-pub(crate) fn subprocess_path(path_prefixes: &[PathBuf]) -> Result<Option<std::ffi::OsString>> {
-    if path_prefixes.is_empty() {
-        return Ok(None);
-    }
-    let mut paths = path_prefixes.to_vec();
-    if let Some(current) = env::var_os("PATH") {
-        paths.extend(env::split_paths(&current));
-    }
-    env::join_paths(paths)
-        .map(Some)
-        .map_err(|err| Error::Message(format!("failed to build subprocess PATH: {err}")))
+pub(crate) fn apply_subprocess_env(
+    command: &mut std::process::Command,
+    invocation: &ExecInvocation,
+) -> Result<()> {
+    crate::process_env::apply_process_env(
+        command,
+        &invocation.env,
+        crate::process_env::ProcessEnvOptions::new(&invocation.path_prefixes),
+    )
+}
+
+pub(crate) fn apply_pty_subprocess_env(
+    command: &mut portable_pty::CommandBuilder,
+    invocation: &ExecInvocation,
+) -> Result<()> {
+    crate::process_env::apply_pty_process_env(
+        command,
+        &invocation.env,
+        crate::process_env::ProcessEnvOptions::new(&invocation.path_prefixes),
+    )
 }
 
 pub(crate) fn clamp_yield_ms(value: Option<i64>, default: u64, min: u64, max: u64) -> u64 {
@@ -344,33 +357,12 @@ pub(crate) fn set_parent_death_signal(parent_pid: libc::pid_t) -> std::io::Resul
 
 #[cfg(unix)]
 pub(crate) fn terminate_std_child_tree(child: &mut std::process::Child) {
-    let _ = kill_process_group_by_pid(child.id());
-    let _ = child.kill();
+    crate::process_env::terminate_std_child_process_group(child);
 }
 
 #[cfg(not(unix))]
 pub(crate) fn terminate_std_child_tree(child: &mut std::process::Child) {
-    let _ = child.kill();
-}
-
-#[cfg(unix)]
-pub(crate) fn kill_process_group_by_pid(pid: u32) -> std::io::Result<()> {
-    let pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
-    if pgid == -1 {
-        let err = std::io::Error::last_os_error();
-        if err.kind() != std::io::ErrorKind::NotFound {
-            return Err(err);
-        }
-        return Ok(());
-    }
-    let result = unsafe { libc::killpg(pgid, libc::SIGKILL) };
-    if result == -1 {
-        let err = std::io::Error::last_os_error();
-        if err.kind() != std::io::ErrorKind::NotFound {
-            return Err(err);
-        }
-    }
-    Ok(())
+    crate::process_env::terminate_std_child_process_group(child);
 }
 
 #[cfg(test)]

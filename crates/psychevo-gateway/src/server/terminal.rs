@@ -7,7 +7,10 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use psychevo_gateway_protocol as wire;
-use psychevo_runtime::{Error, GitBashRuntime, canonicalize_cwd, resolve_input_path};
+use psychevo_runtime::{
+    Error, GitBashRuntime, ProcessEnvOptions, apply_pty_process_env, canonicalize_cwd,
+    resolve_input_path, terminate_pty_child_tree,
+};
 use serde_json::json;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -50,10 +53,7 @@ impl TerminalManager {
         let mut command = portable_pty::CommandBuilder::new(shell);
         command.args(shell_args);
         command.cwd(cwd.as_os_str());
-        command.env("TERM", "xterm-256color");
-        for (key, value) in inherited_env {
-            command.env(key, value);
-        }
+        apply_terminal_env(&mut command, inherited_env)?;
         let child = pair
             .slave
             .spawn_command(command)
@@ -144,7 +144,7 @@ impl TerminalManager {
             return Ok(wire::TerminalMutationResult { accepted: false });
         };
         if let Ok(mut child) = session.child.lock() {
-            let _ = child.kill();
+            terminate_pty_child_tree(child.as_mut());
         }
         let _ = out_tx.send(rpc_notification(
             "terminal/exited",
@@ -287,4 +287,52 @@ fn default_terminal_shell(
             .unwrap_or_else(|| "/bin/sh".to_string()),
         Vec::new(),
     ))
+}
+
+fn apply_terminal_env(
+    command: &mut portable_pty::CommandBuilder,
+    inherited_env: &BTreeMap<String, String>,
+) -> psychevo_runtime::Result<()> {
+    apply_pty_process_env(command, inherited_env, ProcessEnvOptions::new(&[]))?;
+    command.env("TERM", "xterm-256color");
+    Ok(())
+}
+
+#[cfg(test)]
+fn terminal_effective_env(
+    inherited_env: &BTreeMap<String, String>,
+    windows_utf8_defaults: bool,
+) -> psychevo_runtime::Result<BTreeMap<String, String>> {
+    let mut env = psychevo_runtime::effective_process_env(
+        inherited_env,
+        ProcessEnvOptions::new(&[]).with_windows_utf8_defaults(windows_utf8_defaults),
+    )?;
+    env.insert("TERM".to_string(), "xterm-256color".to_string());
+    Ok(env)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_env_applies_windows_utf8_defaults_without_overrides() {
+        let env = terminal_effective_env(
+            &BTreeMap::from([
+                ("PYTHONIOENCODING".to_string(), "utf-16".to_string()),
+                ("LC_CTYPE".to_string(), "C".to_string()),
+                ("TERM".to_string(), "dumb".to_string()),
+            ]),
+            true,
+        )
+        .expect("terminal env");
+
+        assert_eq!(env.get("PYTHONUTF8").map(String::as_str), Some("1"));
+        assert_eq!(
+            env.get("PYTHONIOENCODING").map(String::as_str),
+            Some("utf-16")
+        );
+        assert_eq!(env.get("LC_CTYPE").map(String::as_str), Some("C"));
+        assert_eq!(env.get("TERM").map(String::as_str), Some("xterm-256color"));
+    }
 }

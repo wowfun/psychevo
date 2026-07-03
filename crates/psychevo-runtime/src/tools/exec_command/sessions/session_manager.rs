@@ -238,6 +238,7 @@ pub(crate) async fn exec_command_tool_impl_with_context(
         shell,
         login,
         tty,
+        env: context.env.clone(),
         path_prefixes: context.path_prefixes.clone(),
         sandbox_policy: context.sandbox_policy.clone(),
     };
@@ -315,6 +316,7 @@ pub(crate) async fn run_exec_command_for_user_shell(
         shell: default_shell_for_env(&std::env::vars().collect())?,
         login: false,
         tty: false,
+        env: std::env::vars().collect(),
         path_prefixes: Vec::new(),
         sandbox_policy,
     };
@@ -372,6 +374,7 @@ pub(crate) struct ExecInvocation {
     pub(crate) shell: String,
     pub(crate) login: bool,
     pub(crate) tty: bool,
+    pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
     pub(crate) sandbox_policy: SandboxPolicy,
 }
@@ -488,7 +491,7 @@ impl ExecSession {
                     "session_id": self.id,
                     "tool_call_id": self.root_tool_call_id.clone(),
                     "seq": seq,
-                    "output": String::from_utf8_lossy(bytes).to_string(),
+                    "output": decode_exec_output(bytes),
                 }))
             }
         };
@@ -602,7 +605,7 @@ impl ExecProcess {
             }
             Self::Pty(child) => {
                 if let Ok(mut child) = child.lock() {
-                    let _ = child.kill();
+                    crate::process_env::terminate_pty_child_tree(child.as_mut());
                 }
             }
         }
@@ -655,9 +658,7 @@ pub(crate) fn spawn_pipe_session(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(path) = subprocess_path(&invocation.path_prefixes)? {
-        command.env("PATH", path);
-    }
+    apply_subprocess_env(&mut command, invocation)?;
     for (key, value) in invocation.sandbox_policy.env_markers() {
         command.env(key, value);
     }
@@ -775,9 +776,7 @@ pub(crate) fn spawn_pty_session(
         &invocation.cmd,
     )?);
     command.cwd(invocation.cwd.as_os_str());
-    if let Some(path) = subprocess_path(&invocation.path_prefixes)? {
-        command.env("PATH", path);
-    }
+    apply_pty_subprocess_env(&mut command, invocation)?;
     let child = pair
         .slave
         .spawn_command(command)

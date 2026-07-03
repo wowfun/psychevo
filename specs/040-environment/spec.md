@@ -97,6 +97,11 @@ must not trim leading or trailing whitespace from a path string. Surfaces that
 want to forgive accidental whitespace must do so before calling the generic
 path parser.
 
+Host path normalization must also preserve literal `#` and `?` characters in
+ordinary filesystem paths. Query and fragment stripping applies only to
+URI-like inputs such as `file://` URLs; plain relative or absolute filesystem
+paths treat `#` and `?` as path characters.
+
 Process exposure includes shell execution, stdin/stdout/stderr handling,
 long-running child sessions, yielded stdin, platform-specific process
 capabilities, and executable discovery. Shell execution remains subject to
@@ -161,6 +166,21 @@ Drive and UNC detection should run before shell-unescape fallback. Windows
 process launches must also preserve case-insensitive environment-variable
 semantics and provide Windows lookup essentials such as `COMSPEC` and `PATHEXT`
 when the child process path depends on native shell lookup.
+
+Subprocess and PTY launches should be UTF-8-first. Native Windows Git Bash tool,
+worker, language-server, ACP backend, and Web terminal launches should pass the
+effective run environment, add UTF-8 child-process defaults only when the caller
+has not provided explicit values, and decode model-visible legacy Windows locale
+stdout/stderr bytes before falling back to lossy UTF-8. The defaults include
+`PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and
+`LC_CTYPE=C.UTF-8`.
+
+Runtime-owned process launches must share the same environment and cleanup
+helpers where possible. This keeps case-insensitive Windows environment lookup,
+managed `PATH` prefixing, `PATH`/`Path` preservation, `PATHEXT` executable
+resolution, output decoding, and Windows process-tree termination consistent
+across model tools, Web terminal sessions, plugins, hooks, language servers, and
+ACP peers.
 
 Configured executable names that are entered as shell-like product settings,
 such as ACP peer backend commands, must be resolved at the host boundary before

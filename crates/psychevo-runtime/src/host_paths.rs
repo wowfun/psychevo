@@ -142,13 +142,17 @@ impl GitBashRuntime {
             .output()
             .map_err(|err| Error::Message(format!("failed to run cygpath: {err}")))?;
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stderr = crate::process_env::decode_process_output(&output.stderr)
+                .trim()
+                .to_string();
             return Err(Error::Message(format!(
                 "failed to resolve Git Bash path with cygpath: {}",
                 if stderr.is_empty() { raw } else { &stderr }
             )));
         }
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let value = crate::process_env::decode_process_output(&output.stdout)
+            .trim()
+            .to_string();
         if value.is_empty() {
             return Err(Error::Message(format!(
                 "cygpath returned an empty path for {raw}"
@@ -309,27 +313,15 @@ fn executable_candidate(
 ) -> Option<PathBuf> {
     match options.platform {
         HostPlatform::Posix => existing_file(path, options.platform),
-        HostPlatform::Windows => {
-            if command_has_extension {
-                return existing_file(path, options.platform);
-            }
-            for extension in windows_pathext(options.env) {
-                if let Some(path) = existing_file(
-                    path_with_appended_extension(&path, &extension),
-                    options.platform,
-                ) {
-                    return Some(path);
-                }
-            }
-            existing_file(path, options.platform)
-        }
+        HostPlatform::Windows => crate::process_env::executable_path_candidates(
+            &path,
+            command_has_extension,
+            options.env,
+            true,
+        )
+        .into_iter()
+        .find_map(|candidate| existing_file(candidate, options.platform)),
     }
-}
-
-fn path_with_appended_extension(path: &Path, extension: &str) -> PathBuf {
-    let mut raw = path.as_os_str().to_os_string();
-    raw.push(extension);
-    PathBuf::from(raw)
 }
 
 fn existing_file(path: PathBuf, platform: HostPlatform) -> Option<PathBuf> {
@@ -407,31 +399,6 @@ fn is_windows_drive_colon(value: &str, entry_start: usize, colon_index: usize) -
         return false;
     }
     matches!(value[colon_index + 1..].chars().next(), Some('\\' | '/'))
-}
-
-fn windows_pathext(env_map: &BTreeMap<String, String>) -> Vec<String> {
-    let values = env_value(env_map, "PATHEXT")
-        .map(|value| value.split(';').collect::<Vec<_>>())
-        .filter(|values| values.iter().any(|value| !value.trim().is_empty()))
-        .unwrap_or_else(|| vec![".COM", ".EXE", ".BAT", ".CMD"]);
-    values
-        .into_iter()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .flat_map(|value| {
-            let extension = if value.starts_with('.') {
-                value.to_string()
-            } else {
-                format!(".{value}")
-            };
-            let lower = extension.to_ascii_lowercase();
-            if lower == extension {
-                vec![extension]
-            } else {
-                vec![extension, lower]
-            }
-        })
-        .collect()
 }
 
 fn env_value<'a>(env_map: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
@@ -773,11 +740,18 @@ fn percent_decode(value: &str) -> Result<String> {
 }
 
 fn find_on_path(name: &str, env_map: &BTreeMap<String, String>) -> Option<PathBuf> {
-    let path = env_map.get("PATH").or_else(|| env_map.get("Path"))?;
+    let path = crate::process_env::env_value_case_insensitive(env_map, "PATH")?;
+    let command_has_extension = Path::new(name).extension().is_some();
     for dir in env::split_paths(path) {
-        let candidate = dir.join(name);
-        if candidate.exists() {
-            return Some(candidate);
+        for candidate in crate::process_env::executable_path_candidates(
+            &dir.join(name),
+            command_has_extension,
+            env_map,
+            cfg!(windows),
+        ) {
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
     }
     None

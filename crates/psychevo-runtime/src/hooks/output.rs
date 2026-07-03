@@ -116,7 +116,7 @@ pub(crate) fn block_reason(stdout: &str, stderr: &str) -> String {
 }
 
 pub(crate) fn bounded_output(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
+    let text = crate::process_env::decode_process_output(bytes);
     if text.len() <= OUTPUT_LIMIT {
         text.trim().to_string()
     } else {

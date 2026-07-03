@@ -96,11 +96,15 @@ fn acp_backend_command_from_launch(peer: &ResolvedPeerTurn, launch: &AcpBackendL
     let mut command = Command::new(&launch.program);
     command
         .args(&peer.backend.args)
-        .envs(&launch.env)
         .current_dir(&launch.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    let _ = psychevo_runtime::apply_tokio_process_env(
+        &mut command,
+        &launch.env,
+        psychevo_runtime::ProcessEnvOptions::new(&[]),
+    );
     command
 }
 

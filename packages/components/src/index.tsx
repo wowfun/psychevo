@@ -4,6 +4,7 @@ export { DismissibleDetails } from "./dismissibleDetails";
 export type { DismissibleDetailsControls, DismissibleDetailsProps } from "./dismissibleDetails";
 export { diffDisplayPath, diffFilesStats, diffLineStats, parseStrictGitPatchDiff, parseUnifiedDiff } from "./diff";
 export type { DiffLineStats, DiffParseMode, ParsedDiffFile, ParsedDiffHunk, ParsedDiffLine, ParsedDiffLineKind } from "./diff";
+export { decodeFilePath, encodeFilePath, normalizeFilePathInput, stripFileProtocol, stripQueryAndHash, unquoteGitPath } from "./filePath";
 export { HistoryPanel } from "./history";
 export type { HistoryBrowserWorkspace, HistoryDraftSession, HistoryPanelProps } from "./history";
 export { StatusPanel } from "./status";

@@ -54,6 +54,19 @@ Git Bash command invocation uses POSIX shell arguments:
 Explicitly requested PowerShell, `cmd.exe`, or another non-Git-Bash shell on
 native Windows is unsupported in this slice and must fail closed.
 
+Subprocess and PTY text is UTF-8-first. Native Windows Git Bash `exec_command`,
+worker, language-server, ACP backend, and Web terminal launches must set UTF-8
+child-process defaults when the caller has not provided explicit values:
+`PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and
+`LC_CTYPE=C.UTF-8`. Runtime should still decode model-visible legacy Windows
+locale bytes from stdout/stderr when a child process ignores those defaults,
+falling back to lossy UTF-8 only after supported locale decoding fails.
+
+Runtime-owned Windows process termination must target the process tree, not only
+the direct child, so shells or scripts that spawn Python, Node, language-server,
+or plugin helper children do not outlive the originating tool or terminal
+session.
+
 ## Path Views
 
 Durable cwd storage stays a canonical native path string. Psychevo does not
@@ -150,6 +163,10 @@ Deterministic validation must cover:
 - fake `cygpath` resolution for `/tmp` and failure propagation
 - permissions and filesystem grants treating Git Bash and native Windows forms
   as the same path
+- UTF-8 environment defaults, including `LC_CTYPE`, without overriding explicit
+  caller values
+- Windows legacy output decoding and bounded lossy fallback for invalid bytes
+- Windows process-tree termination command construction
 - session and automation state lookups by normalized native cwd string
 - Gateway protocol generation and Workbench typechecking after path boundary
   changes

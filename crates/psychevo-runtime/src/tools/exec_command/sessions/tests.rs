@@ -77,6 +77,95 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn exec_command_applies_runtime_env_to_child_process() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("work");
+        fs::create_dir_all(&cwd).expect("cwd");
+        let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+        let value = exec_command_tool_impl_with_context(
+            cwd,
+            ToolRuntimeContext {
+                env: BTreeMap::from([(
+                    "PSYCHEVO_EXEC_ENV_TEST".to_string(),
+                    "from-runtime-env".to_string(),
+                )]),
+                ..ToolRuntimeContext::default()
+            },
+            "exec_command".to_string(),
+            json!({"cmd": "printf '%s' \"$PSYCHEVO_EXEC_ENV_TEST\""}),
+            receivers.abort_signal(),
+        )
+        .await
+        .expect("exec command should receive runtime env");
+
+        assert_eq!(value["exit_code"].as_i64(), Some(0), "{value}");
+        assert_eq!(value["output"], "from-runtime-env");
+    }
+
+    #[test]
+    fn subprocess_path_prepends_prefixes_to_runtime_env_path() {
+        let temp = tempfile::tempdir().expect("temp");
+        let tools = temp.path().join("tools");
+        let inherited = temp.path().join("inherited");
+        fs::create_dir_all(&tools).expect("tools");
+        fs::create_dir_all(&inherited).expect("inherited");
+        let env = BTreeMap::from([(
+            "PATH".to_string(),
+            inherited.to_string_lossy().to_string(),
+        )]);
+
+        let path = crate::process_env::prefixed_path_overlay(std::slice::from_ref(&tools), &env)
+            .expect("path")
+            .expect("prefixed path")
+            .1;
+        let entries = env::split_paths(&path).collect::<Vec<_>>();
+
+        assert_eq!(entries.first(), Some(&tools));
+        assert_eq!(entries.get(1), Some(&inherited));
+    }
+
+    #[test]
+    fn windows_utf8_defaults_do_not_override_explicit_python_encoding() {
+        let defaults = crate::process_env::windows_utf8_default_env(&BTreeMap::from([(
+            "PYTHONIOENCODING".to_string(),
+            "utf-16".to_string(),
+        )]));
+
+        assert!(
+            defaults
+                .iter()
+                .all(|(key, _)| !key.eq_ignore_ascii_case("PYTHONIOENCODING")),
+            "{defaults:?}"
+        );
+        assert!(defaults.iter().any(|(key, _)| *key == "PYTHONUTF8"));
+    }
+
+    #[test]
+    fn exec_output_decodes_utf8_and_windows_gbk_bytes() {
+        assert_eq!(
+            crate::process_env::decode_process_output_for_platform("中文".as_bytes(), true),
+            "中文"
+        );
+        assert_eq!(
+            crate::process_env::decode_process_output_for_platform(
+                &[0xD6, 0xD0, 0xCE, 0xC4],
+                true
+            ),
+            "中文"
+        );
+    }
+
+    #[test]
+    fn exec_output_invalid_bytes_fall_back_to_lossy_text() {
+        let output =
+            crate::process_env::decode_process_output_for_platform(&[0xFF, 0xFF], true);
+
+        assert!(!output.is_empty());
+        assert!(output.contains('\u{FFFD}'), "{output:?}");
+    }
+
+    #[tokio::test]
     async fn exec_command_rejects_tty_when_sandbox_enabled() {
         let temp = tempfile::tempdir().expect("temp");
         let env = BTreeMap::new();

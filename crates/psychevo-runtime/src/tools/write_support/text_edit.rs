@@ -360,12 +360,12 @@ pub(crate) fn run_bounded_process(
         if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
             let output = child.wait_with_output().map_err(|err| err.to_string())?;
             let mut combined = String::new();
-            combined.push_str(&String::from_utf8_lossy(&output.stdout));
-            combined.push_str(&String::from_utf8_lossy(&output.stderr));
+            combined.push_str(&crate::process_env::decode_process_output(&output.stdout));
+            combined.push_str(&crate::process_env::decode_process_output(&output.stderr));
             return Ok((status.code().unwrap_or(1), truncate_lint_output(&combined)));
         }
         if start.elapsed() > timeout {
-            let _ = child.kill();
+            crate::process_env::terminate_std_child_tree(&mut child);
             let _ = child.wait();
             return Err("lint timed out".to_string());
         }

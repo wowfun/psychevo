@@ -205,6 +205,12 @@ prepends `$PSYCHEVO_HOME/tools` to the `PATH` used by `exec_command` subprocesse
 Prompts may guide models to use `jq` for JSON or JSONL inspection when it is
 available, but runtime does not guarantee or install `jq`.
 
+`exec_command` subprocesses inherit the effective run environment. Managed tool
+path prefixes are applied to that environment before launch. On native Windows
+Git Bash, runtime sets UTF-8 child-process defaults only when unset, including
+Python and locale hints, and decodes model-visible stdout/stderr as UTF-8 with
+a Windows legacy locale fallback.
+
 `write_stdin` polls an existing yielded session or writes text to its stdin.
 Empty `chars` is a poll. Non-empty `chars` requires a stdin-capable session.
 

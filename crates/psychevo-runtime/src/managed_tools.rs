@@ -40,7 +40,7 @@ where
     if is_executable_file(&managed_rg) {
         return Ok(managed_paths(tools_dir));
     }
-    if find_on_path("rg", env_path_value(env_map)).is_some() {
+    if find_on_path("rg", env_path_value(env_map), env_map).is_some() {
         return Ok(ManagedToolPaths::default());
     }
     fs::create_dir_all(&tools_dir)?;
@@ -67,20 +67,30 @@ pub(crate) fn managed_paths(tools_dir: PathBuf) -> ManagedToolPaths {
 pub(crate) fn env_path_value(env_map: &BTreeMap<String, String>) -> Option<OsString> {
     env_map
         .get("PATH")
+        .or_else(|| {
+            env_map
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+                .map(|(_, value)| value)
+        })
         .map(OsString::from)
         .or_else(|| env::var_os("PATH"))
 }
 
-pub(crate) fn find_on_path(name: &str, path: Option<OsString>) -> Option<PathBuf> {
+pub(crate) fn find_on_path(
+    name: &str,
+    path: Option<OsString>,
+    env_map: &BTreeMap<String, String>,
+) -> Option<PathBuf> {
     let path = path?;
+    let command_has_extension = Path::new(name).extension().is_some();
     for dir in env::split_paths(&path) {
-        let candidate = dir.join(name);
-        if is_executable_file(&candidate) {
-            return Some(candidate);
-        }
-        #[cfg(windows)]
-        {
-            let candidate = dir.join(format!("{name}.exe"));
+        for candidate in crate::process_env::executable_path_candidates(
+            &dir.join(name),
+            command_has_extension,
+            env_map,
+            cfg!(windows),
+        ) {
             if is_executable_file(&candidate) {
                 return Some(candidate);
             }

@@ -21,6 +21,7 @@ pub mod model_state;
 pub(crate) mod paths;
 pub(crate) mod permissions;
 pub mod plugins;
+pub mod process_env;
 pub(crate) mod project_instructions;
 pub(crate) mod prompt_assembly;
 pub(crate) mod prompt_image;
@@ -117,6 +118,14 @@ pub use plugins::{
     plugin_marketplace_list_value, plugin_marketplace_remove_value, plugin_set_enabled_value,
     plugin_uninstall_value, plugin_view_value,
 };
+pub use process_env::{
+    ProcessEnvOptions, apply_process_env, apply_pty_process_env, apply_tokio_process_env,
+    combined_path_value, decode_process_output, decode_process_output_for_platform,
+    effective_process_env, env_value_case_insensitive, executable_path_candidates,
+    prefixed_path_overlay, terminate_pty_child_tree, terminate_std_child_process_group,
+    terminate_std_child_tree, terminate_tokio_child_tree, windows_pathext_extensions,
+    windows_utf8_default_env,
+};
 pub use prompt_image::{
     extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,
     prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path,
@@ -178,8 +187,8 @@ pub use types::{
     ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent, ClarifyResolvedEvent,
     ClarifyResolvedReason, ClarifyResponse, ClarifyResult, ConfigScope, ConfiguredModel,
     CustomProviderInput, CustomProviderResult, ExternalAgentDelegate, ExternalAgentDelegateRequest,
-    ExternalAgentDelegateResult, ImageInput, McpServerInput, McpTransportInput, ModelCatalogEntry,
-    ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
+    ExternalAgentDelegateResult, ImageInput, McpServerInput, McpServerPolicy, McpTransportInput,
+    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
     PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
     ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
     ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions,
