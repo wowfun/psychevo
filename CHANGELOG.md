@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-03
+
+- Added `pevo mcp serve` and expanded MCP tool policy, snapshot, and strict
+  reply-schema support.
+- Improved Windows Git Bash process handling across install, Gateway/Web
+  terminals, ACP, hooks/plugins, LSP, PATH lookup, UTF-8 defaults, and cleanup.
+- Added `pevo web start`, `pevo web stop`, and `pevo web restart`, and moved the
+  starter `config.toml` into a compiled template with a default `/expr` alias.
+- Improved `peval-py view/export tr -p` Trial cell path handling and inspect
+  selectors, including `--steps` and bounded previews.
+- Fixed shared file-path normalization so literal `#` and `?` remain valid in
+  filesystem paths while URL query and fragment parts are still stripped.
+
 ## 2026-07-02
 
 - Added Codex-grounded MCP catalog and runtime snapshot plumbing with canonical
