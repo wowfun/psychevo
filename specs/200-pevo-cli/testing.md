@@ -181,27 +181,27 @@ come from the focused command and smoke tests below.
 ## Install Script Coverage
 
 - `scripts/install.sh` passes POSIX shell syntax validation with `sh -n`.
-- Dry-run coverage verifies local `--source` install planning, clone-mode
-  defaults and overrides, default post-install initialization, `--no-init`, and
-  `--with-peval` planning. It also verifies `--offline` command planning,
-  `--web-dist` planning, and Git Bash/MSYS/MINGW binary naming.
-- Dry-run output is deterministic and does not require `git`, `cargo`, network
-  access, provider credentials, or global Psychevo state.
+- Unknown-option coverage verifies removed installer modes fail as unsupported
+  options rather than retaining compatibility aliases.
+- Checkout detection coverage verifies the installer fails before dependency or
+  network actions when it is not run from inside a Psychevo checkout.
 - Install preflight coverage verifies missing native C compiler, missing
   Node.js, missing `pnpm`, mismatched `pnpm` warnings, Windows
-  Git Bash native build-tool diagnostics, and `--no-web` bypass behavior without
-  cloning, installing, initializing, network access, provider credentials, or
+  Git Bash native build-tool diagnostics, and unusable pnpm/Corepack shims
+  without installing, initializing, network access, provider credentials, or
   global Psychevo state.
+- Normal install preflight coverage verifies stderr progress breadcrumbs before
+  Cargo/Rust, native build-tool, Node.js, and pnpm checks so a hang can be
+  localized from the last printed stage.
 - `--check` coverage verifies dependency and version diagnostics without
   installing `pevo` or mutating global Psychevo state, and reports mismatched
-  `pnpm` as a warning rather than a failure.
-- `--offline` coverage rejects clone mode before network access and adds offline
-  Cargo/pnpm flags when a source checkout is selected.
-- `--web-dist` coverage validates a prebuilt dist directory with `index.html`
-  and skips pnpm install/build commands.
-- Clone, Cargo, and pnpm failure coverage verifies enterprise-network
-  diagnostics are printed without modifying proxy, registry, mirror, or CA
-  configuration.
+  `pnpm` as a warning rather than a failure. It reports `pnpm --version`
+  failures as unusable tool failures.
+- Cargo and pnpm failure coverage verifies enterprise-network diagnostics are
+  printed without modifying proxy, registry, mirror, or CA configuration.
+  Cargo install coverage verifies subprocess-scoped timeout/retry defaults,
+  user overrides for those values, Windows Git Bash revocation-check defaults,
+  and effective Cargo network diagnostics.
 - Local checkout preflight failures for native and Web build prerequisites
   include the optional `cargo xtask doctor deps check --only install`
   diagnostic hint. Missing Cargo bootstrap failures do not require `xtask`.

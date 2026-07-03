@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+
 pub(crate) fn install_workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -37,443 +38,61 @@ fn install_preflight_command(bin_dir: &Path, home: &Path) -> Command {
     let mut command = Command::new("/bin/sh");
     command
         .arg(install_script_path())
-        .arg("--source")
-        .arg(install_workspace_root())
-        .arg("--no-init")
+        .current_dir(install_workspace_root())
         .env_clear()
         .env("HOME", home)
-        .env("PATH", bin_dir)
-        .env("PEVO_INSTALL_UNAME", "Linux");
+        .env("PATH", bin_dir);
     command
 }
 
 #[test]
-pub(crate) fn install_dry_run_uses_explicit_source_and_default_init() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let root = install_workspace_root();
-    let output = Command::new("sh")
-        .arg(install_script_path())
-        .arg("--dry-run")
-        .arg("--source")
-        .arg(&root)
-        .env("HOME", &home)
-        .env_remove("CARGO_HOME")
-        .env_remove("CARGO_INSTALL_ROOT")
-        .output()
-        .expect("install dry run");
+pub(crate) fn install_rejects_removed_options() {
+    for flag in [
+        "--repo-url",
+        "--ref",
+        "--source",
+        "--with-peval",
+        "--no-web",
+        "--no-init",
+        "--offline",
+        "--web-dist",
+        "--dry-run",
+    ] {
+        let output = Command::new("sh")
+            .arg(install_script_path())
+            .arg(flag)
+            .output()
+            .expect("install option");
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stderr).is_empty(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    let source = root.display().to_string();
-    assert!(stdout.contains("pevo install dry run"), "{stdout}");
-    assert!(stdout.contains("mode: local"), "{stdout}");
-    assert!(stdout.contains(&format!("source: {source}")), "{stdout}");
-    assert!(
-        stdout.contains(&format!(
-            "install_command: cargo install --locked --path '{source}/crates/psychevo-cli' --force"
-        )),
-        "{stdout}"
-    );
-    assert!(stdout.contains("with_peval: 0"), "{stdout}");
-    assert!(stdout.contains("with_web: 1"), "{stdout}");
-    assert!(
-        stdout.contains(&format!(
-            "web_install_command: cd '{source}' && pnpm install --frozen-lockfile"
-        )),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!(
-            "web_build_command: cd '{source}' && pnpm --filter @psychevo/workbench build"
-        )),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!("web_asset_source: {source}/apps/workbench/dist")),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!(
-            "init_command: '{}/.cargo/bin/pevo' init",
-            home.display()
-        )),
-        "{stdout}"
-    );
+        assert!(!output.status.success(), "{flag}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("unknown option: {flag}")),
+            "{stderr}"
+        );
+    }
 }
 
 #[test]
-pub(crate) fn install_dry_run_can_skip_web_assets() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let root = install_workspace_root();
-    let output = Command::new("sh")
-        .arg(install_script_path())
-        .arg("--dry-run")
-        .arg("--no-web")
-        .arg("--source")
-        .arg(&root)
-        .env("HOME", &home)
-        .env_remove("CARGO_HOME")
-        .env_remove("CARGO_INSTALL_ROOT")
-        .output()
-        .expect("install dry run");
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("with_web: 0"), "{stdout}");
-    assert!(stdout.contains("web_asset_install: (skipped)"), "{stdout}");
-    assert!(!stdout.contains("web_build_command:"), "{stdout}");
-}
-
-#[test]
-pub(crate) fn install_dry_run_offline_plans_offline_commands() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let root = install_workspace_root();
-    let output = Command::new("sh")
-        .arg(install_script_path())
-        .arg("--dry-run")
-        .arg("--offline")
-        .arg("--source")
-        .arg(&root)
-        .env("HOME", &home)
-        .env_remove("CARGO_HOME")
-        .env_remove("CARGO_INSTALL_ROOT")
-        .output()
-        .expect("install dry run");
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    let source = root.display().to_string();
-    assert!(stdout.contains("offline: 1"), "{stdout}");
-    assert!(
-        stdout.contains(&format!(
-            "install_command: cargo install --locked --offline --path '{source}/crates/psychevo-cli' --force"
-        )),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!(
-            "web_install_command: cd '{source}' && pnpm install --frozen-lockfile --offline"
-        )),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!(
-            "web_build_command: cd '{source}' && pnpm --offline --filter @psychevo/workbench build"
-        )),
-        "{stdout}"
-    );
-}
-
-#[test]
-pub(crate) fn install_offline_rejects_clone_mode() {
+pub(crate) fn install_requires_checkout_cwd() {
     let temp = tempdir().expect("temp");
     let output = Command::new("sh")
         .arg(install_script_path())
-        .arg("--dry-run")
-        .arg("--offline")
         .current_dir(temp.path())
         .output()
-        .expect("install dry run");
+        .expect("install");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--offline requires an existing Psychevo source checkout"),
-        "{stderr}"
-    );
-}
-
-#[test]
-pub(crate) fn install_dry_run_web_dist_skips_pnpm_commands() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let dist = temp.path().join("dist");
-    std::fs::create_dir_all(&dist).expect("dist");
-    std::fs::write(dist.join("index.html"), "<!doctype html>").expect("index");
-    let root = install_workspace_root();
-    let output = Command::new("sh")
-        .arg(install_script_path())
-        .arg("--dry-run")
-        .arg("--source")
-        .arg(&root)
-        .arg("--web-dist")
-        .arg(&dist)
-        .env("HOME", &home)
-        .env_remove("CARGO_HOME")
-        .env_remove("CARGO_INSTALL_ROOT")
-        .output()
-        .expect("install dry run");
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(
-        stdout.contains("web_install_command: (skipped; --web-dist supplied)"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("web_build_command: (skipped; --web-dist supplied)"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!("web_asset_source: {}", dist.display())),
-        "{stdout}"
-    );
-    assert!(!stdout.contains("pnpm install"), "{stdout}");
-}
-
-#[test]
-pub(crate) fn install_dry_run_can_include_peval() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let root = install_workspace_root();
-    let output = Command::new("sh")
-        .arg(install_script_path())
-        .arg("--dry-run")
-        .arg("--with-peval")
-        .arg("--source")
-        .arg(&root)
-        .env("HOME", &home)
-        .env_remove("CARGO_HOME")
-        .env_remove("CARGO_INSTALL_ROOT")
-        .output()
-        .expect("install dry run");
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    let source = root.display().to_string();
-    assert!(stdout.contains("with_peval: 1"), "{stdout}");
-    assert!(
-        stdout.contains(&format!(
-            "peval_install_command: cargo install --locked --path '{source}/crates/psychevo-eval' --force"
-        )),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!(
-            "peval_binary: {}/.cargo/bin/peval",
-            home.display()
-        )),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(&format!(
-            "init_command: '{}/.cargo/bin/pevo' init",
-            home.display()
-        )),
-        "{stdout}"
-    );
-}
-
-#[test]
-pub(crate) fn install_dry_run_plans_clone_mode_and_no_init() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let output = Command::new("sh")
-        .arg(install_script_path())
-        .arg("--dry-run")
-        .arg("--repo-url")
-        .arg("https://example.invalid/psychevo.git")
-        .arg("--ref")
-        .arg("test-ref")
-        .arg("--no-init")
-        .current_dir(temp.path())
-        .env("HOME", &home)
-        .env_remove("CARGO_HOME")
-        .env_remove("CARGO_INSTALL_ROOT")
-        .output()
-        .expect("install dry run");
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("mode: clone"), "{stdout}");
-    assert!(
-        stdout.contains("repo_url: https://example.invalid/psychevo.git"),
-        "{stdout}"
-    );
-    assert!(stdout.contains("repo_ref: test-ref"), "{stdout}");
-    assert!(stdout.contains("source: <temporary>/psychevo"), "{stdout}");
-    assert!(
-        stdout.contains(
-            "clone_command: git clone --depth 1 --branch 'test-ref' 'https://example.invalid/psychevo.git' '<temporary>/psychevo'"
-        ),
-        "{stdout}"
-    );
-    assert!(stdout.contains("init_command: (skipped)"), "{stdout}");
-}
-
-#[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_reports_missing_native_compiler() {
-    let temp = tempdir().expect("temp");
-    let bin = temp.path().join("bin");
-    write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
-    let output = install_preflight_command(&bin, &temp.path().join("home"))
-        .arg("--no-web")
-        .output()
-        .expect("install preflight");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("native C compiler/linker is required"),
+        stderr.contains("Run this script from inside a Psychevo checkout"),
         "{stderr}"
     );
     assert!(
-        stderr.contains("cc, gcc, or clang") || stderr.contains("build-essential"),
+        stderr.contains("git clone https://github.com/wowfun/psychevo.git"),
         "{stderr}"
     );
-    assert!(
-        stderr.contains("cargo xtask doctor deps check --only install"),
-        "{stderr}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_reports_missing_node_for_default_web_install() {
-    let temp = tempdir().expect("temp");
-    let bin = temp.path().join("bin");
-    write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
-    write_fake_command(&bin, "cc", "exit 0");
-    let output = install_preflight_command(&bin, &temp.path().join("home"))
-        .output()
-        .expect("install preflight");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("Node.js is required to build Web UI assets"),
-        "{stderr}"
-    );
-    assert!(stderr.contains("--no-web"), "{stderr}");
-    assert!(
-        stderr.contains("cargo xtask doctor deps check --only install"),
-        "{stderr}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_reports_missing_pnpm_for_default_web_install() {
-    let temp = tempdir().expect("temp");
-    let bin = temp.path().join("bin");
-    write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
-    write_fake_command(&bin, "cc", "exit 0");
-    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
-    let output = install_preflight_command(&bin, &temp.path().join("home"))
-        .output()
-        .expect("install preflight");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("pnpm 11.8.0 is required to build Web UI assets"),
-        "{stderr}"
-    );
-    assert!(stderr.contains("--no-web"), "{stderr}");
-    assert!(
-        stderr.contains("cargo xtask doctor deps check --only install"),
-        "{stderr}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-pub(crate) fn install_no_web_bypasses_node_and_pnpm_preflight() {
-    let temp = tempdir().expect("temp");
-    let bin = temp.path().join("bin");
-    write_fake_command(&bin, "cargo", "printf 'fake cargo reached\\n' >&2\nexit 42");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
-    write_fake_command(&bin, "cc", "exit 0");
-    let output = install_preflight_command(&bin, &temp.path().join("home"))
-        .arg("--no-web")
-        .output()
-        .expect("install preflight");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("fake cargo reached"), "{stderr}");
-    assert!(
-        stderr.contains("Enterprise network diagnostics (cargo install failed)"),
-        "{stderr}"
-    );
-    assert!(
-        !stderr.contains("Node.js is required") && !stderr.contains("pnpm is required"),
-        "{stderr}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_warns_for_mismatched_pnpm_and_continues() {
-    let temp = tempdir().expect("temp");
-    let bin = temp.path().join("bin");
-    let home = temp.path().join("home");
-    write_fake_pevo(&home);
-    write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
-    write_fake_command(&bin, "cc", "exit 0");
-    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
-    write_fake_command(
-        &bin,
-        "pnpm",
-        "case \"$1\" in\n  --version) printf '1.0.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) printf 'fake pnpm reached\\n' >&2; exit 42 ;;\nesac",
-    );
-    write_fake_command(&bin, "corepack", "exit 0");
-    let output = install_preflight_command(&bin, &home)
-        .output()
-        .expect("install preflight");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("warning: pnpm 1.0.0 is installed; pnpm 11.8.0 is recommended"),
-        "{stderr}"
-    );
-    assert!(stderr.contains("fake pnpm reached"), "{stderr}");
-    assert!(
-        stderr.contains("Enterprise network diagnostics (pnpm install failed)"),
-        "{stderr}"
-    );
-    assert!(
-        !stderr.contains("corepack enable && corepack prepare pnpm@11.8.0 --activate"),
-        "{stderr}"
-    );
+    assert!(!stderr.contains("checking Cargo"), "{stderr}");
 }
 
 #[cfg(unix)]
@@ -485,12 +104,10 @@ pub(crate) fn install_check_reports_missing_tools_without_mutation() {
     let output = Command::new("/bin/sh")
         .arg(install_script_path())
         .arg("--check")
-        .arg("--source")
-        .arg(install_workspace_root())
+        .current_dir(install_workspace_root())
         .env_clear()
         .env("HOME", temp.path().join("home"))
         .env("PATH", &bin)
-        .env("PEVO_INSTALL_UNAME", "Linux")
         .output()
         .expect("install check");
 
@@ -500,6 +117,27 @@ pub(crate) fn install_check_reports_missing_tools_without_mutation() {
     assert!(stdout.contains("cargo: missing"), "{stdout}");
     assert!(stdout.contains("node: missing"), "{stdout}");
     assert!(stdout.contains("pnpm: missing"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("CARGO_HTTP_CHECK_REVOKE: (unset)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("CARGO_HTTP_TIMEOUT: 120 (installer default for cargo install)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("CARGO_NET_RETRY: 10 (installer default for cargo install)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("CARGO_HTTP_LOW_SPEED_LIMIT: (unset)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("CARGO_HTTP_MULTIPLEXING: (unset)"),
+        "{stderr}"
+    );
     assert!(
         !temp.path().join("home/.cargo/bin/pevo").exists(),
         "check mode must not install pevo"
@@ -523,12 +161,10 @@ pub(crate) fn install_check_reports_mismatched_pnpm_as_warning() {
     let output = Command::new("/bin/sh")
         .arg(install_script_path())
         .arg("--check")
-        .arg("--source")
-        .arg(install_workspace_root())
+        .current_dir(install_workspace_root())
         .env_clear()
         .env("HOME", temp.path().join("home"))
         .env("PATH", &bin)
-        .env("PEVO_INSTALL_UNAME", "Linux")
         .output()
         .expect("install check");
 
@@ -546,77 +182,143 @@ pub(crate) fn install_check_reports_mismatched_pnpm_as_warning() {
 
 #[cfg(unix)]
 #[test]
-pub(crate) fn install_windows_preflight_reports_missing_build_tools_before_cargo() {
+pub(crate) fn install_preflight_reports_missing_native_compiler() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
-    write_fake_command(&bin, "cargo", "printf 'fake cargo reached\\n' >&2\nexit 42");
+    write_fake_command(&bin, "cargo", "exit 0");
     write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
-    let output = Command::new("/bin/sh")
-        .arg(install_script_path())
-        .arg("--source")
-        .arg(install_workspace_root())
-        .arg("--no-web")
-        .arg("--no-init")
-        .env_clear()
-        .env("HOME", temp.path().join("home"))
-        .env("PATH", &bin)
-        .env("PEVO_INSTALL_UNAME", "MINGW64_NT-10.0")
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
         .output()
         .expect("install preflight");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Windows native build tools were not detected"),
+        stderr.contains("native C compiler/linker is required"),
         "{stderr}"
     );
-    assert!(!stderr.contains("fake cargo reached"), "{stderr}");
+    assert!(
+        stderr.contains("cc, gcc, or clang") || stderr.contains("build-essential"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("cargo xtask doctor deps check --only install"),
+        "{stderr}"
+    );
 }
 
 #[cfg(unix)]
 #[test]
-pub(crate) fn install_clone_failure_prints_enterprise_diagnostics() {
+pub(crate) fn install_preflight_reports_missing_node_for_full_install() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
-    write_fake_command(
-        &bin,
-        "mktemp",
-        "template=$2\nprintf '%s\\n' \"${template%/*}/pevo-install.fake\"",
-    );
-    write_fake_command(&bin, "git", "printf 'fake clone failed\\n' >&2\nexit 42");
-    let output = Command::new("/bin/sh")
-        .arg(install_script_path())
-        .arg("--repo-url")
-        .arg("https://example.invalid/psychevo.git")
-        .arg("--ref")
-        .arg("test-ref")
-        .current_dir(temp.path())
-        .env_clear()
-        .env("HOME", temp.path().join("home"))
-        .env("PATH", &bin)
-        .env("HTTPS_PROXY", "http://user:pass@example.proxy:8080")
+    write_fake_command(&bin, "cargo", "exit 0");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
         .output()
-        .expect("install clone");
+        .expect("install preflight");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Enterprise network diagnostics (git clone failed)"),
+        stderr.contains("Node.js is required to build Workbench assets"),
         "{stderr}"
     );
+    assert!(!stderr.contains("--no-web"), "{stderr}");
     assert!(
-        stderr.contains("repo_url: https://example.invalid/psychevo.git"),
-        "{stderr}"
-    );
-    assert!(
-        stderr.contains("HTTPS_PROXY: http://***@example.proxy:8080"),
+        stderr.contains("cargo xtask doctor deps check --only install"),
         "{stderr}"
     );
 }
 
 #[cfg(unix)]
 #[test]
-pub(crate) fn install_pnpm_failure_prints_enterprise_diagnostics() {
+pub(crate) fn install_preflight_reports_missing_pnpm_for_full_install() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "cargo", "exit 0");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("pnpm 11.8.0 is required to build Workbench assets"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("--no-web"), "{stderr}");
+    assert!(
+        stderr.contains("cargo xtask doctor deps check --only install"),
+        "{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_preflight_prints_progress_breadcrumbs() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'fake cargo reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(
+        &bin,
+        "rustc",
+        "case \"$1\" in\n  --version) printf 'rustc 1.94.0\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("pevo install: using unix source checkout at"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("pevo install: validating source checkout"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("pevo install: checking Cargo"), "{stderr}");
+    assert!(
+        stderr.contains("pevo install: checking Rust version"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("pevo install: checking native build tools"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("pevo install: checking Node.js"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("pevo install: checking pnpm"), "{stderr}");
+    assert!(stderr.contains("pevo install: installing pevo"), "{stderr}");
+    assert!(
+        stderr.contains("pevo install: collecting enterprise diagnostics"),
+        "{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_preflight_warns_for_mismatched_pnpm_and_continues() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     let home = temp.path().join("home");
@@ -628,63 +330,333 @@ pub(crate) fn install_pnpm_failure_prints_enterprise_diagnostics() {
     write_fake_command(
         &bin,
         "pnpm",
-        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) printf 'fake pnpm failed\\n' >&2; exit 42 ;;\nesac",
+        "case \"$1\" in\n  --version) printf '1.0.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) printf 'fake pnpm reached\\n' >&2; exit 42 ;;\nesac",
     );
     let output = install_preflight_command(&bin, &home)
-        .env("HTTPS_PROXY", "http://proxy.example:8080")
         .output()
-        .expect("install pnpm");
+        .expect("install preflight");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("fake pnpm failed"), "{stderr}");
+    assert!(
+        stderr.contains("warning: pnpm 1.0.0 is installed; pnpm 11.8.0 is recommended"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("fake pnpm reached"), "{stderr}");
     assert!(
         stderr.contains("Enterprise network diagnostics (pnpm install failed)"),
         "{stderr}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    let home = temp.path().join("home");
+    write_fake_pevo(&home);
+    write_fake_command(&bin, "cargo", "exit 0");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "if [ \"${COREPACK_ENABLE_PROJECT_SPEC:-}\" != 0 ]; then printf 'corepack attempted project download\\n' >&2; exit 42; fi\nif [ \"${COREPACK_ENABLE_DOWNLOAD_PROMPT:-}\" != 0 ]; then printf 'corepack prompted\\n' >&2; exit 42; fi\ncase \"$1\" in\n  --version) printf '1.0.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  install) printf 'fake pnpm install reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    let output = install_preflight_command(&bin, &home)
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("pnpm registry: https://registry.npmjs.org/"),
+        stderr.contains("warning: pnpm 1.0.0 is installed; pnpm 11.8.0 is recommended"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("fake pnpm install reached"), "{stderr}");
+    assert!(
+        !stderr.contains("corepack attempted project download"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("corepack prompted"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_preflight_rejects_unusable_pnpm_before_cargo_install() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'fake cargo reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf 'corepack certificate failure\\n' >&2; exit 42 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 42 ;;\nesac",
+    );
+
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("corepack certificate failure"), "{stderr}");
+    assert!(
+        stderr.contains("pnpm exists on PATH, but `pnpm --version` failed"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("--no-web"), "{stderr}");
+    assert!(!stderr.contains("fake cargo reached"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_check_reports_unusable_pnpm_as_failure() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "cargo", "printf 'cargo 1.96.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf 'corepack certificate failure\\n' >&2; exit 42 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 42 ;;\nesac",
+    );
+    let output = Command::new("/bin/sh")
+        .arg(install_script_path())
+        .arg("--check")
+        .current_dir(install_workspace_root())
+        .env_clear()
+        .env("HOME", temp.path().join("home"))
+        .env("PATH", &bin)
+        .output()
+        .expect("install check");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("pnpm: unusable - pnpm --version failed"),
+        "{stdout}"
+    );
+    assert!(stderr.contains("corepack certificate failure"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_windows_preflight_reports_missing_build_tools_before_cargo() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
+    write_fake_command(&bin, "cargo", "printf 'fake cargo reached\\n' >&2\nexit 42");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install preflight");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Windows native C/C++ build tools are required"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("fake cargo reached"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_windows_cargo_install_defaults_revocation_check_off() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ \"${CARGO_HTTP_CHECK_REVOKE:-}\" = false ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install cargo");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cargo revoke=false"), "{stderr}");
+    assert!(
+        stderr.contains("try CARGO_HTTP_MULTIPLEXING=false"),
         "{stderr}"
     );
 }
 
+#[cfg(unix)]
 #[test]
-pub(crate) fn install_dry_run_uses_windows_binary_name_for_git_bash() {
+pub(crate) fn install_windows_cargo_install_preserves_explicit_revocation_setting() {
     let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let root = install_workspace_root();
-    let output = Command::new("sh")
-        .arg(install_script_path())
-        .arg("--dry-run")
-        .arg("--source")
-        .arg(&root)
-        .current_dir(temp.path())
-        .env("HOME", &home)
-        .env("PEVO_INSTALL_UNAME", "MINGW64_NT-10.0")
-        .env_remove("CARGO_HOME")
-        .env_remove("CARGO_INSTALL_ROOT")
+    let bin = temp.path().join("bin");
+    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ \"${CARGO_HTTP_CHECK_REVOKE:-}\" = true ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .env("CARGO_HTTP_CHECK_REVOKE", "true")
         .output()
-        .expect("install dry run");
+        .expect("install cargo");
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cargo revoke=true"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_unix_cargo_install_does_not_force_revocation_setting() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ -z \"${CARGO_HTTP_CHECK_REVOKE+x}\" ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("platform: windows-git-bash"), "{stdout}");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install cargo");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cargo revoke=unset"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_cargo_install_defaults_timeout_and_retry() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo timeout=%s retry=%s\\n' \"${CARGO_HTTP_TIMEOUT-unset}\" \"${CARGO_NET_RETRY-unset}\" >&2; [ \"${CARGO_HTTP_TIMEOUT:-}\" = 120 ] || exit 43; [ \"${CARGO_NET_RETRY:-}\" = 10 ] || exit 44; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .output()
+        .expect("install cargo");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cargo timeout=120 retry=10"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_cargo_install_preserves_explicit_timeout_and_retry() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo timeout=%s retry=%s\\n' \"${CARGO_HTTP_TIMEOUT-unset}\" \"${CARGO_NET_RETRY-unset}\" >&2; [ \"${CARGO_HTTP_TIMEOUT:-}\" = 45 ] || exit 43; [ \"${CARGO_NET_RETRY:-}\" = 2 ] || exit 44; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .env("CARGO_HTTP_TIMEOUT", "45")
+        .env("CARGO_NET_RETRY", "2")
+        .output()
+        .expect("install cargo");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cargo timeout=45 retry=2"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn install_cargo_failure_prints_enterprise_diagnostics() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    write_fake_command(
+        &bin,
+        "cargo",
+        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'fake cargo failed\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cc", "exit 0");
+    write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        &bin,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+    );
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
+        .env("HTTPS_PROXY", "http://user:pass@example.proxy:8080")
+        .output()
+        .expect("install cargo");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("fake cargo failed"), "{stderr}");
     assert!(
-        stdout.contains(&format!(
-            "pevo_binary: {}/.cargo/bin/pevo.exe",
-            home.display()
-        )),
-        "{stdout}"
+        stderr.contains("Enterprise network diagnostics (cargo install failed)"),
+        "{stderr}"
     );
     assert!(
-        stdout.contains(&format!(
-            "init_command: '{}/.cargo/bin/pevo.exe' init",
-            home.display()
-        )),
-        "{stdout}"
+        stderr.contains("HTTPS_PROXY: http://***@example.proxy:8080"),
+        "{stderr}"
     );
+    assert!(
+        stderr.contains("CARGO_HTTP_TIMEOUT: 120 (installer default for cargo install)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("CARGO_NET_RETRY: 10 (installer default for cargo install)"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("repo_url:"), "{stderr}");
 }

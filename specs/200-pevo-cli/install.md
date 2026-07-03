@@ -3,190 +3,157 @@ name: 200. pevo install Script
 psychevo_self_edit: deny
 ---
 
-Define the source-install helper script for the `pevo` product CLI.
+Define the checkout-local source-install helper script for the `pevo` product
+CLI.
 
 This attachment is part of [200 pevo CLI](spec.md).
 
-`scripts/install.sh` is the standalone product installer. Repository-local
-developer diagnostics may mirror its host prerequisite checks through
-`cargo xtask doctor deps`, but the installer must not depend on `xtask` because
-the remote `curl | sh` path and first-time bootstrap path may not have a
-checkout or usable Cargo yet.
+`scripts/install.sh` is a POSIX-compatible shell script. It must run with `sh`,
+`bash`, and Windows Git Bash/MSYS/MINGW shells. It installs from the current
+Psychevo checkout only; it does not clone repositories, install from arbitrary
+source paths, install release binaries, or model package-manager workflows.
 
 ## Scope
 
-- one-command source install helper
-- repository checkout and local-source install selection
-- Rust/Cargo dependency detection and guided installation
-- post-install verification and global home initialization
+- checkout-local full source install helper
+- Rust/Cargo, native compiler, Node.js, and pnpm dependency detection
+- Workbench asset build and install
+- post-install `pevo` verification and global home initialization
 - Git Bash/MSYS/MINGW script compatibility boundaries
 
 Out of scope:
 
 - crates.io publishing, binary releases, package managers, or uninstall/update
   commands
+- remote clone, Git mirror, source override, offline, CLI-only, or prebuilt Web
+  asset installer modes
 - provider credential prompts, API-key validation, or live provider probes
 - automatic shell profile edits
-- automatic Visual Studio Build Tools, MinGW, Xcode, Homebrew, apt, or yum
-  installation
+- automatic Rust, Visual Studio Build Tools, MinGW, Xcode, Homebrew, apt, yum,
+  Node.js, Corepack, npm, or pnpm installation
 
 ## Script Contract
 
-`scripts/install.sh` is a POSIX-compatible shell script. It must run with
-`sh`, `bash`, and Windows Git Bash/MSYS/MINGW shells.
+Accepted flags:
 
-The default install source is the current checkout when the process cwd is
-inside a Psychevo repository. Otherwise, the script clones
-`https://github.com/wowfun/psychevo.git` at `main` into a temporary directory
-and installs from that clone.
-
-Accepted flags and environment defaults:
-
-- `--repo-url <url>` overrides the clone URL. `PEVO_INSTALL_REPO` is the
-  environment default.
-- `--ref <ref>` overrides the clone branch or tag. `PEVO_INSTALL_REF` is the
-  environment default.
-- `--source <path>` forces installation from a local Psychevo source tree.
-- `--with-peval` also installs and verifies the `peval` evaluation CLI.
-- `--no-web` skips building and installing Web UI assets.
-- `--no-init` skips post-install `pevo init`.
 - `--check` prints dependency, version, and environment-readiness diagnostics
-  without cloning, installing, building Web assets, copying files, initializing,
-  or attempting best-effort repairs.
-- `--offline` requires an existing source checkout and runs Cargo and pnpm in
-  offline mode. It must reject clone-mode installs before any network action.
-- `--web-dist <path>` installs prebuilt Workbench assets from a directory that
-  contains `index.html`; it skips `pnpm install` and `pnpm build`.
-- `--dry-run` prints the resolved plan and commands without cloning,
-  installing, initializing, or requiring installed dependencies.
+  without installing, building Web assets, copying files, initializing, or
+  attempting toolchain repairs.
 - `-h, --help` prints usage.
 
-Default installation uses:
+The script has no installer-owned environment variables. It may use standard
+host/tool environment such as `PATH`, `HOME`, `CARGO_HOME`,
+`CARGO_INSTALL_ROOT`, proxy variables, and CA variables.
+
+The script finds the source checkout by walking upward from the process cwd and
+requires a workspace root containing `Cargo.toml` and
+`crates/psychevo-cli/Cargo.toml`. If no checkout is found, it must fail before
+any install action with a short `git clone ... && cd psychevo` style hint.
+
+Normal installation always runs the same full product path:
 
 ```bash
 cargo install --locked --path crates/psychevo-cli --force
+pnpm install --frozen-lockfile
+pnpm --filter @psychevo/workbench build
+pevo init
 ```
 
-When `--with-peval` is supplied, installation also uses:
+After the Workbench build, the script copies `apps/workbench/dist` into
+`$(dirname pevo)/../share/psychevo/web`. This install-share location is the
+stable Web UI asset location for source installs.
 
-```bash
-cargo install --locked --path crates/psychevo-eval --force
-```
-
-The script must validate that local source directories contain the workspace
-root and `crates/psychevo-cli/Cargo.toml` before installing.
+Normal installation must print short stderr progress breadcrumbs before each
+potentially slow or host-dependent stage. The breadcrumb prefix is
+`pevo install:` and must include enough stage context to identify where a hang
+occurred.
 
 ## Dependency Handling
 
-When cloning is required, missing `git` is a hard failure with a short install
-hint.
-
-When `cargo` is missing and stdin is interactive, the script asks before trying
-to install Rust:
-
-- Unix and WSL use the rustup shell installer.
-- Windows Git Bash/MSYS/MINGW prefers `winget install --id Rustlang.Rustup -e`
-  when `winget` is available, then rechecks `cargo`.
-
-When `cargo` is missing in a non-interactive shell, or the guided installation
-cannot make `cargo` available in the current process, the script fails with a
-manual Rust installation hint. The documented `curl | sh` install path is
-non-interactive stdin, so it requires Rust/Cargo to already be available.
-
-When `cargo` is present, the script checks `rustc --version` against the root
-`Cargo.toml` `rust-version`. If Rust is too old and `rustup` is available in an
-interactive shell, the script asks before attempting `rustup update stable`,
-refreshes the current-process PATH, and rechecks. It must not install or update
-Rust non-interactively.
+When `cargo` or `rustc` is missing, the script fails with a manual Rust
+installation hint. It must not install Rust automatically. When `cargo` is
+present, the script checks `rustc --version` against the root `Cargo.toml`
+`rust-version`; outdated Rust is a hard failure.
 
 Unix, macOS, and WSL source builds require a native C compiler/linker toolchain
 before `cargo install` runs. The script must fail early when no `cc`, `gcc`, or
-`clang` command is available, with a short platform-appropriate hint. The script
-must not install native compiler toolchains automatically.
+`clang` command is available, with a short platform-appropriate hint. Windows
+Git Bash/MSYS/MINGW source builds require `cl`, `link`, `gcc`, `clang`, `cc`, or
+`vswhere`; missing Windows build tools are a hard failure with Visual Studio
+Build Tools or compatible MinGW/clang guidance.
 
-Windows Git Bash/MSYS/MINGW source builds check for `cl`, `link`, `gcc`,
-`clang`, `cc`, or `vswhere` before `cargo install`. If none are detected, the
-script prints Visual Studio Build Tools and MinGW guidance and continues only
-after explicit interactive confirmation. It must never install Visual Studio
-Build Tools or MinGW automatically.
+Node.js and pnpm are required because the install script always builds
+Workbench assets. The script checks Node.js against the current frontend
+requirement, with supported lines `20.19+`, `22.13+`, or `24+`. Missing or
+unsupported Node.js is a hard failure.
 
-Web UI asset installation is enabled by default. When it is enabled, missing or
-unsupported `node` is a hard failure with a short hint to install Node.js or
-rerun with `--no-web`. Missing `pnpm` may use the interactive best-effort
-Corepack/npm repair path below; otherwise it is a hard failure with a short
-hint. The script does not install Node.js automatically. The repository root
-`packageManager` declaration is the recommended `pnpm` version for source
-installs, not an exact installer gate.
+The repository root `packageManager` declaration is the recommended pnpm
+version for source installs, not an exact installer gate. If `pnpm` is present
+but differs from the root `packageManager` declaration, the script prints a
+warning and continues; `pnpm install --frozen-lockfile` remains the real
+compatibility gate. The installer runs its pnpm subprocesses with Corepack
+project-version enforcement disabled so a corporate machine with a usable older
+system pnpm does not have to download the recommended pnpm version during
+preflight. If `pnpm` is present but version detection still fails, including a
+failing Corepack shim, the script treats pnpm as unusable and fails before Cargo
+install or Web build steps. The failure must keep the underlying stderr visible
+and point to Corepack/npm registry, proxy, and CA remediation paths. The
+installer must not modify user Corepack, npm, pnpm, registry, proxy, or CA
+configuration.
 
-When Web asset installation is enabled and `--web-dist` is not supplied, the
-script checks Node.js against the current frontend requirement, with the
-supported lines `20.19+`, `22.13+`, or `24+`. If `pnpm` is present but differs
-from the root `packageManager` declaration, the script prints a warning and
-continues; `pnpm install --frozen-lockfile` remains the real compatibility gate.
-If `pnpm` is missing and stdin is interactive, the script asks before trying
-Corepack `corepack enable` plus `corepack prepare pnpm@<version> --activate`; if
-Corepack is unavailable but npm exists, it asks before trying
-`npm install -g pnpm@<version>`. After either path, it refreshes the current
-process PATH and rechecks for any available `pnpm`. It must not install Node.js
-automatically.
+When the script reports missing native or Web build prerequisites, it may point
+developers to `cargo xtask doctor deps check --only install` for a complete
+non-mutating dependency report. It must not give that `xtask` hint for missing
+Cargo bootstrap failures where `xtask` cannot run.
 
-After any best-effort tool installation or update, Windows Git Bash/MSYS/MINGW
-refreshes only the current process PATH with common Cargo, Node.js, npm, and
-pnpm locations. The script must not edit shell profiles.
+If `cargo install` fails under Windows Git Bash/MSYS/MINGW, the failure text
+must mention that Rust and native C/C++ build tools, such as Visual Studio Build
+Tools or a compatible MinGW setup, may be required. Windows Git
+Bash/MSYS/MINGW installs may default the `cargo install` subprocess to
+`CARGO_HTTP_CHECK_REVOKE=false` so corporate networks that block certificate
+revocation checks can still fetch the registry index. This default is scoped to
+the installer subprocess only; the script must not write Cargo configuration,
+shell profiles, or other persistent settings. If the user explicitly sets
+`CARGO_HTTP_CHECK_REVOKE`, the script must preserve that value.
 
-When the script is running from a local Psychevo checkout and reports missing
-native or Web build prerequisites, it may additionally point developers to
-`cargo xtask doctor deps check --only install` for a complete non-mutating
-dependency report. It must not give that `xtask` hint for missing Cargo
-bootstrap failures where `xtask` cannot run.
+The installer may also give the `cargo install` subprocess more tolerant
+network defaults for intermittent registry fetches: `CARGO_HTTP_TIMEOUT=120`
+and `CARGO_NET_RETRY=10`. These defaults are scoped to the Cargo subprocess
+only, are not written to Cargo configuration, and must not override user-set
+environment values. The installer must not default
+`CARGO_HTTP_MULTIPLEXING=false`; users may set that manually when a corporate
+proxy mishandles HTTP/2 multiplexing.
 
-If `cargo install` fails under Windows Git Bash/MSYS/MINGW, the failure text must
-mention that Rust and native C/C++ build tools, such as Visual Studio Build
-Tools or a compatible MinGW setup, may be required.
+When Cargo install or pnpm install/build steps fail, the script prints a compact
+enterprise-network diagnostics block. The block reports relevant npm/pnpm
+registry, Cargo registry/source configuration presence, proxy variables, and
+CA-related environment variables, including effective Cargo install network
+values for `CARGO_HTTP_TIMEOUT`, `CARGO_NET_RETRY`,
+`CARGO_HTTP_LOW_SPEED_LIMIT`, `CARGO_HTTP_MULTIPLEXING`, and
+`CARGO_HTTP_CHECK_REVOKE`. It must not modify Git, npm, pnpm, Cargo, proxy,
+registry, mirror, or CA configuration.
 
-When clone, Cargo install, or pnpm install/build steps fail, the script prints a
-compact enterprise-network diagnostics block. The block reports relevant
-Git proxy, npm/pnpm registry, `HTTP_PROXY`/`HTTPS_PROXY`, Cargo registry/source
-configuration presence, and CA-related environment variables. It must not modify
-Git, npm, pnpm, Cargo, proxy, registry, mirror, or CA configuration. Internal
-Git mirrors continue to use `--repo-url` or `PEVO_INSTALL_REPO`.
+Enterprise diagnostics collection itself is a named install stage so users can
+distinguish a failing build step from a hang while reading proxy, registry, or
+CA configuration.
 
 ## Post-Install Behavior
 
 After `cargo install` succeeds, the script locates `pevo` or `pevo.exe`, runs
-`pevo --help`, and by default runs `pevo init`. When `--with-peval` is
-supplied, the script also locates `peval` or `peval.exe` and runs
-`peval --help`.
+`pevo --help`, builds and installs Workbench assets, and runs `pevo init`.
 
-Unless `--no-web` or `--web-dist` is supplied, the script builds Workbench
-assets from the selected source checkout using:
-
-```bash
-pnpm install --frozen-lockfile
-pnpm --filter @psychevo/workbench build
-```
-
-With `--offline`, the script adds Cargo `--offline` and pnpm `--offline` to the
-install commands. It then copies either `apps/workbench/dist` or the explicit
-`--web-dist` directory into `$(dirname pevo)/../share/psychevo/web`. This
-install-share location is the stable Web UI asset location for source installs.
-Dry-run output includes the install, build, copy, offline, and `--web-dist`
-decisions.
-
-The install script must not run `peval init` automatically. Evaluation store
-setup remains an explicit user action through `peval init`, `--root`, or
-`PEVAL_ROOT`.
+If installation is interrupted by `INT` or `TERM`, the script reports the
+current install stage before exiting. This message is best-effort diagnostic
+output and must not replace failure handling.
 
 `pevo init` is idempotent and must not overwrite existing `config.toml` or
 `.env` files. The install script must not write raw API keys.
 
-If Cargo's bin directory is not on `PATH`, the script prints an `export PATH=...`
-command and a short note that the user should add it to their shell profile. It
-must not edit profiles automatically.
+If Cargo's bin directory is not on `PATH`, the script prints an `export
+PATH=...` command and a short note that the user should add it to their shell
+profile. It must not edit profiles automatically.
 
-Final success guidance must only suggest `pevo web` when Web UI assets were
-installed. CLI-only installs should instead point users to rerun the install
-script without `--no-web` or use `pevo setup` after installing Node.js and pnpm.
+Final success guidance should suggest `pevo --help`, `pevo`, and `pevo web`.
 
 ## Related Topics
 

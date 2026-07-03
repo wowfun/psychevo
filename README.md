@@ -39,117 +39,28 @@ would need before they can be useful or auditable.
 ## Install From Source
 
 Psychevo is not documented here as a crates.io package or binary release. Source
-installs build the local `pevo` binary with Cargo and, by default, build and copy
-Workbench Web UI assets beside the installed binary.
+installs build the local `pevo` binary with Cargo, build Workbench Web UI
+assets, and copy those assets beside the installed binary.
 
-### Prerequisites
-
-Install these before running the installer:
-
-| Requirement | Needed for |
-|-------------|------------|
-| `git` | Cloning Psychevo when installing from a remote source. |
-| Rust/Cargo | Building `pevo` and optionally `peval`; the workspace uses Rust 1.94 and edition 2024. |
-| Native C compiler/linker | Source builds on Unix, macOS, and WSL; provide `cc`, `gcc`, or `clang`. |
-| Node.js and `pnpm` | Default Web UI asset builds; use Node.js 20.19+, 22.13+, or 24+; the workspace recommends `pnpm@11.8.0`. |
-
-The install script does not install Node.js, pnpm, apt/Homebrew/Yum packages,
-Xcode Command Line Tools, Visual Studio Build Tools, or MinGW. If Rust/Cargo is
-missing and stdin is interactive, it can ask before trying rustup; the
-`curl | sh` path is non-interactive, so Rust must already be installed there.
-On interactive shells, the script may try conservative best-effort repairs such
-as `rustup update stable` for an old Rust toolchain or Corepack/npm activation
-for a missing pnpm command. If a different pnpm version is already installed,
-the script warns and lets `pnpm install --frozen-lockfile` validate the lockfile.
-It never edits shell profiles or enterprise proxy/registry/CA configuration.
-
-On a fresh Ubuntu or WSL machine, the system-level pieces usually look like:
-
-```bash
-sudo apt update
-sudo apt install git curl build-essential
-```
-
-Install Rust from <https://rustup.rs/>. Install Node.js with your normal Node
-manager or OS package source, then enable or install pnpm, for example:
-
-```bash
-corepack enable
-corepack prepare pnpm@11.8.0 --activate
-```
-
-From a checked-out repository, this non-mutating diagnostic summarizes the full
-source-install prerequisite set:
-
-```bash
-cargo xtask doctor deps check --only install
-```
-
-The standalone installer also has a checkout-local diagnostic that does not
-clone, build, install, initialize, or repair anything:
-
-```bash
-sh scripts/install.sh --check
-```
-
-### Install A Checkout
-
-The most reliable source install path is from a checked-out repository:
+Install Git, Rust/Cargo, a native compiler, Node.js, and pnpm first. Then
+install from a checkout:
 
 ```bash
 git clone https://github.com/wowfun/psychevo.git
 cd psychevo
+sh scripts/install.sh --check
 sh scripts/install.sh
 ```
 
-The default install does all of this:
+See the [Installation Guide](docs/install.md) for prerequisites, diagnostics,
+Windows Git Bash notes, enterprise network guidance, and development commands.
+
+For CLI-only or evaluation-tool installs, use the underlying Cargo commands:
 
 ```bash
 cargo install --locked --path crates/psychevo-cli --force
-pnpm install --frozen-lockfile
-pnpm --filter @psychevo/workbench build
-pevo init
+cargo install --locked --path crates/psychevo-eval --force
 ```
-
-It copies `apps/workbench/dist` into the install-share directory beside the
-Cargo binary, normally `~/.cargo/share/psychevo/web`.
-
-For CLI-only installation, skip Web UI assets:
-
-```bash
-sh scripts/install.sh --no-web
-```
-
-For enterprise networks or pre-seeded package caches, run from a checkout and
-force offline package resolution:
-
-```bash
-sh scripts/install.sh --offline
-```
-
-To avoid npm/pnpm entirely, build or distribute Workbench assets separately and
-install the prebuilt `dist` directory:
-
-```bash
-sh scripts/install.sh --web-dist /path/to/workbench/dist
-```
-
-Use `--no-init` to skip the idempotent `pevo init`, and `--with-peval` to also
-install and verify the evaluation CLI:
-
-```bash
-sh scripts/install.sh --with-peval
-```
-
-Remote script installs are supported when prerequisites are already present:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/wowfun/psychevo/main/scripts/install.sh | sh
-```
-
-If Web assets are missing later, run `sh scripts/install.sh` again from a
-checkout after installing Node.js and pnpm, or use `pevo setup` from a source
-checkout.
 
 For development without installing:
 
@@ -243,6 +154,7 @@ Run `pevo <command> --help` or `peval <command> --help` for flags and subcommand
 
 ## Documentation
 
+- [Installation Guide](docs/install.md)
 - [ACP Configuration Guide](docs/acp-configuration.md)
 - [Evaluation Guide](docs/evaluation/README.md)
 - [TUI Troubleshooting](docs/troubleshooting/tui.md)

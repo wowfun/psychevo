@@ -1,49 +1,30 @@
 #!/bin/sh
 set -eu
 
-DEFAULT_REPO_URL="https://github.com/wowfun/psychevo.git"
-DEFAULT_REPO_REF="main"
-
-repo_url="${PEVO_INSTALL_REPO:-$DEFAULT_REPO_URL}"
-repo_ref="${PEVO_INSTALL_REF:-$DEFAULT_REPO_REF}"
-source_arg=""
-run_init=1
-dry_run=0
 check_only=0
-offline=0
-install_peval=0
-install_web=1
-web_dist_arg=""
-web_dist_dir=""
-tmp_dir=""
+current_step="starting"
 
 usage() {
   cat <<'EOF'
 usage: install.sh [options]
 
-Install pevo from source. Use --with-peval to install the evaluation CLI too.
+Install pevo from the current Psychevo source checkout.
 
 Options:
-  --repo-url <url>  Git repository to clone when no local checkout is found
-  --ref <ref>       Git branch or tag to clone
-  --source <path>   Install from a local Psychevo source checkout
-  --with-peval      Also install and verify the peval evaluation CLI
-  --no-web          Skip building and installing Web UI assets
-  --no-init         Skip post-install pevo init
-  --check           Check dependencies and environment readiness only
-  --offline         Require a local checkout and use offline Cargo/pnpm installs
-  --web-dist <path> Install prebuilt Web UI assets from an existing dist folder
-  --dry-run         Print the resolved install plan without making changes
-  -h, --help        Show this help
-
-Environment defaults:
-  PEVO_INSTALL_REPO
-  PEVO_INSTALL_REF
+  --check     Check dependencies and environment readiness only
+  -h, --help  Show this help
 EOF
 }
 
 info() {
   printf '%s\n' "$*" >&2
+}
+
+step() {
+  current_step=$1
+  if [ "$check_only" -eq 0 ]; then
+    info "pevo install: $current_step..."
+  fi
 }
 
 die() {
@@ -65,10 +46,6 @@ valid_source_dir() {
   [ -f "$1/Cargo.toml" ] && [ -f "$1/crates/psychevo-cli/Cargo.toml" ]
 }
 
-normalize_dir() {
-  (CDPATH= cd "$1" 2>/dev/null && pwd -P)
-}
-
 find_source_from_cwd() {
   dir=$(pwd -P)
   while :; do
@@ -84,12 +61,12 @@ find_source_from_cwd() {
   done
 }
 
+checkout_required_hint() {
+  printf 'Run this script from inside a Psychevo checkout. For a fresh checkout, run: git clone https://github.com/wowfun/psychevo.git && cd psychevo && sh scripts/install.sh'
+}
+
 uname_value() {
-  if [ -n "${PEVO_INSTALL_UNAME:-}" ]; then
-    printf '%s\n' "$PEVO_INSTALL_UNAME"
-  else
-    uname -s 2>/dev/null || printf 'unknown\n'
-  fi
+  uname -s 2>/dev/null || printf 'unknown\n'
 }
 
 is_windows_shell() {
@@ -100,7 +77,7 @@ is_windows_shell() {
 }
 
 is_wsl() {
-  if [ -n "${PEVO_INSTALL_WSL:-}" ] || [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSL_INTEROP:-}" ]; then
+  if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSL_INTEROP:-}" ]; then
     return 0
   fi
   if [ -r /proc/version ] && grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
@@ -143,10 +120,6 @@ candidate_pevo_bin() {
   printf '%s/pevo%s\n' "$(cargo_bin_dir)" "$(pevo_bin_suffix)"
 }
 
-candidate_peval_bin() {
-  printf '%s/peval%s\n' "$(cargo_bin_dir)" "$(pevo_bin_suffix)"
-}
-
 web_asset_target_for_bin() {
   bin_dir=$(dirname "$1")
   printf '%s/../share/psychevo/web\n' "$bin_dir"
@@ -159,28 +132,25 @@ path_contains_dir() {
   esac
 }
 
-make_temp_dir() {
-  base="${TMPDIR:-/tmp}"
-  if have_cmd mktemp; then
-    mktemp -d "$base/pevo-install.XXXXXX"
+handle_interrupt() {
+  signal=$1
+  if [ -n "${current_step:-}" ]; then
+    info "pevo install: interrupted during $current_step"
   else
-    dir="$base/pevo-install.$$"
-    mkdir -p "$dir"
-    printf '%s\n' "$dir"
+    info "pevo install: interrupted"
   fi
-}
-
-cleanup() {
-  if [ -n "$tmp_dir" ] && [ -d "$tmp_dir" ]; then
-    if have_cmd rm; then
-      rm -rf "$tmp_dir"
-    fi
-  fi
+  trap - HUP INT TERM
+  case "$signal" in
+    INT) exit 130 ;;
+    TERM) exit 143 ;;
+    HUP) exit 129 ;;
+    *) exit 1 ;;
+  esac
 }
 
 manual_rust_hint() {
   if is_windows_shell; then
-    printf 'Install Rust for Windows from https://rustup.rs/ or with winget install --id Rustlang.Rustup -e, then restart Git Bash and rerun this script.'
+    printf 'Install Rust for Windows from https://rustup.rs/, then restart Git Bash and rerun this script.'
   else
     printf 'Install Rust from https://rustup.rs/ and rerun this script.'
   fi
@@ -205,48 +175,11 @@ native_build_hint() {
 }
 
 manual_web_hint() {
-  printf 'Install Node.js and pnpm, then rerun this script, or use --no-web to install only the CLI.'
+  printf 'Install Node.js and pnpm, then rerun this script.'
 }
 
 developer_install_check_hint() {
-  if [ "${source_origin:-}" = "local" ] && [ -n "${source_dir:-}" ]; then
-    printf ' In a Psychevo checkout, run cargo xtask doctor deps check --only install for a full dependency report.'
-  fi
-}
-
-confirm() {
-  prompt=$1
-  if [ ! -t 0 ]; then
-    return 1
-  fi
-  printf '%s [y/N] ' "$prompt" >&2
-  IFS= read -r answer || answer=""
-  case "$answer" in
-    y|Y|yes|YES|Yes) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-add_path_dir() {
-  dir=$1
-  [ -n "$dir" ] || return 0
-  [ -d "$dir" ] || return 0
-  if ! path_contains_dir "$dir"; then
-    PATH="$dir:${PATH:-}"
-    export PATH
-  fi
-}
-
-refresh_tool_path() {
-  add_path_dir "$(cargo_bin_dir)"
-  if is_windows_shell; then
-    if [ -n "${HOME:-}" ]; then
-      add_path_dir "$HOME/AppData/Local/pnpm"
-      add_path_dir "$HOME/AppData/Roaming/npm"
-    fi
-    add_path_dir "/c/Program Files/nodejs"
-    add_path_dir "/c/Program Files (x86)/nodejs"
-  fi
+  printf ' In a Psychevo checkout, run cargo xtask doctor deps check --only install for a full dependency report.'
 }
 
 extract_quoted_value() {
@@ -264,7 +197,7 @@ extract_quoted_value() {
 }
 
 workspace_rust_version() {
-  [ -n "${source_dir:-}" ] && [ -f "$source_dir/Cargo.toml" ] || return 1
+  [ -f "$source_dir/Cargo.toml" ] || return 1
   while IFS= read -r line; do
     case "$line" in
       rust-version*)
@@ -277,7 +210,7 @@ workspace_rust_version() {
 }
 
 workspace_pnpm_version() {
-  [ -n "${source_dir:-}" ] && [ -f "$source_dir/package.json" ] || return 1
+  [ -f "$source_dir/package.json" ] || return 1
   while IFS= read -r line; do
     case "$line" in
       *\"packageManager\"*\"pnpm@\"*)
@@ -365,21 +298,72 @@ command_version() {
   if ! have_cmd "$command"; then
     return 1
   fi
-  "$command" "$@" 2>/dev/null | {
-    IFS= read -r line || line=""
-    clean_version "$line"
-  }
+  output=$("$command" "$@") || return 1
+  IFS='
+'
+  set -- $output
+  unset IFS
+  clean_version "${1:-}"
+}
+
+run_pnpm() {
+  COREPACK_ENABLE_PROJECT_SPEC=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm "$@"
+}
+
+cargo_install_http_timeout_default() {
+  printf '120\n'
+}
+
+cargo_install_net_retry_default() {
+  printf '10\n'
+}
+
+cargo_install_http_timeout_value() {
+  if [ -n "${CARGO_HTTP_TIMEOUT+x}" ]; then
+    printf '%s\n' "$CARGO_HTTP_TIMEOUT"
+  else
+    cargo_install_http_timeout_default
+  fi
+}
+
+cargo_install_net_retry_value() {
+  if [ -n "${CARGO_NET_RETRY+x}" ]; then
+    printf '%s\n' "$CARGO_NET_RETRY"
+  else
+    cargo_install_net_retry_default
+  fi
+}
+
+run_cargo_install() {
+  cargo_http_timeout=$(cargo_install_http_timeout_value)
+  cargo_net_retry=$(cargo_install_net_retry_value)
+  if is_windows_shell && [ -z "${CARGO_HTTP_CHECK_REVOKE+x}" ]; then
+    CARGO_HTTP_TIMEOUT="$cargo_http_timeout" \
+      CARGO_NET_RETRY="$cargo_net_retry" \
+      CARGO_HTTP_CHECK_REVOKE=false \
+      cargo install "$@"
+  else
+    CARGO_HTTP_TIMEOUT="$cargo_http_timeout" \
+      CARGO_NET_RETRY="$cargo_net_retry" \
+      cargo install "$@"
+  fi
+}
+
+detect_pnpm_version() {
+  if ! have_cmd pnpm; then
+    return 1
+  fi
+  output=$(run_pnpm --version) || return 1
+  IFS='
+'
+  set -- $output
+  unset IFS
+  clean_version "${1:-}"
 }
 
 pnpm_repair_hint() {
   required=$1
-  if have_cmd corepack; then
-    printf 'Run: corepack enable && corepack prepare pnpm@%s --activate' "$required"
-  elif have_cmd npm; then
-    printf 'Run: npm install -g pnpm@%s' "$required"
-  else
-    printf 'Install Node.js Corepack or npm, then install pnpm@%s' "$required"
-  fi
+  printf 'Install or activate pnpm %s with your approved Node.js package manager.' "$required"
 }
 
 redact_url_credentials() {
@@ -400,17 +384,37 @@ print_env_value() {
   fi
 }
 
+print_effective_env_value() {
+  name=$1
+  default_value=$2
+  default_label=$3
+  eval "is_set=\${$name+x}"
+  if [ -n "$is_set" ]; then
+    eval "value=\${$name-}"
+    if [ -n "$value" ]; then
+      printf '  %s: %s\n' "$name" "$(redact_url_credentials "$value")" >&2
+    else
+      printf '  %s: (set empty)\n' "$name" >&2
+    fi
+  elif [ -n "$default_label" ]; then
+    printf '  %s: %s (%s)\n' "$name" "$default_value" "$default_label" >&2
+  else
+    printf '  %s: (unset)\n' "$name" >&2
+  fi
+}
+
+print_effective_cargo_revoke_value() {
+  if is_windows_shell; then
+    print_effective_env_value CARGO_HTTP_CHECK_REVOKE false "installer default for cargo install"
+  else
+    print_env_value CARGO_HTTP_CHECK_REVOKE
+  fi
+}
+
 print_enterprise_diagnostics() {
   reason=$1
+  step "collecting enterprise diagnostics"
   printf '\nEnterprise network diagnostics (%s):\n' "$reason" >&2
-  printf '  repo_url: %s\n' "$repo_url" >&2
-  if have_cmd git; then
-    git_proxy=$(git config --get http.proxy 2>/dev/null || true)
-    [ -n "$git_proxy" ] || git_proxy="(unset)"
-    printf '  git http.proxy: %s\n' "$(redact_url_credentials "$git_proxy")" >&2
-  else
-    printf '  git http.proxy: git unavailable\n' >&2
-  fi
   if have_cmd npm; then
     npm_registry=$(npm config get registry 2>/dev/null || true)
     [ -n "$npm_registry" ] || npm_registry="(unset)"
@@ -419,14 +423,14 @@ print_enterprise_diagnostics() {
     printf '  npm registry: npm unavailable\n' >&2
   fi
   if have_cmd pnpm; then
-    pnpm_registry=$(pnpm config get registry 2>/dev/null || true)
+    pnpm_registry=$(run_pnpm config get registry 2>/dev/null || true)
     [ -n "$pnpm_registry" ] || pnpm_registry="(unset)"
     printf '  pnpm registry: %s\n' "$pnpm_registry" >&2
   else
     printf '  pnpm registry: pnpm unavailable\n' >&2
   fi
   cargo_config_found=0
-  if [ -n "${source_dir:-}" ] && [ -f "$source_dir/.cargo/config.toml" ]; then
+  if [ -f "$source_dir/.cargo/config.toml" ]; then
     cargo_config_found=1
     printf '  cargo config: %s\n' "$source_dir/.cargo/config.toml" >&2
   fi
@@ -449,6 +453,11 @@ print_enterprise_diagnostics() {
   print_env_value NODE_EXTRA_CA_CERTS
   print_env_value CARGO_HTTP_CAINFO
   print_env_value CARGO_HTTP_PROXY
+  print_effective_env_value CARGO_HTTP_TIMEOUT "$(cargo_install_http_timeout_default)" "installer default for cargo install"
+  print_effective_env_value CARGO_NET_RETRY "$(cargo_install_net_retry_default)" "installer default for cargo install"
+  print_env_value CARGO_HTTP_LOW_SPEED_LIMIT
+  print_env_value CARGO_HTTP_MULTIPLEXING
+  print_effective_cargo_revoke_value
 }
 
 windows_build_tools_available() {
@@ -476,23 +485,7 @@ print_check_report() {
   check_status=0
   printf 'pevo install check\n'
   printf 'platform: %s\n' "$(platform_name)"
-  printf 'mode: %s\n' "$source_origin"
-  printf 'offline: %s\n' "$offline"
-  if valid_source_dir "${source_dir:-}"; then
-    printf 'source: %s\n' "$source_dir"
-  else
-    printf 'source: unavailable (run from a checkout or pass --source for version checks)\n'
-  fi
-
-  if [ "$source_origin" = "clone" ]; then
-    if have_cmd git; then
-      check_line "git" "ok" "$(command -v git)"
-    else
-      check_line "git" "missing" "required to clone Psychevo"
-    fi
-  else
-    check_line "git" "skipped" "local source checkout selected"
-  fi
+  printf 'source: %s\n' "$source_dir"
 
   if have_cmd cargo; then
     cargo_version=$(command_version cargo --version || true)
@@ -526,65 +519,44 @@ print_check_report() {
     check_line "native-build-tools" "missing" "$(native_build_hint)"
   fi
 
-  if [ "$install_web" -eq 0 ]; then
-    check_line "node" "skipped" "--no-web supplied"
-    check_line "pnpm" "skipped" "--no-web supplied"
-  elif [ -n "$web_dist_dir" ]; then
-    check_line "node" "skipped" "--web-dist supplied"
-    check_line "pnpm" "skipped" "--web-dist supplied"
-  else
-    if have_cmd node; then
-      node_version=$(command_version node --version || true)
-      if node_version_supported "$node_version"; then
-        check_line "node" "ok" "$node_version"
-      else
-        check_line "node" "outdated" "found $node_version, requires $(node_requirement_hint)"
-      fi
+  if have_cmd node; then
+    node_version=$(command_version node --version || true)
+    if node_version_supported "$node_version"; then
+      check_line "node" "ok" "$node_version"
     else
-      check_line "node" "missing" "$(manual_web_hint)"
+      check_line "node" "outdated" "found $node_version, requires $(node_requirement_hint)"
     fi
-    required_pnpm=$(workspace_pnpm_version || true)
-    [ -n "$required_pnpm" ] || required_pnpm="11.8.0"
-    if have_cmd pnpm; then
-      pnpm_version=$(command_version pnpm --version || true)
+  else
+    check_line "node" "missing" "$(manual_web_hint)"
+  fi
+
+  required_pnpm=$(workspace_pnpm_version || true)
+  [ -n "$required_pnpm" ] || required_pnpm="11.8.0"
+  if have_cmd pnpm; then
+    if pnpm_version=$(detect_pnpm_version); then
       if [ "$pnpm_version" = "$required_pnpm" ]; then
         check_line "pnpm" "ok" "$pnpm_version"
       else
         check_line "pnpm" "warn" "found $pnpm_version, recommended $required_pnpm"
       fi
     else
-      check_line "pnpm" "missing" "requires $required_pnpm. $(pnpm_repair_hint "$required_pnpm")"
+      check_line "pnpm" "unusable" "pnpm --version failed; configure Corepack/npm registry or corporate CA settings"
     fi
+  else
+    check_line "pnpm" "missing" "requires $required_pnpm. $(pnpm_repair_hint "$required_pnpm")"
   fi
 
   print_enterprise_diagnostics "check"
   return "$check_status"
 }
 
-install_rust_unix() {
-  have_cmd curl || die "curl is required to install Rust with rustup. $(manual_rust_hint)"
-  info "Installing Rust with rustup..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  if [ -n "${HOME:-}" ] && [ -f "$HOME/.cargo/env" ]; then
-    # shellcheck disable=SC1090
-    . "$HOME/.cargo/env"
-  else
-    PATH="$(cargo_bin_dir):${PATH:-}"
-    export PATH
-  fi
-}
-
-install_rust_windows() {
-  if have_cmd winget; then
-    info "Installing Rust with winget..."
-    winget install --id Rustlang.Rustup -e
-    refresh_tool_path
-    return 0
-  fi
-  die "winget is not available. $(manual_rust_hint)"
+pnpm_unusable_hint() {
+  required=$1
+  printf 'pnpm exists on PATH, but `pnpm --version` failed. If this is a Corepack shim, configure corporate proxy/CA settings or pre-activate pnpm %s, then rerun this script.' "$required"
 }
 
 ensure_rust_version() {
+  step "checking Rust version"
   have_cmd rustc || die "rustc is required. $(manual_rust_hint)"
   required_rust=$(workspace_rust_version || true)
   [ -n "$required_rust" ] || return 0
@@ -592,67 +564,22 @@ ensure_rust_version() {
   if version_ge "$rust_version" "$required_rust"; then
     return 0
   fi
-  if [ "$dry_run" -eq 1 ]; then
-    return 0
-  fi
-  if have_cmd rustup && confirm "Rust $rust_version is installed, but Psychevo requires Rust $required_rust. Update Rust with rustup now?"; then
-    info "Updating Rust with rustup..."
-    rustup update stable
-    refresh_tool_path
-    rust_version=$(command_version rustc --version || true)
-    if version_ge "$rust_version" "$required_rust"; then
-      return 0
-    fi
-  fi
   die "Rust $required_rust or newer is required; found ${rust_version:-unknown}. $(manual_rust_hint)"
 }
 
 ensure_cargo() {
-  if have_cmd cargo; then
-    ensure_rust_version
-    return 0
-  fi
-  if [ "$dry_run" -eq 1 ]; then
-    return 0
-  fi
-  if [ ! -t 0 ]; then
-    die "cargo is required. $(manual_rust_hint)"
-  fi
-  printf 'Rust/Cargo is required to build pevo. Install Rust now? [y/N] ' >&2
-  IFS= read -r answer || answer=""
-  case "$answer" in
-    y|Y|yes|YES|Yes)
-      if is_windows_shell; then
-        install_rust_windows
-      else
-        install_rust_unix
-      fi
-      ;;
-    *)
-      die "cargo is required. $(manual_rust_hint)"
-      ;;
-  esac
-  refresh_tool_path
-  have_cmd cargo || die "cargo is still not available in this shell. $(manual_rust_hint)"
+  step "checking Cargo"
+  have_cmd cargo || die "cargo is required. $(manual_rust_hint)"
   ensure_rust_version
 }
 
 ensure_native_build_tools() {
-  if [ "$dry_run" -eq 1 ]; then
-    return 0
-  fi
+  step "checking native build tools"
   if is_windows_shell; then
     if windows_build_tools_available; then
       return 0
     fi
-    printf '%s\n' "Windows native build tools were not detected on PATH." >&2
-    printf '\n' >&2
-    printf '%s\n' "Install Visual Studio Build Tools with the C++ workload, or install a compatible" >&2
-    printf '%s\n' "MinGW/clang toolchain, then restart Git Bash and rerun this script." >&2
-    if confirm "Continue anyway and let cargo attempt the build?"; then
-      return 0
-    fi
-    die "Windows native C/C++ build tools are required to build pevo from source."
+    die "Windows native C/C++ build tools are required to build pevo from source. Install Visual Studio Build Tools with the C++ workload, or install a compatible MinGW/clang toolchain, then restart Git Bash and rerun this script."
   fi
   if have_cmd cc || have_cmd gcc || have_cmd clang; then
     return 0
@@ -661,59 +588,33 @@ ensure_native_build_tools() {
 }
 
 ensure_node_version() {
+  step "checking Node.js"
   if ! have_cmd node; then
-    die "Node.js is required to build Web UI assets. $(manual_web_hint)$(developer_install_check_hint)"
+    die "Node.js is required to build Workbench assets. $(manual_web_hint)$(developer_install_check_hint)"
   fi
   node_version=$(command_version node --version || true)
   if node_version_supported "$node_version"; then
     return 0
   fi
-  die "Node.js ${node_version:-unknown} is installed, but $(node_requirement_hint) is required to build Web UI assets. Install a supported Node.js version, then rerun this script, or use --no-web to install only the CLI."
+  die "Node.js ${node_version:-unknown} is installed, but $(node_requirement_hint) is required to build Workbench assets. Install a supported Node.js version, then rerun this script."
 }
 
 ensure_pnpm_version() {
+  step "checking pnpm"
   required_pnpm=$(workspace_pnpm_version || true)
   [ -n "$required_pnpm" ] || required_pnpm="11.8.0"
   if have_cmd pnpm; then
-    pnpm_version=$(command_version pnpm --version || true)
+    pnpm_version=$(detect_pnpm_version) || die "$(pnpm_unusable_hint "$required_pnpm")$(developer_install_check_hint)"
     if [ "$pnpm_version" = "$required_pnpm" ]; then
       return 0
     fi
     info "warning: pnpm ${pnpm_version:-unknown} is installed; pnpm $required_pnpm is recommended for this checkout. Continuing and letting pnpm validate the lockfile/build."
     return 0
-  else
-    problem="pnpm $required_pnpm is required to build Web UI assets."
   fi
-
-  if [ "$dry_run" -eq 1 ]; then
-    return 0
-  fi
-
-  if have_cmd corepack && confirm "$problem Activate pnpm $required_pnpm with Corepack now?"; then
-    corepack enable
-    corepack prepare "pnpm@$required_pnpm" --activate
-    refresh_tool_path
-  elif have_cmd npm && confirm "$problem Install pnpm $required_pnpm globally with npm now?"; then
-    npm install -g "pnpm@$required_pnpm"
-    refresh_tool_path
-  else
-    die "$problem $(pnpm_repair_hint "$required_pnpm"), then rerun this script, or use --no-web to install only the CLI.$(developer_install_check_hint)"
-  fi
-
-  if have_cmd pnpm; then
-    pnpm_version=$(command_version pnpm --version || true)
-    if [ "$pnpm_version" != "$required_pnpm" ]; then
-      info "warning: pnpm ${pnpm_version:-unknown} is installed; pnpm $required_pnpm is recommended for this checkout. Continuing and letting pnpm validate the lockfile/build."
-    fi
-    return 0
-  fi
-  die "pnpm $required_pnpm is still not available in this shell. $(pnpm_repair_hint "$required_pnpm")$(developer_install_check_hint)"
+  die "pnpm $required_pnpm is required to build Workbench assets. $(pnpm_repair_hint "$required_pnpm")$(developer_install_check_hint)"
 }
 
 ensure_web_toolchain() {
-  if [ "$install_web" -eq 0 ] || [ -n "$web_dist_dir" ]; then
-    return 0
-  fi
   ensure_node_version
   ensure_pnpm_version
 }
@@ -730,25 +631,6 @@ resolve_pevo_bin() {
     return 0
   fi
   found=$(command -v pevo.exe 2>/dev/null || true)
-  if [ -n "$found" ]; then
-    printf '%s\n' "$found"
-    return 0
-  fi
-  return 1
-}
-
-resolve_peval_bin() {
-  candidate=$(candidate_peval_bin)
-  if [ -x "$candidate" ]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-  found=$(command -v peval 2>/dev/null || true)
-  if [ -n "$found" ]; then
-    printf '%s\n' "$found"
-    return 0
-  fi
-  found=$(command -v peval.exe 2>/dev/null || true)
   if [ -n "$found" ]; then
     printf '%s\n' "$found"
     return 0
@@ -773,120 +655,10 @@ Add that line to your shell profile if you want installed commands available in 
 EOF
 }
 
-print_plan() {
-  source_display=$source_dir
-  if [ "$source_origin" = "clone" ] && [ "$dry_run" -eq 1 ]; then
-    source_display="<temporary>/psychevo"
-  fi
-  printf 'pevo install dry run\n'
-  printf 'platform: %s\n' "$(platform_name)"
-  printf 'mode: %s\n' "$source_origin"
-  printf 'repo_url: %s\n' "$repo_url"
-  printf 'repo_ref: %s\n' "$repo_ref"
-  printf 'with_peval: %s\n' "$install_peval"
-  printf 'with_web: %s\n' "$install_web"
-  printf 'offline: %s\n' "$offline"
-  printf 'source: %s\n' "$source_display"
-  if [ -n "$web_dist_dir" ]; then
-    printf 'web_dist: %s\n' "$web_dist_dir"
-  fi
-  if [ "$source_origin" = "clone" ]; then
-    printf 'clone_command: git clone --depth 1 --branch %s %s %s\n' \
-      "$(shell_quote "$repo_ref")" \
-      "$(shell_quote "$repo_url")" \
-      "$(shell_quote "$source_display")"
-  fi
-  if [ "$offline" -eq 1 ]; then
-    printf 'install_command: cargo install --locked --offline --path %s --force\n' \
-      "$(shell_quote "$source_display/crates/psychevo-cli")"
-  else
-    printf 'install_command: cargo install --locked --path %s --force\n' \
-      "$(shell_quote "$source_display/crates/psychevo-cli")"
-  fi
-  printf 'pevo_binary: %s\n' "$(candidate_pevo_bin)"
-  if [ "$install_web" -eq 1 ]; then
-    if [ -n "$web_dist_dir" ]; then
-      printf 'web_install_command: (skipped; --web-dist supplied)\n'
-      printf 'web_build_command: (skipped; --web-dist supplied)\n'
-      printf 'web_asset_source: %s\n' "$web_dist_dir"
-    elif [ "$offline" -eq 1 ]; then
-      printf 'web_install_command: cd %s && pnpm install --frozen-lockfile --offline\n' \
-        "$(shell_quote "$source_display")"
-      printf 'web_build_command: cd %s && pnpm --offline --filter @psychevo/workbench build\n' \
-        "$(shell_quote "$source_display")"
-      printf 'web_asset_source: %s\n' "$source_display/apps/workbench/dist"
-    else
-      printf 'web_install_command: cd %s && pnpm install --frozen-lockfile\n' \
-        "$(shell_quote "$source_display")"
-      printf 'web_build_command: cd %s && pnpm --filter @psychevo/workbench build\n' \
-        "$(shell_quote "$source_display")"
-      printf 'web_asset_source: %s\n' "$source_display/apps/workbench/dist"
-    fi
-    printf 'web_asset_target: %s\n' "$(web_asset_target_for_bin "$(candidate_pevo_bin)")"
-  else
-    printf 'web_asset_install: (skipped)\n'
-  fi
-  if [ "$install_peval" -eq 1 ]; then
-    if [ "$offline" -eq 1 ]; then
-      printf 'peval_install_command: cargo install --locked --offline --path %s --force\n' \
-        "$(shell_quote "$source_display/crates/psychevo-eval")"
-    else
-      printf 'peval_install_command: cargo install --locked --path %s --force\n' \
-        "$(shell_quote "$source_display/crates/psychevo-eval")"
-    fi
-    printf 'peval_binary: %s\n' "$(candidate_peval_bin)"
-  fi
-  if [ "$run_init" -eq 1 ]; then
-    printf 'init_command: %s init\n' "$(shell_quote "$(candidate_pevo_bin)")"
-  else
-    printf 'init_command: (skipped)\n'
-  fi
-}
-
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --repo-url)
-      [ "$#" -gt 1 ] || die "--repo-url requires a value"
-      repo_url=$2
-      shift 2
-      ;;
-    --ref)
-      [ "$#" -gt 1 ] || die "--ref requires a value"
-      repo_ref=$2
-      shift 2
-      ;;
-    --source)
-      [ "$#" -gt 1 ] || die "--source requires a value"
-      source_arg=$2
-      shift 2
-      ;;
-    --with-peval)
-      install_peval=1
-      shift
-      ;;
-    --no-web)
-      install_web=0
-      shift
-      ;;
-    --no-init)
-      run_init=0
-      shift
-      ;;
     --check)
       check_only=1
-      shift
-      ;;
-    --offline)
-      offline=1
-      shift
-      ;;
-    --web-dist)
-      [ "$#" -gt 1 ] || die "--web-dist requires a value"
-      web_dist_arg=$2
-      shift 2
-      ;;
-    --dry-run)
-      dry_run=1
       shift
       ;;
     -h|--help)
@@ -899,162 +671,63 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ "$check_only" -eq 1 ] && [ "$dry_run" -eq 1 ] && die "--check cannot be combined with --dry-run"
-[ "$install_web" -eq 0 ] && [ -n "$web_dist_arg" ] && die "--web-dist cannot be used with --no-web"
-
-if [ -n "$web_dist_arg" ]; then
-  web_dist_dir=$(normalize_dir "$web_dist_arg") || die "Web UI dist directory does not exist: $web_dist_arg"
-  [ -f "$web_dist_dir/index.html" ] || die "--web-dist directory must contain index.html: $web_dist_dir"
-fi
-
-source_origin="clone"
-source_dir=""
-
-if [ -n "$source_arg" ]; then
-  source_dir=$(normalize_dir "$source_arg") || die "source directory does not exist: $source_arg"
-  valid_source_dir "$source_dir" || die "not a Psychevo source checkout: $source_dir"
-  source_origin="local"
-else
-  if source_dir=$(find_source_from_cwd 2>/dev/null); then
-    source_origin="local"
-  else
-    source_origin="clone"
-    if [ "$dry_run" -eq 1 ]; then
-      source_dir="<temporary>/psychevo"
-    fi
-  fi
-fi
-
-if [ "$offline" -eq 1 ] && [ "$source_origin" = "clone" ]; then
-  die "--offline requires an existing Psychevo source checkout; run from a checkout or pass --source"
-fi
+source_dir=$(find_source_from_cwd 2>/dev/null) || die "$(checkout_required_hint)"
 
 if [ "$check_only" -eq 1 ]; then
   print_check_report
   exit $?
 fi
 
-if [ "$dry_run" -eq 1 ]; then
-  print_plan
-  exit 0
-fi
+trap 'handle_interrupt HUP' HUP
+trap 'handle_interrupt INT' INT
+trap 'handle_interrupt TERM' TERM
 
-trap cleanup EXIT HUP INT TERM
-
-if [ "$source_origin" = "clone" ]; then
-  have_cmd git || die "git is required to clone Psychevo. Install git and rerun this script."
-  tmp_dir=$(make_temp_dir)
-  source_dir="$tmp_dir/psychevo"
-  info "Cloning Psychevo from $repo_url ($repo_ref)..."
-  if ! git clone --depth 1 --branch "$repo_ref" "$repo_url" "$source_dir"; then
-    print_enterprise_diagnostics "git clone failed"
-    die "git clone failed. For enterprise networks, use --repo-url or PEVO_INSTALL_REPO with an internal mirror, or configure Git proxy/CA settings."
-  fi
-fi
-
+step "using $(platform_name) source checkout at $source_dir"
+step "validating source checkout"
 valid_source_dir "$source_dir" || die "not a Psychevo source checkout: $source_dir"
 ensure_cargo
 ensure_native_build_tools
 ensure_web_toolchain
 
-info "Installing pevo from $source_dir..."
-if [ "$offline" -eq 1 ]; then
-  if cargo install --locked --offline --path "$source_dir/crates/psychevo-cli" --force; then
-    cargo_status=0
-  else
-    cargo_status=1
-  fi
+step "installing pevo from $source_dir"
+if run_cargo_install --locked --path "$source_dir/crates/psychevo-cli" --force; then
+  cargo_status=0
 else
-  if cargo install --locked --path "$source_dir/crates/psychevo-cli" --force; then
-    cargo_status=0
-  else
-    cargo_status=1
-  fi
+  cargo_status=1
 fi
 if [ "$cargo_status" -ne 0 ]; then
   print_enterprise_diagnostics "cargo install failed"
   if is_windows_shell; then
-    die "cargo install failed. On Windows Git Bash/MSYS/MINGW, install Rust and native C/C++ build tools such as Visual Studio Build Tools or a compatible MinGW setup, then rerun this script."
+    die "cargo install failed. On Windows Git Bash/MSYS/MINGW, install Rust and native C/C++ build tools such as Visual Studio Build Tools or a compatible MinGW setup. If registry fetches time out after partial progress, try CARGO_HTTP_MULTIPLEXING=false or configure Cargo proxy, CA, or registry mirror settings."
   fi
-  die "cargo install failed."
+  die "cargo install failed. If registry fetches time out after partial progress, try CARGO_HTTP_MULTIPLEXING=false or configure Cargo proxy, CA, or registry mirror settings."
 fi
 
 pevo_bin=$(resolve_pevo_bin) || die "pevo was installed, but the binary could not be found."
 
-info "Verifying pevo..."
+step "verifying pevo"
 "$pevo_bin" --help >/dev/null
 
-if [ "$install_web" -eq 1 ]; then
-  if [ -n "$web_dist_dir" ]; then
-    info "Using prebuilt Workbench assets from $web_dist_dir..."
-    web_source="$web_dist_dir"
-  else
-    info "Building Workbench assets..."
-    if [ "$offline" -eq 1 ]; then
-      if ! (CDPATH= cd "$source_dir" && pnpm install --frozen-lockfile --offline); then
-        print_enterprise_diagnostics "pnpm install failed"
-        die "pnpm install failed."
-      fi
-      if ! (CDPATH= cd "$source_dir" && pnpm --offline --filter @psychevo/workbench build); then
-        print_enterprise_diagnostics "pnpm build failed"
-        die "pnpm build failed."
-      fi
-    else
-      if ! (CDPATH= cd "$source_dir" && pnpm install --frozen-lockfile); then
-        print_enterprise_diagnostics "pnpm install failed"
-        die "pnpm install failed."
-      fi
-      if ! (CDPATH= cd "$source_dir" && pnpm --filter @psychevo/workbench build); then
-        print_enterprise_diagnostics "pnpm build failed"
-        die "pnpm build failed."
-      fi
-    fi
-    web_source="$source_dir/apps/workbench/dist"
-  fi
-  [ -f "$web_source/index.html" ] || die "Workbench build did not produce $web_source/index.html"
-  web_target=$(web_asset_target_for_bin "$pevo_bin")
-  info "Installing Workbench assets to $web_target..."
-  rm -rf "$web_target"
-  mkdir -p "$web_target"
-  cp -R "$web_source/." "$web_target/"
-else
-  info "Skipping Web UI assets because --no-web was supplied."
+step "building Workbench assets"
+if ! (CDPATH= cd "$source_dir" && run_pnpm install --frozen-lockfile); then
+  print_enterprise_diagnostics "pnpm install failed"
+  die "pnpm install failed."
+fi
+if ! (CDPATH= cd "$source_dir" && run_pnpm --filter @psychevo/workbench build); then
+  print_enterprise_diagnostics "pnpm build failed"
+  die "pnpm build failed."
 fi
 
-if [ "$install_peval" -eq 1 ]; then
-  [ -f "$source_dir/crates/psychevo-eval/Cargo.toml" ] || die "source checkout does not contain crates/psychevo-eval/Cargo.toml"
-  info "Installing peval from $source_dir..."
-  if [ "$offline" -eq 1 ]; then
-    if cargo install --locked --offline --path "$source_dir/crates/psychevo-eval" --force; then
-      peval_cargo_status=0
-    else
-      peval_cargo_status=1
-    fi
-  else
-    if cargo install --locked --path "$source_dir/crates/psychevo-eval" --force; then
-      peval_cargo_status=0
-    else
-      peval_cargo_status=1
-    fi
-  fi
-  if [ "$peval_cargo_status" -ne 0 ]; then
-    print_enterprise_diagnostics "peval cargo install failed"
-    if is_windows_shell; then
-      die "peval cargo install failed. On Windows Git Bash/MSYS/MINGW, install Rust and native C/C++ build tools such as Visual Studio Build Tools or a compatible MinGW setup, then rerun this script."
-    fi
-    die "peval cargo install failed."
-  fi
-  peval_bin=$(resolve_peval_bin) || die "peval was installed, but the binary could not be found."
-  info "Verifying peval..."
-  "$peval_bin" --help >/dev/null
-fi
+web_source="$source_dir/apps/workbench/dist"
+[ -f "$web_source/index.html" ] || die "Workbench build did not produce $web_source/index.html"
+web_target=$(web_asset_target_for_bin "$pevo_bin")
+step "installing Workbench assets to $web_target"
+rm -rf "$web_target"
+mkdir -p "$web_target"
+cp -R "$web_source/." "$web_target/"
 
-if [ "$run_init" -eq 1 ]; then
-  info "Initializing Psychevo home..."
-  "$pevo_bin" init
-else
-  info "Skipping pevo init because --no-init was supplied."
-fi
+step "initializing Psychevo home"
+"$pevo_bin" init
 
 print_path_hint_if_needed
 
@@ -1062,37 +735,9 @@ cat <<EOF
 
 pevo is installed:
   $pevo_bin
-EOF
 
-if [ "$install_peval" -eq 1 ]; then
-  cat <<EOF
-peval is installed:
-  $peval_bin
-
-EOF
-fi
-
-cat <<EOF
 Try:
   pevo --help
   pevo
-EOF
-
-if [ "$install_web" -eq 1 ]; then
-  cat <<'EOF'
   pevo web
 EOF
-else
-  cat <<'EOF'
-
-Web UI assets were skipped. To add them later, install Node.js and pnpm,
-then rerun this installer from a Psychevo checkout without --no-web or run:
-  pevo setup
-EOF
-fi
-
-if [ "$install_peval" -eq 1 ]; then
-  cat <<'EOF'
-  peval --help
-EOF
-fi
