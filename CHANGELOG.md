@@ -2,12 +2,34 @@
 
 ## 2026-07-02
 
+- Added Codex-grounded MCP catalog and runtime snapshot plumbing with canonical
+  tool identities, profile and selected-root MCP server inputs, deferred
+  `tool_search` loadable specs, global resource/prompt utility tools, and
+  bounded sampling/elicitation policy metadata.
+- Reworked Workbench Models settings into a vertical default/title/compression
+  assignment flow, editable available-provider rows, per-model metadata saves,
+  and the current `name`/`api` provider schema across setup, auth, TUI, ACP,
+  visual fixtures, and explicit `api_key_env` overrides.
+- Improved `peval-py serve` source handling so workspace Trial cells are
+  discovered on startup or source reload, missing cell artifacts stay visible
+  without breaking page load, and source actions load only the selected report.
+- Fixed Workbench Terminal tabs in light and warm appearances so xterm uses a
+  readable light background and ANSI palette instead of the default black
+  terminal surface.
+- Fixed Windows Git Bash cwd display, `exec_command` cwd metadata, and
+  OpenCode ACP launches by normalizing Windows verbatim paths and resolving
+  `PATHEXT` shims before Gateway starts peers.
 - Fixed Workbench side-thread submission and transcript recovery so temporary
   source tabs close cleanly, yielded `exec_command` blocks preserve identity
   and titles, and stale live overlays cannot downgrade completed tool rows.
 - Added semantic transcript runtime ledgers across Gateway, Web, TUI, and
   Workbench validation to catch duplicate, stale-overlay, status-downgrade, and
   pseudo-running regressions before visual review.
+- Added a dedicated installation guide and simplified `scripts/install.sh` to a
+  checkout-local install surface with sharper diagnostics for Windows Git Bash,
+  enterprise networks, pnpm/Corepack, and Cargo fetch failures.
+- Fixed native Windows source installs and release builds by keeping Linux-only
+  Landlock and Unix-only helper code out of Windows builds.
 - Unified the workspace `reqwest` dependency on `0.13.3` across Runtime,
   Gateway, CLI, and provider HTTP clients.
 
