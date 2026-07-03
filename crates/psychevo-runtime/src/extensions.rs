@@ -433,12 +433,15 @@ pub(crate) fn selected_root_contributions(
                 }
                 let source_id = format!("capability-root:{}", root.id);
                 for server in &manifest.mcp_servers {
-                    out.mcp_servers.push(McpServerInput::with_source(
-                        server.name.clone(),
-                        server.transport.clone(),
-                        source_id.clone(),
-                        "selected_capability_root",
-                    ));
+                    out.mcp_servers.push(
+                        McpServerInput::with_source(
+                            server.name.clone(),
+                            server.transport.clone(),
+                            source_id.clone(),
+                            "selected_capability_root",
+                        )
+                        .with_policy(server.policy.clone()),
+                    );
                 }
                 for (name, config) in &manifest.toolsets {
                     out.toolsets.push(ToolsetContribution {

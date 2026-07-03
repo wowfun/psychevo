@@ -86,6 +86,17 @@ pub const CLI_COMMANDS: &[CliCommandSpec] = &[
         status: CommandStatus::Active,
     },
     CliCommandSpec {
+        canonical: "mcp",
+        aliases: &[],
+        usage: "pevo mcp serve",
+        summary: "run the MCP stdio server",
+        surface: PEVO_CLI,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::RequiredValue,
+        output_kind: CommandOutputKind::ProcessResult,
+        status: CommandStatus::Active,
+    },
+    CliCommandSpec {
         canonical: "profile",
         aliases: &[],
         usage: "pevo profile <command>",

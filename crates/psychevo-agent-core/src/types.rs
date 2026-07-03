@@ -445,6 +445,9 @@ pub trait ToolBinding: Send + Sync {
     }
     fn description(&self) -> &str;
     fn parameters(&self) -> Value;
+    fn search_metadata(&self) -> Vec<String> {
+        Vec::new()
+    }
     fn exposure(&self) -> ToolExposure {
         ToolExposure::Direct
     }

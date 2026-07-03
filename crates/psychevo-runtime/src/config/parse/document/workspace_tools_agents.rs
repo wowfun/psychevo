@@ -79,11 +79,30 @@ pub(crate) fn parse_tool_selection_config(value: &Value) -> Result<ToolSelection
 
 fn parse_tool_search_config(value: &Value) -> Result<ToolSearchConfig> {
     match value {
-        Value::Bool(enabled) => Ok(ToolSearchConfig { enabled: *enabled }),
-        Value::Object(object) => Ok(ToolSearchConfig {
-            enabled: optional_bool_field(object, "enabled")?
-                .unwrap_or_else(|| ToolSearchConfig::default().enabled),
+        Value::Bool(enabled) => Ok(ToolSearchConfig {
+            enabled: *enabled,
+            ..ToolSearchConfig::default()
         }),
+        Value::Object(object) => {
+            let default = ToolSearchConfig::default();
+            let default_limit = optional_u64_field(object, "default_limit")?
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(default.default_limit);
+            let max_limit = optional_u64_field(object, "max_limit")?
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(default.max_limit);
+            if default_limit > max_limit {
+                return Err(Error::Config(
+                    "tools.tool_search.default_limit must be less than or equal to max_limit"
+                        .to_string(),
+                ));
+            }
+            Ok(ToolSearchConfig {
+                enabled: optional_bool_field(object, "enabled")?.unwrap_or(default.enabled),
+                default_limit,
+                max_limit,
+            })
+        }
         _ => Err(Error::Config(
             "tools.tool_search must be a boolean or object".to_string(),
         )),
@@ -208,14 +227,62 @@ pub(crate) fn parse_profile_mcp_servers(value: &Value) -> Result<Vec<McpServerIn
                 )));
             }
         };
-        out.push(McpServerInput::with_source(
+        let policy = parse_mcp_server_policy(
+            server,
+            &format!("mcp_servers.{name}"),
+            ["enabled_tools"],
+            ["disabled_tools"],
+        )?;
+        out.push(
+            McpServerInput::with_source(
             trimmed_name.to_string(),
             transport_input,
             format!("profile:mcp:{trimmed_name}"),
             "profile",
-        ));
+            )
+            .with_policy(policy),
+        );
     }
     Ok(out)
+}
+
+pub(crate) fn parse_mcp_server_policy<const ENABLED: usize, const DISABLED: usize>(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    enabled_tool_keys: [&str; ENABLED],
+    disabled_tool_keys: [&str; DISABLED],
+) -> Result<McpServerPolicy> {
+    let mut policy = McpServerPolicy::default();
+    if let Some(enabled) = optional_bool_field(object, "enabled")? {
+        policy.enabled = enabled;
+    }
+    if let Some(required) = optional_bool_field(object, "required")? {
+        policy.required = required;
+    }
+    policy.enabled_tools = first_string_array_field(object, &enabled_tool_keys, path)?;
+    policy.disabled_tools =
+        first_string_array_field(object, &disabled_tool_keys, path)?.unwrap_or_default();
+    if let Some(supports_parallel_tool_calls) =
+        optional_bool_field(object, "supports_parallel_tool_calls")?
+    {
+        policy.supports_parallel_tool_calls = supports_parallel_tool_calls;
+    }
+    policy.startup_timeout_secs = optional_u64_field(object, "startup_timeout_secs")?;
+    policy.tool_timeout_secs = optional_u64_field(object, "tool_timeout_secs")?;
+    Ok(policy)
+}
+
+pub(crate) fn first_string_array_field<const N: usize>(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str; N],
+    path: &str,
+) -> Result<Option<Vec<String>>> {
+    for key in keys {
+        if object.contains_key(*key) {
+            return string_array_field(object, key, &format!("{path}.{key}")).map(Some);
+        }
+    }
+    Ok(None)
 }
 
 pub(crate) fn parse_agent_backend_configs(

@@ -17,12 +17,24 @@ pub use channels::*;
 #[test]
 fn profile_mcp_servers_parse_stdio_and_http_descriptors() {
     let config = crate::config::config_parse::parse_run_config(json!({
+        "tools": {
+            "tool_search": {
+                "enabled": true,
+                "default_limit": 3,
+                "max_limit": 7
+            }
+        },
         "mcp_servers": {
             "repo tools": {
                 "command": "./mcp-server",
                 "args": ["--stdio"],
                 "env": { "MCP_MODE": "test" },
-                "cwd": "./tools"
+                "cwd": "./tools",
+                "enabled_tools": ["search"],
+                "disabled_tools": ["delete"],
+                "supports_parallel_tool_calls": true,
+                "startup_timeout_secs": 2,
+                "tool_timeout_secs": 5
             },
             "docs": {
                 "transport": "streamable_http",
@@ -33,6 +45,8 @@ fn profile_mcp_servers_parse_stdio_and_http_descriptors() {
     }))
     .expect("config");
 
+    assert_eq!(config.tools.tool_search.default_limit, 3);
+    assert_eq!(config.tools.tool_search.max_limit, 7);
     assert_eq!(config.mcp_servers.len(), 2);
     let repo = config
         .mcp_servers
@@ -45,6 +59,14 @@ fn profile_mcp_servers_parse_stdio_and_http_descriptors() {
         .find(|server| server.name == "docs")
         .expect("docs");
     assert_eq!(repo.source_kind.as_deref(), Some("profile"));
+    assert_eq!(
+        repo.policy.enabled_tools.as_deref(),
+        Some(&["search".to_string()][..])
+    );
+    assert_eq!(repo.policy.disabled_tools, vec!["delete".to_string()]);
+    assert!(repo.policy.supports_parallel_tool_calls);
+    assert_eq!(repo.policy.startup_timeout_secs, Some(2));
+    assert_eq!(repo.policy.tool_timeout_secs, Some(5));
     assert!(matches!(
         &repo.transport,
         crate::types::McpTransportInput::Stdio { args, env, cwd, .. }

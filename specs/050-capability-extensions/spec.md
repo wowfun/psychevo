@@ -97,6 +97,12 @@ server declarations with source identity; the MCP module resolves precedence,
 conflicts, runtime snapshots, connection state, and tool/resource/prompt
 normalization before anything becomes model-visible or executable.
 
+An exported Psychevo MCP server is not an MCP server declaration in this sense.
+It is an interface adapter that lets external MCP clients start or continue
+Psychevo turns through normal runtime entrypoints. Exported MCP server tools
+must not be registered back into `ExtensionRegistry`, selected toolsets, or the
+agent-invocation tool surface.
+
 Projection acceptance status values are:
 
 - `accepted`

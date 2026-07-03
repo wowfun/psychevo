@@ -203,12 +203,15 @@ fn add_static_contributions(
         assembly.hook_sources.push(source);
     }
     for server in &manifest.mcp_servers {
-        assembly.mcp_servers.push(McpServerInput::with_source(
-            server.name.clone(),
-            server.transport.clone(),
-            source_id.clone(),
-            "plugin",
-        ));
+        assembly.mcp_servers.push(
+            McpServerInput::with_source(
+                server.name.clone(),
+                server.transport.clone(),
+                source_id.clone(),
+                "plugin",
+            )
+            .with_policy(server.policy.clone()),
+        );
         assembly.projection.record(ContributionFact::new(
             source_id.clone(),
             "plugin",

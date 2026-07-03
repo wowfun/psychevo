@@ -163,6 +163,13 @@ impl ToolBinding for DeferredTool {
         json!({"type": "object", "properties": {}, "additionalProperties": false})
     }
 
+    fn search_metadata(&self) -> Vec<String> {
+        vec![
+            "mcp:repo_tools".to_string(),
+            "repo tools/raw_lookup".to_string(),
+        ]
+    }
+
     fn exposure(&self) -> ToolExposure {
         ToolExposure::Deferred
     }
@@ -260,6 +267,17 @@ pub(crate) fn tool_search_activates_deferred_tools_for_later_declarations() {
         .map(|declaration| declaration.name)
         .collect::<Vec<_>>();
     assert_eq!(activated_names, vec!["deferred_lookup"]);
+}
+
+#[test]
+pub(crate) fn tool_search_matches_source_metadata() {
+    let mut router = ToolRouter::from_tools(vec![Arc::new(DeferredTool) as Arc<dyn ToolBinding>])
+        .with_tool_search(ToolSearchOptions::enabled());
+
+    let output = router.execute_tool_search(&json!({"query": "repo_tools"}));
+
+    assert!(!output.is_error);
+    assert_eq!(output.json["activated"], json!(["deferred_lookup"]));
 }
 
 #[test]

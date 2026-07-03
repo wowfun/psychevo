@@ -116,10 +116,11 @@ impl ToolRouter {
             .filter(|tool| self.effective_exposure(tool.name()) == Some(ToolExposure::Deferred))
             .filter_map(|tool| {
                 let haystack = format!(
-                    "{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}",
                     tool.name(),
                     canonical_name_for_search(&tool.canonical_tool_name()),
                     tool.description(),
+                    tool.search_metadata().join("\n"),
                     serde_json::to_string(&tool.parameters()).unwrap_or_default()
                 )
                 .to_ascii_lowercase();

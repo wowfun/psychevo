@@ -17,12 +17,12 @@ session, but MCP semantics are not owned by ACP.
 - MCP tool contribution, naming, conflict, and dispatch semantics
 - MCP resources, prompts, elicitation, sampling, and roots as runtime-owned
   client surfaces
+- minimal MCP server export for driving Psychevo from MCP clients
 - permission and evidence requirements for MCP startup and MCP actions
 - interface projection requirements for ACP or future interfaces
 
 Out of scope:
 
-- implementing an MCP server inside Psychevo
 - OAuth, registry discovery, marketplace install, or managed MCP server install
   lifecycle
 - treating MCP as a trusted local-script extension mode
@@ -61,6 +61,14 @@ makes its MCP server declarations candidates for acceptance. The MCP module
 still owns normalization, startup approval, capability listing, model-visible
 naming, action dispatch, and diagnostics.
 
+An MCP server declaration may carry runtime policy fields for whether the
+server is enabled, whether startup failure is required-fatal for the
+invocation, which raw tool names are included or excluded, whether parallel
+tool calls are allowed for that source, and bounded startup or tool-call
+timeouts. These fields constrain acceptance and dispatch. They do not grant
+permission to start a process, make a network call, or expose a model-visible
+declaration.
+
 ## Runtime Snapshot
 
 Runtime creates an MCP runtime snapshot at a generation-safe boundary. The
@@ -69,11 +77,20 @@ capabilities, normalized tool declarations, utility-surface availability,
 available environment identity, and compact hashes used for prompt-prefix
 reconstruction.
 
+Runtime resolves declarations through an MCP catalog and manages accepted
+server connections through a connection-manager boundary. The catalog owns
+source precedence, replacement, disabled sources, and compact diagnostics. The
+connection manager owns startup, capability listing, call dispatch, connection
+reuse, per-server policy, and dirty-state tracking.
+
 Runtime may reuse server connections when the resolved catalog and available
-environment identity are unchanged. Runtime must not silently mutate
-model-visible MCP declarations in the middle of a generation request. If a
-later request reconstructs a prompt prefix with a different MCP snapshot hash or
-tool declaration hash, the reconstruction must be labeled approximate.
+environment identity are unchanged. `tools/list_changed` or equivalent runtime
+signals may mark one or more servers dirty, but runtime must not silently
+mutate model-visible MCP declarations in the middle of a generation request. A
+dirty server may refresh only at a generation-safe boundary, such as before the
+next generation request or after an explicit reload command. If a later request
+reconstructs a prompt prefix with a different MCP snapshot hash or tool
+declaration hash, the reconstruction must be labeled approximate.
 
 ## Transports
 
@@ -134,7 +151,9 @@ arguments must be JSON objects. Non-text MCP content may be preserved in
 structured tool output when the current AI protocol cannot model it natively.
 
 MCP tools should be treated as sequential unless a later capability contract
-defines safe parallel dispatch for a specific server/tool source.
+defines safe parallel dispatch for a specific server/tool source. A per-server
+parallel-call policy may opt a source into parallel dispatch only for tools
+accepted from that source.
 
 ## Resources And Prompts
 
@@ -227,6 +246,33 @@ they affect an agent invocation:
 - resource, prompt, elicitation, sampling, and roots action summaries
 
 Runtime does not need to persist every discovered MCP candidate by default.
+
+## MCP Server Export
+
+Psychevo may expose a minimal MCP server so MCP clients can drive Psychevo as
+an agent endpoint. This server is an interface adapter, not a
+capability-extension source. It must stay separate from inbound MCP server
+declarations and must not feed its own exported tools back into the runtime
+tool surface.
+
+The minimal server surface contains two tools:
+
+- `psychevo`, which starts or continues a Psychevo turn from client-supplied
+  prompt text and optional session identity.
+- `psychevo-reply`, which replies to an existing Psychevo session.
+
+`psychevo-reply` requires prompt text plus one session identity alias. The
+exported input schema and handler must accept `sessionId`, `session_id`,
+`threadId`, or `thread_id`, with all aliases resolving to the same Psychevo
+session identity. The schema and implementation must stay aligned so strict
+MCP clients can validate inputs before calling the tool.
+
+Tool results should include the Psychevo session identity and final assistant
+content in structured content when the MCP client supports it, with concise
+text fallback for older clients. The exported MCP server must use normal
+runtime entrypoints, provider configuration, permission policy, and session
+storage. It must not give the MCP client ambient filesystem or terminal
+authority beyond what the selected Psychevo invocation permits.
 
 ## Related Topics
 

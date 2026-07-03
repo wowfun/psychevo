@@ -101,6 +101,9 @@ Examples:
   contributors, and token-usage contributors.
 - MCP inputs primarily install `McpServerContributor` entries; resulting MCP
   tools still pass through the tool surface.
+- An exported Psychevo MCP server is an interface adapter; it uses runtime
+  entrypoints and does not install contributors or feed exported tools back
+  into the accepted invocation surface.
 - Plugin packages declare resources and extension sources; host code maps
   accepted declarations into contributors or owning modules.
 - Hooks are handled by the runtime hook module; hook effects enter lifecycle,

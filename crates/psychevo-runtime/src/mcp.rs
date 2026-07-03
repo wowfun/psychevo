@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use http::{HeaderName, HeaderValue};
@@ -23,7 +24,7 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::permissions::PermissionRuntime;
-use crate::types::{McpServerInput, McpTransportInput, RunWarning};
+use crate::types::{McpServerInput, McpServerPolicy, McpTransportInput, RunWarning};
 
 const LIST_MCP_RESOURCES_TOOL: &str = "list_mcp_resources";
 const LIST_MCP_RESOURCE_TEMPLATES_TOOL: &str = "list_mcp_resource_templates";
@@ -139,8 +140,49 @@ impl McpSourceCatalog {
             hasher.update([0]);
             hasher.update(mcp_transport_kind(&entry.input.transport).as_bytes());
             hasher.update([0]);
+            update_mcp_policy_hash(&mut hasher, &entry.input.policy);
         }
         format!("{:x}", hasher.finalize())
+    }
+}
+
+fn update_mcp_policy_hash(hasher: &mut Sha256, policy: &McpServerPolicy) {
+    hasher.update(if policy.enabled {
+        b"enabled:1"
+    } else {
+        b"enabled:0"
+    });
+    hasher.update([0]);
+    hasher.update(if policy.required {
+        b"required:1"
+    } else {
+        b"required:0"
+    });
+    hasher.update([0]);
+    hasher.update(if policy.supports_parallel_tool_calls {
+        b"parallel:1"
+    } else {
+        b"parallel:0"
+    });
+    hasher.update([0]);
+    if let Some(startup_timeout_secs) = policy.startup_timeout_secs {
+        hasher.update(format!("startup_timeout:{startup_timeout_secs}").as_bytes());
+    }
+    hasher.update([0]);
+    if let Some(tool_timeout_secs) = policy.tool_timeout_secs {
+        hasher.update(format!("tool_timeout:{tool_timeout_secs}").as_bytes());
+    }
+    hasher.update([0]);
+    if let Some(enabled_tools) = &policy.enabled_tools {
+        for tool in enabled_tools {
+            hasher.update(tool.as_bytes());
+            hasher.update([0]);
+        }
+    }
+    hasher.update([0]);
+    for tool in &policy.disabled_tools {
+        hasher.update(tool.as_bytes());
+        hasher.update([0]);
     }
 }
 
@@ -192,6 +234,7 @@ impl McpElicitationPolicy {
 pub(crate) struct McpRuntimeSnapshot {
     pub(crate) tools: Vec<Arc<dyn ToolBinding>>,
     pub(crate) warnings: Vec<RunWarning>,
+    pub(crate) required_failures: Vec<String>,
     pub(crate) snapshot_hash: String,
     pub(crate) catalog_hash: String,
     pub(crate) accepted_servers: Vec<String>,
@@ -201,13 +244,61 @@ pub(crate) struct McpRuntimeSnapshot {
     pub(crate) elicitation_policy: McpElicitationPolicy,
 }
 
-pub(crate) async fn mcp_tool_bindings(
-    inputs: &[McpServerInput],
-    cwd: &Path,
-    permission_runtime: Option<&PermissionRuntime>,
-) -> (Vec<Arc<dyn ToolBinding>>, Vec<RunWarning>) {
-    let snapshot = mcp_runtime_snapshot(inputs, cwd, permission_runtime).await;
-    (snapshot.tools, snapshot.warnings)
+#[derive(Default)]
+pub(crate) struct McpConnectionManager {
+    cached: Option<McpCachedSnapshot>,
+    dirty_servers: HashSet<String>,
+    generation: u64,
+}
+
+struct McpCachedSnapshot {
+    catalog_hash: String,
+    cwd: PathBuf,
+    snapshot: McpRuntimeSnapshot,
+}
+
+impl McpConnectionManager {
+    #[cfg(test)]
+    pub(crate) fn mark_tools_changed(&mut self, server_name: &str) {
+        self.dirty_servers
+            .insert(normalize_mcp_server_name(server_name));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_all_dirty(&mut self) {
+        self.dirty_servers.insert("*".to_string());
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub(crate) async fn snapshot(
+        &mut self,
+        inputs: &[McpServerInput],
+        cwd: &Path,
+        permission_runtime: Option<&PermissionRuntime>,
+    ) -> McpRuntimeSnapshot {
+        let catalog_hash = McpSourceCatalog::resolve(inputs).hash();
+        let cwd = cwd.to_path_buf();
+        if self.dirty_servers.is_empty()
+            && let Some(cached) = &self.cached
+            && cached.catalog_hash == catalog_hash
+            && cached.cwd == cwd
+        {
+            return cached.snapshot.clone();
+        }
+
+        let snapshot = mcp_runtime_snapshot(inputs, &cwd, permission_runtime).await;
+        self.generation = self.generation.saturating_add(1);
+        self.dirty_servers.clear();
+        self.cached = Some(McpCachedSnapshot {
+            catalog_hash,
+            cwd,
+            snapshot: snapshot.clone(),
+        });
+        snapshot
+    }
 }
 
 pub(crate) async fn mcp_runtime_snapshot(
@@ -221,6 +312,7 @@ pub(crate) async fn mcp_runtime_snapshot(
     let mut connections = BTreeMap::<String, Arc<McpConnection>>::new();
     let mut tool_candidates = Vec::<McpToolCandidate>::new();
     let mut accepted_servers = Vec::new();
+    let mut required_failures = Vec::new();
     let mut resources_available = false;
     let mut prompts_available = false;
     let sampling_config = McpSamplingConfig::bounded_default();
@@ -228,25 +320,35 @@ pub(crate) async fn mcp_runtime_snapshot(
 
     for entry in &catalog.entries {
         let server_name = entry.normalized_name.clone();
+        if !entry.input.policy.enabled {
+            let message = format!("MCP server `{}` is disabled", entry.input.name);
+            warnings.push(mcp_warning(message.clone()));
+            if entry.input.policy.required {
+                required_failures.push(message);
+            }
+            continue;
+        }
         if let Some(permission_runtime) = permission_runtime
             && let Err(err) = permission_runtime
                 .authorize_mcp_startup(&server_name, mcp_transport_kind(&entry.input.transport))
                 .await
         {
-            warnings.push(mcp_warning(format!(
-                "MCP server `{}` startup omitted: {err}",
-                entry.input.name
-            )));
+            let message = format!("MCP server `{}` startup omitted: {err}", entry.input.name);
+            warnings.push(mcp_warning(message.clone()));
+            if entry.input.policy.required {
+                required_failures.push(message);
+            }
             continue;
         }
 
-        let service = match connect_mcp_server(&entry.input, cwd).await {
+        let service = match connect_mcp_server_with_policy(&entry.input, cwd).await {
             Ok(service) => service,
             Err(err) => {
-                warnings.push(mcp_warning(format!(
-                    "MCP server `{}` is unavailable: {err}",
-                    entry.input.name
-                )));
+                let message = format!("MCP server `{}` is unavailable: {err}", entry.input.name);
+                warnings.push(mcp_warning(message.clone()));
+                if entry.input.policy.required {
+                    required_failures.push(message);
+                }
                 continue;
             }
         };
@@ -274,6 +376,9 @@ pub(crate) async fn mcp_runtime_snapshot(
 
         for tool in listed {
             let raw_tool_name = tool.name.to_string();
+            if !mcp_tool_allowed_by_policy(&entry.input.policy, &raw_tool_name) {
+                continue;
+            }
             let title = tool
                 .title
                 .clone()
@@ -300,6 +405,8 @@ pub(crate) async fn mcp_runtime_snapshot(
                     raw_tool_name,
                     description,
                     parameters: Value::Object((*tool.input_schema).clone()),
+                    supports_parallel_tool_calls: entry.input.policy.supports_parallel_tool_calls,
+                    tool_timeout_secs: entry.input.policy.tool_timeout_secs,
                     connection: Arc::clone(&connection),
                 },
             });
@@ -345,6 +452,7 @@ pub(crate) async fn mcp_runtime_snapshot(
     McpRuntimeSnapshot {
         tools,
         warnings,
+        required_failures,
         snapshot_hash,
         catalog_hash,
         accepted_servers,
@@ -675,6 +783,38 @@ pub(crate) async fn connect_mcp_server(
         }
         McpTransportInput::Unsupported { kind } => Err(format!("unsupported transport `{kind}`")),
     }
+}
+
+async fn connect_mcp_server_with_policy(
+    input: &McpServerInput,
+    cwd: &Path,
+) -> Result<RunningService<RoleClient, ()>, String> {
+    match input.policy.startup_timeout_secs {
+        Some(timeout_secs) => {
+            match tokio::time::timeout(
+                Duration::from_secs(timeout_secs),
+                connect_mcp_server(input, cwd),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(format!("startup timed out after {timeout_secs}s")),
+            }
+        }
+        None => connect_mcp_server(input, cwd).await,
+    }
+}
+
+fn mcp_tool_allowed_by_policy(policy: &McpServerPolicy, raw_tool_name: &str) -> bool {
+    if let Some(enabled_tools) = &policy.enabled_tools
+        && !enabled_tools.iter().any(|tool| tool == raw_tool_name)
+    {
+        return false;
+    }
+    !policy
+        .disabled_tools
+        .iter()
+        .any(|tool| tool == raw_tool_name)
 }
 
 pub(crate) fn mcp_tool_description(
@@ -1064,6 +1204,8 @@ pub(crate) struct McpToolBinding {
     pub(crate) raw_tool_name: String,
     pub(crate) description: String,
     pub(crate) parameters: Value,
+    pub(crate) supports_parallel_tool_calls: bool,
+    pub(crate) tool_timeout_secs: Option<u64>,
     pub(crate) connection: Arc<McpConnection>,
 }
 
@@ -1087,8 +1229,24 @@ impl ToolBinding for McpToolBinding {
         self.parameters.clone()
     }
 
+    fn search_metadata(&self) -> Vec<String> {
+        vec![
+            self.source_id.clone(),
+            self.source_kind.clone(),
+            self.raw_server_name.clone(),
+            self.normalized_server_name.clone(),
+            self.raw_tool_name.clone(),
+            format!("{}/{}", self.normalized_server_name, self.raw_tool_name),
+            format!("{}/{}", self.raw_server_name, self.raw_tool_name),
+        ]
+    }
+
     fn execution_mode(&self) -> ToolExecutionMode {
-        ToolExecutionMode::Sequential
+        if self.supports_parallel_tool_calls {
+            ToolExecutionMode::Parallel
+        } else {
+            ToolExecutionMode::Sequential
+        }
     }
 
     fn display_spec(&self) -> ToolDisplaySpec {
@@ -1120,6 +1278,7 @@ impl ToolBinding for McpToolBinding {
         let canonical_name = self.canonical_name.clone();
         let source_id = self.source_id.clone();
         let source_kind = self.source_kind.clone();
+        let tool_timeout_secs = self.tool_timeout_secs;
         let peer = self.connection.peer.clone();
         Box::pin(async move {
             let arguments = match args {
@@ -1139,25 +1298,44 @@ impl ToolBinding for McpToolBinding {
             let request =
                 CallToolRequestParams::new(raw_tool_name.clone()).with_arguments(arguments);
             let mut abort = abort;
-            tokio::select! {
-                _ = abort.wait_for_abort() => ToolOutput::error(format!(
-                    "MCP tool `{server_name}/{raw_tool_name}` was aborted"
-                )),
-                result = peer.call_tool(request) => match result {
-                    Ok(result) => mcp_tool_output_with_identity(McpToolOutputIdentity {
-                        normalized_server_name: server_name.clone(),
-                        raw_server_name,
-                        raw_tool_name: raw_tool_name.clone(),
-                        provider_name,
-                        canonical_namespace,
-                        canonical_name,
-                        source_id,
-                        source_kind,
-                    }, result),
-                    Err(err) => ToolOutput::error(format!(
-                        "MCP tool `{server_name}/{raw_tool_name}` failed: {err}"
+            let call = peer.call_tool(request);
+            let identity = McpToolOutputIdentity {
+                normalized_server_name: server_name.clone(),
+                raw_server_name,
+                raw_tool_name: raw_tool_name.clone(),
+                provider_name,
+                canonical_namespace,
+                canonical_name,
+                source_id,
+                source_kind,
+            };
+            if let Some(timeout_secs) = tool_timeout_secs {
+                tokio::select! {
+                    _ = abort.wait_for_abort() => ToolOutput::error(format!(
+                        "MCP tool `{server_name}/{raw_tool_name}` was aborted"
                     )),
-                },
+                    result = tokio::time::timeout(Duration::from_secs(timeout_secs), call) => match result {
+                        Ok(Ok(result)) => mcp_tool_output_with_identity(identity, result),
+                        Ok(Err(err)) => ToolOutput::error(format!(
+                            "MCP tool `{server_name}/{raw_tool_name}` failed: {err}"
+                        )),
+                        Err(_) => ToolOutput::error(format!(
+                            "MCP tool `{server_name}/{raw_tool_name}` timed out after {timeout_secs}s"
+                        )),
+                    },
+                }
+            } else {
+                tokio::select! {
+                    _ = abort.wait_for_abort() => ToolOutput::error(format!(
+                        "MCP tool `{server_name}/{raw_tool_name}` was aborted"
+                    )),
+                    result = call => match result {
+                        Ok(result) => mcp_tool_output_with_identity(identity, result),
+                        Err(err) => ToolOutput::error(format!(
+                            "MCP tool `{server_name}/{raw_tool_name}` failed: {err}"
+                        )),
+                    },
+                }
             }
         })
     }
@@ -1299,6 +1477,79 @@ pub(crate) mod tests {
             normalize_mcp_server_name("repo tools")
         );
         assert_eq!(catalog.warnings.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn disabled_required_server_records_required_failure() {
+        let input = McpServerInput::with_source(
+            "repo tools",
+            McpTransportInput::Unsupported {
+                kind: "stdio".to_string(),
+            },
+            "profile:mcp:repo tools",
+            "profile",
+        )
+        .with_policy(McpServerPolicy {
+            enabled: false,
+            required: true,
+            ..McpServerPolicy::default()
+        });
+
+        let snapshot = mcp_runtime_snapshot(&[input], Path::new("."), None).await;
+
+        assert!(snapshot.tools.is_empty());
+        assert_eq!(snapshot.required_failures.len(), 1);
+        assert!(
+            snapshot.required_failures[0].contains("disabled"),
+            "{:?}",
+            snapshot.required_failures
+        );
+    }
+
+    #[test]
+    fn source_catalog_hash_includes_policy() {
+        let base = McpServerInput::with_source(
+            "repo",
+            McpTransportInput::Unsupported {
+                kind: "stdio".to_string(),
+            },
+            "profile:mcp:repo",
+            "profile",
+        );
+        let filtered = base.clone().with_policy(McpServerPolicy {
+            enabled_tools: Some(vec!["search".to_string()]),
+            disabled_tools: vec!["delete".to_string()],
+            ..McpServerPolicy::default()
+        });
+
+        assert_ne!(
+            McpSourceCatalog::resolve(&[base]).hash(),
+            McpSourceCatalog::resolve(&[filtered]).hash()
+        );
+    }
+
+    #[tokio::test]
+    async fn connection_manager_refreshes_only_at_snapshot_boundary() {
+        let mut manager = McpConnectionManager::default();
+        let cwd = std::env::temp_dir();
+
+        let first = manager.snapshot(&[], &cwd, None).await;
+        let first_generation = manager.generation();
+        let second = manager.snapshot(&[], &cwd, None).await;
+
+        assert_eq!(first.snapshot_hash, second.snapshot_hash);
+        assert_eq!(manager.generation(), first_generation);
+
+        manager.mark_tools_changed("repo");
+        let refreshed = manager.snapshot(&[], &cwd, None).await;
+
+        assert_eq!(refreshed.snapshot_hash, first.snapshot_hash);
+        assert_eq!(manager.generation(), first_generation + 1);
+
+        manager.mark_all_dirty();
+        let refreshed_again = manager.snapshot(&[], &cwd, None).await;
+        assert_eq!(refreshed_again.snapshot_hash, first.snapshot_hash);
+        assert_eq!(manager.generation(), first_generation + 2);
     }
 
     #[test]

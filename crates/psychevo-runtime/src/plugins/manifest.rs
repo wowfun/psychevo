@@ -10,7 +10,7 @@ use super::types::{
 };
 use crate::config::CustomToolsetConfig;
 use crate::error::{Error, Result};
-use crate::types::{McpServerInput, McpTransportInput};
+use crate::types::{McpServerInput, McpServerPolicy, McpTransportInput};
 
 const NATIVE_MANIFEST: &str = ".psychevo-plugin/plugin.json";
 const CODEX_MANIFEST: &str = ".codex-plugin/plugin.json";
@@ -711,16 +711,20 @@ fn parse_mcp_server_descriptor(
             "stdio" | "http" | "streamable_http" | "streamable-http"
         )
     {
+        let policy = parse_manifest_mcp_policy(name, object, manifest_path, diagnostics)?;
         diagnostics.push(PluginDiagnostic::warning(
             format!("mcpServers.{name} uses unsupported transport `{kind}`"),
             Some(manifest_path.to_path_buf()),
         ));
-        return Some(McpServerInput::new(
-            name,
-            McpTransportInput::Unsupported {
-                kind: kind.to_string(),
-            },
-        ));
+        return Some(
+            McpServerInput::new(
+                name,
+                McpTransportInput::Unsupported {
+                    kind: kind.to_string(),
+                },
+            )
+            .with_policy(policy),
+        );
     }
     let inferred_http = object.get("url").is_some()
         || matches!(
@@ -811,15 +815,19 @@ fn parse_stdio_mcp_server(
             return None;
         }
     };
-    Some(McpServerInput::new(
-        name,
-        McpTransportInput::Stdio {
-            command,
-            args,
-            env,
-            cwd,
-        },
-    ))
+    let policy = parse_manifest_mcp_policy(name, object, manifest_path, diagnostics)?;
+    Some(
+        McpServerInput::new(
+            name,
+            McpTransportInput::Stdio {
+                command,
+                args,
+                env,
+                cwd,
+            },
+        )
+        .with_policy(policy),
+    )
 }
 
 fn parse_http_mcp_server(
@@ -853,10 +861,54 @@ fn parse_http_mcp_server(
             return None;
         }
     };
-    Some(McpServerInput::new(
-        name,
-        McpTransportInput::StreamableHttp { url, headers },
-    ))
+    let policy = parse_manifest_mcp_policy(name, object, manifest_path, diagnostics)?;
+    Some(
+        McpServerInput::new(name, McpTransportInput::StreamableHttp { url, headers })
+            .with_policy(policy),
+    )
+}
+
+fn parse_manifest_mcp_policy(
+    name: &str,
+    object: &Map<String, Value>,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<McpServerPolicy> {
+    match parse_manifest_mcp_policy_inner(object) {
+        Ok(policy) => Some(policy),
+        Err(err) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("mcpServers.{name}.{err}"),
+                Some(manifest_path.to_path_buf()),
+            ));
+            None
+        }
+    }
+}
+
+fn parse_manifest_mcp_policy_inner(
+    object: &Map<String, Value>,
+) -> std::result::Result<McpServerPolicy, String> {
+    let mut policy = McpServerPolicy::default();
+    if let Some(enabled) = optional_bool_value(object, "enabled")? {
+        policy.enabled = enabled;
+    }
+    if let Some(required) = optional_bool_value(object, "required")? {
+        policy.required = required;
+    }
+    policy.enabled_tools = first_string_array_value(object, &["enabled_tools", "enabledTools"])?;
+    policy.disabled_tools =
+        first_string_array_value(object, &["disabled_tools", "disabledTools"])?.unwrap_or_default();
+    if let Some(supports_parallel_tool_calls) = first_bool_value(
+        object,
+        &["supports_parallel_tool_calls", "supportsParallelToolCalls"],
+    )? {
+        policy.supports_parallel_tool_calls = supports_parallel_tool_calls;
+    }
+    policy.startup_timeout_secs =
+        first_u64_value(object, &["startup_timeout_secs", "startupTimeoutSecs"])?;
+    policy.tool_timeout_secs = first_u64_value(object, &["tool_timeout_secs", "toolTimeoutSecs"])?;
+    Ok(policy)
 }
 
 fn parse_manifest_toolsets(
@@ -958,6 +1010,18 @@ fn string_array_value(value: &Value, key: &str) -> std::result::Result<Vec<Strin
         .collect()
 }
 
+fn first_string_array_value(
+    object: &Map<String, Value>,
+    keys: &[&str],
+) -> std::result::Result<Option<Vec<String>>, String> {
+    for key in keys {
+        if let Some(value) = object.get(*key) {
+            return string_array_value(value, key).map(Some);
+        }
+    }
+    Ok(None)
+}
+
 fn optional_string_map(
     object: &Map<String, Value>,
     key: &str,
@@ -984,6 +1048,48 @@ fn string_map_value(
                 .ok_or_else(|| format!("{key}.{name} must be a string"))
         })
         .collect()
+}
+
+fn optional_bool_value(
+    object: &Map<String, Value>,
+    key: &str,
+) -> std::result::Result<Option<bool>, String> {
+    object
+        .get(key)
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| format!("{key} must be a boolean"))
+        })
+        .transpose()
+}
+
+fn first_bool_value(
+    object: &Map<String, Value>,
+    keys: &[&str],
+) -> std::result::Result<Option<bool>, String> {
+    for key in keys {
+        if object.contains_key(*key) {
+            return optional_bool_value(object, key);
+        }
+    }
+    Ok(None)
+}
+
+fn first_u64_value(
+    object: &Map<String, Value>,
+    keys: &[&str],
+) -> std::result::Result<Option<u64>, String> {
+    for key in keys {
+        if let Some(value) = object.get(*key) {
+            return value
+                .as_u64()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| format!("{key} must be a positive integer"))
+                .map(Some);
+        }
+    }
+    Ok(None)
 }
 
 fn valid_toolset_name(name: &str) -> bool {

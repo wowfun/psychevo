@@ -17,7 +17,7 @@ pub(crate) use crate::types::{
     ApprovalPolicy, ApprovalsReviewer, AutoReviewConfig, ConfigScope, ConfiguredModel,
     CustomProviderInput, CustomProviderResult, ExecPolicyConfig, ExecPolicyDecision,
     ExecPolicyExample, ExecPolicyHostExecutable, ExecPolicyPatternToken, ExecPolicyRule,
-    GranularApprovalConfig, McpServerInput, McpTransportInput, ModelCapabilities,
+    GranularApprovalConfig, McpServerInput, McpServerPolicy, McpTransportInput, ModelCapabilities,
     ModelCatalogEntry, ModelCatalogProvider, ModelCost, ModelCostTier, ModelLimits, ModelMetadata,
     ModelMetadataCacheTarget, PermissionAccess, PermissionConfig, PermissionProfileConfig,
     ProjectContextInstructionMode, RunMode, RunOptions, ScopedCustomProviderInput,

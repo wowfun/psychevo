@@ -115,12 +115,14 @@ include resolution, and conflict handling. Skill prompt-visibility rules that
 refer to toolsets must use these accepted toolset facts, not raw configuration
 names.
 
-Capability sources may declare toolsets. A contributed toolset may include
-built-in, configured, or other contributed toolsets, but it must not expose a
-tool without a registered execution binding. Plugin and MCP toolset membership
-is accepted only after the owning tool binding exists. Contributed toolsets are
-selection metadata only; they are never executable handlers and never become
-model-visible declarations.
+Capability sources may declare toolsets. Runtime may also derive toolset facts
+from accepted runtime sources when the source owns a stable tool family, such
+as an MCP server. A contributed or derived toolset may include built-in,
+configured, or other contributed toolsets, but it must not expose a tool
+without a registered execution binding. Plugin and MCP toolset membership is
+accepted only after the owning tool binding exists. Contributed and derived
+toolsets are selection metadata only; they are never executable handlers and
+never become model-visible declarations.
 
 This spec owns expansion semantics. [050 Capability Extensions](../050-capability-extensions/spec.md) owns source identity, activation, availability, degraded state, and conflicts for declared toolsets and tools.
 
@@ -142,13 +144,15 @@ Tool exposure is invocation-scoped:
 When the accepted invocation surface contains deferred declarations and
 `tool_search` is enabled, runtime exposes a single direct `tool_search`
 declaration. `tool_search` searches deferred canonical identities,
-provider-visible fallback names, descriptions, and schemas. A successful search
-returns loadable declaration specifications and activates the matching deferred
-tools in the same agent invocation, so later generation-request snapshots can
-include those concrete tool declarations. The activation state belongs to the
-agent loop's mutable tool router, not to plugin manifests, MCP servers, or
-persistent configuration. `tool_search` is enabled by default; explicit
-configuration may disable it for an invocation.
+provider-visible fallback names, descriptions, schemas, and source-qualified
+search metadata. A successful search returns loadable declaration
+specifications and activates the matching deferred tools in the same agent
+invocation, so later generation-request snapshots can include those concrete
+tool declarations. The activation state belongs to the agent loop's mutable
+tool router, not to plugin manifests, MCP servers, or persistent configuration.
+`tool_search` is enabled by default. Explicit configuration may disable it for
+an invocation or bound the default and maximum number of returned loadable
+declarations.
 
 Exposure policy is source-family aware. Direct MCP tools and plugin worker
 tools enter the router as deferred bindings when `tool_search` is enabled.

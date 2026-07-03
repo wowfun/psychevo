@@ -267,7 +267,17 @@ fn manifest_parses_mcp_servers_object_without_discarding_valid_siblings() {
               "version": "1.0.0",
               "description": "mcp plugin",
               "mcpServers": {
-                "stdio": {"command": "node", "args": ["server.js"], "env": {"TOKEN": "x"}, "cwd": "."},
+                "stdio": {
+                  "command": "node",
+                  "args": ["server.js"],
+                  "env": {"TOKEN": "x"},
+                  "cwd": ".",
+                  "enabledTools": ["search"],
+                  "disabledTools": ["delete"],
+                  "supportsParallelToolCalls": true,
+                  "startupTimeoutSecs": 2,
+                  "toolTimeoutSecs": 5
+                },
                 "http": {"type": "http", "url": "https://example.test/mcp", "headers": {"Authorization": "Bearer x"}},
                 "future": {"type": "sse", "url": "https://example.test/sse"},
                 "bad": {"command": 7}
@@ -298,6 +308,14 @@ fn manifest_parses_mcp_servers_object_without_discarding_valid_siblings() {
         }
         other => panic!("unexpected stdio transport: {other:?}"),
     }
+    assert_eq!(
+        stdio.policy.enabled_tools.as_deref(),
+        Some(&["search".to_string()][..])
+    );
+    assert_eq!(stdio.policy.disabled_tools, vec!["delete".to_string()]);
+    assert!(stdio.policy.supports_parallel_tool_calls);
+    assert_eq!(stdio.policy.startup_timeout_secs, Some(2));
+    assert_eq!(stdio.policy.tool_timeout_secs, Some(5));
     let http = manifest
         .mcp_servers
         .iter()

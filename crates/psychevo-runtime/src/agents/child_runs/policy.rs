@@ -126,20 +126,28 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     };
     let permission_runtime =
         permission_runtime.with_sandbox(child.context.sandbox_policy.clone(), sandbox_grants.clone());
-    let (mcp_tools, mcp_warnings) = crate::mcp::mcp_tool_bindings(
-        &child.context.extension_inputs.mcp_servers,
-        &child.context.cwd,
-        Some(&permission_runtime),
-    )
-    .await;
-    emit_child_warning_events(&child, &child_session, &mcp_warnings);
-    let mut extension_tools = mcp_tools
+    let mut mcp_manager = crate::mcp::McpConnectionManager::default();
+    let mcp_snapshot = mcp_manager
+        .snapshot(
+            &child.context.extension_inputs.mcp_servers,
+            &child.context.cwd,
+            Some(&permission_runtime),
+        )
+        .await;
+    if !mcp_snapshot.required_failures.is_empty() {
+        return Err(Error::Message(format!(
+            "required MCP server unavailable: {}",
+            mcp_snapshot.required_failures.join("; ")
+        )));
+    }
+    emit_child_warning_events(&child, &child_session, &mcp_snapshot.warnings);
+    let mut extension_tools = mcp_snapshot
+        .tools
         .into_iter()
         .map(|tool| {
-            let source_id = crate::mcp::mcp_tool_name_parts(tool.name())
-                .map(|(server, _)| format!("mcp:{server}"))
-                .unwrap_or_else(|| "mcp:unknown".to_string());
-            RuntimeTool::with_source(tool, source_id, "mcp")
+            let source_id = crate::mcp::mcp_tool_source_id(tool.name());
+            let source_kind = crate::mcp::mcp_tool_source_kind(tool.name());
+            RuntimeTool::with_source(tool, source_id, source_kind)
         })
         .collect::<Vec<_>>();
     extension_tools.extend(child.context.extension_inputs.runtime_tools.clone());
@@ -170,8 +178,13 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         tools = apply_hook_runtime(tools, runtime);
     }
     let effective_tool_names = effective_tool_names(&tools);
-    let tool_search_options = if child.context.tool_selection.tool_search.enabled {
-        psychevo_agent_core::ToolSearchOptions::enabled()
+    let tool_search_config = &child.context.tool_selection.tool_search;
+    let tool_search_options = if tool_search_config.enabled {
+        psychevo_agent_core::ToolSearchOptions {
+            enabled: true,
+            default_limit: tool_search_config.default_limit,
+            max_limit: tool_search_config.max_limit,
+        }
     } else {
         psychevo_agent_core::ToolSearchOptions::disabled()
     };

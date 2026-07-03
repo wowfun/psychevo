@@ -454,8 +454,17 @@ pub(crate) async fn run_live_internal(
     let permission_runtime =
         permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
     let mcp_server_inputs = extension_assembly.registry.mcp_servers();
-    let mcp_snapshot =
-        crate::mcp::mcp_runtime_snapshot(&mcp_server_inputs, &cwd, Some(&permission_runtime)).await;
+    let mut mcp_manager = crate::mcp::McpConnectionManager::default();
+    let mcp_snapshot = mcp_manager
+        .snapshot(&mcp_server_inputs, &cwd, Some(&permission_runtime))
+        .await;
+    if !mcp_snapshot.required_failures.is_empty() {
+        return Err(Error::Message(format!(
+            "required MCP server unavailable: {}",
+            mcp_snapshot.required_failures.join("; ")
+        )));
+    }
+    let mcp_generation = mcp_manager.generation();
     let mcp_snapshot_hash = mcp_snapshot.snapshot_hash.clone();
     let mcp_catalog_hash = mcp_snapshot.catalog_hash.clone();
     let mcp_accepted_servers = mcp_snapshot.accepted_servers.clone();
@@ -558,8 +567,13 @@ pub(crate) async fn run_live_internal(
     };
     let project_instructions_role = (!prompt_project_instructions.is_empty())
         .then(|| developer_provider_role(&resolved.metadata.capabilities).to_string());
-    let tool_search_options = if loaded.config.tools.tool_search.enabled {
-        psychevo_agent_core::ToolSearchOptions::enabled()
+    let tool_search_config = &loaded.config.tools.tool_search;
+    let tool_search_options = if tool_search_config.enabled {
+        psychevo_agent_core::ToolSearchOptions {
+            enabled: true,
+            default_limit: tool_search_config.default_limit,
+            max_limit: tool_search_config.max_limit,
+        }
     } else {
         psychevo_agent_core::ToolSearchOptions::disabled()
     };
@@ -582,6 +596,7 @@ pub(crate) async fn run_live_internal(
             "accepted_servers": mcp_accepted_servers,
             "resources_available": mcp_resources_available,
             "prompts_available": mcp_prompts_available,
+            "generation": mcp_generation,
             "sampling": mcp_sampling_config,
             "elicitation": mcp_elicitation_policy,
         },

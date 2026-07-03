@@ -50,8 +50,8 @@ pub(crate) mod tests {
         assert_eq!(
             names,
             [
-                "init", "run", "tui", "serve", "gateway", "acp", "profile", "agent", "skill",
-                "tool", "session", "model", "config", "auth", "stats", "context",
+                "init", "run", "tui", "serve", "gateway", "acp", "mcp", "profile", "agent",
+                "skill", "tool", "session", "model", "config", "auth", "stats", "context",
             ]
         );
         assert!(

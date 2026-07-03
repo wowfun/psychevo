@@ -112,11 +112,17 @@ pub(crate) struct ToolSelectionConfig {
 #[derive(Debug, Clone)]
 pub(crate) struct ToolSearchConfig {
     pub(crate) enabled: bool,
+    pub(crate) default_limit: usize,
+    pub(crate) max_limit: usize,
 }
 
 impl Default for ToolSearchConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            default_limit: 8,
+            max_limit: 20,
+        }
     }
 }
 

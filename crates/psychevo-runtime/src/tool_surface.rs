@@ -112,11 +112,6 @@ pub(crate) fn assemble_tool_surface_with_warnings(
     let mut selected_tools = Vec::new();
     let mut accepted_tool_names = Vec::new();
     let mut selected_tool_sources = BTreeMap::new();
-    let toolsets = build_toolset_definitions(
-        &input.custom_toolsets,
-        &input.contributed_toolsets,
-        &mut projection,
-    );
 
     if let ClarifyToolSurface::Enabled { control, stream } = input.clarify {
         let entry = AvailableToolEntry::new(
@@ -166,6 +161,13 @@ pub(crate) fn assemble_tool_surface_with_warnings(
         }
     }
 
+    let mut toolsets = build_toolset_definitions(
+        &input.custom_toolsets,
+        &input.contributed_toolsets,
+        &mut projection,
+    );
+    insert_runtime_derived_toolsets(&mut toolsets, &available_tools, &mut projection);
+
     let selected_toolsets = selected_toolset_names(input.mode, &input.tool_selection);
     let disabled_toolsets = disabled_toolset_names(input.mode, &input.tool_selection);
     let mut accepted_toolset_names = Vec::new();
@@ -189,7 +191,7 @@ pub(crate) fn assemble_tool_surface_with_warnings(
     }
 
     for entry in fallback_entries {
-        select_tool_entry(
+        let accepted = select_tool_entry(
             &entry,
             &mut *expansion.selected_tools,
             &mut *expansion.selected_tool_sources,
@@ -198,6 +200,14 @@ pub(crate) fn assemble_tool_surface_with_warnings(
             &mut *expansion.warnings,
             true,
         );
+        if accepted {
+            record_runtime_derived_toolset_acceptance(
+                &entry,
+                &mut *expansion.accepted_toolset_names,
+                &mut *expansion.accepted_toolsets,
+                &mut *expansion.projection,
+            );
+        }
     }
     drop(expansion);
     ToolSurfaceAssemblyResult {
@@ -241,12 +251,20 @@ impl ToolBinding for DeferredToolBinding {
         self.inner.name()
     }
 
+    fn canonical_tool_name(&self) -> psychevo_ai::ToolName {
+        self.inner.canonical_tool_name()
+    }
+
     fn description(&self) -> &str {
         self.inner.description()
     }
 
     fn parameters(&self) -> Value {
         self.inner.parameters()
+    }
+
+    fn search_metadata(&self) -> Vec<String> {
+        self.inner.search_metadata()
     }
 
     fn exposure(&self) -> ToolExposure {
@@ -286,6 +304,10 @@ impl ToolRegistry {
 
     fn entries(&self, name: &str) -> Option<&[AvailableToolEntry]> {
         self.by_name.get(name).map(Vec::as_slice)
+    }
+
+    fn all_entries(&self) -> impl Iterator<Item = &AvailableToolEntry> {
+        self.by_name.values().flat_map(|entries| entries.iter())
     }
 }
 
@@ -400,6 +422,78 @@ fn insert_toolset_definition(
         return;
     }
     definitions.insert(definition.name.clone(), definition);
+}
+
+fn insert_runtime_derived_toolsets(
+    definitions: &mut BTreeMap<String, ToolsetDefinition>,
+    registry: &ToolRegistry,
+    projection: &mut ContributionProjection,
+) {
+    let mut tools_by_source = BTreeMap::<String, BTreeSet<String>>::new();
+    for entry in registry.all_entries() {
+        if entry.source_kind != "mcp" {
+            continue;
+        }
+        let Some(server) = entry.source_id.strip_prefix("mcp:") else {
+            continue;
+        };
+        if server == "utility" || server.is_empty() {
+            continue;
+        }
+        tools_by_source
+            .entry(entry.source_id.clone())
+            .or_default()
+            .insert(entry.name.clone());
+    }
+    for (source_id, tools) in tools_by_source {
+        let Some(server) = source_id.strip_prefix("mcp:") else {
+            continue;
+        };
+        let server = server.to_string();
+        insert_toolset_definition(
+            definitions,
+            ToolsetDefinition {
+                name: format!("mcp-{server}"),
+                source_id,
+                source_kind: "mcp".to_string(),
+                config: CustomToolsetConfig {
+                    description: Some(format!("MCP tools from `{server}`")),
+                    tools: tools.into_iter().collect(),
+                    includes: Vec::new(),
+                },
+            },
+            projection,
+        );
+    }
+}
+
+fn record_runtime_derived_toolset_acceptance(
+    entry: &AvailableToolEntry,
+    accepted_toolset_names: &mut Vec<String>,
+    accepted_toolsets: &mut BTreeSet<String>,
+    projection: &mut ContributionProjection,
+) {
+    if entry.source_kind != "mcp" {
+        return;
+    }
+    let Some(server) = entry.source_id.strip_prefix("mcp:") else {
+        return;
+    };
+    if server == "utility" || server.is_empty() {
+        return;
+    }
+    let toolset_name = format!("mcp-{server}");
+    if accepted_toolsets.insert(toolset_name.clone()) {
+        accepted_toolset_names.push(toolset_name.clone());
+        projection.record(ContributionFact::new(
+            entry.source_id.clone(),
+            entry.source_kind.clone(),
+            "toolset",
+            "tool_surface",
+            format!("toolset:{toolset_name}"),
+            ContributionStatus::Accepted,
+        ));
+    }
 }
 
 fn selected_toolset_names(mode: RunMode, selection: &ToolSelectionConfig) -> Vec<String> {
@@ -810,6 +904,41 @@ mod tests {
         assert!(names.contains(&"tool_search".to_string()));
         assert!(!names.contains(&"plugin_lookup".to_string()));
         assert!(!names.contains(&"mcp_lookup".to_string()));
+    }
+
+    #[test]
+    fn mcp_runtime_tools_derive_source_toolset_metadata() {
+        let mut input = base_input(RunMode::Default);
+        input.tool_selection.modes.insert(
+            "default".to_string(),
+            ToolModeConfig {
+                enabled_toolsets: Some(vec!["mcp-repo".to_string()]),
+                disabled_toolsets: Vec::new(),
+            },
+        );
+        input.extension_tools.push(RuntimeTool::with_source(
+            Arc::new(TestTool::new("mcp__repo__search")),
+            "mcp:repo",
+            "mcp",
+        ));
+
+        let result = assemble_tool_surface_with_warnings(input);
+
+        assert!(
+            result
+                .accepted_toolset_names
+                .contains(&"mcp-repo".to_string())
+        );
+        assert!(
+            result
+                .accepted_tool_names
+                .contains(&"mcp__repo__search".to_string())
+        );
+        assert!(result.projection.facts().iter().any(|fact| {
+            fact.status == ContributionStatus::Accepted
+                && fact.source_id == "mcp:repo"
+                && fact.effect_target == "toolset:mcp-repo"
+        }));
     }
 
     #[test]

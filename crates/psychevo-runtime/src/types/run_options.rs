@@ -203,6 +203,32 @@ pub struct McpServerInput {
     pub source_id: Option<String>,
     pub source_kind: Option<String>,
     pub transport: McpTransportInput,
+    pub policy: McpServerPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpServerPolicy {
+    pub enabled: bool,
+    pub required: bool,
+    pub enabled_tools: Option<Vec<String>>,
+    pub disabled_tools: Vec<String>,
+    pub supports_parallel_tool_calls: bool,
+    pub startup_timeout_secs: Option<u64>,
+    pub tool_timeout_secs: Option<u64>,
+}
+
+impl Default for McpServerPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            required: false,
+            enabled_tools: None,
+            disabled_tools: Vec::new(),
+            supports_parallel_tool_calls: false,
+            startup_timeout_secs: None,
+            tool_timeout_secs: None,
+        }
+    }
 }
 
 impl McpServerInput {
@@ -212,6 +238,7 @@ impl McpServerInput {
             source_id: None,
             source_kind: None,
             transport,
+            policy: McpServerPolicy::default(),
         }
     }
 
@@ -226,7 +253,13 @@ impl McpServerInput {
             source_id: Some(source_id.into()),
             source_kind: Some(source_kind.into()),
             transport,
+            policy: McpServerPolicy::default(),
         }
+    }
+
+    pub fn with_policy(mut self, policy: McpServerPolicy) -> Self {
+        self.policy = policy;
+        self
     }
 }
 
