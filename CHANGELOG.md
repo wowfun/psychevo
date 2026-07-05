@@ -1,7 +1,39 @@
 # Changelog
 
+## 2026-07-05
+
+- Added shared design-system assets, switch/form primitives, and Markdown
+  preview affordances used by Workbench, Floating, and Capabilities surfaces.
+- Improved skill and agent discovery labels, grouped composer completions, and
+  protected the built-in `coding-core` toolset from management writes.
+- Consolidated Workbench create/install/connect panels and fixed their desktop
+  and narrow-viewport placement.
+- Hardened Desktop startup, native smoke, WSLg sizing, app icon generation,
+  managed Gateway reuse, and Desktop live-suite coverage.
+- Reworked Desktop Floating submission and transcript handling around shared
+  Workbench thread controls, including same-thread focus, close behavior, and
+  first-visible response timing artifacts.
+
+## 2026-07-04
+
+- Added Workbench Capabilities management for Skills, Plugins, MCP, and Tools,
+  including domain Gateway RPCs, profile-scoped mutations, OAuth plumbing, and
+  strict catalog/read/uninstall behavior.
+- Simplified the Workbench Skills management UI around search-first rows,
+  inline switches, shared Markdown previews, and an internally scrolling detail
+  panel.
+- Refined `peval-py` report and serve comparison views with Leaderboard
+  Summary, archived-source controls, batch Archive/Activate actions, and
+  consistent single-row behavior.
+- Split `peval-py` CLI, serve, state, analysis, report, HTML, JS, and CSS
+  internals into focused modules while preserving public imports.
+- Added `pevo desktop` source-checkout launching plus Desktop/Floating Linux
+  and WSLg capture, visual, live, Gateway, and authenticated-download support.
+
 ## 2026-07-03
 
+- Added the first Psychevo Desktop and Floating scaffold with native Gateway
+  transport, Workbench reuse, attachment mapping, and focused package tests.
 - Added `pevo mcp serve` and expanded MCP tool policy, snapshot, and strict
   reply-schema support.
 - Improved Windows Git Bash process handling across install, Gateway/Web
