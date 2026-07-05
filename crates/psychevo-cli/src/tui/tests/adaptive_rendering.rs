@@ -4,9 +4,9 @@ pub(crate) use super::*;
 pub(crate) fn adaptive_theme_falls_back_without_terminal_profile() {
     let theme = TuiTheme::from_profile(TerminalProfile::unknown());
 
-    assert_eq!(theme.surface_bg, TUI_SURFACE_BG);
-    assert_eq!(theme.selection_bg, TUI_SELECTION_BG);
-    assert_eq!(theme.accent, TUI_CYAN);
+    assert_eq!(theme.surface_bg, TUI_ROLE_SURFACE_BG);
+    assert_eq!(theme.selection_bg, TUI_ROLE_SELECTION_BG);
+    assert_eq!(theme.accent, TUI_ROLE_ACCENT);
 }
 
 #[test]
@@ -16,8 +16,8 @@ pub(crate) fn adaptive_theme_derives_distinct_light_and_dark_surfaces() {
 
     assert_ne!(dark.surface_bg, light.surface_bg);
     assert_ne!(dark.menu_bg, light.menu_bg);
-    assert_ne!(light.selection_bg, TUI_SELECTION_BG);
-    assert_ne!(light.accent, TUI_CYAN);
+    assert_ne!(light.selection_bg, TUI_ROLE_SELECTION_BG);
+    assert_ne!(light.accent, TUI_ROLE_ACCENT);
 }
 
 #[test]
@@ -29,7 +29,7 @@ pub(crate) fn adaptive_theme_ansi16_uses_stable_fallback_surfaces() {
     };
     let theme = TuiTheme::from_profile(profile);
 
-    assert_eq!(theme.surface_bg, TUI_SURFACE_BG);
+    assert_eq!(theme.surface_bg, TUI_ROLE_SURFACE_BG);
     assert_eq!(theme.menu_bg, Color::Rgb(16, 16, 20));
 }
 

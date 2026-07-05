@@ -82,12 +82,14 @@ capabilities such as pickers, clipboard, renderer toggles, process exit, Side
 chat, and image attachment, then projects shared command effects into terminal
 panes, command feedback rows, composer state, queues, and approvals.
 
-The slash menu stays a flat list with at most eight rows and does not show
-group headers. Built-in compatibility aliases may match the canonical command
-row but do not appear as independent rows. User-configured aliases appear as
-alias rows when matched. Configured shortcut dispatch works only from an empty
-composer while shell mode, selection, popup, bottom pane, and history search
-are inactive.
+The slash menu stays compact, uses the same completion section language as GUI
+surfaces, and caps selectable command rows at eight. Section headers are visual
+only and never participate in keyboard selection, mouse hit testing, or command
+execution. Built-in compatibility aliases may match the canonical command row
+but do not appear as independent rows. User-configured aliases appear as alias
+rows when matched. Configured shortcut dispatch works only from an empty
+composer while shell mode, selection, popup, bottom pane, and history search are
+inactive.
 
 Fullscreen `/help` opens a bottom help pane with `Help`, `General`,
 `Commands`, and `Custom commands` sections. `Esc` closes the pane, and
@@ -101,11 +103,19 @@ result below it as display-only material.
 
 ## Completion, Selection, And Mouse Routing
 
-Typing an `@` token in the fullscreen composer opens a file path completion
-popup for the selected cwd. Valid tokens start at the beginning of the
-current line or after whitespace. The popup is hidden while a bottom selection
-pane is open. Shell mode reuses the same `@` file path completion popup; image
-paths selected this way remain plain shell text and do not create attachments.
+Typing an `@` token in the fullscreen composer opens one grouped completion
+popup for the selected cwd. In prompt mode, agent rows and cwd path rows may
+appear together under `Agents`, `Directories`, and `Files`; in shell mode,
+only path rows appear. Typing a `$` token opens a grouped skill/agent marker
+popup. Valid tokens start at the beginning of the current line or after
+whitespace. Popup headers are visual only: `Up`, `Down`, `Home`, `End`,
+`Enter`, `Tab`, and mouse clicks address selectable candidate rows only.
+Agent and skill rows show their discovery source/scope when available. The
+popup is hidden while a bottom selection pane is open. Agent and skill rows use
+the shared human-facing source labels `System`, `User`, and `Project` rather than raw
+discovery source names. Shell mode reuses the same `@` file path completion
+popup; image paths selected this way remain plain shell text and do not create
+attachments.
 
 Mouse wheel events route by the pointer row: transcript hover scrolls the
 transcript, bottom-pane hover scrolls the pane, and composer/status/other

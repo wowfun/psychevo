@@ -113,7 +113,9 @@ impl LiveEnvironment {
             .env("PSYCHEVO_CONFIG", &self.config_path)
             .env("PSYCHEVO_DB", &self.db_path);
         if let Some(provider) = provider {
-            command.env("PSYCHEVO_INFERENCE_PROVIDER", provider.id);
+            command
+                .env("PSYCHEVO_INFERENCE_PROVIDER", provider.id)
+                .env("PSYCHEVO_INFERENCE_MODEL", provider.model);
         }
     }
 
@@ -167,6 +169,8 @@ fn load_dotenv(path: &Path) -> Result<BTreeMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::live::registry::XIAOMI_TOKEN_PLAN;
 
     use super::*;
 
@@ -232,6 +236,37 @@ mod tests {
             root.join(".local/.psychevo-dev/config.toml")
         );
         assert_eq!(env.db_path(), check_dir.join("state.db"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn provider_command_environment_includes_provider_and_model() {
+        let root = live_dev_home("psychevo-xtask-live-provider-env");
+        let prerequisites = LivePrerequisites::load(&root).expect("prerequisites");
+        let env = prerequisites
+            .resolve(LiveEnvMode::Shared, &root.join("artifact/live/check"))
+            .expect("shared env");
+        let mut command = ProcessCommand::new("pevo");
+
+        env.apply_to_command(&mut command, Some(XIAOMI_TOKEN_PLAN));
+
+        let envs = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().to_string(),
+                    value.map(|value| value.to_string_lossy().to_string()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            envs.get("PSYCHEVO_INFERENCE_PROVIDER"),
+            Some(&Some("xiaomi-token-plan".to_string()))
+        );
+        assert_eq!(
+            envs.get("PSYCHEVO_INFERENCE_MODEL"),
+            Some(&Some("xiaomi-token-plan/mimo-v2.5-pro".to_string()))
+        );
         let _ = fs::remove_dir_all(root);
     }
 

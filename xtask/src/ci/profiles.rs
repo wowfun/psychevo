@@ -99,6 +99,12 @@ const VISUAL_STEPS: &[WorkflowStep] = &[
         action: WorkflowStepAction::WorkbenchVisual,
         live: false,
     },
+    WorkflowStep {
+        id: "desktop-visual",
+        description: "Capture deterministic Desktop/Floating visual diagnostics",
+        action: WorkflowStepAction::DesktopVisual,
+        live: false,
+    },
 ];
 
 const LIVE_STEPS: &[WorkflowStep] = &[WorkflowStep {
@@ -261,7 +267,7 @@ mod tests {
     #[test]
     fn visual_plan_uses_runner_owned_visual_steps() {
         let plan = plan_profile("visual", None).expect("visual profile");
-        assert_eq!(plan.steps.len(), 2);
+        assert_eq!(plan.steps.len(), 3);
         assert_eq!(plan.steps[0].id, "tui-vhs-demo");
         assert_eq!(
             plan.steps[0].command,
@@ -271,6 +277,11 @@ mod tests {
         assert_eq!(
             plan.steps[1].command,
             vec!["xtask-internal", "workbench-visual"]
+        );
+        assert_eq!(plan.steps[2].id, "desktop-visual");
+        assert_eq!(
+            plan.steps[2].command,
+            vec!["xtask-internal", "desktop-visual"]
         );
     }
 

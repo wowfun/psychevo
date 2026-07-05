@@ -227,7 +227,7 @@ pub(crate) fn uninstall_skill(
     env_map: std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     drop(env_map);
-    let value = remove_installed_skill(home, cwd, target_from_uninstall(&args), &args.name)?;
+    let value = remove_installed_skill(home, cwd, target_from_uninstall(&args), &args.name, None)?;
     print_value(value, args.json)
 }
 

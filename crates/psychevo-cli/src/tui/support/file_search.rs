@@ -141,32 +141,11 @@ impl FileSearchState {
         }
     }
 
-    pub(crate) fn height(&self) -> u16 {
-        let Some(popup) = &self.popup else {
-            return 0;
-        };
-        let rows = popup.matches.len().clamp(1, FILE_POPUP_MAX_ROWS);
-        rows as u16
-    }
-
     pub(crate) fn selected_path(&self) -> Option<String> {
         self.popup
             .as_ref()
             .and_then(|popup| popup.matches.get(popup.selected))
             .map(|entry| entry.path.clone())
-    }
-
-    pub(crate) fn move_selection(&mut self, direction: isize) {
-        let Some(popup) = &mut self.popup else {
-            return;
-        };
-        let len = popup.matches.len();
-        if len == 0 {
-            popup.selected = 0;
-            return;
-        }
-        let current = popup.selected.min(len.saturating_sub(1)) as isize;
-        popup.selected = (current + direction).rem_euclid(len as isize) as usize;
     }
 
     pub(crate) fn set_selection(&mut self, index: usize) {

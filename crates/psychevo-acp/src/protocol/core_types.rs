@@ -670,6 +670,10 @@ pub(crate) fn acp_mcp_servers(servers: Vec<McpServer>) -> Vec<McpServerInput> {
                         .into_iter()
                         .map(|header| (header.name, header.value))
                         .collect(),
+                    bearer_token_env_var: None,
+                    scopes: Vec::new(),
+                    oauth_resource: None,
+                    oauth_client_id: None,
                 },
             ),
             McpServer::Stdio(McpServerStdio {

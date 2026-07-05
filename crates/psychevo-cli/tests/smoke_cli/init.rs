@@ -22,6 +22,7 @@ pub(crate) fn cli_help_lists_aligned_command_descriptions() {
     assert!(stdout.contains("Run one coding-agent turn"));
     assert!(stdout.contains("Open the fullscreen terminal UI"));
     assert!(stdout.contains("Open or manage the managed local Web UI"));
+    assert!(stdout.contains("Open the native Desktop app from a source checkout"));
     assert!(stdout.contains("Run local deterministic diagnostics"));
     assert!(stdout.contains("Inspect local context-window usage for a session"));
 }
@@ -58,6 +59,14 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
             "--print-url",
             "start",
             "restart",
+        ],
+    );
+    assert_help_contains(
+        temp.path(),
+        &["desktop", "--help"],
+        &[
+            "Open the native Desktop app from a Psychevo source checkout",
+            "--dir <DIR>",
         ],
     );
     assert_help_contains(

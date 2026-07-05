@@ -340,7 +340,8 @@ pub(crate) fn render_slash_menu(
     let theme = tui_theme();
     row_areas.clear();
     frame.render_widget(Block::default().style(theme.menu_style()), area);
-    let rows = items
+    let mut rows = vec![completion_header_row("Commands")];
+    rows.extend(items
         .iter()
         .enumerate()
         .map(|(index, item)| {
@@ -357,14 +358,14 @@ pub(crate) fn render_slash_menu(
                 tone: DisplayRowTone::Accent,
                 ..DisplayRow::default()
             }
-        })
-        .collect::<Vec<_>>();
-    for index in 0..rows.len().min(area.height as usize) {
+        }));
+    let visible_item_rows = items.len().min(area.height.saturating_sub(1) as usize);
+    for index in 0..visible_item_rows {
         row_areas.push((
             index,
             Rect {
                 x: area.x,
-                y: area.y.saturating_add(index as u16),
+                y: area.y.saturating_add(index as u16).saturating_add(1),
                 width: area.width,
                 height: 1,
             },
@@ -373,138 +374,170 @@ pub(crate) fn render_slash_menu(
     render_display_rows(area, frame.buffer_mut(), &rows);
 }
 
-pub(crate) fn render_file_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
+pub(crate) fn render_completion_popup(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    ui: &mut FullscreenUi<'_>,
+) {
     let theme = tui_theme();
+    ui.last_completion_popup_areas.clear();
+    ui.last_agent_popup_areas.clear();
     ui.last_file_popup_areas.clear();
-    let Some(popup) = &ui.file_search.popup else {
-        return;
-    };
+    ui.last_skill_popup_areas.clear();
     frame.render_widget(Block::default().style(theme.menu_style()), area);
-    let rows = if popup.matches.is_empty() {
-        let label = if popup.waiting {
-            "searching files..."
-        } else {
-            "no matches"
-        };
-        vec![DisplayRow {
-            marker: "  ",
-            label: label.to_string(),
-            tone: DisplayRowTone::Dim,
-            ..DisplayRow::default()
-        }]
-    } else {
-        popup
-            .matches
-            .iter()
-            .take(FILE_POPUP_MAX_ROWS)
-            .enumerate()
-            .map(|(index, item)| {
-                let kind = match item.kind {
-                    FileSearchMatchKind::Directory => "dir",
-                    FileSearchMatchKind::File => "file",
-                };
+    let selected = ui.selected_completion_popup_target();
+    let mut rows: Vec<(DisplayRow, Option<CompletionPopupTarget>)> = Vec::new();
+
+    if let Some(popup) = &ui.agent_search.popup
+        && !popup.matches.is_empty()
+    {
+        rows.push((completion_header_row("Agents"), None));
+        rows.extend(
+            popup
+                .matches
+                .iter()
+                .take(FILE_POPUP_MAX_ROWS)
+                .enumerate()
+                .map(|(index, item)| {
+                    let target = CompletionPopupTarget::Agent(index);
+                    (
+                        DisplayRow {
+                            marker: "  ",
+                            label: format!("@{}", item.name),
+                            description: Some(item.description.clone()),
+                            meta: item.source_label.clone(),
+                            selected: selected == Some(target),
+                            tone: DisplayRowTone::Identity,
+                            ..DisplayRow::default()
+                        },
+                        Some(target),
+                    )
+                }),
+        );
+    }
+
+    if let Some(popup) = &ui.file_search.popup {
+        if popup.matches.is_empty() {
+            rows.push((completion_header_row("Files"), None));
+            let label = if popup.waiting {
+                "searching files..."
+            } else {
+                "no matches"
+            };
+            rows.push((
                 DisplayRow {
                     marker: "  ",
-                    label: item.path.clone(),
-                    meta: Some(kind.to_string()),
-                    selected: index == popup.selected,
-                    tone: DisplayRowTone::Accent,
+                    label: label.to_string(),
+                    tone: DisplayRowTone::Dim,
                     ..DisplayRow::default()
+                },
+                None,
+            ));
+        } else {
+            for (header, kind, meta) in [
+                ("Directories", FileSearchMatchKind::Directory, "dir"),
+                ("Files", FileSearchMatchKind::File, "file"),
+            ] {
+                let group = popup
+                    .matches
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| item.kind == kind)
+                    .take(FILE_POPUP_MAX_ROWS)
+                    .collect::<Vec<_>>();
+                if group.is_empty() {
+                    continue;
                 }
-            })
-            .collect()
-    };
-    for index in 0..rows.len().min(area.height as usize) {
-        ui.last_file_popup_areas.push((
-            index,
-            Rect {
-                x: area.x,
-                y: area.y.saturating_add(index as u16),
-                width: area.width,
-                height: 1,
-            },
-        ));
+                rows.push((completion_header_row(header), None));
+                rows.extend(group.into_iter().map(|(index, item)| {
+                    let target = CompletionPopupTarget::File(index);
+                    (
+                        DisplayRow {
+                            marker: "  ",
+                            label: item.path.clone(),
+                            meta: Some(meta.to_string()),
+                            selected: selected == Some(target),
+                            tone: DisplayRowTone::Accent,
+                            ..DisplayRow::default()
+                        },
+                        Some(target),
+                    )
+                }));
+            }
+        }
     }
-    render_display_rows(area, frame.buffer_mut(), &rows);
-}
 
-pub(crate) fn render_skill_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
-    let theme = tui_theme();
-    ui.last_skill_popup_areas.clear();
-    let Some(popup) = &ui.skill_search.popup else {
-        return;
-    };
-    frame.render_widget(Block::default().style(theme.menu_style()), area);
-    let rows = if popup.matches.is_empty() {
-        vec![DisplayRow {
-            marker: "  ",
-            label: "no skill matches".to_string(),
-            tone: DisplayRowTone::Dim,
-            ..DisplayRow::default()
-        }]
-    } else {
-        popup
-            .matches
-            .iter()
-            .take(FILE_POPUP_MAX_ROWS)
-            .enumerate()
-            .map(|(index, item)| DisplayRow {
-                marker: "  ",
-                label: format!("${}", item.name),
-                description: Some(item.description.clone()),
-                selected: index == popup.selected,
-                tone: DisplayRowTone::Identity,
-                ..DisplayRow::default()
-            })
-            .collect()
-    };
-    for index in 0..rows.len().min(area.height as usize) {
-        ui.last_skill_popup_areas.push((
-            index,
-            Rect {
-                x: area.x,
-                y: area.y.saturating_add(index as u16),
-                width: area.width,
-                height: 1,
-            },
-        ));
+    if let Some(popup) = &ui.skill_search.popup {
+        rows.push((completion_header_row("Skills"), None));
+        if popup.matches.is_empty() {
+            rows.push((
+                DisplayRow {
+                    marker: "  ",
+                    label: "no skill matches".to_string(),
+                    tone: DisplayRowTone::Dim,
+                    ..DisplayRow::default()
+                },
+                None,
+            ));
+        } else {
+            rows.extend(
+                popup
+                    .matches
+                    .iter()
+                    .take(FILE_POPUP_MAX_ROWS)
+                    .enumerate()
+                    .map(|(index, item)| {
+                        let target = CompletionPopupTarget::Skill(index);
+                        (
+                            DisplayRow {
+                                marker: "  ",
+                                label: format!("${}", item.name),
+                                description: Some(item.description.clone()),
+                                meta: item.source_label.clone(),
+                                selected: selected == Some(target),
+                                tone: DisplayRowTone::Identity,
+                                ..DisplayRow::default()
+                            },
+                            Some(target),
+                        )
+                    }),
+            );
+        }
     }
-    render_display_rows(area, frame.buffer_mut(), &rows);
-}
 
-pub(crate) fn render_agent_popup(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
-    let theme = tui_theme();
-    ui.last_agent_popup_areas.clear();
-    let Some(popup) = &ui.agent_search.popup else {
-        return;
-    };
-    frame.render_widget(Block::default().style(theme.menu_style()), area);
-    let rows = popup
-        .matches
-        .iter()
-        .take(FILE_POPUP_MAX_ROWS)
-        .enumerate()
-        .map(|(index, item)| DisplayRow {
-            marker: "  ",
-            label: format!("@{} (agent)", item.name),
-            description: Some(item.description.clone()),
-            selected: index == popup.selected,
-            tone: DisplayRowTone::Identity,
-            ..DisplayRow::default()
-        })
+    for (visual_index, (_, target)) in rows.iter().enumerate().take(area.height as usize) {
+        let Some(target) = *target else {
+            continue;
+        };
+        let rect = Rect {
+            x: area.x,
+            y: area.y.saturating_add(visual_index as u16),
+            width: area.width,
+            height: 1,
+        };
+        ui.last_completion_popup_areas.push((target, rect));
+        match target {
+            CompletionPopupTarget::Agent(index) => ui.last_agent_popup_areas.push((index, rect)),
+            CompletionPopupTarget::File(index) => ui.last_file_popup_areas.push((index, rect)),
+            CompletionPopupTarget::Skill(index) => ui.last_skill_popup_areas.push((index, rect)),
+        }
+    }
+
+    let display_rows = rows
+        .into_iter()
+        .map(|(row, _)| row)
         .collect::<Vec<_>>();
-    for index in 0..rows.len().min(area.height as usize) {
-        ui.last_agent_popup_areas.push((
-            index,
-            Rect {
-                x: area.x,
-                y: area.y.saturating_add(index as u16),
-                width: area.width,
-                height: 1,
-            },
-        ));
+    render_display_rows(area, frame.buffer_mut(), &display_rows);
+}
+
+fn completion_header_row(label: &str) -> DisplayRow {
+    DisplayRow {
+        marker: "  ",
+        label: label.to_string(),
+        tone: DisplayRowTone::Dim,
+        disabled: true,
+        ..DisplayRow::default()
     }
-    render_display_rows(area, frame.buffer_mut(), &rows);
 }
 
 pub(crate) fn render_status(

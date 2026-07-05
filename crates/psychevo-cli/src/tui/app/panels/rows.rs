@@ -112,7 +112,7 @@ pub(crate) fn agent_definition_row(
     let path = agent.file_path.clone();
     let state = if shadowed { "Shadowed" } else { "Active" };
     let editable = agent_definition_editable(source, path.as_ref());
-    let source_label = source.as_str().replace('_', "-");
+    let source_label = source.display_label();
     let entrypoints = agent.entrypoints.clone();
     let entrypoint_label = agent_entrypoint_label(&entrypoints);
     let current_main = current_agent.is_some_and(|current| {

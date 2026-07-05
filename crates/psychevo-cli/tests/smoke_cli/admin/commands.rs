@@ -385,7 +385,7 @@ decision = "prompt"
 }
 
 #[test]
-pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
+pub(crate) fn cli_tool_commands_list_and_toggle_profile_toolsets() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -486,8 +486,40 @@ pub(crate) fn cli_tool_commands_list_and_toggle_project_toolsets() {
         "stderr: {}",
         String::from_utf8_lossy(&removed.stderr)
     );
-    let config = std::fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("config");
+    let config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
     assert!(!config.contains("[toolsets.docs]"));
+
+    let local_created = admin_cmd(temp.path(), &psychevo_home, &cwd)
+        .args([
+            "tool",
+            "create",
+            "localdocs",
+            "--tool",
+            "web_fetch",
+            "--local",
+            "--json",
+        ])
+        .output()
+        .expect("tool create local");
+    assert!(
+        local_created.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&local_created.stderr)
+    );
+    let local_config =
+        std::fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("local config");
+    assert!(local_config.contains("[toolsets.localdocs]"));
+
+    let removed_global_flag = admin_cmd(temp.path(), &psychevo_home, &cwd)
+        .args(["tool", "disable", "web", "--global"])
+        .output()
+        .expect("tool global rejected");
+    assert!(!removed_global_flag.status.success());
+    let stderr = String::from_utf8_lossy(&removed_global_flag.stderr);
+    assert!(
+        stderr.contains("unexpected argument '--global'"),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]

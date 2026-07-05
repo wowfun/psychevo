@@ -399,18 +399,18 @@ pub(crate) fn user_shell_transcript_row_uses_prompt_surface_command_line() {
     );
     assert_eq!(
         buffer.cell((0, command_y)).expect("user shell marker").fg,
-        TUI_CYAN
+        TUI_ROLE_ACCENT
     );
     assert_eq!(
         buffer.cell((0, command_y)).expect("user shell marker").bg,
-        TUI_SURFACE_BG
+        TUI_ROLE_SURFACE_BG
     );
     assert_eq!(
         buffer
             .cell((30, command_y))
             .expect("user shell row padding")
             .bg,
-        TUI_SURFACE_BG
+        TUI_ROLE_SURFACE_BG
     );
     assert!(text.contains("└ feeds"), "{text}");
 }

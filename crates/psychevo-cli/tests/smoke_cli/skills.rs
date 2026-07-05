@@ -103,7 +103,15 @@ pub(crate) fn cli_skill_list_view_config_and_json() {
         String::from_utf8_lossy(&all.stderr)
     );
     let value: Value = serde_json::from_slice(&all.stdout).expect("json");
-    assert_eq!(value["count"], 0);
+    assert_eq!(value["count"], 1);
+    let reviewer = value["skills"]
+        .as_array()
+        .expect("skills array")
+        .iter()
+        .find(|skill| skill["name"] == "reviewer")
+        .expect("reviewer row");
+    assert_eq!(reviewer["enabled"], false);
+    assert_eq!(reviewer["prompt_visible"], false);
     assert!(
         value["diagnostics"]
             .as_array()

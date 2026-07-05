@@ -140,6 +140,13 @@ pub(crate) mod tests {
             Cli::try_parse_from(["pevo", "web", "restart", "--bind", "127.0.0.1:58081"])
                 .is_ok()
         );
+        let cli = Cli::try_parse_from(["pevo", "desktop", "--dir", "work"]).expect("desktop");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Desktop(DesktopArgs {
+                dir: Some(_),
+            }))
+        ));
         assert!(Cli::try_parse_from(["pevo", "doctor", "--json"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "doctor", "--live"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "setup", "--dry-run"]).is_ok());

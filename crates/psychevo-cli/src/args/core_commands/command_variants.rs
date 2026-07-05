@@ -111,18 +111,7 @@ pub(crate) struct ToolModeMutationArgs {
     pub(crate) name: String,
     #[arg(long, value_enum, default_value_t = ToolModeArg::Default, help = "Mode to change: default or plan")]
     pub(crate) mode: ToolModeArg,
-    #[arg(
-        short = 'g',
-        long = "global",
-        conflicts_with = "local",
-        help = "Write to the global Psychevo home scope"
-    )]
-    pub(crate) global: bool,
-    #[arg(
-        long,
-        conflicts_with = "global",
-        help = "Write to the current cwd .psychevo scope"
-    )]
+    #[arg(long, help = "Write to the current cwd .psychevo scope; default writes profile config")]
     pub(crate) local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
@@ -146,18 +135,7 @@ pub(crate) struct ToolCreateArgs {
         help = "Toolset to include; repeatable"
     )]
     pub(crate) includes: Vec<String>,
-    #[arg(
-        short = 'g',
-        long = "global",
-        conflicts_with = "local",
-        help = "Write to the global Psychevo home scope"
-    )]
-    pub(crate) global: bool,
-    #[arg(
-        long,
-        conflicts_with = "global",
-        help = "Write to the current cwd .psychevo scope"
-    )]
+    #[arg(long, help = "Write to the current cwd .psychevo scope; default writes profile config")]
     pub(crate) local: bool,
     #[arg(long, help = "Overwrite an existing custom toolset")]
     pub(crate) force: bool,
@@ -169,18 +147,7 @@ pub(crate) struct ToolCreateArgs {
 pub(crate) struct ToolRemoveArgs {
     #[arg(value_name = "NAME", help = "Custom toolset name")]
     pub(crate) name: String,
-    #[arg(
-        short = 'g',
-        long = "global",
-        conflicts_with = "local",
-        help = "Remove from the global Psychevo home scope"
-    )]
-    pub(crate) global: bool,
-    #[arg(
-        long,
-        conflicts_with = "global",
-        help = "Remove from the current cwd .psychevo scope"
-    )]
+    #[arg(long, help = "Remove from the current cwd .psychevo scope; default removes from profile config")]
     pub(crate) local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,

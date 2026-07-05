@@ -468,9 +468,9 @@ fn reject_alias_path_conflict(
 }
 
 const RESERVED_PROFILE_NAMES: &[&str] = &[
-    "acp", "agent", "agents", "auth", "config", "context", "doctor", "gateway", "help", "init",
-    "model", "pevo", "profile", "run", "serve", "session", "setup", "skill", "skills", "stats",
-    "tool", "tools", "tui", "web",
+    "acp", "agent", "agents", "auth", "config", "context", "desktop", "doctor", "gateway", "help",
+    "init", "model", "pevo", "profile", "run", "serve", "session", "setup", "skill", "skills",
+    "stats", "tool", "tools", "tui", "web",
 ];
 
 const RESERVED_ALIAS_NAMES: &[&str] = &[

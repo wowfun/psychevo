@@ -421,6 +421,72 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     }));
 }
 
+#[test]
+pub(crate) fn dynamic_slash_omits_disabled_hidden_and_collision_skills() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    fs::create_dir_all(app.cwd.join(".git")).expect("git marker");
+    let home_skills = app.home.join("skills");
+    let project_skills = app.cwd.join(".psychevo").join("skills");
+    fs::create_dir_all(&home_skills).expect("home skills");
+    fs::create_dir_all(&project_skills).expect("project skills");
+    fs::write(
+        home_skills.join("visible.md"),
+        "---\nname: visible\ndescription: Visible skill\n---\n\nbody\n",
+    )
+    .expect("visible");
+    fs::write(
+        home_skills.join("hidden.md"),
+        "---\nname: hidden\ndescription: Hidden skill\ndisable-model-invocation: true\n---\n\nbody\n",
+    )
+    .expect("hidden");
+    fs::write(
+        home_skills.join("disabled.md"),
+        "---\nname: disabled\ndescription: Disabled skill\n---\n\nbody\n",
+    )
+    .expect("disabled");
+    fs::write(
+        home_skills.join("same.md"),
+        "---\nname: same\ndescription: Global same\n---\n\nbody\n",
+    )
+    .expect("global same");
+    let project_same = project_skills.join("same");
+    fs::create_dir_all(&project_same).expect("project same");
+    fs::write(
+        project_same.join("SKILL.md"),
+        "---\nname: same\ndescription: Project same\n---\n\nbody\n",
+    )
+    .expect("project same");
+    psychevo_runtime::set_skill_enabled(
+        &app.home,
+        &app.cwd,
+        psychevo_runtime::SkillTarget::Global,
+        "disabled",
+        false,
+    )
+    .expect("disable skill");
+
+    let catalog = app.current_skill_catalog().expect("catalog");
+    assert!(catalog.skills.iter().any(|skill| skill.name == "disabled"));
+    assert_eq!(
+        catalog
+            .skills
+            .iter()
+            .filter(|skill| skill.name == "same")
+            .count(),
+        2
+    );
+    let commands = app
+        .slash_items()
+        .into_iter()
+        .map(|item| item.command)
+        .collect::<Vec<_>>();
+    assert!(commands.contains(&"/visible".to_string()));
+    assert!(!commands.contains(&"/hidden".to_string()));
+    assert!(!commands.contains(&"/disabled".to_string()));
+    assert!(!commands.contains(&"/same".to_string()));
+}
+
 #[tokio::test]
 pub(crate) async fn fullscreen_skills_command_lists_dynamic_entries_and_submits_dynamic_slash() {
     let temp = tempdir().expect("temp");

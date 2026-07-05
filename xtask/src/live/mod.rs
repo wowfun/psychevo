@@ -139,6 +139,7 @@ enum LiveStatus {
     Passed,
     Failed,
     Blocked,
+    Skipped,
 }
 
 #[derive(Debug)]
@@ -164,6 +165,17 @@ struct PlaywrightLiveContext {
     timeout_ms: u64,
     interval_ms: u64,
     prompt: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopLiveCapabilitySnapshot {
+    display_variables: Vec<String>,
+    native_runtime_available: bool,
+    os: &'static str,
+    provider_required: bool,
+    reason: Option<String>,
+    session: &'static str,
 }
 
 pub(crate) fn run(command: LiveCommand, root: &Path) -> Result<()> {
@@ -204,11 +216,9 @@ pub(crate) fn run(command: LiveCommand, root: &Path) -> Result<()> {
             } else {
                 print_run_summary(&run);
             }
-            if let Some(non_success) = run
-                .checks
-                .iter()
-                .find(|check| check.status != LiveStatus::Passed)
-            {
+            if let Some(non_success) = run.checks.iter().find(|check| {
+                check.status != LiveStatus::Passed && check.status != LiveStatus::Skipped
+            }) {
                 bail!(
                     "live check '{}' ended as {:?}; artifacts: {}",
                     non_success.id,
@@ -254,6 +264,7 @@ pub(crate) fn run_ci_single_provider_live(
         LiveStatus::Passed => 0,
         LiveStatus::Failed => 1,
         LiveStatus::Blocked => 2,
+        LiveStatus::Skipped => 0,
     };
     let detail = result
         .detail
@@ -412,6 +423,16 @@ fn run_check(
     log: Arc<Mutex<fs::File>>,
 ) -> Result<CheckResult> {
     match check.action {
+        LiveCheckAction::DesktopNativeSmoke { provider_required } => {
+            run_desktop_native_smoke_check(
+                root,
+                check_dir,
+                providers,
+                env_mode,
+                provider_required,
+                log,
+            )
+        }
         LiveCheckAction::ProviderSmoke => {
             run_provider_smoke_check(root, check_dir, providers, env_mode, log)
         }
@@ -440,6 +461,143 @@ fn run_check(
             log,
         ),
     }
+}
+
+fn run_desktop_native_smoke_check(
+    root: &Path,
+    check_dir: &Path,
+    providers: &[LiveProvider],
+    env_mode: LiveEnvMode,
+    provider_required: bool,
+    log: Arc<Mutex<fs::File>>,
+) -> Result<CheckResult> {
+    let mut environment = None;
+    let mut live_environment = None;
+    let mut provider = None;
+    if provider_required {
+        let prerequisites = match LivePrerequisites::load(root) {
+            Ok(prerequisites) => prerequisites,
+            Err(reason) => return blocked(log, reason),
+        };
+        let live_env = match prerequisites.resolve(env_mode, check_dir) {
+            Ok(live_env) => live_env,
+            Err(error) => return failed_result(log, format!("{error:#}"), None),
+        };
+        environment = Some(live_env.to_output());
+        live_environment = Some(live_env);
+        let Some(selected_provider) = providers.first().copied() else {
+            return blocked_with_env(log, "no live provider selected".to_string(), environment);
+        };
+        if !prerequisites.provider_credentials_available(&selected_provider) {
+            return blocked_with_env(
+                log,
+                format!(
+                    "{} credentials missing from .local/.psychevo-dev/.env",
+                    selected_provider.id
+                ),
+                environment,
+            );
+        }
+        provider = Some(selected_provider);
+    }
+
+    let skip_reason = desktop_native_skip_reason();
+    write_desktop_capability_snapshot(check_dir, provider_required, skip_reason.clone())?;
+    if let Some(reason) = skip_reason {
+        return skipped_with_env(log, reason, environment);
+    }
+    if !command_exists("pnpm") {
+        return blocked_with_env(
+            log,
+            "missing pnpm; run: cargo xtask doctor deps install --only playwright".to_string(),
+            environment,
+        );
+    }
+    let pevo_bin = match ensure_pevo_built(root, Arc::clone(&log))? {
+        Ok(path) => path,
+        Err(mut result) => {
+            result.environment = environment;
+            return Ok(result);
+        }
+    };
+
+    let wdio_artifact_root = check_dir.join("wdio");
+    fs::create_dir_all(&wdio_artifact_root)
+        .with_context(|| format!("create {}", wdio_artifact_root.display()))?;
+    let provider_token = provider.map(desktop_provider_live_token);
+    let floating_text = desktop_floating_live_text(provider_token.as_deref());
+
+    let mut build = ProcessCommand::new("pnpm");
+    build
+        .args(["--filter", "@psychevo/desktop", "tauri:wdio-build"])
+        .current_dir(root);
+    configure_desktop_wdio_command(
+        &mut build,
+        &wdio_artifact_root,
+        &floating_text,
+        live_environment.as_ref(),
+        provider,
+        Some(pevo_bin.as_path()),
+        provider_token.as_deref(),
+    );
+    let outcome = run_logged_process("desktop native WDIO build", &mut build, Arc::clone(&log))?;
+    if !outcome.passed {
+        return check_result_from_outcome(outcome, "Desktop native WDIO build failed", environment);
+    }
+
+    let mut wdio = ProcessCommand::new("pnpm");
+    wdio.args(["--filter", "@psychevo/desktop", "wdio"])
+        .current_dir(root);
+    configure_desktop_wdio_command(
+        &mut wdio,
+        &wdio_artifact_root,
+        &floating_text,
+        live_environment.as_ref(),
+        provider,
+        Some(pevo_bin.as_path()),
+        provider_token.as_deref(),
+    );
+    let outcome = run_logged_process("desktop native WDIO smoke", &mut wdio, log)?;
+    check_result_from_outcome(outcome, "Desktop native WDIO smoke failed", environment)
+}
+
+fn configure_desktop_wdio_command(
+    command: &mut ProcessCommand,
+    wdio_artifact_root: &Path,
+    floating_text: &str,
+    live_env: Option<&LiveEnvironment>,
+    provider: Option<LiveProvider>,
+    pevo_bin: Option<&Path>,
+    provider_token: Option<&str>,
+) {
+    if let (Some(live_env), Some(provider)) = (live_env, provider) {
+        live_env.apply_to_command(command, Some(provider));
+    }
+    if let Some(pevo_bin) = pevo_bin {
+        command.env("PSYCHEVO_PEVO_BIN", pevo_bin);
+    }
+    command
+        .env("PSYCHEVO_WDIO_ARTIFACT_ROOT", wdio_artifact_root)
+        .env("PSYCHEVO_FLOATING_TEXT", floating_text);
+    if let Some(token) = provider_token {
+        command
+            .env("PSYCHEVO_DESKTOP_PROVIDER_LIVE", "1")
+            .env("PSYCHEVO_FLOATING_PROVIDER_TOKEN", token);
+    }
+}
+
+fn desktop_provider_live_token(provider: LiveProvider) -> String {
+    format!(
+        "PEVO_DF_{}_OK",
+        provider.id.replace('-', "_").to_ascii_uppercase()
+    )
+}
+
+fn desktop_floating_live_text(provider_token: Option<&str>) -> String {
+    provider_token.map_or_else(
+        || "Psychevo floating live smoke selected text".to_string(),
+        |token| format!("Floating provider live token: {token}"),
+    )
 }
 
 fn run_provider_smoke_check(
@@ -961,6 +1119,96 @@ fn failed_result(
     })
 }
 
+fn skipped_with_env(
+    log: Arc<Mutex<fs::File>>,
+    reason: String,
+    environment: Option<LiveEnvironmentPathsOutput>,
+) -> Result<CheckResult> {
+    write_log_line(&log, &format!("skipped: {reason}"))?;
+    Ok(CheckResult {
+        status: LiveStatus::Skipped,
+        detail: Some(reason),
+        environment,
+    })
+}
+
+fn write_desktop_capability_snapshot(
+    check_dir: &Path,
+    provider_required: bool,
+    reason: Option<String>,
+) -> Result<()> {
+    let snapshot = DesktopLiveCapabilitySnapshot {
+        display_variables: observed_display_variables(),
+        native_runtime_available: reason.is_none(),
+        os: desktop_os(),
+        provider_required,
+        reason,
+        session: desktop_session(),
+    };
+    fs::write(
+        check_dir.join("capabilities.json"),
+        serde_json::to_vec_pretty(&snapshot)?,
+    )
+    .with_context(|| format!("write {}", check_dir.join("capabilities.json").display()))
+}
+
+fn desktop_native_skip_reason() -> Option<String> {
+    if desktop_os() == "linux" && !command_exists("pkg-config") {
+        return Some(
+            "native Tauri Linux prerequisites are unavailable: missing pkg-config".to_string(),
+        );
+    }
+    if desktop_os() == "linux" && desktop_session() == "unknown" {
+        return Some("native Desktop smoke requires an X11 or Wayland display session".to_string());
+    }
+    None
+}
+
+fn desktop_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    }
+}
+
+fn desktop_session() -> &'static str {
+    if desktop_os() != "linux" {
+        return "unknown";
+    }
+    match std::env::var("XDG_SESSION_TYPE")
+        .ok()
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("wayland") => "wayland",
+        Some("x11") => "x11",
+        _ if std::env::var("WAYLAND_DISPLAY").is_ok_and(|value| !value.trim().is_empty()) => {
+            "wayland"
+        }
+        _ if std::env::var("DISPLAY").is_ok_and(|value| !value.trim().is_empty()) => "x11",
+        _ => "unknown",
+    }
+}
+
+fn observed_display_variables() -> Vec<String> {
+    [
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XDG_SESSION_TYPE",
+        "XDG_CURRENT_DESKTOP",
+        "DESKTOP_SESSION",
+        "WSL_DISTRO_NAME",
+        "WSL_INTEROP",
+    ]
+    .into_iter()
+    .filter(|name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty()))
+    .map(str::to_string)
+    .collect()
+}
+
 fn provider_outputs(providers: &[LiveProvider]) -> Vec<ProviderOutput> {
     providers
         .iter()
@@ -1092,5 +1340,57 @@ mod tests {
         );
         assert_eq!(plan.providers[0].id, "deepseek");
         assert_eq!(plan.artifact_root.as_deref(), Some("/tmp/artifacts"));
+    }
+
+    #[test]
+    fn plan_expands_desktop_suite_with_provider_live_check() {
+        let plan = plan_output(
+            &LiveSelection {
+                checks: Vec::new(),
+                suites: vec!["desktop".to_string()],
+                all: false,
+                providers: Vec::new(),
+            },
+            LiveEnvMode::Shared,
+            None,
+        )
+        .expect("plan");
+        let planned = plan
+            .checks
+            .iter()
+            .map(|check| (check.id, check.command.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            planned,
+            vec![
+                (
+                    "desktop-native-smoke-live",
+                    vec![
+                        "xtask-internal".to_string(),
+                        "desktop-native-smoke".to_string(),
+                        "provider-required=false".to_string(),
+                    ],
+                ),
+                (
+                    "desktop-floating-provider-live",
+                    vec![
+                        "xtask-internal".to_string(),
+                        "desktop-native-smoke".to_string(),
+                        "provider-required=true".to_string(),
+                    ],
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn desktop_provider_live_probe_text_exposes_token_in_preview() {
+        let token = desktop_provider_live_token(registry::XIAOMI_TOKEN_PLAN);
+        let text = desktop_floating_live_text(Some(&token));
+        assert!(text.contains(&token));
+        assert!(
+            text.chars().count() <= 80,
+            "Desktop activation preview truncates after 80 characters: {text}"
+        );
     }
 }

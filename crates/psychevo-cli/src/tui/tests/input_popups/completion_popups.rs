@@ -445,6 +445,111 @@ pub(crate) async fn agent_popup_keyboard_selection_inserts_marker_without_submit
 }
 
 #[tokio::test]
+pub(crate) async fn at_popup_keyboard_reaches_file_rows_after_agent_rows() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("use @he");
+    ui.agent_search.popup = Some(AgentSearchPopupState {
+        query: "he".to_string(),
+        matches: vec![AgentSearchMatch {
+            name: "helper".to_string(),
+            description: "Helps with delegated code work".to_string(),
+            source_label: Some("Project".to_string()),
+        }],
+        selected: 0,
+    });
+    ui.file_search.popup = Some(FileSearchPopupState {
+        query: "he".to_string(),
+        matches: vec![FileSearchMatch {
+            path: "src/main.rs".to_string(),
+            kind: FileSearchMatchKind::File,
+        }],
+        selected: 0,
+        waiting: false,
+    });
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .expect("down");
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("enter");
+
+    assert_eq!(textarea_text(&ui.textarea), "use src/main.rs ");
+    assert!(ui.agent_search.popup.is_none());
+    assert!(ui.file_search.popup.is_none());
+    assert!(ui.history.is_empty());
+    assert!(ui.running.is_none());
+}
+
+#[test]
+pub(crate) fn at_popup_renders_agents_directories_and_files_grouped() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("use @he");
+    ui.agent_search.popup = Some(AgentSearchPopupState {
+        query: "he".to_string(),
+        matches: vec![AgentSearchMatch {
+            name: "helper".to_string(),
+            description: "Helps with delegated code work".to_string(),
+            source_label: Some("User".to_string()),
+        }],
+        selected: 0,
+    });
+    ui.file_search.popup = Some(FileSearchPopupState {
+        query: "he".to_string(),
+        matches: vec![
+            FileSearchMatch {
+                path: "src".to_string(),
+                kind: FileSearchMatchKind::Directory,
+            },
+            FileSearchMatch {
+                path: "src/main.rs".to_string(),
+                kind: FileSearchMatchKind::File,
+            },
+        ],
+        selected: 0,
+        waiting: false,
+    });
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 20);
+    let text = buffer_text(&buffer);
+
+    assert!(text.contains("Agents"), "{text}");
+    assert!(text.contains("@helper"), "{text}");
+    assert!(text.contains("User"), "{text}");
+    assert!(text.contains("Directories"), "{text}");
+    assert!(text.contains("src"), "{text}");
+    assert!(text.contains("Files"), "{text}");
+    assert!(text.contains("src/main.rs"), "{text}");
+    assert_eq!(ui.last_completion_popup_areas.len(), 3);
+    let first_row = ui.last_completion_popup_areas[0].1;
+    assert!(
+        ui.completion_popup_hit(first_row.x, first_row.y.saturating_sub(1))
+            .is_none()
+    );
+}
+
+#[test]
+pub(crate) fn skill_popup_renders_group_header_and_scope() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    write_tui_skill(&app, "helper", "Helps with focused edits");
+    let mut ui = FullscreenUi::new(&app);
+    ui.textarea = textarea_with_text("use $he");
+    app.sync_skill_popup(&mut ui);
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 18);
+    let text = buffer_text(&buffer);
+
+    assert!(text.contains("Skills"), "{text}");
+    assert!(text.contains("$helper"), "{text}");
+    assert!(text.contains("User"), "{text}");
+}
+
+#[tokio::test]
 pub(crate) async fn skill_popup_esc_dismisses_until_token_changes() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
@@ -537,6 +642,7 @@ pub(crate) async fn mouse_click_inserts_skill_popup_row_without_submitting() {
         matches: vec![SkillSearchMatch {
             name: "helper".to_string(),
             description: "Helps with focused edits".to_string(),
+            source_label: Some("Project".to_string()),
         }],
         selected: 0,
     });
@@ -579,6 +685,7 @@ pub(crate) async fn mouse_click_inserts_agent_popup_row_without_submitting() {
         matches: vec![AgentSearchMatch {
             name: "helper".to_string(),
             description: "Helps with delegated code work".to_string(),
+            source_label: Some("User".to_string()),
         }],
         selected: 0,
     });

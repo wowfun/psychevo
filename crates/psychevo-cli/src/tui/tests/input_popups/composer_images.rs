@@ -326,7 +326,7 @@ pub(crate) fn composer_ctrl_a_selection_is_highlighted() {
 
     assert!(cell.modifier.contains(Modifier::REVERSED));
     assert!(cell.modifier.contains(Modifier::BOLD));
-    assert_ne!(cell.bg, TUI_SELECTION_BG);
+    assert_ne!(cell.bg, TUI_ROLE_SELECTION_BG);
 }
 
 #[tokio::test]

@@ -822,17 +822,17 @@ pub(crate) fn buffer_style_text(buffer: &ratatui::buffer::Buffer) -> String {
 }
 
 pub(crate) fn style_marker(color: Color) -> &'static str {
-    if color == TUI_MAGENTA || color == Color::Magenta {
+    if color == TUI_ROLE_IDENTITY || color == Color::Magenta {
         "[magenta]"
-    } else if color == TUI_CYAN || color == Color::Cyan {
+    } else if color == TUI_ROLE_ACCENT || color == Color::Cyan {
         "[cyan]"
     } else if color == Color::Green {
         "[green]"
-    } else if color == TUI_RED || color == Color::Red {
+    } else if color == TUI_ROLE_DANGER || color == Color::Red {
         "[red]"
-    } else if color == TUI_DIM || color == Color::DarkGray {
+    } else if color == TUI_ROLE_DIM || color == Color::DarkGray {
         "[dim]"
-    } else if color == TUI_PAPER {
+    } else if color == TUI_ROLE_THINKING {
         "[paper]"
     } else {
         "[default]"

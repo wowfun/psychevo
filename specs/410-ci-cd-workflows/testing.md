@@ -43,6 +43,7 @@ cargo xtask live list --json
 cargo xtask live plan --json
 cargo xtask live plan --env isolated --json
 cargo xtask live plan --suite web --json
+cargo xtask live plan --suite desktop --json
 cargo xtask live plan --all --json
 cargo xtask ci plan --profile live --live-env isolated --json
 ```
@@ -71,6 +72,9 @@ cargo xtask ci run --profile rust-broad
 - `live plan --json` defaults to `environment.mode = "shared"`.
 - `live plan --env isolated --json` reports isolated mode without changing
   selected checks.
+- `live plan --suite desktop --json` includes `desktop-native-smoke-live` and
+  `desktop-floating-provider-live`; the provider-backed Floating check is
+  planned with the Desktop suite and does not require an additional opt-in flag.
 - `ci plan/run --profile live --live-env isolated` mirrors the live registry
   environment mode, and `--live-env` is rejected for non-live profiles.
 - `ci plan --profile package --json` marks the profile as artifact-only CD and

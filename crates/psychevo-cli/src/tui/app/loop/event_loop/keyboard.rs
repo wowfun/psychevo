@@ -111,100 +111,33 @@ impl TuiApp {
             }
             return Ok(false);
         }
-        if ui.agent_popup_visible() {
+        if ui.completion_popup_visible() {
             match key.code {
                 KeyCode::Up => {
-                    ui.move_agent_popup_selection(-1);
+                    ui.move_completion_popup_selection(-1);
                     return Ok(false);
                 }
                 KeyCode::Down => {
-                    ui.move_agent_popup_selection(1);
+                    ui.move_completion_popup_selection(1);
                     return Ok(false);
                 }
                 KeyCode::Home => {
-                    ui.set_agent_popup_selection(0);
+                    ui.set_completion_popup_selection(0);
                     return Ok(false);
                 }
                 KeyCode::End => {
-                    ui.set_agent_popup_selection(FILE_POPUP_MAX_ROWS.saturating_sub(1));
+                    ui.set_completion_popup_selection(
+                        ui.completion_popup_selectable_count().saturating_sub(1),
+                    );
                     return Ok(false);
                 }
                 KeyCode::Esc => {
-                    ui.dismiss_agent_popup();
+                    ui.dismiss_completion_popup();
                     return Ok(false);
                 }
-                KeyCode::Tab | KeyCode::Enter if ui.selected_agent_name().is_some() => {
-                    ui.insert_selected_agent_marker();
-                    self.sync_agent_popup(ui);
-                    self.sync_skill_popup(ui);
-                    return Ok(false);
-                }
-                _ => {}
-            }
-        }
-        if ui.file_popup_visible() {
-            match key.code {
-                KeyCode::Up => {
-                    ui.move_file_popup_selection(-1);
-                    return Ok(false);
-                }
-                KeyCode::Down => {
-                    ui.move_file_popup_selection(1);
-                    return Ok(false);
-                }
-                KeyCode::Home => {
-                    ui.set_file_popup_selection(0);
-                    return Ok(false);
-                }
-                KeyCode::End => {
-                    ui.set_file_popup_selection(FILE_POPUP_MAX_ROWS.saturating_sub(1));
-                    return Ok(false);
-                }
-                KeyCode::Esc => {
-                    ui.dismiss_file_popup();
-                    return Ok(false);
-                }
-                KeyCode::Tab => {
-                    ui.insert_selected_file_path();
+                KeyCode::Tab | KeyCode::Enter if ui.selected_completion_popup_target().is_some() => {
+                    ui.insert_selected_completion_popup_item();
                     ui.sync_file_popup(&self.cwd);
-                    self.sync_agent_popup(ui);
-                    self.sync_skill_popup(ui);
-                    return Ok(false);
-                }
-                KeyCode::Enter if ui.selected_file_path().is_some() => {
-                    ui.insert_selected_file_path();
-                    ui.sync_file_popup(&self.cwd);
-                    self.sync_agent_popup(ui);
-                    self.sync_skill_popup(ui);
-                    return Ok(false);
-                }
-                _ => {}
-            }
-        }
-        if ui.skill_popup_visible() {
-            match key.code {
-                KeyCode::Up => {
-                    ui.move_skill_popup_selection(-1);
-                    return Ok(false);
-                }
-                KeyCode::Down => {
-                    ui.move_skill_popup_selection(1);
-                    return Ok(false);
-                }
-                KeyCode::Home => {
-                    ui.set_skill_popup_selection(0);
-                    return Ok(false);
-                }
-                KeyCode::End => {
-                    ui.set_skill_popup_selection(FILE_POPUP_MAX_ROWS.saturating_sub(1));
-                    return Ok(false);
-                }
-                KeyCode::Esc => {
-                    ui.dismiss_skill_popup();
-                    return Ok(false);
-                }
-                KeyCode::Tab | KeyCode::Enter if ui.selected_skill_name().is_some() => {
-                    ui.insert_selected_skill_marker();
                     self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                     return Ok(false);

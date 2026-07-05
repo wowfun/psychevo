@@ -593,8 +593,8 @@ pub(crate) fn prompt_block_uses_full_width_background_without_left_rail() {
     let buffer = terminal.backend().buffer();
 
     assert_eq!(buffer.cell((0, 0)).expect("cell").symbol(), "›");
-    assert_eq!(buffer.cell((0, 0)).expect("cell").bg, TUI_SURFACE_BG);
-    assert_eq!(buffer.cell((47, 0)).expect("cell").bg, TUI_SURFACE_BG);
+    assert_eq!(buffer.cell((0, 0)).expect("cell").bg, TUI_ROLE_SURFACE_BG);
+    assert_eq!(buffer.cell((47, 0)).expect("cell").bg, TUI_ROLE_SURFACE_BG);
     assert_ne!(buffer.cell((0, 0)).expect("cell").symbol(), "▌");
 }
 
@@ -620,21 +620,24 @@ pub(crate) fn composer_and_prompt_share_full_width_surface() {
             .symbol(),
         "›"
     );
-    assert_eq!(buffer.cell((0, 0)).expect("prompt bg").bg, TUI_SURFACE_BG);
+    assert_eq!(
+        buffer.cell((0, 0)).expect("prompt bg").bg,
+        TUI_ROLE_SURFACE_BG
+    );
     assert_eq!(
         buffer.cell((47, 0)).expect("prompt trailing bg").bg,
-        TUI_SURFACE_BG
+        TUI_ROLE_SURFACE_BG
     );
     assert_eq!(
         buffer.cell((0, composer_y)).expect("composer bg").bg,
-        TUI_SURFACE_BG
+        TUI_ROLE_SURFACE_BG
     );
     assert_eq!(
         buffer
             .cell((47, composer_y))
             .expect("composer trailing bg")
             .bg,
-        TUI_SURFACE_BG
+        TUI_ROLE_SURFACE_BG
     );
     assert_ne!(
         buffer
@@ -666,12 +669,12 @@ pub(crate) fn wrapped_prompt_rows_keep_full_width_background_for_wide_text() {
     for y in 0..=1 {
         assert_eq!(
             buffer.cell((0, y)).expect("row start").bg,
-            TUI_SURFACE_BG,
+            TUI_ROLE_SURFACE_BG,
             "row {y} start"
         );
         assert_eq!(
             buffer.cell((23, y)).expect("row end").bg,
-            TUI_SURFACE_BG,
+            TUI_ROLE_SURFACE_BG,
             "row {y} end"
         );
     }
@@ -699,11 +702,11 @@ pub(crate) fn empty_composer_uses_one_surface_row() {
     );
     assert_eq!(
         buffer.cell((0, composer_y)).expect("composer row start").bg,
-        TUI_SURFACE_BG
+        TUI_ROLE_SURFACE_BG
     );
     assert_eq!(
         buffer.cell((47, composer_y)).expect("composer row end").bg,
-        TUI_SURFACE_BG
+        TUI_ROLE_SURFACE_BG
     );
 }
 

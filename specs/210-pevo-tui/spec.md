@@ -12,6 +12,10 @@ and routes live coding-agent turns through `psychevo-gateway`. Runtime remains
 the execution and persistence kernel behind Gateway. For interactive
 terminals, `pevo tui` is a fullscreen terminal UI. For non-terminal
 stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
+TUI visual roles map to `075` `DESIGN.md` roles such as accent, identity,
+danger, dim, thinking, surface, and selection. The implementation may keep
+ANSI16/ANSI256/truecolor fallbacks and host palette probing, but local color
+constants should express those semantic roles rather than a separate TUI theme.
 
 ## Scope
 

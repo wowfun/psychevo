@@ -1,6 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 680
+assertion_line: 732
 expression: combined
 ---
 fixture=slash_menu_prefix_filtering
@@ -24,8 +24,8 @@ size=120x24
 
 
 
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Commands
 › /model  configure model
   /mode  set collaboration mode
   /permissions  view/edit permission policy
@@ -50,8 +50,8 @@ mock/model  high  ~/work · main
 [default]
 [default]
 [default]
-[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[cyan]  [dim]Commands[default]
 [cyan]› /model[default]  [dim]configure model[default]
 [cyan]  /mode[default]  [dim]set collaboration mode[default]
 [cyan]  /permissions[default]  [dim]view/edit permission policy[default]

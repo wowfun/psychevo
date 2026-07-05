@@ -170,6 +170,13 @@ impl TuiApp {
         }
         if let Some(catalog) = self.current_skill_catalog() {
             for skill in catalog.skills {
+                if !skill.enabled
+                    || skill.disable_model_invocation
+                    || !skill.supported_on_current_platform
+                    || !skill.collision_group.is_empty()
+                {
+                    continue;
+                }
                 if dynamic_names.contains(&skill.name) {
                     continue;
                 }
@@ -207,6 +214,10 @@ impl TuiApp {
                         SkillSearchMatch {
                             name: skill.name,
                             description: skill.description,
+                            source_label: psychevo_runtime::skill_source_display_label(Some(
+                                skill.source.as_str(),
+                            ))
+                            .map(ToString::to_string),
                         },
                     )
                 })
@@ -239,6 +250,10 @@ impl TuiApp {
                         AgentSearchMatch {
                             name: agent.name,
                             description: agent.description,
+                            source_label: psychevo_runtime::agent_source_display_label(Some(
+                                agent.source.as_str(),
+                            ))
+                            .map(ToString::to_string),
                         },
                     )
                 })
@@ -266,13 +281,11 @@ impl TuiApp {
             return;
         };
         ui.sync_agent_popup(self.agent_search_matches(&token.query));
-        if ui.agent_popup_visible() {
-            ui.close_file_popup();
-        }
     }
 
     pub(crate) fn sync_skill_popup(&self, ui: &mut FullscreenUi<'_>) {
-        if ui.shell_mode || ui.current_file_token().is_some() || ui.agent_popup_visible() {
+        if ui.shell_mode || ui.current_file_token().is_some() || ui.current_agent_token().is_some()
+        {
             ui.close_skill_popup();
             return;
         }

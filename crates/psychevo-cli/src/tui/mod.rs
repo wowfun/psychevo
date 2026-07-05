@@ -105,6 +105,14 @@ pub(crate) const TUI_CONTINUE_SESSION_SOURCES: &[&str] = &["run", "tui"];
 pub(crate) const TUI_INTERNAL_SESSION_SOURCES: &[&str] = &[TUI_SIDE_CONVERSATION_SESSION_SOURCE];
 pub(crate) const USER_SHELL_HELP: &str = "shell mode: type !<command> to run a local shell command";
 pub(crate) const FILE_POPUP_MAX_ROWS: usize = 8;
+pub(crate) const COMPLETION_POPUP_MAX_ROWS: usize = FILE_POPUP_MAX_ROWS + 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompletionPopupTarget {
+    Agent(usize),
+    File(usize),
+    Skill(usize),
+}
 
 pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let env_map = inherited_env();

@@ -107,6 +107,13 @@ Registered live checks:
 - `runtime-provider-read`: runtime ignored live provider read-tool check.
 - `runtime-model-fetch`: runtime ignored Xiaomi `/models` fetch/cache check.
 - `gateway-automation-live`: gateway automation ignored live check.
+- `desktop-native-smoke-live`: native Desktop/Floating WebDriverIO smoke
+  without provider calls.
+- `desktop-floating-provider-live`: native Floating provider validation through
+  Desktop. This check belongs to the Desktop live suite and is triggered with
+  the other Desktop live checks by `cargo xtask live run --suite desktop`; it
+  uses the live runner's normal live invocation and credential resolution
+  rather than a separate opt-in gate.
 - `web-composer-live`: Workbench real-provider composer check.
 - `web-automation-live`: Workbench GUI automation live check.
 - `web-subagent-live`: Workbench live subagent GUI check.
@@ -131,6 +138,8 @@ Suites:
   live.
 - `web`: Workbench composer, automation, and subagent live checks.
 - `skill`: live skill check.
+- `desktop`: native Desktop/Floating smoke and provider-backed Floating live
+  checks.
 - `acp`: OpenCode ACP live checks and Psychevo ACP server live validation.
 - `automation`: gateway automation and Web automation live checks.
 - `all`: all registered checks.

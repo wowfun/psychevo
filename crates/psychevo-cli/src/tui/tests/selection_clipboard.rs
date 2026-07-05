@@ -303,7 +303,7 @@ pub(crate) fn multiline_transcript_selection_ignores_same_row_sidebar_text() {
         .cell((sidebar_row.0, sidebar_row.1))
         .expect("sidebar cell");
     assert!(!sidebar_cell.modifier.contains(Modifier::REVERSED));
-    assert_ne!(sidebar_cell.bg, TUI_SELECTION_BG);
+    assert_ne!(sidebar_cell.bg, TUI_ROLE_SELECTION_BG);
 }
 
 #[tokio::test]
@@ -319,11 +319,11 @@ pub(crate) async fn active_selection_highlights_rendered_buffer_and_esc_clears()
     let start = buffer.cell((2, 0)).expect("highlight start");
     assert!(start.modifier.contains(Modifier::REVERSED));
     assert!(start.modifier.contains(Modifier::BOLD));
-    assert_ne!(start.bg, TUI_SELECTION_BG);
+    assert_ne!(start.bg, TUI_ROLE_SELECTION_BG);
     let end = buffer.cell((5, 0)).expect("highlight end");
     assert!(end.modifier.contains(Modifier::REVERSED));
     assert!(end.modifier.contains(Modifier::BOLD));
-    assert_ne!(end.bg, TUI_SELECTION_BG);
+    assert_ne!(end.bg, TUI_ROLE_SELECTION_BG);
     let outside = buffer.cell((6, 0)).expect("outside highlight");
     assert!(!outside.modifier.contains(Modifier::REVERSED));
 

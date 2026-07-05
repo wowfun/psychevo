@@ -5,6 +5,7 @@ use std::process::Command as ProcessCommand;
 use anyhow::{Context, Result, anyhow, bail};
 
 use super::artifacts::{default_artifact_root, display_path};
+use super::desktop_visual::run_desktop_visual;
 use super::model::{
     CiEnvironmentOutput, RunOutput, StepRunOutput, StepStatus, WorkflowProfile, WorkflowStep,
     WorkflowStepAction,
@@ -120,6 +121,9 @@ fn run_step(
         WorkflowStepAction::SingleProviderLive => {
             run_single_provider_live_step(root, artifact_root, profile, step, live_env, log_path)
         }
+        WorkflowStepAction::DesktopVisual => {
+            run_desktop_visual_step(root, artifact_root, step, log_path)
+        }
         WorkflowStepAction::TuiVhsDemo => {
             run_tui_vhs_demo_step(root, artifact_root, step, log_path)
         }
@@ -170,6 +174,29 @@ fn run_tui_vhs_demo_step(
 ) -> Result<StepExecution> {
     let log = create_step_log(log_path)?;
     let outcome = run_tui_vhs_demo(root, artifact_root, log)?;
+    println!(
+        "ci step {}: {}",
+        step.id,
+        if outcome.passed { "ok" } else { "failed" }
+    );
+    Ok(step_execution(
+        step,
+        log_path,
+        step.action.command_for_plan(),
+        outcome.passed,
+        outcome.exit_code,
+        outcome.mirrored_diagnostics,
+    ))
+}
+
+fn run_desktop_visual_step(
+    root: &Path,
+    artifact_root: &Path,
+    step: &WorkflowStep,
+    log_path: &Path,
+) -> Result<StepExecution> {
+    let log = create_step_log(log_path)?;
+    let outcome = run_desktop_visual(root, artifact_root, log)?;
     println!(
         "ci step {}: {}",
         step.id,

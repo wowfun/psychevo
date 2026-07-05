@@ -15,6 +15,9 @@ pub(crate) struct LiveCheck {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LiveCheckAction {
+    DesktopNativeSmoke {
+        provider_required: bool,
+    },
     ProviderSmoke,
     PevoDoctorLive,
     CargoIgnoredTest {
@@ -100,6 +103,22 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo-gateway",
             test: "live_xiaomi_token_plan_automation_manual_run_completes",
+        },
+    },
+    LiveCheck {
+        id: "desktop-native-smoke-live",
+        description: "Run native Desktop/Floating smoke validation without provider calls",
+        suites: &["desktop"],
+        action: LiveCheckAction::DesktopNativeSmoke {
+            provider_required: false,
+        },
+    },
+    LiveCheck {
+        id: "desktop-floating-provider-live",
+        description: "Run native Floating provider validation through Desktop",
+        suites: &["desktop"],
+        action: LiveCheckAction::DesktopNativeSmoke {
+            provider_required: true,
         },
     },
     LiveCheck {
@@ -197,6 +216,10 @@ pub(crate) const LIVE_SUITES: &[LiveSuite] = &[
     LiveSuite {
         id: "skill",
         description: "Workbench live skill check",
+    },
+    LiveSuite {
+        id: "desktop",
+        description: "Native Desktop and Floating live checks",
     },
     LiveSuite {
         id: "acp",
@@ -303,6 +326,11 @@ fn add_suite_checks(suite: &str, selected: &mut BTreeSet<String>) -> Result<()> 
 
 pub(crate) fn command_for_plan(check: &LiveCheck) -> Vec<String> {
     match check.action {
+        LiveCheckAction::DesktopNativeSmoke { provider_required } => vec![
+            "xtask-internal".to_string(),
+            "desktop-native-smoke".to_string(),
+            format!("provider-required={provider_required}"),
+        ],
         LiveCheckAction::ProviderSmoke => {
             vec!["xtask-internal".to_string(), "provider-smoke".to_string()]
         }
@@ -365,6 +393,37 @@ mod tests {
                 "web-composer-live",
                 "web-automation-live",
                 "web-subagent-live",
+            ]
+        );
+    }
+
+    #[test]
+    fn desktop_suite_includes_native_and_provider_checks() {
+        let checks = select_checks(&LiveSelection {
+            checks: Vec::new(),
+            suites: vec!["desktop".to_string()],
+            all: false,
+            providers: Vec::new(),
+        })
+        .expect("checks");
+        assert_eq!(
+            checks.iter().map(|check| check.id).collect::<Vec<_>>(),
+            vec![
+                "desktop-native-smoke-live",
+                "desktop-floating-provider-live"
+            ]
+        );
+    }
+
+    #[test]
+    fn desktop_provider_live_is_planned_as_provider_backed() {
+        let check = check_by_id("desktop-floating-provider-live").expect("desktop check");
+        assert_eq!(
+            command_for_plan(check),
+            vec![
+                "xtask-internal".to_string(),
+                "desktop-native-smoke".to_string(),
+                "provider-required=true".to_string(),
             ]
         );
     }

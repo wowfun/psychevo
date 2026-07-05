@@ -3,13 +3,13 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-pub(crate) const TUI_CYAN: Color = Color::Cyan;
-pub(crate) const TUI_MAGENTA: Color = Color::Magenta;
-pub(crate) const TUI_RED: Color = Color::Red;
-pub(crate) const TUI_DIM: Color = Color::DarkGray;
-pub(crate) const TUI_PAPER: Color = Color::Rgb(216, 205, 184);
-pub(crate) const TUI_SURFACE_BG: Color = Color::Rgb(38, 38, 38);
-pub(crate) const TUI_SELECTION_BG: Color = Color::Rgb(62, 88, 105);
+pub(crate) const TUI_ROLE_ACCENT: Color = Color::Cyan;
+pub(crate) const TUI_ROLE_IDENTITY: Color = Color::Magenta;
+pub(crate) const TUI_ROLE_DANGER: Color = Color::Red;
+pub(crate) const TUI_ROLE_DIM: Color = Color::DarkGray;
+pub(crate) const TUI_ROLE_THINKING: Color = Color::Rgb(216, 205, 184);
+pub(crate) const TUI_ROLE_SURFACE_BG: Color = Color::Rgb(38, 38, 38);
+pub(crate) const TUI_ROLE_SELECTION_BG: Color = Color::Rgb(62, 88, 105);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum TranscriptKind {

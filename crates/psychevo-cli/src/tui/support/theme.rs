@@ -101,39 +101,39 @@ impl TuiTheme {
             (246, 178, 127)
         };
         Self {
-            surface_bg: best_theme_color(surface, color_level).unwrap_or(TUI_SURFACE_BG),
+            surface_bg: best_theme_color(surface, color_level).unwrap_or(TUI_ROLE_SURFACE_BG),
             menu_bg: best_theme_color(menu, color_level).unwrap_or(Color::Rgb(16, 16, 20)),
             menu_selected_bg: best_theme_color(selected, color_level)
                 .unwrap_or(Color::Rgb(24, 24, 28)),
-            selection_bg: best_theme_color(selected, color_level).unwrap_or(TUI_SELECTION_BG),
+            selection_bg: best_theme_color(selected, color_level).unwrap_or(TUI_ROLE_SELECTION_BG),
             panel_field_bg: best_theme_color(field, color_level)
                 .unwrap_or(Color::Rgb(246, 178, 127)),
             panel_field_fg: if light { Color::Reset } else { Color::Black },
-            accent: best_theme_color(accent_rgb, color_level).unwrap_or(TUI_CYAN),
-            identity: TUI_MAGENTA,
+            accent: best_theme_color(accent_rgb, color_level).unwrap_or(TUI_ROLE_ACCENT),
+            identity: TUI_ROLE_IDENTITY,
             success: Color::Green,
-            error: TUI_RED,
-            dim: TUI_DIM,
-            thinking: TUI_PAPER,
-            code: best_theme_color(accent_rgb, color_level).unwrap_or(TUI_CYAN),
+            error: TUI_ROLE_DANGER,
+            dim: TUI_ROLE_DIM,
+            thinking: TUI_ROLE_THINKING,
+            code: best_theme_color(accent_rgb, color_level).unwrap_or(TUI_ROLE_ACCENT),
         }
     }
 
     pub(crate) fn fallback() -> Self {
         Self {
-            surface_bg: TUI_SURFACE_BG,
+            surface_bg: TUI_ROLE_SURFACE_BG,
             menu_bg: Color::Rgb(16, 16, 20),
             menu_selected_bg: Color::Rgb(24, 24, 28),
-            selection_bg: TUI_SELECTION_BG,
+            selection_bg: TUI_ROLE_SELECTION_BG,
             panel_field_bg: Color::Rgb(246, 178, 127),
             panel_field_fg: Color::Black,
-            accent: TUI_CYAN,
-            identity: TUI_MAGENTA,
+            accent: TUI_ROLE_ACCENT,
+            identity: TUI_ROLE_IDENTITY,
             success: Color::Green,
-            error: TUI_RED,
-            dim: TUI_DIM,
-            thinking: TUI_PAPER,
-            code: TUI_CYAN,
+            error: TUI_ROLE_DANGER,
+            dim: TUI_ROLE_DIM,
+            thinking: TUI_ROLE_THINKING,
+            code: TUI_ROLE_ACCENT,
         }
     }
 

@@ -288,6 +288,7 @@ impl TuiApp {
             ui.last_file_popup_areas.clear();
             ui.last_agent_popup_areas.clear();
             ui.last_skill_popup_areas.clear();
+            ui.last_completion_popup_areas.clear();
             let panel_height = ui
                 .bottom_panel
                 .as_ref()
@@ -342,14 +343,11 @@ impl TuiApp {
             composer_input_width(main.width, ui.shell_mode, ui.textarea.is_empty());
         let composer_height = composer_height(&ui.textarea, editable_width);
         let pending_preview_height = pending_input_preview_height(ui, main.width);
-        let file_popup_height = ui.file_popup_height();
-        let agent_popup_height = ui.agent_popup_height();
-        let skill_popup_height = ui.skill_popup_height();
+        ui.clamp_completion_popup_selection();
+        let completion_popup_height = ui.completion_popup_height();
         let composer_text = textarea_text(&ui.textarea);
         let slash_items = if !ui.textarea.is_selecting()
-            && file_popup_height == 0
-            && agent_popup_height == 0
-            && skill_popup_height == 0
+            && completion_popup_height == 0
         {
             if ui.slash_menu_dismissed(&composer_text) {
                 Vec::new()
@@ -361,24 +359,19 @@ impl TuiApp {
         };
         ui.clamp_slash_menu_selection(slash_items.len());
         ui.last_bottom_panel_areas.clear();
-        if file_popup_height == 0 {
+        if completion_popup_height == 0 {
             ui.last_file_popup_areas.clear();
-        }
-        if agent_popup_height == 0 {
             ui.last_agent_popup_areas.clear();
-        }
-        if skill_popup_height == 0 {
             ui.last_skill_popup_areas.clear();
+            ui.last_completion_popup_areas.clear();
         }
         let slash_height = if slash_items.is_empty() {
             0
         } else {
-            (slash_items.len() as u16).min(FILE_POPUP_MAX_ROWS as u16)
+            (slash_items.len().saturating_add(1) as u16)
+                .min(COMPLETION_POPUP_MAX_ROWS as u16)
         };
-        let popup_height = agent_popup_height
-            .max(file_popup_height)
-            .max(skill_popup_height)
-            .max(slash_height);
+        let popup_height = completion_popup_height.max(slash_height);
         let vertical = if popup_height == 0 {
             Layout::default()
                 .direction(Direction::Vertical)
@@ -407,24 +400,10 @@ impl TuiApp {
             render_pending_input_preview(frame, vertical[1], ui);
             render_composer(frame, vertical[2], ui);
             render_status(frame, vertical[3], self, ui);
-        } else if agent_popup_height > 0 {
+        } else if completion_popup_height > 0 {
             ui.set_render_areas(vertical[0], Some(vertical[3]), vertical[4], None);
             render_transcript(frame, vertical[0], ui, session_identity.as_deref());
-            render_agent_popup(frame, vertical[1], ui);
-            render_pending_input_preview(frame, vertical[2], ui);
-            render_composer(frame, vertical[3], ui);
-            render_status(frame, vertical[4], self, ui);
-        } else if file_popup_height > 0 {
-            ui.set_render_areas(vertical[0], Some(vertical[3]), vertical[4], None);
-            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
-            render_file_popup(frame, vertical[1], ui);
-            render_pending_input_preview(frame, vertical[2], ui);
-            render_composer(frame, vertical[3], ui);
-            render_status(frame, vertical[4], self, ui);
-        } else if skill_popup_height > 0 {
-            ui.set_render_areas(vertical[0], Some(vertical[3]), vertical[4], None);
-            render_transcript(frame, vertical[0], ui, session_identity.as_deref());
-            render_skill_popup(frame, vertical[1], ui);
+            render_completion_popup(frame, vertical[1], ui);
             render_pending_input_preview(frame, vertical[2], ui);
             render_composer(frame, vertical[3], ui);
             render_status(frame, vertical[4], self, ui);

@@ -73,6 +73,11 @@ pub(crate) enum Commands {
     )]
     Web(WebArgs),
     #[command(
+        about = "Open the native Desktop app from a source checkout",
+        long_about = "Open the native Desktop app from a Psychevo source checkout by running the existing @psychevo/desktop Tauri development entrypoint."
+    )]
+    Desktop(DesktopArgs),
+    #[command(
         about = "Run the headless local Gateway API server",
         long_about = "Run the headless local Gateway API server on loopback. The command emits one ready JSON object on stdout and writes logs to stderr."
     )]
@@ -95,6 +100,7 @@ pub(crate) enum Commands {
 }
 
 include!("global_args/basic_profile.rs");
+include!("global_args/desktop.rs");
 include!("global_args/gateway.rs");
 include!("global_args/run_stats_context.rs");
 include!("global_args/skills_entry.rs");

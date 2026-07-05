@@ -1,4 +1,5 @@
 pub(crate) mod artifacts;
+mod desktop_visual;
 mod model;
 pub(crate) mod process;
 mod profiles;

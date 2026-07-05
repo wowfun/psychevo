@@ -3,6 +3,7 @@ pub(crate) mod auth;
 pub(crate) mod common;
 pub(crate) mod config;
 pub(crate) mod context;
+pub(crate) mod desktop;
 pub(crate) mod doctor;
 pub(crate) mod gateway;
 pub(crate) mod hooks;

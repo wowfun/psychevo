@@ -12,9 +12,7 @@ use crate::args::{
     ToolArgs, ToolCommand, ToolCreateArgs, ToolListArgs, ToolModeMutationArgs, ToolRemoveArgs,
     ToolShowArgs,
 };
-use crate::commands::common::{
-    base_run_options, print_json_error, scoped_config_dir, scoped_label,
-};
+use crate::commands::common::{base_run_options, config_scope_dir, print_json_error, scope_label};
 use crate::env::{inherited_env, resolve_psychevo_home};
 
 pub(crate) fn run_tool_command(args: ToolArgs) -> Result<ExitCode> {
@@ -74,13 +72,13 @@ pub(crate) fn show_toolset(args: &ToolShowArgs) -> Result<()> {
 pub(crate) fn set_toolset_enabled(args: &ToolModeMutationArgs, enabled: bool) -> Result<()> {
     let (env_map, home, cwd) = command_context()?;
     let result = set_local_toolset_enabled(
-        scoped_config_dir(&home, &cwd, args.global)?,
+        config_scope_dir(&home, &cwd, args.local)?,
         args.mode.run_mode(),
         &args.name,
         enabled,
     )?;
     let value = json!({
-        "scope": scoped_label(args.global),
+        "scope": scope_label(args.local),
         "path": result.config_path,
         "name": result.name,
         "mode": args.mode.run_mode().as_str(),
@@ -105,7 +103,7 @@ pub(crate) fn set_toolset_enabled(args: &ToolModeMutationArgs, enabled: bool) ->
 pub(crate) fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
     let (_env_map, home, cwd) = command_context()?;
     let result = create_local_toolset(
-        scoped_config_dir(&home, &cwd, args.global)?,
+        config_scope_dir(&home, &cwd, args.local)?,
         &args.name,
         args.description.clone(),
         args.tools.clone(),
@@ -113,7 +111,7 @@ pub(crate) fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
         args.force,
     )?;
     let value = json!({
-        "scope": scoped_label(args.global),
+        "scope": scope_label(args.local),
         "path": result.config_path,
         "name": result.name,
         "changed": result.changed,
@@ -130,9 +128,9 @@ pub(crate) fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
 
 pub(crate) fn remove_toolset(args: &ToolRemoveArgs) -> Result<()> {
     let (_env_map, home, cwd) = command_context()?;
-    let result = remove_local_toolset(scoped_config_dir(&home, &cwd, args.global)?, &args.name)?;
+    let result = remove_local_toolset(config_scope_dir(&home, &cwd, args.local)?, &args.name)?;
     let value = json!({
-        "scope": scoped_label(args.global),
+        "scope": scope_label(args.local),
         "path": result.config_path,
         "name": result.name,
         "changed": result.changed,

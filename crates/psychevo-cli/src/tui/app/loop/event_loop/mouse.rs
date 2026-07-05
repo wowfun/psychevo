@@ -48,16 +48,25 @@ impl TuiApp {
                         .as_ref()
                         .and_then(BottomPanel::selected_value);
                     self.apply_bottom_panel_selection(ui, selected)?;
+                } else if let Some(target) = ui.completion_popup_hit(mouse.column, mouse.row) {
+                    ui.clear_selection();
+                    ui.set_completion_popup_target_selection(target);
+                    ui.insert_selected_completion_popup_item();
+                    ui.sync_file_popup(&self.cwd);
+                    self.sync_agent_popup(ui);
+                    self.sync_skill_popup(ui);
                 } else if let Some(index) = ui.agent_popup_hit(mouse.column, mouse.row) {
                     ui.clear_selection();
                     ui.set_agent_popup_selection(index);
                     ui.insert_selected_agent_marker();
+                    ui.close_file_popup();
                     self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
                 } else if let Some(index) = ui.file_popup_hit(mouse.column, mouse.row) {
                     ui.clear_selection();
                     ui.set_file_popup_selection(index);
                     ui.insert_selected_file_path();
+                    ui.close_agent_popup();
                     ui.sync_file_popup(&self.cwd);
                     self.sync_agent_popup(ui);
                     self.sync_skill_popup(ui);
