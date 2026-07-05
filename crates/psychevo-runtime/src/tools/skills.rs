@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+use crate::skills::{find_skill, skill_prompt_visible_for_activation};
 #[derive(Clone)]
 pub(crate) struct ListSkillsTool {
     pub(crate) options: SkillDiscoveryOptions,
@@ -170,6 +171,12 @@ pub(crate) fn view_skill_tool_impl(options: &SkillDiscoveryOptions, args: Value)
     let catalog = discover_skills(options)?;
     let name = required_string(&args, "name")?;
     let file_path = optional_string(&args, "file_path")?;
+    let skill = find_skill(&catalog, name)?;
+    if !skill_prompt_visible_for_activation(skill) {
+        return Err(Error::Message(format!(
+            "skill is not available for model invocation: {name}"
+        )));
+    }
     view_skill_value(&catalog, name, file_path)
 }
 

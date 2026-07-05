@@ -301,6 +301,14 @@
             .collect::<Vec<_>>();
         assert_eq!(labels.first().copied(), Some("$x-daily"));
         assert!(labels.contains(&"$explore"), "{labels:?}");
+        let first = result["items"]
+            .as_array()
+            .expect("items")
+            .first()
+            .expect("first item");
+        assert_eq!(first["group"], "skills");
+        assert_eq!(first["groupLabel"], "Skills");
+        assert_eq!(first["scopeLabel"], "Project");
     }
 
     #[tokio::test]

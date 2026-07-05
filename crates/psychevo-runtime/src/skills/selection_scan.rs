@@ -2,11 +2,11 @@
 pub(crate) use super::*;
 
 pub(crate) fn add_skill(
-    skill: Skill,
+    mut skill: Skill,
     only_names: Option<&BTreeSet<String>>,
     disabled: &BTreeSet<String>,
     catalog: &mut SkillCatalog,
-    seen: &mut BTreeMap<String, PathBuf>,
+    _seen: &mut BTreeMap<String, PathBuf>,
 ) {
     let explicit = skill.source == SkillSource::Explicit;
     if let Some(only_names) = only_names
@@ -15,27 +15,43 @@ pub(crate) fn add_skill(
         return;
     }
     if disabled.contains(&skill.name) && !explicit {
+        skill.enabled = false;
         catalog.diagnostics.push(SkillDiagnostic::warning(
             format!("skill disabled: {}", skill.name),
             Some(skill.file_path.clone()),
         ));
-        return;
     }
-    if let Some(winner) = seen.get(&skill.name) {
-        catalog.diagnostics.push(SkillDiagnostic::collision(
-            &skill.name,
-            winner,
-            &skill.file_path,
-        ));
-        let entry = catalog
-            .collisions
-            .entry(skill.name.clone())
-            .or_insert_with(|| vec![winner.clone()]);
-        entry.push(skill.file_path.clone());
-        return;
-    }
-    seen.insert(skill.name.clone(), skill.file_path.clone());
     catalog.skills.push(skill);
+}
+
+pub(crate) fn finalize_skill_catalog(catalog: &mut SkillCatalog) {
+    catalog.collisions.clear();
+    for skill in &mut catalog.skills {
+        skill.collision_group.clear();
+    }
+    let mut by_name = BTreeMap::<String, Vec<PathBuf>>::new();
+    for skill in &catalog.skills {
+        if skill.enabled {
+            by_name
+                .entry(skill.name.clone())
+                .or_default()
+                .push(skill.file_path.clone());
+        }
+    }
+    for (name, paths) in by_name {
+        if paths.len() < 2 {
+            continue;
+        }
+        catalog.collisions.insert(name.clone(), paths.clone());
+        catalog
+            .diagnostics
+            .push(SkillDiagnostic::collision(&name, &paths));
+        for skill in &mut catalog.skills {
+            if skill.name == name && skill.enabled {
+                skill.collision_group = paths.clone();
+            }
+        }
+    }
 }
 
 pub(crate) fn skill_mentions(prompt: &str) -> Vec<String> {
@@ -85,7 +101,7 @@ pub(crate) fn select_skills<'a>(
         if let Some(skill) = catalog
             .skills
             .iter()
-            .find(|skill| skill.name == name && skill.supported_on_current_platform)
+            .find(|skill| skill.name == name && skill_prompt_visible_for_activation(skill))
             && seen.insert(skill.file_path.clone())
         {
             selected.push(selected_skill(skill));
@@ -99,6 +115,13 @@ pub(crate) fn selected_skill(skill: &Skill) -> SelectedSkill {
         name: skill.name.clone(),
         path: skill.file_path.clone(),
     }
+}
+
+pub(crate) fn skill_prompt_visible_for_activation(skill: &Skill) -> bool {
+    skill.enabled
+        && !skill.disable_model_invocation
+        && skill.supported_on_current_platform
+        && skill.collision_group.is_empty()
 }
 
 pub(crate) fn explicit_path_selects_skill(path: &Path, skill_path: &Path, base_dir: &Path) -> bool {
@@ -533,6 +556,26 @@ pub(crate) fn find_skill<'a>(catalog: &'a SkillCatalog, name: &str) -> Result<&'
         .iter()
         .find(|skill| skill.name == name)
         .ok_or_else(|| Error::Message(format!("skill not found: {name}")))
+}
+
+pub(crate) fn find_skill_by_path<'a>(
+    catalog: &'a SkillCatalog,
+    name: &str,
+    path: &Path,
+) -> Result<&'a Skill> {
+    let selector = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    catalog
+        .skills
+        .iter()
+        .find(|skill| {
+            skill.name == name
+                && skill
+                    .file_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| skill.file_path.clone())
+                    == selector
+        })
+        .ok_or_else(|| Error::Message(format!("skill not found: {name} at {}", path.display())))
 }
 
 pub(crate) fn resolve_skill_relative_path(skill: &Skill, raw: &str) -> Result<PathBuf> {

@@ -237,7 +237,20 @@ struct WebStateInner {
     review: WorkspaceReviewState,
     pending_actions: Mutex<HashMap<String, PendingActionView>>,
     wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
+    mcp_oauth_sessions: Mutex<HashMap<String, McpOAuthSession>>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
+}
+
+#[derive(Debug, Clone)]
+struct McpOAuthSession {
+    status: Arc<Mutex<McpOAuthSessionStatus>>,
+}
+
+#[derive(Debug, Clone)]
+enum McpOAuthSessionStatus {
+    Pending,
+    Succeeded,
+    Failed(String),
 }
 
 #[derive(Debug, Clone)]
@@ -288,6 +301,7 @@ impl WebState {
                 review: WorkspaceReviewState::default(),
                 pending_actions: Mutex::new(HashMap::new()),
                 wechat_qr_sessions: Mutex::new(HashMap::new()),
+                mcp_oauth_sessions: Mutex::new(HashMap::new()),
                 channel_runtime,
             }),
         };

@@ -729,6 +729,27 @@ pub(crate) fn json_projection_hides_reasoning_unless_included() {
             text: "x".to_string()
         }
     );
+    let streaming_update = project_run_stream_event(&AgentEvent::MessageUpdate {
+        message: Message::Assistant {
+            content: vec![AssistantBlock::Text {
+                text: "streaming visible".to_string(),
+            }],
+            timestamp_ms: 2,
+            finish_reason: None,
+            outcome: Outcome::Normal,
+            model: Some("model".to_string()),
+            provider: Some("provider".to_string()),
+        },
+    })
+    .expect("streaming update");
+    match streaming_update {
+        RunStreamEvent::Event(value) => {
+            assert_eq!(value["type"], "message_update");
+            assert_eq!(value["message"]["role"], "assistant");
+            assert_eq!(value["message"]["content"][0]["text"], "streaming visible");
+        }
+        other => panic!("unexpected streaming update: {other:?}"),
+    }
     assert!(
         project_agent_event(
             &AgentEvent::ToolCallPending {

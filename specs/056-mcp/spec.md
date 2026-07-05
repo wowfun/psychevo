@@ -17,13 +17,15 @@ session, but MCP semantics are not owned by ACP.
 - MCP tool contribution, naming, conflict, and dispatch semantics
 - MCP resources, prompts, elicitation, sampling, and roots as runtime-owned
   client surfaces
+- profile-scoped MCP server management, HTTP auth references, and OAuth token
+  storage
 - minimal MCP server export for driving Psychevo from MCP clients
 - permission and evidence requirements for MCP startup and MCP actions
 - interface projection requirements for ACP or future interfaces
 
 Out of scope:
 
-- OAuth, registry discovery, marketplace install, or managed MCP server install
+- registry discovery, marketplace install, or managed MCP server install
   lifecycle
 - treating MCP as a trusted local-script extension mode
 - delegating filesystem or terminal authority to an interface client
@@ -69,6 +71,11 @@ timeouts. These fields constrain acceptance and dispatch. They do not grant
 permission to start a process, make a network call, or expose a model-visible
 declaration.
 
+Profile configuration is the default durable owner for GUI-managed MCP server
+declarations. Project-local declarations remain valid config input, but
+Workbench capability management writes to the active profile unless a future
+surface explicitly selects a project-local scope.
+
 ## Runtime Snapshot
 
 Runtime creates an MCP runtime snapshot at a generation-safe boundary. The
@@ -111,6 +118,35 @@ relative command path beginning with `./`. Package-relative command paths and
 `cwd` values must stay inside the plugin root. Relative `cwd` values are
 resolved beneath the plugin root. Unsupported or malformed transport fields
 must omit only the affected server when sibling server declarations are valid.
+
+## HTTP Authentication
+
+Streamable HTTP MCP declarations may reference a bearer token through
+`bearer_token_env_var`. The resolved token is injected as an
+`Authorization: Bearer <token>` header at connection time and must never be
+serialized into config, Gateway responses, transcripts, or frontend storage.
+Inline bearer-token fields are invalid.
+
+Streamable HTTP declarations may also configure OAuth metadata through
+`scopes`, `oauth_resource`, and `[mcp_servers.<name>.oauth].client_id`.
+Stdio declarations reject OAuth and bearer-token fields.
+
+Runtime resolves streamable HTTP auth in this order:
+
+1. non-empty `bearer_token_env_var`
+2. stored OAuth token for the active profile, server name, and URL
+3. unauthenticated connection
+
+Production MCP OAuth credentials are stored in the system keyring under service
+`psychevo-mcp-oauth`. The account key is derived from the active profile home,
+server name, and URL. Tests use an injectable fake keyring store and do not
+touch the user's real keyring.
+
+OAuth login is started explicitly by a CLI or Gateway management action, not by
+ordinary server startup. The login flow opens a loopback callback listener,
+returns an authorization URL to the caller, stores tokens only after a completed
+callback exchange, and exposes completion status without revealing token
+values.
 
 ## Identity And Naming
 

@@ -82,6 +82,10 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
     .await
     .expect("turn/start");
     assert_eq!(accepted["accepted"], true);
+    let accepted_thread_id = accepted["threadId"]
+        .as_str()
+        .expect("accepted turn thread id")
+        .to_string();
 
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
@@ -121,6 +125,7 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
         .as_str()
         .expect("target thread")
         .to_string();
+    assert_eq!(accepted_thread_id, target_thread_id);
 
     let runs = backend.runs.lock().expect("runs").clone();
     assert_eq!(runs.len(), 1);

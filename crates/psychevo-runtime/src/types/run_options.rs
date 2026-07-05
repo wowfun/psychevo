@@ -274,6 +274,10 @@ pub enum McpTransportInput {
     StreamableHttp {
         url: String,
         headers: BTreeMap<String, String>,
+        bearer_token_env_var: Option<String>,
+        scopes: Vec<String>,
+        oauth_resource: Option<String>,
+        oauth_client_id: Option<String>,
     },
     Unsupported {
         kind: String,

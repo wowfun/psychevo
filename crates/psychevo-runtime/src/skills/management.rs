@@ -165,12 +165,16 @@ pub fn remove_installed_skill(
     cwd: &Path,
     target: SkillTarget,
     name: &str,
+    selector_path: Option<&Path>,
 ) -> Result<Value> {
     let name = name.trim();
     if name.is_empty() {
         return Err(Error::Message("skill name is required".to_string()));
     }
     let root = target_skills_dir(home, cwd, target);
+    if let Some(selector_path) = selector_path {
+        return remove_installed_skill_at_path(&root, target, name, selector_path);
+    }
     let package = root.join(name);
     let markdown = root.join(format!("{name}.md"));
     let path = if package.join("SKILL.md").is_file() {
@@ -186,6 +190,59 @@ pub fn remove_installed_skill(
         )));
     };
     Ok(json!({"success": true, "name": name, "scope": target.as_str(), "path": path}))
+}
+
+fn remove_installed_skill_at_path(
+    root: &Path,
+    target: SkillTarget,
+    name: &str,
+    selector_path: &Path,
+) -> Result<Value> {
+    let canonical_root = root.canonicalize().map_err(|_| {
+        Error::Message(format!(
+            "skill root not found in {} scope: {}",
+            target.as_str(),
+            root.display()
+        ))
+    })?;
+    let canonical_selector = selector_path.canonicalize()?;
+    if !canonical_selector.starts_with(&canonical_root) {
+        return Err(Error::Message(format!(
+            "skill is not removable from {} scope: {}",
+            target.as_str(),
+            selector_path.display()
+        )));
+    }
+    let removed = if canonical_selector
+        .file_name()
+        .and_then(|value| value.to_str())
+        == Some("SKILL.md")
+    {
+        let Some(package_dir) = canonical_selector.parent() else {
+            return Err(Error::Message("invalid skill package path".to_string()));
+        };
+        if !package_dir.join("SKILL.md").is_file() {
+            return Err(Error::Message(format!(
+                "skill package not found: {}",
+                selector_path.display()
+            )));
+        }
+        fs::remove_dir_all(package_dir)?;
+        package_dir.to_path_buf()
+    } else if canonical_selector
+        .extension()
+        .and_then(|value| value.to_str())
+        == Some("md")
+    {
+        fs::remove_file(&canonical_selector)?;
+        canonical_selector
+    } else {
+        return Err(Error::Message(format!(
+            "skill path is not a removable SKILL.md package or root markdown file: {}",
+            selector_path.display()
+        )));
+    };
+    Ok(json!({"success": true, "name": name, "scope": target.as_str(), "path": removed}))
 }
 
 pub fn set_skill_enabled(
@@ -405,20 +462,28 @@ pub fn install_skill(home: &Path, cwd: &Path, options: InstallOptions) -> Result
             if skill.file_path.file_name().and_then(|value| value.to_str()) == Some("SKILL.md") {
                 let target = target_root.join(&skill.name);
                 if target.exists() {
-                    return Err(Error::Message(format!(
-                        "skill already exists: {}",
-                        skill.name
-                    )));
+                    if options.force {
+                        remove_existing_skill_target(&target)?;
+                    } else {
+                        return Err(Error::Message(format!(
+                            "skill already exists: {}",
+                            skill.name
+                        )));
+                    }
                 }
                 copy_dir_recursive(&skill.base_dir, &target)?;
                 target.join("SKILL.md")
             } else {
                 let target = target_root.join(format!("{}.md", skill.name));
                 if target.exists() {
-                    return Err(Error::Message(format!(
-                        "skill already exists: {}",
-                        skill.name
-                    )));
+                    if options.force {
+                        remove_existing_skill_target(&target)?;
+                    } else {
+                        return Err(Error::Message(format!(
+                            "skill already exists: {}",
+                            skill.name
+                        )));
+                    }
                 }
                 fs::copy(&skill.file_path, &target)?;
                 target
@@ -430,6 +495,15 @@ pub fn install_skill(home: &Path, cwd: &Path, options: InstallOptions) -> Result
         }));
     }
     Ok(json!({"success": true, "installed": installed}))
+}
+
+fn remove_existing_skill_target(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        fs::remove_dir_all(path)?;
+    } else {
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 pub fn target_skills_dir(home: &Path, cwd: &Path, target: SkillTarget) -> PathBuf {
@@ -815,6 +889,7 @@ pub(crate) fn load_skill_file(
         file_path: file.to_path_buf(),
         base_dir,
         source,
+        enabled: true,
         disable_model_invocation: frontmatter.disable_model_invocation.unwrap_or(false),
         category: None,
         tags,
@@ -831,5 +906,6 @@ pub(crate) fn load_skill_file(
         required_toolsets,
         fallback_for_toolsets,
         supported_on_current_platform,
+        collision_group: Vec::new(),
     }))
 }

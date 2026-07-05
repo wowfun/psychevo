@@ -457,6 +457,7 @@ pub(crate) fn title_skill_catalog(
         file_path: path.clone(),
         base_dir: root.join("x-daily"),
         source: crate::skills::SkillSource::Project,
+        enabled: true,
         disable_model_invocation: false,
         category: None,
         tags: Vec::new(),
@@ -473,6 +474,7 @@ pub(crate) fn title_skill_catalog(
         required_toolsets: Vec::new(),
         fallback_for_toolsets: Vec::new(),
         supported_on_current_platform: true,
+        collision_group: Vec::new(),
     };
     let selected = vec![crate::skills::SelectedSkill {
         name: skill.name.clone(),

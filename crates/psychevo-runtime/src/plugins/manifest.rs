@@ -863,8 +863,18 @@ fn parse_http_mcp_server(
     };
     let policy = parse_manifest_mcp_policy(name, object, manifest_path, diagnostics)?;
     Some(
-        McpServerInput::new(name, McpTransportInput::StreamableHttp { url, headers })
-            .with_policy(policy),
+        McpServerInput::new(
+            name,
+            McpTransportInput::StreamableHttp {
+                url,
+                headers,
+                bearer_token_env_var: None,
+                scopes: Vec::new(),
+                oauth_resource: None,
+                oauth_client_id: None,
+            },
+        )
+        .with_policy(policy),
     )
 }
 

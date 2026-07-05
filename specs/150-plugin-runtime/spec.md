@@ -14,7 +14,8 @@ enablement, diagnostics, static declarations, and Psychevo worker execution.
 - plugin package enablement overlay in `RunConfig`
 - static declaration loading
 - stdio JSON-RPC worker execution for tools
-- CLI-facing read, diagnostic, install, uninstall, enable, disable, and catalog operations
+- CLI- and Gateway-facing read, diagnostic, install, uninstall, enable,
+  disable, and catalog operations
 
 Out of scope:
 - hosted marketplaces, signatures, review workflows, ratings, accounts, or graphical stores
@@ -168,11 +169,13 @@ ignored fields, manifest resources, Psychevo extensions, install source, active
 version, enabled state, skipped reason, owning-surface policy state, worker
 failures, and data root.
 
-Gateway exposes read-only plugin metadata methods for product surfaces:
-`plugin/list`, `plugin/read`, and `plugin/doctor`. These methods use the same
-runtime read helpers as the CLI, honor the resolved scope/profile rules, return
-typed interface metadata, and do not install, enable, disable, uninstall, or
-mutate plugin state in this slice.
+Gateway exposes plugin metadata and package-management methods for product
+surfaces: `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
+`plugin/uninstall`, and `plugin/setEnabled`. These methods use the same runtime
+helpers as the CLI, honor resolved scope/profile rules, return typed interface
+metadata, and keep responses secret-free. GUI install overwrite and other
+force-worthy actions require an explicit `force` request supplied by the
+caller.
 
 ## Related Topics
 

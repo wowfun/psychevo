@@ -30,6 +30,23 @@ impl AgentSource {
             Self::BuiltIn => "built_in",
         }
     }
+
+    pub fn display_label(self) -> &'static str {
+        match self {
+            Self::Project | Self::ClaudeProject => "Project",
+            Self::Explicit | Self::Global | Self::ClaudeGlobal | Self::Generated => "User",
+            Self::BuiltIn => "System",
+        }
+    }
+}
+
+pub fn agent_source_display_label(value: Option<&str>) -> Option<&'static str> {
+    match value.map(str::trim).filter(|value| !value.is_empty())? {
+        "project" | "claude_project" | "Project" => Some("Project"),
+        "explicit" | "global" | "claude_global" | "generated" | "User" => Some("User"),
+        "built_in" | "builtin" | "system" | "core" | "System" => Some("System"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

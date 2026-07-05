@@ -221,6 +221,22 @@ pub(crate) fn project_agent_wins_over_built_in() {
 }
 
 #[test]
+pub(crate) fn agent_source_display_label_groups_raw_sources() {
+    for source in ["project", "claude_project"] {
+        assert_eq!(agent_source_display_label(Some(source)), Some("Project"));
+    }
+    for source in ["explicit", "global", "claude_global", "generated"] {
+        assert_eq!(agent_source_display_label(Some(source)), Some("User"));
+    }
+    for source in ["built_in", "builtin", "system", "core"] {
+        assert_eq!(agent_source_display_label(Some(source)), Some("System"));
+    }
+    assert_eq!(agent_source_display_label(Some("custom_source")), None);
+    assert_eq!(agent_source_display_label(Some("")), None);
+    assert_eq!(agent_source_display_label(None), None);
+}
+
+#[test]
 pub(crate) fn backend_config_generates_peer_agent_definition() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
@@ -278,6 +294,7 @@ command = "minimal-agent"
     );
     let value = list_agents_value(&catalog);
     assert_eq!(value["agents"][0]["generated"], true);
+    assert_eq!(value["agents"][0]["source_label"], "User");
 }
 
 #[test]

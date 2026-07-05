@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,8 +24,11 @@ use sha2::{Digest, Sha256};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
+use crate::config::{
+    config_show_value, load_mcp_oauth_access_token, parse_run_config, resolve_psychevo_home,
+};
 use crate::permissions::PermissionRuntime;
-use crate::types::{McpServerInput, McpServerPolicy, McpTransportInput, RunWarning};
+use crate::types::{McpServerInput, McpServerPolicy, McpTransportInput, RunOptions, RunWarning};
 
 const LIST_MCP_RESOURCES_TOOL: &str = "list_mcp_resources";
 const LIST_MCP_RESOURCE_TEMPLATES_TOOL: &str = "list_mcp_resource_templates";
@@ -471,6 +475,50 @@ pub(crate) fn mcp_transport_kind(transport: &McpTransportInput) -> &'static str 
     }
 }
 
+pub async fn mcp_test_server_value(options: &RunOptions, name: &str) -> crate::Result<Value> {
+    let document = config_show_value(options, crate::types::ConfigScope::Effective)?;
+    let value = document.get("value").cloned().unwrap_or_else(|| json!({}));
+    let config = parse_run_config(value)?;
+    let server = config
+        .mcp_servers
+        .into_iter()
+        .find(|server| server.name == name)
+        .ok_or_else(|| crate::Error::Config(format!("unknown MCP server: {name}")))?;
+    match connect_mcp_server_with_policy(&server, &options.cwd).await {
+        Ok(service) => {
+            let peer = service.peer().clone();
+            let tools = peer
+                .list_all_tools()
+                .await
+                .map(|tools| {
+                    tools
+                        .into_iter()
+                        .map(|tool| {
+                            json!({
+                                "name": tool.name,
+                                "title": tool.title,
+                                "description": tool.description,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            Ok(json!({
+                "ok": true,
+                "name": name,
+                "transport": mcp_transport_kind(&server.transport),
+                "tools": tools,
+            }))
+        }
+        Err(err) => Ok(json!({
+            "ok": false,
+            "name": name,
+            "transport": mcp_transport_kind(&server.transport),
+            "error": err,
+        })),
+    }
+}
+
 pub(crate) fn mcp_tool_name_parts(tool_name: &str) -> Option<(&str, &str)> {
     let rest = tool_name.strip_prefix("mcp__")?;
     rest.split_once("__")
@@ -767,7 +815,12 @@ pub(crate) async fn connect_mcp_server(
             let transport = TokioChildProcess::new(cmd).map_err(|err| err.to_string())?;
             ().serve(transport).await.map_err(|err| err.to_string())
         }
-        McpTransportInput::StreamableHttp { url, headers } => {
+        McpTransportInput::StreamableHttp {
+            url,
+            headers,
+            bearer_token_env_var,
+            ..
+        } => {
             let mut parsed_headers = HashMap::new();
             for (name, value) in headers {
                 let name = HeaderName::from_bytes(name.as_bytes())
@@ -776,13 +829,36 @@ pub(crate) async fn connect_mcp_server(
                     .map_err(|err| format!("invalid HTTP header value for `{name}`: {err}"))?;
                 parsed_headers.insert(name, value);
             }
-            let config = StreamableHttpClientTransportConfig::with_uri(url.clone())
+            let mut config = StreamableHttpClientTransportConfig::with_uri(url.clone())
                 .custom_headers(parsed_headers);
+            if let Some(token) =
+                resolve_http_bearer_token(input, bearer_token_env_var.as_deref(), url)
+            {
+                config = config.auth_header(token);
+            }
             let transport = StreamableHttpClientTransport::from_config(config);
             ().serve(transport).await.map_err(|err| err.to_string())
         }
         McpTransportInput::Unsupported { kind } => Err(format!("unsupported transport `{kind}`")),
     }
+}
+
+fn resolve_http_bearer_token(
+    input: &McpServerInput,
+    bearer_token_env_var: Option<&str>,
+    url: &str,
+) -> Option<String> {
+    if let Some(env_var) = bearer_token_env_var
+        && let Ok(value) = env::var(env_var)
+        && !value.trim().is_empty()
+    {
+        return Some(value);
+    }
+    let env_map = env::vars().collect::<BTreeMap<_, _>>();
+    let home = resolve_psychevo_home(&env_map).ok()?;
+    load_mcp_oauth_access_token(&home, &input.name, url)
+        .ok()
+        .flatten()
 }
 
 async fn connect_mcp_server_with_policy(

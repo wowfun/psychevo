@@ -318,6 +318,7 @@ async fn handle_rpc(
             let gateway = state.inner.gateway.clone();
             let bind_source =
                 (!requested_side_conversation_thread).then(|| cwd_source(&scope.cwd));
+            let response_thread_id = thread_id.clone();
             let requested_thread_id = thread_id.clone();
             tokio::spawn(async move {
                 let result = gateway
@@ -352,7 +353,7 @@ async fn handle_rpc(
                 };
                 let _ = out_tx.send(notification);
             });
-            Ok(json!({"accepted": true}))
+            Ok(json!({"accepted": true, "threadId": response_thread_id}))
         }
         "turn/steer" => {
             let params = request.required_params::<wire::TurnSteerParams>()?;
@@ -652,6 +653,244 @@ async fn handle_rpc(
             let options = plugin_runtime_options(&state, scope.cwd);
             plugin_doctor_value(&options, params.selector.as_deref())
         }
+        "plugin/install" => {
+            let params = request.required_params::<wire::PluginInstallParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            plugin_install_value(
+                &state.inner.home,
+                &scope.cwd,
+                PluginInstallOptions {
+                    source: params.source,
+                    scope: parse_plugin_scope(params.scope_name.as_deref())?,
+                    git_ref: params.git_ref,
+                    force: params.force,
+                },
+            )
+        }
+        "plugin/uninstall" => {
+            let params = request.required_params::<wire::PluginUninstallParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            plugin_uninstall_value(
+                &state.inner.home,
+                &scope.cwd,
+                parse_plugin_scope(params.scope_name.as_deref())?,
+                &params.selector,
+            )
+        }
+        "plugin/setEnabled" => {
+            let params = request.required_params::<wire::PluginSetEnabledParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            plugin_set_enabled_value(
+                &state.inner.home,
+                &scope.cwd,
+                parse_plugin_scope(params.scope_name.as_deref())?,
+                &params.selector,
+                params.enabled,
+            )
+        }
+        "skill/list" => {
+            let params = request.params::<wire::SkillListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let catalog = discover_skills(&SkillDiscoveryOptions {
+                home: state.inner.home.clone(),
+                cwd: scope.cwd,
+                config_path: state.inner.config_path.clone(),
+                env: state.inner.inherited_env.clone(),
+                explicit_inputs: Vec::new(),
+                additional_roots: Vec::new(),
+                no_skills: false,
+            })?;
+            Ok(list_skills_value_with_options(
+                &catalog,
+                &ListSkillsOptions {
+                    include_hidden: true,
+                    detail: true,
+                    ..ListSkillsOptions::default()
+                },
+            ))
+        }
+        "skill/read" => {
+            let params = request.required_params::<wire::SkillReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let catalog = discover_skills(&SkillDiscoveryOptions {
+                home: state.inner.home.clone(),
+                cwd: scope.cwd,
+                config_path: state.inner.config_path.clone(),
+                env: state.inner.inherited_env.clone(),
+                explicit_inputs: Vec::new(),
+                additional_roots: Vec::new(),
+                no_skills: false,
+            })?;
+            view_skill_value_selected(
+                &catalog,
+                &params.name,
+                params.path.as_deref().map(std::path::Path::new),
+                None,
+            )
+        }
+        "skill/install" => {
+            let params = request.required_params::<wire::SkillInstallParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            install_skill(
+                &state.inner.home,
+                &scope.cwd,
+                InstallOptions {
+                    source: params.source,
+                    target: parse_skill_target(params.target.as_deref())?,
+                    name: params.name,
+                    all: params.all,
+                    force: params.force,
+                },
+            )
+        }
+        "skill/uninstall" => {
+            let params = request.required_params::<wire::SkillUninstallParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            remove_installed_skill(
+                &state.inner.home,
+                &scope.cwd,
+                parse_skill_target(params.target.as_deref())?,
+                &params.name,
+                params.path.as_deref().map(std::path::Path::new),
+            )
+        }
+        "skill/setEnabled" => {
+            let params = request.required_params::<wire::SkillSetEnabledParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            set_skill_enabled(
+                &state.inner.home,
+                &scope.cwd,
+                parse_skill_target(params.target.as_deref())?,
+                &params.name,
+                params.enabled,
+            )
+        }
+        "tool/list" => {
+            let params = request.params::<wire::ToolListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let options = plugin_runtime_options(&state, scope.cwd);
+            toolsets_value(&options, ConfigScope::Effective)
+        }
+        "tool/read" => {
+            let params = request.required_params::<wire::ToolReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let options = plugin_runtime_options(&state, scope.cwd);
+            let value = toolsets_value(&options, ConfigScope::Effective)?;
+            let toolsets = value
+                .get("toolsets")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let Some(toolset) = toolsets.into_iter().find(|toolset| {
+                toolset
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name == params.name)
+            }) else {
+                return Err(Error::Config(format!("unknown toolset: {}", params.name)));
+            };
+            Ok(json!({"toolset": toolset}))
+        }
+        "tool/setEnabled" => {
+            let params = request.required_params::<wire::ToolSetEnabledParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let config_dir = tool_config_dir(&state, &scope, params.local);
+            let mode = parse_tool_mode(&params.mode)?;
+            Ok(toolset_mutation_value(set_local_toolset_enabled(
+                config_dir,
+                mode,
+                &params.name,
+                params.enabled,
+            )?))
+        }
+        "tool/create" => {
+            let params = request.required_params::<wire::ToolCreateParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let config_dir = tool_config_dir(&state, &scope, params.local);
+            Ok(toolset_mutation_value(create_local_toolset(
+                config_dir,
+                &params.name,
+                params.description,
+                params.tools,
+                params.includes,
+                params.force,
+            )?))
+        }
+        "tool/remove" => {
+            let params = request.required_params::<wire::ToolRemoveParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let config_dir = tool_config_dir(&state, &scope, params.local);
+            Ok(toolset_mutation_value(remove_local_toolset(
+                config_dir,
+                &params.name,
+            )?))
+        }
+        "mcp/list" => {
+            let params = request.params::<wire::McpListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let options = plugin_runtime_options(&state, scope.cwd);
+            mcp_servers_value(&options, ConfigScope::Effective)
+        }
+        "mcp/read" => {
+            let params = request.required_params::<wire::McpReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let options = plugin_runtime_options(&state, scope.cwd);
+            mcp_server_value(&options, &params.name)
+        }
+        "mcp/upsert" => {
+            let params = request.required_params::<wire::McpUpsertParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            upsert_mcp_server(
+                active_profile_config_dir(&state, &scope),
+                mcp_config_input(params),
+            )
+        }
+        "mcp/remove" => {
+            let params = request.required_params::<wire::McpNameParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            remove_mcp_server(active_profile_config_dir(&state, &scope), &params.name)
+        }
+        "mcp/setEnabled" => {
+            let params = request.required_params::<wire::McpSetEnabledParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            set_mcp_server_enabled(
+                active_profile_config_dir(&state, &scope),
+                &params.name,
+                params.enabled,
+            )
+        }
+        "mcp/setToolPolicy" => {
+            let params = request.required_params::<wire::McpSetToolPolicyParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            set_mcp_server_tool_policy(
+                active_profile_config_dir(&state, &scope),
+                &params.name,
+                McpToolPolicyInput {
+                    enabled_tools: params.enabled_tools,
+                    disabled_tools: params.disabled_tools,
+                },
+            )
+        }
+        "mcp/test" => {
+            let params = request.required_params::<wire::McpNameParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let options = plugin_runtime_options(&state, scope.cwd);
+            mcp_test_server_value(&options, &params.name).await
+        }
+        "mcp/oauth/start" => {
+            let params = request.required_params::<wire::McpOAuthStartParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            mcp_oauth_start_value(state, scope, params).await
+        }
+        "mcp/oauth/status" => {
+            let params = request.required_params::<wire::McpOAuthStatusParams>()?;
+            mcp_oauth_status_value(&state, &params.session_id)
+        }
+        "mcp/oauth/logout" => {
+            let params = request.required_params::<wire::McpNameParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            mcp_oauth_logout_value(&state, &scope, &params.name)
+        }
         "channel/list" => {
             let params = request.params::<wire::ChannelListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
@@ -928,6 +1167,381 @@ fn plugin_runtime_options(state: &WebState, cwd: PathBuf) -> RunOptions {
     );
     options.inherited_env = Some(inherited_env);
     options
+}
+
+fn parse_skill_target(value: Option<&str>) -> psychevo_runtime::Result<SkillTarget> {
+    match value.unwrap_or("global") {
+        "global" | "profile" => Ok(SkillTarget::Global),
+        "project" | "local" => Ok(SkillTarget::Project),
+        other => Err(Error::Config(format!("unknown skill target: {other}"))),
+    }
+}
+
+fn parse_plugin_scope(value: Option<&str>) -> psychevo_runtime::Result<PluginScope> {
+    match value.unwrap_or("global") {
+        "global" | "profile" => Ok(PluginScope::Global),
+        "local" | "project" => Ok(PluginScope::Local),
+        other => Err(Error::Config(format!("unknown plugin scope: {other}"))),
+    }
+}
+
+fn parse_tool_mode(value: &str) -> psychevo_runtime::Result<RunMode> {
+    RunMode::parse(value).ok_or_else(|| Error::Config(format!("unknown tool mode: {value}")))
+}
+
+fn tool_config_dir(state: &WebState, scope: &ResolvedScope, local: bool) -> PathBuf {
+    if local {
+        scope.cwd.join(".psychevo")
+    } else {
+        active_profile_config_dir(state, scope)
+    }
+}
+
+fn toolset_mutation_value(result: psychevo_runtime::ToolsetMutationResult) -> Value {
+    json!({
+        "success": true,
+        "changed": result.changed,
+        "name": result.name,
+        "path": result.config_path,
+    })
+}
+
+fn mcp_config_input(params: wire::McpUpsertParams) -> McpServerConfigInput {
+    McpServerConfigInput {
+        name: params.name,
+        transport: params.transport,
+        enabled: params.enabled,
+        required: params.required,
+        command: params.command,
+        args: params.args,
+        env: params.env,
+        cwd: params.cwd,
+        url: params.url,
+        headers: params.headers,
+        bearer_token_env_var: params.bearer_token_env_var,
+        scopes: params.scopes,
+        oauth_resource: params.oauth_resource,
+        oauth_client_id: params.oauth_client_id,
+        enabled_tools: params.enabled_tools,
+        disabled_tools: params.disabled_tools,
+        supports_parallel_tool_calls: params.supports_parallel_tool_calls,
+        startup_timeout_secs: params.startup_timeout_secs,
+        tool_timeout_secs: params.tool_timeout_secs,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct McpOAuthMetadata {
+    name: String,
+    url: String,
+    client_id: String,
+    scopes: Vec<String>,
+    oauth_resource: Option<String>,
+    profile_home: PathBuf,
+}
+
+async fn mcp_oauth_start_value(
+    state: WebState,
+    scope: ResolvedScope,
+    params: wire::McpOAuthStartParams,
+) -> psychevo_runtime::Result<Value> {
+    let metadata = mcp_oauth_metadata(&state, &scope, &params.name)?;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+    let redirect_uri = format!("http://{}/callback", listener.local_addr()?);
+    let session_id = Uuid::now_v7().to_string();
+    let state_token = Uuid::now_v7().to_string();
+    let authorization_url = mcp_authorization_url(&metadata, &redirect_uri, &state_token)?;
+    let status = Arc::new(Mutex::new(McpOAuthSessionStatus::Pending));
+    state
+        .inner
+        .mcp_oauth_sessions
+        .lock()
+        .expect("mcp oauth sessions poisoned")
+        .insert(
+            session_id.clone(),
+            McpOAuthSession {
+                status: Arc::clone(&status),
+            },
+        );
+    tokio::spawn(run_mcp_oauth_callback(
+        listener,
+        metadata,
+        redirect_uri,
+        state_token,
+        status,
+    ));
+    Ok(json!({
+        "sessionId": session_id,
+        "authorizationUrl": authorization_url,
+        "status": "pending",
+    }))
+}
+
+fn mcp_oauth_status_value(state: &WebState, session_id: &str) -> psychevo_runtime::Result<Value> {
+    let sessions = state
+        .inner
+        .mcp_oauth_sessions
+        .lock()
+        .expect("mcp oauth sessions poisoned");
+    let Some(session) = sessions.get(session_id) else {
+        return Err(Error::Config(format!(
+            "unknown MCP OAuth session: {session_id}"
+        )));
+    };
+    let status = session.status.lock().expect("mcp oauth session poisoned");
+    Ok(match &*status {
+        McpOAuthSessionStatus::Pending => json!({
+            "sessionId": session_id,
+            "status": "pending",
+        }),
+        McpOAuthSessionStatus::Succeeded => json!({
+            "sessionId": session_id,
+            "status": "succeeded",
+        }),
+        McpOAuthSessionStatus::Failed(error) => json!({
+            "sessionId": session_id,
+            "status": "failed",
+            "error": error,
+        }),
+    })
+}
+
+fn mcp_oauth_logout_value(
+    state: &WebState,
+    scope: &ResolvedScope,
+    name: &str,
+) -> psychevo_runtime::Result<Value> {
+    let metadata = mcp_oauth_metadata(state, scope, name)?;
+    let removed =
+        clear_mcp_oauth_access_token(&metadata.profile_home, &metadata.name, &metadata.url)?;
+    Ok(json!({
+        "success": true,
+        "name": metadata.name,
+        "removed": removed,
+    }))
+}
+
+fn mcp_oauth_metadata(
+    state: &WebState,
+    scope: &ResolvedScope,
+    name: &str,
+) -> psychevo_runtime::Result<McpOAuthMetadata> {
+    let options = plugin_runtime_options(state, scope.cwd.clone());
+    let value = mcp_server_value(&options, name)?;
+    let server = value
+        .get("server")
+        .ok_or_else(|| Error::Config(format!("unknown MCP server: {name}")))?;
+    let transport = server
+        .get("transport")
+        .and_then(Value::as_object)
+        .ok_or_else(|| Error::Config(format!("MCP server {name} has no transport")))?;
+    if transport.get("kind").and_then(Value::as_str) != Some("streamable_http") {
+        return Err(Error::Config(format!(
+            "MCP OAuth is only supported for streamable HTTP servers: {name}"
+        )));
+    }
+    let url = transport
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Config(format!("MCP server {name} has no URL")))?
+        .to_string();
+    let auth = transport
+        .get("auth")
+        .and_then(Value::as_object)
+        .ok_or_else(|| Error::Config(format!("MCP server {name} has no OAuth metadata")))?;
+    let client_id = auth
+        .get("oauthClientId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            Error::Config(format!(
+                "MCP server {name} must configure oauth.client_id before OAuth login"
+            ))
+        })?
+        .to_string();
+    let scopes = auth
+        .get("scopes")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let oauth_resource = auth
+        .get("oauthResource")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(McpOAuthMetadata {
+        name: name.to_string(),
+        url,
+        client_id,
+        scopes,
+        oauth_resource,
+        profile_home: active_profile_config_dir(state, scope),
+    })
+}
+
+fn mcp_authorization_url(
+    metadata: &McpOAuthMetadata,
+    redirect_uri: &str,
+    state_token: &str,
+) -> psychevo_runtime::Result<String> {
+    let base = metadata
+        .oauth_resource
+        .as_deref()
+        .unwrap_or(metadata.url.as_str());
+    let mut url = reqwest::Url::parse(&oauth_endpoint(base, "authorize"))
+        .map_err(|err| Error::Config(format!("failed to build OAuth authorization URL: {err}")))?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("response_type", "code");
+        query.append_pair("client_id", &metadata.client_id);
+        query.append_pair("redirect_uri", redirect_uri);
+        query.append_pair("state", state_token);
+        if !metadata.scopes.is_empty() {
+            query.append_pair("scope", &metadata.scopes.join(" "));
+        }
+        if let Some(resource) = &metadata.oauth_resource {
+            query.append_pair("resource", resource);
+        }
+    }
+    Ok(url.to_string())
+}
+
+async fn run_mcp_oauth_callback(
+    listener: TcpListener,
+    metadata: McpOAuthMetadata,
+    redirect_uri: String,
+    state_token: String,
+    status: Arc<Mutex<McpOAuthSessionStatus>>,
+) {
+    let result = async {
+        let (mut stream, _) = listener.accept().await?;
+        let mut buffer = vec![0_u8; 8192];
+        let size = stream.read(&mut buffer).await?;
+        let request = String::from_utf8_lossy(&buffer[..size]);
+        let target = request
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("/");
+        let callback_url = reqwest::Url::parse(&format!("http://localhost{target}"))
+            .map_err(|err| Error::Config(format!("OAuth callback parse failed: {err}")))?;
+        let pairs = callback_url
+            .query_pairs()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect::<BTreeMap<_, _>>();
+        if pairs.get("state") != Some(&state_token) {
+            write_oauth_callback_response(&mut stream, false).await?;
+            return Err(Error::Config("OAuth callback state mismatch".to_string()));
+        }
+        let Some(code) = pairs.get("code").cloned() else {
+            write_oauth_callback_response(&mut stream, false).await?;
+            return Err(Error::Config("OAuth callback did not include code".to_string()));
+        };
+        write_oauth_callback_response(&mut stream, true).await?;
+        let token = exchange_mcp_oauth_code(&metadata, &redirect_uri, &code).await?;
+        save_mcp_oauth_access_token(&metadata.profile_home, &metadata.name, &metadata.url, &token)?;
+        Ok::<(), Error>(())
+    }
+    .await;
+    let mut status = status.lock().expect("mcp oauth session poisoned");
+    *status = match result {
+        Ok(()) => McpOAuthSessionStatus::Succeeded,
+        Err(err) => McpOAuthSessionStatus::Failed(err.to_string()),
+    };
+}
+
+async fn write_oauth_callback_response(
+    stream: &mut tokio::net::TcpStream,
+    success: bool,
+) -> std::io::Result<()> {
+    let body = if success {
+        "OAuth login finished. You can return to Psychevo."
+    } else {
+        "OAuth login failed. You can close this page."
+    };
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes()).await
+}
+
+async fn exchange_mcp_oauth_code(
+    metadata: &McpOAuthMetadata,
+    redirect_uri: &str,
+    code: &str,
+) -> psychevo_runtime::Result<String> {
+    let base = metadata
+        .oauth_resource
+        .as_deref()
+        .unwrap_or(metadata.url.as_str());
+    let token_endpoint = oauth_endpoint(base, "token");
+    let mut form = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", code.to_string()),
+        ("redirect_uri", redirect_uri.to_string()),
+        ("client_id", metadata.client_id.clone()),
+    ];
+    if !metadata.scopes.is_empty() {
+        form.push(("scope", metadata.scopes.join(" ")));
+    }
+    if let Some(resource) = &metadata.oauth_resource {
+        form.push(("resource", resource.clone()));
+    }
+    let response = reqwest::Client::new()
+        .post(token_endpoint)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(form_urlencoded(&form))
+        .send()
+        .await
+        .map_err(|err| Error::Config(format!("OAuth token request failed: {err}")))?;
+    let status = response.status();
+    let value = response
+        .json::<Value>()
+        .await
+        .map_err(|err| Error::Config(format!("OAuth token response parse failed: {err}")))?;
+    if !status.is_success() {
+        return Err(Error::Config(format!(
+            "OAuth token request failed with HTTP {status}: {value}"
+        )));
+    }
+    value
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| Error::Config("OAuth token response omitted access_token".to_string()))
+}
+
+fn oauth_endpoint(base: &str, suffix: &str) -> String {
+    format!("{}/{}", base.trim_end_matches('/'), suffix)
+}
+
+fn form_urlencoded(values: &[(&str, String)]) -> String {
+    values
+        .iter()
+        .map(|(key, value)| format!("{}={}", url_percent_encode(key), url_percent_encode(value)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn url_percent_encode(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char);
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 include!("rpc_dispatch/model_scope.rs");

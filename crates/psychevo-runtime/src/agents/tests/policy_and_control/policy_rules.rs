@@ -345,6 +345,7 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
         file_path: PathBuf::from("/tmp/reviewer/SKILL.md"),
         base_dir: PathBuf::from("/tmp/reviewer"),
         source: crate::skills::SkillSource::Project,
+        enabled: true,
         disable_model_invocation: false,
         category: None,
         tags: Vec::new(),
@@ -361,6 +362,7 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
         required_toolsets: Vec::new(),
         fallback_for_toolsets: Vec::new(),
         supported_on_current_platform: true,
+        collision_group: Vec::new(),
     };
     let tools = apply_agent_tool_policy(
         vec![

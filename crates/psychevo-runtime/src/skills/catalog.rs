@@ -12,6 +12,7 @@ pub struct Skill {
     pub file_path: PathBuf,
     pub base_dir: PathBuf,
     pub source: SkillSource,
+    pub enabled: bool,
     pub disable_model_invocation: bool,
     pub category: Option<String>,
     pub tags: Vec<String>,
@@ -28,6 +29,7 @@ pub struct Skill {
     pub required_toolsets: Vec<String>,
     pub fallback_for_toolsets: Vec<String>,
     pub supported_on_current_platform: bool,
+    pub collision_group: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +38,7 @@ pub enum SkillSource {
     Explicit,
     Project,
     Agents,
+    AgentsGlobal,
     Global,
     Config,
     Plugin,
@@ -48,11 +51,35 @@ impl SkillSource {
             Self::Explicit => "explicit",
             Self::Project => "project",
             Self::Agents => "agents",
+            Self::AgentsGlobal => "agents_global",
             Self::Global => "global",
             Self::Config => "config",
             Self::Plugin => "plugin",
             Self::InstallSource => "install_source",
         }
+    }
+
+    pub fn display_label(self) -> &'static str {
+        match self {
+            Self::Project | Self::Agents => "Project",
+            Self::Explicit
+            | Self::AgentsGlobal
+            | Self::Global
+            | Self::Config
+            | Self::InstallSource => "User",
+            Self::Plugin => "System",
+        }
+    }
+}
+
+pub fn skill_source_display_label(value: Option<&str>) -> Option<&'static str> {
+    match value.map(str::trim).filter(|value| !value.is_empty())? {
+        "project" | "agents" | "Project" => Some("Project"),
+        "explicit" | "global" | "agents_global" | "config" | "install_source" | "User" => {
+            Some("User")
+        }
+        "plugin" | "system" | "builtin" | "built_in" | "core" | "System" => Some("System"),
+        _ => None,
     }
 }
 
@@ -73,15 +100,19 @@ impl SkillDiagnostic {
         }
     }
 
-    pub(crate) fn collision(name: &str, winner: &Path, loser: &Path) -> Self {
+    pub(crate) fn collision(name: &str, paths: &[PathBuf]) -> Self {
         Self {
             kind: "collision".to_string(),
             message: format!(
-                "skill name \"{name}\" collision; keeping {} and omitting {}",
-                winner.display(),
-                loser.display()
+                "skill name \"{name}\" collision; name-based activation disabled for {} matching skills ({})",
+                paths.len(),
+                paths
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
-            path: Some(loser.to_path_buf()),
+            path: paths.first().cloned(),
         }
     }
 }
@@ -404,13 +435,20 @@ pub fn discover_skills_with_settings(
             sources.push((dir, SkillSource::Agents, false));
         }
         sources.push((options.home.join("skills"), SkillSource::Global, true));
+        if let Some(user_home) = env_path("HOME", &options.env) {
+            sources.push((
+                user_home.join(".agents").join("skills"),
+                SkillSource::AgentsGlobal,
+                false,
+            ));
+        }
         for path in &settings.paths {
             sources.push((path.clone(), SkillSource::Config, true));
         }
         for path in &options.additional_roots {
             sources.push((path.clone(), SkillSource::Plugin, true));
         }
-        for (path, source, include_root_files) in sources {
+        for (path, source, include_root_files) in dedupe_skill_source_roots(sources) {
             add_path_skills(
                 &path,
                 source,
@@ -422,6 +460,8 @@ pub fn discover_skills_with_settings(
             )?;
         }
     }
+
+    finalize_skill_catalog(&mut catalog);
 
     let loaded_names = catalog
         .skills
@@ -440,10 +480,24 @@ pub fn discover_skills_with_settings(
     Ok(catalog)
 }
 
+fn dedupe_skill_source_roots(
+    sources: Vec<(PathBuf, SkillSource, bool)>,
+) -> Vec<(PathBuf, SkillSource, bool)> {
+    let mut seen = BTreeSet::new();
+    let mut deduped = Vec::with_capacity(sources.len());
+    for (path, source, include_root_files) in sources {
+        let key = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if seen.insert(key) {
+            deduped.push((path, source, include_root_files));
+        }
+    }
+    deduped
+}
+
 pub fn format_skills_for_prompt(skills: &[Skill]) -> String {
     let visible = skills
         .iter()
-        .filter(|skill| !skill.disable_model_invocation && skill.supported_on_current_platform)
+        .filter(|skill| skill_prompt_visible_for_activation(skill))
         .collect::<Vec<_>>();
     format_skill_prompt_entries(&visible)
 }
@@ -484,7 +538,7 @@ where
         .collect::<HashSet<_>>();
     skills
         .iter()
-        .filter(|skill| !skill.disable_model_invocation && skill.supported_on_current_platform)
+        .filter(|skill| skill_prompt_visible_for_activation(skill))
         .filter(|skill| skill_prompt_visible_for_tools(skill, &available_tools, &accepted_toolsets))
         .cloned()
         .collect()
@@ -568,7 +622,7 @@ pub fn list_skills_value_with_options(
     let skills = catalog
         .skills
         .iter()
-        .filter(|skill| options.include_hidden || !skill.disable_model_invocation)
+        .filter(|skill| options.include_hidden || skill_prompt_visible_for_activation(skill))
         .filter(|skill| {
             options
                 .category
@@ -581,10 +635,7 @@ pub fn list_skills_value_with_options(
                 .as_ref()
                 .is_none_or(|source| skill.source.as_str() == source)
         })
-        .filter(|skill| {
-            !options.enabled_only
-                || (!skill.disable_model_invocation && skill.supported_on_current_platform)
-        })
+        .filter(|skill| !options.enabled_only || skill_prompt_visible_for_activation(skill))
         .filter(|skill| {
             options.platform.as_ref().is_none_or(|platform| {
                 platform.eq_ignore_ascii_case("all")
@@ -609,14 +660,25 @@ pub fn list_skills_value_with_options(
         })
         .map(|skill| {
             let mut value = json!({
+                "id": skill_catalog_id(skill),
                 "name": skill.name,
                 "description": skill.description,
                 "location": skill.file_path,
                 "source": skill.source.as_str(),
+                "source_label": skill.source.display_label(),
                 "category": skill.category,
+                "enabled": skill.enabled,
+                "prompt_visible": skill_prompt_visible_for_activation(skill),
                 "readiness_status": skill_readiness_status(skill),
+                "supported_on_current_platform": skill.supported_on_current_platform,
                 "disable_model_invocation": skill.disable_model_invocation,
+                "issues": skill_issues(skill),
             });
+            if !skill.collision_group.is_empty()
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("collision_group".to_string(), json!(skill.collision_group));
+            }
             if options.detail
                 && let Some(object) = value.as_object_mut()
             {
@@ -624,10 +686,6 @@ pub fn list_skills_value_with_options(
                 object.insert("tags".to_string(), json!(skill.tags));
                 object.insert("related_skills".to_string(), json!(skill.related));
                 object.insert("platforms".to_string(), json!(skill.platforms));
-                object.insert(
-                    "supported_on_current_platform".to_string(),
-                    json!(skill.supported_on_current_platform),
-                );
                 object.insert(
                     "required_environment_variables".to_string(),
                     json!(skill.required_environment_variables),
@@ -674,12 +732,26 @@ pub fn view_skill_value(
     name: &str,
     file_path: Option<&str>,
 ) -> Result<Value> {
-    let skill = find_skill(catalog, name)?;
+    view_skill_value_selected(catalog, name, None, file_path)
+}
+
+pub fn view_skill_value_selected(
+    catalog: &SkillCatalog,
+    name: &str,
+    selector_path: Option<&Path>,
+    file_path: Option<&str>,
+) -> Result<Value> {
+    let skill = match selector_path {
+        Some(path) => find_skill_by_path(catalog, name, path)?,
+        None => find_skill(catalog, name)?,
+    };
     if !skill.supported_on_current_platform && file_path.is_none() {
         return Ok(json!({
             "success": false,
             "name": skill.name,
             "error": format!("skill '{}' is not supported on this platform", skill.name),
+            "source": skill.source.as_str(),
+            "source_label": skill.source.display_label(),
             "readiness_status": "unsupported",
             "platforms": skill.platforms,
         }));
@@ -706,18 +778,29 @@ pub fn view_skill_value(
     let bytes = fs::read(&target)?;
     let is_binary = bytes.contains(&0);
     if is_binary {
+        let content = format!(
+            "[Binary file: {}, size: {} bytes]",
+            target.display(),
+            bytes.len()
+        );
         return Ok(json!({
             "success": true,
             "name": skill.name,
             "file": file_path,
             "is_binary": true,
             "size": bytes.len(),
-            "content": format!("[Binary file: {}, size: {} bytes]", target.display(), bytes.len()),
+            "content": content.clone(),
+            "preview_content": content,
         }));
     }
     let text = match String::from_utf8(bytes) {
         Ok(text) => text,
         Err(err) => {
+            let content = format!(
+                "[Non-UTF-8 file: {}, size: {} bytes]",
+                target.display(),
+                err.as_bytes().len()
+            );
             return Ok(json!({
                 "success": true,
                 "name": skill.name,
@@ -725,10 +808,12 @@ pub fn view_skill_value(
                 "path": target,
                 "is_binary": true,
                 "size": err.as_bytes().len(),
-                "content": format!("[Non-UTF-8 file: {}, size: {} bytes]", target.display(), err.as_bytes().len()),
+                "content": content.clone(),
+                "preview_content": content,
             }));
         }
     };
+    let preview_content = text.clone();
     let content = if file_path.is_none() {
         preprocess_skill_content(strip_frontmatter(&text).trim(), &skill.base_dir, None, None)
     } else {
@@ -737,16 +822,22 @@ pub fn view_skill_value(
     Ok(json!({
         "success": true,
         "name": skill.name,
+        "id": skill_catalog_id(skill),
+        "enabled": skill.enabled,
+        "prompt_visible": skill_prompt_visible_for_activation(skill),
         "file": file_path,
         "path": target,
         "skill_dir": skill.base_dir,
         "description": skill.description,
         "source": skill.source.as_str(),
+        "source_label": skill.source.display_label(),
         "category": skill.category,
         "tags": skill.tags,
         "related_skills": skill.related,
         "platforms": skill.platforms,
         "platform_status": if skill.supported_on_current_platform { "supported" } else { "unsupported" },
+        "issues": skill_issues(skill),
+        "collision_group": skill.collision_group,
         "required_environment_variables": skill.required_environment_variables,
         "missing_required_environment_variables": missing_required_env_names(skill, None),
         "missing_credential_files": missing_credential_files(skill),
@@ -761,8 +852,52 @@ pub fn view_skill_value(
         "required_toolsets": skill.required_toolsets,
         "fallback_for_toolsets": skill.fallback_for_toolsets,
         "content": content,
+        "preview_content": preview_content,
         "linked_files": linked_files(&skill.base_dir),
     }))
+}
+
+pub(crate) fn skill_catalog_id(skill: &Skill) -> String {
+    skill
+        .file_path
+        .canonicalize()
+        .unwrap_or_else(|_| skill.file_path.clone())
+        .to_string_lossy()
+        .to_string()
+}
+
+pub(crate) fn skill_issues(skill: &Skill) -> Vec<String> {
+    let mut issues = Vec::new();
+    if !skill.enabled {
+        issues.push("disabled".to_string());
+    }
+    if skill.disable_model_invocation {
+        issues.push("hidden_from_model".to_string());
+    }
+    if !skill.supported_on_current_platform {
+        issues.push("unsupported_on_current_platform".to_string());
+    }
+    let missing_env = missing_required_env_names(skill, None);
+    if !missing_env.is_empty() {
+        issues.push(format!(
+            "missing environment variables: {}",
+            missing_env.join(", ")
+        ));
+    }
+    let missing_credentials = missing_credential_files(skill);
+    if !missing_credentials.is_empty() {
+        issues.push(format!(
+            "missing credential files: {}",
+            missing_credentials.join(", ")
+        ));
+    }
+    if !skill.collision_group.is_empty() {
+        issues.push(format!(
+            "ambiguous skill name across {} paths",
+            skill.collision_group.len()
+        ));
+    }
+    issues
 }
 
 pub(crate) fn skill_readiness_status(skill: &Skill) -> &'static str {

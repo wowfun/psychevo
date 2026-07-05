@@ -1,12 +1,13 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 use crate::skills::{
-    SaveSkillBundleOptions, ScanVerdict, SkillDiscoveryOptions, SkillTarget, delete_skill_bundle,
-    discover_skills, format_skills_for_prompt, list_skill_bundles, list_skills_value,
-    save_skill_bundle, scan_skill_path, select_explicit_skills, select_skills_for_prompt,
-    set_skill_config_value, set_skill_enabled, skill_context_fragments, skill_context_messages,
+    InstallOptions, SaveSkillBundleOptions, ScanVerdict, SkillDiscoveryOptions, SkillSource,
+    SkillTarget, delete_skill_bundle, discover_skills, format_skills_for_prompt, install_skill,
+    list_skill_bundles, list_skills_value, save_skill_bundle, scan_skill_path,
+    select_explicit_skills, select_skills_for_prompt, set_skill_config_value, set_skill_enabled,
+    skill_context_fragments, skill_context_messages, skill_source_display_label,
     skills_visible_for_prompt_with_tools, skills_visible_for_prompt_with_tools_and_toolsets,
-    view_skill_value,
+    view_skill_value, view_skill_value_selected,
 };
 use crate::tools::skill_tools_for_mode;
 
@@ -54,6 +55,55 @@ pub(crate) fn write_root_skill(root: &std::path::Path, name: &str, description: 
 }
 
 #[test]
+pub(crate) fn skills_discovery_loads_overlapping_home_agents_root_once() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("psychevo-home");
+    let cwd = temp.path().join("workspaces").join("chat");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(temp.path().join(".git")).expect("git marker");
+    write_package_skill(
+        &temp.path().join(".agents").join("skills"),
+        "shared-home",
+        "home agents compatibility skill",
+        "home agents body",
+    );
+
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
+    let matches = catalog
+        .skills
+        .iter()
+        .filter(|skill| skill.name == "shared-home")
+        .collect::<Vec<_>>();
+
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].source, SkillSource::Agents);
+    assert!(matches[0].collision_group.is_empty());
+    assert!(!catalog.collisions.contains_key("shared-home"));
+}
+
+#[test]
+pub(crate) fn skill_source_display_label_groups_raw_sources() {
+    for source in ["project", "agents"] {
+        assert_eq!(skill_source_display_label(Some(source)), Some("Project"));
+    }
+    for source in [
+        "explicit",
+        "global",
+        "agents_global",
+        "config",
+        "install_source",
+    ] {
+        assert_eq!(skill_source_display_label(Some(source)), Some("User"));
+    }
+    for source in ["plugin", "system", "builtin", "built_in", "core"] {
+        assert_eq!(skill_source_display_label(Some(source)), Some("System"));
+    }
+    assert_eq!(skill_source_display_label(Some("custom_source")), None);
+    assert_eq!(skill_source_display_label(Some("")), None);
+    assert_eq!(skill_source_display_label(None), None);
+}
+
+#[test]
 pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_files() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
@@ -92,6 +142,18 @@ pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_fil
         "Psychevo native root file",
         "root body",
     );
+    write_package_skill(
+        &temp.path().join(".agents").join("skills"),
+        "compat-tool",
+        "home agents compatibility package",
+        "compat body",
+    );
+    write_root_skill(
+        &temp.path().join(".agents").join("skills"),
+        "compat-root",
+        "must be ignored",
+        "ignored body",
+    );
 
     let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let names = catalog
@@ -100,19 +162,24 @@ pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_fil
         .map(|skill| skill.name.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(names, vec!["shared", "agent-tool", "root-md"]);
+    assert_eq!(
+        names,
+        vec!["shared", "agent-tool", "root-md", "shared", "compat-tool"]
+    );
     let shared = catalog
         .skills
         .iter()
         .find(|skill| skill.name == "shared")
         .expect("shared");
     assert_eq!(shared.description, "project shared skill");
+    assert!(!shared.collision_group.is_empty());
     assert!(
         catalog
             .skills
             .iter()
-            .all(|skill| skill.name != "agent-root")
+            .all(|skill| skill.name != "agent-root" && skill.name != "compat-root")
     );
+    assert_eq!(catalog.collisions["shared"].len(), 2);
     assert!(
         catalog
             .diagnostics
@@ -153,10 +220,41 @@ pub(crate) fn skills_discovery_skips_missing_descriptions_and_honors_disabled_an
         .iter()
         .map(|skill| skill.name.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(names, vec!["hidden"]);
+    assert_eq!(names, vec!["hidden", "normal"]);
+    let normal = catalog
+        .skills
+        .iter()
+        .find(|skill| skill.name == "normal")
+        .expect("normal");
+    let hidden = catalog
+        .skills
+        .iter()
+        .find(|skill| skill.name == "hidden")
+        .expect("hidden");
+    assert!(!normal.enabled);
+    assert!(!normal.disable_model_invocation);
+    assert!(hidden.enabled);
+    assert!(hidden.disable_model_invocation);
     assert!(format_skills_for_prompt(&catalog.skills).is_empty());
     assert_eq!(list_skills_value(&catalog, false)["count"], 0);
-    assert_eq!(list_skills_value(&catalog, true)["count"], 1);
+    let listed = list_skills_value(&catalog, true);
+    assert_eq!(listed["count"], 2);
+    let normal_row = listed["skills"]
+        .as_array()
+        .expect("skills array")
+        .iter()
+        .find(|skill| skill["name"] == "normal")
+        .expect("normal row");
+    let hidden_row = listed["skills"]
+        .as_array()
+        .expect("skills array")
+        .iter()
+        .find(|skill| skill["name"] == "hidden")
+        .expect("hidden row");
+    assert_eq!(normal_row["enabled"], false);
+    assert_eq!(normal_row["prompt_visible"], false);
+    assert_eq!(hidden_row["enabled"], true);
+    assert_eq!(hidden_row["prompt_visible"], false);
     assert!(
         catalog
             .diagnostics
@@ -300,7 +398,7 @@ pub(crate) fn skills_selection_parses_markers_and_dedupes_unknowns() {
 }
 
 #[test]
-pub(crate) fn skills_selection_allows_hidden_explicit_and_excludes_disabled() {
+pub(crate) fn skills_selection_excludes_hidden_and_disabled_markers() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -329,8 +427,19 @@ pub(crate) fn skills_selection_allows_hidden_explicit_and_excludes_disabled() {
         .map(|skill| skill.name.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(names, vec!["hidden"]);
+    assert!(names.is_empty());
     assert!(format_skills_for_prompt(&catalog.skills).is_empty());
+    let selected_by_path = select_explicit_skills(
+        &catalog,
+        &[hidden.to_string_lossy().to_string()],
+        &cwd,
+        &BTreeMap::from([(
+            "HOME".to_string(),
+            temp.path().to_string_lossy().to_string(),
+        )]),
+    );
+    assert_eq!(selected_by_path.len(), 1);
+    assert_eq!(selected_by_path[0].name, "hidden");
 }
 
 #[test]
@@ -444,10 +553,15 @@ pub(crate) fn view_skill_reads_linked_files_but_rejects_path_escape() {
     let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let skill = view_skill_value(&catalog, "reader", None).expect("skill view");
     assert_eq!(skill["content"], "Read me.");
+    let preview_content = skill["preview_content"].as_str().expect("preview content");
+    assert!(preview_content.contains("---"));
+    assert!(preview_content.contains("description: read references"));
+    assert!(preview_content.contains("Read me."));
     assert_eq!(skill["linked_files"]["references"][0], "references/note.md");
     let reference =
         view_skill_value(&catalog, "reader", Some("references/note.md")).expect("reference view");
     assert_eq!(reference["content"], "reference\n");
+    assert_eq!(reference["preview_content"], "reference\n");
     assert!(view_skill_value(&catalog, "reader", Some("../outside.md")).is_err());
     assert!(view_skill_value(&catalog, "reader", Some("/tmp/outside.md")).is_err());
 }
@@ -473,6 +587,7 @@ pub(crate) fn view_skill_reports_hermes_metadata_and_setup_readiness() {
 
     assert_eq!(value["readiness_status"], "setup_needed");
     assert_eq!(value["source"], "global");
+    assert_eq!(value["source_label"], "User");
     assert_eq!(value["platform_status"], "supported");
     assert_eq!(
         value["missing_required_environment_variables"],
@@ -516,6 +631,56 @@ pub(crate) fn skill_name_collisions_require_explicit_resolution_for_view() {
     let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     assert!(view_skill_value(&catalog, "same", None).is_err());
     assert!(catalog.collisions.contains_key("same"));
+    assert_eq!(catalog.skills.len(), 2);
+    assert!(format_skills_for_prompt(&catalog.skills).is_empty());
+    let project_path = cwd
+        .join(".psychevo")
+        .join("skills")
+        .join("same")
+        .join("SKILL.md");
+    let selected = view_skill_value_selected(&catalog, "same", Some(&project_path), None)
+        .expect("path selected skill");
+    assert_eq!(selected["description"], "project");
+}
+
+#[test]
+pub(crate) fn skill_install_force_overwrites_existing_target() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    let source = temp.path().join("source");
+    fs::create_dir_all(&cwd).expect("cwd");
+
+    write_package_skill(&source, "fresh", "fresh description", "fresh body");
+    write_package_skill(
+        &cwd.join(".psychevo").join("skills"),
+        "fresh",
+        "stale description",
+        "stale body",
+    );
+    let options = InstallOptions {
+        source: source.to_string_lossy().to_string(),
+        target: SkillTarget::Project,
+        name: Some("fresh".to_string()),
+        all: false,
+        force: false,
+    };
+    let err = install_skill(&home, &cwd, options.clone()).expect_err("force required");
+    assert!(err.to_string().contains("skill already exists"));
+
+    install_skill(
+        &home,
+        &cwd,
+        InstallOptions {
+            force: true,
+            ..options
+        },
+    )
+    .expect("force install");
+    let content =
+        fs::read_to_string(cwd.join(".psychevo/skills/fresh/SKILL.md")).expect("installed skill");
+    assert!(content.contains("fresh description"));
+    assert!(!content.contains("stale description"));
 }
 
 #[test]

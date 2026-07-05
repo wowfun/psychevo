@@ -323,7 +323,7 @@ fn manifest_parses_mcp_servers_object_without_discarding_valid_siblings() {
         .expect("http");
     assert!(matches!(
         &http.transport,
-        McpTransportInput::StreamableHttp { url, headers }
+        McpTransportInput::StreamableHttp { url, headers, .. }
             if url == "https://example.test/mcp"
                 && headers.get("Authorization").map(String::as_str) == Some("Bearer x")
     ));

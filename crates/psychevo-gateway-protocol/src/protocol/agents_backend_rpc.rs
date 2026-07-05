@@ -249,6 +249,255 @@ pub struct PluginDoctorParams {
     pub scope: Option<GatewayRequestScope>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillReadParams {
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillInstallParams {
+    pub source: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub all: bool,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub force: bool,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillUninstallParams {
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSetEnabledParams {
+    pub name: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInstallParams {
+    pub source: String,
+    #[serde(default)]
+    pub git_ref: Option<String>,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub force: bool,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginUninstallParams {
+    pub selector: String,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSetEnabledParams {
+    pub selector: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolReadParams {
+    pub name: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolSetEnabledParams {
+    pub name: String,
+    pub mode: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub local: bool,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCreateParams {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub includes: Vec<String>,
+    #[serde(default)]
+    pub force: bool,
+    #[serde(default)]
+    pub local: bool,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolRemoveParams {
+    pub name: String,
+    #[serde(default)]
+    pub local: bool,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpReadParams {
+    pub name: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpUpsertParams {
+    pub name: String,
+    pub transport: String,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub required: Option<bool>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default, rename = "bearerTokenEnvVar")]
+    pub bearer_token_env_var: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default, rename = "oauthResource")]
+    pub oauth_resource: Option<String>,
+    #[serde(default, rename = "oauthClientId")]
+    pub oauth_client_id: Option<String>,
+    #[serde(default, rename = "enabledTools")]
+    pub enabled_tools: Option<Vec<String>>,
+    #[serde(default, rename = "disabledTools")]
+    pub disabled_tools: Vec<String>,
+    #[serde(default, rename = "supportsParallelToolCalls")]
+    pub supports_parallel_tool_calls: Option<bool>,
+    #[serde(default, rename = "startupTimeoutSecs")]
+    pub startup_timeout_secs: Option<u64>,
+    #[serde(default, rename = "toolTimeoutSecs")]
+    pub tool_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpNameParams {
+    pub name: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSetEnabledParams {
+    pub name: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSetToolPolicyParams {
+    pub name: String,
+    #[serde(default, rename = "enabledTools")]
+    pub enabled_tools: Option<Vec<String>>,
+    #[serde(default, rename = "disabledTools")]
+    pub disabled_tools: Vec<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthStartParams {
+    pub name: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthStatusParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendConfigView {
@@ -506,6 +755,52 @@ pub enum ClientRequest {
     PluginRead(PluginReadParams),
     #[serde(rename = "plugin/doctor")]
     PluginDoctor(PluginDoctorParams),
+    #[serde(rename = "plugin/install")]
+    PluginInstall(PluginInstallParams),
+    #[serde(rename = "plugin/uninstall")]
+    PluginUninstall(PluginUninstallParams),
+    #[serde(rename = "plugin/setEnabled")]
+    PluginSetEnabled(PluginSetEnabledParams),
+    #[serde(rename = "skill/list")]
+    SkillList(SkillListParams),
+    #[serde(rename = "skill/read")]
+    SkillRead(SkillReadParams),
+    #[serde(rename = "skill/install")]
+    SkillInstall(SkillInstallParams),
+    #[serde(rename = "skill/uninstall")]
+    SkillUninstall(SkillUninstallParams),
+    #[serde(rename = "skill/setEnabled")]
+    SkillSetEnabled(SkillSetEnabledParams),
+    #[serde(rename = "tool/list")]
+    ToolList(ToolListParams),
+    #[serde(rename = "tool/read")]
+    ToolRead(ToolReadParams),
+    #[serde(rename = "tool/setEnabled")]
+    ToolSetEnabled(ToolSetEnabledParams),
+    #[serde(rename = "tool/create")]
+    ToolCreate(ToolCreateParams),
+    #[serde(rename = "tool/remove")]
+    ToolRemove(ToolRemoveParams),
+    #[serde(rename = "mcp/list")]
+    McpList(McpListParams),
+    #[serde(rename = "mcp/read")]
+    McpRead(McpReadParams),
+    #[serde(rename = "mcp/upsert")]
+    McpUpsert(McpUpsertParams),
+    #[serde(rename = "mcp/remove")]
+    McpRemove(McpNameParams),
+    #[serde(rename = "mcp/setEnabled")]
+    McpSetEnabled(McpSetEnabledParams),
+    #[serde(rename = "mcp/setToolPolicy")]
+    McpSetToolPolicy(McpSetToolPolicyParams),
+    #[serde(rename = "mcp/test")]
+    McpTest(McpNameParams),
+    #[serde(rename = "mcp/oauth/start")]
+    McpOAuthStart(McpOAuthStartParams),
+    #[serde(rename = "mcp/oauth/status")]
+    McpOAuthStatus(McpOAuthStatusParams),
+    #[serde(rename = "mcp/oauth/logout")]
+    McpOAuthLogout(McpNameParams),
     #[serde(rename = "channel/list")]
     ChannelList(ChannelListParams),
     #[serde(rename = "channel/show")]

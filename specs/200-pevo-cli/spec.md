@@ -191,6 +191,16 @@ fall back through `127.0.0.1:58099` if earlier ports are already in use. The
 JSON response always reports the actual bound URL in `baseUrl`. An explicit
 `--bind` is strict and does not use managed port fallback.
 
+`pevo desktop` is the source-checkout developer launcher for the native Desktop
+shell. It discovers a Psychevo source checkout containing `apps/desktop/` and
+runs the existing `@psychevo/desktop` Tauri development entrypoint. It accepts
+`--dir <DIR>` to choose the Desktop fallback workspace cwd; otherwise it uses
+the caller's cwd. The command preserves active profile selection for the
+Desktop child process and passes the current `pevo` executable path as
+`PSYCHEVO_PEVO_BIN` so Desktop managed Gateway startup uses the same CLI build
+that launched the native shell. It is not a Desktop packaging, installer,
+update, or background lifecycle command.
+
 `pevo serve` starts the strict headless local Gateway API server. It binds
 loopback by default, requires an explicit token from `PSYCHEVO_SERVE_TOKEN` or
 `--token-file`, emits one ready JSON object to stdout, and does not mount the
@@ -288,10 +298,11 @@ with warnings for non-fatal conditions.
 shows built-in and user-defined toolsets, effective mode enablement, and
 expanded tools. `show <name>` displays one tool or toolset. `enable` and
 `disable` update per-mode `tools.modes.<mode>.enabled_toolsets` or
-`disabled_toolsets`; they default to project-local `.psychevo/config.toml` and
-accept `-g`/`--global` for `$PSYCHEVO_HOME/config.toml`. `create` and `remove`
-manage user-defined `[toolsets.<name>]` entries with the same local-default
-scope behavior.
+`disabled_toolsets`; they default to the active profile
+`$PSYCHEVO_HOME/config.toml` and accept `--local` for the current cwd
+`.psychevo/config.toml`. `-g` and `--global` are not accepted for `pevo tool`
+mutations. `create` and `remove` manage user-defined `[toolsets.<name>]`
+entries with the same profile-default scope behavior.
 
 `pevo context` owns local context-window usage inspection for one existing
 session. It does not contact providers, refresh catalogs, or persist prompt

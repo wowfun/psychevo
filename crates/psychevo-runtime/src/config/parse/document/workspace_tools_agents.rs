@@ -182,6 +182,7 @@ pub(crate) fn parse_profile_mcp_servers(value: &Value) -> Result<Vec<McpServerIn
         let url = optional_string_field(server, "url")?;
         let transport_input = match transport.as_deref() {
             Some("stdio") => {
+                reject_stdio_mcp_auth_fields(server, &format!("mcp_servers.{name}"))?;
                 let command = command.ok_or_else(|| {
                     Error::Config(format!("mcp_servers.{name}.command is required"))
                 })?;
@@ -195,32 +196,25 @@ pub(crate) fn parse_profile_mcp_servers(value: &Value) -> Result<Vec<McpServerIn
             Some("streamable_http" | "http") => {
                 let url = url
                     .ok_or_else(|| Error::Config(format!("mcp_servers.{name}.url is required")))?;
-                McpTransportInput::StreamableHttp {
-                    url,
-                    headers: string_map_field(
-                        server,
-                        "headers",
-                        &format!("mcp_servers.{name}.headers"),
-                    )?,
-                }
+                parse_streamable_http_mcp_transport(server, &format!("mcp_servers.{name}"), url)?
             }
             Some(kind) => McpTransportInput::Unsupported {
                 kind: kind.to_string(),
             },
-            None if command.is_some() => McpTransportInput::Stdio {
-                command: PathBuf::from(command.expect("checked is_some")),
-                args: string_array_field(server, "args", &format!("mcp_servers.{name}.args"))?,
-                env: string_map_field(server, "env", &format!("mcp_servers.{name}.env"))?,
-                cwd: optional_string_field(server, "cwd")?.map(PathBuf::from),
-            },
-            None if url.is_some() => McpTransportInput::StreamableHttp {
-                url: url.expect("checked is_some"),
-                headers: string_map_field(
-                    server,
-                    "headers",
-                    &format!("mcp_servers.{name}.headers"),
-                )?,
-            },
+            None if command.is_some() => {
+                reject_stdio_mcp_auth_fields(server, &format!("mcp_servers.{name}"))?;
+                McpTransportInput::Stdio {
+                    command: PathBuf::from(command.expect("checked is_some")),
+                    args: string_array_field(server, "args", &format!("mcp_servers.{name}.args"))?,
+                    env: string_map_field(server, "env", &format!("mcp_servers.{name}.env"))?,
+                    cwd: optional_string_field(server, "cwd")?.map(PathBuf::from),
+                }
+            }
+            None if url.is_some() => parse_streamable_http_mcp_transport(
+                server,
+                &format!("mcp_servers.{name}"),
+                url.expect("checked is_some"),
+            )?,
             None => {
                 return Err(Error::Config(format!(
                     "mcp_servers.{name} must declare command or url"
@@ -244,6 +238,58 @@ pub(crate) fn parse_profile_mcp_servers(value: &Value) -> Result<Vec<McpServerIn
         );
     }
     Ok(out)
+}
+
+fn reject_stdio_mcp_auth_fields(
+    server: &serde_json::Map<String, Value>,
+    path: &str,
+) -> Result<()> {
+    for key in ["bearer_token_env_var", "scopes", "oauth_resource", "oauth"] {
+        if server.contains_key(key) {
+            return Err(Error::Config(format!(
+                "{path}.{key} is only valid for streamable HTTP MCP servers"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn parse_streamable_http_mcp_transport(
+    server: &serde_json::Map<String, Value>,
+    path: &str,
+    url: String,
+) -> Result<McpTransportInput> {
+    if server.contains_key("bearer_token") {
+        return Err(Error::Config(format!(
+            "{path}.bearer_token is not supported; use bearer_token_env_var"
+        )));
+    }
+    let headers = string_map_field(server, "headers", &format!("{path}.headers"))?;
+    if headers
+        .keys()
+        .any(|key| key.eq_ignore_ascii_case("authorization"))
+    {
+        return Err(Error::Config(format!(
+            "{path}.headers.Authorization is not supported; use bearer_token_env_var"
+        )));
+    }
+    let oauth_client_id = match server.get("oauth") {
+        Some(value) => {
+            let object = value
+                .as_object()
+                .ok_or_else(|| Error::Config(format!("{path}.oauth must be an object")))?;
+            optional_string_field(object, "client_id")?
+        }
+        None => None,
+    };
+    Ok(McpTransportInput::StreamableHttp {
+        url,
+        headers,
+        bearer_token_env_var: optional_string_field(server, "bearer_token_env_var")?,
+        scopes: string_array_field(server, "scopes", &format!("{path}.scopes"))?,
+        oauth_resource: optional_string_field(server, "oauth_resource")?,
+        oauth_client_id,
+    })
 }
 
 pub(crate) fn parse_mcp_server_policy<const ENABLED: usize, const DISABLED: usize>(

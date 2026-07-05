@@ -83,16 +83,41 @@ Skill discovery is deterministic. The precedence order is:
 2. project `<cwd>/.psychevo/skills`
 3. ancestor `.agents/skills` from nearest directory to git root
 4. global `$PSYCHEVO_HOME/skills`
-5. optional configured `skills.paths`
+5. compatibility `$HOME/.agents/skills`
+6. optional configured `skills.paths`
 
 Psychevo keeps `skills.paths` as the external-directory config key. The legacy
-`skills.external_dirs` key is not a supported config alias.
+`skills.external_dirs` key is not a supported config alias. `$HOME/.agents/skills`
+is a compatibility discovery root, not a config alias, and loads only directory
+packages with `SKILL.md`.
+
+Discovery canonicalizes existing source roots before scanning and loads each
+physical root once. If a root is reachable through multiple rules, the earliest
+rule in the precedence order owns the source label and root-file behavior. This
+prevents `$HOME/.agents/skills` from appearing once as an ancestor `agents` root
+and again as an `agents_global` compatibility root while preserving collisions
+for distinct enabled skills with the same name.
+
+Discovery produces a management catalog before runtime activation filters are
+applied. Valid discovered skills remain visible to management surfaces even
+when they are disabled, unsupported on the current platform, hidden from model
+invocation, or collision-ambiguous. Each catalog row exposes `enabled`,
+`prompt_visible`, `readiness_status`, `supported_on_current_platform`, `source`,
+`source_label`, `location`, `skill_dir`, `issues`, and, when applicable,
+`collision_group`.
+
+`source` is the raw discovery source for filtering, diagnostics, and mutation
+target resolution. User-facing surfaces must prefer `source_label`, a coarse
+display label that hides implementation-oriented source names: project-local
+and ancestor `.agents/skills` roots are `Project`, user/configured/explicit
+roots are `User`, and plugin or built-in/system roots are `System`. Unknown raw
+sources do not fall back to visible snake_case labels.
 
 Duplicate enabled skill names are surfaced as collisions. Name-based view,
 marker selection, and dynamic slash invocation refuse ambiguous names instead of
 silently choosing the precedence winner. Callers can disambiguate through a
-category path, an explicit filesystem path, or CLI scope/path flags where
-available.
+category path, an explicit filesystem path, or CLI/Gateway path selectors where
+available. Colliding rows stay visible in `skill/list`.
 
 Disabled state lives in `config.toml` under `skills.disabled` and
 `skills.platform_disabled.<platform>`. Runtime ignores legacy disabled sidecars.
@@ -109,7 +134,8 @@ Runtime appends a compact skill index to system instructions when at least one
 available, non-hidden skill is discovered and skill discovery is enabled. The
 index contains only name, description, and location. Skills marked
 `disable-model-invocation: true`, disabled skills, unsupported skills, and
-collision-ambiguous skills are omitted.
+collision-ambiguous skills are omitted. The same strict visibility applies to
+dynamic slash, marker activation, and name-only model `view_skill`.
 
 The index is advisory: when the task matches a listed skill that has not
 already been selected for the turn, the model is instructed to load the full
@@ -146,13 +172,17 @@ readiness. Usage-based sorts read SQLite aggregate counters. Listing does not
 increment usage telemetry.
 
 `view_skill` reads a skill's main `SKILL.md` content, or a requested supporting
-file within that skill's directory. It rejects path traversal and resolved paths
-outside the skill directory. Binary or invalid UTF-8 files are reported as
-metadata rather than inlined. Missing supporting files return available file
-choices. `view_skill` reports linked files, readiness, tags, related skills,
-setup notes, missing required environment variables, missing credential files,
-and platform status. Viewing increments aggregate view telemetry, including in
-Plan Mode.
+file within that skill's directory. Main `SKILL.md` reads keep `content` as the
+processed model-facing body without YAML frontmatter, while product GUI callers
+may use `preview_content` for the raw UTF-8 Markdown file preview. Supporting
+file reads may return the same raw text for both fields. It rejects path
+traversal and resolved paths outside the skill directory. Binary or invalid
+UTF-8 files are reported as metadata rather than inlined. Missing supporting
+files return available file choices. `view_skill` reports linked files,
+raw `source`, display `source_label`, readiness, tags, related skills, setup
+notes, missing required environment variables, missing credential files, and
+platform status. Viewing increments aggregate view telemetry, including in Plan
+Mode.
 
 Default mode also exposes aggregate tools:
 
@@ -196,6 +226,26 @@ seeding or syncing.
 `-g`/`--global` installs under `$PSYCHEVO_HOME/skills`. Installing a managed
 skill as an editable copy uses `install --name <new-name>`, and the new name is
 required. `--project` is not accepted as a scope alias.
+
+Gateway exposes skill management methods for product surfaces:
+`skill/list`, `skill/read`, `skill/install`, `skill/uninstall`, and
+`skill/setEnabled`. These methods use the same discovery, scanner, install,
+and scoped config helpers as the CLI/TUI. Workbench capability management writes
+to the active profile by default. Dangerous scanner verdicts and overwrites
+must require an explicit force request from the caller.
+
+`skill/list` returns the management catalog and remains JSON-compatible with
+older fields. It adds a stable path-derived `id`, `enabled`,
+`prompt_visible`, `issues`, and optional `collision_group` per row.
+`skill/read` accepts `{ name, path?, scope }`; `path` selects an exact
+discovered row and bypasses name-collision ambiguity, while name-only reads
+continue to refuse ambiguous names. `content` remains the processed body used by
+model-facing views; `preview_content` is the raw UTF-8 file text intended for
+GUI Markdown preview. `skill/uninstall` accepts
+`{ name, path?, target?, scope }`; `path` removes that exact profile/project
+installed skill when it is in a mutable Psychevo skills directory and refuses
+non-mutable sources. `skill/setEnabled` remains name-scoped because persisted
+disabled state is `skills.disabled`.
 
 The TUI `/skills` command is a hub dispatcher. `/skills` with no arguments
 shows a bounded hub dashboard/help block. Read subcommands include `list`,

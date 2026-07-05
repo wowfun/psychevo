@@ -39,7 +39,11 @@ fn profile_mcp_servers_parse_stdio_and_http_descriptors() {
             "docs": {
                 "transport": "streamable_http",
                 "url": "https://example.test/mcp",
-                "headers": { "x-test": "yes" }
+                "headers": { "x-test": "yes" },
+                "bearer_token_env_var": "DOCS_MCP_TOKEN",
+                "scopes": ["docs.read"],
+                "oauth_resource": "https://auth.example.test",
+                "oauth": { "client_id": "psychevo" }
             }
         }
     }))
@@ -76,8 +80,46 @@ fn profile_mcp_servers_parse_stdio_and_http_descriptors() {
     ));
     assert!(matches!(
         &docs.transport,
-        crate::types::McpTransportInput::StreamableHttp { url, headers }
+        crate::types::McpTransportInput::StreamableHttp {
+            url,
+            headers,
+            bearer_token_env_var,
+            scopes,
+            oauth_resource,
+            oauth_client_id,
+        }
             if url == "https://example.test/mcp"
                 && headers.get("x-test").map(String::as_str) == Some("yes")
+                && bearer_token_env_var.as_deref() == Some("DOCS_MCP_TOKEN")
+                && scopes == &vec!["docs.read".to_string()]
+                && oauth_resource.as_deref() == Some("https://auth.example.test")
+                && oauth_client_id.as_deref() == Some("psychevo")
     ));
+}
+
+#[test]
+fn profile_mcp_servers_reject_inline_http_tokens_and_stdio_oauth() {
+    let inline = crate::config::config_parse::parse_run_config(json!({
+        "mcp_servers": {
+            "docs": {
+                "transport": "streamable_http",
+                "url": "https://example.test/mcp",
+                "headers": { "Authorization": "Bearer secret" }
+            }
+        }
+    }))
+    .expect_err("inline bearer");
+    assert!(inline.to_string().contains("bearer_token_env_var"));
+
+    let stdio = crate::config::config_parse::parse_run_config(json!({
+        "mcp_servers": {
+            "repo": {
+                "transport": "stdio",
+                "command": "node",
+                "oauth": { "client_id": "bad" }
+            }
+        }
+    }))
+    .expect_err("stdio oauth");
+    assert!(stdio.to_string().contains("only valid for streamable HTTP"));
 }

@@ -210,6 +210,9 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
         diff_completion["detail"].as_str(),
         Some("Preview - show workspace diff")
     );
+    assert_eq!(diff_completion["group"], "commands");
+    assert_eq!(diff_completion["groupLabel"], "Commands");
+    assert!(diff_completion["scopeLabel"].is_null());
 
     let parent_session = state
         .inner
@@ -557,6 +560,9 @@ async fn command_list_and_execute_include_dynamic_skill_commands() {
         dynamic_completion["detail"].as_str(),
         Some("Prompt - Fetch X daily posts.")
     );
+    assert_eq!(dynamic_completion["group"], "skills");
+    assert_eq!(dynamic_completion["groupLabel"], "Skills");
+    assert_eq!(dynamic_completion["scopeLabel"], "User");
 
     let result = handle_rpc(
         state,

@@ -183,6 +183,12 @@ pub struct CompletionItem {
     pub target: Option<GatewayMentionTarget>,
     #[serde(default)]
     pub sort_text: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub group_label: Option<String>,
+    #[serde(default)]
+    pub scope_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -518,6 +524,8 @@ pub struct RuntimeOptionsResult {
 #[serde(rename_all = "camelCase")]
 pub struct TurnStartResult {
     pub accepted: bool,
+    #[serde(default)]
+    pub thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

@@ -544,6 +544,65 @@ fn live_projector_authoritative_message_end_preserves_runtime_reasoning() {
 }
 
 #[test]
+fn live_projector_projects_message_update_before_terminal_message_end() {
+    let mut projector = GatewayLiveProjector::default();
+
+    let update = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "message_update",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "streaming hello"}
+                    ],
+                    "finish_reason": null,
+                    "outcome": "normal"
+                }
+            })),
+        )
+        .expect("streaming message update");
+
+    let (turn_id, entry) = match update {
+        GatewayEvent::EntryStarted { turn_id, entry }
+        | GatewayEvent::EntryUpdated { turn_id, entry } => (turn_id, entry),
+        other => panic!("message_update must project to a live transcript entry: {other:?}"),
+    };
+    assert_eq!(turn_id, "turn-1");
+    assert_eq!(entry.role, TranscriptEntryRole::Assistant);
+    assert_eq!(entry.status, TranscriptBlockStatus::Running);
+    assert_eq!(entry.blocks[0].kind, TranscriptBlockKind::Text);
+    assert_eq!(entry.blocks[0].body.as_deref(), Some("streaming hello"));
+    assert_eq!(entry.blocks[0].status, TranscriptBlockStatus::Running);
+
+    let terminal = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "streaming hello done"}
+                    ],
+                    "finish_reason": "stop",
+                    "outcome": "normal"
+                }
+            })),
+        )
+        .expect("terminal message end");
+
+    let GatewayEvent::EntryCompleted { turn_id, entry } = terminal else {
+        panic!("message_end must project to entryCompleted");
+    };
+    assert_eq!(turn_id, "turn-1");
+    assert_eq!(entry.status, TranscriptBlockStatus::Completed);
+    assert_eq!(entry.blocks[0].body.as_deref(), Some("streaming hello done"));
+    assert_eq!(entry.blocks[0].status, TranscriptBlockStatus::Completed);
+}
+
+#[test]
 fn live_projector_replaces_running_message_update_snapshot_when_content_positions_shift() {
     let mut projector = GatewayLiveProjector::default();
     let table = "3 个翻译 Agent 已并发启动 ✅，等待它们返回结果：\n\n| # | 任务 | Agent ID | 状态 |\n|---|------|----------|------|\n| 1 | 中→英 | `translate_cn_to_en` | 🔄 运行中 |\n| 2 | 英→中 | `translate_en_to_cn` | 🔄 运行中 |\n| 3 | 日→中 | `translate_ja_to_cn` | 🔄 运行中 |\n\n正在等待所有 Agent 完成...";

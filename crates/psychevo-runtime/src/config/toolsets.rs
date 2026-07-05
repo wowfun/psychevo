@@ -46,6 +46,8 @@ pub fn toolsets_value(options: &RunOptions, scope: ConfigScope) -> Result<Value>
             "tools": tools,
             "includes": [],
             "unknown_tools": [],
+            "mode_mutable": *name != "coding-core",
+            "removable": false,
         }));
     }
     for (name, toolset) in &config.toolsets {
@@ -62,6 +64,8 @@ pub fn toolsets_value(options: &RunOptions, scope: ConfigScope) -> Result<Value>
             "tools": toolset.tools.clone(),
             "includes": toolset.includes.clone(),
             "unknown_tools": unknown_tools,
+            "mode_mutable": true,
+            "removable": true,
         }));
     }
     Ok(json!({
@@ -84,6 +88,11 @@ pub fn set_local_toolset_enabled(
     enabled: bool,
 ) -> Result<ToolsetMutationResult> {
     let name = normalize_toolset_name(name)?;
+    if name == "coding-core" {
+        return Err(Error::Config(
+            "built-in toolset coding-core cannot be configured".to_string(),
+        ));
+    }
     let mode_key = mode.as_str();
     fs::create_dir_all(&config_dir)?;
     let config_path = config_dir.join(CONFIG_FILE_NAME);
@@ -127,6 +136,11 @@ pub fn create_local_toolset(
     force: bool,
 ) -> Result<ToolsetMutationResult> {
     let name = normalize_toolset_name(name)?;
+    if crate::tools::builtin_toolset_names().contains(&name.as_str()) {
+        return Err(Error::Config(format!(
+            "built-in toolset {name} cannot be overwritten"
+        )));
+    }
     validate_toolset_entries(&tools, "tool")?;
     validate_toolset_entries(&includes, "include")?;
     fs::create_dir_all(&config_dir)?;
@@ -283,5 +297,73 @@ pub(crate) fn remove_mode_toolset_entry(
 pub(crate) fn push_unique_string(values: &mut Vec<Value>, name: &str) {
     if !values.iter().any(|value| value.as_str() == Some(name)) {
         values.push(Value::String(name.to_string()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn coding_core_toolset_configuration_is_rejected_without_writing_config() {
+        let temp = tempdir().expect("temp");
+        let config_dir = temp.path().join("profile");
+
+        let err =
+            set_local_toolset_enabled(config_dir.clone(), RunMode::Default, "coding-core", false)
+                .expect_err("coding-core disable should fail");
+        assert!(
+            err.to_string()
+                .contains("built-in toolset coding-core cannot be configured"),
+            "{err}"
+        );
+        assert!(!config_dir.join(CONFIG_FILE_NAME).exists());
+
+        let err = set_local_toolset_enabled(config_dir.clone(), RunMode::Plan, "coding-core", true)
+            .expect_err("coding-core enable should fail");
+        assert!(
+            err.to_string()
+                .contains("built-in toolset coding-core cannot be configured"),
+            "{err}"
+        );
+        assert!(!config_dir.join(CONFIG_FILE_NAME).exists());
+    }
+
+    #[test]
+    fn coding_core_builtin_toolset_creation_is_rejected_without_writing_config() {
+        let temp = tempdir().expect("temp");
+        let config_dir = temp.path().join("profile");
+
+        let err = create_local_toolset(
+            config_dir.clone(),
+            "coding-core",
+            Some("override".to_string()),
+            vec!["read".to_string()],
+            Vec::new(),
+            true,
+        )
+        .expect_err("coding-core create should fail");
+        assert!(
+            err.to_string()
+                .contains("built-in toolset coding-core cannot be overwritten"),
+            "{err}"
+        );
+
+        let err = create_local_toolset(
+            config_dir.clone(),
+            "web",
+            Some("override".to_string()),
+            vec!["web_fetch".to_string()],
+            Vec::new(),
+            true,
+        )
+        .expect_err("web create should fail");
+        assert!(
+            err.to_string()
+                .contains("built-in toolset web cannot be overwritten"),
+            "{err}"
+        );
+        assert!(!config_dir.join(CONFIG_FILE_NAME).exists());
     }
 }

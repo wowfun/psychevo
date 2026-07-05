@@ -34,6 +34,15 @@ async fn completion_list_returns_cwd_files() {
         .filter_map(|item| item["label"].as_str())
         .collect::<Vec<_>>();
     assert!(labels.contains(&"@src/main.rs"));
+    let item = result["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["label"] == "@src/main.rs")
+        .expect("main.rs completion");
+    assert_eq!(item["group"], "files");
+    assert_eq!(item["groupLabel"], "Files");
+    assert!(item["scopeLabel"].is_null());
 }
 
 #[tokio::test]
@@ -74,6 +83,9 @@ async fn completion_list_returns_agent_mentions_for_at_prefix() {
         .expect("review agent completion");
     assert_eq!(item["sigil"], "@");
     assert_eq!(item["kind"], "agent");
+    assert_eq!(item["group"], "agents");
+    assert_eq!(item["groupLabel"], "Agents");
+    assert_eq!(item["scopeLabel"], "Project");
     assert_eq!(item["target"]["kind"], "agent");
     assert_eq!(item["target"]["name"], "review");
     assert!(

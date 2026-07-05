@@ -1,7 +1,10 @@
 use std::path::Path;
 
 use psychevo_gateway_protocol as wire;
-use psychevo_runtime::{AgentEntrypoint, ListSkillsOptions, list_skills_value_with_options};
+use psychevo_runtime::{
+    AgentEntrypoint, ListSkillsOptions, agent_source_display_label, list_skills_value_with_options,
+    skill_source_display_label,
+};
 use serde_json::Value;
 
 use super::{
@@ -12,6 +15,14 @@ use super::{
 const MAX_COMPLETION_ITEMS: usize = 50;
 const MAX_FILE_COMPLETION_ITEMS: usize = 80;
 const MAX_FILE_COMPLETION_DEPTH: usize = 8;
+
+const GROUP_COMMANDS: &str = "commands";
+const GROUP_SKILLS: &str = "skills";
+const GROUP_AGENTS: &str = "agents";
+const GROUP_DIRECTORIES: &str = "directories";
+const GROUP_FILES: &str = "files";
+const GROUP_CAPABILITIES: &str = "capabilities";
+const GROUP_OPTIONS: &str = "options";
 
 #[derive(Debug, Clone)]
 pub(super) struct CompletionToken {
@@ -97,20 +108,28 @@ fn slash_completion_items(
     )?
     .commands;
     commands.sort_by_key(|command| command_item_match_sort_key(command, query));
-    Ok(commands
+    let mut items = commands
         .into_iter()
         .filter(|command| command_item_matches(command, query))
-        .map(|command| wire::CompletionItem {
-            id: format!("command:{}", command.name),
-            sigil: "/".to_string(),
-            label: command.slash.clone(),
-            insert_text: command.slash.clone(),
-            kind: "command".to_string(),
-            detail: Some(command_item_completion_detail(&command)),
-            target: None,
-            sort_text: Some(format!("command:{}", command.name)),
+        .map(|command| {
+            let (group, group_label) = command_item_completion_group(&command);
+            wire::CompletionItem {
+                id: format!("command:{}", command.name),
+                sigil: "/".to_string(),
+                label: command.slash.clone(),
+                insert_text: command.slash.clone(),
+                kind: "command".to_string(),
+                detail: Some(command_item_completion_detail(&command)),
+                target: None,
+                sort_text: Some(format!("command:{}", command.name)),
+                group: Some(group.to_string()),
+                group_label: Some(group_label.to_string()),
+                scope_label: command_item_scope_label(&command),
+            }
         })
-        .collect())
+        .collect::<Vec<_>>();
+    items.sort_by_key(completion_group_rank);
+    Ok(items)
 }
 
 fn command_item_match_sort_key(command: &wire::CommandListItem, query: &str) -> (u8, String) {
@@ -204,17 +223,30 @@ fn dollar_completion_items(
                     skill.get("description").and_then(Value::as_str),
                     "skill",
                 )),
+                group: Some(GROUP_SKILLS.to_string()),
+                group_label: Some(completion_group_label(GROUP_SKILLS).to_string()),
+                scope_label: skill_completion_scope_label(skill),
             });
         }
     }
 
     items.extend(agent_completion_items(state, scope, query, '$', None)?);
     items.sort_by(|left, right| {
-        left.sort_text
-            .cmp(&right.sort_text)
+        completion_group_rank(left)
+            .cmp(&completion_group_rank(right))
+            .then(left.sort_text.cmp(&right.sort_text))
             .then(left.label.cmp(&right.label))
     });
     Ok(items)
+}
+
+fn sort_grouped_completion_items(items: &mut [wire::CompletionItem]) {
+    items.sort_by(|left, right| {
+        completion_group_rank(left)
+            .cmp(&completion_group_rank(right))
+            .then(left.sort_text.cmp(&right.sort_text))
+            .then(left.label.cmp(&right.label))
+    });
 }
 
 fn at_completion_items(
@@ -225,6 +257,7 @@ fn at_completion_items(
     let mut items =
         agent_completion_items(state, scope, query, '@', Some(AgentEntrypoint::Subagent))?;
     items.extend(file_completion_items(&scope.cwd, query)?);
+    sort_grouped_completion_items(&mut items);
     Ok(items)
 }
 
@@ -266,6 +299,10 @@ fn agent_completion_items(
                 backend_ref: agent.backend.map(|backend| backend.name),
             }),
             sort_text: Some(sort_text),
+            group: Some(GROUP_AGENTS.to_string()),
+            group_label: Some(completion_group_label(GROUP_AGENTS).to_string()),
+            scope_label: agent_source_display_label(Some(agent.source.as_str()))
+                .map(ToString::to_string),
         });
     }
     Ok(items)
@@ -307,7 +344,7 @@ fn file_completion_items(
 ) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
     let mut items = Vec::new();
     collect_file_completion_items(cwd, cwd, query, 0, &mut items);
-    items.sort_by(|left, right| left.label.cmp(&right.label));
+    sort_grouped_completion_items(&mut items);
     items.truncate(MAX_FILE_COMPLETION_ITEMS);
     Ok(items)
 }
@@ -346,6 +383,11 @@ fn collect_file_completion_items(
             format!("@{relative}")
         };
         if query.is_empty() || relative.to_ascii_lowercase().contains(query) {
+            let group = if is_dir {
+                GROUP_DIRECTORIES
+            } else {
+                GROUP_FILES
+            };
             items.push(wire::CompletionItem {
                 id: format!("file:{relative}"),
                 sigil: "@".to_string(),
@@ -358,11 +400,95 @@ fn collect_file_completion_items(
                     relative_path: relative.clone(),
                 }),
                 sort_text: Some(relative.clone()),
+                group: Some(group.to_string()),
+                group_label: Some(completion_group_label(group).to_string()),
+                scope_label: None,
             });
         }
         if is_dir {
             collect_file_completion_items(root, &path, query, depth + 1, items);
         }
+    }
+}
+
+fn command_item_completion_group(command: &wire::CommandListItem) -> (&'static str, &'static str) {
+    let source = command.source.to_ascii_lowercase();
+    let presentation = command
+        .presentation_kind
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if source.contains("skill")
+        || source == "dynamic"
+        || presentation.contains("skill")
+        || presentation.contains("extension")
+    {
+        return (GROUP_SKILLS, completion_group_label(GROUP_SKILLS));
+    }
+    if source.contains("capability") || presentation.contains("capability") {
+        return (
+            GROUP_CAPABILITIES,
+            completion_group_label(GROUP_CAPABILITIES),
+        );
+    }
+    (GROUP_COMMANDS, completion_group_label(GROUP_COMMANDS))
+}
+
+fn command_item_scope_label(command: &wire::CommandListItem) -> Option<String> {
+    let (group, _) = command_item_completion_group(command);
+    match group {
+        GROUP_SKILLS => {
+            let source = command.source.trim();
+            if source == "dynamic" {
+                Some("User".to_string())
+            } else {
+                skill_source_display_label(Some(source)).map(ToString::to_string)
+            }
+        }
+        GROUP_CAPABILITIES => completion_scope_label(Some(command.source.as_str())),
+        _ => None,
+    }
+}
+
+fn skill_completion_scope_label(skill: &Value) -> Option<String> {
+    skill
+        .get("source_label")
+        .and_then(Value::as_str)
+        .and_then(|value| skill_source_display_label(Some(value)))
+        .or_else(|| skill_source_display_label(skill.get("source").and_then(Value::as_str)))
+        .map(ToString::to_string)
+}
+
+fn completion_scope_label(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn completion_group_label(group: &str) -> &'static str {
+    match group {
+        GROUP_COMMANDS => "Commands",
+        GROUP_SKILLS => "Skills",
+        GROUP_AGENTS => "Agents",
+        GROUP_DIRECTORIES => "Directories",
+        GROUP_FILES => "Files",
+        GROUP_CAPABILITIES => "Capabilities",
+        GROUP_OPTIONS => "Options",
+        _ => "Options",
+    }
+}
+
+fn completion_group_rank(item: &wire::CompletionItem) -> u8 {
+    match item.group.as_deref().unwrap_or(item.kind.as_str()) {
+        GROUP_COMMANDS | "command" => 0,
+        GROUP_SKILLS | "skill" => 1,
+        GROUP_AGENTS | "agent" => 2,
+        GROUP_DIRECTORIES | "directory" => 3,
+        GROUP_FILES | "file" => 4,
+        GROUP_CAPABILITIES | "capability" => 5,
+        GROUP_OPTIONS | "option" => 6,
+        _ => 7,
     }
 }
 

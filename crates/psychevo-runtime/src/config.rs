@@ -58,7 +58,7 @@ pub(crate) use config_file_env::*;
 #[path = "config/parse.rs"]
 pub(crate) mod config_parse;
 #[allow(unused_imports)]
-use config_parse::*;
+pub(crate) use config_parse::*;
 #[path = "config/model_metadata.rs"]
 pub(crate) mod config_model_metadata;
 pub use config_model_metadata::*;
@@ -89,6 +89,9 @@ pub use config_permissions::*;
 #[path = "config/toolsets.rs"]
 pub(crate) mod config_toolsets;
 pub use config_toolsets::*;
+#[path = "config/mcp_management.rs"]
+pub(crate) mod config_mcp_management;
+pub use config_mcp_management::*;
 #[path = "config/channels.rs"]
 pub(crate) mod config_channels;
 pub use config_channels::*;

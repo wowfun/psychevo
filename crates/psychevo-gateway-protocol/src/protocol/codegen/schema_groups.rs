@@ -79,6 +79,15 @@ fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("Plugin") {
         return "gateway/plugins/requests";
     }
+    if name.starts_with("Skill") {
+        return "gateway/skills/requests";
+    }
+    if name.starts_with("Tool") {
+        return "gateway/tools/requests";
+    }
+    if name.starts_with("Mcp") {
+        return "gateway/mcp/requests";
+    }
     if matches!(
         name,
         "ChannelDoctorParams"
@@ -270,7 +279,10 @@ fn schema_group_const(module: &str) -> &'static str {
         "gateway/channels/results" => "gatewayChannelResultSchemas",
         "gateway/core" => "gatewayCoreSchemas",
         "gateway/events" => "gatewayEventSchemas",
+        "gateway/mcp/requests" => "gatewayMcpRequestSchemas",
         "gateway/plugins/requests" => "gatewayPluginRequestSchemas",
+        "gateway/skills/requests" => "gatewaySkillRequestSchemas",
+        "gateway/tools/requests" => "gatewayToolRequestSchemas",
         "interaction" => "interactionSchemas",
         "launch" => "launchSchemas",
         "model/catalog" => "modelCatalogSchemas",
@@ -323,7 +335,10 @@ fn schema_group_refs_const(module: &str) -> &'static str {
         "gateway/channels/results" => "gatewayChannelResultSchemaRefs",
         "gateway/core" => "gatewayCoreSchemaRefs",
         "gateway/events" => "gatewayEventSchemaRefs",
+        "gateway/mcp/requests" => "gatewayMcpRequestSchemaRefs",
         "gateway/plugins/requests" => "gatewayPluginRequestSchemaRefs",
+        "gateway/skills/requests" => "gatewaySkillRequestSchemaRefs",
+        "gateway/tools/requests" => "gatewayToolRequestSchemaRefs",
         "interaction" => "interactionSchemaRefs",
         "launch" => "launchSchemaRefs",
         "model/catalog" => "modelCatalogSchemaRefs",

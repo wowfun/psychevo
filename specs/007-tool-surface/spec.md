@@ -124,6 +124,11 @@ accepted only after the owning tool binding exists. Contributed and derived
 toolsets are selection metadata only; they are never executable handlers and
 never become model-visible declarations.
 
+Profile-scoped GUI management may create, remove, enable, and disable toolsets
+through tool-surface management helpers, but those writes only change runtime
+selection configuration. They do not bypass expansion, mode filtering, source
+acceptance, permission policy, or execution-binding checks.
+
 This spec owns expansion semantics. [050 Capability Extensions](../050-capability-extensions/spec.md) owns source identity, activation, availability, degraded state, and conflicts for declared toolsets and tools.
 
 ## Request and Execution Boundary

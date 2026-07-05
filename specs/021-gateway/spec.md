@@ -11,7 +11,7 @@ interactive surfaces.
 Gateway is the caller-facing orchestration layer above
 `psychevo-runtime`. It normalizes source identity, thread and turn requests,
 active-turn control, interaction requests, and observation events for CLI, TUI,
-ACP, future Web/Desktop surfaces, IM adapters, and peer-agent backends.
+ACP, Web, Desktop, native Floating, IM adapters, and peer-agent backends.
 
 ## Scope
 
@@ -27,7 +27,8 @@ ACP, future Web/Desktop surfaces, IM adapters, and peer-agent backends.
 
 Out of scope:
 
-- concrete Web/Desktop UI behavior and CLI lifecycle commands
+- concrete Web/Desktop UI behavior, Floating capsule behavior, and CLI
+  lifecycle commands
 - public internet, LAN, relay, TLS, or installer service behavior
 - concrete IM platform SDKs, stdio, native desktop bridge, or mobile shell
   transport adapters
@@ -58,6 +59,11 @@ separately as `backend_kind` and optional `backend_native_id`, so future
 peer-agent backends can keep their native session identifiers without changing
 the public thread id contract.
 
+Gateway HTTP session artifact downloads require an authenticated caller. Browser
+surfaces may use the launch-created browser session cookie; Desktop and other
+native bridges must use the owner bearer token from native code rather than
+placing that token in renderer-visible URLs.
+
 Source identity is distinct from thread identity. A source describes the
 transport or adapter origin of input, such as CLI run, TUI session, ACP actor,
 Web client, desktop window, or IM chat/thread. Gateway stores a deterministic
@@ -74,8 +80,16 @@ Every source declares a lifetime:
   uses this lifetime so a long-running process can remember its current thread
   without creating durable source bindings.
 - `Persistent`: the source is resolved from and written to
-  `gateway_source_bindings`. ACP, future Web/Desktop surfaces, IM adapters, and
-  reconnectable sources use this lifetime.
+  `gateway_source_bindings`. ACP, Web/Desktop surfaces that need source
+  continuation, IM adapters, and reconnectable sources use this lifetime.
+
+Floating capsules hosted by Desktop use `source.kind = "floating"` with
+per-activation raw ids and process lifetime. That lets `turn/start` materialize
+and bind the first thread inside the current Gateway instance while avoiding a
+durable source binding. The Phase 1 Floating product still passes explicit
+thread ids for follow-up messages, and a later fresh capsule receives a new
+activation raw id so it does not silently continue a prior selection-bound
+thread.
 
 Raw source identity is not model-visible by default. A surface may provide an
 explicit model-visible context input part when it wants the model to know
@@ -273,6 +287,11 @@ with `Authorization: Bearer <token>`. Managed browser clients authenticate with
 an HttpOnly SameSite session cookie set by the managed launch bootstrap; query
 string tokens are not a supported auth mechanism.
 
+Native Desktop webviews do not receive the managed Gateway bearer token. The
+Desktop shell owns token resolution and attaches authorization on the native
+side, while renderer code sends typed bridge requests and receives routed
+Gateway messages.
+
 First-slice JSON-RPC methods include:
 
 - `initialize`
@@ -320,6 +339,16 @@ cwd-local file references, and `$` for skills, local agents, and ACP
 capability mentions. Completion responses are transport data only; accepting an
 item does not execute a command or start a turn.
 
+Each completion item may include display-only grouping metadata:
+`group`, `groupLabel`, and `scopeLabel`. `group` is a stable bucket id such as
+`commands`, `skills`, `agents`, `directories`, `files`, `capabilities`, or
+`options`; `groupLabel` is the user-facing section header; `scopeLabel` is a
+short source/scope badge for items such as skills and agents. Gateway should
+fill these fields when it owns the candidate source, keep groups contiguous in
+the returned ordering, and omit `scopeLabel` when no trustworthy source value
+exists. Clients may infer a fallback group from `kind` or `target` only when
+older Gateway responses omit the display fields.
+
 `command/execute` executes shared surface commands that can be represented by
 Gateway operations. Prompt-submission commands resolve to `turn/start` inputs;
 session commands resolve to thread/source operations; control commands resolve
@@ -327,6 +356,12 @@ to turn control operations. Commands that require host-only side effects such as
 clipboard or download may return a structured client action for the surface to
 perform. Unsupported commands return structured feedback rather than silently
 falling back to prompt text.
+
+`turn/start` returns whether Gateway accepted the turn and the materialized
+thread id when a thread is available. Source-started first turns may pass a null
+`threadId` request; Gateway creates or resolves the human-visible thread before
+returning the accepted result, so compact clients such as Floating can correlate
+subsequent events and follow-up turns without first calling `thread/start`.
 
 Transport-level `turn/steer` includes `expected_turn_id` and is rejected when
 the supplied id does not match the active turn. `turn/takeover` targets a thread
@@ -361,8 +396,8 @@ canonical and display paths for local diagnostics and UI display.
 
 Transport requests that introduce or select a source carry a request-scoped
 `scope` object inside `params`. The scope contains `cwd` plus source intent.
-`source.kind` is an open namespace string such as `web`, `desktop`,
-`im.platform`, or `agent.peer`. `rawId` may be omitted; Gateway derives a stable
+`source.kind` is an open namespace string such as `web`, `floating`,
+`desktop`, `im.platform`, or `agent.peer`. `rawId` may be omitted; Gateway derives a stable
 raw id from source kind plus canonical cwd. `thread/start`,
 source-default `thread/resume`, `turn/start`, and completion requests require
 `params.scope`. Methods anchored by a thread id or active selector authorize
