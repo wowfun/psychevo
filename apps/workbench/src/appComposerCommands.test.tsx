@@ -467,6 +467,35 @@ describe("Workbench command routing", () => {
     expect(await screen.findByText("Opened History.")).toBeTruthy();
   });
 
+  it("routes history export and share through semantic session downloads", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-history", "History export")];
+    const { container } = render(<App />);
+
+    await screen.findByText("History export");
+    const menu = container.querySelector(".pevo-sessionMenu") as HTMLDetailsElement | null;
+    const trigger = container.querySelector(".pevo-sessionMenu summary") as HTMLElement | null;
+    expect(trigger).toBeTruthy();
+
+    fireEvent.click(trigger!);
+    await waitFor(() => expect(menu?.open).toBe(true));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export" }));
+    await waitFor(() => {
+      expect(gatewayMock.openDownloadLog).toContain(
+        "http://127.0.0.1/download/session/thread-history/export"
+      );
+    });
+    await waitFor(() => expect(menu?.open).toBe(false));
+
+    fireEvent.click(trigger!);
+    await waitFor(() => expect(menu?.open).toBe(true));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Share" }));
+    await waitFor(() => {
+      expect(gatewayMock.openDownloadLog).toContain(
+        "http://127.0.0.1/download/session/thread-history/share"
+      );
+    });
+  });
+
   it("keeps idle steer errors local to the composer", async () => {
     gatewayMock.commandExecute = (command: string) => ({
       accepted: true,
@@ -792,7 +821,9 @@ describe("Workbench command routing", () => {
     fireEvent.change(textarea, { target: { value: "/export" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => {
-      expect(gatewayMock.openDownloadLog).toContain("http://127.0.0.1/download");
+      expect(gatewayMock.openDownloadLog).toContain(
+        "http://127.0.0.1/download/session/thread-1/export"
+      );
     });
     expect(await screen.findByText("Export download opened.")).toBeTruthy();
   });

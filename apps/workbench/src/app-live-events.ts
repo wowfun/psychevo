@@ -1,6 +1,6 @@
 import { useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import {
-  applyLiveTranscriptEvent,
+  applyGatewayEventToThreadSnapshot,
   type GatewayClient
 } from "@psychevo/client";
 import type {
@@ -37,6 +37,13 @@ function pacedGatewayEvent(event: GatewayEvent): boolean {
     event.type === "entryCompleted";
 }
 
+export function applyWorkbenchGatewayEventSnapshot(
+  current: ThreadSnapshot,
+  event: GatewayEvent
+): ThreadSnapshot {
+  return normalizeSnapshot(applyGatewayEventToThreadSnapshot(current, event));
+}
+
 export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
   const gatewayEventQueueRef = useRef<GatewayEvent[]>([]);
   const gatewayEventRafRef = useRef<number | null>(null);
@@ -51,7 +58,7 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
       const event = gatewayEventQueueRef.current.shift();
       if (event) {
         params.setSnapshot((current) => {
-          const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
+          const next = applyWorkbenchGatewayEventSnapshot(current, event);
           params.selectedThreadIdRef.current = next.thread?.id ?? null;
           return next;
         });
@@ -75,7 +82,7 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
     if (event.type === "turnCompleted") {
       gatewayEventQueueRef.current = applyTurnCompletionQueueBarrier(gatewayEventQueueRef.current, event);
       params.setSnapshot((current) => {
-        const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
+        const next = applyWorkbenchGatewayEventSnapshot(current, event);
         params.selectedThreadIdRef.current = next.thread?.id ?? null;
         return next;
       });
@@ -83,7 +90,7 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
     }
     if (!pacedGatewayEvent(event)) {
       params.setSnapshot((current) => {
-        const next = normalizeSnapshot(applyLiveTranscriptEvent(current, event));
+        const next = applyWorkbenchGatewayEventSnapshot(current, event);
         params.selectedThreadIdRef.current = next.thread?.id ?? null;
         return next;
       });

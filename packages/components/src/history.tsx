@@ -18,7 +18,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { SessionSummary } from "@psychevo/protocol";
 import { DismissibleDetails } from "./dismissibleDetails";
-import { IconButton } from "./primitives";
+import { ActionButton, IconButton } from "./primitives";
 
 export interface HistoryPanelProps {
   archived: boolean;
@@ -128,9 +128,18 @@ export function HistoryPanel(props: HistoryPanelProps) {
         </div>
         <div className="pevo-iconRow">
           {props.onCreateWorkspace && (
-            <IconButton title="New Workspace" onClick={props.onCreateWorkspace} disabled={props.disabled}>
-              <FolderPlus size={17} />
-            </IconButton>
+            <ActionButton
+              ariaLabel="New Workspace"
+              disabled={props.disabled}
+              icon={<FolderPlus size={17} />}
+              iconOnly
+              onClick={props.onCreateWorkspace}
+              size="compact"
+              tooltip="New Workspace"
+              variant="ghost"
+            >
+              New Workspace
+            </ActionButton>
           )}
           <IconButton title={hasCollapsedProjects ? "Expand all workspaces" : "Collapse all workspaces"} onClick={toggleAllProjects} disabled={groupedSessions.length === 0}>
             {hasCollapsedProjects ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
@@ -156,14 +165,19 @@ export function HistoryPanel(props: HistoryPanelProps) {
                     {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
                     <span>{group.label}</span>
                   </button>
-                  <IconButton
+                  <ActionButton
+                    ariaLabel={`New session in ${group.label}`}
                     className="pevo-sessionProjectNew"
-                    title={`New session in ${group.label}`}
-                    onClick={() => startProjectSession(group.cwd)}
                     disabled={props.disabled}
+                    icon={<Plus size={15} />}
+                    iconOnly
+                    onClick={() => startProjectSession(group.cwd)}
+                    size="compact"
+                    tooltip={`New session in ${group.label}`}
+                    variant="ghost"
                   >
-                    <Plus size={15} />
-                  </IconButton>
+                    New session in {group.label}
+                  </ActionButton>
                 </header>
                 {!collapsed && groupDraftSession && (
                   <article className="pevo-sessionRow is-active is-draft" key={groupDraftSession.id}>

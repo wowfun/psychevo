@@ -159,9 +159,15 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .slashSettingsLayout,
   .slashLeaderForm,
+  .slashLeaderControls,
   .slashEditorGrid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .slashSettingsSide {
+    position: static;
   }
 
   .modelProviderActions {

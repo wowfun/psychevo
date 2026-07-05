@@ -1,0 +1,249 @@
+.pevo-srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pevo-actionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 16%);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+  font-weight: 650;
+  line-height: 1;
+  text-decoration: none;
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, box-shadow, color, opacity, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.pevo-actionButton--compact {
+  height: 27px;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: var(--pevo-radius-xs);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.pevo-actionButton--iconOnly {
+  width: 32px;
+  padding: 0;
+}
+
+.pevo-actionButton--compact.pevo-actionButton--iconOnly {
+  width: 27px;
+}
+
+.pevo-actionButton--primary {
+  color: var(--pevo-accent-ink);
+  background: var(--pevo-accent);
+  border-color: var(--pevo-accent);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.pevo-actionButton--ghost {
+  color: var(--pevo-muted-strong);
+  background: transparent;
+  border-color: transparent;
+}
+
+.pevo-actionButton--danger {
+  color: var(--pevo-danger);
+  background: color-mix(in oklch, var(--pevo-danger), transparent 92%);
+  border-color: color-mix(in oklch, var(--pevo-danger), transparent 66%);
+}
+
+.pevo-actionButton.is-active {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-accent-soft) 34%);
+  border-color: color-mix(in oklch, var(--pevo-accent), var(--pevo-border) 58%);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.pevo-actionButtonIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+}
+
+.pevo-actionButtonIcon svg {
+  display: block;
+}
+
+.pevo-actionButtonLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pevo-actionButton:focus-visible {
+  outline: 2px solid var(--pevo-switch-focus, var(--pevo-accent));
+  outline-offset: 2px;
+}
+
+.pevo-actionButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pevo-formField {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--pevo-ink);
+}
+
+.pevo-formFieldCopy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pevo-formFieldLabel {
+  color: var(--pevo-muted-strong);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 700;
+}
+
+.pevo-formFieldHint,
+.pevo-formFieldError {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.35;
+}
+
+.pevo-formFieldError {
+  color: var(--pevo-danger);
+}
+
+.pevo-formFieldControl {
+  min-width: 0;
+}
+
+.pevo-formFieldControl :is(input, select, textarea) {
+  width: 100%;
+}
+
+.pevo-formField.is-invalid :is(input, select, textarea) {
+  border-color: color-mix(in oklch, var(--pevo-danger), var(--pevo-border) 36%);
+}
+
+.pevo-createPanel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-panel-muted) 34%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 16%);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-panel);
+}
+
+.pevo-createPanel--inline {
+  padding: 14px;
+}
+
+.pevo-createPanel--side {
+  padding: 16px;
+}
+
+.pevo-createPanel--dialog {
+  padding: 18px;
+  box-shadow: var(--pevo-shadow-popover);
+}
+
+.pevo-createPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pevo-createPanelTitleGroup {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pevo-createPanelIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--pevo-muted-strong);
+}
+
+.pevo-createPanelTitle {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-chrome);
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.pevo-createPanelDescription {
+  margin: 4px 0 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.35;
+}
+
+.pevo-createPanelBody {
+  min-width: 0;
+}
+
+.pevo-createPanelFooter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (hover: hover) {
+  .pevo-actionButton:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-ink) 8%);
+    border-color: var(--pevo-border-strong);
+  }
+
+  .pevo-actionButton--primary:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--pevo-accent), var(--pevo-ink) 8%);
+    border-color: color-mix(in oklch, var(--pevo-accent), var(--pevo-ink) 8%);
+  }
+
+  .pevo-actionButton--ghost:hover:not(:disabled) {
+    background: var(--pevo-panel-muted);
+    border-color: color-mix(in oklch, var(--pevo-border), transparent 22%);
+  }
+
+  .pevo-actionButton--danger:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--pevo-danger), transparent 86%);
+    border-color: color-mix(in oklch, var(--pevo-danger), transparent 48%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pevo-actionButton {
+    transition-duration: var(--pevo-motion-reduce, 0ms);
+  }
+}

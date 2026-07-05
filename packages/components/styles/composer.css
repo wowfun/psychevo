@@ -17,7 +17,7 @@
   left: 12px;
   z-index: 20;
   display: grid;
-  gap: 4px;
+  gap: 2px;
   max-height: min(320px, 44dvh);
   overflow: auto;
   padding: 6px;
@@ -29,10 +29,11 @@
 
 .pevo-completionPopover button {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 10px;
-  min-height: 42px;
-  padding: 7px 9px;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 8px;
   color: var(--pevo-ink);
   text-align: left;
   background: transparent;
@@ -47,6 +48,40 @@
   border-color: var(--pevo-border);
 }
 
+.pevo-completionGroup {
+  min-height: 18px;
+  padding: 6px 8px 2px;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.pevo-completionIcon {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-completionPopover button.is-active .pevo-completionIcon,
+.pevo-completionPopover button:hover .pevo-completionIcon {
+  color: var(--pevo-accent);
+  border-color: color-mix(in oklch, var(--pevo-accent), var(--pevo-border) 52%);
+}
+
+.pevo-completionCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
 .pevo-completionPopover strong,
 .pevo-completionPopover small {
   min-width: 0;
@@ -56,14 +91,23 @@
 }
 
 .pevo-completionPopover small {
-  grid-column: 1 / -1;
   color: var(--pevo-muted);
   font-size: var(--pevo-font-size-xsmall);
 }
 
-.pevo-completionPopover span {
+.pevo-completionScope {
+  max-width: min(128px, 28vw);
+  min-width: 0;
+  overflow: hidden;
+  padding: 3px 6px;
   color: var(--pevo-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
   font-size: var(--pevo-font-size-xsmall);
+  line-height: 1;
 }
 
 .pevo-jumpBottom {
@@ -372,48 +416,21 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  width: 100%;
   gap: 12px;
   color: var(--pevo-muted);
+  text-align: left;
 }
 
-.pevo-modeSwitchRow > span:first-child {
+.pevo-modeSwitchRow .pevo-switchLabel {
+  grid-column: 1;
+  grid-row: 1;
   overflow-wrap: anywhere;
 }
 
-.pevo-modeSwitchTrack {
-  position: relative;
-  width: 34px;
-  height: 20px;
-  background: var(--pevo-panel-muted);
-  border: 1px solid var(--pevo-border-strong);
-  border-radius: 999px;
-  transition: background-color 140ms ease, border-color 140ms ease;
-}
-
-.pevo-modeSwitchTrack span {
-  position: absolute;
-  top: 50%;
-  left: 3px;
-  width: 14px;
-  height: 14px;
-  background: var(--pevo-muted);
-  border-radius: 999px;
-  transform: translateY(-50%);
-  transition: transform 140ms ease, background-color 140ms ease;
-}
-
-.pevo-modeSwitchRow.is-on {
-  color: var(--pevo-ink);
-}
-
-.pevo-modeSwitchRow.is-on .pevo-modeSwitchTrack {
-  background: color-mix(in oklch, var(--pevo-accent), white 72%);
-  border-color: color-mix(in oklch, var(--pevo-accent), white 42%);
-}
-
-.pevo-modeSwitchRow.is-on .pevo-modeSwitchTrack span {
-  background: var(--pevo-accent);
-  transform: translate(14px, -50%);
+.pevo-modeSwitchRow .pevo-switchTrack {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 @media (hover: hover) {

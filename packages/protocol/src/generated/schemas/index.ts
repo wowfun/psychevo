@@ -21,7 +21,10 @@ import { gatewayChannelRequestSchemas } from './gateway/channels/requests';
 import { gatewayChannelResultSchemas } from './gateway/channels/results';
 import { gatewayCoreSchemas } from './gateway/core';
 import { gatewayEventSchemas } from './gateway/events';
+import { gatewayMcpRequestSchemas } from './gateway/mcp/requests';
 import { gatewayPluginRequestSchemas } from './gateway/plugins/requests';
+import { gatewaySkillRequestSchemas } from './gateway/skills/requests';
+import { gatewayToolRequestSchemas } from './gateway/tools/requests';
 import { interactionSchemas } from './interaction';
 import { launchSchemas } from './launch';
 import { modelCatalogSchemas } from './model/catalog';
@@ -139,6 +142,27 @@ export const gatewaySchemas = {
   PluginListParams: gatewayPluginRequestSchemas.PluginListParams,
   PluginReadParams: gatewayPluginRequestSchemas.PluginReadParams,
   PluginDoctorParams: gatewayPluginRequestSchemas.PluginDoctorParams,
+  SkillListParams: gatewaySkillRequestSchemas.SkillListParams,
+  SkillReadParams: gatewaySkillRequestSchemas.SkillReadParams,
+  SkillInstallParams: gatewaySkillRequestSchemas.SkillInstallParams,
+  SkillUninstallParams: gatewaySkillRequestSchemas.SkillUninstallParams,
+  SkillSetEnabledParams: gatewaySkillRequestSchemas.SkillSetEnabledParams,
+  PluginInstallParams: gatewayPluginRequestSchemas.PluginInstallParams,
+  PluginUninstallParams: gatewayPluginRequestSchemas.PluginUninstallParams,
+  PluginSetEnabledParams: gatewayPluginRequestSchemas.PluginSetEnabledParams,
+  ToolListParams: gatewayToolRequestSchemas.ToolListParams,
+  ToolReadParams: gatewayToolRequestSchemas.ToolReadParams,
+  ToolSetEnabledParams: gatewayToolRequestSchemas.ToolSetEnabledParams,
+  ToolCreateParams: gatewayToolRequestSchemas.ToolCreateParams,
+  ToolRemoveParams: gatewayToolRequestSchemas.ToolRemoveParams,
+  McpListParams: gatewayMcpRequestSchemas.McpListParams,
+  McpReadParams: gatewayMcpRequestSchemas.McpReadParams,
+  McpUpsertParams: gatewayMcpRequestSchemas.McpUpsertParams,
+  McpNameParams: gatewayMcpRequestSchemas.McpNameParams,
+  McpSetEnabledParams: gatewayMcpRequestSchemas.McpSetEnabledParams,
+  McpSetToolPolicyParams: gatewayMcpRequestSchemas.McpSetToolPolicyParams,
+  McpOAuthStartParams: gatewayMcpRequestSchemas.McpOAuthStartParams,
+  McpOAuthStatusParams: gatewayMcpRequestSchemas.McpOAuthStatusParams,
   BackendConfigView: gatewayBackendConfigSchemas.BackendConfigView,
   BackendListResult: gatewayBackendConfigSchemas.BackendListResult,
   BackendDiagnosticView: gatewayBackendConfigSchemas.BackendDiagnosticView,

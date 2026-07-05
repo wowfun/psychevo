@@ -170,23 +170,20 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   display: grid;
   width: min(420px, calc(100vw - 32px));
   min-width: 0;
-  gap: 14px;
-  padding: 14px;
   color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius);
-  box-shadow: var(--pevo-shadow-popover);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
-.workspaceDialog header,
-.workspaceDialog footer,
-.workspaceDialogTitle {
+.workspaceDialog > header,
+.workspaceDialog > footer,
+.workspaceDialog > .workspaceDialogTitle {
   display: flex;
   align-items: center;
 }
 
-.workspaceDialog header {
+.workspaceDialog > header {
   justify-content: space-between;
   gap: 10px;
 }
@@ -205,7 +202,7 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   white-space: nowrap;
 }
 
-.workspaceDialog header button {
+.workspaceDialog > header button {
   display: grid;
   flex: 0 0 auto;
   width: 30px;
@@ -246,12 +243,12 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   resize: vertical;
 }
 
-.workspaceDialog footer {
+.workspaceDialog > footer {
   justify-content: flex-end;
   gap: 8px;
 }
 
-.workspaceDialog footer button {
+.workspaceDialog > footer button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -266,7 +263,7 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   cursor: pointer;
 }
 
-.workspaceDialog footer button[type="submit"] {
+.workspaceDialog > footer button[type="submit"] {
   color: white;
   background: var(--pevo-accent);
   border-color: color-mix(in oklch, var(--pevo-accent), black 12%);
@@ -281,8 +278,8 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
 }
 
 @media (hover: hover) {
-  .workspaceDialog header button:hover,
-  .workspaceDialog footer button:hover:not(:disabled) {
+  .workspaceDialog > header button:hover,
+  .workspaceDialog > footer button:hover:not(:disabled) {
     color: var(--pevo-ink);
     border-color: color-mix(in oklch, var(--pevo-border), white 18%);
   }
@@ -411,6 +408,7 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
 }
 
 .leftActions button > svg,
+.leftActions .pevo-actionButtonIcon,
 .leftUtilityRail button > svg {
   justify-self: center;
 }

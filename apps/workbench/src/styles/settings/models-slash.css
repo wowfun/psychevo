@@ -6,8 +6,7 @@
   border-radius: 0;
 }
 
-.segmentedControl button,
-.switchControl {
+.segmentedControl button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -25,15 +24,6 @@
   color: var(--pevo-ink);
   background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
   box-shadow: var(--pevo-shadow-active);
-}
-
-.switchControl {
-  background: transparent;
-  border: 0;
-}
-
-.switchControl input {
-  margin: 0;
 }
 
 .modelsSettingsPanel {
@@ -60,10 +50,9 @@
   font-size: var(--pevo-font-size-xsmall);
 }
 
-.modelSettingsToolbar button,
-.modelProviderRow button,
-.modelProviderEditorRow button,
-.modelProviderEditorActions button,
+.modelProviderRow button:not(.pevo-actionButton),
+.modelProviderEditorRow button:not(.pevo-actionButton),
+.modelProviderEditorActions button:not(.pevo-actionButton),
 .modelAssignmentControls button {
   display: inline-flex;
   align-items: center;
@@ -82,17 +71,15 @@
   white-space: nowrap;
 }
 
-.modelSettingsToolbar button:disabled,
-.modelProviderRow button:disabled,
-.modelProviderEditorRow button:disabled,
-.modelProviderEditorActions button:disabled,
+.modelProviderRow button:not(.pevo-actionButton):disabled,
+.modelProviderEditorRow button:not(.pevo-actionButton):disabled,
+.modelProviderEditorActions button:not(.pevo-actionButton):disabled,
 .modelAssignmentControls button:disabled {
   cursor: default;
   opacity: 0.55;
 }
 
-.modelSettingsToolbar button.is-active,
-.modelProviderRow button.is-active {
+.modelProviderRow button:not(.pevo-actionButton).is-active {
   color: var(--pevo-ink);
   background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
   box-shadow: var(--pevo-shadow-active);
@@ -114,14 +101,84 @@
 }
 
 .slashSettingsPanel {
-  gap: 9px;
+  gap: 10px;
+}
+
+.slashSettingsLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.slashSettingsMain,
+.slashSettingsSide,
+.slashSettingsCard,
+.slashCommandCatalog,
+.slashEditorPanel {
+  min-width: 0;
+}
+
+.slashSettingsMain {
+  display: grid;
+  gap: 10px;
+}
+
+.slashSettingsSide {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.slashSettingsCard {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.slashSettingsCardCopy,
+.slashCommandSectionHeader > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.slashSettingsCardCopy strong,
+.slashCommandSectionHeader h4 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-session);
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.slashSettingsCardCopy span,
+.slashCommandSectionHeader p {
+  margin: 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.35;
+}
+
+.slashSettingsCardCopy code {
+  color: var(--pevo-muted-strong);
 }
 
 .slashLeaderForm {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.8fr) minmax(98px, 0.45fr) auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.62fr);
   align-items: end;
+}
+
+.slashLeaderControls {
+  display: grid;
+  grid-template-columns: minmax(112px, 1fr) minmax(92px, 0.72fr) auto;
+  align-items: end;
+  gap: 7px;
   min-width: 0;
 }
 
@@ -140,55 +197,103 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  height: 32px;
-  padding: 0 9px;
+  height: 30px;
+  padding: 0 8px;
   color: var(--pevo-ink);
   background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 18%);
   border-radius: var(--pevo-radius-sm);
   font: inherit;
   font-size: var(--pevo-font-size-small);
 }
 
-.slashLeaderForm button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 74px;
-  min-height: 32px;
-  padding: 0 10px;
-  color: var(--pevo-ink);
-  font: inherit;
-  font-size: var(--pevo-font-size-xsmall);
-  font-weight: 650;
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-  cursor: pointer;
+.slashLeaderForm .pevo-actionButton {
+  height: 30px;
+  min-width: 68px;
+  padding-inline: 10px;
 }
 
-.slashLeaderForm button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.slashCommandSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  text-transform: none;
+}
+
+.slashCommandSectionHeader > span,
+.slashCommandSectionHeader > svg {
+  flex: 0 0 auto;
+  color: var(--pevo-muted);
+}
+
+.slashCommandSectionHeader > span {
+  padding-top: 2px;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  text-transform: none;
 }
 
 .slashCommandList {
   min-width: 0;
+  gap: 0;
 }
 
 .slashCommandRow {
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+  gap: 10px;
+  padding: 9px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+  border-radius: 0;
+}
+
+.slashCommandRow:last-child {
+  border-bottom: 0;
 }
 
 .slashCommandMain {
   display: grid;
-  gap: 4px;
+  gap: 5px;
+  min-width: 0;
+}
+
+.slashCommandTarget {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.slashCommandTarget strong {
   min-width: 0;
 }
 
 .slashCommandMain code {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+
+.slashCommandStats {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.slashCommandStats span {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 20%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 44%);
+  border-radius: 999px;
+  font-size: var(--pevo-font-size-xsmall);
+  white-space: nowrap;
 }
 
 .slashChipLine {
@@ -242,15 +347,83 @@
   opacity: 0.48;
 }
 
+.slashCommandRowActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+.slashCommandRowActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.slashCommandRowActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.slashEmptyState {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 0 4px;
+}
+
+.slashEmptyState strong {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+}
+
+.slashEmptyState span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.35;
+  white-space: normal;
+}
+
 .slashEditorGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
 }
 
 .slashCommandEditor {
+  display: grid;
   align-content: start;
+  gap: 8px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 60%);
+  text-transform: none;
+}
+
+.slashCommandEditor:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.slashCommandEditor footer {
+  justify-content: flex-end;
+}
+
+.slashCommandEditor .pevo-actionButton {
+  height: 30px;
+  padding-inline: 10px;
 }
 
 .modelAssignmentPanel,
@@ -386,10 +559,19 @@
 
 .modelProviderEditor {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
+  max-height: min(640px, calc(100dvh - 220px));
+  overflow: hidden;
   padding: 12px 0 14px 12px;
   border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
   border-left: 2px solid color-mix(in oklch, var(--pevo-accent), #258a7a 36%);
+}
+
+.modelProviderEditor .pevo-createPanelBody {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .modelProviderEditorForm {
@@ -499,6 +681,10 @@
 }
 
 @media (max-width: 760px) {
+  .modelProviderEditor {
+    max-height: min(600px, calc(100dvh - 300px));
+  }
+
   .modelAssignmentRow,
   .modelProviderRow {
     grid-template-columns: minmax(0, 1fr);

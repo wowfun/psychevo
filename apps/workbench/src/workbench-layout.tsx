@@ -1,8 +1,7 @@
 import { type CSSProperties } from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
-import { Composer, HistoryPanel, TranscriptPanel } from "@psychevo/components";
+import { ActionButton, Composer, HistoryPanel, TranscriptPanel } from "@psychevo/components";
 import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
-import { downloadUrl } from "@psychevo/host";
 import { WorkspaceCreateDialog, LeftUtilityRail, MainSurface, PinnedPanel } from "./app-shell";
 import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
 import { ComposerRequests, ComposerStatusLine, ComposerSubmitControls } from "./composer-controls";
@@ -40,7 +39,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     commands,
     contextUsage,
     controls,
-    copyTranscriptText,
+    copyText,
     createWorkspace,
     currentThreadId,
     debugEnabled,
@@ -58,6 +57,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     error,
     executeCommand,
     extraRuntimeModeValues,
+    fallbackCwd,
     handleAttachment,
     host,
     init,
@@ -234,9 +234,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
               </button>
             </div>
             <div className="leftActions" aria-label="Session actions">
-              <button aria-label="New Session" onClick={() => void runAction(async () => startNewThread())} type="button">
-                <MessageSquare size={16} /> <span>New Session</span>
-              </button>
+              <ActionButton ariaLabel="New Session" icon={<MessageSquare size={16} />} onClick={() => void runAction(async () => startNewThread())} variant="ghost">
+                New Session
+              </ActionButton>
               <button aria-label="Search" className={mainView === "search" ? "is-selected" : ""} onClick={() => switchMainView("search")} type="button">
                 <Search size={16} /> <span>Search</span>
               </button>
@@ -278,7 +278,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   })}
                   onExport={(threadId) => {
                     if (endpoint) {
-                      void host?.open.openDownload(downloadUrl(endpoint, threadId, "export"));
+                      void host?.open.downloadSession(endpoint, threadId, "export");
                     }
                   }}
                   onNew={() => void runAction(async () => {
@@ -312,7 +312,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   })}
                   onShare={(threadId) => {
                     if (endpoint) {
-                      void host?.open.openDownload(downloadUrl(endpoint, threadId, "share"));
+                      void host?.open.downloadSession(endpoint, threadId, "share");
                     }
                   }}
                 />
@@ -373,6 +373,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               usageStatsLoading={usageStatsLoading}
               cwd={activeWorkbenchCwd}
               loadThreadSearchText={loadThreadSearchText}
+              onCopyText={copyText}
               onAppearanceChange={setAppearance}
               onDeleteAutomation={(id) => deleteAutomation(id)}
               onDraftAutomation={(params) => draftAutomation(params)}
@@ -421,7 +422,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 <TranscriptPanel
                   activity={activity}
                   entries={transcriptEntries}
-                  onCopyText={copyTranscriptText}
+                  onCopyText={copyText}
                   onOpenAgentSession={openAgentSessionTab}
                   threadId={snapshot.thread?.id ?? null}
                 />
@@ -448,7 +449,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
             <Composer
               attachments={attachments}
               completionProvider={async (text, cursor) => {
-                const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? window.location.pathname);
+                const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
                 const result = await client?.request("completion/list", {
                   cursor,
                   scope,
@@ -646,7 +647,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onAcceptChange={(turnId, path) => void runAction(async () => acceptWorkspaceChange(turnId, path))}
               onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
               onClose={props.closeRightWorkspaceTab}
-              onCopyText={copyTranscriptText}
+              onCopyText={copyText}
               onDirtyTabChange={(tabId, dirty) => {
                 setDirtyRightTabs((current: Record<string, boolean>) => current[tabId] === dirty ? current : { ...current, [tabId]: dirty });
               }}

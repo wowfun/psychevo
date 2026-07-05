@@ -6,7 +6,7 @@ psychevo_self_edit: deny
 # 240. pevo Web
 
 Define the concrete Web/Workbench product surface and the JavaScript frontend
-platform used by managed Web and future generic Desktop/Mobile shells.
+platform used by browser and managed-Web shells.
 
 ## Scope
 
@@ -14,10 +14,10 @@ platform used by managed Web and future generic Desktop/Mobile shells.
 - JavaScript/TypeScript workspace boundaries for Web product UI clients
 - shared protocol, client runtime, React components, and web-consumable assets
 - host runtime, shell capability, and host storage abstraction for browser,
-  managed Web, PWA, and future shell builds
+  managed Web, and PWA builds
 - Workbench layout, visual direction, settings, status, files, review,
-  terminal, command, and debug surfaces
-- PWA and generic app-shell build boundaries
+  terminal, command, capabilities, and debug surfaces
+- PWA and browser app-shell build boundaries
 - browser/frontend validation expectations
 
 Out of scope:
@@ -29,7 +29,8 @@ Out of scope:
   [270 UI Interaction](../270-ui-interaction/spec.md)
 - managed Gateway lifecycle and launch bootstrap; this belongs to
   [220 pevo Gateway](../220-pevo-gateway/spec.md)
-- native desktop or mobile project scaffolding
+- native desktop or mobile project scaffolding; native Desktop belongs to
+  [246 pevo Desktop](../246-pevo-desktop/spec.md)
 - runtime execution, persistence schemas, provider behavior, or Gateway
   semantics
 - public npm publishing guarantees
@@ -61,8 +62,10 @@ packages in the first slice:
   file read/write and reveal-in-folder.
 - `@psychevo/components`: controlled React panels and UI primitives. It does
   not own RPC, routing, local storage, or process startup.
-- `@psychevo/assets`: web-consumable theme tokens, CSS variables, syntax theme
-  defaults, icon mapping, and references to canonical brand assets.
+- `@psychevo/assets`: web-consumable theme tokens, generated CSS variables,
+  typed design-system metadata, syntax theme defaults, icon mapping, and
+  references to canonical brand assets. Its generated outputs come from
+  [075 `DESIGN.md`](../075-design-system/DESIGN.md).
 
 All first-slice packages are `private: true`. Product code may change these
 interfaces without semver compatibility until a later SDK or package publishing
@@ -75,8 +78,8 @@ the canonical asset location.
 
 ## Host Runtime
 
-Client runtime code is host-aware. Browser/PWA and generic app-shell builds use
-the same application source, but host-specific behavior goes through
+Client runtime code is host-aware. Browser/PWA builds use the same application
+source, but host-specific behavior goes through
 `@psychevo/host` adapters:
 
 - endpoint discovery and explicit endpoint overrides
@@ -103,7 +106,15 @@ Browser file picking is a web-standard host capability. It may return selected
 paths. Native shells may later provide path or bookmark based file contracts
 through the same host boundary.
 
-## Web, PWA, And Shell Builds
+Host capability failures use a shared reason taxonomy across browser,
+managed-Web, Desktop, and future shells: `unsupported`, `unavailable`,
+`permissionDenied`, `canceled`, and `failed`. Browser hosts should keep
+native-only capture methods as typed `unsupported`, report denied browser
+permissions as `permissionDenied`, report user-canceled chooser flows as
+`canceled`, and include a bounded message only when it helps the product surface
+show the next useful action.
+
+## Web And PWA Builds
 
 The Web build may enable PWA installation and service-worker caching for static
 app-shell assets only. API routes, WebSocket routes, session state, tokenized
@@ -114,15 +125,9 @@ schema groups so no ordinary production chunk exceeds Vite's default chunk-size
 warning threshold. The build must not silence this warning by raising the
 threshold when a maintainable chunk split is available.
 
-The generic shell build reuses the same React/Vite source with an explicit
-Gateway endpoint requirement. Shell builds disable service workers, PWA install
-prompts, and browser-only origin inference. Native Android, iOS, Harmony, or
-desktop bridge projects are deferred.
-Generic Desktop shell capability is therefore implemented first by sharing the
-same Workbench source, protocol client, host adapter contract, and components
-used by managed Web. A feature that works in the shared Workbench path is
-available to future Desktop shells when the shell host supplies an explicit
-Gateway endpoint and source scope; native packaging remains outside this topic.
+Native Desktop reuses Workbench through the host/runtime interface, but native
+packaging, Tauri bridge behavior, and Desktop window lifecycle belong to
+[246 pevo Desktop](../246-pevo-desktop/spec.md).
 
 ## Web Shell
 
@@ -148,6 +153,10 @@ Workbench layout, navigation, inspector, file review, terminal, settings, and
 responsive shell behavior are specified in [Workbench Layout](workbench-layout.md).
 The split keeps this product surface maintainable without changing the managed
 Gateway lifecycle or transport contract.
+Capability management is specified in
+[247 Capability Management](../247-capability-management/spec.md). Workbench
+must compose skills, plugins, MCP, and toolset management through those domain
+RPCs instead of introducing a generic capability aggregation RPC.
 
 The Web implementation follows the architecture large-file limit from
 [001 Architecture](../001-architecture/spec.md). Workbench app entrypoints
@@ -164,6 +173,10 @@ overflow behavior and Web/TUI-aligned running activity indicators for history,
 composer, and transcript Thinking/tool rows, including persisted elapsed labels
 after tool blocks complete. Large app and package entrypoints should remain
 thin aggregators around semantic modules.
+Workbench resource creation uses shared component primitives for action
+buttons, form fields, and create/edit panel shells so `New`, `Add`, `Install`,
+`Connect`, and `Set up` flows stay visually and behaviorally consistent across
+Sessions, Workspace, Automations, Settings, and Capabilities.
 
 ## Visual Direction
 
@@ -179,6 +192,10 @@ paper-warm sidebar that avoids gray drift, and low-contrast warm-gray borders.
 than the ivory/taupe `warm` palette. All appearances share the same readable
 Workbench typographic scale so theme switching does not change font size, line
 height, or row density.
+Workbench, shared components, and embedded terminal panels consume generated
+`@psychevo/assets` tokens. Product CSS should use `--pevo-*` semantic
+variables; embedded xterm palettes should come from the typed design-system
+export rather than isolated Workbench literals.
 
 ## Validation
 
@@ -210,6 +227,8 @@ after prompt submission.
 - [Web Shell](web-shell.md)
 - [Workbench Layout](workbench-layout.md)
 - [Testing](testing.md) defines Web/Workbench validation expectations.
+- [247 Capability Management](../247-capability-management/spec.md) defines the
+  Workbench skills, plugins, MCP, and toolset management surface.
 
 ## Related Topics
 

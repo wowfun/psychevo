@@ -4,6 +4,93 @@ import { gatewayMock } from "./gateway-mock";
 
 const localStorageItems = new Map<string, string>();
 
+function defaultSkillRecords(): Array<Record<string, unknown>> {
+  return [
+    {
+      id: "/tmp/profile/skills/review/SKILL.md",
+      name: "review",
+      description: "Review code changes",
+      location: "/tmp/profile/skills/review/SKILL.md",
+      skill_dir: "/tmp/profile/skills/review",
+      source: "global",
+      category: "engineering",
+      enabled: true,
+      prompt_visible: true,
+      readiness_status: "available",
+      supported_on_current_platform: true,
+      disable_model_invocation: false,
+      tags: ["review"],
+      missing_required_environment_variables: [],
+      missing_credential_files: [],
+      required_tools: ["shell"],
+      required_toolsets: [],
+      issues: []
+    },
+    {
+      id: "/tmp/profile/skills/imagegen/SKILL.md",
+      name: "imagegen",
+      description: "Generate bitmap assets",
+      location: "/tmp/profile/skills/imagegen/SKILL.md",
+      skill_dir: "/tmp/profile/skills/imagegen",
+      source: "global",
+      category: "media",
+      enabled: true,
+      prompt_visible: true,
+      readiness_status: "available",
+      supported_on_current_platform: true,
+      disable_model_invocation: false,
+      tags: [],
+      missing_required_environment_variables: [],
+      missing_credential_files: [],
+      required_tools: [],
+      required_toolsets: [],
+      issues: []
+    },
+    {
+      id: "/tmp/profile/skills/root-note.md",
+      name: "root-note",
+      description: "Root markdown skill",
+      location: "/tmp/profile/skills/root-note.md",
+      skill_dir: "/tmp/profile/skills",
+      source: "global",
+      category: "notes",
+      enabled: true,
+      prompt_visible: true,
+      readiness_status: "available",
+      supported_on_current_platform: true,
+      disable_model_invocation: false,
+      tags: ["notes"],
+      missing_required_environment_variables: [],
+      missing_credential_files: [],
+      required_tools: [],
+      required_toolsets: [],
+      issues: []
+    },
+    {
+      id: "/tmp/project/.psychevo/skills/deploy/SKILL.md",
+      name: "deploy",
+      description: "Deploy with release checks",
+      location: "/tmp/project/.psychevo/skills/deploy/SKILL.md",
+      skill_dir: "/tmp/project/.psychevo/skills/deploy",
+      source: "project",
+      category: "operations",
+      enabled: false,
+      prompt_visible: false,
+      readiness_status: "setup_needed",
+      supported_on_current_platform: true,
+      disable_model_invocation: false,
+      tags: ["release"],
+      missing_required_environment_variables: ["DEPLOY_TOKEN"],
+      missing_credential_files: ["secrets/deploy.json"],
+      required_tools: ["shell"],
+      required_toolsets: ["web"],
+      issues: ["disabled", "missing environment variables: DEPLOY_TOKEN"]
+    }
+  ];
+}
+
+gatewayMock.skillRecords = defaultSkillRecords();
+
 Object.defineProperty(window, "localStorage", {
   configurable: true,
   value: {
@@ -110,6 +197,7 @@ afterEach(() => {
   gatewayMock.wechatQrPoll = null;
   gatewayMock.permissionRespond = () => ({ accepted: true });
   gatewayMock.clarifyRespond = () => ({ accepted: true });
+  gatewayMock.clipboardWriteLog.length = 0;
   gatewayMock.openDownloadLog.length = 0;
   gatewayMock.optimisticLog.length = 0;
   gatewayMock.projectBranch = "main";
@@ -120,6 +208,7 @@ afterEach(() => {
   gatewayMock.browserWorkspaces = null;
   gatewayMock.agentRecords = [];
   gatewayMock.backendRecords = [];
+  gatewayMock.skillRecords = defaultSkillRecords();
   gatewayMock.automationRecords = [];
   gatewayMock.channelRecords = [
     {

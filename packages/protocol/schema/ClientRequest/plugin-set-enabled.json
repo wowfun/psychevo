@@ -1,0 +1,118 @@
+{
+  "$id": "ClientRequest/plugin-set-enabled.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    },
+    "PluginSetEnabledParams": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scopeName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selector": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "selector"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "plugin/setEnabled"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/PluginSetEnabledParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest plugin/setEnabled",
+  "type": "object"
+}

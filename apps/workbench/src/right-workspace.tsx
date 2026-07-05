@@ -93,7 +93,7 @@ export function RightWorkspace({
   onAcceptChange(turnId: string, path: string): void;
   onChangedFile(path: string): void;
   onClose(tabId: string): void;
-  onCopyText?(text: string): void | Promise<void>;
+  onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onDirtyTabChange(tabId: string, dirty: boolean): void;
   onOpenFile(path: string): void;
   onOpenAgentSession(session: TranscriptAgentSession): void;
@@ -163,6 +163,7 @@ export function RightWorkspace({
                 tabId={tab.id}
                 truncated={truncated}
                 onCompare={onChangedFile}
+                onCopyText={onCopyText}
                 onDirtyChange={onDirtyTabChange}
                 onOpen={onOpenFile}
                 onSave={onSaveFile}

@@ -1,0 +1,23 @@
+{
+  "name": "@psychevo/floating",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@psychevo/client": "workspace:*",
+    "@psychevo/components": "workspace:*",
+    "@psychevo/host": "workspace:*",
+    "@psychevo/protocol": "workspace:*",
+    "lucide-react": "^1.21.0",
+    "react": "^19.2.7"
+  }
+}

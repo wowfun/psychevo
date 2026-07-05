@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Psychevo Desktop",
+  "version": "0.1.0",
+  "identifier": "dev.psychevo.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "devUrl": "http://127.0.0.1:5175",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "workbench",
+        "title": "Psychevo",
+        "width": 1280,
+        "height": 820,
+        "decorations": true,
+        "resizable": true
+      },
+      {
+        "label": "floating",
+        "title": "Psychevo Floating",
+        "url": "/?surface=floating",
+        "width": 780,
+        "height": 150,
+        "minWidth": 320,
+        "minHeight": 48,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "shadow": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": ["../../../assets/psychevo-logo-square.png"],
+    "targets": "all"
+  }
+}

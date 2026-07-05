@@ -3,12 +3,21 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "@psychevo/components";
-import type { CompletionListResult } from "@psychevo/protocol";
+import type { CompletionItem, CompletionListResult } from "@psychevo/protocol";
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
+
+function completionItem(item: Omit<CompletionItem, "group" | "groupLabel" | "scopeLabel"> & Partial<Pick<CompletionItem, "group" | "groupLabel" | "scopeLabel">>): CompletionItem {
+  return {
+    group: null,
+    groupLabel: null,
+    scopeLabel: null,
+    ...item
+  };
+}
 
 describe("Composer completion mentions", () => {
   it("submits an accepted skill completion as a structured mention after more typing", async () => {
@@ -16,7 +25,7 @@ describe("Composer completion mentions", () => {
     const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
       replacement: { start: 0, end: 2 },
       items: [
-        {
+        completionItem({
           id: "skill:x-daily",
           sigil: "$",
           label: "$x-daily",
@@ -29,7 +38,7 @@ describe("Composer completion mentions", () => {
             name: "x-daily",
             path: "/project/.agents/skills/x-daily/SKILL.md"
           }
-        }
+        })
       ]
     }));
 
@@ -71,7 +80,7 @@ describe("Composer completion mentions", () => {
     const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
       replacement: { start: 0, end: 3 },
       items: [
-        {
+        completionItem({
           id: "agent:opencode",
           sigil: "@",
           label: "@opencode",
@@ -86,7 +95,7 @@ describe("Composer completion mentions", () => {
             entrypoints: ["subagent"],
             backendRef: "opencode"
           }
-        }
+        })
       ]
     }));
 
@@ -154,7 +163,7 @@ describe("Composer completion mentions", () => {
       resolveCompletion({
         replacement: { start: 0, end: 2 },
         items: [
-          {
+          completionItem({
             id: "skill:x-daily",
             sigil: "$",
             label: "$x-daily",
@@ -163,7 +172,7 @@ describe("Composer completion mentions", () => {
             detail: null,
             target: null,
             sortText: "1:x-daily"
-          }
+          })
         ]
       });
       await completionPromise;
@@ -178,7 +187,7 @@ describe("Composer completion mentions", () => {
     const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
       replacement: { start: 0, end: 2 },
       items: [
-        {
+        completionItem({
           id: "command:help",
           sigil: "/",
           label: "/help",
@@ -187,7 +196,7 @@ describe("Composer completion mentions", () => {
           detail: "show commands and shortcuts",
           sortText: "command:help",
           target: null
-        }
+        })
       ]
     }));
 
@@ -221,7 +230,7 @@ describe("Composer completion mentions", () => {
     const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
       replacement: { start: 0, end: 3 },
       items: [
-        {
+        completionItem({
           id: "command:st",
           sigil: "/",
           label: "/st",
@@ -230,7 +239,7 @@ describe("Composer completion mentions", () => {
           detail: "Status - alias for /status",
           sortText: "command:st",
           target: null
-        }
+        })
       ]
     }));
 
@@ -256,6 +265,171 @@ describe("Composer completion mentions", () => {
 
     expect(onCommand).toHaveBeenCalledWith("/st");
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("renders grouped completion headers and right-side scope labels", async () => {
+    const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
+      replacement: { start: 0, end: 1 },
+      items: [
+        completionItem({
+          id: "agent:helper",
+          sigil: "@",
+          label: "@helper",
+          insertText: "@helper",
+          kind: "agent",
+          detail: "Delegated code work",
+          target: null,
+          sortText: "1:agent:helper",
+          group: "agents",
+          groupLabel: "Agents",
+          scopeLabel: "generated"
+        }),
+        completionItem({
+          id: "skill:review",
+          sigil: "$",
+          label: "$review",
+          insertText: "$review",
+          kind: "skill",
+          detail: "Review changes",
+          target: null,
+          sortText: "1:skill:review",
+          group: "skills",
+          groupLabel: "Skills",
+          scopeLabel: "project"
+        }),
+        completionItem({
+          id: "file:src",
+          sigil: "@",
+          label: "@src/",
+          insertText: "@src/",
+          kind: "directory",
+          detail: "src/",
+          target: null,
+          sortText: "src",
+          group: "directories",
+          groupLabel: "Directories"
+        })
+      ]
+    }));
+
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "@" } });
+
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(3));
+    expect(screen.getByText("Skills")).toBeTruthy();
+    expect(screen.getByText("Agents")).toBeTruthy();
+    expect(screen.getByText("Directories")).toBeTruthy();
+    expect(screen.getByText("Project")).toBeTruthy();
+    expect(screen.getByText("User")).toBeTruthy();
+    expect(screen.getByText("directory")).toBeTruthy();
+    expect(screen.queryByText("generated")).toBeNull();
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      expect.stringContaining("$review"),
+      expect.stringContaining("@helper"),
+      expect.stringContaining("@src/")
+    ]);
+  });
+
+  it("normalizes legacy raw skill scope labels", async () => {
+    const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
+      replacement: { start: 0, end: 1 },
+      items: [
+        completionItem({
+          id: "skill:writer",
+          sigil: "$",
+          label: "$writer",
+          insertText: "$writer",
+          kind: "skill",
+          detail: "Draft writing",
+          target: null,
+          sortText: "1:skill:writer",
+          group: "skills",
+          groupLabel: "Skills",
+          scopeLabel: "plugin"
+        })
+      ]
+    }));
+
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "$" } });
+
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(1));
+    expect(screen.getByText("System")).toBeTruthy();
+    expect(screen.queryByText("plugin")).toBeNull();
+  });
+
+  it("falls back to kind and target when completion display metadata is missing", async () => {
+    const completionProvider = vi.fn(async () => ({
+      replacement: { start: 0, end: 1 },
+      items: [
+        {
+          id: "file:src/main.rs",
+          sigil: "@",
+          label: "@src/main.rs",
+          insertText: "@src/main.rs",
+          kind: "file",
+          detail: "src/main.rs",
+          target: null,
+          sortText: "src/main.rs"
+        },
+        {
+          id: "agent:helper",
+          sigil: "@",
+          label: "@helper",
+          insertText: "@helper",
+          kind: "agent",
+          detail: "Delegated code work",
+          target: {
+            kind: "agent",
+            name: "helper",
+            source: "global",
+            entrypoints: ["subagent"],
+            backendRef: null
+          },
+          sortText: "1:agent:helper"
+        }
+      ]
+    } as unknown as CompletionListResult));
+
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "@" } });
+
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
+    expect(screen.getByText("Agents")).toBeTruthy();
+    expect(screen.getByText("Files")).toBeTruthy();
+    expect(screen.getByText("User")).toBeTruthy();
+    expect(screen.getByText("file")).toBeTruthy();
+    expect(screen.queryByText("global")).toBeNull();
   });
 
   it("ignores completion results that omit items", async () => {
@@ -287,7 +461,7 @@ describe("Composer completion mentions", () => {
       configurable: true,
       value: scrollIntoView
     });
-    const items = Array.from({ length: 24 }, (_, index) => ({
+    const items = Array.from({ length: 24 }, (_, index) => completionItem({
       id: `skill:skill-${index}`,
       sigil: "$",
       label: `$skill-${String(index).padStart(2, "0")}`,
@@ -387,7 +561,7 @@ describe("Composer completion mentions", () => {
     const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
       replacement: { start: 0, end: 4 },
       items: [
-        {
+        completionItem({
           id: "file:src",
           sigil: "@",
           label: "@src/",
@@ -396,7 +570,7 @@ describe("Composer completion mentions", () => {
           detail: "src/",
           sortText: "src",
           target: null
-        }
+        })
       ]
     }));
 

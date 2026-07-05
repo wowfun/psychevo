@@ -96,7 +96,7 @@ not show the raw `diff --git`, `index`, `---`, or `+++` metadata block as
 visible header copy, and absolute paths are reserved for title/tooltip text
 when the active cwd can be joined with the changed file path. Files
 previews render text files as syntax-highlighted code and Markdown files
-through the shared transcript Markdown renderer, with raw HTML escaped. The
+through the shared `@psychevo/components` Markdown renderer, with raw HTML escaped. The
 Files tab header keeps only the tab title; the selected file absolute path
 appears above the preview. Code highlighting uses the Workbench-local
 `highlight.js` core integration with a hand-picked language set and app-token
@@ -183,6 +183,15 @@ are both ordinary cwds; UI may show project affordances such as Git branch
 only when the current cwd supports them. Creating a GUI workspace is an
 icon-only Sessions header action immediately to the left of the
 expand/collapse-all Sessions control, not a standalone primary left-nav item.
+Resource creation vocabulary is stable across Workbench. `New` starts a
+session, workspace, or automation. `Add` creates local configurable objects
+such as ACP backends and MCP servers. `Install` adds external skill or plugin
+packages. `Connect` and `Set up` are reserved for provider and channel flows
+that bind credentials or an external service. Familiar, repeated add/new
+actions may stay icon-first with an accessible label and tooltip; complex setup
+and install actions should show icon plus text in the owning page header.
+Create/edit panels use the same compact ledger surface and close-on-success
+behavior across Settings, Capabilities, and Automations.
 The Settings center page exposes an explicit return control at the top of its
 own left navigation, followed by a settings search field. It does not show a
 separate top Settings header, top-right close button, or current

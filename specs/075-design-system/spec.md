@@ -6,7 +6,7 @@ psychevo_self_edit: deny
 # 075. Design System
 
 Define Psychevo's shared visual and interaction language. This topic owns the
-high-level Adaptive Workbench direction; concrete transcript rendering,
+canonical Adaptive Workbench design system; concrete transcript rendering,
 interaction mechanics, and product layout live in the UI and product specs that
 consume it.
 
@@ -16,10 +16,13 @@ consume it.
 - compact glyph/icon language, color roles, and adaptive host fallback
 - core transcript, prompt, composer, status line, sidebar, picker, and bottom
   panel surface treatment
+- shared browser control roles, including management-style switches
+- shared browser Markdown metadata treatment, including YAML frontmatter tables
 - evidence language for inline ledger rows, collapsed details, and active work
 - composer-first interaction baseline and default shortcut expectations
 - semantic rendering architecture expectations
 - deterministic design-system validation expectations
+- `DESIGN.md` source-of-truth structure and generated token outputs
 
 Out of scope:
 
@@ -35,6 +38,43 @@ Out of scope:
   [240 pevo Web](../240-pevo-web/spec.md)
 - runtime evidence semantics, storage formats, provider payloads, or public
   Rust APIs
+
+## Source Of Truth
+
+`DESIGN.md` in this directory is the canonical design-system source. Its YAML
+front matter owns exact token values and platform mappings; its prose owns the
+visual intent and application guidance. This spec owns governance: which
+surfaces consume the design system, how direct constants are allowed, and what
+validation keeps generated outputs honest.
+
+`@psychevo/assets` consumes `DESIGN.md` and publishes generated browser tokens
+through `theme.css` plus a typed TypeScript design-system export. Browser
+surfaces should import `@psychevo/assets/theme.css` instead of maintaining
+parallel theme files. The generated public CSS variable prefix is `--pevo-`.
+Management-style browser switches consume the generated `--pevo-switch-*`
+semantic variables and keep sizing in component CSS so Web, Desktop, and
+Floating can share visual state without duplicating color decisions.
+Browser Markdown renderers consume the shared Markdown component for document
+body rendering and document-start YAML frontmatter. Frontmatter is supporting
+metadata: render it as a compact table before the Markdown body, use existing
+`--pevo-*` border, panel, code, and ink roles, and do not show the raw `---`
+block or add explanatory visible copy around it. Markdown previews may expose a
+quiet icon-only copy action through the shared renderer; that action copies raw
+Markdown source through the host clipboard boundary and does not add visible
+state text. Product GUI surfaces should not create page-local Markdown parsers
+or duplicate preview copy affordances when the shared component can render and
+copy the same source.
+
+TUI consumes the same semantic role names while preserving terminal-native
+adaptation. It may keep ANSI and host-palette fallbacks because terminal
+capabilities are part of the rendering contract, but the role intent still
+comes from `DESIGN.md`.
+
+Direct hardcoded color, radius, typography, shadow, glyph, or terminal palette
+values are allowed only when they are host fallbacks, deterministic test
+fixtures, or generated outputs from `DESIGN.md`. New product CSS should use
+generated semantic variables, and shared package CSS must be scoped enough that
+Desktop can import multiple surfaces without selector collisions.
 
 ## Direction
 
@@ -115,6 +155,14 @@ optional tabs only when needed, searchable row list, selected row marker, and a
 contextual footer. Slash command discovery remains a lightweight menu above the
 composer instead of becoming a full command palette.
 
+Browser switches are reserved for direct binary state such as capability,
+backend, channel, debug, or mode enablement. They use a quiet neutral off track,
+a clear accent on track, a raised thumb, and visible focus ring. Switch state
+is carried by the control itself; adjacent visible text must name the setting
+being controlled, not repeat state words such as `On`, `Off`, `Enabled`, or
+`Disabled`. Ordinary checkboxes remain checkboxes when the user is selecting
+multiple options, confirming force behavior, or editing form fields.
+
 ## Evidence Language
 
 Evidence is inline ledger material inside the transcript. It does not use
@@ -176,6 +224,8 @@ semantics without live providers, API keys, or terminal palette dependence.
 
 ## Attachments
 
+- [DESIGN.md](DESIGN.md) is the canonical design-system source for prose,
+  tokens, themes, glyphs, motion, and platform mappings.
 - [Brand Assets](brand-assets.md) defines canonical tracked logo and brand
   asset locations and usage rules.
 
@@ -196,3 +246,7 @@ semantics without live providers, API keys, or terminal palette dependence.
   terminal command and TUI-specific rendering/interaction behavior.
 - [240 pevo Web](../240-pevo-web/spec.md) defines concrete Web/Workbench
   layout and browser behavior.
+- [245 pevo Floating](../245-pevo-floating/spec.md) defines the native floating
+  capsule surface that consumes scoped design-system tokens.
+- [246 pevo Desktop](../246-pevo-desktop/spec.md) defines the native Desktop
+  shell that imports multiple browser-facing surfaces.

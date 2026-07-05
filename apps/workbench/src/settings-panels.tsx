@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, ModelOptionView, SessionSummary } from "@psychevo/protocol";
+import { Switch } from "@psychevo/components";
 import type {
   Appearance,
   BackendDraft,
@@ -406,10 +407,13 @@ function SettingsSectionPanel({
       return (
         <div className="settingsRows">
           <SettingsOptionRow title="Show debug tab" description="Recent Gateway notifications in the right inspector.">
-            <label className="switchControl">
-              <input checked={debugEnabled} onChange={(event) => onDebugChange(event.target.checked)} type="checkbox" />
-              <span>{debugEnabled ? "On" : "Off"}</span>
-            </label>
+            <Switch
+              ariaLabel="Show debug tab"
+              checked={debugEnabled}
+              label="Show debug tab"
+              onCheckedChange={onDebugChange}
+              showLabel={false}
+            />
           </SettingsOptionRow>
         </div>
       );

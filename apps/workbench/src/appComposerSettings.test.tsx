@@ -62,6 +62,20 @@ describe("Workbench settings and backend controls", () => {
     expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
   });
 
+  it("shows the Debug switch without repeating its on/off state as text", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Debug" }));
+
+    const debugSwitch = within(settingsRegion).getByRole("switch", { name: "Show debug tab" });
+    const debugRow = debugSwitch.closest(".settingsRow") as HTMLElement;
+    expect(debugRow).toBeTruthy();
+    expect(within(debugRow).queryByText(/^On$/)).toBeNull();
+    expect(within(debugRow).queryByText(/^Off$/)).toBeNull();
+  });
+
   it("manages profile slash aliases and shortcuts from Settings", async () => {
     render(<App />);
 
@@ -388,6 +402,8 @@ describe("Workbench settings and backend controls", () => {
     expect(within(channelsPanel).getByText("Connected Channels")).toBeTruthy();
     expect(within(channelsPanel).queryByRole("button", { name: "All" })).toBeNull();
     expect(within(channelsPanel).queryByRole("button", { name: "Enabled" })).toBeNull();
+    expect(within(channelsPanel).queryByText("Enabled")).toBeNull();
+    expect(within(channelsPanel).queryByText("Disabled")).toBeNull();
     expect(within(channelsPanel).queryByRole("button", { name: "Needs setup" })).toBeNull();
     expect(within(channelsPanel).getByText("Release Bot")).toBeTruthy();
     expect(within(channelsPanel).getAllByText("ready").length).toBeGreaterThan(0);
@@ -518,6 +534,8 @@ describe("Workbench settings and backend controls", () => {
     });
     const listAgain = await within(settingsRegion).findByRole("region", { name: "Channels" });
     expect(within(listAgain).queryByText("Release Ops")).toBeNull();
+    expect(within(listAgain).queryByRole("tab", { name: "Feishu" })).toBeNull();
+    fireEvent.click(within(listAgain).getByRole("button", { name: "Set up channel" }));
     fireEvent.click(within(listAgain).getByRole("tab", { name: "Feishu" }));
     expect(within(listAgain).getByText("FEISHU_APP_ID")).toBeTruthy();
     fireEvent.click(within(listAgain).getByRole("tab", { name: "WeChat" }));
@@ -703,6 +721,7 @@ describe("Workbench settings and backend controls", () => {
     const settingsRegion = await screen.findByRole("region", { name: "Settings" });
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
     const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Set up channel" }));
     fireEvent.click(within(channelsPanel).getByRole("tab", { name: "WeChat" }));
     fireEvent.click(within(channelsPanel).getByRole("button", { name: "Generate QR" }));
     await act(async () => {
@@ -754,6 +773,7 @@ describe("Workbench settings and backend controls", () => {
     const settingsRegion = await screen.findByRole("region", { name: "Settings" });
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
     const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Set up channel" }));
     fireEvent.click(within(channelsPanel).getByRole("tab", { name: "WeChat" }));
 
     expect(within(channelsPanel).getByText("WeChat reconnect required")).toBeTruthy();
@@ -796,6 +816,7 @@ describe("Workbench settings and backend controls", () => {
     const settingsRegion = await screen.findByRole("region", { name: "Settings" });
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
     const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Set up channel" }));
     fireEvent.click(within(channelsPanel).getByRole("tab", { name: "WeChat" }));
 
     expect(within(channelsPanel).getByText("WeChat polling is starting")).toBeTruthy();
@@ -1074,7 +1095,7 @@ describe("Workbench settings and backend controls", () => {
 
     const agentsPanel = await within(settingsRegion).findByRole("region", { name: "Agents" });
     const addButton = within(agentsPanel).getByRole("button", { name: "Add ACP backend" });
-    expect(addButton.textContent).toBe("");
+    expect(addButton.textContent).toContain("Add backend");
     fireEvent.click(addButton);
     const form = await within(agentsPanel).findByRole("form", { name: "Profile ACP backend" });
     expect(within(form).queryByLabelText("Target")).toBeNull();
@@ -1163,6 +1184,8 @@ describe("Workbench settings and backend controls", () => {
     const settingsRegion = await screen.findByRole("region", { name: "Settings" });
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
     const agentsPanel = await within(settingsRegion).findByRole("region", { name: "Agents" });
+    expect(within(agentsPanel).queryByText("Enabled")).toBeNull();
+    expect(within(agentsPanel).queryByText("Disabled")).toBeNull();
 
     fireEvent.click(await within(agentsPanel).findByRole("switch", { name: "Disable opencode" }));
     await waitFor(() => {

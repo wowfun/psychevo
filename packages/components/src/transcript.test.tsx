@@ -70,6 +70,40 @@ function editDiff(): string {
   ].join("\n");
 }
 
+describe("TranscriptPanel Markdown rendering", () => {
+  it("renders text blocks through the shared Markdown renderer", () => {
+    const block = transcriptBlock({
+      kind: "text",
+      body: "---\ntitle: Shared\n---\n# Shared Markdown\n\nBody",
+      metadata: null
+    });
+
+    render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
+
+    expect(screen.getByRole("table", { name: "YAML frontmatter" })).toBeTruthy();
+    expect(screen.getByText("Shared")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Shared Markdown" })).toBeTruthy();
+    expect(screen.getByText("Body")).toBeTruthy();
+  });
+
+  it("keeps copy controls at the message level instead of the Markdown renderer", () => {
+    const block = transcriptBlock({
+      kind: "text",
+      body: "# Shared Markdown",
+      metadata: null
+    });
+    const onCopyText = vi.fn();
+
+    render(<TranscriptPanel entries={[transcriptEntry([block])]} onCopyText={onCopyText} />);
+
+    expect(screen.queryByRole("button", { name: "Copy Markdown" })).toBeNull();
+    const copyButtons = screen.getAllByRole("button", { name: "Copy message" });
+    expect(copyButtons).toHaveLength(1);
+    fireEvent.click(copyButtons[0] as HTMLElement);
+    expect(onCopyText).toHaveBeenCalledWith("# Shared Markdown");
+  });
+});
+
 describe("TranscriptPanel inline diff evidence", () => {
   it("default-opens successful edit diffs with a compact edited title", () => {
     const block = transcriptBlock({

@@ -110,7 +110,7 @@ export type RightWorkspaceTab = {
   message?: string | null;
 };
 
-export type MainView = "transcript" | "search" | "settings" | "automations";
+export type MainView = "transcript" | "search" | "settings" | "automations" | "capabilities";
 export type SettingsSection = "appearance" | "models" | "slash" | "usage" | "debug" | "agents" | "channels" | "archived";
 export type WorkbenchUsageStats = UsageReadResult;
 export type WorkbenchAutomation = AutomationTaskView;

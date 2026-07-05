@@ -1,8 +1,11 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
-  appendOptimisticPrompt,
+  acceptThreadTurn,
+  bindThreadSnapshot,
   parseThreadSnapshot,
+  prepareThreadTurn,
   scopeForCwd,
+  threadTurnStartParams,
   type GatewayClient
 } from "@psychevo/client";
 import {
@@ -91,6 +94,7 @@ type AppActionsParams = {
   detachedShellTokenRef: MutableRefObject<number>;
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
+  fallbackCwd: string;
   modelReady: boolean;
   modelTurnBlockReason: string;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
@@ -156,7 +160,7 @@ export function createAppActions(params: AppActionsParams) {
   function scope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForCwd(params.settings?.cwd || window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd || params.fallbackCwd);
   }
 
   function resetRuntimeSelection() {
@@ -252,22 +256,37 @@ export function createAppActions(params: AppActionsParams) {
       : {};
     params.pendingDetachedShellRef.current = null;
     params.clearCommandTransientUi();
-    params.setSnapshot((current) => appendOptimisticPrompt(current, optimisticText));
-    await params.client?.request("turn/start", {
-      agentName: params.runtimeAcceptsAgentPersona ? params.selectedAgentName || null : null,
+    const requestedThreadId = params.snapshot.thread?.id ?? null;
+    const prepared = prepareThreadTurn(params.snapshot, optimisticText, requestedThreadId);
+    params.setSnapshot(prepared.snapshot);
+    const result = await params.client?.request("turn/start", threadTurnStartParams({
+      controls: {
+        agentName: params.runtimeAcceptsAgentPersona ? params.selectedAgentName || null : null,
+        mode: params.selectedRuntimeRef === "native" ? params.workMode : null,
+        model: params.selectedModel,
+        permissionMode: params.permissionMode,
+        reasoningEffort: params.selectedVariant === "none" ? null : params.selectedVariant,
+        runtimeOptions,
+        runtimeRef: params.selectedRuntimeRef,
+        runtimeSessionId: params.runtimeSessionId
+      },
       input: nextInput,
       mentions: submittedMentions,
-      mode: params.selectedRuntimeRef === "native" ? params.workMode : null,
-      model: params.selectedModel,
-      permissionMode: params.permissionMode,
-      reasoningEffort: params.selectedVariant === "none" ? null : params.selectedVariant,
-      runtimeOptions,
-      runtimeRef: params.selectedRuntimeRef,
-      runtimeSessionId: params.runtimeSessionId,
       scope: scope(),
-      threadId: params.snapshot.thread?.id ?? null,
+      threadId: prepared.requestedThreadId,
       text: null
-    });
+    }));
+    if (result) {
+      const accepted = acceptThreadTurn(prepared.snapshot, result, prepared.requestedThreadId);
+      params.selectedThreadIdRef.current = accepted.threadId;
+      params.setSnapshot((current) => {
+        const currentThreadId = current.thread?.id ?? null;
+        if (currentThreadId && currentThreadId !== accepted.threadId) {
+          return current;
+        }
+        return normalizeSnapshot(bindThreadSnapshot(current, accepted.threadId));
+      });
+    }
     params.setAttachments([]);
     await params.refreshHistory();
   }
@@ -421,7 +440,7 @@ export function createAppActions(params: AppActionsParams) {
     return transcriptSearchText(snapshot.entries);
   }
 
-  async function copyTranscriptText(text: string) {
+  async function copyText(text: string) {
     const result = await params.host?.clipboard.writeText(text);
     if (!result || !result.ok) {
       const message = "Clipboard copy is not supported by this host.";
@@ -665,7 +684,7 @@ export function createAppActions(params: AppActionsParams) {
   return {
     acceptWorkspaceChange,
     changeAgentSelection,
-    copyTranscriptText,
+    copyText,
     createWorkspace,
     deleteArchivedSession,
     deleteBackend,

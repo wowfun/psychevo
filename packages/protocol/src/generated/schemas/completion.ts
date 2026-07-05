@@ -251,6 +251,20 @@ export const completionSchemas = {
         "null"
       ]
     },
+    "group": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "groupLabel": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "id": {
       "type": "string"
     },
@@ -262,6 +276,13 @@ export const completionSchemas = {
     },
     "label": {
       "type": "string"
+    },
+    "scopeLabel": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "sigil": {
       "type": "string"
@@ -307,6 +328,20 @@ export const completionSchemas = {
             "null"
           ]
         },
+        "group": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "groupLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -318,6 +353,13 @@ export const completionSchemas = {
         },
         "label": {
           "type": "string"
+        },
+        "scopeLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "sigil": {
           "type": "string"

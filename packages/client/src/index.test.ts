@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseThreadSnapshot, scopeForCwd } from "./index";
+import {
+  GatewayClient,
+  parseThreadSnapshot,
+  scopeForCwd,
+  type GatewayRawMessageHandler,
+  type GatewayTransport
+} from "./index";
 
 describe("scopeForCwd", () => {
   it("creates a persistent web source scope", () => {
@@ -141,3 +147,85 @@ describe("parseThreadSnapshot", () => {
     expect(parsed.entries[0]?.blocks[0]?.body).toBe("hello history");
   });
 });
+
+describe("GatewayClient transport", () => {
+  it("can use a non-browser raw-message transport", async () => {
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+
+    await client.connect();
+    const pending = client.request("thread/list", {});
+
+    expect(JSON.parse(transport.sent[0]!)).toMatchObject({
+      jsonrpc: "2.0",
+      method: "thread/list",
+      params: {}
+    });
+
+    transport.emit(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "1",
+      result: {
+        sessions: []
+      }
+    }));
+
+    await expect(pending).resolves.toEqual({ sessions: [] });
+  });
+
+  it("rejects pending requests when the transport disconnects", async () => {
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+
+    await client.connect();
+    const pending = client.request("thread/list", {});
+    transport.disconnect("bridge closed");
+
+    await expect(pending).rejects.toThrow("bridge closed");
+  });
+});
+
+class FakeGatewayTransport implements GatewayTransport {
+  readonly sent: string[] = [];
+  private connected = false;
+  private readonly disconnectHandlers = new Set<(message: string) => void>();
+  private readonly messageHandlers = new Set<GatewayRawMessageHandler>();
+
+  async connect(): Promise<void> {
+    this.connected = true;
+  }
+
+  close(): void {
+    this.connected = false;
+    this.disconnect("closed");
+  }
+
+  onDisconnect(handler: (message: string) => void): () => void {
+    this.disconnectHandlers.add(handler);
+    return () => this.disconnectHandlers.delete(handler);
+  }
+
+  onMessage(handler: GatewayRawMessageHandler): () => void {
+    this.messageHandlers.add(handler);
+    return () => this.messageHandlers.delete(handler);
+  }
+
+  send(data: string): void {
+    if (!this.connected) {
+      throw new Error("not connected");
+    }
+    this.sent.push(data);
+  }
+
+  emit(data: string): void {
+    for (const handler of this.messageHandlers) {
+      handler(data);
+    }
+  }
+
+  disconnect(message: string): void {
+    for (const handler of this.disconnectHandlers) {
+      handler(message);
+    }
+  }
+}

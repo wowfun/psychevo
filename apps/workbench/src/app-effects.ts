@@ -1,15 +1,17 @@
 import { useEffect, useLayoutEffect, type MutableRefObject } from "react";
 import {
-  GatewayClient,
+  applyTurnResultToThreadSnapshot,
   parseThreadSnapshot,
-  scopeForCwd
+  scopeForCwd,
+  type GatewayClient
 } from "@psychevo/client";
-import { createBrowserHost, type GatewayEndpoint, type PsychevoHost } from "@psychevo/host";
+import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
   GatewayEventSchema,
   InitializeResultSchema,
   TerminalExitedPayloadSchema,
   TerminalOutputPayloadSchema,
+  TurnResultNotificationSchema,
   type GatewayEvent,
   type GatewayRequestScope,
   type InitializeResult,
@@ -29,6 +31,7 @@ import {
   normalizeSnapshot,
   startupDraftScope
 } from "./session-utils";
+import type { WorkbenchRuntimeFactory } from "./runtime";
 import {
   PINNED_SESSIONS_KEY,
   PREFS_APPEARANCE_VERSION,
@@ -62,7 +65,7 @@ function nextTerminalEventSeq(): number {
 }
 
 type RefreshSnapshot = (
-  nextClient?: GatewayClient | null,
+  runtimeClient?: GatewayClient | null,
   threadId?: string,
   scope?: GatewayRequestScope,
   readOnly?: boolean,
@@ -71,7 +74,7 @@ type RefreshSnapshot = (
 ) => Promise<void>;
 
 type RefreshWorkspaceSurface = (
-  nextClient?: GatewayClient | null,
+  runtimeClient?: GatewayClient | null,
   scope?: GatewayRequestScope,
   threadId?: string | null,
   expectedEpoch?: number | null
@@ -83,6 +86,7 @@ type AppEffectsParams = {
   activeScope: GatewayRequestScope | null;
   appearance: Appearance;
   client: GatewayClient | null;
+  createRuntime: WorkbenchRuntimeFactory;
   commandContextKey: string;
   commandContextKeyRef: MutableRefObject<string | null>;
   commandFeedback: CommandFeedback;
@@ -109,6 +113,7 @@ type AppEffectsParams = {
   selectedRuntimeRef: string;
   settingsSection: string;
   settingsCwd: string | undefined;
+  fallbackCwd: string;
   showSessionChrome: boolean;
   skipNextPinnedPersistRef: MutableRefObject<boolean>;
   snapshot: ThreadSnapshot;
@@ -117,17 +122,17 @@ type AppEffectsParams = {
   mainViewRef: MutableRefObject<MainView>;
   viewEpochRef: MutableRefObject<number>;
   workMode: string;
-  adoptSnapshotScope(nextClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
+  adoptSnapshotScope(runtimeClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
   applyGatewayEvent(event: GatewayEvent): void;
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
   pushDebugEvent(method: string, payload: unknown): void;
-  refreshAgentSurface(nextClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
-  refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<SessionSummary[]>;
+  refreshAgentSurface(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
+  refreshHistory(runtimeClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<SessionSummary[]>;
   refreshSnapshot: RefreshSnapshot;
-  refreshTrace(nextClient?: GatewayClient | null, threadId?: string | null): Promise<void>;
+  refreshTrace(runtimeClient?: GatewayClient | null, threadId?: string | null): Promise<void>;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
-  scheduleSnapshotRefreshAfterLiveSettle(nextClient: GatewayClient, threadId: string | null, epoch?: number): void;
+  scheduleSnapshotRefreshAfterLiveSettle(runtimeClient: GatewayClient, threadId: string | null, epoch?: number): void;
   setActiveRightTabId(value: string | null): void;
   setActiveScope(value: GatewayRequestScope | null): void;
   setClient(value: GatewayClient | null): void;
@@ -135,6 +140,7 @@ type AppEffectsParams = {
   setDraftSession(value: ReturnType<typeof createHistoryDraftSession> | null): void;
   setEndpoint(value: GatewayEndpoint | null): void;
   setError(value: string | null): void;
+  setFallbackCwd(value: string): void;
   setHost(value: PsychevoHost | null): void;
   setInit(value: InitializeResult | null): void;
   setMobilePanel(value: "history" | "transcript" | "status"): void;
@@ -185,7 +191,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     }
     const scope = params.activeScope
       ?? params.initScope
-      ?? scopeForCwd(params.settingsCwd ?? window.location.pathname);
+      ?? scopeForCwd(params.settingsCwd ?? params.fallbackCwd);
     let cancelled = false;
     params.setRuntimeOptionsLoading(true);
     params.setRuntimeOptionsError(null);
@@ -359,13 +365,11 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
 
   useEffect(() => {
     let alive = true;
-    const nextHost = createBrowserHost(window.location, window.localStorage);
-    const nextEndpoint = nextHost.endpoint;
-    const nextClient = new GatewayClient(nextEndpoint);
-    params.setHost(nextHost);
-    params.setEndpoint(nextEndpoint);
+    let activeClient: GatewayClient | null = null;
+    let openThreadUnlisten: (() => void) | null = null;
 
-    nextClient.subscribe((notification) => {
+    function attachRuntime(runtimeClient: GatewayClient) {
+      runtimeClient.subscribe((notification) => {
       params.pushDebugEvent(notification.method, notification.params);
       if (notification.method === "terminal/output") {
         const parsed = TerminalOutputPayloadSchema.safeParse(notification.params);
@@ -391,10 +395,10 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           const event = parsed.data;
           params.applyGatewayEvent(event);
           if (event.type === "turnStarted" && event.threadId) {
-            void params.refreshHistory(nextClient);
+            void params.refreshHistory(runtimeClient);
           }
           if (event.type === "activityChanged" || event.type === "titleChanged") {
-            void params.refreshHistory(nextClient);
+            void params.refreshHistory(runtimeClient);
           }
           if (event.type === "turnCompleted" && (event.threadId || event.turn.threadId)) {
             const threadId = event.threadId ?? event.turn.threadId;
@@ -402,20 +406,20 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
               return;
             }
             const eventEpoch = params.viewEpochRef.current;
-            params.scheduleSnapshotRefreshAfterLiveSettle(nextClient, threadId, eventEpoch);
-            void params.refreshHistory(nextClient);
+            params.scheduleSnapshotRefreshAfterLiveSettle(runtimeClient, threadId, eventEpoch);
+            void params.refreshHistory(runtimeClient);
             const scope = params.scopeRef.current;
             if (scope) {
-              void params.refreshWorkspaceSurface(nextClient, scope, threadId);
+              void params.refreshWorkspaceSurface(runtimeClient, scope, threadId);
             }
             for (const delay of [1_500, 3_000, 7_500, 15_000, 30_000, 60_000, 120_000]) {
               window.setTimeout(() => {
-                void params.refreshSnapshot(nextClient, threadId, undefined, true, eventEpoch);
-                void params.refreshHistory(nextClient);
+                void params.refreshSnapshot(runtimeClient, threadId, undefined, true, eventEpoch);
+                void params.refreshHistory(runtimeClient);
               }, delay);
             }
             window.setTimeout(() => {
-              void params.refreshSnapshot(nextClient, threadId, undefined, true, eventEpoch);
+              void params.refreshSnapshot(runtimeClient, threadId, undefined, true, eventEpoch);
             }, 750);
           }
           if (["actionRequested", "actionUpdated", "actionResolved", "actionCancelled"].includes(event.type)) {
@@ -423,7 +427,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
               ? event.action.threadId
               : params.selectedThreadIdRef.current;
             if (threadId) {
-              void params.refreshSnapshot(nextClient, threadId, undefined, true, params.viewEpochRef.current);
+              void params.refreshSnapshot(runtimeClient, threadId, undefined, true, params.viewEpochRef.current);
             }
           }
         }
@@ -439,70 +443,112 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           if (adoptDetached) {
             params.pendingDetachedShellRef.current = null;
           }
-          void params.refreshSnapshot(nextClient, threadId, undefined, true, eventEpoch, adoptDetached);
+          void params.refreshSnapshot(runtimeClient, threadId, undefined, true, eventEpoch, adoptDetached);
           const scope = params.scopeRef.current;
           if (scope) {
-            void params.refreshWorkspaceSurface(nextClient, scope, threadId);
-            void params.refreshAgentSurface(nextClient, scope);
+            void params.refreshWorkspaceSurface(runtimeClient, scope, threadId);
+            void params.refreshAgentSurface(runtimeClient, scope);
           }
         } else {
-          void params.refreshSnapshot(nextClient);
+          void params.refreshSnapshot(runtimeClient);
         }
-        void params.refreshHistory(nextClient);
+        void params.refreshHistory(runtimeClient);
       }
       if (notification.method === "shell/error") {
         const record = asRecord(notification.params);
         params.setError(optionalStringField(record.message) ?? "Shell command failed");
         const threadId = optionalStringField(record.threadId);
         if (threadId) {
-          void params.refreshSnapshot(nextClient, threadId, undefined, true, params.viewEpochRef.current);
+          void params.refreshSnapshot(runtimeClient, threadId, undefined, true, params.viewEpochRef.current);
         }
-        void params.refreshHistory(nextClient);
+        void params.refreshHistory(runtimeClient);
       }
       if (notification.method === "turn/result") {
+        const parsed = TurnResultNotificationSchema.safeParse(notification.params);
         const record = asRecord(notification.params);
         const thread = asRecord(record.thread);
-        const threadId = optionalStringField(thread.id);
+        const threadId = parsed.success
+          ? parsed.data.thread.id
+          : optionalStringField(thread.id);
+        if (parsed.success) {
+          params.setSnapshot((current) => {
+            const next = normalizeSnapshot(applyTurnResultToThreadSnapshot(current, parsed.data));
+            params.selectedThreadIdRef.current = next.thread?.id ?? null;
+            return next;
+          });
+        }
         if (threadId) {
-          params.scheduleSnapshotRefreshAfterLiveSettle(nextClient, threadId, params.viewEpochRef.current);
+          params.scheduleSnapshotRefreshAfterLiveSettle(runtimeClient, threadId, params.viewEpochRef.current);
           const scope = params.scopeRef.current;
           if (scope) {
-            void params.refreshWorkspaceSurface(nextClient, scope, threadId);
+            void params.refreshWorkspaceSurface(runtimeClient, scope, threadId);
           }
         } else {
-          void params.refreshSnapshot(nextClient);
+          void params.refreshSnapshot(runtimeClient);
         }
-        void params.refreshHistory(nextClient);
+        void params.refreshHistory(runtimeClient);
       }
       if (notification.method === "turn/error") {
         const record = asRecord(notification.params);
         params.setError(optionalStringField(record.message) ?? "Turn failed");
         const threadId = optionalStringField(record.threadId);
         if (threadId) {
-          void params.refreshSnapshot(nextClient, threadId, undefined, true, params.viewEpochRef.current);
+          void params.refreshSnapshot(runtimeClient, threadId, undefined, true, params.viewEpochRef.current);
         } else {
-          void params.refreshSnapshot(nextClient);
+          void params.refreshSnapshot(runtimeClient);
         }
-        void params.refreshHistory(nextClient);
+        void params.refreshHistory(runtimeClient);
       }
-    });
+      });
+    }
 
     async function boot() {
       try {
-        await nextClient.connect();
+        const runtime = await params.createRuntime();
         if (!alive) {
+          runtime.client.close();
           return;
         }
-        params.setClient(nextClient);
+        activeClient = runtime.client;
+        params.setHost(runtime.host);
+        params.setEndpoint(runtime.endpoint);
+        params.setFallbackCwd(runtime.fallbackCwd);
+        attachRuntime(runtime.client);
+        if (runtime.onOpenThreadRequest) {
+          try {
+            const maybeUnlisten = await runtime.onOpenThreadRequest((threadId) => {
+              const epoch = params.beginExplicitViewSwitch();
+              params.updateMainView("transcript");
+              params.setMobilePanel("transcript");
+              void params.refreshSnapshot(runtime.client, threadId, undefined, false, epoch)
+                .then(() => params.refreshHistory(runtime.client));
+            });
+            if (!alive) {
+              maybeUnlisten();
+              return;
+            }
+            openThreadUnlisten = maybeUnlisten;
+          } catch (error) {
+            params.pushDebugEvent("desktop-open-thread/listen-error", {
+              message: error instanceof Error ? error.message : String(error)
+            });
+          }
+        }
+        await runtime.client.connect();
+        if (!alive) {
+          runtime.client.close();
+          return;
+        }
+        params.setClient(runtime.client);
         params.setStatus("connected");
-        const initialize = InitializeResultSchema.parse(await nextClient.request("initialize"));
+        const initialize = InitializeResultSchema.parse(await runtime.client.request("initialize"));
         params.setInit(initialize);
         params.setActiveScope(initialize.scope);
         params.scopeRef.current = initialize.scope;
-        const nextSessions = await params.refreshHistory(nextClient);
-        const startupScope = startupDraftScope(initialize.scope, nextSessions);
+        const nextSessions = await params.refreshHistory(runtime.client);
+        const startupScope = startupDraftScope(initialize.scope, nextSessions, runtime.fallbackCwd);
         const epoch = params.beginExplicitViewSwitch();
-        const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/start", { scope: startupScope }));
+        const nextSnapshot = parseThreadSnapshot(await runtime.client.request("thread/start", { scope: startupScope }));
         if (!alive) {
           return;
         }
@@ -513,7 +559,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         if (params.mainViewRef.current === "transcript") {
           params.updateMainView("transcript");
         }
-        await params.adoptSnapshotScope(nextClient, nextSnapshot);
+        await params.adoptSnapshotScope(runtime.client, nextSnapshot);
       } catch (err) {
         if (alive) {
           params.setStatus("error");
@@ -530,7 +576,8 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         window.cancelAnimationFrame(params.gatewayEventRafRef.current);
         params.gatewayEventRafRef.current = null;
       }
-      nextClient.close();
+      openThreadUnlisten?.();
+      activeClient?.close();
     };
   }, []);
 

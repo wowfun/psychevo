@@ -7,7 +7,11 @@ export type { DiffLineStats, DiffParseMode, ParsedDiffFile, ParsedDiffHunk, Pars
 export { decodeFilePath, encodeFilePath, normalizeFilePathInput, stripFileProtocol, stripQueryAndHash, unquoteGitPath } from "./filePath";
 export { HistoryPanel } from "./history";
 export type { HistoryBrowserWorkspace, HistoryDraftSession, HistoryPanelProps } from "./history";
+export { MarkdownText } from "./markdown";
+export type { MarkdownTextProps } from "./markdown";
+export { ActionButton, CreatePanel, FormField, Switch } from "./primitives";
+export type { ActionButtonProps, CreatePanelProps, FormFieldProps, SwitchProps } from "./primitives";
 export { StatusPanel } from "./status";
 export type { StatusPanelProps } from "./status";
-export { MarkdownText, TranscriptPanel } from "./transcript";
-export type { MarkdownTextProps, TranscriptAgentSession, TranscriptPanelProps } from "./transcript";
+export { TranscriptPanel } from "./transcript";
+export type { TranscriptAgentSession, TranscriptPanelProps } from "./transcript";

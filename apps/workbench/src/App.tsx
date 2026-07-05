@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryDraftSession } from "@psychevo/components";
 import {
   GatewayClient,
-  scopeForCwd
+  scopeForCwd,
+  threadTurnStartParams
 } from "@psychevo/client";
 import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
@@ -64,6 +65,11 @@ import {
   readWorkbenchPrefs
 } from "./storage";
 import { createRightWorkspaceActions } from "./right-workspace-actions";
+import {
+  browserFallbackCwd,
+  createBrowserWorkbenchRuntime,
+  type WorkbenchRuntimeFactory
+} from "./runtime";
 import type {
   Appearance,
   BackendDraft,
@@ -112,7 +118,7 @@ function mergeBrowserWorkspaces(
   return Array.from(byCwd.values());
 }
 
-export function App() {
+export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtimeFactory?: WorkbenchRuntimeFactory } = {}) {
   const [client, setClient] = useState<GatewayClient | null>(null);
   const [host, setHost] = useState<PsychevoHost | null>(null);
   const [endpoint, setEndpoint] = useState<GatewayEndpoint | null>(null);
@@ -179,6 +185,7 @@ export function App() {
   const [status, setStatus] = useState("connecting");
   const [error, setError] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"history" | "transcript" | "status">("transcript");
+  const [fallbackCwd, setFallbackCwd] = useState(browserFallbackCwd);
   const viewEpochRef = useRef(0);
   const mainViewRef = useRef<MainView>("transcript");
   const selectedThreadIdRef = useRef<string | null>(null);
@@ -200,7 +207,7 @@ export function App() {
   const hasSelectedSession = Boolean(currentThreadId || visibleDraftSession);
   const showSessionChrome = mainView === "transcript" && hasSelectedSession;
   const commandContextKey = `${activeScope?.cwd ?? ""}:${currentThreadId ?? visibleDraftSession?.id ?? "none"}`;
-  const activeWorkbenchCwd = activeScope?.cwd ?? init?.scope.cwd ?? settings?.cwd ?? window.location.pathname;
+  const activeWorkbenchCwd = activeScope?.cwd ?? init?.scope.cwd ?? settings?.cwd ?? fallbackCwd;
   const activeRightTab = rightTabs.find((tab) =>
     tab.id === activeRightTabId && rightWorkspaceTabVisibleForSession(tab, currentThreadId ?? null)
   ) ?? null;
@@ -291,6 +298,7 @@ export function App() {
     activeScope,
     client,
     currentThreadId: currentThreadId ?? null,
+    fallbackCwd,
     initScope: init?.scope ?? null,
     pinnedSessionIds,
     scopeRef,
@@ -356,6 +364,7 @@ export function App() {
     activeScope,
     activeWorkbenchCwd,
     client,
+    fallbackCwd,
     initScope: init?.scope ?? null,
     mainView,
     settingsCwd: settings?.cwd,
@@ -424,6 +433,7 @@ export function App() {
     activeScope,
     appearance,
     client,
+    createRuntime: runtimeFactory,
     commandContextKey,
     commandContextKeyRef,
     commandFeedback,
@@ -453,6 +463,7 @@ export function App() {
     selectedThreadIdRef,
     settingsSection,
     settingsCwd: settings?.cwd,
+    fallbackCwd,
     showSessionChrome,
     skipNextPinnedPersistRef,
     snapshot,
@@ -476,6 +487,7 @@ export function App() {
     setDraftSession,
     setEndpoint,
     setError,
+    setFallbackCwd,
     setHost,
     setInit,
     setMobilePanel,
@@ -585,7 +597,7 @@ export function App() {
   const {
     acceptWorkspaceChange,
     changeAgentSelection,
-    copyTranscriptText,
+    copyText,
     createWorkspace,
     deleteArchivedSession,
     deleteBackend,
@@ -616,6 +628,7 @@ export function App() {
     client,
     currentThreadId: currentThreadId ?? null,
     detachedShellTokenRef,
+    fallbackCwd,
     host,
     initScope: init?.scope ?? null,
     pendingDetachedShellRef,
@@ -701,21 +714,23 @@ export function App() {
       ? { mode: selectedPeerRuntimeMode }
       : {};
     clearCommandTransientUi();
-    await client.request("turn/start", {
-      agentName: runtimeAcceptsAgentPersona ? selectedAgentName || null : null,
+    await client.request("turn/start", threadTurnStartParams({
+      controls: {
+        agentName: runtimeAcceptsAgentPersona ? selectedAgentName || null : null,
+        mode: selectedRuntimeRef === "native" ? workMode : null,
+        model: selectedModel,
+        permissionMode,
+        reasoningEffort: selectedVariant === "none" ? null : selectedVariant,
+        runtimeOptions,
+        runtimeRef: selectedRuntimeRef,
+        runtimeSessionId
+      },
       input: [{ type: "text", text: trimmed }],
       mentions: submittedMentions,
-      mode: selectedRuntimeRef === "native" ? workMode : null,
-      model: selectedModel,
-      permissionMode,
-      reasoningEffort: selectedVariant === "none" ? null : selectedVariant,
-      runtimeOptions,
-      runtimeRef: selectedRuntimeRef,
-      runtimeSessionId,
-      scope: activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd || window.location.pathname),
+      scope: activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd || fallbackCwd),
       threadId,
       text: null
-    });
+    }));
     await refreshHistory();
   }
 
@@ -724,6 +739,7 @@ export function App() {
     activity,
     client,
     endpoint,
+    fallbackCwd,
     host,
     initScope: init?.scope ?? null,
     pendingDetachedShellRef,
@@ -822,7 +838,7 @@ export function App() {
     automations, automationsError, automationsLoading,
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch,
     beginRightResize, changeAgentSelection, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
-    channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyTranscriptText, createWorkspace, currentThreadId,
+    channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyText, createWorkspace, currentThreadId,
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, extraRuntimeModeValues, handleAttachment, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
     loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
@@ -838,7 +854,7 @@ export function App() {
     setAttachments, setBackendDraft, setChannelEnabled, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
     setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
     setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel: changeComposerModel, setSelectedModelSelection: changeComposerModelSelection, setSelectedRuntimeMode, setSelectedRuntimeRef,
-    setSelectedVariant: changeComposerVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, settings, settingsSection,
+    setSelectedVariant: changeComposerVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, fallbackCwd, settings, settingsSection,
     usageStats, usageStatsError, usageStatsLoading, refreshUsageStats,
     clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, startWechatQrSetup, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
     togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateChannel, updateMainView, viewEpochRef, workMode,

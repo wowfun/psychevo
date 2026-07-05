@@ -75,6 +75,7 @@ const gatewayMock = vi.hoisted(() => {
     wechatQrPoll: null as null | ((params: unknown) => unknown | Promise<unknown>),
     permissionRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     clarifyRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
+    clipboardWriteLog: [] as string[],
     openDownloadLog: [] as string[],
     optimisticLog: [] as string[],
     projectBranch: "main" as string | null,
@@ -85,6 +86,7 @@ const gatewayMock = vi.hoisted(() => {
     browserWorkspaces: null as Array<Record<string, unknown>> | null,
     agentRecords: [] as Array<Record<string, unknown>>,
     backendRecords: [] as Array<Record<string, unknown>>,
+    skillRecords: [] as Array<Record<string, unknown>>,
     channelRecords: [
       {
         id: "release",

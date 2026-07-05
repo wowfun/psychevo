@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Edit3, Keyboard, RotateCcw, Save, Trash2, X } from "lucide-react";
+import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
+import { Edit3, Keyboard, Link2, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type { SlashSettingsResult } from "@psychevo/protocol";
+import { ActionButton } from "@psychevo/components";
 import { errorMessage } from "./common";
 
 type SlashAliasDraft = {
@@ -46,6 +47,7 @@ export function SlashCommandsSettingsPanel({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const targetListId = useId();
 
   async function loadSlashSettings() {
     if (!client) {
@@ -155,6 +157,7 @@ export function SlashCommandsSettingsPanel({
   }
 
   const groups = useMemo(() => slashTargetGroups(settings), [settings]);
+  const targetOptions = useMemo(() => groups.map((group) => group.target), [groups]);
   const totalRows = (settings?.aliases.length ?? 0) + (settings?.keybinds.length ?? 0);
   const saving = Boolean(busyKey);
 
@@ -162,191 +165,256 @@ export function SlashCommandsSettingsPanel({
     <section className="agentSurfacePanel slashSettingsPanel" aria-label="Slash Commands">
       <header className="agentSurfaceHeaderWithAction">
         <span><Keyboard size={15} /> Profile Slash Commands <b>{totalRows}</b></span>
-        <button
+        <ActionButton
           aria-label="Refresh slash command settings"
           disabled={disabled || loading || !client}
+          icon={<RotateCcw size={13} />}
+          iconOnly
           onClick={() => void loadSlashSettings()}
+          size="compact"
           title="Refresh"
           type="button"
+          variant="ghost"
         >
-          <RotateCcw size={13} />
-        </button>
+          Refresh
+        </ActionButton>
       </header>
       {error && <div className="modelSettingsMessage is-error" role="alert">{error}</div>}
       {notice && <div className="modelSettingsMessage">{notice}</div>}
       {(settings?.diagnostics ?? []).map((diagnostic) => (
         <div className="modelSettingsMessage is-warning" key={diagnostic}>{diagnostic}</div>
       ))}
-      <form className="slashLeaderForm" onSubmit={saveLeader}>
-        <label>
-          <span>Leader key</span>
-          <input
-            disabled={disabled || !client || loading || saving}
-            onChange={(event) => setLeaderKeyDraft(event.currentTarget.value)}
-            placeholder="ctrl+x"
-            value={leaderKeyDraft}
-          />
-        </label>
-        <label>
-          <span>Timeout ms</span>
-          <input
-            disabled={disabled || !client || loading || saving}
-            inputMode="numeric"
-            onChange={(event) => setLeaderTimeoutDraft(event.currentTarget.value)}
-            placeholder="2000"
-            value={leaderTimeoutDraft}
-          />
-        </label>
-        <button disabled={disabled || !client || loading || saving} title="Save leader key" type="submit">
-          <Save size={13} />
-          <span>{busyKey === "leader" ? "Saving" : "Save"}</span>
-        </button>
-      </form>
-      <div className="agentSurfaceList slashCommandList">
-        {groups.map((group) => (
-          <div className="agentSurfaceRow slashCommandRow" key={group.target}>
-            <div className="slashCommandMain">
-              <strong><code>{group.target}</code></strong>
-              <span>{group.summary ?? "Slash target"}</span>
-              <div className="slashChipLine">
-                {group.aliases.map((entry) => (
-                  <span className="slashChip" key={`alias:${entry.alias}`}>
-                    <code>{entry.alias}</code>
-                    <button
-                      aria-label={`Edit alias ${entry.alias}`}
-                      disabled={disabled || saving}
-                      onClick={() => setAliasDraft({ originalAlias: entry.alias, alias: entry.alias, target: entry.target })}
-                      title="Edit alias"
-                      type="button"
-                    >
-                      <Edit3 size={11} />
-                    </button>
-                    <button
-                      aria-label={`Delete alias ${entry.alias}`}
-                      disabled={disabled || saving || !settings}
-                      onClick={() => settings && void saveSlashSettings({
-                        aliases: settings.aliases.filter((alias) => alias.alias !== entry.alias)
-                      }, `alias:${entry.alias}`, "Alias deleted")}
-                      title="Delete alias"
-                      type="button"
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  </span>
-                ))}
-                {group.keybinds.map((entry) => (
-                  <span className="slashChip is-shortcut" key={`keybind:${entry.shortcut}`}>
-                    <code>{entry.shortcut}</code>
-                    <button
-                      aria-label={`Edit shortcut ${entry.shortcut}`}
-                      disabled={disabled || saving}
-                      onClick={() => setKeybindDraft({ originalShortcut: entry.shortcut, shortcut: entry.shortcut, target: entry.target })}
-                      title="Edit shortcut"
-                      type="button"
-                    >
-                      <Edit3 size={11} />
-                    </button>
-                    <button
-                      aria-label={`Delete shortcut ${entry.shortcut}`}
-                      disabled={disabled || saving || !settings}
-                      onClick={() => settings && void saveSlashSettings({
-                        keybinds: settings.keybinds.filter((keybind) => keybind.shortcut !== entry.shortcut)
-                      }, `keybind:${entry.shortcut}`, "Shortcut deleted")}
-                      title="Delete shortcut"
-                      type="button"
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  </span>
-                ))}
-              </div>
+      <datalist id={targetListId}>
+        {targetOptions.map((target) => <option key={target} value={target} />)}
+      </datalist>
+      <div className="slashSettingsLayout">
+        <div className="slashSettingsMain">
+          <form className="slashLeaderForm slashSettingsCard" onSubmit={saveLeader}>
+            <div className="slashSettingsCardCopy">
+              <strong>Leader shortcut</strong>
+              <span>Controls TUI keybind sequences such as <code>&lt;leader&gt;s</code>.</span>
             </div>
-          </div>
-        ))}
-        {!loading && groups.length === 0 && <p>No custom slash aliases or shortcuts configured.</p>}
-        {loading && <p>Loading slash command settings...</p>}
-      </div>
-      <div className="slashEditorGrid">
-        <form className="backendEditor slashCommandEditor" onSubmit={saveAlias}>
-          <header>
-            <h4>{aliasDraft.originalAlias ? "Edit alias" : "Add alias"}</h4>
-            {aliasDraft.originalAlias && (
-              <button aria-label="Cancel alias edit" onClick={() => setAliasDraft(EMPTY_SLASH_ALIAS_DRAFT)} title="Cancel" type="button">
-                <X size={14} />
-              </button>
-            )}
-          </header>
-          <label>
-            <span>Alias</span>
-            <input
-              disabled={disabled || !client || loading || saving}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setAliasDraft((current) => ({ ...current, alias: value }));
-              }}
-              placeholder="/st"
-              value={aliasDraft.alias}
-            />
-          </label>
-          <label>
-            <span>Target slash line</span>
-            <input
-              disabled={disabled || !client || loading || saving}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setAliasDraft((current) => ({ ...current, target: value }));
-              }}
-              placeholder="/status"
-              value={aliasDraft.target}
-            />
-          </label>
-          <footer>
-            <button disabled={disabled || !client || loading || saving || !aliasDraft.alias.trim() || !aliasDraft.target.trim()} type="submit">
-              <Save size={13} />
-              <span>{busyKey === "alias" ? "Saving" : "Save alias"}</span>
-            </button>
-          </footer>
-        </form>
-        <form className="backendEditor slashCommandEditor" onSubmit={saveKeybind}>
-          <header>
-            <h4>{keybindDraft.originalShortcut ? "Edit shortcut" : "Add shortcut"}</h4>
-            {keybindDraft.originalShortcut && (
-              <button aria-label="Cancel shortcut edit" onClick={() => setKeybindDraft(EMPTY_SLASH_KEYBIND_DRAFT)} title="Cancel" type="button">
-                <X size={14} />
-              </button>
-            )}
-          </header>
-          <label>
-            <span>Shortcut</span>
-            <input
-              disabled={disabled || !client || loading || saving}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setKeybindDraft((current) => ({ ...current, shortcut: value }));
-              }}
-              placeholder="<leader>s"
-              value={keybindDraft.shortcut}
-            />
-          </label>
-          <label>
-            <span>Target slash line</span>
-            <input
-              disabled={disabled || !client || loading || saving}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setKeybindDraft((current) => ({ ...current, target: value }));
-              }}
-              placeholder="/status"
-              value={keybindDraft.target}
-            />
-          </label>
-          <footer>
-            <button disabled={disabled || !client || loading || saving || !keybindDraft.shortcut.trim() || !keybindDraft.target.trim()} type="submit">
-              <Save size={13} />
-              <span>{busyKey === "keybind" ? "Saving" : "Save shortcut"}</span>
-            </button>
-          </footer>
-        </form>
+            <div className="slashLeaderControls">
+              <label>
+                <span>Leader key</span>
+                <input
+                  disabled={disabled || !client || loading || saving}
+                  onChange={(event) => setLeaderKeyDraft(event.currentTarget.value)}
+                  placeholder="ctrl+x"
+                  value={leaderKeyDraft}
+                />
+              </label>
+              <label>
+                <span>Timeout ms</span>
+                <input
+                  disabled={disabled || !client || loading || saving}
+                  inputMode="numeric"
+                  onChange={(event) => setLeaderTimeoutDraft(event.currentTarget.value)}
+                  placeholder="2000"
+                  value={leaderTimeoutDraft}
+                />
+              </label>
+              <ActionButton disabled={disabled || !client || loading || saving} icon={<Save size={13} />} title="Save leader key" type="submit" variant="neutral">
+                {busyKey === "leader" ? "Saving" : "Save"}
+              </ActionButton>
+            </div>
+          </form>
+
+          <section className="slashSettingsCard slashCommandCatalog" aria-label="Configured slash command targets">
+            <header className="slashCommandSectionHeader">
+              <div>
+                <h4>Configured targets</h4>
+                <p>Aliases and shortcuts are grouped by the slash line they run.</p>
+              </div>
+              <span>{groups.length} targets</span>
+            </header>
+            <div className="agentSurfaceList slashCommandList">
+              {groups.map((group) => (
+                <div className="agentSurfaceRow slashCommandRow" key={group.target}>
+                  <div className="slashCommandMain">
+                    <div className="slashCommandTarget">
+                      <strong><code>{group.target}</code></strong>
+                      <div className="slashCommandStats" aria-label="Slash target mappings">
+                        <span>{formatCount(group.aliases.length, "alias")}</span>
+                        <span>{formatCount(group.keybinds.length, "shortcut")}</span>
+                      </div>
+                    </div>
+                    <span>{group.summary ?? "Slash target"}</span>
+                    <div className="slashChipLine">
+                      {group.aliases.map((entry) => (
+                        <span className="slashChip" key={`alias:${entry.alias}`}>
+                          <code>{entry.alias}</code>
+                          <button
+                            aria-label={`Edit alias ${entry.alias}`}
+                            disabled={disabled || saving}
+                            onClick={() => setAliasDraft({ originalAlias: entry.alias, alias: entry.alias, target: entry.target })}
+                            title="Edit alias"
+                            type="button"
+                          >
+                            <Edit3 size={11} />
+                          </button>
+                          <button
+                            aria-label={`Delete alias ${entry.alias}`}
+                            disabled={disabled || saving || !settings}
+                            onClick={() => settings && void saveSlashSettings({
+                              aliases: settings.aliases.filter((alias) => alias.alias !== entry.alias)
+                            }, `alias:${entry.alias}`, "Alias deleted")}
+                            title="Delete alias"
+                            type="button"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </span>
+                      ))}
+                      {group.keybinds.map((entry) => (
+                        <span className="slashChip is-shortcut" key={`keybind:${entry.shortcut}`}>
+                          <code>{entry.shortcut}</code>
+                          <button
+                            aria-label={`Edit shortcut ${entry.shortcut}`}
+                            disabled={disabled || saving}
+                            onClick={() => setKeybindDraft({ originalShortcut: entry.shortcut, shortcut: entry.shortcut, target: entry.target })}
+                            title="Edit shortcut"
+                            type="button"
+                          >
+                            <Edit3 size={11} />
+                          </button>
+                          <button
+                            aria-label={`Delete shortcut ${entry.shortcut}`}
+                            disabled={disabled || saving || !settings}
+                            onClick={() => settings && void saveSlashSettings({
+                              keybinds: settings.keybinds.filter((keybind) => keybind.shortcut !== entry.shortcut)
+                            }, `keybind:${entry.shortcut}`, "Shortcut deleted")}
+                            title="Delete shortcut"
+                            type="button"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="slashCommandRowActions">
+                    <button
+                      disabled={disabled || saving}
+                      onClick={() => setAliasDraft({ originalAlias: null, alias: "", target: group.target })}
+                      type="button"
+                    >
+                      <Plus size={12} aria-hidden /> Alias
+                    </button>
+                    <button
+                      disabled={disabled || saving}
+                      onClick={() => setKeybindDraft({ originalShortcut: null, shortcut: "", target: group.target })}
+                      type="button"
+                    >
+                      <Plus size={12} aria-hidden /> Shortcut
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!loading && groups.length === 0 && (
+                <div className="slashEmptyState">
+                  <strong>No custom mappings</strong>
+                  <span>Add an alias or shortcut to make frequent slash commands faster.</span>
+                </div>
+              )}
+              {loading && <p>Loading slash command settings...</p>}
+            </div>
+          </section>
+        </div>
+
+        <aside className="slashSettingsSide" aria-label="Slash command editors">
+          <section className="slashSettingsCard slashEditorPanel">
+            <header className="slashCommandSectionHeader">
+              <div>
+                <h4>Create mappings</h4>
+                <p>Point aliases and shortcuts at any complete slash line.</p>
+              </div>
+              <Link2 size={14} aria-hidden />
+            </header>
+            <div className="slashEditorGrid">
+              <form className="backendEditor slashCommandEditor" onSubmit={saveAlias}>
+                <header>
+                  <h4>{aliasDraft.originalAlias ? "Edit alias" : "Add alias"}</h4>
+                  {aliasDraft.originalAlias && (
+                    <button aria-label="Cancel alias edit" onClick={() => setAliasDraft(EMPTY_SLASH_ALIAS_DRAFT)} title="Cancel" type="button">
+                      <X size={14} />
+                    </button>
+                  )}
+                </header>
+                <label>
+                  <span>Alias</span>
+                  <input
+                    disabled={disabled || !client || loading || saving}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setAliasDraft((current) => ({ ...current, alias: value }));
+                    }}
+                    placeholder="/st"
+                    value={aliasDraft.alias}
+                  />
+                </label>
+                <label>
+                  <span>Target slash line</span>
+                  <input
+                    disabled={disabled || !client || loading || saving}
+                    list={targetListId}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setAliasDraft((current) => ({ ...current, target: value }));
+                    }}
+                    placeholder="/status"
+                    value={aliasDraft.target}
+                  />
+                </label>
+                <footer>
+                  <ActionButton disabled={disabled || !client || loading || saving || !aliasDraft.alias.trim() || !aliasDraft.target.trim()} icon={<Save size={13} />} type="submit" variant="primary">
+                    {busyKey === "alias" ? "Saving" : "Save alias"}
+                  </ActionButton>
+                </footer>
+              </form>
+              <form className="backendEditor slashCommandEditor" onSubmit={saveKeybind}>
+                <header>
+                  <h4>{keybindDraft.originalShortcut ? "Edit shortcut" : "Add shortcut"}</h4>
+                  {keybindDraft.originalShortcut && (
+                    <button aria-label="Cancel shortcut edit" onClick={() => setKeybindDraft(EMPTY_SLASH_KEYBIND_DRAFT)} title="Cancel" type="button">
+                      <X size={14} />
+                    </button>
+                  )}
+                </header>
+                <label>
+                  <span>Shortcut</span>
+                  <input
+                    disabled={disabled || !client || loading || saving}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setKeybindDraft((current) => ({ ...current, shortcut: value }));
+                    }}
+                    placeholder="<leader>s"
+                    value={keybindDraft.shortcut}
+                  />
+                </label>
+                <label>
+                  <span>Target slash line</span>
+                  <input
+                    disabled={disabled || !client || loading || saving}
+                    list={targetListId}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setKeybindDraft((current) => ({ ...current, target: value }));
+                    }}
+                    placeholder="/status"
+                    value={keybindDraft.target}
+                  />
+                </label>
+                <footer>
+                  <ActionButton disabled={disabled || !client || loading || saving || !keybindDraft.shortcut.trim() || !keybindDraft.target.trim()} icon={<Save size={13} />} type="submit" variant="primary">
+                    {busyKey === "keybind" ? "Saving" : "Save shortcut"}
+                  </ActionButton>
+                </footer>
+              </form>
+            </div>
+          </section>
+        </aside>
       </div>
     </section>
   );
@@ -383,4 +451,8 @@ function ensureSlashTargetGroup(
   const next: SlashTargetGroup = { target, summary, aliases: [], keybinds: [] };
   groups.set(target, next);
   return next;
+}
+
+function formatCount(count: number, label: string): string {
+  return `${count} ${label}${count === 1 ? "" : "s"}`;
 }

@@ -12,10 +12,7 @@ Topic directories use this structure:
 - `tasks.md`: implementation checklist and status tracking for `100+` specs only; do not create unless necessary
 - Additional supplementary files; must have entry links in `spec.md`, `testing.md` or `plan.md`
 
-In `spec.md`, same-directory `.md` supplements belong under `## Attachments`.
-Same-topic attachment labels omit the topic number; cross-topic attachment
-labels keep the target topic number. Apply the same label rule to inline
-references.
+In `spec.md`, same-directory `.md` supplements belong under `## Attachments`. Same-topic attachment labels omit the topic number; cross-topic attachment labels keep the target topic number. Apply the same label rule to inline references.
 
 Specs that directly drive implementation should include functional requirements and acceptance criteria when behavior is non-trivial.
 

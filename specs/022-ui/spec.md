@@ -25,6 +25,10 @@ Out of scope:
 - concrete Web/Workbench product behavior, JavaScript workspace boundaries,
   browser host adapters, PWA behavior, and frontend package layout; these
   belong to [240 pevo Web](../240-pevo-web/spec.md)
+- concrete native floating question-capsule behavior belongs to
+  [245 pevo Floating](../245-pevo-floating/spec.md)
+- concrete native Desktop shell, Tauri project layout, window lifecycle, and
+  native host adapters belong to [246 pevo Desktop](../246-pevo-desktop/spec.md)
 - managed Gateway lifecycle and browser launch bootstrap; these belong to
   [220 pevo Gateway](../220-pevo-gateway/spec.md)
 - runtime execution, persistence schemas, provider behavior, or Gateway
@@ -39,6 +43,13 @@ different host technologies:
   Agent, answer, status, and metadata material
 - composers collect user prompts, shell commands, attachments, steer/queue
   input, and structured permission or clarify responses
+- composer completion popups group `/`, `@`, and `$` candidates by action type
+  so commands, skills, agents, directories, files, capabilities, and options
+  remain scannable across host surfaces; section headers are display-only and
+  right-side scope/source labels are reserved for candidates whose origin
+  clarifies selection; skill and agent origin labels use the shared
+  human-facing `System`, `User`, and `Project` vocabulary instead of raw discovery
+  source names
 - status and observability surfaces summarize active scope, running work,
   context-window risk, session usage, cache, and cost without becoming
   transcript content
@@ -76,6 +87,10 @@ visible.
 - [240 pevo Web](../240-pevo-web/spec.md) owns Web/Workbench layout, browser
   host behavior, frontend packages, component implementation boundaries, and
   browser validation.
+- [245 pevo Floating](../245-pevo-floating/spec.md) owns native desktop
+  selection-capsule layout, host capture, placement, and floating validation.
+- [246 pevo Desktop](../246-pevo-desktop/spec.md) owns native Desktop shell
+  packaging, bridge adapters, and multi-window lifecycle.
 
 ## Validation
 
@@ -100,3 +115,7 @@ is required when the changed behavior is primarily visual.
   launch lifecycle.
 - [240 pevo Web](../240-pevo-web/spec.md) defines the Web/Workbench product
   surface and frontend platform.
+- [245 pevo Floating](../245-pevo-floating/spec.md) defines the native desktop
+  floating question capsule.
+- [246 pevo Desktop](../246-pevo-desktop/spec.md) defines the native GUI
+  Desktop shell.

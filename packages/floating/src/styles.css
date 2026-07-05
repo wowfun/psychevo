@@ -1,0 +1,340 @@
+.pevo-floating {
+  color-scheme: dark;
+  background:
+    linear-gradient(135deg, color-mix(in oklch, var(--pevo-floating-bg), transparent 3%), color-mix(in oklch, var(--pevo-floating-bg-raised), transparent 5%)),
+    var(--pevo-floating-bg);
+  color: var(--pevo-floating-ink);
+  font-family: inherit;
+}
+
+.pevo-floating,
+.pevo-floating * {
+  box-sizing: border-box;
+}
+
+.pevo-floating button,
+.pevo-floating input {
+  font: inherit;
+}
+
+.pevo-floating-capsule {
+  width: min(760px, 100vw);
+  margin: 0 auto;
+  border: 1px solid var(--pevo-floating-border);
+  border-radius: var(--pevo-radius);
+  background:
+    linear-gradient(135deg, color-mix(in oklch, var(--pevo-floating-bg), transparent 3%), color-mix(in oklch, var(--pevo-floating-bg-raised), transparent 5%)),
+    var(--pevo-floating-bg);
+  box-shadow: var(--pevo-floating-shadow);
+  overflow: hidden;
+  transition: width 180ms ease, min-height 180ms ease;
+}
+
+.pevo-floating-capsuleExpanded {
+  width: min(720px, 100vw);
+}
+
+.pevo-floating-capsuleToolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) minmax(24px, 1fr) auto auto auto auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 5px 7px;
+  cursor: grab;
+  user-select: none;
+}
+
+.pevo-floating-capsuleToolbar:active,
+.pevo-floating-toolbarDragRegion:active {
+  cursor: grabbing;
+}
+
+.pevo-floating-brandMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 28px;
+  border-radius: var(--pevo-radius-sm);
+  background: transparent;
+}
+
+.pevo-floating-logo {
+  display: block;
+  width: 19px;
+  height: 22px;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px color-mix(in oklch, #000, transparent 48%));
+}
+
+.pevo-floating-toolbarDragRegion {
+  align-self: stretch;
+  min-width: 24px;
+  cursor: grab;
+}
+
+.pevo-floating-actionRail {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.pevo-floating-actionButton,
+.pevo-floating-attachmentChip,
+.pevo-floating-attachButton,
+.pevo-floating-iconButton,
+.pevo-floating-promptRow,
+.pevo-floating-sendButton,
+.pevo-floating-errorRow button {
+  cursor: default;
+  user-select: auto;
+}
+
+.pevo-floating-actionButton,
+.pevo-floating-attachButton,
+.pevo-floating-iconButton,
+.pevo-floating-sendButton,
+.pevo-floating-parkedButton,
+.pevo-floating-errorRow button {
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pevo-floating-actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--pevo-radius-sm);
+  background: transparent;
+  color: var(--pevo-floating-ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pevo-floating-actionButton:hover,
+.pevo-floating-iconButton:hover,
+.pevo-floating-attachButton:hover {
+  background: var(--pevo-floating-hover-bg);
+}
+
+.pevo-floating-actionButton:disabled,
+.pevo-floating-sendButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.pevo-floating-iconButton,
+.pevo-floating-sendButton {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pevo-floating-sendButton {
+  background: var(--pevo-floating-action);
+  color: var(--pevo-floating-action-ink);
+}
+
+.pevo-floating-attachmentStrip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 9px 7px;
+  overflow-x: auto;
+}
+
+.pevo-floating-attachmentChip,
+.pevo-floating-attachButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--pevo-floating-chip-bg);
+  color: color-mix(in oklch, var(--pevo-floating-ink), transparent 12%);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pevo-floating-attachmentChip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pevo-floating-attachmentChip button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pevo-floating-attachButton {
+  flex: 0 0 auto;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pevo-floating-promptRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin: 0 7px 7px;
+  min-height: 36px;
+  padding: 4px 5px 4px 10px;
+  border-radius: var(--pevo-radius-sm);
+  background: var(--pevo-floating-field-bg);
+}
+
+.pevo-floating-promptRow input {
+  min-width: 0;
+  height: 28px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--pevo-floating-ink);
+}
+
+.pevo-floating-promptRow input::placeholder {
+  color: var(--pevo-floating-muted);
+}
+
+.pevo-floating-answerPanel {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-floating-ink), transparent 88%);
+}
+
+.pevo-floating-answerPanel .pevo-transcript {
+  --pevo-ink: var(--pevo-floating-ink);
+  --pevo-muted: var(--pevo-floating-muted);
+  --pevo-muted-strong: color-mix(in oklch, var(--pevo-floating-ink), transparent 38%);
+  --pevo-faint: color-mix(in oklch, var(--pevo-floating-ink), transparent 58%);
+  --pevo-panel: transparent;
+  --pevo-panel-muted: var(--pevo-floating-field-bg);
+  --pevo-border: color-mix(in oklch, var(--pevo-floating-ink), transparent 84%);
+  --pevo-user-bubble: var(--pevo-floating-field-bg);
+  --pevo-user-bubble-border: color-mix(in oklch, var(--pevo-floating-ink), transparent 84%);
+  --pevo-code-bg: color-mix(in oklch, #000, transparent 34%);
+  --pevo-code-ink: var(--pevo-floating-ink);
+  min-height: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pevo-floating-answerPanel .pevo-threadItems {
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  gap: 8px;
+  max-height: 292px;
+  padding: 0 0 8px;
+}
+
+.pevo-floating-answerPanel .pevo-messageFrame,
+.pevo-floating-answerPanel .pevo-messageFrame.is-assistant,
+.pevo-floating-answerPanel .pevo-message {
+  max-width: 100%;
+}
+
+.pevo-floating-answerPanel .pevo-messageFrame.is-user {
+  max-width: min(520px, 88%);
+}
+
+.pevo-floating-answerPanel .pevo-messageFrame {
+  --pevo-messageActionHitArea: 24px;
+  --pevo-messageActionHitOffset: -24px;
+}
+
+.pevo-floating-answerPanel .pevo-emptyThread {
+  display: none;
+}
+
+.pevo-floating-errorRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 6px 10px;
+  color: var(--pevo-floating-ink);
+}
+
+.pevo-floating-errorRow {
+  justify-content: space-between;
+  background: var(--pevo-floating-danger-bg);
+}
+
+.pevo-floating-errorRow button {
+  border-radius: var(--pevo-radius-sm);
+  background: color-mix(in oklch, var(--pevo-floating-ink), transparent 86%);
+  padding: 3px 7px;
+}
+
+.pevo-floating-parkedButton {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  min-height: 34px;
+  margin: 8px;
+  border-radius: 999px;
+  background: var(--pevo-floating-action);
+  color: var(--pevo-floating-action-ink);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pevo-floating-parkedButton .pevo-floating-logo {
+  width: 20px;
+  height: 24px;
+  filter: none;
+}
+
+.pevo-floating-hiddenFileInput {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pevo-floating-capsule {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .pevo-floating-actionButton {
+    justify-content: center;
+    width: 28px;
+    padding: 0;
+  }
+
+  .pevo-floating-actionButton span {
+    display: none;
+  }
+}

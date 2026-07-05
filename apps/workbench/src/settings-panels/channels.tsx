@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ArrowLeft, MessageCircle, Play, Plus, Save, Settings2, Trash2, Wrench, X } from "lucide-react";
+import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
 import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult } from "@psychevo/protocol";
 import type { SessionBrowserWorkspaceState, WorkbenchChannel, WorkbenchChannelDoctor, WorkbenchChannelSource } from "../types";
 import type { ChannelSettingsControls, ChannelUpdateDraft } from "./types";
@@ -65,6 +66,7 @@ export function ChannelsSettingsPanel({
 }) {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [selectedChannelChoice, setSelectedChannelChoice] = useState<ChannelChoice>("wechat");
+  const [setupOpen, setSetupOpen] = useState(false);
   const panelRef = useRef<HTMLElement | null>(null);
   const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) ?? null;
   const configuredChoiceChannel = channels.find((channel) => channel.channel === selectedChannelChoice) ?? null;
@@ -97,20 +99,49 @@ export function ChannelsSettingsPanel({
       <header className="agentSurfaceHeaderWithAction channelSettingsToolbar">
         <span><MessageCircle size={15} /> Connected Channels <b>{channels.length}</b></span>
         <div className="channelToolbarActions">
-          <button aria-label="Doctor Channels" disabled={disabled} onClick={onDoctorChannels} title="Doctor Channels" type="button">
-            <Wrench size={13} />
-            <span>Doctor</span>
-          </button>
-          <button aria-label="Add custom channel" disabled={disabled} onClick={() => setSelectedChannelChoice("telegram")} title="Add custom channel" type="button">
-            <Plus size={13} />
-            <span>Add custom</span>
-          </button>
-          <button aria-label="Start Channels" disabled={disabled} onClick={onDoctorChannels} title="Start Channels" type="button">
-            <Play size={13} />
-            <span>Start</span>
-          </button>
+          <ActionButton ariaLabel="Doctor Channels" disabled={disabled} icon={<Wrench size={13} />} onClick={onDoctorChannels} tooltip="Doctor Channels" variant="ghost">
+            Doctor
+          </ActionButton>
+          <ActionButton ariaLabel="Set up channel" disabled={disabled} icon={<Plus size={13} />} onClick={() => setSetupOpen(true)} tooltip="Set up channel" variant="primary">
+            Set up channel
+          </ActionButton>
+          <ActionButton ariaLabel="Start Channels" disabled={disabled} icon={<Play size={13} />} onClick={onDoctorChannels} tooltip="Start Channels" variant="ghost">
+            Start
+          </ActionButton>
         </div>
       </header>
+      {setupOpen && (
+        <CreatePanel
+          className="channelAddSection"
+          description="Choose a channel and complete its setup."
+          icon={<Plus size={14} />}
+          layout="side"
+          onClose={() => setSetupOpen(false)}
+          title="Set up channel"
+        >
+          <div className="channelPlatformPicker" role="tablist" aria-label="Channel type">
+            {CHANNEL_CHOICES.map((channel) => (
+              <button
+                aria-selected={selectedChannelChoice === channel}
+                className={selectedChannelChoice === channel ? "is-selected" : ""}
+                key={channel}
+                onClick={() => setSelectedChannelChoice(channel)}
+                role="tab"
+                type="button"
+              >
+                {formatChannelName(channel)}
+              </button>
+            ))}
+          </div>
+          <ChannelSetupCard
+            channel={selectedChannelChoice}
+            disabled={disabled}
+            existingChannel={configuredChoiceChannel}
+            onPollWechatQrSetup={onPollWechatQrSetup}
+            onStartWechatQrSetup={onStartWechatQrSetup}
+          />
+        </CreatePanel>
+      )}
       <div className="agentSurfaceList channelSurfaceList">
         {channels.map((channel) => {
           const doctor = channelDoctor[channel.id] ?? null;
@@ -135,25 +166,22 @@ export function ChannelsSettingsPanel({
                 )}
               </div>
               <div className="agentBackendSide">
-                <label className="backendSwitch">
-                  <input
-                    aria-label={`${channel.enabled ? "Disable" : "Enable"} ${channel.id}`}
-                    checked={channel.enabled}
-                    disabled={disabled}
-                    onChange={(event) => onSetChannelEnabled(channel, event.currentTarget.checked)}
-                    role="switch"
-                    type="checkbox"
-                  />
-                  <span className="backendSwitchTrack" aria-hidden />
-                  <span>{channel.enabled ? "Enabled" : "Disabled"}</span>
-                </label>
+                <Switch
+                  ariaLabel={`${channel.enabled ? "Disable" : "Enable"} ${channel.id}`}
+                  checked={channel.enabled}
+                  disabled={disabled}
+                  label={channel.enabled ? "Enabled" : "Disabled"}
+                  onCheckedChange={(enabled) => onSetChannelEnabled(channel, enabled)}
+                  showLabel={false}
+                  size="compact"
+                />
                 <div className="agentBackendActions">
-                  <button aria-label={`Test ${channel.id}`} disabled={disabled} onClick={() => onDoctorChannel(channel)} title="Test" type="button">
-                    <Wrench size={13} />
-                  </button>
-                  <button aria-label={`Settings ${channel.id}`} disabled={disabled} onClick={() => setSelectedChannelId(channel.id)} title="Settings" type="button">
-                    <Settings2 size={13} />
-                  </button>
+                  <ActionButton ariaLabel={`Test ${channel.id}`} disabled={disabled} icon={<Wrench size={13} />} iconOnly onClick={() => onDoctorChannel(channel)} size="compact" tooltip="Test" variant="ghost">
+                    Test {channel.id}
+                  </ActionButton>
+                  <ActionButton ariaLabel={`Settings ${channel.id}`} disabled={disabled} icon={<Settings2 size={13} />} iconOnly onClick={() => setSelectedChannelId(channel.id)} size="compact" tooltip="Settings" variant="ghost">
+                    Settings {channel.id}
+                  </ActionButton>
                 </div>
               </div>
             </div>
@@ -161,32 +189,6 @@ export function ChannelsSettingsPanel({
         })}
         {channels.length === 0 && <p>No channels configured.</p>}
       </div>
-      <section className="channelAddSection" aria-label="Add channel">
-        <header>
-          <span><Plus size={14} /> Add channel</span>
-        </header>
-        <div className="channelPlatformPicker" role="tablist" aria-label="Channel type">
-          {CHANNEL_CHOICES.map((channel) => (
-            <button
-              aria-selected={selectedChannelChoice === channel}
-              className={selectedChannelChoice === channel ? "is-selected" : ""}
-              key={channel}
-              onClick={() => setSelectedChannelChoice(channel)}
-              role="tab"
-              type="button"
-            >
-              {formatChannelName(channel)}
-            </button>
-          ))}
-        </div>
-        <ChannelSetupCard
-          channel={selectedChannelChoice}
-          disabled={disabled}
-          existingChannel={configuredChoiceChannel}
-          onPollWechatQrSetup={onPollWechatQrSetup}
-          onStartWechatQrSetup={onStartWechatQrSetup}
-        />
-      </section>
     </section>
   );
 }

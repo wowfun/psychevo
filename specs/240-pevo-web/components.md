@@ -24,6 +24,20 @@ clarify, tabs, buttons, inputs, and layout primitives. Components should
 support desktop density and mobile/shell collapse without requiring a separate
 native component tree.
 
+Shared GUI creation primitives live in `@psychevo/components` and are
+controlled like the rest of the package. `ActionButton` owns compact
+button sizing, variants, icon rendering, tooltip/label requirements, active
+state, and busy state. `FormField` owns label, hint, error, and ARIA wiring for
+ordinary input controls. `CreatePanel` owns the visual shell for inline,
+side-panel, and compact dialog create/edit flows while callers keep state,
+validation, RPC calls, and close behavior. These primitives consume generated
+`--pevo-*` semantic variables; product pages must not duplicate page-local
+button, field, or create-panel color systems. Create panels are viewport-bound
+interaction surfaces: opening a create/edit panel must keep its shell inside the
+visible page region at desktop and narrow widths, constrain long bodies with
+internal scrolling, and keep close and primary actions reachable without
+requiring page-level horizontal scrolling.
+
 The client package owns headless UX state machines that must behave the same
 across Web, Desktop, and Mobile shells:
 
@@ -217,6 +231,9 @@ through touch lists or sheets. Completion ordering is query-aware: exact and
 prefix matches against the visible command/skill/agent/file label rank before
 substring or description-only matches, so pressing Enter accepts the item the
 typed token visibly points at.
+Skill and agent rows display origin with the shared `System`, `User`, and `Project`
+labels; raw source identifiers remain protocol/detail data and are not shown in
+the compact completion row.
 Slash completion rows may include a short destination label such as Panel,
 Preview, Prompt, Download, or Extension. Those labels are derived from Gateway
 command presentation metadata, not from frontend command-name allowlists.
@@ -260,20 +277,21 @@ The Settings Agents section is the Workbench app-level ACP client configuration
 surface. It shows configurable Profile-level ACP backend registrations and their
 diagnostics, but not the read-only effective agent catalog or the current
 session's running/background child-agent status. Backend create/edit controls
-are embedded inside Settings > Agents rather than opened in a modal. GUI backend
-writes are Profile-only and update the active `$PSYCHEVO_HOME/config.toml`; the
-form does not expose a target selector. Project-level backend definitions may
-still be read by Gateway and affect runtime behavior, but Workbench does not
-show, edit, or delete them from Settings because they are not configurable from
-this GUI surface. Workbench does not expose inactive profiles in this surface.
+open in a scoped Settings create/edit panel rather than a global modal. GUI
+backend writes are Profile-only and update the active `$PSYCHEVO_HOME/config.toml`;
+the form does not expose a target selector. Project-level backend definitions
+may still be read by Gateway and affect runtime behavior, but Workbench does
+not show, edit, or delete them from Settings because they are not configurable
+from this GUI surface. Workbench does not expose inactive profiles in this
+surface.
 Each listed Profile ACP backend exposes its enabled state as a row-level switch
 in Settings > Agents, so users can enable or disable configured backends without
 opening the editor. The row also exposes ordinary checkbox controls for the
-backend's `peer` and `subagent` entrypoints. The embedded backend editor does
-not duplicate the enabled or entrypoint controls.
-The create control is an icon-only add button that opens a generic ACP backend
-editor; users can configure OpenCode or any other ACP-compatible backend by
-filling the backend id, a single JSON command configuration, and capabilities.
+backend's `peer` and `subagent` entrypoints. The backend editor does not
+duplicate the enabled or entrypoint controls.
+The add control opens a generic ACP backend editor; users can configure OpenCode
+or any other ACP-compatible backend by filling the backend id, a single JSON
+command configuration, and capabilities.
 The command JSON input replaces separate Command, Args, and Env fields. New
 backend drafts prefill it with the generic OpenCode ACP template
 `{"command":"opencode","args":["acp"],"env":{}}`, which users can edit for any
@@ -299,7 +317,8 @@ protocol labels such as `Reasoning` and projection markers such as `Preamble`
 are never ordinary transcript header text. Assistant text remains assistant
 text even when the same assistant message also contains tool calls.
 
-Transcript rendering supports Markdown for user and assistant text, including
+Transcript rendering uses the shared `@psychevo/components` Markdown renderer
+for user and assistant text, including
 CommonMark block structure, GFM tables/task lists, links, inline code, fenced
 code blocks, and streaming caret placement at the end of the final rendered
 block. Running assistant text and running reasoning blocks must reveal newly
@@ -325,6 +344,10 @@ duration immediately left of the timestamp, and the timestamp, using the same
 completed-turn format as TUI metadata. The action copies the raw Markdown source
 for that text block through the host clipboard boundary. Feedback controls such
 as thumbs up or thumbs down are not part of this first interaction.
+Preview-oriented Markdown surfaces such as Files and Capabilities use the
+shared Markdown renderer's copy affordance instead of transcript message
+metadata. That preview action copies raw Markdown source and remains an
+icon-only control so it does not compete with the rendered document.
 The hover affordance must keep a continuous pointer path from the message block
 to the action row; moving from the text to Copy must not pass through a dead
 zone that hides the controls before the pointer reaches the button.

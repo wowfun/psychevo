@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default production capabilities for Psychevo Desktop windows.",
+  "windows": ["workbench", "floating"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-hide",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-size",
+    "core:window:allow-start-dragging"
+  ]
+}

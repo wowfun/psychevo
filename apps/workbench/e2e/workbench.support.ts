@@ -177,7 +177,7 @@ export function ensureLiveAutomationCwd(contextCwd: string | undefined): string 
 
 export async function assertLeftNavigationSectionAlignment(page: Page) {
   const actionIcon = page.locator(".leftActions button").first().locator("svg");
-  const actionLabel = page.locator(".leftActions button").first().locator("span");
+  const actionLabel = page.locator(".leftActions button").first().locator(".pevo-actionButtonLabel");
   const pinnedIcon = page.locator(".leftPinnedPanel header svg");
   const pinnedLabel = page.locator(".leftPinnedPanel header span");
   const sessionsIcon = page.locator(".pevo-sessionsHeader .pevo-titleLine svg");
@@ -382,6 +382,27 @@ export async function assertNoHorizontalOverflow(page: Page, locator: Locator) {
   expect(result.left).toBeGreaterThanOrEqual(-1);
   expect(result.right).toBeLessThanOrEqual(viewport!.width + 1);
   expect(result.scrollWidth).toBeLessThanOrEqual(result.clientWidth + 1);
+}
+
+export async function assertNoPageVerticalOverflow(page: Page) {
+  const metrics = await page.evaluate(() => {
+    const scrollingElement = document.scrollingElement ?? document.documentElement;
+    window.scrollTo(0, scrollingElement.scrollHeight);
+    const afterScroll = {
+      bodyClientHeight: document.body.clientHeight,
+      bodyScrollHeight: document.body.scrollHeight,
+      clientHeight: scrollingElement.clientHeight,
+      scrollHeight: scrollingElement.scrollHeight,
+      scrollTop: scrollingElement.scrollTop,
+      scrollY: window.scrollY
+    };
+    window.scrollTo(0, 0);
+    return afterScroll;
+  });
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight + 1);
+  expect(metrics.bodyScrollHeight).toBeLessThanOrEqual(metrics.bodyClientHeight + 1);
+  expect(metrics.scrollTop).toBeLessThanOrEqual(1);
+  expect(metrics.scrollY).toBeLessThanOrEqual(1);
 }
 
 export async function expectSettingsGutterScrollsContent(page: Page, settings: Locator) {

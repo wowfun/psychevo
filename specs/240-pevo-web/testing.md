@@ -22,6 +22,9 @@ product surface and frontend platform.
   method names, event names, and wire shape compatibility.
 - Desktop and narrow viewports preserve usable navigation and non-overlapping
   primary controls.
+- Non-fullscreen Desktop main-window validation must assert that the Workbench
+  document itself cannot scroll vertically while preserving internal transcript,
+  session-list, Settings-content, and long-panel scrolling.
 - Browser validation samples rendered transcript order against
   message-derived SQLite transcript facts when live rendering correctness is
   under test.
@@ -69,6 +72,9 @@ required. They must not print tokens or secrets.
   accepted, busy, and failed starts.
 - Desktop and narrow viewports preserve usable navigation and non-overlapping
   primary controls.
+- Short desktop viewport checks cover the main Workbench shell and Settings as
+  a control case, and fail when `document.scrollingElement` can scroll past the
+  visible app shell.
 - Generated protocol schemas and clients preserve public imports and strict
   validation behavior.
 - The reusable `live-skill` Playwright check is selected by

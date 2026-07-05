@@ -66,9 +66,23 @@ import {
   type ModelStateReadParams,
   type ModelStateResult,
   type ModelStateSetParams,
+  type McpListParams,
+  type McpNameParams,
+  type McpOAuthStartParams,
+  type McpOAuthStatusParams,
+  type McpReadParams,
+  type McpSetEnabledParams,
+  type McpSetToolPolicyParams,
+  type McpUpsertParams,
   type ObservabilityReadParams,
   type ObservabilityReadResult,
   type PermissionRespondParams,
+  type PluginDoctorParams,
+  type PluginInstallParams,
+  type PluginListParams,
+  type PluginReadParams,
+  type PluginSetEnabledParams,
+  type PluginUninstallParams,
   type RpcNotification,
   type RuntimeOptionsParams,
   type RuntimeOptionsResult,
@@ -76,6 +90,11 @@ import {
   type SettingsReadResult,
   type SettingsUpdateParams,
   type ShellStartParams,
+  type SkillInstallParams,
+  type SkillListParams,
+  type SkillReadParams,
+  type SkillSetEnabledParams,
+  type SkillUninstallParams,
   type ShellStartResult,
   type SlashSettingsReadParams,
   type SlashSettingsResult,
@@ -87,6 +106,11 @@ import {
   type TerminalStartResult,
   type TerminalTerminateParams,
   type TerminalWriteParams,
+  type ToolCreateParams,
+  type ToolListParams,
+  type ToolReadParams,
+  type ToolRemoveParams,
+  type ToolSetEnabledParams,
   type ThreadBrowserParams,
   type ThreadBrowserResult,
   type ThreadDeleteResult,
@@ -131,8 +155,42 @@ export {
   applyLiveTranscriptEvent,
   reconcileThreadSnapshot
 } from "./transcript";
+export {
+  acceptThreadTurn,
+  applyGatewayEventToThreadSnapshot,
+  applyTurnResultToThreadSnapshot,
+  bindThreadSnapshot,
+  emptyThreadSnapshot,
+  latestAssistantTranscriptText,
+  prepareThreadTurn,
+  threadTurnControlsFromWorkbenchControls,
+  threadTurnStartParams,
+  ThreadTranscriptController,
+  turnCompletedEventFromResult,
+  turnResultThreadId
+} from "./thread-controller";
+export type {
+  ThreadGatewayEventApplication,
+  ThreadTurnAcceptance,
+  ThreadTurnControls,
+  ThreadTurnErrorApplication,
+  ThreadTurnPreparation,
+  ThreadTurnResultApplication,
+  ThreadTurnStartInput,
+  ThreadTurnStartPlan
+} from "./thread-controller";
 
 export type NotificationHandler = (notification: RpcNotification) => void;
+export type GatewayRawMessageHandler = (data: unknown) => void;
+export type GatewayJsonResult = Record<string, unknown>;
+
+export interface GatewayTransport {
+  close(): void;
+  connect(): Promise<void>;
+  onDisconnect(handler: (message: string) => void): () => void;
+  onMessage(handler: GatewayRawMessageHandler): () => void;
+  send(data: string): void;
+}
 
 export interface GatewayRequestParams {
   "agent/delete": AgentDeleteParams;
@@ -175,6 +233,32 @@ export interface GatewayRequestParams {
   "usage/read": UsageReadParams;
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
+  "plugin/doctor": PluginDoctorParams;
+  "plugin/install": PluginInstallParams;
+  "plugin/list": PluginListParams;
+  "plugin/read": PluginReadParams;
+  "plugin/setEnabled": PluginSetEnabledParams;
+  "plugin/uninstall": PluginUninstallParams;
+  "skill/install": SkillInstallParams;
+  "skill/list": SkillListParams;
+  "skill/read": SkillReadParams;
+  "skill/setEnabled": SkillSetEnabledParams;
+  "skill/uninstall": SkillUninstallParams;
+  "tool/create": ToolCreateParams;
+  "tool/list": ToolListParams;
+  "tool/read": ToolReadParams;
+  "tool/remove": ToolRemoveParams;
+  "tool/setEnabled": ToolSetEnabledParams;
+  "mcp/list": McpListParams;
+  "mcp/oauth/logout": McpNameParams;
+  "mcp/oauth/start": McpOAuthStartParams;
+  "mcp/oauth/status": McpOAuthStatusParams;
+  "mcp/read": McpReadParams;
+  "mcp/remove": McpNameParams;
+  "mcp/setEnabled": McpSetEnabledParams;
+  "mcp/setToolPolicy": McpSetToolPolicyParams;
+  "mcp/test": McpNameParams;
+  "mcp/upsert": McpUpsertParams;
   "runtime/options": RuntimeOptionsParams;
   "settings/read": SettingsReadParams;
   "settings/update": SettingsUpdateParams;
@@ -251,6 +335,32 @@ export interface GatewayRequestResults {
   "usage/read": UsageReadResult;
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
+  "plugin/doctor": GatewayJsonResult;
+  "plugin/install": GatewayJsonResult;
+  "plugin/list": GatewayJsonResult;
+  "plugin/read": GatewayJsonResult;
+  "plugin/setEnabled": GatewayJsonResult;
+  "plugin/uninstall": GatewayJsonResult;
+  "skill/install": GatewayJsonResult;
+  "skill/list": GatewayJsonResult;
+  "skill/read": GatewayJsonResult;
+  "skill/setEnabled": GatewayJsonResult;
+  "skill/uninstall": GatewayJsonResult;
+  "tool/create": GatewayJsonResult;
+  "tool/list": GatewayJsonResult;
+  "tool/read": GatewayJsonResult;
+  "tool/remove": GatewayJsonResult;
+  "tool/setEnabled": GatewayJsonResult;
+  "mcp/list": GatewayJsonResult;
+  "mcp/oauth/logout": GatewayJsonResult;
+  "mcp/oauth/start": GatewayJsonResult;
+  "mcp/oauth/status": GatewayJsonResult;
+  "mcp/read": GatewayJsonResult;
+  "mcp/remove": GatewayJsonResult;
+  "mcp/setEnabled": GatewayJsonResult;
+  "mcp/setToolPolicy": GatewayJsonResult;
+  "mcp/test": GatewayJsonResult;
+  "mcp/upsert": GatewayJsonResult;
   "runtime/options": RuntimeOptionsResult;
   "settings/read": SettingsReadResult;
   "settings/update": SettingsReadResult;
@@ -310,37 +420,33 @@ export function parseThreadSnapshot(value: unknown): ThreadSnapshot {
 
 export class GatewayClient {
   private nextId = 1;
-  private socket: WebSocket | null = null;
+  private readonly transport: GatewayTransport;
   private readonly pending = new Map<
     string,
     { reject: (error: Error) => void; resolve: (value: unknown) => void }
   >();
   private readonly handlers = new Set<NotificationHandler>();
 
-  constructor(readonly endpoint: GatewayEndpoint) {}
+  readonly endpoint: GatewayEndpoint | null;
+
+  constructor(endpointOrTransport: GatewayEndpoint | GatewayTransport) {
+    if (isGatewayTransport(endpointOrTransport)) {
+      this.endpoint = null;
+      this.transport = endpointOrTransport;
+    } else {
+      this.endpoint = endpointOrTransport;
+      this.transport = new BrowserWebSocketTransport(endpointOrTransport);
+    }
+    this.transport.onMessage((data) => this.handleMessage(data));
+    this.transport.onDisconnect((message) => this.rejectPending(message));
+  }
 
   connect(): Promise<void> {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(this.endpoint.wsUrl);
-      this.socket = socket;
-      socket.addEventListener("open", () => resolve(), { once: true });
-      socket.addEventListener(
-        "error",
-        () => reject(new Error("Gateway WebSocket connection failed")),
-        { once: true }
-      );
-      socket.addEventListener("message", (event) => this.handleMessage(event.data));
-      socket.addEventListener("close", () => this.rejectPending("Gateway WebSocket closed"));
-    });
+    return this.transport.connect();
   }
 
   close(): void {
-    this.socket?.close();
-    this.socket = null;
+    this.transport.close();
     this.rejectPending("Gateway WebSocket closed");
   }
 
@@ -353,11 +459,6 @@ export class GatewayClient {
     method: M,
     params?: GatewayRequestInit<M>
   ): Promise<GatewayRequestResults[M]> {
-    const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error("Gateway WebSocket is not connected"));
-    }
-
     const id = String(this.nextId++);
     const payload =
       params === undefined
@@ -369,7 +470,12 @@ export class GatewayClient {
         reject
       });
     });
-    socket.send(JSON.stringify(payload));
+    try {
+      this.transport.send(JSON.stringify(payload));
+    } catch (error) {
+      this.pending.delete(id);
+      return Promise.reject(error);
+    }
     return promise;
   }
 
@@ -403,6 +509,70 @@ export class GatewayClient {
       pending.reject(new Error(message));
     }
     this.pending.clear();
+  }
+}
+
+function isGatewayTransport(value: GatewayEndpoint | GatewayTransport): value is GatewayTransport {
+  return typeof (value as GatewayTransport).send === "function"
+    && typeof (value as GatewayTransport).onDisconnect === "function"
+    && typeof (value as GatewayTransport).onMessage === "function";
+}
+
+class BrowserWebSocketTransport implements GatewayTransport {
+  private socket: WebSocket | null = null;
+  private readonly disconnectHandlers = new Set<(message: string) => void>();
+  private readonly handlers = new Set<GatewayRawMessageHandler>();
+
+  constructor(private readonly endpoint: GatewayEndpoint) {}
+
+  connect(): Promise<void> {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(this.endpoint.wsUrl);
+      this.socket = socket;
+      socket.addEventListener("open", () => resolve(), { once: true });
+      socket.addEventListener(
+        "error",
+        () => reject(new Error("Gateway WebSocket connection failed")),
+        { once: true }
+      );
+      socket.addEventListener("message", (event) => {
+        for (const handler of this.handlers) {
+          handler(event.data);
+        }
+      });
+      socket.addEventListener("close", () => {
+        for (const handler of this.disconnectHandlers) {
+          handler("Gateway WebSocket closed");
+        }
+      });
+    });
+  }
+
+  close(): void {
+    this.socket?.close();
+    this.socket = null;
+  }
+
+  onMessage(handler: GatewayRawMessageHandler): () => void {
+    this.handlers.add(handler);
+    return () => this.handlers.delete(handler);
+  }
+
+  onDisconnect(handler: (message: string) => void): () => void {
+    this.disconnectHandlers.add(handler);
+    return () => this.disconnectHandlers.delete(handler);
+  }
+
+  send(data: string): void {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      throw new Error("Gateway WebSocket is not connected");
+    }
+    socket.send(data);
   }
 }
 

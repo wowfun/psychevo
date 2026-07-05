@@ -1,5 +1,11 @@
 packages:
   - apps/*
   - packages/*
+overrides:
+  "@wdio/native-utils": 2.5.0
+allowBuilds:
+  edgedriver: false
+  esbuild: true
+  geckodriver: false
 minimumReleaseAgeExclude:
   - lucide-react@1.21.0

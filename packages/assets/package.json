@@ -7,9 +7,14 @@
     "./theme.css": "./theme.css"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests",
+    "build": "pnpm run design:generate && tsc -p tsconfig.json",
+    "check": "pnpm run design:check && tsc -p tsconfig.json",
+    "design:check": "node scripts/design-system.mjs check",
+    "design:generate": "node scripts/design-system.mjs generate",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "yaml": "2.9.0"
   }
 }

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { CalendarClock, FolderPlus, Pin, Settings, X } from "lucide-react";
+import { CalendarClock, FolderPlus, Pin, Settings, Wrench, X } from "lucide-react";
 import type {
   GatewayClient,
 } from "@psychevo/client";
@@ -15,7 +15,9 @@ import type {
   SessionSummary,
   SettingsReadResult
 } from "@psychevo/protocol";
+import { ActionButton, CreatePanel, FormField } from "@psychevo/components";
 import { AutomationsPage } from "./automations-panel";
+import { CapabilitiesPage } from "./capabilities-page";
 import { SearchPage } from "./search";
 import { SettingsPage } from "./settings-panels";
 import { shortSessionId } from "./session-utils";
@@ -44,6 +46,7 @@ export function LeftUtilityRail({
   onChange(value: MainView): void;
 }) {
   const items: Array<{ icon: ReactNode; label: string; value: MainView }> = [
+    { icon: <Wrench size={16} />, label: "Capabilities", value: "capabilities" },
     { icon: <CalendarClock size={16} />, label: "Automations", value: "automations" },
     { icon: <Settings size={16} />, label: "Settings", value: "settings" }
   ];
@@ -97,17 +100,23 @@ export function WorkspaceCreateDialog({
           }
         }}
       >
-        <header>
-          <div className="workspaceDialogTitle">
-            <FolderPlus size={18} aria-hidden />
-            <h2>New Workspace</h2>
-          </div>
-          <button aria-label="Close" onClick={onCancel} title="Close" type="button">
-            <X size={15} />
-          </button>
-        </header>
-        <label>
-          <span>Name</span>
+        <CreatePanel
+          icon={<FolderPlus size={18} />}
+          layout="dialog"
+          onClose={onCancel}
+          title="New Workspace"
+          footer={
+            <>
+              <ActionButton disabled={disabled} onClick={onCancel} variant="ghost">
+                Cancel
+              </ActionButton>
+              <ActionButton disabled={disabled || !trimmed} type="submit" variant="primary">
+                Create
+              </ActionButton>
+            </>
+          }
+        >
+          <FormField label="Name">
           <input
             autoFocus
             disabled={disabled}
@@ -115,15 +124,8 @@ export function WorkspaceCreateDialog({
             placeholder="general notes"
             value={name}
           />
-        </label>
-        <footer>
-          <button disabled={disabled} onClick={onCancel} type="button">
-            Cancel
-          </button>
-          <button disabled={disabled || !trimmed} type="submit">
-            Create
-          </button>
-        </footer>
+          </FormField>
+        </CreatePanel>
       </form>
     </div>
   );
@@ -188,6 +190,7 @@ export function MainSurface({
   loadThreadSearchText,
   mainView,
   scope,
+  onCopyText,
   onAppearanceChange,
   onDeleteAutomation,
   onDraftAutomation,
@@ -251,6 +254,7 @@ export function MainSurface({
   loadThreadSearchText(threadId: string): Promise<string>;
   mainView: MainView;
   scope: GatewayRequestScope | null;
+  onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onAppearanceChange(value: Appearance): void;
   onDeleteAutomation(id: string): Promise<void>;
   onDraftAutomation(params: AutomationDraftParams): Promise<AutomationDraftView>;
@@ -369,6 +373,17 @@ export function MainSurface({
         onResume={onResumeAutomation}
         onRun={onRunAutomation}
         onSave={onSaveAutomation}
+      />
+    );
+  }
+  if (mainView === "capabilities") {
+    return (
+      <CapabilitiesPage
+        client={client}
+        cwd={cwd}
+        disabled={disabled}
+        onCopyText={onCopyText}
+        scope={scope}
       />
     );
   }

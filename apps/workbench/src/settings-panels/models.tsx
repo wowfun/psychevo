@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, RotateCcw, Save, Search, X } from "lucide-react";
+import { ActionButton, CreatePanel } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
 import type { AuxiliaryModelAssignmentView, ModelOptionView, ModelProviderView, ModelSettingsResult } from "@psychevo/protocol";
 import { ModelReasoningSelector, reasoningEffortsForModelOption } from "../model-picker";
@@ -223,25 +224,29 @@ export function ModelsSettingsPanel({
     }
   }
 
+  const editingProvider = visibleProviders.find((provider) => provider.id === editingProviderId) ?? null;
+  const editingDraft = editingProvider ? providerDrafts[editingProvider.id] ?? providerDraftFromView(editingProvider, modelOptions) : null;
+
   return (
     <section className="modelsSettingsPanel" aria-label="Models">
       <div className="modelSettingsToolbar">
-        <button
-          aria-label="Refresh model settings"
+        <ActionButton
+          ariaLabel="Refresh model settings"
           disabled={disabled || loading || !client}
+          icon={<RotateCcw size={13} />}
           onClick={() => void loadModelSettings()}
-          title="Refresh model settings"
-          type="button"
+          tooltip="Refresh model settings"
+          variant="ghost"
         >
-          <RotateCcw size={13} />
-          <span>Refresh</span>
-        </button>
-        <button
+          Refresh
+        </ActionButton>
+        <ActionButton
+          active={addingProvider}
           aria-expanded={addingProvider}
-          aria-label="Add provider"
-          aria-pressed={addingProvider}
+          ariaLabel="Connect provider"
           className={`modelProviderAddButton${addingProvider ? " is-active" : ""}`}
           disabled={disabled || loading || !client}
+          icon={<Plus size={13} />}
           onClick={() => {
             if (addingProvider) {
               setAddingProvider(false);
@@ -251,12 +256,11 @@ export function ModelsSettingsPanel({
             setEditingProviderId(null);
             setAddDraft((current) => current ?? initialAddDraft(providerTemplates));
           }}
-          title={addingProvider ? "Close provider editor" : "Add provider"}
-          type="button"
+          tooltip={addingProvider ? "Close provider setup" : "Connect provider"}
+          variant={addingProvider ? "neutral" : "primary"}
         >
-          <Plus size={13} />
-          <span>Add</span>
-        </button>
+          Connect provider
+        </ActionButton>
       </div>
       {error && <div className="modelSettingsMessage is-error" role="alert">{error}</div>}
       {notice && <div className="modelSettingsMessage">{notice}</div>}
@@ -264,6 +268,36 @@ export function ModelsSettingsPanel({
         <div className="modelSettingsMessage is-warning">
           OpenCode Zen free models may route data through free endpoints with different retention policies.
         </div>
+      )}
+      {addingProvider && addDraft && (
+        <ProviderEditor
+          busy={busyKey === `provider:${addDraft.providerId}` || busyKey === `catalog:${addDraft.providerId}`}
+          catalogOptions={catalogOptionsForDraft(addDraft, modelOptions, catalog)}
+          disabled={disabled || !client}
+          draft={addDraft}
+          mode="add"
+          providerTemplates={providerTemplates}
+          onCancel={() => setAddingProvider(false)}
+          onDraftChange={setAddDraft}
+          onFetch={() => void fetchProviderCatalog(addDraft)}
+          onProviderTemplateChange={(provider) => setAddDraft(providerDraftFromView(provider, modelOptions))}
+          onSave={() => void saveProvider(addDraft, "add")}
+        />
+      )}
+      {editingProvider && editingDraft && (
+        <ProviderEditor
+          busy={busyKey === `provider:${editingDraft.providerId}` || busyKey === `catalog:${editingDraft.providerId}`}
+          catalogOptions={catalogOptionsForDraft(editingDraft, modelOptions, catalog)}
+          disabled={disabled || !client}
+          draft={editingDraft}
+          mode="edit"
+          providerTemplates={providerTemplates}
+          onCancel={() => setEditingProviderId(null)}
+          onDraftChange={(nextDraft) => patchProviderDraft(editingProvider.id, nextDraft)}
+          onFetch={() => void fetchProviderCatalog(editingDraft)}
+          onProviderTemplateChange={(template) => patchProviderDraft(editingProvider.id, providerDraftFromView(template, modelOptions))}
+          onSave={() => void saveProvider(editingDraft, "edit")}
+        />
       )}
       <section className="modelAssignmentPanel" aria-label="Model assignments">
         <ModelAssignmentRow
@@ -296,23 +330,7 @@ export function ModelsSettingsPanel({
             <span>{visibleProviders.length ? `${visibleProviders.length} available` : "No available providers"}</span>
           </div>
         </div>
-        {addingProvider && addDraft && (
-          <ProviderEditor
-            busy={busyKey === `provider:${addDraft.providerId}` || busyKey === `catalog:${addDraft.providerId}`}
-            catalogOptions={catalogOptionsForDraft(addDraft, modelOptions, catalog)}
-            disabled={disabled || !client}
-            draft={addDraft}
-            mode="add"
-            providerTemplates={providerTemplates}
-            onCancel={() => setAddingProvider(false)}
-            onDraftChange={setAddDraft}
-            onFetch={() => void fetchProviderCatalog(addDraft)}
-            onProviderTemplateChange={(provider) => setAddDraft(providerDraftFromView(provider, modelOptions))}
-            onSave={() => void saveProvider(addDraft, "add")}
-          />
-        )}
         {visibleProviders.map((provider) => {
-          const draft = providerDrafts[provider.id] ?? providerDraftFromView(provider, modelOptions);
           const editing = editingProviderId === provider.id;
           return (
             <div className="modelProviderStack" key={provider.id}>
@@ -330,21 +348,6 @@ export function ModelsSettingsPanel({
                   setEditingProviderId(provider.id);
                 }}
               />
-              {editing && (
-                <ProviderEditor
-                  busy={busyKey === `provider:${draft.providerId}` || busyKey === `catalog:${draft.providerId}`}
-                  catalogOptions={catalogOptionsForDraft(draft, modelOptions, catalog)}
-                  disabled={disabled || !client}
-                  draft={draft}
-                  mode="edit"
-                  providerTemplates={providerTemplates}
-                  onCancel={() => setEditingProviderId(null)}
-                  onDraftChange={(nextDraft) => patchProviderDraft(provider.id, nextDraft)}
-                  onFetch={() => void fetchProviderCatalog(draft)}
-                  onProviderTemplateChange={(template) => patchProviderDraft(provider.id, providerDraftFromView(template, modelOptions))}
-                  onSave={() => void saveProvider(draft, "edit")}
-                />
-              )}
             </div>
           );
         })}
@@ -376,18 +379,18 @@ function ProviderSummaryRow({
       <div className="modelProviderStatus" data-status={provider.credentialStatus}>
         {provider.credentialStatus === "notRequired" ? "No auth" : "API key ready"}
       </div>
-      <button
-        aria-expanded={editing}
-        aria-pressed={editing}
-        className={editing ? "is-active" : undefined}
-        disabled={disabled || busy}
-        onClick={onEdit}
-        title={editing ? `Close ${provider.name} editor` : `Edit ${provider.name}`}
-        type="button"
-      >
-        <Pencil size={13} />
-        <span>Edit</span>
-      </button>
+        <ActionButton
+          aria-expanded={editing}
+          active={editing}
+          className={editing ? "is-active" : undefined}
+          disabled={disabled || busy}
+          icon={<Pencil size={13} />}
+          onClick={onEdit}
+          tooltip={editing ? `Close ${provider.name} editor` : `Edit ${provider.name}`}
+          variant="ghost"
+        >
+          Edit
+        </ActionButton>
     </div>
   );
 }
@@ -426,7 +429,24 @@ function ProviderEditor({
     || (!draft.noAuth && mode === "add" && !draft.apiKey.trim());
   const modelListId = `model-options-${mode}-${draft.providerId || "custom"}`;
   return (
-    <div className="modelProviderEditor" role="group" aria-label={mode === "add" ? "Add provider" : `Edit ${displayProviderName(draft)}`}>
+    <CreatePanel
+      className="modelProviderEditor"
+      description={mode === "add" ? "Connect a provider and register its first model." : "Update provider connection and model metadata."}
+      icon={mode === "add" ? <Plus size={16} /> : <Pencil size={16} />}
+      layout="side"
+      onClose={onCancel}
+      title={mode === "add" ? "Connect provider" : `Edit ${displayProviderName(draft)}`}
+      footer={
+        <>
+          <ActionButton disabled={disabled || busy} icon={<X size={13} />} onClick={onCancel} variant="ghost">
+            Cancel
+          </ActionButton>
+          <ActionButton disabled={saveDisabled} icon={<Save size={13} />} onClick={onSave} variant="primary">
+            {busy ? "Saving" : "Save provider"}
+          </ActionButton>
+        </>
+      }
+    >
       <div className="modelProviderEditorForm">
         <div className="modelProviderEditorRow modelProviderEditorRowProvider">
           {draft.sourceProviderId === "custom" ? (
@@ -511,10 +531,9 @@ function ProviderEditor({
               ))}
             </datalist>
           </label>
-          <button className="modelProviderFetchButton" disabled={disabled || busy || !draft.providerId.trim()} onClick={onFetch} type="button">
-            <Search size={13} />
-            <span>Fetch models</span>
-          </button>
+          <ActionButton className="modelProviderFetchButton" disabled={disabled || busy || !draft.providerId.trim()} icon={<Search size={13} />} onClick={onFetch} variant="ghost">
+            Fetch models
+          </ActionButton>
           <label>
             <span>Name</span>
             <input
@@ -567,17 +586,7 @@ function ProviderEditor({
           </label>
         </div>
       </div>
-      <div className="modelProviderEditorActions">
-        <button disabled={saveDisabled} onClick={onSave} type="button">
-          <Save size={13} />
-          <span>{busy ? "Saving" : "Save provider"}</span>
-        </button>
-        <button disabled={disabled || busy} onClick={onCancel} title="Cancel" type="button">
-          <X size={13} />
-          <span>Cancel</span>
-        </button>
-      </div>
-    </div>
+    </CreatePanel>
   );
 }
 

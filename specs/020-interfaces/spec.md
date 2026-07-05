@@ -28,7 +28,7 @@ A caller is any product surface, library consumer, SDK, transport adapter, test 
 
 An entrypoint is a caller-facing way to invoke Psychevo. Gateway libraries are the stable interactive substrate entrypoint, while runtime libraries remain the execution substrate beneath Gateway. CLI is a product entrypoint category. SDK, HTTP, and other transports may exist as future entrypoint categories.
 
-Interactive entrypoints should route work through `psychevo-gateway` instead of reaching into lower layers for thread/turn orchestration. Gateway delegates execution to `psychevo-runtime`. ACP is a concrete transport entrypoint category for editor and agent-client integrations. `psychevo-agent-core` owns execution semantics, and `psychevo-ai` owns provider-neutral AI protocol semantics. Interface behavior must not redefine those lower-layer contracts.
+Interactive entrypoints should route work through `psychevo-gateway` instead of reaching into lower layers for thread/turn orchestration. Gateway delegates execution to `psychevo-runtime`. ACP is a concrete transport entrypoint category for editor and agent-client integrations. Native Desktop is a concrete GUI entrypoint category, and Floating capsules are a concrete Desktop feature for selection-anchored question-and-answer workflows. `psychevo-agent-core` owns execution semantics, and `psychevo-ai` owns provider-neutral AI protocol semantics. Interface behavior must not redefine those lower-layer contracts.
 
 Interactive entrypoints provide a source identity with an explicit lifetime to
 Gateway. Invocation-only callers may avoid automatic source continuity, process

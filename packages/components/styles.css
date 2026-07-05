@@ -1,4 +1,6 @@
 @import "./styles/shell-history.css";
 @import "./styles/transcript.css";
+@import "./styles/primitives.css";
+@import "./styles/switch.css";
 @import "./styles/composer.css";
 @import "./styles/status-settings.css";

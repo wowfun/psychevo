@@ -207,9 +207,10 @@ describe("Workbench layout and workspace panels", () => {
       ],
       truncated: false
     };
+    const markdownSource = "---\ntitle: API Notes\ntags:\n  - docs\n  - guide\n---\n# API Notes\n\n- supports markdown";
     gatewayMock.workspaceFileReadResults.set("docs/README.md", {
       path: "docs/README.md",
-      content: "# API Notes\n\n- supports markdown",
+      content: markdownSource,
       binary: false,
       unreadable: null,
       truncated: false
@@ -226,8 +227,16 @@ describe("Workbench layout and workspace panels", () => {
 
     fireEvent.click(within(files).getByRole("treeitem", { name: /README\.md/ }));
     expect(await within(files).findByText("/tmp/project/docs/README.md")).toBeTruthy();
+    const table = await within(files).findByRole("table", { name: "YAML frontmatter" });
+    expect(within(table).getByText("title")).toBeTruthy();
+    expect(within(table).getByText("docs")).toBeTruthy();
+    expect(within(table).getByText("guide")).toBeTruthy();
     expect(await within(files).findByRole("heading", { name: "API Notes" })).toBeTruthy();
     expect(within(files).getByText("supports markdown")).toBeTruthy();
+    fireEvent.click(within(files).getByRole("button", { name: "Copy Markdown file" }));
+    await waitFor(() => {
+      expect(gatewayMock.clipboardWriteLog[gatewayMock.clipboardWriteLog.length - 1]).toBe(markdownSource);
+    });
   });
 
   it("saves text edits manually without entering the Review queue", async () => {

@@ -23,6 +23,12 @@ The desktop layout is a three-surface workbench:
   `Review`, `Terminal`, `Files`, temporary side chats, and opened
   child-agent threads
 
+The Web and Desktop Workbench shell fills the visible window without using
+document-level vertical scrolling. Internal panes such as the transcript,
+session list, Settings content, and long form bodies may scroll, but the outer
+`html`/`body`/app shell must not reveal blank space below the primary workbench
+in normal, non-fullscreen Desktop windows.
+
 On startup, Workbench creates and selects a local detached draft. The launch
 scope is preferred; if unavailable, Workbench uses the most recent project
 scope from session history, then the initialized default scope. This selected
@@ -91,8 +97,10 @@ for narrow responsive layouts. Review and Files use the same locally filterable
 tree component with folder expand/collapse and selected row state. Preview and
 tree regions are immersive right-workspace panes with subtle split dividers
 instead of framed card backgrounds. Markdown previews reuse the shared
-transcript Markdown renderer with raw HTML escaped and appearance-adapted code
-blocks. Code previews use a Workbench-local `highlight.js` core
+`@psychevo/components` Markdown renderer with raw HTML escaped, appearance-adapted code
+blocks, GitHub-like document-start YAML frontmatter tables, and a quiet copy
+action that writes the raw Markdown file source through the host clipboard. Code previews
+use a Workbench-local `highlight.js` core
 integration with app-token colors. The Files header does not repeat the project
 path; the selected file absolute path is shown above the preview. Diff previews
 use theme-adapted surfaces so light and warm appearances do not retain dark
@@ -189,11 +197,19 @@ amber/taupe active states. The dark palette keeps the near-black ledger
 structure, removes cold blue sidebar bias, and uses higher-luminance primary,
 muted, and navigation text so Gateway-rendered status/settings data remains
 readable under all appearances. All three appearances share the same Workbench
-font scale and row density. The `Agents`
+font scale and row density. Settings creation flows use scoped create/edit
+panels inside the selected page instead of bottom-stacked always-visible forms.
+Provider setup uses `Connect provider`; Profile ACP backend setup uses
+`Add backend`; channel setup uses `Set up channel`. Successful saves close the
+panel and refresh the page data, while failures keep the panel open with the
+entered draft and inline error. The opened panel must be placed in the owning
+page's scrollable content column, not below the viewport or outside the visible
+page bounds; long forms scroll within the page/panel while header, close, and
+primary actions remain reachable at desktop and narrow Workbench widths. The `Agents`
 section shows only configurable Profile-level ACP backend registrations and
 diagnostics; it does not list the read-only effective agent catalog or
 Project-level backend definitions because those are not configurable from the
-GUI. Its icon-only add control opens a generic ACP backend editor with an
+GUI. Its add control opens a generic ACP backend editor with an
 editable OpenCode ACP command JSON template prefilled for new drafts, rather
 than an OpenCode-specific backend preset. Each listed Profile ACP backend exposes its
 enabled state as a row-level switch in Settings > Agents plus ordinary

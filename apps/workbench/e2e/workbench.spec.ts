@@ -3,6 +3,7 @@ import { startPevoWeb } from "./harness";
 import {
   assertLeftNavigationSectionAlignment,
   assertNoHorizontalOverflow,
+  assertNoPageVerticalOverflow,
   captureWorkbench,
   composerBoxMetrics,
   openPanel,
@@ -158,6 +159,23 @@ test.describe("pevo Web Workbench", () => {
       await expect(page.locator(".threadPanel")).toHaveCount(0);
       await openPanel(page, isMobile, "Status");
       await expect(page.getByRole("region", { name: "Workspace status" }).getByRole("button", { name: "Side chat" })).toHaveCount(0);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("keeps the desktop app shell fixed in a short viewport", async ({ page, isMobile }) => {
+    test.skip(isMobile, "desktop shell overflow is covered by the desktop viewport");
+    await page.setViewportSize({ width: 1280, height: 420 });
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByPlaceholder("Ask Psychevo...")).toBeVisible();
+      await assertNoPageVerticalOverflow(page);
+
+      await page.getByRole("button", { name: "Settings" }).click();
+      await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
+      await assertNoPageVerticalOverflow(page);
     } finally {
       await server.stop();
     }

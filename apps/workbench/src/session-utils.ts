@@ -1,12 +1,12 @@
 import { scopeForCwd } from "@psychevo/client";
 import type { GatewayRequestScope, SessionSummary, ThreadSnapshot } from "@psychevo/protocol";
 
-export function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSummary[]): GatewayRequestScope {
+export function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSummary[], fallbackCwd: string): GatewayRequestScope {
   if (launchScope.cwd.trim()) {
     return launchScope;
   }
   const recentCwd = sessions.find((session) => session.cwd.trim())?.cwd ?? "";
-  return scopeForCwd(recentCwd.trim() || window.location.pathname);
+  return scopeForCwd(recentCwd.trim() || fallbackCwd);
 }
 
 export function shortSessionId(id: string): string {

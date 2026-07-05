@@ -1,13 +1,25 @@
+.appShell[data-main-view="automations"] .centerWorkspace,
+.appShell[data-main-view="automations"] .centerPage {
+  height: 100%;
+  overflow: hidden;
+}
+
+.appShell[data-main-view="automations"] .centerPage {
+  align-content: stretch;
+}
+
 .automationsPage {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   align-content: stretch;
   justify-self: center;
   width: min(980px, 100%);
+  height: 100%;
   min-height: 0;
   margin-inline: auto;
   gap: 10px;
   padding: 4px 0 0;
+  overflow: hidden;
 }
 
 .automationToolbar,
@@ -90,11 +102,7 @@
   font-size: var(--pevo-font-size-chrome);
 }
 
-.automationToolbarActions button,
-.automationNaturalDraft button,
-.automationRowActions button,
-.automationDraft footer button,
-.automationTemplateActions button {
+.automationRowActions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -114,20 +122,12 @@
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.automationToolbarActions button:active,
-.automationNaturalDraft button:active,
 .automationRowActions button:active,
-.automationDraft footer button:active,
-.automationTemplateActions button:active,
 .automationSegments button:active {
   transform: scale(0.96);
 }
 
-.automationToolbarActions button:disabled,
-.automationNaturalDraft button:disabled,
 .automationRowActions button:disabled,
-.automationDraft footer button:disabled,
-.automationTemplateActions button:disabled,
 .automationSegments button:disabled {
   cursor: not-allowed;
   opacity: 0.54;
@@ -135,11 +135,8 @@
 }
 
 @media (hover: hover) {
-  .automationToolbarActions button:hover,
-  .automationNaturalDraft button:hover,
   .automationRowActions button:hover,
-  .automationDraft footer button:hover,
-  .automationTemplateActions button:hover {
+  .automationSegments button:hover {
     background: color-mix(in oklch, var(--pevo-panel-muted), white 8%);
   }
 }
@@ -193,8 +190,17 @@
   align-items: start;
   gap: 16px;
   min-width: 0;
+  height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
+}
+
+.automationSurface.has-draft {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  justify-content: stretch;
+  gap: 12px;
+  width: 100%;
 }
 
 .automationSurface.is-list-only {
@@ -206,7 +212,7 @@
 }
 
 .automationSurface.has-draft.is-empty-list {
-  grid-template-columns: minmax(0, 640px);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .automationSurface.has-draft.is-empty-list .automationListPane {
@@ -316,38 +322,35 @@
 }
 
 .automationDraft {
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  overflow: auto;
+  display: block;
+  order: -1;
+  overflow: hidden;
   width: 100%;
-  padding: 16px;
-  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-panel-muted) 20%);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
-  border-radius: var(--pevo-radius);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.16);
-}
-
-.automationDraft header {
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.automationDraft header strong {
-  color: var(--pevo-ink);
-  font-size: var(--pevo-font-size-chrome);
-}
-
-.automationDraft header button {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  color: var(--pevo-muted);
+  height: 100%;
+  max-height: 100%;
+  padding: 0;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--pevo-radius-sm);
-  cursor: pointer;
+  border: 0;
+  box-shadow: none;
+}
+
+.automationDraft .pevo-createPanel {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.automationDraft .pevo-createPanelBody {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .automationDraft label {
@@ -364,28 +367,42 @@
 .automationDraft textarea {
   width: 100%;
   min-width: 0;
-  min-height: 38px;
-  padding: 0 9px;
+  min-height: 32px;
+  padding: 0 8px;
   color: var(--pevo-ink);
   background: var(--pevo-panel);
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
   font: inherit;
-  font-size: var(--pevo-font-size-chrome);
+  font-size: var(--pevo-font-size-small);
+}
+
+.automationFieldWide,
+.automationSegments,
+.automationWeekdays {
+  grid-column: 1 / -1;
+}
+
+.automationFieldCompact {
+  width: min(220px, 100%);
 }
 
 .automationDraft textarea {
-  min-height: 122px;
+  min-height: 96px;
+  max-height: 180px;
   padding: 8px 9px;
   line-height: 1.35;
   resize: vertical;
 }
 
 .automationSegments {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-self: start;
   gap: 4px;
+  width: fit-content;
   min-width: 0;
+  max-width: 100%;
   padding: 3px;
   background: color-mix(in oklch, var(--pevo-bg), var(--pevo-panel-muted) 42%);
   border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
@@ -393,9 +410,10 @@
 }
 
 .automationSegments button {
+  flex: 0 1 auto;
   min-width: 0;
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 28px;
+  padding: 0 10px;
   overflow: hidden;
   color: var(--pevo-muted);
   text-overflow: ellipsis;
@@ -417,7 +435,8 @@
 
 .automationWeekdays {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(34px, 42px));
+  justify-content: start;
   gap: 4px;
   min-width: 0;
 }
@@ -447,13 +466,6 @@
   box-shadow: var(--pevo-shadow-active);
 }
 
-.automationDraft footer {
-  justify-content: flex-end;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
-}
-
 .automationEmpty {
   display: grid;
   min-height: 120px;
@@ -467,8 +479,9 @@
 .automationTemplateActions {
   display: grid;
   grid-template-columns: repeat(2, minmax(144px, max-content));
-  justify-content: center;
+  justify-content: end;
   gap: 8px;
+  width: 100%;
 }
 
 @media (max-width: 980px) {
@@ -490,8 +503,8 @@
   }
 
   .automationDraft {
-    max-height: none;
-    overflow: visible;
+    max-height: 100%;
+    overflow: hidden;
   }
 }
 
@@ -506,7 +519,10 @@
     display: grid;
   }
 
-  .automationToolbarActions,
+  .automationToolbarActions {
+    justify-content: flex-end;
+  }
+
   .automationRowActions {
     justify-content: start;
   }
@@ -518,6 +534,20 @@
 
   .automationNaturalDraft {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automationDraft .pevo-createPanelBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automationFieldWide,
+  .automationSegments,
+  .automationWeekdays {
+    grid-column: auto;
+  }
+
+  .automationWeekdays {
+    grid-template-columns: repeat(7, minmax(30px, 1fr));
   }
 
   .automationTemplateActions {

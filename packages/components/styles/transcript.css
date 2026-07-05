@@ -68,6 +68,59 @@
   overflow-wrap: anywhere;
 }
 
+.pevo-markdownFrame {
+  position: relative;
+  min-width: 0;
+}
+
+.pevo-markdownFrame > .pevo-markdown {
+  padding-right: 32px;
+}
+
+.pevo-markdownCopy {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 12%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
+  border-radius: var(--pevo-radius-xs);
+  box-shadow: none;
+  cursor: pointer;
+  opacity: 0.78;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.pevo-markdownCopy:hover,
+.pevo-markdownCopy:focus-visible {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+  border-color: var(--pevo-border);
+  opacity: 1;
+}
+
+.pevo-markdownCopy:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+.pevo-markdownCopy:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pevo-markdownCopy {
+    transition: none;
+  }
+}
+
 .pevo-markdown > :first-child {
   margin-top: 0;
 }
@@ -120,6 +173,70 @@
 .pevo-markdown td {
   padding: 5px 7px;
   border: 1px solid var(--pevo-border);
+}
+
+.pevo-markdown .pevo-frontmatterTable {
+  width: 100%;
+  margin: 0 0 0.85em;
+  overflow: hidden;
+  border: 1px solid var(--pevo-border);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--pevo-radius-sm);
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-markdown .pevo-frontmatterTable th,
+.pevo-markdown .pevo-frontmatterTable td {
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--pevo-border);
+  vertical-align: top;
+}
+
+.pevo-markdown .pevo-frontmatterTable tr:last-child th,
+.pevo-markdown .pevo-frontmatterTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.pevo-markdown .pevo-frontmatterKey {
+  width: 132px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-bg) 18%);
+  border-right: 1px solid var(--pevo-border);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.pevo-markdown .pevo-frontmatterValue {
+  min-width: 0;
+  color: var(--pevo-ink);
+}
+
+.pevo-frontmatterChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pevo-markdown code.pevo-frontmatterChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 22%);
+  color: var(--pevo-ink);
+  background: var(--pevo-markdown-inline-bg, transparent);
+}
+
+.pevo-markdown code.pevo-frontmatterCode {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  padding: 0;
+  color: var(--pevo-markdown-code-ink, var(--pevo-code-ink));
+  background: transparent;
+  white-space: pre-wrap;
 }
 
 .pevo-markdown.is-streaming > :last-child::after {

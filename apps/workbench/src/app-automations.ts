@@ -29,6 +29,7 @@ type UseAutomationsParams = {
   activeScope: GatewayRequestScope | null;
   activeWorkbenchCwd: string;
   client: GatewayClient | null;
+  fallbackCwd: string;
   initScope: GatewayRequestScope | null;
   mainView: MainView;
   settingsCwd: string | undefined;
@@ -56,7 +57,7 @@ export function useAutomations(params: UseAutomationsParams) {
   const [automationsError, setAutomationsError] = useState<string | null>(null);
 
   function activeAutomationScope(): GatewayRequestScope {
-    return params.activeScope ?? params.initScope ?? scopeForCwd(params.settingsCwd ?? window.location.pathname);
+    return params.activeScope ?? params.initScope ?? scopeForCwd(params.settingsCwd ?? params.fallbackCwd);
   }
 
   async function refreshAutomations(nextClient: GatewayClient | null = params.client) {

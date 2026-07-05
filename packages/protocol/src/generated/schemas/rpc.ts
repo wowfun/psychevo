@@ -40,6 +40,29 @@ import { clientRequestBackendDeleteSchema } from './rpc/client-request/backend-d
 import { clientRequestPluginListSchema } from './rpc/client-request/plugin-list';
 import { clientRequestPluginReadSchema } from './rpc/client-request/plugin-read';
 import { clientRequestPluginDoctorSchema } from './rpc/client-request/plugin-doctor';
+import { clientRequestPluginInstallSchema } from './rpc/client-request/plugin-install';
+import { clientRequestPluginUninstallSchema } from './rpc/client-request/plugin-uninstall';
+import { clientRequestPluginSetEnabledSchema } from './rpc/client-request/plugin-set-enabled';
+import { clientRequestSkillListSchema } from './rpc/client-request/skill-list';
+import { clientRequestSkillReadSchema } from './rpc/client-request/skill-read';
+import { clientRequestSkillInstallSchema } from './rpc/client-request/skill-install';
+import { clientRequestSkillUninstallSchema } from './rpc/client-request/skill-uninstall';
+import { clientRequestSkillSetEnabledSchema } from './rpc/client-request/skill-set-enabled';
+import { clientRequestToolListSchema } from './rpc/client-request/tool-list';
+import { clientRequestToolReadSchema } from './rpc/client-request/tool-read';
+import { clientRequestToolSetEnabledSchema } from './rpc/client-request/tool-set-enabled';
+import { clientRequestToolCreateSchema } from './rpc/client-request/tool-create';
+import { clientRequestToolRemoveSchema } from './rpc/client-request/tool-remove';
+import { clientRequestMcpListSchema } from './rpc/client-request/mcp-list';
+import { clientRequestMcpReadSchema } from './rpc/client-request/mcp-read';
+import { clientRequestMcpUpsertSchema } from './rpc/client-request/mcp-upsert';
+import { clientRequestMcpRemoveSchema } from './rpc/client-request/mcp-remove';
+import { clientRequestMcpSetEnabledSchema } from './rpc/client-request/mcp-set-enabled';
+import { clientRequestMcpSetToolPolicySchema } from './rpc/client-request/mcp-set-tool-policy';
+import { clientRequestMcpTestSchema } from './rpc/client-request/mcp-test';
+import { clientRequestMcpOauthStartSchema } from './rpc/client-request/mcp-oauth-start';
+import { clientRequestMcpOauthStatusSchema } from './rpc/client-request/mcp-oauth-status';
+import { clientRequestMcpOauthLogoutSchema } from './rpc/client-request/mcp-oauth-logout';
 import { clientRequestChannelListSchema } from './rpc/client-request/channel-list';
 import { clientRequestChannelShowSchema } from './rpc/client-request/channel-show';
 import { clientRequestChannelEnableSchema } from './rpc/client-request/channel-enable';
@@ -396,6 +419,75 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/plugin-doctor.json"
     },
     {
+      "$ref": "ClientRequest/plugin-install.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-uninstall.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-list.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-read.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-install.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-uninstall.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-list.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-read.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-create.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-remove.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-list.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-read.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-upsert.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-remove.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-set-tool-policy.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-test.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-oauth-start.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-oauth-status.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-oauth-logout.json"
+    },
+    {
       "$ref": "ClientRequest/channel-list.json"
     },
     {
@@ -573,6 +665,29 @@ export const rpcSchemaRefs = [
   clientRequestPluginListSchema,
   clientRequestPluginReadSchema,
   clientRequestPluginDoctorSchema,
+  clientRequestPluginInstallSchema,
+  clientRequestPluginUninstallSchema,
+  clientRequestPluginSetEnabledSchema,
+  clientRequestSkillListSchema,
+  clientRequestSkillReadSchema,
+  clientRequestSkillInstallSchema,
+  clientRequestSkillUninstallSchema,
+  clientRequestSkillSetEnabledSchema,
+  clientRequestToolListSchema,
+  clientRequestToolReadSchema,
+  clientRequestToolSetEnabledSchema,
+  clientRequestToolCreateSchema,
+  clientRequestToolRemoveSchema,
+  clientRequestMcpListSchema,
+  clientRequestMcpReadSchema,
+  clientRequestMcpUpsertSchema,
+  clientRequestMcpRemoveSchema,
+  clientRequestMcpSetEnabledSchema,
+  clientRequestMcpSetToolPolicySchema,
+  clientRequestMcpTestSchema,
+  clientRequestMcpOauthStartSchema,
+  clientRequestMcpOauthStatusSchema,
+  clientRequestMcpOauthLogoutSchema,
   clientRequestChannelListSchema,
   clientRequestChannelShowSchema,
   clientRequestChannelEnableSchema,

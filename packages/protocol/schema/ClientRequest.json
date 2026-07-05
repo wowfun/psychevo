@@ -122,6 +122,75 @@
       "$ref": "ClientRequest/plugin-doctor.json"
     },
     {
+      "$ref": "ClientRequest/plugin-install.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-uninstall.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-list.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-read.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-install.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-uninstall.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-list.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-read.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-create.json"
+    },
+    {
+      "$ref": "ClientRequest/tool-remove.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-list.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-read.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-upsert.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-remove.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-set-tool-policy.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-test.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-oauth-start.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-oauth-status.json"
+    },
+    {
+      "$ref": "ClientRequest/mcp-oauth-logout.json"
+    },
+    {
       "$ref": "ClientRequest/channel-list.json"
     },
     {

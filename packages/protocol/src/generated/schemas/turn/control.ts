@@ -500,6 +500,13 @@ export const turnControlSchemas = {
   "properties": {
     "accepted": {
       "type": "boolean"
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

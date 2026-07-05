@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, Pause, Pencil, Play, Plus, RefreshCw, Save, Sparkles, Trash2, X } from "lucide-react";
+import { CalendarClock, Pause, Pencil, Play, Plus, RefreshCw, Save, Sparkles, Trash2 } from "lucide-react";
+import { ActionButton, CreatePanel } from "@psychevo/components";
 import type {
   AutomationDraftParams,
   AutomationDraftView,
@@ -174,12 +175,12 @@ export function AutomationsPage({
               ))}
             </select>
           </label>
-          <button disabled={disabled || Boolean(pendingAction)} onClick={() => void runPending("refresh", onRefresh)} type="button">
-            <RefreshCw size={15} aria-hidden /> Refresh
-          </button>
-          <button disabled={disabled || Boolean(pendingAction)} onClick={() => setDraft(projectDraft(selectedCwd))} type="button">
-            <Plus size={15} aria-hidden /> New
-          </button>
+          <ActionButton disabled={disabled || Boolean(pendingAction)} icon={<RefreshCw size={15} />} onClick={() => void runPending("refresh", onRefresh)} variant="ghost">
+            Refresh
+          </ActionButton>
+          <ActionButton disabled={disabled || Boolean(pendingAction)} icon={<Plus size={15} />} onClick={() => setDraft(projectDraft(selectedCwd))} variant="primary">
+            New
+          </ActionButton>
         </div>
       </header>
 
@@ -201,9 +202,9 @@ export function AutomationsPage({
           placeholder="Every weekday at 9, review the repo before standup"
           value={requestText}
         />
-        <button disabled={disabled || Boolean(pendingAction) || !requestText.trim()} type="submit">
-          <Sparkles size={15} aria-hidden /> {pendingAction === "draft" ? "Drafting" : "Draft"}
-        </button>
+        <ActionButton busy={pendingAction === "draft"} disabled={disabled || Boolean(pendingAction) || !requestText.trim()} icon={<Sparkles size={15} />} type="submit" variant="neutral">
+          {pendingAction === "draft" ? "Drafting" : "Draft"}
+        </ActionButton>
       </form>
 
       <div className={`automationSurface ${surfaceMode} ${sorted.length === 0 ? "is-empty-list" : ""}`}>
@@ -213,16 +214,16 @@ export function AutomationsPage({
           ) : sorted.length === 0 ? (
             <div className="automationEmpty">
               <div className="automationTemplateActions">
-                <button disabled={disabled} onClick={() => setDraft(projectDraft(selectedCwd))} type="button">
+                <ActionButton disabled={disabled} onClick={() => setDraft(projectDraft(selectedCwd))} variant="neutral">
                   Project check
-                </button>
-                <button
+                </ActionButton>
+                <ActionButton
                   disabled={disabled || selectedThreadOptions.length === 0}
                   onClick={() => setDraft(threadDraft(selectedCwd, selectedThreadOptions[0]?.id ?? null))}
-                  type="button"
+                  variant="neutral"
                 >
                   Thread heartbeat
-                </button>
+                </ActionButton>
               </div>
             </div>
           ) : (
@@ -308,14 +309,24 @@ export function AutomationsPage({
               void saveDraft();
             }}
           >
-            <>
-              <header>
-                <strong>{draft.id ? "Edit automation" : "New automation"}</strong>
-                <button aria-label="Close automation draft" onClick={() => setDraft(null)} title="Close" type="button">
-                  <X size={15} />
-                </button>
-              </header>
-              <label>
+            <CreatePanel
+              description={draft.id ? "Update the schedule, target, and prompt." : "Create a scheduled local workflow."}
+              icon={<CalendarClock size={18} />}
+              layout="side"
+              onClose={() => setDraft(null)}
+              title={draft.id ? "Edit automation" : "New automation"}
+              footer={
+                <>
+                  <ActionButton disabled={Boolean(pendingAction)} onClick={() => setDraft(null)} variant="ghost">
+                    Cancel
+                  </ActionButton>
+                  <ActionButton disabled={Boolean(pendingAction) || !draft.title.trim() || !draft.prompt.trim()} icon={<Save size={15} />} type="submit" variant="primary">
+                    Save
+                  </ActionButton>
+                </>
+              }
+            >
+              <label className="automationField automationFieldWide">
                 <span>Workspace</span>
                 <select
                   aria-label="Draft workspace"
@@ -331,7 +342,7 @@ export function AutomationsPage({
                   ))}
                 </select>
               </label>
-              <label>
+              <label className="automationField">
                 <span>Bind to</span>
                 <select
                   aria-label="Bind to"
@@ -349,7 +360,7 @@ export function AutomationsPage({
                   ))}
                 </select>
               </label>
-              <label>
+              <label className="automationField">
                 <span>Title</span>
                 <input
                   onChange={(event) => setDraft({ ...draft, title: event.target.value })}
@@ -357,7 +368,7 @@ export function AutomationsPage({
                   value={draft.title}
                 />
               </label>
-              <label>
+              <label className="automationField automationFieldWide">
                 <span>Prompt</span>
                 <textarea
                   onChange={(event) => setDraft({ ...draft, prompt: event.target.value })}
@@ -373,7 +384,7 @@ export function AutomationsPage({
                 ))}
               </div>
               {draft.scheduleKind === "interval" && (
-                <label>
+                <label className="automationField automationFieldCompact">
                   <span>Every minutes</span>
                   <input
                     min={1}
@@ -384,7 +395,7 @@ export function AutomationsPage({
                 </label>
               )}
               {draft.scheduleKind === "delay" && (
-                <label>
+                <label className="automationField automationFieldCompact">
                   <span>After minutes</span>
                   <input
                     min={1}
@@ -395,7 +406,7 @@ export function AutomationsPage({
                 </label>
               )}
               {draft.scheduleKind === "once" && (
-                <label>
+                <label className="automationField automationFieldCompact">
                   <span>Run once at</span>
                   <input
                     onChange={(event) => setDraft({ ...draft, onceAt: event.target.value || defaultOnceAt() })}
@@ -405,7 +416,7 @@ export function AutomationsPage({
                 </label>
               )}
               {(draft.scheduleKind === "daily" || draft.scheduleKind === "weekly") && (
-                <label>
+                <label className="automationField automationFieldCompact">
                   <span>Time</span>
                   <input
                     onChange={(event) => setDraft({ ...draft, time: event.target.value || "09:00" })}
@@ -441,15 +452,7 @@ export function AutomationsPage({
                   Ask first
                 </button>
               </div>
-              <footer>
-                <button disabled={Boolean(pendingAction)} onClick={() => setDraft(null)} type="button">
-                  Cancel
-                </button>
-                <button disabled={Boolean(pendingAction) || !draft.title.trim() || !draft.prompt.trim()} type="submit">
-                  <Save size={15} aria-hidden /> Save
-                </button>
-              </footer>
-            </>
+            </CreatePanel>
           </form>
         )}
       </div>

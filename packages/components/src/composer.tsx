@@ -1,7 +1,7 @@
-import { ArrowUp, Plus, X } from "lucide-react";
+import { ArrowUp, Bot, Command, FileText, Folder, Settings2, Sparkles, X, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { CompletionItem, CompletionListResult, GatewayMention, PendingAction } from "@psychevo/protocol";
-import { IconButton } from "./primitives";
+import { IconButton, Switch } from "./primitives";
 
 export interface ComposerProps {
   attachments?: ComposerAttachmentView[] | undefined;
@@ -78,6 +78,7 @@ export function Composer({
   const attachMenuRef = useRef<HTMLDivElement | null>(null);
   const trimmed = draft.trim();
   const completionItems = completion?.items ?? [];
+  const completionRows = completionRowsForItems(completionItems);
   const shellMode = inputMode === "shell";
   const planMode = planModeAvailable && mode === "plan";
   const attachmentItems = attachments ?? [];
@@ -395,26 +396,42 @@ export function Composer({
       )}
       {completionItems.length > 0 && (
         <div className="pevo-completionPopover" role="listbox">
-          {completionItems.map((item, index) => (
-            <button
-              aria-selected={index === activeCompletion}
-              className={index === activeCompletion ? "is-active" : ""}
-              key={item.id}
-              ref={(node) => {
-                completionOptionRefs.current[index] = node;
-              }}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                acceptCompletion(item);
-              }}
-              role="option"
-              type="button"
-            >
-              <strong>{item.label}</strong>
-              <span>{item.kind}</span>
-              {item.detail && <small>{item.detail}</small>}
-            </button>
-          ))}
+          {completionRows.map((row) => {
+            if (row.type === "header") {
+              return (
+                <div className="pevo-completionGroup" key={row.key} role="presentation">
+                  {row.label}
+                </div>
+              );
+            }
+            const item = row.item;
+            const rightLabel = completionRightLabel(item);
+            return (
+              <button
+                aria-selected={row.index === activeCompletion}
+                className={row.index === activeCompletion ? "is-active" : ""}
+                key={item.id}
+                ref={(node) => {
+                  completionOptionRefs.current[row.index] = node;
+                }}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  acceptCompletion(item);
+                }}
+                role="option"
+                type="button"
+              >
+                <span className="pevo-completionIcon" aria-hidden>
+                  <CompletionItemIcon item={item} />
+                </span>
+                <span className="pevo-completionCopy">
+                  <strong>{item.label}</strong>
+                  {item.detail && <small>{item.detail}</small>}
+                </span>
+                {rightLabel && <span className="pevo-completionScope">{rightLabel}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
       <div className="pevo-composerFooter">
@@ -443,21 +460,16 @@ export function Composer({
                 >
                   Add images and files
                 </button>
-                <button
-                  aria-checked={planMode}
-                  className={`pevo-modeSwitchRow ${planMode ? "is-on" : ""}`}
+                <Switch
+                  checked={planMode}
+                  className="pevo-modeSwitchRow"
                   disabled={!planModeAvailable}
-                  onClick={() => {
-                    onModeChange?.(planMode ? "default" : "plan");
+                  label="Plan mode"
+                  onCheckedChange={(checked) => {
+                    onModeChange?.(checked ? "plan" : "default");
                   }}
-                  role="switch"
-                  type="button"
-                >
-                  <span>Plan mode</span>
-                  <span aria-hidden className="pevo-modeSwitchTrack">
-                    <span />
-                  </span>
-                </button>
+                  size="compact"
+                />
               </div>
             )}
           </div>
@@ -514,7 +526,227 @@ function resizeTextarea(textarea: HTMLTextAreaElement | null) {
 }
 
 function completionItemsForResult(result: CompletionListResult): CompletionItem[] {
-  return Array.isArray(result.items) ? result.items : [];
+  return orderCompletionItems(Array.isArray(result.items) ? result.items : []);
+}
+
+type CompletionGroupId = "commands" | "skills" | "agents" | "directories" | "files" | "capabilities" | "options";
+
+type CompletionGroupMeta = {
+  id: string;
+  label: string;
+};
+
+type CompletionDisplayRow =
+  | { type: "header"; key: string; id: string; label: string }
+  | { type: "item"; key: string; item: CompletionItem; index: number };
+
+const COMPLETION_GROUP_LABELS: Record<CompletionGroupId, string> = {
+  commands: "Commands",
+  skills: "Skills",
+  agents: "Agents",
+  directories: "Directories",
+  files: "Files",
+  capabilities: "Capabilities",
+  options: "Options"
+};
+
+const COMPLETION_GROUP_ORDER: Record<CompletionGroupId, number> = {
+  commands: 0,
+  skills: 1,
+  agents: 2,
+  directories: 3,
+  files: 4,
+  capabilities: 5,
+  options: 6
+};
+
+function orderCompletionItems(items: CompletionItem[]): CompletionItem[] {
+  return items
+    .map((item, index) => ({ item, index, group: completionGroupForItem(item).id }))
+    .sort((left, right) => (
+      completionGroupRank(left.group) - completionGroupRank(right.group)
+      || left.index - right.index
+    ))
+    .map(({ item }) => item);
+}
+
+function completionRowsForItems(items: CompletionItem[]): CompletionDisplayRow[] {
+  const rows: CompletionDisplayRow[] = [];
+  let previousGroup: string | null = null;
+  items.forEach((item, index) => {
+    const group = completionGroupForItem(item);
+    if (group.id !== previousGroup) {
+      rows.push({
+        type: "header",
+        key: `header:${group.id}:${index}`,
+        id: group.id,
+        label: group.label
+      });
+      previousGroup = group.id;
+    }
+    rows.push({
+      type: "item",
+      key: `item:${item.id}:${index}`,
+      item,
+      index
+    });
+  });
+  return rows;
+}
+
+function completionGroupForItem(item: CompletionItem): CompletionGroupMeta {
+  const explicitGroup = optionalString((item as CompletionItem & { group?: string | null }).group);
+  const explicitLabel = optionalString((item as CompletionItem & { groupLabel?: string | null }).groupLabel);
+  if (explicitGroup) {
+    const knownGroup = knownCompletionGroup(explicitGroup);
+    return {
+      id: explicitGroup,
+      label: explicitLabel ?? (knownGroup ? COMPLETION_GROUP_LABELS[knownGroup] : titleCaseIdentifier(explicitGroup))
+    };
+  }
+  const targetKind = completionTargetKind(item);
+  const kind = item.kind.toLowerCase();
+  if (kind === "command") {
+    return completionKnownGroup("commands");
+  }
+  if (kind === "skill" || targetKind === "skill") {
+    return completionKnownGroup("skills");
+  }
+  if (kind === "agent" || targetKind === "agent") {
+    return completionKnownGroup("agents");
+  }
+  if (kind === "directory") {
+    return completionKnownGroup("directories");
+  }
+  if (kind === "file" || targetKind === "file") {
+    return completionKnownGroup("files");
+  }
+  if (kind === "capability" || targetKind === "capability") {
+    return completionKnownGroup("capabilities");
+  }
+  return completionKnownGroup("options");
+}
+
+function completionKnownGroup(id: CompletionGroupId): CompletionGroupMeta {
+  return { id, label: COMPLETION_GROUP_LABELS[id] };
+}
+
+function knownCompletionGroup(id: string): CompletionGroupId | null {
+  return id in COMPLETION_GROUP_LABELS ? id as CompletionGroupId : null;
+}
+
+function completionGroupRank(id: string): number {
+  const knownGroup = knownCompletionGroup(id);
+  return knownGroup ? COMPLETION_GROUP_ORDER[knownGroup] : COMPLETION_GROUP_ORDER.options;
+}
+
+function completionRightLabel(item: CompletionItem): string | null {
+  const group = completionGroupForItem(item).id;
+  const explicit = optionalString((item as CompletionItem & { scopeLabel?: string | null }).scopeLabel);
+  const target = item.target as ({ kind?: unknown; source?: unknown } | null | undefined);
+  if (group === "skills") {
+    return skillScopeDisplayLabel(explicit);
+  }
+  if (group === "agents") {
+    return agentScopeDisplayLabel(explicit)
+      ?? (typeof target?.source === "string" ? agentScopeDisplayLabel(target.source) : null);
+  }
+  if (explicit) {
+    return explicit;
+  }
+  if (target?.kind === "agent" && typeof target.source === "string" && target.source.trim()) {
+    return target.source.trim();
+  }
+  if (group === "directories" || group === "files") {
+    return item.kind;
+  }
+  return null;
+}
+
+function skillScopeDisplayLabel(value: string | null | undefined): string | null {
+  switch (value?.trim()) {
+    case "project":
+    case "agents":
+    case "Project":
+      return "Project";
+    case "explicit":
+    case "global":
+    case "agents_global":
+    case "config":
+    case "install_source":
+    case "dynamic":
+    case "User":
+      return "User";
+    case "plugin":
+    case "system":
+    case "builtin":
+    case "built_in":
+    case "core":
+    case "System":
+      return "System";
+    default:
+      return null;
+  }
+}
+
+function agentScopeDisplayLabel(value: string | null | undefined): string | null {
+  switch (value?.trim()) {
+    case "project":
+    case "claude_project":
+    case "Project":
+      return "Project";
+    case "explicit":
+    case "global":
+    case "claude_global":
+    case "generated":
+    case "User":
+      return "User";
+    case "built_in":
+    case "builtin":
+    case "system":
+    case "core":
+    case "System":
+      return "System";
+    default:
+      return null;
+  }
+}
+
+function completionTargetKind(item: CompletionItem): string | null {
+  const target = item.target as ({ kind?: unknown } | null | undefined);
+  return typeof target?.kind === "string" ? target.kind : null;
+}
+
+function optionalString(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function titleCaseIdentifier(value: string): string {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ") || "Options";
+}
+
+function CompletionItemIcon({ item }: { item: CompletionItem }) {
+  const group = completionGroupForItem(item).id;
+  if (group === "skills") {
+    return <Sparkles size={14} />;
+  }
+  if (group === "agents") {
+    return <Bot size={14} />;
+  }
+  if (group === "directories") {
+    return <Folder size={14} />;
+  }
+  if (group === "files") {
+    return <FileText size={14} />;
+  }
+  if (group === "capabilities") {
+    return <Settings2 size={14} />;
+  }
+  return <Command size={14} />;
 }
 
 function completionInsertText(item: CompletionItem): string {

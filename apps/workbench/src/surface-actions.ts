@@ -50,6 +50,7 @@ type SurfaceActionsParams = {
   activeScope: GatewayRequestScope | null;
   client: GatewayClient | null;
   currentThreadId: string | null;
+  fallbackCwd: string;
   initScope: GatewayRequestScope | null;
   scopeRef: MutableRefObject<GatewayRequestScope | null>;
   selectedThreadIdRef: MutableRefObject<string | null>;
@@ -90,7 +91,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
   function defaultScope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForCwd(params.settings?.cwd || window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd || params.fallbackCwd);
   }
 
   async function refreshSnapshot(

@@ -19,15 +19,19 @@ export function browserGatewayEndpoint(location: BrowserLocationLike): GatewayEn
   return { httpBase, wsUrl: wsUrl.toString() };
 }
 
+export type SessionDownloadKind = "export" | "share";
+
+export interface SessionDownloadOptions {
+  filename?: string | null;
+  format?: "markdown" | "json" | string | null;
+  include?: string[] | null;
+}
+
 export function downloadUrl(
   endpoint: GatewayEndpoint,
   sessionId: string,
-  kind: "export" | "share",
-  options: {
-    filename?: string | null;
-    format?: "markdown" | "json" | string | null;
-    include?: string[] | null;
-  } = {}
+  kind: SessionDownloadKind,
+  options: SessionDownloadOptions = {}
 ): string {
   const url = new URL(`/download/session/${encodeURIComponent(sessionId)}/${kind}`, endpoint.httpBase);
   if (options.format) {
@@ -42,9 +46,46 @@ export function downloadUrl(
   return url.toString();
 }
 
+export type HostCapabilityFailureReason =
+  | "unsupported"
+  | "unavailable"
+  | "permissionDenied"
+  | "canceled"
+  | "failed";
+
 export type HostCapabilityResult<T> =
   | { ok: true; value: T }
-  | { capability: string; ok: false; reason: "unsupported" };
+  | {
+      capability: string;
+      message?: string;
+      ok: false;
+      reason: HostCapabilityFailureReason;
+    };
+
+export interface HostCapabilitySnapshot {
+  available: boolean;
+  message?: string;
+  reason?: HostCapabilityFailureReason;
+}
+
+export interface DesktopPlatformCapabilities {
+  capture: {
+    pointer: HostCapabilitySnapshot;
+    portalScreenshot: HostCapabilitySnapshot;
+    regionScreenshot: HostCapabilitySnapshot;
+    selection: HostCapabilitySnapshot;
+  };
+  displayVariables: string[];
+  os: "macos" | "windows" | "linux";
+  session: "x11" | "wayland" | "unknown";
+}
+
+export interface HostRect {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+}
 
 export interface HostStorage {
   getJson<T>(key: string, fallback: T): T;
@@ -103,7 +144,26 @@ export interface FilePickerHost {
   pickFile(): Promise<HostCapabilityResult<File>>;
 }
 
+export interface FloatingSelectionSnapshot {
+  bounds?: HostRect | null;
+  sourceApp?: string | null;
+  text?: string | null;
+}
+
+export interface FloatingCaptureHost {
+  beginRegionPicker(): Promise<HostCapabilityResult<HostRect | null>>;
+  captureRegion(bounds: HostRect): Promise<HostCapabilityResult<{ dataUrl: string; name: string }>>;
+  currentSelection(): Promise<HostCapabilityResult<FloatingSelectionSnapshot>>;
+  showSelectionToolbar(anchor?: HostRect | null): Promise<HostCapabilityResult<void>>;
+}
+
 export interface OpenHost {
+  downloadSession(
+    endpoint: GatewayEndpoint,
+    sessionId: string,
+    kind: SessionDownloadKind,
+    options?: SessionDownloadOptions
+  ): Promise<HostCapabilityResult<void>>;
   openExternal(url: string): Promise<HostCapabilityResult<void>>;
   openDownload(url: string): Promise<HostCapabilityResult<void>>;
 }
@@ -129,6 +189,7 @@ export interface PsychevoHost {
   clipboard: ClipboardHost;
   endpoint: GatewayEndpoint;
   files: FilePickerHost;
+  floating: FloatingCaptureHost;
   lifecycle: WindowLifecycleHost;
   notifications: NotificationHost;
   open: OpenHost;
@@ -142,6 +203,7 @@ export function createBrowserHost(location: BrowserLocationLike, storage: Storag
     clipboard: browserClipboard(),
     endpoint: browserGatewayEndpoint(location),
     files: browserFiles(),
+    floating: browserFloating(),
     lifecycle: browserLifecycle(),
     notifications: browserNotifications(),
     open: browserOpen(),
@@ -152,6 +214,23 @@ export function createBrowserHost(location: BrowserLocationLike, storage: Storag
     storage: new LocalHostStorage(storage),
     theme: {
       colorScheme: "system"
+    }
+  };
+}
+
+function browserFloating(): FloatingCaptureHost {
+  return {
+    async beginRegionPicker() {
+      return unsupported("floating.beginRegionPicker");
+    },
+    async captureRegion() {
+      return unsupported("floating.captureRegion");
+    },
+    async currentSelection() {
+      return unsupported("floating.currentSelection");
+    },
+    async showSelectionToolbar() {
+      return unsupported("floating.showSelectionToolbar");
     }
   };
 }
@@ -202,7 +281,7 @@ function pickBrowserFile(accept?: string): Promise<HostCapabilityResult<File>> {
       const file = input.files?.[0] ?? null;
       input.remove();
       if (!file) {
-        resolve(unsupported("files.pickFile"));
+        resolve(capabilityFailure("files.pickFile", "canceled"));
         return;
       }
       resolve({ ok: true, value: file });
@@ -213,11 +292,15 @@ function pickBrowserFile(accept?: string): Promise<HostCapabilityResult<File>> {
 }
 
 function browserOpen(): OpenHost {
+  const openDownload = async (url: string): Promise<HostCapabilityResult<void>> => {
+    window.open(url, "_blank", "noopener");
+    return { ok: true, value: undefined };
+  };
   return {
-    async openDownload(url: string) {
-      window.open(url, "_blank", "noopener");
-      return { ok: true, value: undefined };
+    async downloadSession(endpoint, sessionId, kind, options) {
+      return openDownload(downloadUrl(endpoint, sessionId, kind, options));
     },
+    openDownload,
     async openExternal(url: string) {
       window.open(url, "_blank", "noopener");
       return { ok: true, value: undefined };
@@ -235,7 +318,7 @@ function browserNotifications(): NotificationHost {
         await Notification.requestPermission();
       }
       if (Notification.permission !== "granted") {
-        return unsupported("notifications.notify");
+        return capabilityFailure("notifications.notify", "permissionDenied");
       }
       new Notification(title, body ? { body } : undefined);
       return { ok: true, value: undefined };
@@ -251,8 +334,18 @@ function browserLifecycle(): WindowLifecycleHost {
   };
 }
 
-function unsupported(capability: string): HostCapabilityResult<never> {
-  return { capability, ok: false, reason: "unsupported" };
+export function capabilityFailure(
+  capability: string,
+  reason: HostCapabilityFailureReason,
+  message?: string
+): HostCapabilityResult<never> {
+  return message
+    ? { capability, message, ok: false, reason }
+    : { capability, ok: false, reason };
+}
+
+export function unsupported(capability: string): HostCapabilityResult<never> {
+  return capabilityFailure(capability, "unsupported");
 }
 
 function trimTrailingSlash(value: string): string {

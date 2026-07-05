@@ -1,3 +1,4 @@
+/* Generated from specs/075-design-system/DESIGN.md. Do not edit directly. */
 :root {
   color-scheme: dark;
   --pevo-bg: oklch(12.8% 0.006 85);
@@ -65,10 +66,29 @@
   --pevo-shadow-popover: 0 18px 42px rgb(0 0 0 / 24%);
   --pevo-shadow-panel: inset 0 0 0 1px color-mix(in oklch, var(--pevo-border), transparent 32%);
   --pevo-shadow-active: 0 1px 0 rgb(255 255 255 / 4%), 0 6px 16px rgb(0 0 0 / 18%);
+  --pevo-switch-track: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-bg) 24%);
+  --pevo-switch-track-hover: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-ink) 8%);
+  --pevo-switch-track-on: oklch(64% 0.13 238);
+  --pevo-switch-border: color-mix(in oklch, var(--pevo-border), transparent 18%);
+  --pevo-switch-thumb: oklch(96% 0.012 84);
+  --pevo-switch-thumb-on: #ffffff;
+  --pevo-switch-shadow: 0 1px 2px rgb(0 0 0 / 28%), 0 0 0 1px rgb(0 0 0 / 10%);
+  --pevo-switch-focus: color-mix(in oklch, var(--pevo-switch-track-on), white 24%);
+  --pevo-floating-bg: #15191a;
+  --pevo-floating-bg-raised: #273034;
+  --pevo-floating-ink: #f6f2e7;
+  --pevo-floating-muted: color-mix(in oklch, #f6f2e7, transparent 55%);
+  --pevo-floating-border: color-mix(in oklch, #f6f2e7, transparent 82%);
+  --pevo-floating-action: #d7e2f0;
+  --pevo-floating-action-ink: #11181f;
+  --pevo-floating-chip-bg: color-mix(in oklch, #090b09, transparent 42%);
+  --pevo-floating-field-bg: color-mix(in oklch, #090b09, transparent 24%);
+  --pevo-floating-hover-bg: color-mix(in oklch, #f6f2e7, transparent 88%);
+  --pevo-floating-danger-bg: color-mix(in oklch, #b85a4a, transparent 74%);
+  --pevo-floating-running: #7fd1c4;
+  --pevo-floating-shadow: 0 18px 60px color-mix(in oklch, #000, transparent 45%), 0 2px 8px color-mix(in oklch, #000, transparent 55%);
   font-family:
-    "Ubuntu Sans", "Aptos", "Segoe UI Variable", ui-sans-serif, system-ui,
-    -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+    "Ubuntu Sans", "Aptos", "Segoe UI Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -133,6 +153,14 @@ html[data-pevo-appearance="light"] {
   --pevo-shadow-popover: 0 18px 42px rgb(0 0 0 / 12%);
   --pevo-shadow-panel: 0 1px 2px rgb(0 0 0 / 6%), 0 10px 28px rgb(0 0 0 / 4%);
   --pevo-shadow-active: 0 1px 3px rgb(0 0 0 / 9%), 0 8px 18px rgb(0 0 0 / 4%);
+  --pevo-switch-track: oklch(90.5% 0.006 255);
+  --pevo-switch-track-hover: oklch(86.5% 0.010 255);
+  --pevo-switch-track-on: oklch(57% 0.16 246);
+  --pevo-switch-border: oklch(82% 0.008 255);
+  --pevo-switch-thumb: #ffffff;
+  --pevo-switch-thumb-on: #ffffff;
+  --pevo-switch-shadow: 0 1px 2px rgb(0 0 0 / 18%), 0 0 0 1px rgb(0 0 0 / 4%);
+  --pevo-switch-focus: color-mix(in oklch, var(--pevo-switch-track-on), white 32%);
 }
 
 html[data-pevo-appearance="warm"] {
@@ -194,6 +222,14 @@ html[data-pevo-appearance="warm"] {
   --pevo-shadow-popover: 0 18px 42px rgb(48 38 25 / 14%);
   --pevo-shadow-panel: 0 1px 2px rgb(48 38 25 / 7%), 0 10px 28px rgb(48 38 25 / 5%);
   --pevo-shadow-active: 0 1px 3px rgb(48 38 25 / 10%), 0 8px 18px rgb(48 38 25 / 5%);
+  --pevo-switch-track: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-border) 18%);
+  --pevo-switch-track-hover: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-ink) 8%);
+  --pevo-switch-track-on: oklch(54% 0.12 238);
+  --pevo-switch-border: color-mix(in oklch, var(--pevo-border), transparent 8%);
+  --pevo-switch-thumb: oklch(99% 0.004 90);
+  --pevo-switch-thumb-on: #ffffff;
+  --pevo-switch-shadow: 0 1px 2px rgb(48 38 25 / 18%), 0 0 0 1px rgb(48 38 25 / 4%);
+  --pevo-switch-focus: color-mix(in oklch, var(--pevo-switch-track-on), white 32%);
 }
 
 * {

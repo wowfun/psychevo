@@ -14,7 +14,7 @@ import {
   type ThreadSnapshot,
   type WorkspaceDiffResult
 } from "@psychevo/protocol";
-import { downloadUrl, type GatewayEndpoint, type PsychevoHost } from "@psychevo/host";
+import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
   asRecord,
   commandFeedbackFromResult,
@@ -63,6 +63,7 @@ type CommandActionsParams = {
   activity: ThreadSnapshot["activity"];
   client: GatewayClient | null;
   endpoint: GatewayEndpoint | null;
+  fallbackCwd: string;
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
@@ -112,7 +113,7 @@ export function createCommandActions(params: CommandActionsParams) {
   function commandScope(): GatewayRequestScope {
     return params.activeScope
       ?? params.initScope
-      ?? scopeForCwd(params.settings?.cwd || window.location.pathname);
+      ?? scopeForCwd(params.settings?.cwd || params.fallbackCwd);
   }
 
   function revealCommandsPanel(_trigger: CommandTrigger = "commandsPanel") {
@@ -455,11 +456,11 @@ export function createCommandActions(params: CommandActionsParams) {
           const threadId = optionalStringField(record.threadId) ?? params.snapshot.thread?.id ?? null;
           if (params.endpoint && threadId) {
             const kind = stringField(record.kind) === "share" ? "share" : "export";
-            void params.host?.open.openDownload(downloadUrl(params.endpoint, threadId, kind, {
+            void params.host?.open.downloadSession(params.endpoint, threadId, kind, {
               filename: optionalStringField(record.filename),
               format: optionalStringField(record.format),
               include: stringArray(record.include)
-            }));
+            });
           }
         }
         break;

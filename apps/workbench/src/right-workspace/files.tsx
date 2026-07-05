@@ -15,6 +15,7 @@ export function FilesPanel({
   tabId,
   truncated,
   onCompare,
+  onCopyText,
   onDirtyChange,
   onOpen,
   onSave
@@ -27,6 +28,7 @@ export function FilesPanel({
   tabId: string;
   truncated: boolean;
   onCompare(path: string): void;
+  onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onDirtyChange(tabId: string, dirty: boolean): void;
   onOpen(path: string): void;
   onSave(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
@@ -293,7 +295,12 @@ export function FilesPanel({
               </div>
             ) : isMarkdownFile(previewPath) ? (
               <div className="fileMarkdownPreview">
-                <MarkdownText text={previewContent} />
+                <MarkdownText
+                  copyLabel="Copy Markdown file"
+                  copyText={previewContent}
+                  onCopyText={onCopyText}
+                  text={previewContent}
+                />
               </div>
             ) : (
               <HighlightedCodePreview content={previewContent} path={previewPath} />

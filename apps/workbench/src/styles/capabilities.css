@@ -1,0 +1,515 @@
+.capabilitiesPage {
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  width: min(1120px, 100%);
+  min-height: 0;
+  margin: 0 auto;
+  gap: 10px;
+  padding: 6px 10px 12px;
+}
+
+.capabilitiesHeader,
+.capabilitiesToolbar,
+.capabilityDetailHeader,
+.capabilityActionGrid,
+.capabilityInlineFields,
+.capabilityForm,
+.capabilityTabs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.capabilitiesHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.capabilitiesToolbar {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.capabilitiesToolbar .pevo-actionButton {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.capabilitiesHeader h2,
+.capabilityDetailHeader h3 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-chrome);
+}
+
+.capabilitiesHeader span,
+.capabilityDetailHeader span,
+.capabilityRow small {
+  overflow: hidden;
+  color: var(--pevo-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capabilitiesHeader > div,
+.capabilityDetailHeader > div,
+.capabilityRowMain {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.capabilityTabs {
+  gap: 4px;
+  padding: 3px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 44%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.capabilityTabs button,
+.capabilitiesHeader button:not(.pevo-actionButton),
+.capabilityDetailHeader button:not(.pevo-actionButton),
+.capabilityActionGrid button:not(.pevo-actionButton),
+.capabilityInlineFields button:not(.pevo-actionButton),
+.capabilityForm button:not(.pevo-actionButton) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+  font-weight: 650;
+}
+
+.capabilityTabs button.is-selected,
+.capabilityActionGrid button:not(.pevo-actionButton),
+.capabilityInlineFields button:not(.pevo-actionButton),
+.capabilityForm button:not(.pevo-actionButton),
+.capabilitiesHeader button:not(.pevo-actionButton),
+.capabilityDetailHeader button:not(.pevo-actionButton) {
+  background: var(--pevo-panel);
+  border-color: color-mix(in oklch, var(--pevo-border), transparent 28%);
+}
+
+.capabilityTabs button:disabled,
+.capabilitiesHeader button:not(.pevo-actionButton):disabled,
+.capabilityDetailHeader button:not(.pevo-actionButton):disabled,
+.capabilityActionGrid button:not(.pevo-actionButton):disabled,
+.capabilityInlineFields button:not(.pevo-actionButton):disabled,
+.capabilityForm button:not(.pevo-actionButton):disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.capabilitiesToolbar label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  width: min(360px, 100%);
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 9px;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.capabilitiesToolbar input,
+.capabilityInlineFields input,
+.capabilityForm input,
+.capabilityForm select {
+  min-width: 0;
+  min-height: 30px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+}
+
+.capabilitiesToolbar input {
+  border: 0;
+  outline: 0;
+}
+
+.capabilityBanner {
+  min-width: 0;
+  padding: 7px 10px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 48%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-small);
+}
+
+.capabilityBanner.is-error {
+  color: var(--pevo-danger);
+  background: color-mix(in oklch, var(--pevo-danger), transparent 88%);
+  border-color: color-mix(in oklch, var(--pevo-danger), transparent 62%);
+}
+
+.capabilitiesGrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.capabilityList,
+.capabilityDetail {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.capabilityList {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.capabilityRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  width: 100%;
+  min-height: 54px;
+  padding: 8px 9px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.capabilityRowWithSwitch {
+  align-items: center;
+  padding: 0;
+  cursor: default;
+}
+
+.capabilityRowSelect {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px 9px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.capabilityRowSwitch {
+  justify-self: end;
+  margin-right: 10px;
+}
+
+.capabilityRow.is-selected {
+  background: var(--pevo-panel);
+  border-color: color-mix(in oklch, var(--pevo-accent), var(--pevo-border) 58%);
+}
+
+.capabilityRow strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--pevo-font-size-small);
+}
+
+.capabilityRowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: start;
+  gap: 4px;
+  max-width: 150px;
+}
+
+.capabilityChip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 6px;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 38%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capabilityChip.is-on {
+  color: var(--pevo-success);
+  border-color: color-mix(in oklch, var(--pevo-success), transparent 58%);
+}
+
+.capabilityChip.is-warning {
+  color: var(--pevo-warning, var(--pevo-danger));
+  border-color: color-mix(in oklch, var(--pevo-warning, var(--pevo-danger)), transparent 58%);
+}
+
+.capabilityDetail {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 10px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 66%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.capabilityDetailHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.capabilityActionGrid {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skillsGrid {
+  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+}
+
+.skillRow {
+  align-items: center;
+  min-height: 66px;
+  padding: 0;
+}
+
+.skillRowSelect {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  padding: 8px 9px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.skillRowMetadata {
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skillDetail {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.skillDetailBody {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.skillDetailSummary {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.skillKeyValues div {
+  grid-template-columns: minmax(120px, 170px) minmax(0, 1fr);
+}
+
+.skillDiagnostics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.skillIssue {
+  color: var(--pevo-warning, var(--pevo-danger));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.skillPreview {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), black 3%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+  word-break: break-word;
+}
+
+.skillPreview .pevo-markdown {
+  max-width: 76ch;
+}
+
+.skillPreview .pevo-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.skillPreview .pevo-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.capabilityStack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.capabilityInlineFields {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.capabilityInlineFields input {
+  width: min(220px, 100%);
+  padding: 0 8px;
+}
+
+.capabilityKeyValues {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.capabilityKeyValues div {
+  display: grid;
+  grid-template-columns: minmax(92px, 150px) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.capabilityKeyValues dt,
+.capabilityKeyValues dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--pevo-font-size-small);
+}
+
+.capabilityKeyValues dt {
+  color: var(--pevo-muted);
+  font-weight: 700;
+}
+
+.capabilityKeyValues dd {
+  color: var(--pevo-ink);
+}
+
+.capabilityForm {
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.capabilityCreatePanel .pevo-createPanelBody {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.capabilityForm input,
+.capabilityForm select {
+  width: min(190px, 100%);
+  padding: 0 8px;
+}
+
+.capabilityForm label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+  font-weight: 650;
+}
+
+.capabilityEmpty {
+  display: grid;
+  min-height: 54px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 62%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 48%);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-small);
+}
+
+@media (hover: hover) {
+  .capabilityTabs button:hover,
+  .capabilitiesHeader button:not(.pevo-actionButton):hover,
+  .capabilityDetailHeader button:not(.pevo-actionButton):hover,
+  .capabilityActionGrid button:not(.pevo-actionButton):hover,
+  .capabilityInlineFields button:not(.pevo-actionButton):hover,
+  .capabilityForm button:not(.pevo-actionButton):hover,
+  .capabilityRow:hover,
+  .capabilityRowSelect:hover,
+  .skillRowSelect:hover {
+    background: color-mix(in oklch, var(--pevo-panel), white 7%);
+  }
+
+}
+
+@media (max-width: 860px) {
+  .capabilitiesPage {
+    padding-inline: 4px;
+  }
+
+  .capabilitiesGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skillsGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .capabilityDetail {
+    max-height: 46vh;
+  }
+
+  .capabilityForm input,
+  .capabilityForm select,
+  .capabilityInlineFields input {
+    width: 100%;
+  }
+}

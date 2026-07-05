@@ -687,6 +687,128 @@ vi.mock("@psychevo/client", async () => {
           expiresAtMs: null
         };
       }
+      if (method === "skill/list") {
+        return {
+          skills: gatewayMock.skillRecords,
+          count: gatewayMock.skillRecords.length,
+          diagnostics: [],
+          collisions: {}
+        };
+      }
+      if (method === "skill/read") {
+        const record = params as { name?: string; path?: string | null } | undefined;
+        const skill = gatewayMock.skillRecords.find((item) => item.name === record?.name && (!record?.path || item.location === record.path))
+          ?? gatewayMock.skillRecords.find((item) => item.name === record?.name);
+        if (!skill) throw new Error("skill not found");
+        const body = `# ${skill.name} workflow\n\nFollow the ${skill.name} workflow.\n\n- Confirm prerequisites\n\n\`\`\`sh\npevo ${skill.name}\n\`\`\``;
+        return {
+          ...skill,
+          success: true,
+          content: body,
+          preview_content: `---\nname: ${skill.name}\ndescription: ${skill.description}\nallowed-tools:\n  - Bash\n  - Read\n---\n${body}`,
+          linked_files: skill.name === "imagegen" ? {} : { references: ["references/guide.md"] }
+        };
+      }
+      if (method === "skill/setEnabled") {
+        const record = params as { name?: string; enabled?: boolean } | undefined;
+        gatewayMock.skillRecords = gatewayMock.skillRecords.map((item) => {
+          if (item.name !== record?.name) return item;
+          const enabled = record?.enabled === true;
+          return {
+            ...item,
+            enabled,
+            prompt_visible: enabled && item.disable_model_invocation !== true && item.supported_on_current_platform !== false,
+            issues: enabled ? [] : ["disabled"]
+          };
+        });
+        return { success: true, name: record?.name, enabled: record?.enabled === true };
+      }
+      if (method === "plugin/list") {
+        return {
+          plugins: [
+            {
+              name: "writer-kit",
+              description: "Writing helper plugin",
+              source_id: "local:/plugins/writer-kit",
+              source: "writer-kit",
+              scope: "global",
+              manifest_kind: "psychevo",
+              enabled: true,
+              diagnostics: []
+            }
+          ],
+          count: 1
+        };
+      }
+      if (method === "mcp/list") {
+        return {
+          servers: [
+            {
+              name: "docs",
+              enabled: true,
+              required: false,
+              sourceKind: "profile",
+              transport: {
+                kind: "streamable_http",
+                url: "https://docs.example.test/mcp",
+                auth: {
+                  bearerTokenEnvVar: "DOCS_MCP_TOKEN",
+                  scopes: ["docs.read"],
+                  oauthClientId: "psychevo",
+                  oauthConfigured: true,
+                  storedOAuthToken: false
+                }
+              },
+              policy: {
+                enabledTools: null,
+                disabledTools: ["delete"],
+                supportsParallelToolCalls: false,
+                startupTimeoutSecs: null,
+                toolTimeoutSecs: null
+              }
+            }
+          ],
+          count: 1
+        };
+      }
+      if (method === "tool/list") {
+        return {
+          modes: {
+            default: { enabled_toolsets: ["coding-core"], disabled_toolsets: [], effective_tools: ["read", "write", "edit", "exec_command", "write_stdin"] },
+            plan: { enabled_toolsets: ["coding-core", "web"], disabled_toolsets: [], effective_tools: ["read", "exec_command", "write_stdin", "web_fetch"] }
+          },
+          toolsets: [
+            {
+              name: "coding-core",
+              source: "built_in",
+              description: "Local coding tools",
+              tools: ["read", "write", "edit", "exec_command", "write_stdin"],
+              includes: [],
+              unknown_tools: [],
+              mode_mutable: false,
+              removable: false
+            },
+            {
+              name: "web",
+              source: "built_in",
+              description: "Web tools",
+              tools: ["web_fetch"],
+              includes: [],
+              unknown_tools: [],
+              mode_mutable: true,
+              removable: false
+            }
+          ]
+        };
+      }
+      if (
+        method.startsWith("skill/")
+        || method.startsWith("plugin/")
+        || method.startsWith("mcp/")
+        || method.startsWith("tool/")
+      ) {
+        return { success: true, status: "succeeded", sessionId: "oauth-session", authorizationUrl: "https://auth.example.test/authorize" };
+      }
       if (method === "automation/list") {
         return { automations: gatewayMock.automationRecords };
       }
@@ -1036,7 +1158,10 @@ vi.mock("@psychevo/client", async () => {
         return gatewayMock.completionResult;
       }
       if (method === "turn/start") {
-        return { accepted: true };
+        const record = params && typeof params === "object" && !Array.isArray(params)
+          ? params as { threadId?: string | null }
+          : {};
+        return { accepted: true, threadId: record.threadId ?? "thread-1" };
       }
       if (method === "permission/respond") {
         return gatewayMock.permissionRespond(params);
@@ -1056,33 +1181,35 @@ vi.mock("@psychevo/client", async () => {
 
   return {
     GatewayClient,
+    acceptThreadTurn: actual.acceptThreadTurn,
     appendOptimisticPrompt: (current: unknown, text: string) => {
       gatewayMock.optimisticLog.push(text);
       return current;
     },
+    applyGatewayEventToThreadSnapshot: actual.applyGatewayEventToThreadSnapshot,
     applyLiveTranscriptEvent: actual.applyLiveTranscriptEvent,
+    applyTurnResultToThreadSnapshot: actual.applyTurnResultToThreadSnapshot,
+    bindThreadSnapshot: actual.bindThreadSnapshot,
+    emptyThreadSnapshot: actual.emptyThreadSnapshot,
+    latestAssistantTranscriptText: actual.latestAssistantTranscriptText,
     parseThreadSnapshot: (value: unknown) => value,
+    prepareThreadTurn: (current: unknown, text: string, requestedThreadId?: string | null) => {
+      gatewayMock.optimisticLog.push(text);
+      return {
+        requestedThreadId: requestedThreadId ?? null,
+        snapshot: current
+      };
+    },
     reconcileThreadSnapshot: (_current: unknown, next: unknown) => next,
-    scopeForCwd: (cwd: string) => ({ ...gatewayMock.scope, cwd })
+    scopeForCwd: (cwd: string) => ({ ...gatewayMock.scope, cwd }),
+    turnCompletedEventFromResult: actual.turnCompletedEventFromResult,
+    threadTurnStartParams: actual.threadTurnStartParams,
+    turnResultThreadId: actual.turnResultThreadId
   };
 });
 
-vi.mock("@psychevo/host", () => ({
-  createBrowserHost: () => ({
-    endpoint: gatewayMock.endpoint,
-    storage: {
-      getJson: (_key: string, fallback: unknown) => fallback,
-      setJson: vi.fn()
-    },
-    clipboard: { writeText: vi.fn(async () => ({ ok: true })) },
-    files: { pickFile: vi.fn(async () => ({ ok: false })) },
-    open: { openDownload: vi.fn((url: string) => gatewayMock.openDownloadLog.push(url)) }
-  }),
-  downloadUrl: (_endpoint: unknown, threadId: string, kind: string, options: Record<string, unknown> = {}) => {
-    const hasInclude = Array.isArray(options.include) && options.include.length > 0;
-    if (!options.format && !hasInclude && !options.filename) {
-      return "http://127.0.0.1/download";
-    }
+vi.mock("@psychevo/host", () => {
+  const downloadUrl = (_endpoint: unknown, threadId: string, kind: string, options: Record<string, unknown> = {}) => {
     const url = new URL(`http://127.0.0.1/download/session/${threadId}/${kind}`);
     if (typeof options.format === "string" && options.format) {
       url.searchParams.set("format", options.format);
@@ -1094,8 +1221,32 @@ vi.mock("@psychevo/host", () => ({
       url.searchParams.set("filename", options.filename);
     }
     return url.toString();
-  }
-}));
+  };
+  return {
+    createBrowserHost: () => ({
+      endpoint: gatewayMock.endpoint,
+      storage: {
+        getJson: (_key: string, fallback: unknown) => fallback,
+        setJson: vi.fn()
+      },
+      clipboard: {
+        writeText: vi.fn(async (text: string) => {
+          gatewayMock.clipboardWriteLog.push(text);
+          return { ok: true };
+        })
+      },
+      files: { pickFile: vi.fn(async () => ({ ok: false })) },
+      open: {
+        downloadSession: vi.fn((endpoint: unknown, threadId: string, kind: string, options: Record<string, unknown> = {}) => {
+          gatewayMock.openDownloadLog.push(downloadUrl(endpoint, threadId, kind, options));
+          return Promise.resolve({ ok: true, value: undefined });
+        }),
+        openDownload: vi.fn((url: string) => gatewayMock.openDownloadLog.push(url))
+      }
+    }),
+    downloadUrl
+  };
+});
 
 vi.mock("@xterm/xterm", () => {
   class Terminal {

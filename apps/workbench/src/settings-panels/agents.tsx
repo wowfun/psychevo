@@ -1,4 +1,5 @@
 import { Edit3, PlugZap, Plus, Save, Trash2, Wrench, X } from "lucide-react";
+import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
 import { prettyJson } from "../data";
 import type { BackendCommandJson, BackendDraft, WorkbenchBackend, WorkbenchBackendDoctor } from "../types";
 
@@ -56,9 +57,9 @@ export function AgentsConfigPanel({
       <header className="agentSurfaceHeaderWithAction">
         <span><PlugZap size={15} /> Profile ACP Backends <b>{profileBackends.length}</b></span>
         {!backendDraft && (
-          <button aria-label="Add ACP backend" disabled={disabled} onClick={onNewBackend} title="Add ACP backend" type="button">
-            <Plus size={14} />
-          </button>
+          <ActionButton ariaLabel="Add ACP backend" disabled={disabled} icon={<Plus size={14} />} onClick={onNewBackend} size="compact" tooltip="Add ACP backend" variant="primary">
+            Add backend
+          </ActionButton>
         )}
       </header>
       {backendDraft && (
@@ -89,18 +90,15 @@ export function AgentsConfigPanel({
               </div>
               <div className="agentBackendSide">
                 <div className="agentBackendControls">
-                  <label className="backendSwitch">
-                    <input
-                      aria-label={`${backend.enabled ? "Disable" : "Enable"} ${backend.id}`}
-                      checked={backend.enabled}
-                      disabled={disabled}
-                      onChange={(event) => onSetBackendEnabled(backend, event.currentTarget.checked)}
-                      role="switch"
-                      type="checkbox"
-                    />
-                    <span className="backendSwitchTrack" aria-hidden />
-                    <span>{backend.enabled ? "Enabled" : "Disabled"}</span>
-                  </label>
+                  <Switch
+                    ariaLabel={`${backend.enabled ? "Disable" : "Enable"} ${backend.id}`}
+                    checked={backend.enabled}
+                    disabled={disabled}
+                    label={backend.enabled ? "Enabled" : "Disabled"}
+                    onCheckedChange={(enabled) => onSetBackendEnabled(backend, enabled)}
+                    showLabel={false}
+                    size="compact"
+                  />
                   <BackendEntrypointControls
                     backend={backend}
                     disabled={disabled}
@@ -108,21 +106,24 @@ export function AgentsConfigPanel({
                   />
                 </div>
                 <div className="agentBackendActions">
-                  <button aria-label={`Edit ${backend.id}`} disabled={disabled} onClick={() => onEditBackend(backend)} title="Edit Profile backend" type="button">
-                    <Edit3 size={13} />
-                  </button>
-                  <button aria-label={`Doctor ${backend.id}`} disabled={disabled} onClick={() => onDoctorBackend(backend)} title="Doctor" type="button">
-                    <Wrench size={13} />
-                  </button>
-                  <button
-                    aria-label={`Delete ${backend.id} from Profile`}
+                  <ActionButton ariaLabel={`Edit ${backend.id}`} disabled={disabled} icon={<Edit3 size={13} />} iconOnly onClick={() => onEditBackend(backend)} size="compact" tooltip="Edit Profile backend" variant="ghost">
+                    Edit {backend.id}
+                  </ActionButton>
+                  <ActionButton ariaLabel={`Doctor ${backend.id}`} disabled={disabled} icon={<Wrench size={13} />} iconOnly onClick={() => onDoctorBackend(backend)} size="compact" tooltip="Doctor" variant="ghost">
+                    Doctor {backend.id}
+                  </ActionButton>
+                  <ActionButton
+                    ariaLabel={`Delete ${backend.id} from Profile`}
                     disabled={disabled}
+                    icon={<Trash2 size={13} />}
+                    iconOnly
                     onClick={() => onDeleteBackend(backend)}
-                    title="Delete Profile backend"
-                    type="button"
+                    size="compact"
+                    tooltip="Delete Profile backend"
+                    variant="danger"
                   >
-                    <Trash2 size={13} />
-                  </button>
+                    Delete {backend.id}
+                  </ActionButton>
                 </div>
               </div>
             </div>
@@ -209,15 +210,23 @@ function BackendEditorForm({
         }
       }}
     >
-      <header>
-        <div className="workspaceDialogTitle">
-          <PlugZap size={18} aria-hidden />
-          <h4>Backend details</h4>
-        </div>
-        <button aria-label="Close backend editor" onClick={onCancel} title="Close" type="button">
-          <X size={15} />
-        </button>
-      </header>
+      <CreatePanel
+        description="Configure a Profile-level ACP backend for peer or subagent execution."
+        icon={<PlugZap size={18} />}
+        layout="side"
+        onClose={onCancel}
+        title={draft.id.trim() ? "Edit backend" : "Add backend"}
+        footer={
+          <>
+            <ActionButton disabled={disabled} icon={<X size={14} />} onClick={onCancel} variant="ghost">
+              Cancel
+            </ActionButton>
+            <ActionButton disabled={disabled || !canSave} icon={<Save size={14} />} type="submit" variant="primary">
+              Save
+            </ActionButton>
+          </>
+        }
+      >
         <label>
           <span>ID</span>
           <input aria-label="ID" disabled={disabled} onChange={(event) => patch({ id: event.currentTarget.value })} value={draft.id} />
@@ -272,16 +281,7 @@ function BackendEditorForm({
           <span>MCP Servers</span>
           <textarea aria-label="MCP Servers" disabled={disabled} onChange={(event) => patch({ mcpServersText: event.currentTarget.value })} value={draft.mcpServersText} />
         </label>
-        <footer>
-          <button disabled={disabled} onClick={onCancel} type="button">
-            <X size={14} />
-            Cancel
-          </button>
-          <button disabled={disabled || !canSave} type="submit">
-            <Save size={14} />
-            Save
-          </button>
-        </footer>
+      </CreatePanel>
     </form>
   );
 }
