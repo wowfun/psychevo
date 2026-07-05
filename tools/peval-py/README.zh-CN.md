@@ -141,7 +141,9 @@ source DB/file 无法成功刷新，也能显示 notes/analysis 的更新。
 `<workspace>/.cache/echarts/6.0.0/echarts.min.js` 提供 ECharts，本地脚本失败时
 回退到固定 CDN URL。Source Manager 会暴露配置好的默认 DB path、source alias 编辑，
 Last Turn End 排序，并提供 English/简体中文选择器；语言选择会把顶层 `locale`
-持久化到 `peval-py.toml`。
+持久化到 `peval-py.toml`。Path 来源字段也可以输入另一个 workspace root、
+`runs/`、`runs/<analysis_eval_slug>`，或 Trial cell 上层目录；serve 会递归导入完整
+cell 到当前 workspace 作为 snapshot，并保持外部 workspace 不变。
 
 CSV 示例：
 

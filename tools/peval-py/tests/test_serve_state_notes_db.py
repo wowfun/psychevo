@@ -381,7 +381,7 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                         trajectory["session_id"]
                         for trajectory in body["report"]["trajectory"]
                     },
-                    {"hermes-latest"},
+                    {"hermes-latest", "hermes-old"},
                 )
             finally:
                 server.shutdown()

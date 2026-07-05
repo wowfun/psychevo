@@ -7,7 +7,7 @@ from typing import Any
 from peval_py.atif import convert_db, convert_path, convert_records
 from peval_py.adapters.base import ConversionResult
 from peval_py.config import ToolConfig, config_for_adapter
-from peval_py.inputs import LoadedInputs, LoadedSession
+from peval_py.models import LoadedInputs, LoadedSession
 from peval_py.report import (
     NoteInput,
     ReportSession,

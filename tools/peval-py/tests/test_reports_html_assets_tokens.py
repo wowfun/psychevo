@@ -1,8 +1,26 @@
 from __future__ import annotations
 
+from importlib.resources import as_file, files
+
+from peval_py.html import ASSET_BUNDLES
 from reports_html_support import *
 
 class PevalPyReportHtmlAssetTokenTests(unittest.TestCase):
+    def test_report_js_asset_parts_have_valid_syntax(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is required for report JS syntax validation")
+        asset_root = files("peval_py.assets")
+        for name in ASSET_BUNDLES["report.js"]:
+            with self.subTest(asset=name), as_file(asset_root.joinpath(name)) as path:
+                result = subprocess.run(
+                    [node, "--check", str(path)],
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_html_inlines_template_css_and_js_package_assets(self) -> None:
         report = {
             "schema_version": 19,
@@ -31,6 +49,9 @@ class PevalPyReportHtmlAssetTokenTests(unittest.TestCase):
         html = render_html(report)
         compact_css = compact_css_text(css)
 
+        self.assertIn("report_css/06-leaderboard-summary.css", ASSET_BUNDLES["report.css"])
+        self.assertIn("report_js/06-leaderboard-summary.js", ASSET_BUNDLES["report.js"])
+        self.assertIn("report_js/09-source-state-controls.js", ASSET_BUNDLES["report.js"])
         self.assertIn("__SERVE_SOURCE_MANAGER__", template)
         self.assertIn('<script type="application/json" id="peval-py-data">__DATA__</script>', template)
         self.assertIn(".time-gradient", css)
@@ -71,6 +92,24 @@ class PevalPyReportHtmlAssetTokenTests(unittest.TestCase):
         )
         self.assertIn("table-layout:auto", css)
         self.assertIn("min-width:max-content", css)
+        self.assertIn(".leaderboard-summary-layout", css)
+        self.assertIn(".leaderboard-summary-table-panel", css)
+        self.assertIn(".leaderboard-summary-table", css)
+        self.assertIn(".leaderboard-summary-chart-panel", css)
+        self.assertIn(".summary-boxplot-card", css)
+        self.assertIn(".summary-boxplot-vertical", css)
+        self.assertIn(".summary-boxplot-median", css)
+        self.assertIn("--summary-whisker-bottom", css)
+        self.assertIn("--summary-p95-bottom", css)
+        self.assertIn(".trajectory-row.trajectory-row-selectable", css)
+        self.assertIn(".trajectory-select", css)
+        self.assertIn(".source-state-controls", css)
+        self.assertIn(".source-state-toggle", css)
+        self.assertIn(".source-state-action", css)
+        self.assertNotIn(".leaderboard-summary-count", css)
+        self.assertNotIn(".leaderboard-summary-distribution", css)
+        self.assertNotIn("--summary-whisker-left", css)
+        self.assertNotIn("--summary-p95-left", css)
         self.assertIn(
             compact_css_text(".data-table th,.data-table td{max-width:260px}"),
             compact_css,
@@ -132,6 +171,36 @@ class PevalPyReportHtmlAssetTokenTests(unittest.TestCase):
         self.assertIn("function renderDataTable", js)
         self.assertIn("function applyDataTableControls", js)
         self.assertIn("function bindDataTableControls", js)
+        self.assertIn("if (metas.length >= 1)", js)
+        self.assertIn("rows.length > 1", js)
+        self.assertIn('if (rows.length > 1 && $("leaderboard-summary")) renderLeaderboardSummary(rows);', js)
+        self.assertIn("function renderLeaderboardSummary(rows = leaderboardRows())", js)
+        self.assertIn("function leaderboardSummaryRows(rows = leaderboardRows())", js)
+        self.assertIn("function measuredModelDurationForRow(row)", js)
+        self.assertIn("function leaderboardSummaryStatistics()", js)
+        self.assertIn("function renderLeaderboardSummaryDistributionPanel(rows)", js)
+        self.assertIn("function renderLeaderboardSummaryBoxplotCard(row)", js)
+        self.assertIn("function renderLeaderboardSummaryBoxplot(row)", js)
+        self.assertIn("function renderServeSourceStateControls(rows = leaderboardRows())", js)
+        self.assertIn("function switchServeSourceMode(mode)", js)
+        self.assertIn("function mutateVisibleServeSourceState()", js)
+        self.assertIn("function applyServeSourceStateMutationPayload(payload, options = {})", js)
+        self.assertIn("function firstReadableSourceKeyFrom(sourceKeys, sources, mode)", js)
+        self.assertIn("function readableServeSourcesFrom(sources, mode = currentServeSourceMode())", js)
+        self.assertIn("const emptiedCurrentMode = payload?.report && listValue(payload.report?.trajectory_meta).length === 0", js)
+        self.assertIn("if (!trial?.trial_key)", js)
+        self.assertIn("!state.notesEditor", js)
+        self.assertIn("trajectory-row-selectable", js)
+        self.assertIn("trajectory-select", js)
+        self.assertIn("bindServeSelectionControls(target);", js)
+        self.assertIn('/api/report?source_state=', js)
+        self.assertIn('/api/sources/state', js)
+        self.assertIn("show_archived", js)
+        self.assertIn("targetReadableCount < 1", js)
+        self.assertIn("readableServeSources(nextMode).length < 1", js)
+        self.assertNotIn("targetReadableCount < 2", js)
+        self.assertNotIn("readableServeSources(nextMode).length < 2", js)
+        self.assertNotIn("Not enough archived sessions", js)
         self.assertIn("function timelineDetailColumns", js)
         self.assertIn('bindDataTableControls(target, "leaderboard"', js)
         self.assertIn('bindDataTableControls(target, "timeline"', js)
@@ -185,6 +254,9 @@ class PevalPyReportHtmlAssetTokenTests(unittest.TestCase):
             html,
         )
         self.assertIn("function renderTrace()", html)
+        self.assertIn('id="leaderboard-summary"', html)
+        self.assertIn("function renderLeaderboardSummary(rows = leaderboardRows())", html)
+        self.assertIn("function renderServeSourceStateControls(rows = leaderboardRows())", html)
         self.assertIn('<script type="application/json" id="peval-py-data">', html)
         self.assertNotIn("__SERVE_SOURCE_MANAGER__", html)
         self.assertNotIn("__DATA__", html)

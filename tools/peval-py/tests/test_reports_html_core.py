@@ -198,6 +198,8 @@ class PevalPyReportHtmlCoreTests(unittest.TestCase):
         self.assertIn('tableId: "timeline"', html)
         self.assertIn("Leaderboard", html)
         self.assertNotIn("leaderboard_eyebrow", html)
+        self.assertIn("Leaderboard Summary", html)
+        self.assertIn('id="leaderboard-summary"', html)
         self.assertIn("data-table-sort", html)
         self.assertIn("selected-row", html)
         self.assertIn("data-trial-key", html)
@@ -261,7 +263,27 @@ class PevalPyReportHtmlCoreTests(unittest.TestCase):
         self.assertNotIn("trajectory-node.role-agent", html)
         self.assertNotIn("--step-count", html)
         self.assertIn("renderLeaderboard(rows);", html)
+        self.assertIn("renderLeaderboardSummary(rows);", html)
         self.assertIn("renderTrajectoryOverview(rows);", html)
+        self.assertLess(
+            html.index("renderLeaderboard(rows);"),
+            html.index("renderLeaderboardSummary(rows);"),
+        )
+        self.assertLess(
+            html.index("renderLeaderboardSummary(rows);"),
+            html.index("renderTrajectoryOverview(rows);"),
+        )
+        self.assertIn("function renderLeaderboardSummary(rows = leaderboardRows())", html)
+        self.assertIn("function leaderboardSummaryRows(rows = leaderboardRows())", html)
+        self.assertIn("function measuredModelDurationForRow(row)", html)
+        self.assertIn("function leaderboardSummaryStatistics()", html)
+        self.assertIn("function renderLeaderboardSummaryDistributionPanel(rows)", html)
+        self.assertIn("function renderLeaderboardSummaryBoxplotCard(row)", html)
+        self.assertIn("function renderLeaderboardSummaryBoxplot(row)", html)
+        self.assertIn('key: "model_duration_ms"', html)
+        self.assertIn('label: t("model_call_duration", "Model call duration")', html)
+        self.assertIn("summary-boxplot-vertical", html)
+        self.assertNotIn("leaderboard-summary-count", html)
         self.assertIn("function renderTrajectoryOverview(rows = leaderboardRows())", html)
         self.assertIn('id="step-drawer"', html)
         self.assertIn("function renderStepDrawer()", html)

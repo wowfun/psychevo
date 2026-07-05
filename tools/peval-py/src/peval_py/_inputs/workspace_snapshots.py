@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any
 
 import peval_py.config as path_config
-from peval_py._inputs.types import LoadedSession
+from peval_py._state.annotations import (
+    meta_with_source_alias,
+    source_report_with_current_annotations,
+    uniquify_trial_keys,
+)
+from peval_py.models import LoadedSession
 
 TRIAL_TRAJECTORY_RELATIVE_PATH = Path("agent") / "trajectory.json"
 TRIAL_META_RELATIVE_PATH = Path("agent") / "trajectory_meta.json"
@@ -328,12 +333,7 @@ def load_workspace_snapshot_sessions_from_rows(
     workspace_root = getattr(config, "workspace_root", None)
     if not workspace_root:
         raise ValueError(peval_py_state_db_error(raw_input))
-    from peval_py.state import (
-        meta_with_source_alias,
-        open_workspace_state_readonly,
-        source_report_with_current_annotations,
-        uniquify_trial_keys,
-    )
+    from peval_py.state import open_workspace_state_readonly
 
     try:
         store = open_workspace_state_readonly(str(workspace_root))

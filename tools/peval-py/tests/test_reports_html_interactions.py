@@ -558,6 +558,941 @@ console.log(result);
         self.assertEqual(result["subsetAnalysisKeys"], ["trial:one", "trial:two"])
         self.assertEqual(result["legacyRowCount"], 0)
 
+    def test_leaderboard_summary_uses_filtered_visible_rows(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        report = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:alpha",
+                    "session_id": "alpha",
+                    "agent": {"name": "agent-a", "model_name": "model-a"},
+                    "steps": [
+                        {"step_id": 1, "source": "user"},
+                        {"step_id": 2, "source": "agent"},
+                        {"step_id": 3, "source": "assistant"},
+                        {"step_id": 4, "source": "tool"},
+                    ],
+                    "final_metrics": {
+                        "total_prompt_tokens": 60,
+                        "total_completion_tokens": 40,
+                        "extra": {
+                            "total_turns": 2,
+                            "total_tool_calls": 2,
+                            "total_tool_errors": 0,
+                        },
+                    },
+                },
+                {
+                    "trajectory_id": "trial:beta",
+                    "session_id": "beta",
+                    "agent": {"name": "agent-b", "model_name": "model-b"},
+                    "steps": [
+                        {"step_id": 1, "source": "assistant"},
+                    ],
+                    "final_metrics": {
+                        "total_prompt_tokens": 150,
+                        "total_completion_tokens": 50,
+                        "extra": {
+                            "total_turns": 4,
+                            "total_tool_calls": 4,
+                            "total_tool_errors": 2,
+                        },
+                    },
+                },
+                {
+                    "trajectory_id": "trial:gamma",
+                    "session_id": "gamma",
+                    "agent": {"name": "agent-c", "model_name": "model-c"},
+                    "steps": [
+                        {"step_id": 1, "source": "assistant"},
+                        {"step_id": 2, "source": "agent"},
+                    ],
+                    "final_metrics": {
+                        "total_prompt_tokens": 220,
+                        "total_completion_tokens": 80,
+                        "extra": {
+                            "total_turns": 6,
+                            "total_tool_calls": 0,
+                            "total_tool_errors": 0,
+                        },
+                    },
+                },
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:alpha",
+                    "status": "passed",
+                    "duration_ms": 2000,
+                    "steps": [
+                        {"step_id": 1, "duration_ms": 100},
+                        {"step_id": 2, "duration_ms": 1000, "duration_source": "measured"},
+                        {"step_id": 3, "duration_ms": 2000, "duration_source": "boundary_estimate"},
+                        {"step_id": 4, "duration_ms": 500},
+                    ],
+                    "warnings": [],
+                },
+                {
+                    "trial_key": "trial:beta",
+                    "status": "failed",
+                    "duration_ms": 3000,
+                    "steps": [
+                        {"step_id": 1, "duration_ms": 3000, "duration_source": "measured"},
+                    ],
+                    "warnings": [],
+                },
+                {
+                    "trial_key": "trial:gamma",
+                    "status": "passed",
+                    "duration_ms": 6000,
+                    "steps": [
+                        {"step_id": 1, "duration_ms": 500, "duration_source": "measured"},
+                        {"step_id": 2, "duration_ms": None, "duration_source": "measured"},
+                    ],
+                    "warnings": [],
+                },
+            ],
+        }
+        single_report = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [{"trajectory_id": "trial:single", "session_id": "single", "steps": []}],
+            "trajectory_meta": [{"trial_key": "trial:single", "status": "passed", "steps": []}],
+        }
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = """
+const vm = require("vm");
+const asset = __ASSET__;
+const report = __REPORT__;
+const singleReport = __SINGLE_REPORT__;
+const nodes = {
+  "peval-py-i18n": { textContent: "{}" },
+  "peval-py-token-estimates": { textContent: "{}" },
+  "peval-py-render-options": { textContent: JSON.stringify({ mode: "report" }) },
+  "leaderboard-summary": { innerHTML: "" },
+  "comparison": { innerHTML: "" },
+};
+const context = {
+  nodes,
+  document: {
+    body: { classList: { toggle() {} } },
+    addEventListener() {},
+    getElementById(id) { return nodes[id] || null; },
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  },
+  window: { addEventListener() {} },
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  report,
+  singleReport,
+};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  function byKey(rows) {
+    return Object.fromEntries(rows.map(row => [row.key, row]));
+  }
+  state.view = report;
+  state.selectedTrial = "trial:alpha";
+  state.rowSelection.add("trial:beta");
+  setFilterValue("leaderboard", "status", "passed", true);
+  const rows = leaderboardRows();
+  renderLeaderboardSummary(rows);
+  const summary = byKey(leaderboardSummaryRows(rows));
+  const selectionProof = byKey(leaderboardSummaryRows(leaderboardRows()));
+
+  const originalRenderComparisonPanels = renderComparisonPanels;
+  const comparisonCalls = [];
+  renderComparisonPanels = options => comparisonCalls.push(options);
+  nodes.comparison.innerHTML = "";
+  renderComparison();
+  const multiHtml = nodes.comparison.innerHTML;
+  state.view = singleReport;
+  nodes.comparison.innerHTML = "sentinel";
+  renderComparison();
+  const singleHtml = nodes.comparison.innerHTML;
+  const singleRows = reportRows();
+  clearFilter("leaderboard", "status");
+  setFilterValue("leaderboard", "status", "failed", true);
+  const singleFilteredRows = leaderboardRows();
+  renderComparisonPanels = originalRenderComparisonPanels;
+
+  JSON.stringify({
+    visibleKeys: rows.map(row => row.trial_key),
+    duration: summary.duration_ms,
+    tokens: summary.tokens,
+    model: summary.model_duration_ms,
+    toolCalls: summary.total_tool_calls,
+    toolRate: summary.tool_error_rate,
+    selectedDurationTotal: selectionProof.duration_ms.total,
+    html: nodes["leaderboard-summary"].innerHTML,
+    multiHtml,
+    singleHtml,
+    singleRows: singleRows.map(row => row.trial_key),
+    singleFilteredRows: singleFilteredRows.map(row => row.trial_key),
+    comparisonCalls,
+  });
+`, context);
+console.log(result);
+""".replace("__ASSET__", json.dumps(asset)).replace("__REPORT__", json.dumps(report)).replace("__SINGLE_REPORT__", json.dumps(single_report))
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["visibleKeys"], ["trial:alpha", "trial:gamma"])
+        self.assertEqual(result["duration"]["count"], 2)
+        self.assertEqual(result["duration"]["missing"], 0)
+        self.assertEqual(result["duration"]["total"], 8000)
+        self.assertEqual(result["tokens"]["total"], 400)
+        self.assertEqual(result["model"]["count"], 2)
+        self.assertEqual(result["model"]["missing"], 0)
+        self.assertEqual(result["model"]["total"], 1500)
+        self.assertEqual(result["toolCalls"]["total"], 2)
+        self.assertEqual(result["toolRate"]["count"], 1)
+        self.assertEqual(result["toolRate"]["missing"], 1)
+        self.assertIsNone(result["toolRate"]["total"])
+        self.assertEqual(result["toolRate"]["mean"], 0)
+        self.assertEqual(result["selectedDurationTotal"], 8000)
+        self.assertIn("Leaderboard Summary", result["html"])
+        self.assertIn("Leaderboard Summary Distributions", result["html"])
+        self.assertIn("<th>Statistic</th>", result["html"])
+        self.assertIn('<th scope="row">Count</th>', result["html"])
+        self.assertIn('<th scope="row">Missing</th>', result["html"])
+        self.assertIn('<th scope="row">Total</th>', result["html"])
+        self.assertIn('<th scope="row">P95</th>', result["html"])
+        self.assertIn('<th class="num">Active Duration</th>', result["html"])
+        self.assertIn("Model call duration", result["html"])
+        self.assertIn("summary-boxplot", result["html"])
+        self.assertIn("summary-boxplot-card", result["html"])
+        self.assertIn("summary-boxplot-vertical", result["html"])
+        self.assertIn("summary-boxplot-flat", result["html"])
+        self.assertIn("--summary-whisker-bottom", result["html"])
+        self.assertIn("--summary-p95-bottom", result["html"])
+        self.assertIn("0.0%", result["html"])
+        self.assertIn("<td class=\"num\">-</td>", result["html"])
+        self.assertNotIn("No visible rows to summarize.", result["html"])
+        self.assertNotIn("leaderboard-summary-count", result["html"])
+        self.assertNotIn("leaderboard-summary-distribution", result["html"])
+        self.assertNotIn("--summary-p95-left", result["html"])
+        self.assertIn('id="leaderboard-summary"', result["multiHtml"])
+        self.assertIn('id="leaderboard"', result["singleHtml"])
+        self.assertIn('id="trajectory-overview"', result["singleHtml"])
+        self.assertNotIn('id="leaderboard-summary"', result["singleHtml"])
+        self.assertEqual(result["singleRows"], ["trial:single"])
+        self.assertEqual(result["singleFilteredRows"], [])
+        self.assertEqual(result["comparisonCalls"], [{"trace": False}, {"trace": False}])
+
+    def test_serve_source_selection_uses_full_report_uniquified_trials(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        sources = [
+            {
+                "source_key": "source-a",
+                "active": True,
+                "artifact_dir": "runs/default/a/session_t001",
+                "last_status": "ok",
+                "trial_key": "session:t001",
+            },
+            {
+                "source_key": "source-b",
+                "active": True,
+                "artifact_dir": "runs/default/b/session_t001",
+                "last_status": "ok",
+                "trial_key": "session:t001",
+            },
+            {
+                "source_key": "source-c",
+                "active": True,
+                "artifact_dir": "runs/default/c/session_t001",
+                "last_status": "ok",
+                "trial_key": "session:t001",
+            },
+        ]
+        report = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:a",
+                    "session_id": "a",
+                    "steps": [],
+                    "final_metrics": {"extra": {"total_turns": 1, "total_tool_calls": 0}},
+                },
+                {
+                    "trajectory_id": "trial:b",
+                    "session_id": "b",
+                    "steps": [],
+                    "final_metrics": {"extra": {"total_turns": 1, "total_tool_calls": 0}},
+                },
+                {
+                    "trajectory_id": "trial:c",
+                    "session_id": "c",
+                    "steps": [],
+                    "final_metrics": {"extra": {"total_turns": 1, "total_tool_calls": 0}},
+                },
+            ],
+            "trajectory_meta": [
+                {"trial_key": "session:t001", "status": "passed", "duration_ms": 100, "steps": [], "warnings": []},
+                {"trial_key": "session:t001:2", "status": "passed", "duration_ms": 200, "steps": [], "warnings": []},
+                {"trial_key": "session:t001:3", "status": "failed", "duration_ms": 300, "steps": [], "warnings": []},
+            ],
+        }
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = """
+const vm = require("vm");
+const asset = __ASSET__;
+const report = __REPORT__;
+const sources = __SOURCES__;
+const nodes = {};
+function makeNode(id) {
+  const node = {
+    id,
+    textContent: "",
+    hidden: false,
+    dataset: {},
+    style: {},
+    classList: { add() {}, remove() {}, toggle() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+    _innerHTML: "",
+  };
+  Object.defineProperty(node, "innerHTML", {
+    get() { return this._innerHTML; },
+    set(value) {
+      this._innerHTML = String(value || "");
+      for (const match of this._innerHTML.matchAll(/id="([^"]+)"/g)) {
+        if (!nodes[match[1]]) nodes[match[1]] = makeNode(match[1]);
+      }
+    },
+  });
+  return node;
+}
+[
+  "peval-py-data",
+  "peval-py-i18n",
+  "peval-py-token-estimates",
+  "peval-py-render-options",
+  "report-notes",
+  "comparison",
+  "trace",
+  "step-drawer",
+].forEach(id => nodes[id] = makeNode(id));
+nodes["peval-py-data"].textContent = "{}";
+nodes["peval-py-i18n"].textContent = "{}";
+nodes["peval-py-token-estimates"].textContent = "{}";
+nodes["peval-py-render-options"].textContent = JSON.stringify({ mode: "serve", sources: [] });
+const context = {
+  nodes,
+  document: {
+    body: { classList: { add() {}, remove() {}, toggle() {} } },
+    addEventListener() {},
+    getElementById(id) { return nodes[id] || null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  },
+  window: { addEventListener() {} },
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  requestAnimationFrame(callback) { callback(); },
+  fetch() { throw new Error("source selection must not fetch a single-source report"); },
+  report,
+  sources,
+};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`
+  applyServeMutationPayload({ sources, report, report_source_key: "source-b" });
+  const afterMutation = {
+    selectedTrial: state.selectedTrial,
+    selectedSourceKey: state.selectedSourceKey,
+    reportRows: reportRows().length,
+    hasLeaderboard: nodes.leaderboard.innerHTML.includes("Leaderboard"),
+    hasSummary: nodes["leaderboard-summary"].innerHTML.includes("Leaderboard Summary"),
+    mappedSecond: sourceKeyForTrialKey("session:t001:2"),
+  };
+  state.rowSelection.add("session:t001:2");
+  selectServeSource("source-c");
+  const afterSourceSelect = {
+    selectedTrial: state.selectedTrial,
+    selectedSourceKey: state.selectedSourceKey,
+    reportRows: reportRows().length,
+    rowSelectionKept: state.rowSelection.has("session:t001:2"),
+    hasLeaderboard: nodes.leaderboard.innerHTML.includes("Leaderboard"),
+    hasSummary: nodes["leaderboard-summary"].innerHTML.includes("Leaderboard Summary"),
+    hasOverview: nodes["trajectory-overview"].innerHTML.includes("Trajectory Overview"),
+  };
+  loadServeSourceReport("source-a");
+  const afterLegacyLoadName = {
+    selectedTrial: state.selectedTrial,
+    selectedSourceKey: state.selectedSourceKey,
+    reportRows: reportRows().length,
+  };
+  JSON.stringify({ afterMutation, afterSourceSelect, afterLegacyLoadName });
+`, context);
+console.log(result);
+""".replace("__ASSET__", json.dumps(asset)).replace("__REPORT__", json.dumps(report)).replace("__SOURCES__", json.dumps(sources))
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["afterMutation"]["selectedTrial"], "session:t001:2")
+        self.assertEqual(result["afterMutation"]["selectedSourceKey"], "source-b")
+        self.assertEqual(result["afterMutation"]["reportRows"], 3)
+        self.assertTrue(result["afterMutation"]["hasLeaderboard"])
+        self.assertTrue(result["afterMutation"]["hasSummary"])
+        self.assertEqual(result["afterMutation"]["mappedSecond"], "source-b")
+        self.assertEqual(result["afterSourceSelect"]["selectedTrial"], "session:t001:3")
+        self.assertEqual(result["afterSourceSelect"]["selectedSourceKey"], "source-c")
+        self.assertEqual(result["afterSourceSelect"]["reportRows"], 3)
+        self.assertTrue(result["afterSourceSelect"]["rowSelectionKept"])
+        self.assertTrue(result["afterSourceSelect"]["hasLeaderboard"])
+        self.assertTrue(result["afterSourceSelect"]["hasSummary"])
+        self.assertTrue(result["afterSourceSelect"]["hasOverview"])
+        self.assertEqual(result["afterLegacyLoadName"]["selectedTrial"], "session:t001")
+        self.assertEqual(result["afterLegacyLoadName"]["selectedSourceKey"], "source-a")
+        self.assertEqual(result["afterLegacyLoadName"]["reportRows"], 3)
+
+    def test_serve_archived_mode_lazy_loads_and_batches_visible_selection(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        sources = [
+            {"source_key": "source-a", "active": True, "artifact_dir": "runs/a", "last_status": "ok", "trial_key": "trial:active-a"},
+            {"source_key": "source-b", "active": True, "artifact_dir": "runs/b", "last_status": "ok", "trial_key": "trial:active-b"},
+            {"source_key": "source-c", "active": True, "artifact_dir": "runs/c", "last_status": "ok", "trial_key": "trial:active-c"},
+            {"source_key": "source-d", "active": False, "artifact_dir": "runs/d", "last_status": "ok", "trial_key": "trial:archived-d"},
+        ]
+        sources_after_archive = [
+            {**sources[0], "active": False},
+            sources[1],
+            sources[2],
+            sources[3],
+        ]
+        active_report = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                {"trajectory_id": "trial:active-a", "session_id": "active-a", "steps": [], "final_metrics": {"extra": {"total_turns": 1}}},
+                {"trajectory_id": "trial:active-b", "session_id": "active-b", "steps": [], "final_metrics": {"extra": {"total_turns": 2}}},
+                {"trajectory_id": "trial:active-c", "session_id": "active-c", "steps": [], "final_metrics": {"extra": {"total_turns": 3}}},
+            ],
+            "trajectory_meta": [
+                {"trial_key": "trial:active-a", "status": "passed", "duration_ms": 1000, "steps": [], "warnings": []},
+                {"trial_key": "trial:active-b", "status": "failed", "duration_ms": 2000, "steps": [], "warnings": []},
+                {"trial_key": "trial:active-c", "status": "passed", "duration_ms": 3000, "steps": [], "warnings": []},
+            ],
+        }
+        active_after_archive = {
+            **active_report,
+            "trajectory": active_report["trajectory"][1:],
+            "trajectory_meta": active_report["trajectory_meta"][1:],
+        }
+        archived_report = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                {"trajectory_id": "trial:archived-d", "session_id": "archived-d", "steps": [], "final_metrics": {"extra": {"total_turns": 4}}},
+            ],
+            "trajectory_meta": [
+                {"trial_key": "trial:archived-d", "status": "passed", "duration_ms": 4000, "steps": [], "warnings": []},
+            ],
+        }
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = """
+const vm = require("vm");
+const asset = __ASSET__;
+const activeReport = __ACTIVE_REPORT__;
+const archivedReport = __ARCHIVED_REPORT__;
+const sources = __SOURCES__;
+const sourcesAfterArchive = __SOURCES_AFTER_ARCHIVE__;
+const activeAfterArchive = __ACTIVE_AFTER_ARCHIVE__;
+const nodes = {};
+function makeNode(id) {
+  const node = {
+    id,
+    textContent: "",
+    hidden: false,
+    dataset: {},
+    classList: { add() {}, remove() {}, toggle() {} },
+    addEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+    _innerHTML: "",
+  };
+  Object.defineProperty(node, "innerHTML", {
+    get() { return this._innerHTML; },
+    set(value) {
+      this._innerHTML = String(value || "");
+      for (const match of this._innerHTML.matchAll(/id="([^"]+)"/g)) {
+        if (!nodes[match[1]]) nodes[match[1]] = makeNode(match[1]);
+      }
+    },
+  });
+  return node;
+}
+[
+  "peval-py-i18n",
+  "peval-py-token-estimates",
+  "peval-py-render-options",
+  "report-notes",
+  "comparison",
+  "trace",
+  "step-drawer",
+].forEach(id => nodes[id] = makeNode(id));
+nodes["peval-py-i18n"].textContent = "{}";
+nodes["peval-py-token-estimates"].textContent = "{}";
+nodes["peval-py-render-options"].textContent = JSON.stringify({ mode: "serve", sources });
+const fetchCalls = [];
+function response(payload) {
+  return { ok: true, statusText: "OK", text: async () => JSON.stringify(payload) };
+}
+const context = {
+  nodes,
+  document: {
+    body: { classList: { add() {}, remove() {}, toggle() {} } },
+    addEventListener() {},
+    getElementById(id) { return nodes[id] || null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  },
+  window: { addEventListener() {} },
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  requestAnimationFrame(callback) { callback(); },
+  fetch: async (path, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : null;
+    fetchCalls.push({ path, body });
+    if (String(path).includes("source_state=archived")) return response(archivedReport);
+    if (String(path) === "/api/sources/state") {
+      return response({
+        sources: sourcesAfterArchive,
+        report: activeAfterArchive,
+        report_source_key: "source-b",
+        report_source_state: "active",
+      });
+    }
+    throw new Error(`unexpected fetch ${path}`);
+  },
+  activeReport,
+  archivedReport,
+  sources,
+  sourcesAfterArchive,
+  activeAfterArchive,
+  fetchCalls,
+};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const promise = vm.runInContext(`(async () => {
+  applyServeMutationPayload({ sources, report: activeReport, report_source_key: "source-a", report_source_state: "active" });
+  const initial = {
+    mode: state.serveSourceMode,
+    leaderboardControls: (nodes.leaderboard.innerHTML.match(/data-source-state-controls/g) || []).length,
+    overviewControls: (nodes["trajectory-overview"].innerHTML.match(/data-source-state-controls/g) || []).length,
+    actionLabel: nodes.leaderboard.innerHTML.includes("Archive selected"),
+    archivedToggleEnabled: !nodes.leaderboard.innerHTML.includes("data-source-state-toggle  disabled"),
+    overviewCheckboxes: (nodes["trajectory-overview"].innerHTML.match(/data-row-select/g) || []).length,
+  };
+  await switchServeSourceMode("archived");
+  const afterArchived = {
+    mode: state.serveSourceMode,
+    reportRows: reportRows().length,
+    selectedSourceKey: state.selectedSourceKey,
+    checkedInLeaderboard: nodes.leaderboard.innerHTML.includes("data-source-state-toggle checked"),
+    checkedInOverview: nodes["trajectory-overview"].innerHTML.includes("data-source-state-toggle checked"),
+    actionLabel: nodes.leaderboard.innerHTML.includes("Activate selected"),
+    archivedFetches: fetchCalls.filter(call => String(call.path).includes("source_state=archived")).length,
+    hasSummary: nodes.comparison.innerHTML.includes('id="leaderboard-summary"'),
+  };
+  await switchServeSourceMode("active");
+  await switchServeSourceMode("archived");
+  const cachedFetches = fetchCalls.filter(call => String(call.path).includes("source_state=archived")).length;
+  await switchServeSourceMode("active");
+  setFilterValue("leaderboard", "status", "passed", true);
+  state.rowSelection.add("trial:active-a");
+  state.rowSelection.add("trial:active-b");
+  renderComparisonPanels({ trace: false });
+  const activeSingleSelection = {
+    actionEnabled: nodes.leaderboard.innerHTML.includes("data-source-state-action >Archive selected"),
+    overviewChecked: nodes["trajectory-overview"].innerHTML.includes('data-row-select="trial:active-a" checked'),
+  };
+  await mutateVisibleServeSourceState();
+  const statePost = fetchCalls.find(call => call.path === "/api/sources/state");
+  const afterArchive = {
+    mode: state.serveSourceMode,
+    reportRows: reportRows().length,
+    selectedSourceKey: state.selectedSourceKey,
+    rowSelectionSize: state.rowSelection.size,
+    statePayload: statePost.body,
+  };
+  const callsBeforeUnavailable = fetchCalls.length;
+  state.serveSources = [sources[0], sources[1], sources[2]];
+  state.serveReportCache = { active: activeReport };
+  state.serveSourceMode = "active";
+  render(activeReport);
+  const zeroTargetDisabled = nodes.leaderboard.innerHTML.includes("data-source-state-toggle  disabled");
+  await switchServeSourceMode("archived");
+  const unavailable = {
+    mode: state.serveSourceMode,
+    fetchUnchanged: fetchCalls.length === callsBeforeUnavailable,
+    zeroTargetDisabled,
+  };
+  return JSON.stringify({ initial, afterArchived, cachedFetches, activeSingleSelection, afterArchive, unavailable });
+})()`, context);
+promise.then(result => console.log(result)).catch(error => { console.error(error && error.stack || error); process.exit(1); });
+""".replace("__ASSET__", json.dumps(asset)).replace("__ACTIVE_REPORT__", json.dumps(active_report)).replace("__ARCHIVED_REPORT__", json.dumps(archived_report)).replace("__SOURCES__", json.dumps(sources)).replace("__SOURCES_AFTER_ARCHIVE__", json.dumps(sources_after_archive)).replace("__ACTIVE_AFTER_ARCHIVE__", json.dumps(active_after_archive))
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["initial"]["mode"], "active")
+        self.assertEqual(result["initial"]["leaderboardControls"], 1)
+        self.assertEqual(result["initial"]["overviewControls"], 1)
+        self.assertTrue(result["initial"]["actionLabel"])
+        self.assertTrue(result["initial"]["archivedToggleEnabled"])
+        self.assertEqual(result["initial"]["overviewCheckboxes"], 3)
+        self.assertEqual(result["afterArchived"]["mode"], "archived")
+        self.assertEqual(result["afterArchived"]["reportRows"], 1)
+        self.assertEqual(result["afterArchived"]["selectedSourceKey"], "source-d")
+        self.assertTrue(result["afterArchived"]["checkedInLeaderboard"])
+        self.assertTrue(result["afterArchived"]["checkedInOverview"])
+        self.assertTrue(result["afterArchived"]["actionLabel"])
+        self.assertEqual(result["afterArchived"]["archivedFetches"], 1)
+        self.assertFalse(result["afterArchived"]["hasSummary"])
+        self.assertEqual(result["cachedFetches"], 1)
+        self.assertTrue(result["activeSingleSelection"]["actionEnabled"])
+        self.assertTrue(result["activeSingleSelection"]["overviewChecked"])
+        self.assertEqual(result["afterArchive"]["mode"], "active")
+        self.assertEqual(result["afterArchive"]["reportRows"], 2)
+        self.assertEqual(result["afterArchive"]["selectedSourceKey"], "source-b")
+        self.assertEqual(result["afterArchive"]["rowSelectionSize"], 0)
+        self.assertEqual(result["afterArchive"]["statePayload"]["source_keys"], ["source-a"])
+        self.assertFalse(result["afterArchive"]["statePayload"]["active"])
+        self.assertEqual(result["afterArchive"]["statePayload"]["report_source_state"], "active")
+        self.assertEqual(result["unavailable"]["mode"], "active")
+        self.assertTrue(result["unavailable"]["fetchUnchanged"])
+        self.assertTrue(result["unavailable"]["zeroTargetDisabled"])
+
+    def test_serve_source_state_auto_switches_when_current_mode_becomes_empty(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        sources = [
+            {"source_key": "source-a", "active": True, "artifact_dir": "runs/a", "last_status": "ok", "trial_key": "trial:active-a"},
+            {"source_key": "source-d", "active": False, "artifact_dir": "runs/d", "last_status": "ok", "trial_key": "trial:archived-d"},
+        ]
+        active_single = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                {"trajectory_id": "trial:active-a", "session_id": "active-a", "steps": [], "final_metrics": {"extra": {"total_turns": 1}}},
+            ],
+            "trajectory_meta": [
+                {"trial_key": "trial:active-a", "status": "passed", "duration_ms": 1000, "steps": [], "warnings": []},
+            ],
+            "annotations": {"notes": []},
+        }
+        archived_single = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                {"trajectory_id": "trial:archived-d", "session_id": "archived-d", "steps": [], "final_metrics": {"extra": {"total_turns": 2}}},
+            ],
+            "trajectory_meta": [
+                {"trial_key": "trial:archived-d", "status": "passed", "duration_ms": 2000, "steps": [], "warnings": []},
+            ],
+            "annotations": {"notes": [{"trial_key": "trial:archived-d", "source": "cell", "label": "notes.md", "markdown": "Archived note."}]},
+        }
+        active_after_activate = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                active_single["trajectory"][0],
+                archived_single["trajectory"][0],
+            ],
+            "trajectory_meta": [
+                active_single["trajectory_meta"][0],
+                archived_single["trajectory_meta"][0],
+            ],
+            "annotations": {"notes": archived_single["annotations"]["notes"]},
+        }
+        archived_after_archive = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                active_single["trajectory"][0],
+                archived_single["trajectory"][0],
+            ],
+            "trajectory_meta": [
+                active_single["trajectory_meta"][0],
+                archived_single["trajectory_meta"][0],
+            ],
+            "annotations": {"notes": archived_single["annotations"]["notes"]},
+        }
+        empty_active = {"schema_version": 19, "includes": ["core"], "trajectory": [], "trajectory_meta": [], "annotations": {"notes": []}}
+        empty_archived = {"schema_version": 19, "includes": ["core"], "trajectory": [], "trajectory_meta": [], "annotations": {"notes": []}}
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = """
+const vm = require("vm");
+const asset = __ASSET__;
+const scenarios = __SCENARIOS__;
+
+function makeNodeFactory(nodes) {
+  return function makeNode(id) {
+    const node = {
+      id,
+      textContent: "",
+      hidden: false,
+      dataset: {},
+      classList: { add() {}, remove() {}, toggle() {} },
+      addEventListener() {},
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      closest() { return null; },
+      _innerHTML: "",
+    };
+    Object.defineProperty(node, "innerHTML", {
+      get() { return this._innerHTML; },
+      set(value) {
+        this._innerHTML = String(value || "");
+        for (const match of this._innerHTML.matchAll(/id="([^"]+)"/g)) {
+          if (!nodes[match[1]]) nodes[match[1]] = makeNode(match[1]);
+        }
+      },
+    });
+    return node;
+  };
+}
+
+function response(payload) {
+  return { ok: true, statusText: "OK", text: async () => JSON.stringify(payload) };
+}
+
+function createContext(scenario) {
+  const nodes = {};
+  const makeNode = makeNodeFactory(nodes);
+  [
+    "peval-py-i18n",
+    "peval-py-token-estimates",
+    "peval-py-render-options",
+    "report-notes",
+    "comparison",
+    "trace",
+    "step-drawer",
+  ].forEach(id => nodes[id] = makeNode(id));
+  nodes["peval-py-i18n"].textContent = "{}";
+  nodes["peval-py-token-estimates"].textContent = "{}";
+  nodes["peval-py-render-options"].textContent = JSON.stringify({ mode: "serve", sources: scenario.sources });
+  const fetchCalls = [];
+  const context = {
+    nodes,
+    scenario,
+    fetchCalls,
+    document: {
+      body: { classList: { add() {}, remove() {}, toggle() {} } },
+      addEventListener() {},
+      getElementById(id) { return nodes[id] || null; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    },
+    window: { addEventListener() {} },
+    console,
+    JSON,
+    Number,
+    String,
+    Object,
+    Math,
+    Date,
+    Set,
+    Array,
+    RegExp,
+    requestAnimationFrame(callback) { callback(); },
+    fetch: async (path, options = {}) => {
+      const body = options.body ? JSON.parse(options.body) : null;
+      fetchCalls.push({ path, body });
+      if (String(path) === "/api/sources/state") return response(scenario.statePayload);
+      if (String(path).includes(`source_state=${scenario.targetMode}`)) return response(scenario.targetReport);
+      throw new Error(`unexpected fetch ${path}`);
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(asset, context);
+  return context;
+}
+
+async function runScenario(scenario) {
+  const context = createContext(scenario);
+  const result = await vm.runInContext(`(async () => {
+    applyServeMutationPayload({
+      sources: scenario.sources,
+      report: scenario.initialReport,
+      report_source_key: scenario.initialSourceKey,
+      report_source_state: scenario.initialMode,
+    });
+    const nullEditorResult = (() => {
+      try {
+        return renderNotesEditor(undefined);
+      } catch (error) {
+        return error.message;
+      }
+    })();
+    state.rowSelection.add(scenario.selectedTrial);
+    state.notesEditor = { trialKey: scenario.selectedTrial, markdown: "draft", error: "", saving: false };
+    renderComparisonPanels({ trace: false });
+    await mutateVisibleServeSourceState();
+    return JSON.stringify({
+      nullEditorResult,
+      mode: state.serveSourceMode,
+      reportRows: reportRows().length,
+      selectedSourceKey: state.selectedSourceKey,
+      selectedTrial: state.selectedTrial,
+      rowSelectionSize: state.rowSelection.size,
+      hasLeaderboard: nodes.leaderboard.innerHTML.includes("Leaderboard"),
+      hasOverview: nodes["trajectory-overview"].innerHTML.includes("Trajectory Overview"),
+      comparisonLength: nodes.comparison.innerHTML.length,
+      traceLength: nodes.trace.innerHTML.length,
+      targetFetches: fetchCalls.filter(call => String(call.path).includes("source_state=" + scenario.targetMode)).length,
+      statePayload: fetchCalls.find(call => call.path === "/api/sources/state").body,
+    });
+  })()`, context);
+  return JSON.parse(result);
+}
+
+Promise.all(scenarios.map(runScenario))
+  .then(result => console.log(JSON.stringify(result)))
+  .catch(error => { console.error(error && error.stack || error); process.exit(1); });
+""".replace("__ASSET__", json.dumps(asset)).replace("__SCENARIOS__", json.dumps([
+            {
+                "name": "activate-last-archived",
+                "sources": sources,
+                "initialMode": "archived",
+                "targetMode": "active",
+                "initialSourceKey": "source-d",
+                "selectedTrial": "trial:archived-d",
+                "initialReport": archived_single,
+                "targetReport": active_after_activate,
+                "statePayload": {
+                    "sources": [sources[0], {**sources[1], "active": True}],
+                    "report": empty_archived,
+                    "report_source_key": None,
+                    "report_source_state": "archived",
+                },
+            },
+            {
+                "name": "archive-last-active",
+                "sources": sources,
+                "initialMode": "active",
+                "targetMode": "archived",
+                "initialSourceKey": "source-a",
+                "selectedTrial": "trial:active-a",
+                "initialReport": active_single,
+                "targetReport": archived_after_archive,
+                "statePayload": {
+                    "sources": [{**sources[0], "active": False}, sources[1]],
+                    "report": empty_active,
+                    "report_source_key": None,
+                    "report_source_state": "active",
+                },
+            },
+        ]))
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        activate, archive = json.loads(node.stdout)
+
+        self.assertEqual(activate["nullEditorResult"], "")
+        self.assertEqual(activate["mode"], "active")
+        self.assertEqual(activate["reportRows"], 2)
+        self.assertEqual(activate["selectedSourceKey"], "source-d")
+        self.assertEqual(activate["selectedTrial"], "trial:archived-d")
+        self.assertEqual(activate["rowSelectionSize"], 0)
+        self.assertTrue(activate["hasLeaderboard"])
+        self.assertTrue(activate["hasOverview"])
+        self.assertGreater(activate["comparisonLength"], 0)
+        self.assertGreater(activate["traceLength"], 0)
+        self.assertEqual(activate["targetFetches"], 1)
+        self.assertEqual(activate["statePayload"]["source_keys"], ["source-d"])
+        self.assertTrue(activate["statePayload"]["active"])
+        self.assertEqual(activate["statePayload"]["report_source_state"], "archived")
+
+        self.assertEqual(archive["nullEditorResult"], "")
+        self.assertEqual(archive["mode"], "archived")
+        self.assertEqual(archive["reportRows"], 2)
+        self.assertEqual(archive["selectedSourceKey"], "source-a")
+        self.assertEqual(archive["selectedTrial"], "trial:active-a")
+        self.assertEqual(archive["rowSelectionSize"], 0)
+        self.assertTrue(archive["hasLeaderboard"])
+        self.assertTrue(archive["hasOverview"])
+        self.assertGreater(archive["comparisonLength"], 0)
+        self.assertGreater(archive["traceLength"], 0)
+        self.assertEqual(archive["targetFetches"], 1)
+        self.assertEqual(archive["statePayload"]["source_keys"], ["source-a"])
+        self.assertFalse(archive["statePayload"]["active"])
+        self.assertEqual(archive["statePayload"]["report_source_state"], "active")
+
     def test_comparison_panel_rerenders_preserve_scroll_positions(self) -> None:
         if not shutil.which("node"):
             self.skipTest("node is required to execute report.js interaction helpers")
@@ -602,6 +1537,7 @@ const result = vm.runInContext(`
     calls.push(["leaderboard", rows.length]);
     globalThis.leaderboardWrap = { scrollTop: 0, scrollLeft: 0, addEventListener() {} };
   };
+  renderLeaderboardSummary = rows => calls.push(["summary", rows.length]);
   renderTrajectoryOverview = rows => {
     calls.push(["overview", rows.length]);
     globalThis.overviewList = { scrollTop: 0, scrollLeft: 0, addEventListener() {} };

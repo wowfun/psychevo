@@ -37,6 +37,14 @@ non-discovered support module under `tools/peval-py/tests`; discovered
 `test_*.py` modules group config/adapter coverage, source conversion coverage,
 report/HTML coverage, and CLI/input-table smoke coverage.
 
+Architecture refactors must keep tests at deep module seams. Workspace state
+tests should exercise workspace services and repositories through behavior
+visible to CLI or serve workflows, not private SQL helper details. Serve tests
+should exercise controller payloads and local HTTP behavior rather than handler
+implementation branches. Asset tests must verify ordered bundle loading,
+embedded render options, Leaderboard Summary assets, and JavaScript syntax for
+every split asset file.
+
 Coverage must verify:
 
 - Psychevo SQLite `messages` extraction orders rows by `session_seq`.
@@ -269,7 +277,7 @@ Coverage must verify:
   `comparison.leaderboard.entries`, legacy `session_heatmap.rows`, and
   `session_table.rows`, `scope`, and `path_selections`; HTML still renders
   Leaderboard and Trajectory Overview by synthesizing rows from canonical Trial
-  facts, and CSV export uses the same runtime rows.
+  facts even for single-Trial reports, and CSV export uses the same runtime rows.
 - converter output keeps `trajectory[]` ATIF-v1.7 compatible: provider
   `usage` and `accounting` maps appear under `steps[].metrics.extra`, aggregate
   custom metrics appear under `final_metrics.extra`, and no non-ATIF metrics
@@ -294,15 +302,18 @@ Coverage must verify:
   files and are still inlined into the emitted offline HTML report.
 - static HTML reports use the default report presentation mode and do not
   render serve-only source manager controls, Leaderboard row-selection
-  checkboxes, or Leaderboard export controls.
+  checkboxes, Leaderboard export controls, or active/archived source-state
+  controls.
 - serve UI HTML mode reuses the static report body while rendering a compact
   source/status toolbar, modal source manager, a Leaderboard row-selection
   checkbox column, a header select-visible checkbox, and one Leaderboard
   `Export` menu with `Table`, `JSON Report`, and `HTML Report` choices.
-- serve UI source manager renders Session/ATIF path, DB, and input-table forms,
-  JSONL/ATIF JSON/report JSON upload affordance, explicit refresh controls,
-  active/archive/delete controls, non-refreshable snapshot labels, and latest
-  source status without a persistent sidebar or duplicate form titles.
+  Leaderboard and Trajectory Overview also render synchronized serve-only
+  `Show archived` and bulk Archive/Activate controls.
+- serve UI source manager renders Session/ATIF/runs path, DB, and input-table
+  forms, JSONL/ATIF JSON/report JSON upload affordance, explicit refresh
+  controls, active/archive/delete controls, non-refreshable snapshot labels, and
+  latest source status without a persistent sidebar or duplicate form titles.
 - serve UI source manager renders a DB Inspect control, adapter single-choice
   controls defaulting to `auto`, session multi-select table, select-all-visible
   control, and add-selected action only in serve mode.
@@ -339,8 +350,31 @@ Coverage must verify:
   the standard `{ sources, report }` mutation payload.
 - serve UI row-selection state is independent from selected-Trial state:
   checkbox clicks stop row selection, row clicks still update the selected
-  Trial, and Trajectory Overview rows keep following filtered and sorted
-  Leaderboard rows rather than checkbox state.
+  Trial, Trajectory Overview row checkboxes mirror the same selection state as
+  Leaderboard row checkboxes, and Trajectory Overview rows keep following
+  filtered and sorted Leaderboard rows rather than checkbox state.
+- serve main-view reports stay full-width over active readable sources:
+  initial `GET /`, refresh, add/reload, source action, alias, and notes
+  mutations return or embed a full active-source report, while explicit
+  `GET /api/report?source_key=KEY` still returns a single-source report. Tests
+  cover duplicate raw Trial keys that are uniquified in the full report and
+  Source Manager row selection mapping back to the corresponding uniquified
+  Trial without clearing comparison panels.
+- serve main-view archived mode is lazy and mutually exclusive with active mode:
+  `GET /api/report?source_state=archived` returns archived readable sources,
+  `GET /api/report` remains active by default, `source_key` report loads still
+  return single-source detail, archived reports are fetched only when the browser
+  first switches modes, and switching is disabled with a status message when the
+  target readable source count is zero.
+- serve UI bulk source-state actions use only checked rows currently visible in
+  `leaderboardRows()`: tests cover hidden checked rows being ignored, Source
+  Manager selection not affecting the payload, successful archive/activate
+  clearing row selection and moving rows out of the current mode, automatic
+  switching to the target mode when the current mode becomes empty after a batch
+  action, same-origin protection, unknown source errors, and invalid payload
+  rejection for `POST /api/sources/state`. HTTP tests keep backend payload
+  semantics stable: `/api/sources/state` may return an empty report for the
+  requested `report_source_state`; the browser owns the automatic fallback load.
 - serve UI export helpers use visible checked rows when any currently visible
   rows are checked, otherwise the current visible filtered and sorted rows.
   Checked rows hidden by filters remain selected in UI state but are excluded
@@ -349,7 +383,7 @@ Coverage must verify:
   labels in multi-session reports.
 - HTML renders Report Notes, Leaderboard, Trajectory Overview, selected Trial
   details, selected-state cues, note snippets, selected Trial notes, and safe
-  note Markdown for multi-session reports.
+  note Markdown for reports with one or more Trials.
 - Leaderboard and Trajectory Overview comparison panels render only their
   primary heading, without duplicate eyebrow text; `Leaderboard` remains English
   in localized reports.
@@ -366,6 +400,18 @@ Coverage must verify:
   visible rows, the Trajectory Overview reuses the same filtered and sorted
   rows, and filter buttons render inline to the right of each filterable column
   label.
+- Leaderboard Summary renders below Leaderboard and above Trajectory Overview in
+  static and serve HTML only when at least two rows are available. Tests cover
+  that its transposed table and separate vertical box plots use only
+  `leaderboardRows()` visible rows, row selection does not affect the summary, no
+  separate visible-row count badge is rendered, model-call duration sums only
+  non-estimated agent/assistant step durations per Trial, tool error rate treats
+  no-tool rows as missing while preserving valid `0%` rows, and single-Trial
+  reports render Leaderboard and Trajectory Overview without rendering the
+  comparison summary section.
+- Empty report runtime coverage verifies comparison panels can be absent without
+  crashing selected-Trial rendering, and notes editor rendering never reads
+  `markdown` from a null editor state.
 - Trajectory Overview renders one session row per currently filtered and sorted
   Leaderboard row, preserving the same row count and order, aligns step nodes by
   the largest visible step count, renders neutral lettered nodes for `S`
@@ -535,9 +581,10 @@ Coverage must verify:
   rejection, 20 MiB upload cap rejection, no CORS header, JSON POST requirement,
   same-origin rejection for mutating APIs, `/api/config/locale` TOML updates,
   `/api/config/adapter-default-db` TOML updates and clears, Source Manager HTML
-  regeneration with updated adapter defaults, `/api/sources/{source_key}/alias`,
-  and the ECharts cached asset route using fake cache/download paths rather than
-  real network.
+  regeneration with updated adapter defaults, recursive external `runs/` import
+  through `/api/sources`, `/api/sources/{source_key}/alias`, batch
+  `/api/sources/state`, and the ECharts cached asset route using fake
+  cache/download paths rather than real network.
 - serve UI HTML and interaction tests verify the near-full-screen Source Manager
   workbench structure, adapter default DB configuration controls, mutable
   adapter default state in `report.js`, and continued DB form autofill from

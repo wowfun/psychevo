@@ -160,7 +160,10 @@ from `<workspace>/.cache/echarts/6.0.0/echarts.min.js` and falls back to the
 fixed CDN URL if the local script fails. Its Source Manager exposes configured
 default DB paths, alias editing, Last Turn End sorting, and an
 English/Simplified Chinese selector that persists top-level `locale` in
-`peval-py.toml`.
+`peval-py.toml`. The Path source field also accepts another workspace root,
+`runs/`, `runs/<analysis_eval_slug>`, or a directory above Trial cells; serve
+recursively imports complete cells into the current workspace as snapshots and
+leaves the external workspace unchanged.
 
 CSV example:
 

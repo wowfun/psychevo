@@ -14,10 +14,15 @@ same command tree.
 
 - offline trajectory export of one session from JSONL or SQLite `messages` rows
 - ATIF v1.7 trajectory projection
-- single-session and session-comparison JSON/HTML report generation
+- single-session and session-comparison JSON/HTML report generation, including
+  single-row HTML comparison panels
 - minimal `peval-py serve` workspace initialization for local report state
 - a local `serve` web UI over a saved peval-py workspace, backed by a
-  Python-owned state layer
+  Python-owned state layer, with active and archived source comparison views
+  that recover to the target view when a batch source-state action empties the
+  current view
+- Source Manager import of complete Trial cells from local external `runs/`
+  trees into the selected peval-py workspace
 - read-only peval cell cached analysis and manual cell notes enrichment, plus
   explicit serve editing of cell-local `notes.md`
 - a bundled `peval-py` agent skill that guides offline session diagnostics,
@@ -45,6 +50,8 @@ Out of scope:
 - [Inputs and Adapters](inputs.md) defines trajectory source, CLI input, config, and adapter behavior.
 - [Serve Workspace State](serve-state.md) defines peval-py workspace persistence.
 - [Outputs](outputs.md) defines report, HTML, serve UI, API, and redaction output behavior.
+- [Architecture](architecture.md) defines non-adapter module boundaries,
+  dependency direction, and asset bundling rules.
 
 ## Position
 

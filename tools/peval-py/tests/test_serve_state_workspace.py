@@ -635,3 +635,94 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 self.assertEqual(len(store.source_payload()), 1)
             finally:
                 store.close()
+
+    def test_external_runs_import_copies_trial_cells_and_sidecars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp) / "workspace")
+            external = peval_py_workspace(Path(tmp) / "external")
+            first_cell = (
+                external
+                / "runs"
+                / "external-eval"
+                / "psychevo"
+                / "session-a"
+                / "session_t001"
+            )
+            second_cell = (
+                external
+                / "runs"
+                / "external-eval"
+                / "psychevo"
+                / "session-b"
+                / "session_t002"
+            )
+            write_trial_cell_artifacts(
+                first_cell,
+                session_id="session-a",
+                trial_key="session_t001",
+            )
+            write_trial_cell_artifacts(
+                second_cell,
+                session_id="session-b",
+                trial_key="session_t002",
+            )
+            (first_cell / "analysis.json").write_text(
+                json.dumps({"summary": "external analysis"}),
+                encoding="utf-8",
+            )
+            (first_cell / "analysis.md").write_text(
+                "External analysis markdown.",
+                encoding="utf-8",
+            )
+            (first_cell / "notes.md").write_text(
+                "External note.",
+                encoding="utf-8",
+            )
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            store = open_workspace_state(str(root))
+            try:
+                cells = discover_complete_trial_cell_dirs(external)
+                self.assertEqual(cells, [first_cell.resolve(), second_cell.resolve()])
+                loaded = LoadedInputs(
+                    sessions=[
+                        loaded_trial_cell_import_session(cell, config)
+                        for cell in cells
+                    ],
+                    notes=[],
+                )
+                keys = store.import_loaded_sources(loaded, config)
+                self.assertEqual(len(keys), 2)
+
+                sources = store.source_payload()
+                self.assertEqual(
+                    [source["trial_session_id"] for source in sources],
+                    ["session-a", "session-b"],
+                )
+                first_source = sources[0]
+                first_artifact = root / first_source["artifact_dir"]
+                self.assertEqual(first_source["kind"], "trial-artifact")
+                self.assertTrue(first_source["snapshot"])
+                self.assertFalse(first_source["refreshable"])
+                self.assertIn("runs/external-eval/psychevo/session-a/session_t001", first_source["artifact_dir"])
+                self.assertEqual(
+                    json.loads((first_artifact / "analysis.json").read_text(encoding="utf-8")),
+                    {"summary": "external analysis"},
+                )
+                self.assertEqual(
+                    (first_artifact / "analysis.md").read_text(encoding="utf-8"),
+                    "External analysis markdown.",
+                )
+                self.assertEqual(
+                    (first_artifact / "notes.md").read_text(encoding="utf-8"),
+                    "External note.",
+                )
+
+                store.delete_source(first_source["source_key"])
+                self.assertFalse(first_artifact.exists())
+                self.assertTrue((first_cell / "agent" / "trajectory.json").is_file())
+                self.assertTrue((first_cell / "notes.md").is_file())
+                remaining = store.source_payload()
+                self.assertEqual(len(remaining), 1)
+                self.assertEqual(remaining[0]["trial_session_id"], "session-b")
+            finally:
+                store.close()

@@ -208,8 +208,9 @@ writes either JSON or HTML:
   selected, as a default `.xlsx` workbook rather than CSV. JSON report and HTML
   report exports keep their existing behavior.
 
-Single-session HTML renders the current Run, Result, Evidence, and Steps
-sections. Multi-session HTML renders Report Notes, Leaderboard, Trajectory
+Single-session HTML renders the current Run, Result, Evidence, Steps, and
+single-row Leaderboard and Trajectory Overview sections. Multi-session HTML
+renders Report Notes, Leaderboard, optional Leaderboard Summary, Trajectory
 Overview, then the selected Trial trajectory. The comparison panels are
 runtime-only projections synthesized from `trajectory[]`, `trajectory_meta[]`,
 and `trajectory.final_metrics`; they are not stored in report JSON. They render
@@ -234,7 +235,21 @@ Trial; if filters hide all rows, the selected Trial detail remains visible but
 no Leaderboard row is selected. Leaderboard active duration, tokens, Tool Calls,
 and Turns cells show per-column metric intensity directly as cell background
 shading; each metric column computes its own scale from the currently visible
-filtered rows, missing values remain unshaded, and Cost is not shaded. The
+filtered rows, missing values remain unshaded, and Cost is not shaded. When two
+or more rows are available, static and serve HTML render a Leaderboard Summary
+section below the Leaderboard derived only from the current visible Leaderboard
+rows. Single-row reports render Leaderboard and Trajectory Overview but do not
+render the Leaderboard Summary section or its empty state. The summary is a
+runtime-only projection, is not stored in report JSON, and is not affected by
+serve row selection. It displays active duration, tokens, turns, measured
+model-call duration, Tool Calls, and tool error rate with a transposed summary
+table and a separate per-metric vertical box plot panel. The table uses
+statistics as rows and metrics as columns, while the distribution panel renders
+one vertical plot per metric on that metric's own scale. Measured model-call
+duration is the per-Trial sum of non-estimated agent/assistant step
+`duration_ms` values; estimated model timing and non-model steps are omitted.
+Tool error rate rows with no tool calls are treated as missing values, while
+`0%` error rates are valid. The
 filter control appears inline on the right side of the filtered column label,
 similar to a spreadsheet table header, instead of occupying a second header
 line. `Analysised` displays `True` only when the Trial's analysis annotation
@@ -263,10 +278,13 @@ active/archive/delete source lifecycle, and per-source status display. The
 modal exposes an adapter default SQLite DB configuration strip above the source
 forms and source list; saving a non-empty path updates that adapter's
 `default_db_path`, while saving or clearing an empty value removes that default.
-Session/ATIF path and DB path fields accept one or more whitespace-separated
-paths and honor single- or double-quoted paths; they import refreshable local
-paths and do not upload file contents. The DB Inspect action still inspects
-  exactly one DB path at a time. Adapter choices in the source manager are
+Session/ATIF/runs path and DB path fields accept one or more
+whitespace-separated paths and honor single- or double-quoted paths. Ordinary
+Session/ATIF paths import refreshable local paths and do not upload file
+contents. Path entries that resolve to a workspace root, `runs/`, `runs/<eval>`,
+or a directory above complete Trial cells recursively import those cells as
+copied non-refreshable snapshots in the current workspace. The DB Inspect action
+still inspects exactly one DB path at a time. Adapter choices in the source manager are
   compact single-select dropdowns in each source form's action row, immediately
   before the add/upload action area, with `auto` as the default; `auto` omits
   the adapter override and lets existing inference/default adapter rules apply.
@@ -284,11 +302,30 @@ paths and do not upload file contents. The DB Inspect action still inspects
 	  Last Turn End using `trajectory_meta.finished_at_ms`, without requiring a
 	  source refresh.
 	  It does not add a persistent left sidebar or reduce the report body width.
-  Serve-only controls use the same color, radius, typography, and panel tokens as
-  static reports but sit at a lower visual priority than report content.
-  Source Manager form shells are structural carriers rather than filled cards:
-  they must not use pink or tinted filled panel backgrounds, while text inputs,
-  uploads, and menu surfaces remain solid enough to read.
+	  Serve-only controls use the same color, radius, typography, and panel tokens as
+	  static reports but sit at a lower visual priority than report content.
+	  Source Manager form shells are structural carriers rather than filled cards:
+	  they must not use pink or tinted filled panel backgrounds, while text inputs,
+	  uploads, and menu surfaces remain solid enough to read.
+	In serve UI mode, Leaderboard and Trajectory Overview each expose the same
+	serve-only source-state controls in the panel header: a `Show archived` switch
+	and a dynamic primary action. The main report opens in the active-source view.
+	When the switch is enabled, the browser lazily loads the archived-source report
+	and Leaderboard, Leaderboard Summary, and Trajectory Overview all project from
+	that archived report. Active and archived views are mutually exclusive; archived
+	rows are not appended to active rows. The dynamic action is `Archive` in the
+	active view and `Activate` in the archived view, operates only on checked rows
+	that are currently visible in `leaderboardRows()`, and ignores hidden checked
+	rows, Source Manager selection, and selected Trial state. Serve-mode Trajectory
+	Overview rows expose the same row-selection checkbox state as Leaderboard rows
+	on the left side of each row; checking either surface updates the same
+	selection set without selecting the Trial. If a batch Archive or Activate
+	action moves every visible readable source out of the current active/archived
+	view, the browser automatically switches to the target view and renders its
+	full report, selecting the first moved readable source. If the target view has
+	no readable sources, the switch does not leave the current report view and the
+	browser shows an actionable status message instead. Static HTML
+	reports do not render these source-state controls.
 
 `serve` does not refresh original path or DB sources on startup unless source
 flags were supplied on that invocation. It does scan the current
@@ -356,9 +393,13 @@ Windows-safe shell-like quoting: quoted paths may contain spaces, unquoted
 Windows drive paths such as `C:\Users\me\state.db` keep their backslashes,
 Windows drive and UNC paths are treated as absolute-like paths and are not
 resolved under the workspace root, and POSIX hosts may map existing drive paths
-through `/mnt/<drive>/...`. New source imports are all-or-nothing: if any
-newly submitted source fails to load, convert, or refresh, the endpoint returns
-a JSON error and does not persist any source from that request. Refreshing an
+through `/mnt/<drive>/...`. Path payloads may mix ordinary path sources and
+recursive run-tree imports; run-tree imports copy complete Trial cells into the
+current workspace, preserve cell-local `analysis.json`, `analysis.md`, and
+`notes.md`, and register the copied cells as non-refreshable snapshots. New
+source imports are all-or-nothing: if any newly submitted source fails to load,
+convert, or refresh, the endpoint returns a JSON error and does not persist any
+source from that request. Refreshing an
 already persisted source keeps the existing artifact directory when conversion
 fails, and records the latest status/error/log entry. If refreshing a persisted
 source converts to a different canonical cell identity, refresh fails and keeps
@@ -367,12 +408,23 @@ into another Trial.
 
 `POST /api/sources/reload` scans the workspace `runs/<analysis_eval_slug>` tree
 for complete Trial cells, registers new artifact sources, updates lightweight
-source summaries, marks missing registered artifacts, and returns `{ sources }`
-without forcing a full report rebuild. `GET /api/report?source_key=KEY` returns
-a report for one readable source; missing or unreadable sources fail with a
-clear JSON error. `GET /api/report` remains available for explicit full-report
-loads and exports, but ordinary source mutations may return only `{ sources }`
-plus a selected-source report when the browser needs one. `POST
+source summaries, marks missing registered artifacts, and returns the standard
+serve mutation payload. Serve's main view always embeds or returns a report for
+all active readable sources, including initial `GET /`, refresh, add/reload,
+archive/activate/delete, alias, and notes mutations. `GET
+/api/report?source_state=active|archived` returns the full readable source
+report for that source state; omitted `source_state` means `active`. `GET
+/api/report?source_key=KEY` returns a report for one readable source and takes
+precedence over `source_state`; missing or unreadable sources fail with a clear
+JSON error. `GET /api/report` remains available for explicit full-report loads
+and exports. `POST /api/sources/state` accepts JSON
+`{ "source_keys": [...], "active": true|false, "report_source_state":
+"active"|"archived" }`, updates all listed sources' active flags, and returns a
+standard mutation payload whose `report` is rebuilt for `report_source_state`.
+Mutation payload `report_source_key` is only a selection hint for the browser;
+it does not mean the payload `report` has been narrowed to that source. Mutation
+payloads may include `report_source_state` so the browser can keep the active or
+archived report cache coherent. `POST
 /api/sources/{source_key}/alias` accepts JSON `{ "alias": "..." }`, updates only
 the display alias for that source, and does not refresh or mutate the original
 source file or DB. An empty alias clears the alias. `POST

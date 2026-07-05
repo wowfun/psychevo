@@ -54,6 +54,19 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 conn.close()
                 self.assertEqual(response.status, 200)
                 self.assertEqual(len(payload["trajectory"]), 1)
+
+                status, _, html = request_text(port, "/")
+                self.assertEqual(status, 200)
+                embedded = script_json(html, "peval-py-data")
+                options = script_json(html, "peval-py-render-options")
+                comparison = report_js_comparison_state(
+                    embedded,
+                    sources=options["sources"],
+                )
+                self.assertEqual(comparison["reportRows"], 1)
+                self.assertTrue(comparison["hasLeaderboard"])
+                self.assertFalse(comparison["hasSummary"])
+                self.assertTrue(comparison["hasOverview"])
             finally:
                 server.shutdown()
                 server.server_close()
@@ -76,12 +89,12 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(cached_echarts_asset(store), b"console.log('cached');")
 
                 cache_path.unlink()
-                with patch("peval_py.serve.download_echarts_asset", return_value=b"console.log('downloaded');"):
+                with patch("peval_py.serve.assets.download_echarts_asset", return_value=b"console.log('downloaded');"):
                     self.assertEqual(cached_echarts_asset(store), b"console.log('downloaded');")
                 self.assertEqual(cache_path.read_bytes(), b"console.log('downloaded');")
 
                 cache_path.unlink()
-                with patch("peval_py.serve.download_echarts_asset", side_effect=RuntimeError("network down")):
+                with patch("peval_py.serve.assets.download_echarts_asset", side_effect=RuntimeError("network down")):
                     with self.assertRaisesRegex(HttpError, "failed to cache ECharts"):
                         cached_echarts_asset(store)
             finally:
@@ -108,7 +121,7 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(body, b"window.echarts={};")
 
                 cache_path.unlink()
-                with patch("peval_py.serve.download_echarts_asset", side_effect=RuntimeError("network down")):
+                with patch("peval_py.serve.assets.download_echarts_asset", side_effect=RuntimeError("network down")):
                     status, _, body = request_bytes(port, ECHARTS_ASSET_PATH)
                 self.assertEqual(status, 502)
                 self.assertIn(b"failed to cache ECharts", body)
@@ -376,14 +389,67 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(len(body["sources"]), 2)
-                self.assertEqual(len(body["report"]["trajectory"]), 1)
                 source_keys = [source["source_key"] for source in body["sources"]]
+                self.assertEqual(body["report_source_key"], source_keys[0])
+                self.assertEqual(len(body["report"]["trajectory"]), 2)
+                self.assertEqual(
+                    [meta["trial_key"] for meta in body["report"]["trajectory_meta"]],
+                    ["session:t001", "session:t001:2"],
+                )
                 artifact_dirs = {
                     source["source_key"]: root / source["artifact_dir"]
                     for source in body["sources"]
                 }
                 self.assertTrue(artifact_dirs[source_keys[0]].is_dir())
                 self.assertTrue(artifact_dirs[source_keys[1]].is_dir())
+                status, _, html = request_text(port, "/")
+                self.assertEqual(status, 200)
+                embedded = script_json(html, "peval-py-data")
+                options = script_json(html, "peval-py-render-options")
+                self.assertEqual(len(embedded["trajectory"]), 2)
+                comparison = report_js_comparison_state(
+                    embedded,
+                    sources=options["sources"],
+                )
+                self.assertEqual(comparison["reportRows"], 2)
+                self.assertTrue(comparison["hasLeaderboard"])
+                self.assertTrue(comparison["hasSummary"])
+                self.assertTrue(comparison["hasOverview"])
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_keys[1]}/alias",
+                    {"alias": "Second source"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["report_source_key"], source_keys[1])
+                self.assertEqual(len(body["report"]["trajectory"]), 2)
+                self.assertEqual(
+                    body["report"]["trajectory_meta"][1]["source_alias"],
+                    "Second source",
+                )
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/refresh",
+                    {},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(len(body["report"]["trajectory"]), 2)
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources/reload",
+                    {},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(len(body["sources"]), 2)
+                self.assertEqual(len(body["report"]["trajectory"]), 2)
                 log_count = store.conn.execute(
                     "SELECT COUNT(*) FROM peval_py_refresh_log"
                 ).fetchone()[0]
@@ -425,6 +491,8 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(len(body["sources"]), 1)
+                self.assertEqual(body["report_source_key"], source_keys[1])
+                self.assertEqual(len(body["report"]["trajectory"]), 1)
                 self.assertTrue(source_a.exists())
                 self.assertFalse(artifact_dirs[source_keys[0]].exists())
                 self.assertTrue(artifact_dirs[source_keys[1]].is_dir())
@@ -463,7 +531,184 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(body["sources"], [])
+                self.assertIsNone(body["report_source_key"])
+                self.assertEqual(body["report"]["trajectory"], [])
                 self.assertFalse(artifact_dirs[source_keys[1]].exists())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_report_source_state_and_batch_archive_activate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source_a = root / "common_one.jsonl"
+            source_b = root / "common_two.jsonl"
+            source_c = root / "common_three.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source_a)
+            shutil.copy(FIXTURES / "common_session.jsonl", source_b)
+            shutil.copy(FIXTURES / "common_session.jsonl", source_c)
+            config = ToolConfig(adapter="opencode")
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+
+            def get_report(path: str) -> tuple[int, dict]:
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", path)
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+                conn.close()
+                return response.status, payload
+
+            try:
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {"path": "common_one.jsonl common_two.jsonl common_three.jsonl"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                source_keys = [source["source_key"] for source in body["sources"]]
+                self.assertEqual(len(source_keys), 3)
+                self.assertEqual(len(body["report"]["trajectory"]), 3)
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources/state",
+                    {
+                        "source_keys": source_keys[1:],
+                        "active": False,
+                        "report_source_state": "active",
+                    },
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["report_source_state"], "active")
+                self.assertEqual(body["report_source_key"], source_keys[0])
+                self.assertEqual(len(body["report"]["trajectory"]), 1)
+                self.assertEqual(
+                    [source["active"] for source in body["sources"]],
+                    [True, False, False],
+                )
+
+                status, active_report = get_report("/api/report")
+                self.assertEqual(status, 200)
+                self.assertEqual(len(active_report["trajectory"]), 1)
+                status, archived_report = get_report("/api/report?source_state=archived")
+                self.assertEqual(status, 200)
+                self.assertEqual(len(archived_report["trajectory"]), 2)
+                self.assertEqual(
+                    [meta["trial_key"] for meta in archived_report["trajectory_meta"]],
+                    ["session:t001", "session:t001:2"],
+                )
+                status, single_report = get_report(
+                    f"/api/report?source_key={source_keys[1]}&source_state=active"
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(len(single_report["trajectory"]), 1)
+                status, invalid_state = get_report("/api/report?source_state=all")
+                self.assertEqual(status, 400)
+                self.assertIn("source_state must be active or archived", invalid_state["error"])
+
+                status, _, bad_keys = request_json(
+                    port,
+                    "POST",
+                    "/api/sources/state",
+                    {
+                        "source_keys": [source_keys[2], "missing-source"],
+                        "active": True,
+                        "report_source_state": "archived",
+                    },
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("unknown source", bad_keys["error"])
+                self.assertFalse(
+                    next(
+                        source
+                        for source in store.source_payload()
+                        if source["source_key"] == source_keys[2]
+                    )["active"]
+                )
+
+                status, _, bad_active = request_json(
+                    port,
+                    "POST",
+                    "/api/sources/state",
+                    {
+                        "source_keys": [source_keys[1]],
+                        "active": "yes",
+                        "report_source_state": "archived",
+                    },
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("active must be true or false", bad_active["error"])
+
+                status, _, bad_state = request_json(
+                    port,
+                    "POST",
+                    "/api/sources/state",
+                    {
+                        "source_keys": [source_keys[1]],
+                        "active": True,
+                        "report_source_state": "all",
+                    },
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("report_source_state must be active or archived", bad_state["error"])
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources/state",
+                    {
+                        "source_keys": [source_keys[1]],
+                        "active": True,
+                        "report_source_state": "archived",
+                    },
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["report_source_state"], "archived")
+                self.assertEqual(body["report_source_key"], source_keys[2])
+                self.assertEqual(len(body["report"]["trajectory"]), 1)
+                self.assertEqual(
+                    [source["active"] for source in body["sources"]],
+                    [True, True, False],
+                )
+
+                status, _, rejected = request_json(
+                    port,
+                    "POST",
+                    "/api/sources/state",
+                    {
+                        "source_keys": [source_keys[2]],
+                        "active": True,
+                        "report_source_state": "archived",
+                    },
+                    origin="http://example.test",
+                )
+                self.assertEqual(status, 403)
+                self.assertIn("same-origin", rejected["error"])
+                self.assertFalse(
+                    next(
+                        source
+                        for source in store.source_payload()
+                        if source["source_key"] == source_keys[2]
+                    )["active"]
+                )
             finally:
                 server.shutdown()
                 server.server_close()
@@ -524,6 +769,98 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 conn.close()
                 self.assertEqual(response.status, 400)
                 self.assertIn("Trial cell artifacts not found", missing["error"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_path_source_recursively_imports_external_runs_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp) / "workspace")
+            external = peval_py_workspace(Path(tmp) / "external")
+            first_cell = (
+                external
+                / "runs"
+                / "external-eval"
+                / "psychevo"
+                / "session-a"
+                / "session_t001"
+            )
+            second_cell = (
+                external
+                / "runs"
+                / "external-eval"
+                / "psychevo"
+                / "session-b"
+                / "session_t002"
+            )
+            write_trial_cell_artifacts(first_cell, session_id="session-a", trial_key="session_t001")
+            write_trial_cell_artifacts(second_cell, session_id="session-b", trial_key="session_t002")
+            (first_cell / "notes.md").write_text("Imported note.", encoding="utf-8")
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {"path": str(external / "runs")},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(len(body["sources"]), 2)
+                self.assertEqual(body["report_source_key"], body["sources"][0]["source_key"])
+                self.assertEqual(len(body["report"]["trajectory"]), 2)
+                self.assertEqual(
+                    [source["trial_session_id"] for source in body["sources"]],
+                    ["session-a", "session-b"],
+                )
+                self.assertTrue(body["sources"][0]["snapshot"])
+                self.assertFalse(body["sources"][0]["refreshable"])
+                copied_note = root / body["sources"][0]["artifact_dir"] / "notes.md"
+                self.assertEqual(copied_note.read_text(encoding="utf-8"), "Imported note.")
+                self.assertTrue((first_cell / "notes.md").is_file())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_empty_runs_import_fails_without_persisting_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp) / "workspace")
+            external = peval_py_workspace(Path(tmp) / "external")
+            (external / "runs" / "empty").mkdir(parents=True)
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {"path": str(external / "runs")},
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("no complete Trial cells found", body["error"])
+                self.assertEqual(store.source_payload(), [])
             finally:
                 server.shutdown()
                 server.server_close()

@@ -1,0 +1,103 @@
+  transform:scale(1.12);
+  box-shadow:0 0 0 3px rgba(49,95,143,.18);
+}
+.trajectory-node.selected-node {
+  border-color:var(--focus);
+  background:color-mix(in oklch,var(--focus),var(--surface) 88%);
+  box-shadow:0 0 0 3px rgba(49,95,143,.20);
+}
+.trajectory-node.selected-node[class*="duration-heat-"] {
+  background:color-mix(in oklch,var(--focus),var(--surface) 88%);
+  box-shadow:0 0 0 3px rgba(49,95,143,.24),inset 0 -3px 0 var(--duration-heat-accent);
+}
+.trace-title {
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.trace-title code {
+  font:700 22px/1 var(--mono);
+  overflow-wrap:anywhere;
+}
+.info-grid {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+  margin:12px 0 18px;
+}
+.info-grid div {
+  min-width:0;
+  border-top:1px solid var(--rule);
+  padding-top:9px;
+}
+.info-grid span {
+  display:block;
+  color:var(--muted);
+  font:700 12px/1 var(--mono);
+  letter-spacing:.05em;
+  text-transform:uppercase;
+}
+.info-grid strong {
+  display:block;
+  margin-top:6px;
+  font:700 15px/1.3 var(--mono);
+  overflow-wrap:anywhere;
+  font-variant-numeric:tabular-nums;
+}
+.status {
+  display:inline-flex;
+  align-items:center;
+  min-height:28px;
+  border-radius:999px;
+  padding:0 11px;
+  font:700 12px/1 var(--mono);
+  text-transform:uppercase;
+}
+.status.passed {
+  background:#dceee4;
+  color:var(--pass);
+}
+.status.failed {
+  background:#f4ddd7;
+  color:var(--fail);
+}
+.selected-extra {
+  margin:14px 0;
+}
+.selected-extra-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-bottom:8px;
+}
+.selected-extra-head h3 {
+  margin:0;
+}
+.notes-editor-panel {
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  background:rgba(255,255,255,.46);
+  padding:12px;
+  margin:0 0 10px;
+}
+.notes-editor-panel textarea {
+  width:100%;
+  min-height:150px;
+  resize:vertical;
+  border:1px solid var(--rule);
+  border-radius:8px;
+  background:var(--surface);
+  color:var(--ink);
+  padding:10px;
+  font:14px/1.5 var(--mono);
+}
+.notes-editor-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}

@@ -53,9 +53,14 @@ version. These files are general peval run artifacts; they must not be treated
 as private `serve` cache. `state.db` is a source index and UI-state store, not
 the only source of artifact truth. `serve` startup and explicit source reload
 scan `<workspace>/runs/<analysis_eval_slug>/*/*/*` for complete Trial cells and
-register previously unknown cells as non-refreshable artifact sources. The
-served report JSON is computed from active readable source rows plus these
-artifacts and is not persisted as a complete blob.
+register previously unknown cells as non-refreshable artifact sources. The Path
+source form may also import a local external workspace root, `runs/`,
+`runs/<eval>`, or a directory above Trial cells; that import recursively finds
+complete Trial cells, copies each cell into the current workspace run tree, and
+registers the copied cells as non-refreshable artifact snapshots. External run
+trees are read-only provenance; deleting a source deletes only the current
+workspace copy. The served report JSON is computed from active readable source
+rows plus these artifacts and is not persisted as a complete blob.
 
 Uploaded JSONL files are converted through the selected adapter. Uploaded ATIF
 JSON trajectory objects and uploaded peval-py report JSON are accepted without
@@ -67,6 +72,12 @@ Trial `annotations.notes[]` are materialized into that Trial cell's `notes.md`,
 matching `annotations.analysis[]` entries are materialized into `analysis.json`
 and `analysis.md`, and report-level notes are ignored until a session/report
 artifact model exists.
+
+Serve source mutation endpoints return a shared JSON envelope with `sources`
+and, when a readable source exists, `report` plus `report_source_key`. Reload,
+add, upload, archive, activate, refresh, alias, notes, and delete actions use
+this envelope so the browser can clear stale report state consistently when no
+source is readable.
 
 `peval-py init` writes only the Python-owned serve state described above.
 Existing unrelated workspace files are left untouched, but they are neither
