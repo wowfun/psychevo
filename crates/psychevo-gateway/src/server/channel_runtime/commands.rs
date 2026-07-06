@@ -225,6 +225,9 @@ fn channel_command_action_from_effect(
                 interrupted, cleared
             ))
         }
+        SlashCommandEffect::Voice(mode) => {
+            ChannelCommandAction::Reply(channel_voice_reply(context.state, context.source, &mode)?)
+        }
         SlashCommandEffect::SandboxShow => {
             let thread_id = context
                 .state
@@ -293,6 +296,7 @@ fn channel_action_visible(action: SlashCommandAction) -> bool {
             | SlashCommandAction::Skills
             | SlashCommandAction::Agents
             | SlashCommandAction::Compact
+            | SlashCommandAction::Voice
             | SlashCommandAction::SkillInvoke
     )
 }
@@ -334,6 +338,42 @@ fn channel_help_text(
     );
     lines.push(channel_status_text(state, runtime, connection, source)?);
     Ok(lines.join("\n"))
+}
+
+fn channel_voice_reply(
+    state: &WebState,
+    source: &GatewaySource,
+    mode: &str,
+) -> psychevo_runtime::Result<String> {
+    let mode = match mode {
+        "status" => voice_policy_for_source(state, source),
+        "on" => {
+            update_voice_policy_for_source(state, source, wire::VoicePolicyMode::VoiceOnly);
+            wire::VoicePolicyMode::VoiceOnly
+        }
+        "tts" => {
+            update_voice_policy_for_source(state, source, wire::VoicePolicyMode::All);
+            wire::VoicePolicyMode::All
+        }
+        "off" => {
+            update_voice_policy_for_source(state, source, wire::VoicePolicyMode::Off);
+            wire::VoicePolicyMode::Off
+        }
+        _ => {
+            return Err(Error::Message(
+                "usage: /voice <on|tts|off|status>".to_string(),
+            ));
+        }
+    };
+    Ok(match mode {
+        wire::VoicePolicyMode::Off => "Voice replies are off.".to_string(),
+        wire::VoicePolicyMode::VoiceOnly => {
+            "Voice replies will follow voice inputs. Text fallback remains active.".to_string()
+        }
+        wire::VoicePolicyMode::All => {
+            "Voice replies are on for all replies. Text fallback remains active.".to_string()
+        }
+    })
 }
 
 fn channel_status_text(

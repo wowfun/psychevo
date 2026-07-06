@@ -21,6 +21,30 @@
     },
     {
       "$ref": "ServerNotification/terminal-exited.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-started.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-sdp.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-item-added.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-transcript-delta.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-transcript-done.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-output-audio-delta.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-error.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-closed.json"
     }
   ],
   "title": "ServerNotification"

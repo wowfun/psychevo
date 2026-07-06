@@ -96,6 +96,7 @@ pub enum SlashCommandAction {
     Agents,
     Fork,
     Compact,
+    Voice,
     SkillInvoke,
 }
 
@@ -248,6 +249,7 @@ impl SlashCommandSpec {
             }
             SlashCommandAction::Diff => &[CommandCapability::WorkspaceDiff],
             SlashCommandAction::Skills => &[],
+            SlashCommandAction::Voice => &[],
             _ => &[],
         }
     }
@@ -313,6 +315,7 @@ impl SlashCommandSpec {
                 | SlashCommandAction::Steer
                 | SlashCommandAction::Queue
                 | SlashCommandAction::Pending
+                | SlashCommandAction::Voice
         )
     }
 }
@@ -341,6 +344,9 @@ pub fn command_presentation(action: SlashCommandAction) -> CommandPresentation {
             presentation(Kind::Inspect, Destination::Preview, Anchor::Trigger)
         }
         SlashCommandAction::Steer | SlashCommandAction::Queue | SlashCommandAction::Pending => {
+            presentation(Kind::Control, Destination::Composer, Anchor::Composer)
+        }
+        SlashCommandAction::Voice => {
             presentation(Kind::Control, Destination::Composer, Anchor::Composer)
         }
         SlashCommandAction::Agents => {

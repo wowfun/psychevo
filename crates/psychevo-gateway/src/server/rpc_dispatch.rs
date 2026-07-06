@@ -414,6 +414,46 @@ async fn handle_rpc(
             let (accepted, activity) = state.inner.gateway.takeover_turn(selector)?;
             Ok(json!({"accepted": accepted, "activity": activity}))
         }
+        "voice/asr/transcribe" => {
+            let params = request.required_params::<wire::VoiceAsrTranscribeParams>()?;
+            voice_asr_transcribe_value(&state, &auth, params).await
+        }
+        "voice/tts/synthesize" => {
+            let params = request.required_params::<wire::VoiceTtsSynthesizeParams>()?;
+            voice_tts_synthesize_value(&state, &auth, params).await
+        }
+        "voice/policy/read" => {
+            let params = request.params::<wire::VoicePolicyReadParams>()?;
+            voice_policy_read_value(&state, &auth, params)
+        }
+        "voice/policy/update" => {
+            let params = request.required_params::<wire::VoicePolicyUpdateParams>()?;
+            voice_policy_update_value(&state, &auth, params)
+        }
+        "thread/realtime/start" => {
+            let params = request.required_params::<wire::ThreadRealtimeStartParams>()?;
+            voice_realtime_start_value(&state, &auth, out_tx, params).await
+        }
+        "thread/realtime/appendAudio" => {
+            let params = request.required_params::<wire::ThreadRealtimeAppendAudioParams>()?;
+            voice_realtime_append_audio_value(&state, params)
+        }
+        "thread/realtime/appendText" => {
+            let params = request.required_params::<wire::ThreadRealtimeAppendTextParams>()?;
+            voice_realtime_append_text_value(&state, params)
+        }
+        "thread/realtime/appendSpeech" => {
+            let params = request.required_params::<wire::ThreadRealtimeAppendSpeechParams>()?;
+            voice_realtime_append_speech_value(&state, params)
+        }
+        "thread/realtime/stop" => {
+            let params = request.required_params::<wire::ThreadRealtimeSessionParams>()?;
+            voice_realtime_stop_value(&state, out_tx, params)
+        }
+        "thread/realtime/listVoices" => {
+            let params = request.required_params::<wire::ThreadRealtimeSessionParams>()?;
+            voice_realtime_list_voices_value(&state, params)
+        }
         "completion/list" => {
             let params = request.required_params::<wire::CompletionListParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;

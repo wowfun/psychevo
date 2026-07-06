@@ -68,6 +68,7 @@ pub use compaction::{
 pub use config::{
     ChannelRuntimeConnection, ChannelSetupInput, ChannelUpdateInput, DEFAULT_WORKSPACE_NAME,
     DEFAULT_WORKSPACE_ROOT, McpServerConfigInput, McpToolPolicyInput, REASONING_EFFORT_VALUES,
+    ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig, ResolvedVoiceTtsConfig,
     ToolsetMutationResult, append_local_permission_allow_rule, append_local_permission_rule,
     auth_status_value, channel_doctor_value, channel_list_value, channel_runtime_connections,
     channel_show_value, channel_summary_value, clear_mcp_oauth_access_token,
@@ -80,12 +81,13 @@ pub use config::{
     normalize_provider_id, permission_rules_value, provider_models_cache_path_for_home,
     read_cached_model_catalog, refresh_model_metadata_cache, remove_config_value,
     remove_local_permission_rule, remove_local_toolset, remove_mcp_server,
-    resolve_default_workspace_cwd, resolve_workspace_root, save_mcp_oauth_access_token,
+    resolve_default_workspace_cwd, resolve_voice_asr_config, resolve_voice_realtime_config,
+    resolve_voice_tts_config, resolve_workspace_root, save_mcp_oauth_access_token,
     selected_configured_model, set_auxiliary_model, set_auxiliary_model_with_reasoning,
     set_channel_enabled, set_config_value, set_default_model, set_default_model_with_reasoning,
     set_local_toolset_enabled, set_mcp_server_enabled, set_mcp_server_tool_policy,
     set_provider_api_key, set_provider_model_config, setup_channel_connection, toolsets_value,
-    update_channel_connection, upsert_channel_connection, upsert_mcp_server,
+    update_channel_connection, upsert_channel_connection, upsert_mcp_server, voice_config_value,
     write_cached_model_catalog,
 };
 pub use context::prune_context;
@@ -143,6 +145,7 @@ pub use psychevo_agent_core::{
 };
 pub use psychevo_ai::AbortSignal;
 pub use psychevo_ai::Outcome;
+pub use psychevo_ai::{VoiceAudioFormat, VoiceRealtimeTransport};
 pub use run::{
     fallback_visible_session_title, reload_session_context, run_live, run_live_streaming,
     run_live_streaming_controlled, spawn_agent_background,

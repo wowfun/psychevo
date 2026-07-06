@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, ExternalLink } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Volume2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   sideInheritedMetadataHidden,
@@ -25,10 +25,12 @@ export interface TranscriptPanelProps {
   entries: TranscriptEntry[];
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
+  onReadAloudText?: ((text: string) => void | Promise<void>) | undefined;
   threadId?: string | null;
 }
 
 type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
+type ReadAloudTextHandler = ((text: string) => void | Promise<void>) | undefined;
 type OpenAgentSessionHandler = ((session: TranscriptAgentSession) => void) | undefined;
 
 const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
@@ -41,7 +43,7 @@ type TranscriptScrollMemory = {
   top: number;
 };
 
-export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSession, threadId }: TranscriptPanelProps) {
+export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSession, onReadAloudText, threadId }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -129,6 +131,7 @@ export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSess
               key={entry.id}
               onCopyText={onCopyText}
               onOpenAgentSession={onOpenAgentSession}
+              onReadAloudText={onReadAloudText}
             />
           ))
         )}
@@ -287,12 +290,14 @@ function TranscriptEntryView({
   activityTick,
   entry,
   onCopyText,
-  onOpenAgentSession
+  onOpenAgentSession,
+  onReadAloudText
 }: {
   activityTick: number;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
   onOpenAgentSession: OpenAgentSessionHandler;
+  onReadAloudText: ReadAloudTextHandler;
 }) {
   return (
     <>
@@ -304,6 +309,7 @@ function TranscriptEntryView({
           key={block.id}
           onCopyText={onCopyText}
           onOpenAgentSession={onOpenAgentSession}
+          onReadAloudText={onReadAloudText}
         />
       ))}
     </>
@@ -315,13 +321,15 @@ function TranscriptBlockView({
   block,
   entry,
   onCopyText,
-  onOpenAgentSession
+  onOpenAgentSession,
+  onReadAloudText
 }: {
   activityTick: number;
   block: TranscriptBlock;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
   onOpenAgentSession: OpenAgentSessionHandler;
+  onReadAloudText: ReadAloudTextHandler;
 }) {
   const text = transcriptBlockText(block);
   const display = evidenceDisplay(block, text);
@@ -370,12 +378,13 @@ function TranscriptBlockView({
         >
           <MarkdownText streaming={block.status === "running"} text={text} />
         </article>
-        {onCopyText && (
+        {(onCopyText || onReadAloudText) && (
           <MessageMeta
             block={block}
             copied={copied}
+            onReadAloud={onReadAloudText ? async () => onReadAloudText(text) : undefined}
             showElapsed
-            onCopy={async () => {
+            onCopy={onCopyText ? async () => {
               try {
                 await onCopyText(text);
                 setCopied(true);
@@ -383,7 +392,7 @@ function TranscriptBlockView({
               } catch {
                 setCopied(false);
               }
-            }}
+            } : undefined}
           />
         )}
       </div>
@@ -545,21 +554,31 @@ function MessageMeta({
   block,
   copied,
   onCopy,
+  onReadAloud,
   showElapsed
 }: {
   block: TranscriptBlock;
   copied: boolean;
-  onCopy(): void | Promise<void>;
+  onCopy?: (() => void | Promise<void>) | undefined;
+  onReadAloud?: (() => void | Promise<void>) | undefined;
   showElapsed: boolean;
 }) {
   const timestamp = transcriptBlockTimestamp(block);
   const elapsed = showElapsed ? transcriptBlockElapsed(block) : null;
   return (
     <div className="pevo-messageMeta" aria-label="Message actions">
-      <button className="pevo-messageCopy" onClick={() => void onCopy()} title="Copy" type="button">
-        {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-        <span className="pevo-srOnly">{copied ? "Copied" : "Copy message"}</span>
-      </button>
+      {onCopy && (
+        <button className="pevo-messageCopy" onClick={() => void onCopy()} title="Copy" type="button">
+          {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+          <span className="pevo-srOnly">{copied ? "Copied" : "Copy message"}</span>
+        </button>
+      )}
+      {onReadAloud && (
+        <button className="pevo-messageCopy" onClick={() => void onReadAloud()} title="Read aloud" type="button">
+          <Volume2 size={14} aria-hidden />
+          <span className="pevo-srOnly">Read aloud</span>
+        </button>
+      )}
       {elapsed && <span className="pevo-messageElapsed">{elapsed}</span>}
       {timestamp && (
         <time className="pevo-messageTime" dateTime={timestamp.iso}>

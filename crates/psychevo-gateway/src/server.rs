@@ -58,12 +58,14 @@ use psychevo_runtime::{
     plugin_uninstall_value, plugin_view_value, read_cached_model_catalog, redo_session,
     remove_config_value, remove_installed_skill, remove_local_toolset, remove_mcp_server,
     render_session_export, resolve_agent_definition, resolve_executable_path,
+    resolve_voice_asr_config, resolve_voice_realtime_config, resolve_voice_tts_config,
     save_mcp_oauth_access_token, selected_configured_model, session_usage_summary,
     set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value,
     set_default_model_with_reasoning, set_local_toolset_enabled, set_mcp_server_enabled,
     set_mcp_server_tool_policy, set_provider_api_key, set_provider_model_config, set_skill_enabled,
     side_conversation_boundary_prompt, side_conversation_session_source, toolsets_value,
     undo_session, upsert_mcp_server, usage_read, valid_agent_name, view_skill_value_selected,
+    voice_config_value,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -90,6 +92,7 @@ mod channels;
 mod commands;
 mod completion;
 mod terminal;
+mod voice;
 mod workspace;
 
 use agents::{
@@ -116,6 +119,13 @@ use commands::{
 use completion::active_completion_token;
 use completion::completion_list_value;
 use terminal::TerminalManager;
+use voice::{
+    RealtimeSessionState, update_voice_policy_for_source, voice_asr_transcribe_value,
+    voice_policy_for_source, voice_policy_read_value, voice_policy_update_value,
+    voice_realtime_append_audio_value, voice_realtime_append_speech_value,
+    voice_realtime_append_text_value, voice_realtime_list_voices_value, voice_realtime_start_value,
+    voice_realtime_stop_value, voice_tts_synthesize_value,
+};
 #[cfg(test)]
 use workspace::workspace_dir_name;
 use workspace::{
@@ -144,6 +154,7 @@ mod tests {
     include!("server/tests/agents_settings.rs");
     include!("server/tests/workspace_commands.rs");
     include!("server/tests/automations.rs");
+    include!("server/tests/voice_rpc.rs");
     include!("server/tests/terminal_launch.rs");
     include!("server/tests/helpers.rs");
 }

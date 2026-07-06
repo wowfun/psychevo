@@ -132,9 +132,12 @@ Tests and development builds should expose projection diagnostics that can fail
 a run without human screenshot inspection. The shared diagnostic vocabulary is
 `duplicateLiveToolIdentity`, `statusDowngradePrevented`,
 `staleOverlayDropped`, `liveAfterTerminalIgnored`, and
-`activeRowAfterTerminal`. Diagnostics are edge evidence, not transcript facts;
-expected diagnostics must be declared by a test, otherwise non-zero counts fail
-the checkpoint.
+`activeRowAfterTerminal`. `activeRowAfterTerminal` applies only when the
+checkpoint has no active turn owner; during active snapshot replay, a
+message-derived tool row may own the visible running state for a matching live
+tool update. Diagnostics are edge evidence, not transcript facts; expected
+diagnostics must be declared by a test, otherwise non-zero counts fail the
+checkpoint.
 
 ## Blocking Actions
 

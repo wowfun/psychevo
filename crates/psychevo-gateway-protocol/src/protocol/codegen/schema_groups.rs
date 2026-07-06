@@ -142,6 +142,12 @@ fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("Transcript") {
         return "transcript";
     }
+    if name.starts_with("Voice")
+        || name.starts_with("Realtime")
+        || name.starts_with("ThreadRealtime")
+    {
+        return "voice";
+    }
     if matches!(
         name,
         "ThreadMutationResult" | "ThreadDeleteResult" | "ThreadListResult"
@@ -306,6 +312,7 @@ fn schema_group_const(module: &str) -> &'static str {
         "turn/result" => "turnResultSchemas",
         "turn/runtime" => "turnRuntimeSchemas",
         "usage" => "usageSchemas",
+        "voice" => "voiceSchemas",
         "workspace/files" => "workspaceFileSchemas",
         "workspace/review" => "workspaceReviewSchemas",
         _ => unreachable!("unknown schema group module"),
@@ -362,6 +369,7 @@ fn schema_group_refs_const(module: &str) -> &'static str {
         "turn/result" => "turnResultSchemaRefs",
         "turn/runtime" => "turnRuntimeSchemaRefs",
         "usage" => "usageSchemaRefs",
+        "voice" => "voiceSchemaRefs",
         "workspace/files" => "workspaceFileSchemaRefs",
         "workspace/review" => "workspaceReviewSchemaRefs",
         _ => unreachable!("unknown schema group module"),

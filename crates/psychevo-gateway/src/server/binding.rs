@@ -238,6 +238,8 @@ struct WebStateInner {
     pending_actions: Mutex<HashMap<String, PendingActionView>>,
     wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
     mcp_oauth_sessions: Mutex<HashMap<String, McpOAuthSession>>,
+    voice_policies: Mutex<HashMap<String, wire::VoicePolicyMode>>,
+    realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
 }
 
@@ -302,6 +304,8 @@ impl WebState {
                 pending_actions: Mutex::new(HashMap::new()),
                 wechat_qr_sessions: Mutex::new(HashMap::new()),
                 mcp_oauth_sessions: Mutex::new(HashMap::new()),
+                voice_policies: Mutex::new(HashMap::new()),
+                realtime_sessions: Mutex::new(HashMap::new()),
                 channel_runtime,
             }),
         };

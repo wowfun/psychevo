@@ -168,6 +168,92 @@ pub(crate) struct ChannelsConfig {
     pub(crate) connections: Vec<ChannelConnectionConfig>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct VoiceConfig {
+    pub(crate) asr: VoiceAsrConfig,
+    pub(crate) tts: VoiceTtsConfig,
+    pub(crate) realtime: Option<VoiceRealtimeConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct VoiceAsrConfig {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) language: Option<String>,
+}
+
+impl Default for VoiceAsrConfig {
+    fn default() -> Self {
+        Self {
+            provider: "xiaomi-token-plan".to_string(),
+            model: "mimo-v2.5-asr".to_string(),
+            language: Some("auto".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct VoiceTtsConfig {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) voice: String,
+    pub(crate) format: VoiceAudioFormat,
+}
+
+impl Default for VoiceTtsConfig {
+    fn default() -> Self {
+        Self {
+            provider: "xiaomi-token-plan".to_string(),
+            model: "mimo-v2.5-tts".to_string(),
+            voice: "mimo_default".to_string(),
+            format: VoiceAudioFormat::Wav,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct VoiceRealtimeConfig {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) transport: VoiceRealtimeTransport,
+    pub(crate) voice: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedVoiceAsrConfig {
+    pub provider: String,
+    pub display_label: String,
+    pub model: String,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub api_key: Option<String>,
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedVoiceTtsConfig {
+    pub provider: String,
+    pub display_label: String,
+    pub model: String,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub api_key: Option<String>,
+    pub voice: String,
+    pub format: VoiceAudioFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedVoiceRealtimeConfig {
+    pub provider: String,
+    pub display_label: String,
+    pub model: String,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub api_key: Option<String>,
+    pub transport: VoiceRealtimeTransport,
+    pub voice: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChannelConnectionConfig {
     pub(crate) id: String,

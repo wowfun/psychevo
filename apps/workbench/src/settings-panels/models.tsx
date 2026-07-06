@@ -26,6 +26,15 @@ type AssignmentDraft = {
   reasoningEffort: string;
 };
 
+type VoiceSettingsRow = {
+  key: "asr" | "tts" | "realtime";
+  label: string;
+  providerLabel: string;
+  model: string;
+  detail: string;
+  credentialStatus: string;
+};
+
 export function ModelsSettingsPanel({
   client,
   disabled,
@@ -323,6 +332,7 @@ export function ModelsSettingsPanel({
           />
         ))}
       </section>
+      <VoiceSettingsPanel voice={settings?.voice ?? null} />
       <section className="modelProvidersPanel" aria-label="Available providers">
         <div className="modelProvidersHeader">
           <div>
@@ -353,6 +363,35 @@ export function ModelsSettingsPanel({
         })}
         {!settings && !loading && <div className="modelSettingsMessage">Model settings unavailable</div>}
       </section>
+    </section>
+  );
+}
+
+function VoiceSettingsPanel({ voice }: { voice: unknown }) {
+  const rows = voiceSettingsRows(voice);
+  return (
+    <section className="voiceSettingsPanel" aria-label="Voice models">
+      <div className="modelProvidersHeader">
+        <div>
+          <strong>Voice</strong>
+          <span>ASR, TTS, realtime</span>
+        </div>
+      </div>
+      {rows.map((row) => (
+        <div className="voiceSettingsRow" key={row.key}>
+          <div className="modelProviderIdentity">
+            <strong>{row.label}</strong>
+            <span>{row.providerLabel}</span>
+          </div>
+          <div className="voiceSettingsModel">
+            <strong>{row.model}</strong>
+            <span>{row.detail}</span>
+          </div>
+          <div className="modelProviderStatus" data-status={row.credentialStatus}>
+            {voiceCredentialStatusLabel(row.credentialStatus)}
+          </div>
+        </div>
+      ))}
     </section>
   );
 }
@@ -393,6 +432,82 @@ function ProviderSummaryRow({
         </ActionButton>
     </div>
   );
+}
+
+function voiceSettingsRows(value: unknown): VoiceSettingsRow[] {
+  const voice = objectValue(value);
+  const asr = objectValue(voice?.asr);
+  const tts = objectValue(voice?.tts);
+  const realtime = objectValue(voice?.realtime);
+  return [
+    {
+      key: "asr",
+      label: "ASR",
+      providerLabel: voiceProviderLabel(asr),
+      model: stringField(asr?.model) ?? "Not configured",
+      detail: `Language ${stringField(asr?.language) ?? "auto"}`,
+      credentialStatus: stringField(asr?.credentialStatus) ?? "missing"
+    },
+    {
+      key: "tts",
+      label: "TTS",
+      providerLabel: voiceProviderLabel(tts),
+      model: stringField(tts?.model) ?? "Not configured",
+      detail: [
+        stringField(tts?.voice),
+        stringField(tts?.format)
+      ].filter(Boolean).join(" / ") || "No voice selected",
+      credentialStatus: stringField(tts?.credentialStatus) ?? "missing"
+    },
+    realtime ? {
+      key: "realtime",
+      label: "Realtime",
+      providerLabel: voiceProviderLabel(realtime),
+      model: stringField(realtime.model) ?? "Not configured",
+      detail: [
+        stringField(realtime.transport),
+        stringField(realtime.voice)
+      ].filter(Boolean).join(" / ") || "Live audio",
+      credentialStatus: stringField(realtime.credentialStatus) ?? "missing"
+    } : {
+      key: "realtime",
+      label: "Realtime",
+      providerLabel: "Not configured",
+      model: "No default",
+      detail: "voice.realtime",
+      credentialStatus: "notConfigured"
+    }
+  ];
+}
+
+function voiceProviderLabel(value: Record<string, unknown> | null): string {
+  if (!value) {
+    return "Not configured";
+  }
+  return stringField(value.providerLabel) ?? stringField(value.provider) ?? "Unknown provider";
+}
+
+function voiceCredentialStatusLabel(status: string): string {
+  switch (status) {
+    case "present":
+      return "API key ready";
+    case "missing":
+      return "Missing key";
+    case "notConfigured":
+      return "Not configured";
+    default:
+      return status;
+  }
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function ProviderEditor({

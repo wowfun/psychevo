@@ -223,3 +223,42 @@
 .runtimeModeHint.is-error {
   color: var(--pevo-danger);
 }
+
+.composerVoiceControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.composerVoiceButton {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.composerVoiceButton:hover:not(:disabled),
+.composerVoiceButton:focus-visible,
+.composerVoiceButton.is-active {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-accent) 8%);
+  border-color: color-mix(in oklch, var(--pevo-border), var(--pevo-accent) 26%);
+}
+
+.composerVoiceButton:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+.composerVoiceButton:disabled {
+  color: var(--pevo-faint);
+  background: var(--pevo-panel-muted);
+  cursor: not-allowed;
+}

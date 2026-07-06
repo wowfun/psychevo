@@ -851,6 +851,26 @@ pub enum ClientRequest {
     ModelStateSet(ModelStateSetParams),
     #[serde(rename = "model/assignment/set")]
     ModelAssignmentSet(ModelAssignmentSetParams),
+    #[serde(rename = "voice/asr/transcribe")]
+    VoiceAsrTranscribe(VoiceAsrTranscribeParams),
+    #[serde(rename = "voice/tts/synthesize")]
+    VoiceTtsSynthesize(VoiceTtsSynthesizeParams),
+    #[serde(rename = "voice/policy/read")]
+    VoicePolicyRead(VoicePolicyReadParams),
+    #[serde(rename = "voice/policy/update")]
+    VoicePolicyUpdate(VoicePolicyUpdateParams),
+    #[serde(rename = "thread/realtime/start")]
+    ThreadRealtimeStart(ThreadRealtimeStartParams),
+    #[serde(rename = "thread/realtime/appendAudio")]
+    ThreadRealtimeAppendAudio(ThreadRealtimeAppendAudioParams),
+    #[serde(rename = "thread/realtime/appendText")]
+    ThreadRealtimeAppendText(ThreadRealtimeAppendTextParams),
+    #[serde(rename = "thread/realtime/appendSpeech")]
+    ThreadRealtimeAppendSpeech(ThreadRealtimeAppendSpeechParams),
+    #[serde(rename = "thread/realtime/stop")]
+    ThreadRealtimeStop(ThreadRealtimeSessionParams),
+    #[serde(rename = "thread/realtime/listVoices")]
+    ThreadRealtimeListVoices(ThreadRealtimeSessionParams),
     #[serde(rename = "workspace/files")]
     WorkspaceFiles(WorkspaceFilesParams),
     #[serde(rename = "workspace/file/read")]
@@ -890,4 +910,20 @@ pub enum ServerNotification {
     TerminalOutput(TerminalOutputPayload),
     #[serde(rename = "terminal/exited")]
     TerminalExited(TerminalExitedPayload),
+    #[serde(rename = "thread/realtime/started")]
+    ThreadRealtimeStarted(ThreadRealtimeStartedNotification),
+    #[serde(rename = "thread/realtime/sdp")]
+    ThreadRealtimeSdp(ThreadRealtimeSdpNotification),
+    #[serde(rename = "thread/realtime/itemAdded")]
+    ThreadRealtimeItemAdded(ThreadRealtimeItemAddedNotification),
+    #[serde(rename = "thread/realtime/transcript/delta")]
+    ThreadRealtimeTranscriptDelta(ThreadRealtimeTranscriptNotification),
+    #[serde(rename = "thread/realtime/transcript/done")]
+    ThreadRealtimeTranscriptDone(ThreadRealtimeTranscriptNotification),
+    #[serde(rename = "thread/realtime/outputAudio/delta")]
+    ThreadRealtimeOutputAudioDelta(ThreadRealtimeOutputAudioDeltaNotification),
+    #[serde(rename = "thread/realtime/error")]
+    ThreadRealtimeError(ThreadRealtimeErrorNotification),
+    #[serde(rename = "thread/realtime/closed")]
+    ThreadRealtimeClosed(ThreadRealtimeClosedNotification),
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryDraftSession } from "@psychevo/components";
 import {
   GatewayClient,
+  latestAssistantTranscriptText,
   scopeForCwd,
   threadTurnStartParams
 } from "@psychevo/client";
@@ -70,6 +71,7 @@ import {
   createBrowserWorkbenchRuntime,
   type WorkbenchRuntimeFactory
 } from "./runtime";
+import { startWavRecorder, type VoiceRecorder } from "./voice-capture";
 import type {
   Appearance,
   BackendDraft,
@@ -168,6 +170,9 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const [usageStatsError, setUsageStatsError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [composerDraftPatch, setComposerDraftPatch] = useState<{ id: number; text: string } | null>(null);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceAutoSpeak, setVoiceAutoSpeak] = useState(false);
+  const [voiceRealtimeSessionId, setVoiceRealtimeSessionId] = useState<string | null>(null);
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [terminalEvents, setTerminalEvents] = useState<TerminalNotificationEvent[]>([]);
   const [latestGatewayEvent, setLatestGatewayEvent] = useState<GatewayEventFeed | null>(null);
@@ -194,6 +199,8 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const detachedShellTokenRef = useRef(0);
   const pendingDetachedShellRef = useRef<PendingDetachedShell | null>(null);
   const skipNextPinnedPersistRef = useRef(false);
+  const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
+  const voiceAutoSpeakKeyRef = useRef<string | null>(null);
 
   const activity = normalizeActivity(snapshot.activity);
   const transcriptEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
@@ -734,6 +741,146 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     await refreshHistory();
   }
 
+  function activeVoiceScope(): GatewayRequestScope {
+    return activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd || fallbackCwd);
+  }
+
+  function setVoiceFeedback(accepted: boolean, command: string, message: string) {
+    setCommandFeedback({
+      accepted,
+      command,
+      message,
+      feedbackAnchor: "composer"
+    });
+  }
+
+  function toggleVoiceDictation() {
+    void runAction(async () => {
+      if (!client) {
+        setVoiceFeedback(false, "voice/asr/transcribe", "Gateway is not connected.");
+        return;
+      }
+      const activeRecorder = voiceRecorderRef.current;
+      if (activeRecorder) {
+        voiceRecorderRef.current = null;
+        setVoiceListening(false);
+        const recording = await activeRecorder.stop();
+        if (recording.durationMs < 150) {
+          setVoiceFeedback(false, "voice/asr/transcribe", "No voice input captured.");
+          return;
+        }
+        const result = await client.request("voice/asr/transcribe", {
+          scope: activeVoiceScope(),
+          audio: {
+            data: recording.data,
+            format: recording.format,
+            mimeType: recording.mimeType
+          },
+          provider: null,
+          model: null,
+          language: null
+        });
+        patchComposerDraft(result.transcript);
+        setVoiceFeedback(true, "voice/asr/transcribe", "Dictation inserted.");
+        return;
+      }
+      voiceRecorderRef.current = await startWavRecorder();
+      setVoiceListening(true);
+      setVoiceFeedback(true, "voice/asr/transcribe", "Listening.");
+    });
+  }
+
+  function toggleVoiceAutoSpeak() {
+    const next = !voiceAutoSpeak;
+    setVoiceAutoSpeak(next);
+    setVoiceFeedback(true, "voice/tts/synthesize", next ? "Auto-speak on." : "Auto-speak off.");
+  }
+
+  function readAloudText(text: string) {
+    void runAction(async () => synthesizeVoiceText(text));
+  }
+
+  function toggleVoiceRealtime() {
+    void runAction(async () => {
+      if (!client) {
+        setVoiceFeedback(false, "thread/realtime/start", "Gateway is not connected.");
+        return;
+      }
+      if (voiceRealtimeSessionId) {
+        const sessionId = voiceRealtimeSessionId;
+        setVoiceRealtimeSessionId(null);
+        await client.request("thread/realtime/stop", { sessionId });
+        setVoiceFeedback(true, "thread/realtime/stop", "Realtime voice stopped.");
+        return;
+      }
+      const threadId = currentThreadId;
+      if (!threadId) {
+        setVoiceFeedback(false, "thread/realtime/start", "Open a thread before starting realtime voice.");
+        return;
+      }
+      const result = await client.request("thread/realtime/start", {
+        threadId,
+        scope: activeVoiceScope(),
+        provider: null,
+        model: null,
+        transport: "webrtc",
+        outputModality: "audio",
+        voice: null,
+        sdpOffer: null
+      });
+      setVoiceRealtimeSessionId(result.sessionId);
+      setVoiceFeedback(true, "thread/realtime/start", "Realtime voice started.");
+    });
+  }
+
+  async function synthesizeVoiceText(text: string) {
+    const trimmed = text.trim();
+    if (!client || !trimmed) {
+      return;
+    }
+    const result = await client.request("voice/tts/synthesize", {
+      scope: activeVoiceScope(),
+      text: trimmed,
+      provider: null,
+      model: null,
+      voice: null,
+      format: "wav"
+    });
+    const AudioCtor = globalThis.Audio;
+    if (!AudioCtor) {
+      throw new Error("Audio playback is not available in this browser.");
+    }
+    const audio = new AudioCtor(`data:${result.audio.mimeType};base64,${result.audio.data}`);
+    await audio.play();
+  }
+
+  useEffect(() => () => {
+    voiceRecorderRef.current?.cancel();
+    voiceRecorderRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!voiceAutoSpeak || running || !client) {
+      return;
+    }
+    const text = latestAssistantTranscriptText(transcriptEntries);
+    if (!text) {
+      return;
+    }
+    const spokenKey = `${currentThreadId ?? "detached"}:${text}`;
+    if (voiceAutoSpeakKeyRef.current === spokenKey) {
+      return;
+    }
+    voiceAutoSpeakKeyRef.current = spokenKey;
+    void runAction(async () => synthesizeVoiceText(text));
+  }, [client, currentThreadId, running, transcriptEntries, voiceAutoSpeak]);
+
+  useEffect(() => {
+    if (voiceRealtimeSessionId) {
+      setVoiceRealtimeSessionId(null);
+    }
+  }, [currentThreadId]);
+
   const { executeCommand, runCommandAlternateAction } = createCommandActions({
     activeScope,
     activity,
@@ -858,6 +1005,9 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     usageStats, usageStatsError, usageStatsLoading, refreshUsageStats,
     clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, startWechatQrSetup, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
     togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateChannel, updateMainView, viewEpochRef, workMode,
+    voiceAutoSpeak, voiceListening, voiceRealtimeActive: Boolean(voiceRealtimeSessionId),
+    onReadAloudText: readAloudText, onVoiceAutoSpeakToggle: toggleVoiceAutoSpeak,
+    onVoiceDictationToggle: toggleVoiceDictation, onVoiceRealtimeToggle: toggleVoiceRealtime,
     workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;
 }

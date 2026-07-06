@@ -102,6 +102,20 @@ describe("TranscriptPanel Markdown rendering", () => {
     fireEvent.click(copyButtons[0] as HTMLElement);
     expect(onCopyText).toHaveBeenCalledWith("# Shared Markdown");
   });
+
+  it("exposes assistant read-aloud at the message level", () => {
+    const block = transcriptBlock({
+      kind: "text",
+      body: "Read this response",
+      metadata: null
+    });
+    const onReadAloudText = vi.fn();
+
+    render(<TranscriptPanel entries={[transcriptEntry([block])]} onReadAloudText={onReadAloudText} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Read aloud" }));
+    expect(onReadAloudText).toHaveBeenCalledWith("Read this response");
+  });
 });
 
 describe("TranscriptPanel inline diff evidence", () => {

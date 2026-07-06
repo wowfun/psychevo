@@ -283,6 +283,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn shared_effect_parses_voice_modes() {
+        let SlashCommandParse::Known(invocation) = parse_slash_command_line("/voice tts") else {
+            panic!("expected known command");
+        };
+        let effect = slash_invocation_effect(
+            &invocation,
+            &[],
+            SlashCommandSurface::Messaging,
+            true,
+        )
+        .expect("voice effect");
+        assert_eq!(effect, SlashCommandEffect::Voice("tts".to_string()));
+
+        let SlashCommandParse::Known(invalid) = parse_slash_command_line("/voice loud") else {
+            panic!("expected known command");
+        };
+        let err = slash_invocation_effect(&invalid, &[], SlashCommandSurface::Messaging, false)
+            .expect_err("invalid voice mode");
+        assert_eq!(err, "usage: /voice <on|tts|off|status>");
+    }
+
+    #[test]
     fn web_desktop_surface_returns_surface_specific_guidance() {
         let SlashCommandParse::Known(invocation) = parse_slash_command_line("/image ./a.png")
         else {

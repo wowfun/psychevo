@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "threadId"
+  ],
+  "title": "ThreadRealtimeStartedNotification",
+  "type": "object"
+}

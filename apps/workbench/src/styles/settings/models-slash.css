@@ -427,7 +427,8 @@
 }
 
 .modelAssignmentPanel,
-.modelProvidersPanel {
+.modelProvidersPanel,
+.voiceSettingsPanel {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -525,6 +526,39 @@
   border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
 }
 
+.voiceSettingsRow {
+  display: grid;
+  grid-template-columns: minmax(116px, 0.24fr) minmax(180px, 1fr) minmax(84px, auto);
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
+}
+
+.voiceSettingsModel {
+  min-width: 0;
+}
+
+.voiceSettingsModel strong {
+  display: block;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voiceSettingsModel span {
+  display: block;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .modelProviderRow button {
   justify-self: end;
   width: auto;
@@ -555,6 +589,18 @@
   color: color-mix(in oklch, #5b638a, var(--pevo-ink) 34%);
   background: color-mix(in oklch, #5b638a, transparent 88%);
   border-color: color-mix(in oklch, #5b638a, transparent 72%);
+}
+
+.modelProviderStatus[data-status="missing"] {
+  color: color-mix(in oklch, #a24830, var(--pevo-ink) 22%);
+  background: color-mix(in oklch, #a24830, transparent 90%);
+  border-color: color-mix(in oklch, #a24830, transparent 74%);
+}
+
+.modelProviderStatus[data-status="notConfigured"] {
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 38%);
+  border-color: color-mix(in oklch, var(--pevo-border), transparent 36%);
 }
 
 .modelProviderEditor {
@@ -686,7 +732,8 @@
   }
 
   .modelAssignmentRow,
-  .modelProviderRow {
+  .modelProviderRow,
+  .voiceSettingsRow {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }

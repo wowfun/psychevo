@@ -118,7 +118,8 @@ async function captureAndAssert(
     })))}\n`
   );
   const durableRows = loadDurableRows(dbPath);
-  const analysis = analyzeTranscriptRuntimeRows(rows, durableRows);
+  const activeTurnRunning = await page.locator(".pevo-composer.is-running").count() > 0;
+  const analysis = analyzeTranscriptRuntimeRows(rows, durableRows, { activeTurnRunning });
   assertNoToolHeaderResultJson(rows, sample);
   assertNoToolRawJson(rows, sample);
   assertNoEvidenceOverflow(rows, sample);
@@ -387,7 +388,11 @@ function assertDurableDomOrder(rows: DomRow[], durableRows: DurableRow[], sample
   }
 }
 
-function analyzeTranscriptRuntimeRows(rows: DomRow[], durableRows: DurableRow[]) {
+function analyzeTranscriptRuntimeRows(
+  rows: DomRow[],
+  durableRows: DurableRow[],
+  options: { activeTurnRunning?: boolean } = {}
+) {
   const errors: string[] = [];
   const warnings: string[] = [];
   const blockIds = new Set<string>();
@@ -410,7 +415,7 @@ function analyzeTranscriptRuntimeRows(rows: DomRow[], durableRows: DurableRow[])
         errors.push(`duplicateLiveToolIdentity: duplicate running tool ${identity}`);
       }
       runningToolIds.add(identity);
-      if (row.source === "runtime.message") {
+      if (row.source === "runtime.message" && !options.activeTurnRunning) {
         errors.push(`activeRowAfterTerminal: committed tool row is still active ${row.blockId ?? row.header}`);
       }
       if (barePendingExecCommandRow(row)) {

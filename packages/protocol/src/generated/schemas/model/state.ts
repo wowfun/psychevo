@@ -526,6 +526,9 @@ export const modelStateSchemas = {
     },
     "scope": {
       "$ref": "#/definitions/ModelSettingsScope"
+    },
+    "voice": {
+      "default": null
     }
   },
   "required": [

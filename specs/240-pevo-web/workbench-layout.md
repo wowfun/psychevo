@@ -259,6 +259,12 @@ non-text files as bounded visible metadata when their contents cannot be
 embedded safely. Attachment chips remain in the composer until the next prompt
 is accepted or the user removes them; attaching files must not require opening
 the right Files tab.
+Voice controls share the same compact composer/transcript control vocabulary:
+mic dictation inserts ASR text into the draft, read-aloud lives on assistant
+messages, auto-speak is off by default, and realtime conversation is a distinct
+thread control with visible live state. These controls are defined by
+[248 Voice ASR/TTS](../248-voice-asr-tts/spec.md) and must not create an
+additional Settings section or a second transcript model.
 The same shared composer provides Web and generic Desktop shell mode. The
 generic Desktop shell reuses this Workbench/Gateway behavior and identifies
 itself through the host/source scope; this topic does not introduce native

@@ -88,6 +88,16 @@ import { clientRequestModelProviderCatalogSchema } from './rpc/client-request/mo
 import { clientRequestModelStateReadSchema } from './rpc/client-request/model-state-read';
 import { clientRequestModelStateSetSchema } from './rpc/client-request/model-state-set';
 import { clientRequestModelAssignmentSetSchema } from './rpc/client-request/model-assignment-set';
+import { clientRequestVoiceAsrTranscribeSchema } from './rpc/client-request/voice-asr-transcribe';
+import { clientRequestVoiceTtsSynthesizeSchema } from './rpc/client-request/voice-tts-synthesize';
+import { clientRequestVoicePolicyReadSchema } from './rpc/client-request/voice-policy-read';
+import { clientRequestVoicePolicyUpdateSchema } from './rpc/client-request/voice-policy-update';
+import { clientRequestThreadRealtimeStartSchema } from './rpc/client-request/thread-realtime-start';
+import { clientRequestThreadRealtimeAppendAudioSchema } from './rpc/client-request/thread-realtime-append-audio';
+import { clientRequestThreadRealtimeAppendTextSchema } from './rpc/client-request/thread-realtime-append-text';
+import { clientRequestThreadRealtimeAppendSpeechSchema } from './rpc/client-request/thread-realtime-append-speech';
+import { clientRequestThreadRealtimeStopSchema } from './rpc/client-request/thread-realtime-stop';
+import { clientRequestThreadRealtimeListVoicesSchema } from './rpc/client-request/thread-realtime-list-voices';
 import { clientRequestWorkspaceFilesSchema } from './rpc/client-request/workspace-files';
 import { clientRequestWorkspaceFileReadSchema } from './rpc/client-request/workspace-file-read';
 import { clientRequestWorkspaceFileWriteSchema } from './rpc/client-request/workspace-file-write';
@@ -105,6 +115,14 @@ import { serverNotificationShellResultSchema } from './rpc/server-notification/s
 import { serverNotificationShellErrorSchema } from './rpc/server-notification/shell-error';
 import { serverNotificationTerminalOutputSchema } from './rpc/server-notification/terminal-output';
 import { serverNotificationTerminalExitedSchema } from './rpc/server-notification/terminal-exited';
+import { serverNotificationThreadRealtimeStartedSchema } from './rpc/server-notification/thread-realtime-started';
+import { serverNotificationThreadRealtimeSdpSchema } from './rpc/server-notification/thread-realtime-sdp';
+import { serverNotificationThreadRealtimeItemAddedSchema } from './rpc/server-notification/thread-realtime-item-added';
+import { serverNotificationThreadRealtimeTranscriptDeltaSchema } from './rpc/server-notification/thread-realtime-transcript-delta';
+import { serverNotificationThreadRealtimeTranscriptDoneSchema } from './rpc/server-notification/thread-realtime-transcript-done';
+import { serverNotificationThreadRealtimeOutputAudioDeltaSchema } from './rpc/server-notification/thread-realtime-output-audio-delta';
+import { serverNotificationThreadRealtimeErrorSchema } from './rpc/server-notification/thread-realtime-error';
+import { serverNotificationThreadRealtimeClosedSchema } from './rpc/server-notification/thread-realtime-closed';
 
 export const rpcSchemas = {
   JsonRpcId: {
@@ -563,6 +581,36 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/model-assignment-set.json"
     },
     {
+      "$ref": "ClientRequest/voice-asr-transcribe.json"
+    },
+    {
+      "$ref": "ClientRequest/voice-tts-synthesize.json"
+    },
+    {
+      "$ref": "ClientRequest/voice-policy-read.json"
+    },
+    {
+      "$ref": "ClientRequest/voice-policy-update.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-start.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-append-audio.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-append-text.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-append-speech.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-stop.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-list-voices.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-files.json"
     },
     {
@@ -618,6 +666,30 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ServerNotification/terminal-exited.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-started.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-sdp.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-item-added.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-transcript-delta.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-transcript-done.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-output-audio-delta.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-error.json"
+    },
+    {
+      "$ref": "ServerNotification/thread-realtime-closed.json"
     }
   ],
   "title": "ServerNotification"
@@ -713,6 +785,16 @@ export const rpcSchemaRefs = [
   clientRequestModelStateReadSchema,
   clientRequestModelStateSetSchema,
   clientRequestModelAssignmentSetSchema,
+  clientRequestVoiceAsrTranscribeSchema,
+  clientRequestVoiceTtsSynthesizeSchema,
+  clientRequestVoicePolicyReadSchema,
+  clientRequestVoicePolicyUpdateSchema,
+  clientRequestThreadRealtimeStartSchema,
+  clientRequestThreadRealtimeAppendAudioSchema,
+  clientRequestThreadRealtimeAppendTextSchema,
+  clientRequestThreadRealtimeAppendSpeechSchema,
+  clientRequestThreadRealtimeStopSchema,
+  clientRequestThreadRealtimeListVoicesSchema,
   clientRequestWorkspaceFilesSchema,
   clientRequestWorkspaceFileReadSchema,
   clientRequestWorkspaceFileWriteSchema,
@@ -730,4 +812,12 @@ export const rpcSchemaRefs = [
   serverNotificationShellErrorSchema,
   serverNotificationTerminalOutputSchema,
   serverNotificationTerminalExitedSchema,
+  serverNotificationThreadRealtimeStartedSchema,
+  serverNotificationThreadRealtimeSdpSchema,
+  serverNotificationThreadRealtimeItemAddedSchema,
+  serverNotificationThreadRealtimeTranscriptDeltaSchema,
+  serverNotificationThreadRealtimeTranscriptDoneSchema,
+  serverNotificationThreadRealtimeOutputAudioDeltaSchema,
+  serverNotificationThreadRealtimeErrorSchema,
+  serverNotificationThreadRealtimeClosedSchema,
 ] as const;

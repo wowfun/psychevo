@@ -378,6 +378,11 @@ pub fn slash_invocation_effect(
             "cancel" => Ok(SlashCommandEffect::PendingCancel),
             _ => Err(format!("usage: {}", spec.usage)),
         },
+        SlashCommandAction::Voice => Ok(SlashCommandEffect::Voice(parse_single_value(
+            spec,
+            &invocation.args,
+            validate_voice_mode,
+        )?)),
         SlashCommandAction::ModelShow => parse_model_effect(spec, &invocation.args),
         SlashCommandAction::VariantSet => Ok(SlashCommandEffect::SetVariant(parse_single_value(
             spec,
@@ -637,4 +642,8 @@ pub(crate) fn validate_variant(value: &str) -> bool {
 
 pub(crate) fn validate_mode(value: &str) -> bool {
     matches!(value, "plan" | "default")
+}
+
+pub(crate) fn validate_voice_mode(value: &str) -> bool {
+    matches!(value, "on" | "tts" | "off" | "status")
 }

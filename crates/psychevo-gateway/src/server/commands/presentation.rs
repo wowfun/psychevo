@@ -18,6 +18,7 @@ pub(super) fn web_desktop_command_visible(command: &AvailableSlashCommand) -> bo
             | SlashCommandAction::Compact
             | SlashCommandAction::Export
             | SlashCommandAction::Share
+            | SlashCommandAction::Voice
             | SlashCommandAction::Undo
             | SlashCommandAction::Redo
             | SlashCommandAction::SkillInvoke
@@ -44,6 +45,7 @@ fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
             | SlashCommandAction::Compact
             | SlashCommandAction::Export
             | SlashCommandAction::Share
+            | SlashCommandAction::Voice
             | SlashCommandAction::Undo
             | SlashCommandAction::Redo
             | SlashCommandAction::SkillInvoke

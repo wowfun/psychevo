@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "VoiceAudioFormat": {
+      "enum": [
+        "wav",
+        "mp3",
+        "pcm16"
+      ],
+      "type": "string"
+    },
+    "VoiceAudioOutput": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/definitions/VoiceAudioFormat"
+        },
+        "mimeType": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "data",
+        "format",
+        "mimeType"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "audio": {
+      "$ref": "#/definitions/VoiceAudioOutput"
+    },
+    "metadata": {
+      "default": null
+    },
+    "model": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "voice": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "audio",
+    "model",
+    "provider",
+    "voice"
+  ],
+  "title": "VoiceTtsSynthesizeResult",
+  "type": "object"
+}

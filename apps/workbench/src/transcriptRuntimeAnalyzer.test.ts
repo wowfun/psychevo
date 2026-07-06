@@ -35,4 +35,32 @@ describe("transcript runtime analyzer", () => {
 
     expect(analysis.errors).toEqual([]);
   });
+
+  it("allows active message-derived tool rows to own a running live update", () => {
+    const analysis = analyzeTranscriptRuntimeRows([
+      row({
+        header: "exec_command python fetch.py 34s",
+        running: true,
+        status: "34s",
+        text: "exec_command python fetch.py 34s"
+      })
+    ], { activeTurnRunning: true });
+
+    expect(analysis.errors).toEqual([]);
+  });
+
+  it("flags message-derived running tool rows after activity has settled", () => {
+    const analysis = analyzeTranscriptRuntimeRows([
+      row({
+        header: "exec_command python fetch.py 34s",
+        running: true,
+        status: "34s",
+        text: "exec_command python fetch.py 34s"
+      })
+    ]);
+
+    expect(analysis.errors).toContain(
+      "activeRowAfterTerminal: committed tool row is still active block-1"
+    );
+  });
 });

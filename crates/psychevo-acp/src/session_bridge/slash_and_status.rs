@@ -302,6 +302,11 @@ impl PsychevoAcpAgent {
                 session_id,
                 "/sandbox is not available in ACP yet.",
             )),
+            SlashCommandEffect::Voice(_) => Ok(send_slash_text(
+                cx,
+                session_id,
+                "/voice is not available in ACP.",
+            )),
             SlashCommandEffect::Unsupported(text) => Ok(send_slash_text(cx, session_id, text)),
         }
     }

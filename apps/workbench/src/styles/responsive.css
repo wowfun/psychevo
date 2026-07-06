@@ -163,6 +163,10 @@
     gap: 4px;
   }
 
+  .composerVoiceControls {
+    flex: 0 0 auto;
+  }
+
   .agentRuntimeButton {
     max-width: min(190px, calc(100vw - 112px));
   }

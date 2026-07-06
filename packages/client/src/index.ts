@@ -106,6 +106,14 @@ import {
   type TerminalStartResult,
   type TerminalTerminateParams,
   type TerminalWriteParams,
+  type ThreadRealtimeAppendAudioParams,
+  type ThreadRealtimeAppendSpeechParams,
+  type ThreadRealtimeAppendTextParams,
+  type ThreadRealtimeListVoicesResult,
+  type ThreadRealtimeMutationResult,
+  type ThreadRealtimeSessionParams,
+  type ThreadRealtimeStartParams,
+  type ThreadRealtimeStartResult,
   type ToolCreateParams,
   type ToolListParams,
   type ToolReadParams,
@@ -132,6 +140,13 @@ import {
   type TurnTakeoverResult,
   type UsageReadParams,
   type UsageReadResult,
+  type VoiceAsrTranscribeParams,
+  type VoiceAsrTranscribeResult,
+  type VoicePolicyReadParams,
+  type VoicePolicyResult,
+  type VoicePolicyUpdateParams,
+  type VoiceTtsSynthesizeParams,
+  type VoiceTtsSynthesizeResult,
   type WorkspaceChangeFileParams,
   type WorkspaceChangeMutationResult,
   type WorkspaceChangesParams,
@@ -280,10 +295,20 @@ export interface GatewayRequestParams {
   "thread/resume": ThreadResumeParams;
   "thread/start": ThreadStartParams;
   "thread/trace": ThreadTraceParams;
+  "thread/realtime/appendAudio": ThreadRealtimeAppendAudioParams;
+  "thread/realtime/appendSpeech": ThreadRealtimeAppendSpeechParams;
+  "thread/realtime/appendText": ThreadRealtimeAppendTextParams;
+  "thread/realtime/listVoices": ThreadRealtimeSessionParams;
+  "thread/realtime/start": ThreadRealtimeStartParams;
+  "thread/realtime/stop": ThreadRealtimeSessionParams;
   "turn/interrupt": { sourceKey?: string | null; threadId?: string | null };
   "turn/start": TurnStartParams;
   "turn/steer": TurnSteerParams;
   "turn/takeover": { sourceKey?: string | null; threadId?: string | null };
+  "voice/asr/transcribe": VoiceAsrTranscribeParams;
+  "voice/policy/read": VoicePolicyReadParams;
+  "voice/policy/update": VoicePolicyUpdateParams;
+  "voice/tts/synthesize": VoiceTtsSynthesizeParams;
   "workspace/change/accept": WorkspaceChangeFileParams;
   "workspace/change/reject": WorkspaceChangeFileParams;
   "workspace/changes": WorkspaceChangesParams;
@@ -382,10 +407,20 @@ export interface GatewayRequestResults {
   "thread/resume": ThreadSnapshot;
   "thread/start": ThreadSnapshot;
   "thread/trace": ThreadTraceResult;
+  "thread/realtime/appendAudio": ThreadRealtimeMutationResult;
+  "thread/realtime/appendSpeech": ThreadRealtimeMutationResult;
+  "thread/realtime/appendText": ThreadRealtimeMutationResult;
+  "thread/realtime/listVoices": ThreadRealtimeListVoicesResult;
+  "thread/realtime/start": ThreadRealtimeStartResult;
+  "thread/realtime/stop": ThreadRealtimeMutationResult;
   "turn/interrupt": TurnControlResult;
   "turn/start": TurnStartResult;
   "turn/steer": TurnControlResult;
   "turn/takeover": TurnTakeoverResult;
+  "voice/asr/transcribe": VoiceAsrTranscribeResult;
+  "voice/policy/read": VoicePolicyResult;
+  "voice/policy/update": VoicePolicyResult;
+  "voice/tts/synthesize": VoiceTtsSynthesizeResult;
   "workspace/change/accept": WorkspaceChangeMutationResult;
   "workspace/change/reject": WorkspaceChangeMutationResult;
   "workspace/changes": WorkspaceChangesResult;

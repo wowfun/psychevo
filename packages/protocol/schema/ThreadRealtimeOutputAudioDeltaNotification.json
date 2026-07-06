@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "VoiceAudioFormat": {
+      "enum": [
+        "wav",
+        "mp3",
+        "pcm16"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "data": {
+      "type": "string"
+    },
+    "format": {
+      "$ref": "#/definitions/VoiceAudioFormat"
+    },
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "data",
+    "format",
+    "sessionId"
+  ],
+  "title": "ThreadRealtimeOutputAudioDeltaNotification",
+  "type": "object"
+}

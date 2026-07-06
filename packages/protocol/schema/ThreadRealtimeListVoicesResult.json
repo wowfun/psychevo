@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadRealtimeVoiceView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "voices": {
+      "items": {
+        "$ref": "#/definitions/ThreadRealtimeVoiceView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "voices"
+  ],
+  "title": "ThreadRealtimeListVoicesResult",
+  "type": "object"
+}

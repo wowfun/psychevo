@@ -13,6 +13,10 @@ pub use resolution::*;
 mod channels;
 #[allow(unused_imports)]
 pub use channels::*;
+#[path = "config/voice.rs"]
+mod voice;
+#[allow(unused_imports)]
+pub use voice::*;
 
 #[test]
 fn profile_mcp_servers_parse_stdio_and_http_descriptors() {

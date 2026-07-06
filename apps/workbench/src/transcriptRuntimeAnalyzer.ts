@@ -15,7 +15,14 @@ export type TranscriptRuntimeAnalysis = {
   warnings: string[];
 };
 
-export function analyzeTranscriptRuntimeRows(rows: TranscriptRuntimeRowSample[]): TranscriptRuntimeAnalysis {
+export type TranscriptRuntimeAnalysisOptions = {
+  activeTurnRunning?: boolean;
+};
+
+export function analyzeTranscriptRuntimeRows(
+  rows: TranscriptRuntimeRowSample[],
+  options: TranscriptRuntimeAnalysisOptions = {}
+): TranscriptRuntimeAnalysis {
   const errors: string[] = [];
   const warnings: string[] = [];
   const blockIds = new Set<string>();
@@ -35,7 +42,7 @@ export function analyzeTranscriptRuntimeRows(rows: TranscriptRuntimeRowSample[])
       }
       runningToolBlocks.add(identity);
     }
-    if (row.kind === "tool" && row.running && row.source === "runtime.message") {
+    if (row.kind === "tool" && row.running && row.source === "runtime.message" && !options.activeTurnRunning) {
       errors.push(`activeRowAfterTerminal: committed tool row is still active ${row.blockId ?? row.header}`);
     }
     if (row.kind === "tool" && row.status === "pending" && row.source === "runtime.message") {

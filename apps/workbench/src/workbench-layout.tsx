@@ -6,6 +6,7 @@ import { WorkspaceCreateDialog, LeftUtilityRail, MainSurface, PinnedPanel } from
 import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
 import { ComposerRequests, ComposerStatusLine, ComposerSubmitControls } from "./composer-controls";
 import { ComposerRuntimeControls } from "./runtime-controls";
+import { ComposerVoiceControls } from "./voice-controls";
 import { RightWorkspace, rightWorkspaceTabLabel } from "./right-workspace";
 import { DEFAULT_RIGHT_WIDTH_PX } from "./storage";
 import { EMPTY_BACKEND_DRAFT, backendDraftFromBackend } from "./settings-panels";
@@ -160,6 +161,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
     togglePinnedSession,
     traceState,
     transcriptEntries,
+    voiceAutoSpeak,
+    voiceListening,
+    voiceRealtimeActive,
     updateBackendDraftFields,
     updateChannel,
     updateMainView,
@@ -172,7 +176,11 @@ export function WorkbenchLayout(props: Record<string, any>) {
     workspaceDiff,
     workspaceFiles,
     acceptWorkspaceChange,
-    clearCommandTransientUi
+    clearCommandTransientUi,
+    onReadAloudText,
+    onVoiceAutoSpeakToggle,
+    onVoiceDictationToggle,
+    onVoiceRealtimeToggle
   } = props;
 
   return (
@@ -425,6 +433,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   onCopyText={copyText}
                   onOpenAgentSession={openAgentSessionTab}
                   threadId={snapshot.thread?.id ?? null}
+                  onReadAloudText={onReadAloudText}
                 />
               )}
             />
@@ -467,33 +476,44 @@ export function WorkbenchLayout(props: Record<string, any>) {
               disabled={disabled}
               draftPatch={props.composerDraftPatch ?? undefined}
               leftControls={(
-                <ComposerRuntimeControls
-                  agents={runnableAgents}
-                  runtimeBackends={runtimeBackends}
-                  disabled={disabled}
-                  agentValue={selectedAgentName}
-                  runtimeValue={selectedRuntimeRef}
-                  runtimeModeValue={selectedRuntimeMode}
-                  runtimeModeOption={runtimeModeOption}
-                  runtimeModeValues={extraRuntimeModeValues}
-                  runtimeModeError={runtimeOptionsError}
-                  runtimeModeUnavailable={Boolean(runtimeModeUnavailable)}
-                  agentPersonaEnabled={runtimeAcceptsAgentPersona}
-                  onAgentChange={(value) => void runAction(async () => changeAgentSelection(value))}
-                  onRuntimeChange={(value) => {
-                    setSelectedRuntimeRef(value);
-                    setRuntimeSessionId(null);
-                    setRuntimeOptionsResult(null);
-                    setRuntimeOptionsError(null);
-                    setSelectedRuntimeMode("");
-                  }}
-                  onRuntimeModeChange={(value) => {
-                    setSelectedRuntimeMode(value);
-                    if (value) {
-                      setWorkMode("default");
-                    }
-                  }}
-                />
+                <>
+                  <ComposerRuntimeControls
+                    agents={runnableAgents}
+                    runtimeBackends={runtimeBackends}
+                    disabled={disabled}
+                    agentValue={selectedAgentName}
+                    runtimeValue={selectedRuntimeRef}
+                    runtimeModeValue={selectedRuntimeMode}
+                    runtimeModeOption={runtimeModeOption}
+                    runtimeModeValues={extraRuntimeModeValues}
+                    runtimeModeError={runtimeOptionsError}
+                    runtimeModeUnavailable={Boolean(runtimeModeUnavailable)}
+                    agentPersonaEnabled={runtimeAcceptsAgentPersona}
+                    onAgentChange={(value) => void runAction(async () => changeAgentSelection(value))}
+                    onRuntimeChange={(value) => {
+                      setSelectedRuntimeRef(value);
+                      setRuntimeSessionId(null);
+                      setRuntimeOptionsResult(null);
+                      setRuntimeOptionsError(null);
+                      setSelectedRuntimeMode("");
+                    }}
+                    onRuntimeModeChange={(value) => {
+                      setSelectedRuntimeMode(value);
+                      if (value) {
+                        setWorkMode("default");
+                      }
+                    }}
+                  />
+                  <ComposerVoiceControls
+                    autoSpeak={Boolean(voiceAutoSpeak)}
+                    disabled={disabled}
+                    listening={Boolean(voiceListening)}
+                    realtimeActive={Boolean(voiceRealtimeActive)}
+                    onToggleAutoSpeak={onVoiceAutoSpeakToggle}
+                    onToggleDictation={onVoiceDictationToggle}
+                    onToggleRealtime={onVoiceRealtimeToggle}
+                  />
+                </>
               )}
               mode={workMode}
               planModeAvailable={planModeAvailable}

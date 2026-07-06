@@ -48,6 +48,7 @@ import { turnControlSchemas } from './turn/control';
 import { turnResultSchemas } from './turn/result';
 import { turnRuntimeSchemas } from './turn/runtime';
 import { usageSchemas } from './usage';
+import { voiceSchemas } from './voice';
 import { workspaceFileSchemas } from './workspace/files';
 import { workspaceReviewSchemas } from './workspace/review';
 
@@ -190,6 +191,35 @@ export const gatewaySchemas = {
   ChannelDoctorCheck: gatewayChannelDoctorSchemas.ChannelDoctorCheck,
   ChannelDoctorChannelView: gatewayChannelDoctorSchemas.ChannelDoctorChannelView,
   ChannelDoctorResult: gatewayChannelDoctorSchemas.ChannelDoctorResult,
+  VoiceAudioFormat: voiceSchemas.VoiceAudioFormat,
+  VoicePolicyMode: voiceSchemas.VoicePolicyMode,
+  RealtimeTransport: voiceSchemas.RealtimeTransport,
+  RealtimeOutputModality: voiceSchemas.RealtimeOutputModality,
+  VoiceAudioInput: voiceSchemas.VoiceAudioInput,
+  VoiceAudioOutput: voiceSchemas.VoiceAudioOutput,
+  VoiceAsrTranscribeParams: voiceSchemas.VoiceAsrTranscribeParams,
+  VoiceAsrTranscribeResult: voiceSchemas.VoiceAsrTranscribeResult,
+  VoiceTtsSynthesizeParams: voiceSchemas.VoiceTtsSynthesizeParams,
+  VoiceTtsSynthesizeResult: voiceSchemas.VoiceTtsSynthesizeResult,
+  VoicePolicyReadParams: voiceSchemas.VoicePolicyReadParams,
+  VoicePolicyUpdateParams: voiceSchemas.VoicePolicyUpdateParams,
+  VoicePolicyResult: voiceSchemas.VoicePolicyResult,
+  ThreadRealtimeStartParams: voiceSchemas.ThreadRealtimeStartParams,
+  ThreadRealtimeSessionParams: voiceSchemas.ThreadRealtimeSessionParams,
+  ThreadRealtimeAppendAudioParams: voiceSchemas.ThreadRealtimeAppendAudioParams,
+  ThreadRealtimeAppendTextParams: voiceSchemas.ThreadRealtimeAppendTextParams,
+  ThreadRealtimeAppendSpeechParams: voiceSchemas.ThreadRealtimeAppendSpeechParams,
+  ThreadRealtimeStartResult: voiceSchemas.ThreadRealtimeStartResult,
+  ThreadRealtimeMutationResult: voiceSchemas.ThreadRealtimeMutationResult,
+  ThreadRealtimeVoiceView: voiceSchemas.ThreadRealtimeVoiceView,
+  ThreadRealtimeListVoicesResult: voiceSchemas.ThreadRealtimeListVoicesResult,
+  ThreadRealtimeStartedNotification: voiceSchemas.ThreadRealtimeStartedNotification,
+  ThreadRealtimeSdpNotification: voiceSchemas.ThreadRealtimeSdpNotification,
+  ThreadRealtimeItemAddedNotification: voiceSchemas.ThreadRealtimeItemAddedNotification,
+  ThreadRealtimeTranscriptNotification: voiceSchemas.ThreadRealtimeTranscriptNotification,
+  ThreadRealtimeOutputAudioDeltaNotification: voiceSchemas.ThreadRealtimeOutputAudioDeltaNotification,
+  ThreadRealtimeErrorNotification: voiceSchemas.ThreadRealtimeErrorNotification,
+  ThreadRealtimeClosedNotification: voiceSchemas.ThreadRealtimeClosedNotification,
   ShellStartParams: shellSchemas.ShellStartParams,
   ShellStartResult: shellSchemas.ShellStartResult,
   TerminalStartParams: systemTerminalSchemas.TerminalStartParams,

@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "VoicePolicyMode": {
+      "enum": [
+        "off",
+        "voiceOnly",
+        "all"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "mode": {
+      "$ref": "#/definitions/VoicePolicyMode"
+    },
+    "target": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "mode",
+    "target"
+  ],
+  "title": "VoicePolicyResult",
+  "type": "object"
+}

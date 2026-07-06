@@ -394,6 +394,9 @@ pub(crate) fn parse_registered_slash_command(
         }
         SlashCommandAction::Fork => parse_fork_command(spec, rest),
         SlashCommandAction::Compact => Ok(SlashCommand::Compact(parse_optional_trailing(rest))),
+        SlashCommandAction::Voice => Err(anyhow!(
+            "/voice is available in Workbench and messaging channels."
+        )),
         SlashCommandAction::SkillInvoke => {
             unreachable!("dynamic skill commands are parsed before registry dispatch")
         }

@@ -22,6 +22,8 @@ cost semantics belong to [120 Provider Registry](../120-provider-registry/spec.m
 - explicit model catalog fetch UX and immediate option propagation
 - global/profile default model assignment
 - auxiliary model assignments for title generation and context compression
+- ASR, TTS, and realtime voice provider selections under `voice.*`, owned by
+  [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md)
 
 Out of scope:
 
@@ -125,6 +127,12 @@ The page offers independent save controls for:
 - provider/model setup, persisted under `provider.<id>` and
   `provider.<id>.models.<model_id>`
 
+Voice provider rows are shown in Settings > Models as compact assignments, not
+as a separate Voice settings page. ASR and TTS use the existing provider
+credential model and default to Xiaomi Token Plan when absent; realtime has no
+default and stays unavailable until explicitly configured under
+`voice.realtime`.
+
 Each assignment row uses catalog-backed pickers only. The GUI does not support
 manual model-id text entry. A model picker is paired with a reasoning-effort
 picker derived from the selected model's capability metadata; `none` is shown as
@@ -179,3 +187,5 @@ leave partially typed secrets in frontend state after successful save.
 - [057 Profiles](../057-profiles/spec.md) defines the active profile home that
   owns global config and shared model state.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines CLI model and auth commands.
+- [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md) defines ASR, TTS, and
+  realtime voice config semantics.

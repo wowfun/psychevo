@@ -79,6 +79,7 @@ pub enum SlashCommandEffect {
     Btw {
         prompt: Option<String>,
     },
+    Voice(String),
     Unsupported(String),
 }
 

@@ -207,6 +207,9 @@ pub struct ModelSettingsResult {
     pub providers: Vec<ModelProviderView>,
     pub auxiliary: Vec<AuxiliaryModelAssignmentView>,
     pub model_options: Vec<ModelOptionView>,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub voice: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

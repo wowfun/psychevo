@@ -209,6 +209,13 @@ fn command_result_from_effect(
             let status = psychevo_runtime::sandbox_status_text(&options, RunMode::Default)?;
             Ok(command_accepted_message(raw, action, Some(status)))
         }
+        SlashCommandEffect::Voice(mode) => Ok(command_voice_result(
+            state,
+            scope,
+            raw,
+            action,
+            &mode,
+        )),
         SlashCommandEffect::Undo => Ok(command_session_undo(state, scope, raw, action, thread_id)),
         SlashCommandEffect::Redo => Ok(command_session_redo(state, scope, raw, action, thread_id)),
         SlashCommandEffect::Unsupported(message) => Ok(command_unsupported(raw, action, message)),
@@ -229,6 +236,44 @@ fn command_result_from_effect(
             action,
             web_desktop_unavailable_message(raw.split_whitespace().next().unwrap_or(raw), action),
         )),
+    }
+}
+
+fn command_voice_result(
+    state: &WebState,
+    scope: &ResolvedScope,
+    raw: &str,
+    action: SlashCommandAction,
+    mode: &str,
+) -> wire::CommandExecuteResult {
+    let policy = match mode {
+        "status" => voice_policy_for_source(state, &scope.source),
+        "on" => {
+            update_voice_policy_for_source(state, &scope.source, wire::VoicePolicyMode::VoiceOnly);
+            wire::VoicePolicyMode::VoiceOnly
+        }
+        "tts" => {
+            update_voice_policy_for_source(state, &scope.source, wire::VoicePolicyMode::All);
+            wire::VoicePolicyMode::All
+        }
+        "off" => {
+            update_voice_policy_for_source(state, &scope.source, wire::VoicePolicyMode::Off);
+            wire::VoicePolicyMode::Off
+        }
+        _ => return command_unsupported(raw, action, "usage: /voice <on|tts|off|status>".to_string()),
+    };
+    command_accepted_message(raw, action, Some(voice_policy_message(policy)))
+}
+
+fn voice_policy_message(mode: wire::VoicePolicyMode) -> String {
+    match mode {
+        wire::VoicePolicyMode::Off => "Voice replies are off.".to_string(),
+        wire::VoicePolicyMode::VoiceOnly => {
+            "Voice replies will follow voice inputs. Text fallback remains active.".to_string()
+        }
+        wire::VoicePolicyMode::All => {
+            "Voice replies are on for all replies. Text fallback remains active.".to_string()
+        }
     }
 }
 

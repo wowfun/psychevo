@@ -67,6 +67,9 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(channels) = object.get("channels") {
         config.channels = parse_channels_config(channels)?;
     }
+    if let Some(voice) = object.get("voice") {
+        config.voice = parse_voice_config(voice)?;
+    }
     if let Some(plugins) = object.get("plugins") {
         config.plugins = parse_plugin_policy_config(plugins)?;
     }

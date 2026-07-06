@@ -258,6 +258,65 @@ async fn channel_help_command_replies_without_running_gateway_turn() {
 }
 
 #[tokio::test]
+async fn channel_voice_command_updates_source_policy() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let backend = Arc::new(TestBackend::default());
+    let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let gateway = Gateway::with_backend(state_runtime, backend);
+    let state = WebState::new(GatewayWebServerConfig::new(
+        gateway,
+        home,
+        cwd,
+        None,
+        BTreeMap::new(),
+        temp.path().join("static"),
+    ));
+    let adapter = FakeImAdapter::new("wechat");
+    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+        "wechat",
+        Arc::new(adapter.clone()),
+        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+    )]);
+    let runtime = ChannelRuntimeState::new(temp.path());
+    let connection = ready_wechat_connection(None);
+    let message = wechat_message("/voice on", "wx-voice-on");
+    let source = gateway_source_for_im(&message);
+
+    handle_channel_message(&state, &runtime, &connection, &channel_gateway, message)
+        .await
+        .expect("voice handled");
+
+    let sent = wait_for_sent(&adapter, 1).await;
+    assert_eq!(
+        sent[0].text,
+        "Voice replies will follow voice inputs. Text fallback remains active."
+    );
+    assert_eq!(
+        voice_policy_for_source(&state, &source),
+        wire::VoicePolicyMode::VoiceOnly
+    );
+
+    handle_channel_message(
+        &state,
+        &runtime,
+        &connection,
+        &channel_gateway,
+        wechat_message("/voice off", "wx-voice-off"),
+    )
+    .await
+    .expect("voice off handled");
+    let sent = wait_for_sent(&adapter, 2).await;
+    assert_eq!(sent[1].text, "Voice replies are off.");
+    assert_eq!(
+        voice_policy_for_source(&state, &source),
+        wire::VoicePolicyMode::Off
+    );
+}
+
+#[tokio::test]
 async fn channel_shared_compact_command_runs_gateway_turn() {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");

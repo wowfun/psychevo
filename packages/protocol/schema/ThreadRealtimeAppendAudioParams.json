@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "VoiceAudioFormat": {
+      "enum": [
+        "wav",
+        "mp3",
+        "pcm16"
+      ],
+      "type": "string"
+    },
+    "VoiceAudioInput": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/definitions/VoiceAudioFormat"
+        },
+        "mimeType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data",
+        "format"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "audio": {
+      "$ref": "#/definitions/VoiceAudioInput"
+    },
+    "channels": {
+      "default": null,
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sampleRate": {
+      "default": null,
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "audio",
+    "sessionId"
+  ],
+  "title": "ThreadRealtimeAppendAudioParams",
+  "type": "object"
+}

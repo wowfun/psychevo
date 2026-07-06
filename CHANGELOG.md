@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-07-06
+
+- Added voice ASR/TTS policy, fake providers, Gateway and realtime RPCs,
+  Workbench controls, and `/voice` commands with text fallback.
+
 ## 2026-07-05
 
 - Added shared design-system assets, switch/form primitives, and Markdown

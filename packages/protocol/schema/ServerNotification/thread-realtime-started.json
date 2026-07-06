@@ -1,0 +1,38 @@
+{
+  "$id": "ServerNotification/thread-realtime-started.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadRealtimeStartedNotification": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "threadId"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "thread/realtime/started"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/ThreadRealtimeStartedNotification"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ServerNotification thread/realtime/started",
+  "type": "object"
+}

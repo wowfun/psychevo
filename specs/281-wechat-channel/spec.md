@@ -115,8 +115,11 @@ Media support has a stricter implementation gate than text:
 - live iLink checks validate the fake contract but are never the default test
   gate.
 
-Voice and video are out of scope unless iLink exposes them through the same
-confirmed media path with no additional user-facing semantics.
+Voice and video are metadata-only unless iLink exposes them through the same
+confirmed media path with no additional user-facing semantics. Shared ASR/TTS
+policy may consume platform-provided voice transcripts or confirmed downloaded
+media, but WeChat raw voice download/send stays out of scope until fake iLink
+or live evidence confirms the media contract.
 
 ## Adapter Behavior
 
@@ -171,6 +174,8 @@ error code.
 - [280 Channel UX](../280-channel-ux/spec.md) defines QR and reconnect UX.
 - [021 Gateway](../021-gateway/spec.md) defines source, thread, and turn
   semantics.
+- [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md) defines shared ASR/TTS
+  policy and WeChat fallback boundaries.
 
 ## Attachments
 

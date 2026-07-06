@@ -124,6 +124,7 @@ fn model_settings_result(
             auxiliary_model_assignment_view(effective, "compression", "Context compression"),
         ],
         model_options,
+        voice: voice_config_value(&options).ok(),
     })
 }
 

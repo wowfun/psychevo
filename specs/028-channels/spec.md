@@ -188,6 +188,12 @@ Outbound delivery must chunk, rate-limit, and degrade when the platform cannot
 render the richer shape. Delivery failures produce secret-free diagnostics and
 must not alter the underlying local thread transcript.
 
+Channel voice reply policy is shared across adapters and defined by
+[248 Voice ASR/TTS](../248-voice-asr-tts/spec.md). `/voice on` means spoken
+replies only after voice input, `/voice tts` means spoken replies for all final
+assistant replies, and `/voice off` means text-only. If TTS or native voice
+delivery is unavailable, channels fall back to text with bounded diagnostics.
+
 ## Acceptance Criteria
 
 - Channel config parsing rejects unknown channels, duplicate ids, invalid
@@ -235,3 +241,5 @@ must not alter the underlying local thread transcript.
   and secret storage boundaries.
 - [280 Channel UX](../280-channel-ux/spec.md) defines user-facing setup and
   operation.
+- [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md) defines shared voice
+  policy and fallback behavior.

@@ -102,6 +102,10 @@ mentions resolved by the client. The first slice supports text, image, explicit
 context parts, and `GatewayMention` records for visible inline references. Text
 and images map to runtime prompt and image inputs. Context parts are included
 only when the caller explicitly marks them model-visible.
+Voice ASR/TTS and provider-native realtime requests are Gateway RPCs owned by
+[248 Voice ASR/TTS](../248-voice-asr-tts/spec.md). Realtime audio frames,
+partial transcripts, SDP, and output audio are live-only transport data; only
+final text may enter the normal thread transcript.
 
 Mentions keep user-visible text separate from the resolved target. A surface may
 show `$reviewer`, `@src/main.rs`, or `$acp-agent` in the composer while sending

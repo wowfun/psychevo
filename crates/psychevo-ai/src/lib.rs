@@ -40,6 +40,9 @@ use stream_chat_chunks::*;
 #[path = "stream/raw.rs"]
 pub(crate) mod stream_raw;
 pub use stream_raw::*;
+#[path = "voice.rs"]
+pub(crate) mod voice;
+pub use voice::*;
 #[path = "fake.rs"]
 pub(crate) mod fake;
 pub use fake::*;

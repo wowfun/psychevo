@@ -187,7 +187,7 @@ async fn run_channel_inbound_turn(
         .send_turn(crate::SendTurnRequest {
             thread_id: None,
             source: Some(source.clone()),
-            bind_source: Some(source),
+            bind_source: Some(source.clone()),
             reset_source_binding: false,
             input: gateway_input_parts_for_im(&message),
             options,
@@ -207,6 +207,13 @@ async fn run_channel_inbound_turn(
     let answer = result.result.final_answer.trim().to_string();
     if answer.is_empty() {
         return Ok(());
+    }
+    let voice_policy = voice_policy_for_source(&state, &source);
+    if voice_policy != wire::VoicePolicyMode::Off {
+        eprintln!(
+            "channel voice delivery fallback: id={} mode={:?} reason=native_voice_delivery_unavailable",
+            connection.id, voice_policy
+        );
     }
     channel_gateway
         .send(ImOutboundMessage {

@@ -266,6 +266,36 @@
       "$ref": "ClientRequest/model-assignment-set.json"
     },
     {
+      "$ref": "ClientRequest/voice-asr-transcribe.json"
+    },
+    {
+      "$ref": "ClientRequest/voice-tts-synthesize.json"
+    },
+    {
+      "$ref": "ClientRequest/voice-policy-read.json"
+    },
+    {
+      "$ref": "ClientRequest/voice-policy-update.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-start.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-append-audio.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-append-text.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-append-speech.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-stop.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-realtime-list-voices.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-files.json"
     },
     {

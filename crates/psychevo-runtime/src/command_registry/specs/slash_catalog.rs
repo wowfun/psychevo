@@ -548,6 +548,22 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         common: false,
     },
     SlashCommandSpec {
+        canonical: "/voice",
+        aliases: &[],
+        usage: "/voice <on|tts|off|status>",
+        summary: "set voice replies",
+        help_detail: Some(
+            "Controls whether messaging channels should attempt voice replies while retaining text fallback.",
+        ),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::FixedEnumValue,
+        output_kind: CommandOutputKind::BoundedFeedback,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Voice,
+        common: true,
+    },
+    SlashCommandSpec {
         canonical: "/quit",
         aliases: &["/exit", "/q"],
         usage: "/quit",
