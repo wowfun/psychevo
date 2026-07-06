@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +19,7 @@ from peval_py.serve.payloads import (
     adapter_override_payload,
     optional_string,
     source_args_from_payload,
+    split_source_path_lines,
     source_path_values,
 )
 from peval_py.session_select import list_adapter_sessions
@@ -27,6 +28,13 @@ from peval_py.state import (
     discover_complete_trial_cell_dirs,
     loaded_trial_cell_import_session,
 )
+
+
+@dataclass(frozen=True)
+class AddSourceResult:
+    keys: list[str]
+    import_results: list[dict[str, Any]] | None = None
+
 
 def load_serve_inputs(
     args: Any,
@@ -40,7 +48,10 @@ def add_source_payload(
     store: ServeStateStore,
     config: ToolConfig,
     payload: dict[str, Any],
-) -> list[str]:
+) -> AddSourceResult:
+    path_lines = path_batch_lines(payload)
+    if len(path_lines) > 1:
+        return add_path_batch_sources(store, config, payload, path_lines)
     source_args = source_args_from_payload(store, payload)
     raw_adapter = adapter_override_payload(payload)
     assignments = parse_adapter_assignments(
@@ -49,7 +60,41 @@ def add_source_payload(
     )
     loaded = load_payload_sources(source_args, assignments, config)
     loaded = apply_payload_alias(loaded, optional_string(payload.get("alias")))
-    return store.import_loaded_sources(loaded, config)
+    keys = store.import_loaded_sources(loaded, config)
+    return AddSourceResult(keys=keys)
+
+
+def path_batch_lines(payload: dict[str, Any]) -> list[str]:
+    raw = optional_string(payload.get("path"))
+    if raw is None:
+        return []
+    return split_source_path_lines(raw)
+
+
+def add_path_batch_sources(
+    store: ServeStateStore,
+    config: ToolConfig,
+    payload: dict[str, Any],
+    path_lines: list[str],
+) -> AddSourceResult:
+    raw_adapter = adapter_override_payload(payload)
+    assignments = parse_adapter_assignments(
+        [raw_adapter] if raw_adapter else [],
+        config.adapter,
+    )
+    all_keys: list[str] = []
+    results: list[dict[str, Any]] = []
+    for line in path_lines:
+        try:
+            source_args = source_args_from_payload(store, {**payload, "path": line})
+            loaded = load_payload_sources(source_args, assignments, config)
+            loaded = apply_payload_alias(loaded, optional_string(payload.get("alias")))
+            keys = store.import_loaded_sources(loaded, config)
+            all_keys.extend(keys)
+            results.append({"path": line, "status": "ok", "source_keys": keys})
+        except Exception as exc:  # noqa: BLE001 - per-line batch result.
+            results.append({"path": line, "status": "error", "error": str(exc)})
+    return AddSourceResult(keys=all_keys, import_results=results)
 
 
 def load_payload_sources(

@@ -126,11 +126,12 @@ def render_source_add_form(
         "input_table": "serve_input_table_source",
     }[kind]
     name = "input_table" if kind == "input_table" else kind
-    field_tag = (
-        f'<textarea name="{escape(name)}" autocomplete="off" required rows="2"></textarea>'
-        if kind in {"path", "db"}
-        else f'<input name="{escape(name)}" autocomplete="off" required>'
-    )
+    if kind == "path":
+        field_tag = f'<textarea name="{escape(name)}" autocomplete="off" required rows="4"></textarea>'
+    elif kind == "db":
+        field_tag = f'<textarea name="{escape(name)}" autocomplete="off" required rows="2"></textarea>'
+    else:
+        field_tag = f'<input name="{escape(name)}" autocomplete="off" required>'
     session_field = ""
     if kind == "db":
         session_field = f"""

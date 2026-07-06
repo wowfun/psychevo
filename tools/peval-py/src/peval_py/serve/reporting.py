@@ -47,7 +47,7 @@ def source_is_readable(source: dict[str, Any], source_state: str = "active") -> 
     if source_state == "archived":
         if active:
             return False
-    elif not active:
+    elif source_state == "active" and not active:
         return False
     return (
         bool(source.get("source_key"))

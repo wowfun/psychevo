@@ -1,20 +1,21 @@
 function renderServeSourceStateControls(rows = leaderboardRows()) {
   if (!serveMode()) return "";
   const mode = currentServeSourceMode();
+  const allMode = mode === "all";
   const archived = mode === "archived";
   const targetMode = archived ? "active" : "archived";
   const targetReadableCount = readableServeSources(targetMode).length;
-  const toggleDisabled = targetReadableCount < 1 ? "disabled" : "";
+  const toggleDisabled = allMode || targetReadableCount < 1 ? "disabled" : "";
   const selectedCount = visibleSelectedSourceKeys(rows).length;
   const actionLabel = archived
     ? t("activate_selected", "Activate selected")
     : t("archive_selected", "Archive selected");
   return `<div class="source-state-controls" data-source-state-controls>
     <label class="source-state-toggle">
-      <input type="checkbox" data-source-state-toggle ${archived ? "checked" : ""} ${toggleDisabled}>
+      <input type="checkbox" data-source-state-toggle ${archived || allMode ? "checked" : ""} ${toggleDisabled}>
       <span>${esc(t("show_archived", "Show archived"))}</span>
     </label>
-    <button class="source-state-action" type="button" data-source-state-action ${selectedCount ? "" : "disabled"}>${esc(actionLabel)}</button>
+    <button class="source-state-action" type="button" data-source-state-action ${selectedCount && !allMode ? "" : "disabled"}>${esc(allMode ? t("mixed_state_action_disabled", "Mixed view") : actionLabel)}</button>
   </div>`;
 }
 
@@ -79,6 +80,10 @@ async function mutateVisibleServeSourceState() {
   const sourceKeys = visibleSelectedSourceKeys();
   if (!sourceKeys.length) return;
   const mode = currentServeSourceMode();
+  if (mode === "all") {
+    setServeStatus(t("mixed_state_action_disabled", "Mixed view"), true);
+    return;
+  }
   const targetMode = mode === "archived" ? "active" : "archived";
   try {
     const payload = await serveApi("/api/sources/state", {
@@ -122,6 +127,9 @@ function firstReadableSourceKeyFrom(sourceKeys, sources, mode) {
 }
 
 function serveSourceModeStatusText(mode = currentServeSourceMode()) {
+  if (normalizeServeSourceMode(mode) === "all") {
+    return t("serve_all_sessions", "All sessions");
+  }
   return normalizeServeSourceMode(mode) === "archived"
     ? t("serve_archived_snapshots", "Archived snapshots")
     : t("serve_active_snapshots", "Active snapshots");

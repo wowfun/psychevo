@@ -23,6 +23,7 @@ from peval_py.serve.payloads import (
     source_action_path,
     source_keys_payload,
     source_state_payload,
+    tags_payload,
 )
 from peval_py.serve.reporting import mutation_payload, single_query_value
 from peval_py.serve.sources import add_source_payload, db_sessions_payload
@@ -63,7 +64,8 @@ def make_handler(
                         "active"
                         if source_key
                         else source_state_payload(
-                            single_query_value(parsed_url.query, "source_state")
+                            single_query_value(parsed_url.query, "source_state"),
+                            allow_all=True,
                         )
                     )
                     try:
@@ -145,14 +147,15 @@ def make_handler(
                     )
                     return
                 if path == "/api/sources":
-                    keys = add_source_payload(store, runtime.config, payload)
-                    self.write_json(
-                        mutation_payload(
-                            store,
-                            runtime.config,
-                            source_key=keys[0] if keys else None,
-                        )
+                    result = add_source_payload(store, runtime.config, payload)
+                    response = mutation_payload(
+                        store,
+                        runtime.config,
+                        source_key=result.keys[0] if result.keys else None,
                     )
+                    if result.import_results is not None:
+                        response["import_results"] = result.import_results
+                    self.write_json(response)
                     return
                 if path == "/api/sources/reload":
                     store.sync_artifact_sources(runtime.config)
@@ -195,6 +198,7 @@ def make_handler(
                 source_action = source_action_path(path)
                 if source_action is not None:
                     source_key, action = source_action
+                    mutation_source_state = "active"
                     if action == "archive":
                         store.set_source_active(source_key, False)
                     elif action == "activate":
@@ -204,7 +208,19 @@ def make_handler(
                     elif action == "delete":
                         store.delete_source(source_key)
                     elif action == "alias":
+                        mutation_source_state = source_state_payload(
+                            payload.get("report_source_state"),
+                            field="report_source_state",
+                            allow_all=True,
+                        )
                         store.set_source_alias(source_key, alias_payload(payload))
+                    elif action == "tags":
+                        mutation_source_state = source_state_payload(
+                            payload.get("report_source_state"),
+                            field="report_source_state",
+                            allow_all=True,
+                        )
+                        store.set_source_tags(source_key, tags_payload(payload))
                     elif action == "notes":
                         store.save_source_notes(
                             source_key,
@@ -218,6 +234,7 @@ def make_handler(
                             store,
                             runtime.config,
                             source_key=None if action == "delete" else source_key,
+                            source_state=mutation_source_state,
                         )
                     )
                     return

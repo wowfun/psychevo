@@ -156,6 +156,30 @@ def meta_with_source_alias(meta: dict[str, Any], alias: Any) -> dict[str, Any]:
     return meta
 
 
+def meta_with_source_metadata(
+    meta: dict[str, Any],
+    alias: Any,
+    tags: Any,
+) -> dict[str, Any]:
+    copy = meta_with_source_alias(meta, alias)
+    tag_values: list[str] = []
+    if isinstance(tags, list):
+        seen: set[str] = set()
+        for raw_tag in tags:
+            tag = optional_str(raw_tag)
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            tag_values.append(tag)
+    if tag_values:
+        copy = dict(copy)
+        copy["source_tags"] = tag_values
+    elif "source_tags" in copy:
+        copy = dict(copy)
+        copy.pop("source_tags", None)
+    return copy
+
+
 def source_report_with_current_annotations(
     source: dict[str, Any],
     trajectory: dict[str, Any],

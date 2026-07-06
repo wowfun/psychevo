@@ -80,6 +80,45 @@ td.num,th.num {
   background:transparent;
   color:var(--muted);
 }
+.source-tag-list {
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  align-items:center;
+}
+.source-tag-chip {
+  max-width:100%;
+  border:1px solid color-mix(in oklch,var(--focus),transparent 58%);
+  border-radius:999px;
+  background:color-mix(in oklch,var(--focus),var(--surface) 92%);
+  color:var(--ink);
+  padding:3px 7px;
+  font:700 12px/1.15 var(--mono);
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.editable-source-cell {
+  display:block;
+  min-width:92px;
+  min-height:24px;
+  border-radius:6px;
+  cursor:text;
+}
+.editable-source-cell:hover {
+  background:color-mix(in oklch,var(--focus),transparent 92%);
+}
+.inline-source-edit {
+  width:100%;
+  min-width:120px;
+  min-height:30px;
+  border:1px solid color-mix(in oklch,var(--focus),transparent 42%);
+  border-radius:6px;
+  background:var(--surface);
+  color:var(--ink);
+  padding:0 8px;
+  font:700 12px/1.2 var(--mono);
+  box-shadow:0 0 0 2px color-mix(in oklch,var(--focus),transparent 84%);
+}
 .table-head-cell {
   display:grid;
   gap:6px;

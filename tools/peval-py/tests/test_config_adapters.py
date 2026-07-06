@@ -89,7 +89,7 @@ class PevalPyConfigAdapterTests(unittest.TestCase):
             child = root / "nested" / "child"
             child.mkdir(parents=True)
             root.joinpath("peval-py.toml").write_text(
-                'state_db = "state.db"\nlocale = "zh-CN"\nanalysis_eval_slug = "custom-eval"\n',
+                'locale = "zh-CN"\nanalysis_eval_slug = "custom-eval"\n',
                 encoding="utf-8",
             )
             explicit = root / "explicit.toml"
@@ -117,7 +117,7 @@ class PevalPyConfigAdapterTests(unittest.TestCase):
                 os.chdir(old_cwd)
 
             root.joinpath("peval-py.toml").write_text(
-                'state_db = "state.db"\nlocale = "fr-FR"\n',
+                'locale = "fr-FR"\n',
                 encoding="utf-8",
             )
             old_cwd = Path.cwd()
@@ -244,7 +244,7 @@ default_db_path = '{unc_path}'
             home = root / "home"
             home.mkdir()
             config_path = root / "peval-py.toml"
-            config_path.write_text('state_db = "state.db"\n', encoding="utf-8")
+            config_path.write_text('locale = "en"\n', encoding="utf-8")
             home_db = home / ".psychevo" / "state.db"
 
             with patch.dict(os.environ, {"HOME": str(home)}):

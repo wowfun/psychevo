@@ -109,10 +109,21 @@ async function submitServeSourceForm(form) {
     const payload = await serveApi("/api/sources", { method: "POST", body });
     form.reset();
     applyServeMutationPayload(payload);
+    showImportResultsSummary(payload);
   } catch (error) {
     showServeNotice(`${t("serve_import_failed", "Import failed")}: ${error.message || String(error)}`, true);
     setServeStatus(error.message || String(error), true);
   }
+}
+function showImportResultsSummary(payload) {
+  const results = Array.isArray(payload?.import_results) ? payload.import_results : [];
+  if (!results.length) return;
+  const imported = results.filter(result => result?.status === "ok").length;
+  const failed = results.filter(result => result?.status === "error").length;
+  const template = t("serve_import_summary", "Imported {imported}, failed {failed}");
+  const message = template.replace("{imported}", String(imported)).replace("{failed}", String(failed));
+  showServeNotice(message, failed > 0);
+  setServeStatus(message, failed > 0);
 }
 async function inspectDbSessions(form) {
   if (!form) return;

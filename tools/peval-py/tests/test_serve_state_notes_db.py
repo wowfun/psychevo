@@ -242,10 +242,10 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                     store,
                     {
                         "path": (
-                            r"C:\Users\kevin\AppData\Local\state.db "
-                            r'"D:\Data Dir\session.jsonl" '
-                            r"C:/Users/kevin/.hermes/state.db "
-                            r"\\server\share\state.db "
+                            r"C:\Users\kevin\AppData\Local\state.db" "\n"
+                            r'"D:\Data Dir\session.jsonl"' "\n"
+                            r"C:/Users/kevin/.hermes/state.db" "\n"
+                            r"\\server\share\state.db" "\n"
                             "relative.jsonl"
                         )
                     },
@@ -282,15 +282,6 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                     ),
                     str(mapped),
                 )
-            finally:
-                store.close()
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = peval_py_workspace(Path(tmp))
-            store = open_workspace_state(str(root))
-            try:
-                with self.assertRaisesRegex(HttpError, "path list is invalid"):
-                    source_path_values(store, {"path": '"unterminated'}, "path")
             finally:
                 store.close()
 

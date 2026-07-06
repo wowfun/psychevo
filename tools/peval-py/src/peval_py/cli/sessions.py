@@ -4,12 +4,9 @@ import argparse
 import sys
 
 from peval_py.adapters import available_adapter_ids
-from peval_py.cli.tables import format_workspace_source_table
 from peval_py.inputs import (
     adapter_for_input_path,
-    is_workspace_state_db_input,
     resolve_db_input,
-    workspace_snapshot_sources_for_input,
 )
 from peval_py.session_select import (
     format_session_table,
@@ -25,10 +22,7 @@ def print_session_lists(
     for input_db in db_inputs_with_adapters(args, adapter_assignments, config):
         if len(input_db["all"]) > 1:
             print(f"d{input_db['index']} {input_db['path']} ({input_db['adapter']})")
-        if input_db.get("kind") == "workspace-state":
-            print(format_workspace_source_table(input_db["sources"]), end="")
-        else:
-            print(format_session_table(input_db["sessions"]), end="")
+        print(format_session_table(input_db["sessions"]), end="")
 
 
 def interactive_session_selection(
@@ -47,14 +41,6 @@ def interactive_session_selection(
             "use repeated -s dN=ID for multiple DB inputs"
         )
     input_db = inputs[0]
-    if input_db.get("kind") == "workspace-state":
-        print(format_workspace_source_table(input_db["sources"]), end="")
-        raw = input("Select saved sources (for example 1,3-5 or all; blank cancels): ")
-        indexes = parse_session_selection(raw, len(input_db["sources"]))
-        return [
-            str(input_db["sources"][index - 1]["source_key"])
-            for index in indexes
-        ]
     print(format_session_table(input_db["sessions"]), end="")
     raw = input("Select sessions (for example 1,3-5 or all; blank cancels): ")
     indexes = parse_session_selection(raw, len(input_db["sessions"]))
@@ -68,9 +54,7 @@ def db_inputs_with_adapters(
 ) -> list[dict]:
     from peval_py.inputs import (
         adapter_for_input_path,
-        is_workspace_state_db_input,
         resolve_db_input,
-        workspace_snapshot_sources_for_input,
     )
     from peval_py.adapters import available_adapter_ids
 
@@ -80,18 +64,6 @@ def db_inputs_with_adapters(
     available = set(available_adapter_ids())
     inputs = []
     for index, path in enumerate(dbs, start=1):
-        if is_workspace_state_db_input(path, config):
-            inputs.append(
-                {
-                    "index": index,
-                    "path": path,
-                    "adapter": "workspace",
-                    "kind": "workspace-state",
-                    "sources": workspace_snapshot_sources_for_input(path, config),
-                    "all": dbs,
-                }
-            )
-            continue
         resolved_path, token_adapter = resolve_db_input(path, index, adapter_assignments, config)
         adapter = token_adapter or adapter_for_input_path(
             resolved_path,

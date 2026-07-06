@@ -79,10 +79,18 @@ def source_path_values(
     raw = optional_string(payload.get(key))
     if raw is None:
         return []
-    parts = split_source_path_list(raw, key)
+    parts = split_source_path_lines(raw) if key == "path" else split_source_path_list(raw, key)
     if not parts:
         raise HttpError(400, f"{key} path list is empty")
     return [workspace_relative_path(store, part) for part in parts]
+
+
+def split_source_path_lines(raw: str) -> list[str]:
+    return [
+        unquote_path_token(line)
+        for line in str(raw).splitlines()
+        if unquote_path_token(line)
+    ]
 
 
 def split_source_path_list(raw: str, key: str) -> list[str]:
@@ -209,12 +217,15 @@ def source_state_payload(
     *,
     default: str = "active",
     field: str = "source_state",
+    allow_all: bool = False,
 ) -> str:
     text = str(value if value is not None else default).strip().lower()
     if not text:
         text = default
-    if text not in {"active", "archived"}:
-        raise HttpError(400, f"{field} must be active or archived")
+    allowed = {"active", "archived", "all"} if allow_all else {"active", "archived"}
+    if text not in allowed:
+        expected = "active, archived, or all" if allow_all else "active or archived"
+        raise HttpError(400, f"{field} must be {expected}")
     return text
 
 
@@ -248,6 +259,23 @@ def alias_payload(payload: dict[str, Any]) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def tags_payload(payload: dict[str, Any]) -> list[str]:
+    value = payload.get("tags", payload.get("source_tags"))
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value]
+    else:
+        parts = re.split(r"[,，]", str(value or ""))
+    tags: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        tag = part.strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag)
+    return tags
 
 
 def optional_string(value: Any) -> str | None:

@@ -52,15 +52,15 @@ class ToolConfig:
         repr=False,
     )
     adapter_default_db_paths: dict[str, str] = field(default_factory=dict, repr=False)
-    workspace_state_db_path: str | None = field(default=None, repr=False)
 
 
 def default_workspace_config_text() -> str:
-    lines = ['state_db = "state.db"\n']
+    lines: list[str] = []
     for adapter_id, default_db_path in DEFAULT_ADAPTER_DB_PATHS.items():
+        if lines:
+            lines.append("\n")
         lines.extend(
             [
-                "\n",
                 f"[{_adapter_table_key(adapter_id)}]\n",
                 f"default_db_path = {json.dumps(default_db_path)}\n",
             ]

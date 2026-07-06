@@ -94,8 +94,8 @@ Coverage must verify:
   unrelated `-r/-a/-d/-s/-i` and DB listing flags, and malformed `runs/...` cell
   directories that report the missing artifact files instead of adapter DB
   lookup errors. Git Bash and WSL coverage includes accessible `C:/...` Trial
-  cell artifact paths mapped through `/mnt/<drive>/...`, workspace state DB
-  snapshot reads with Windows drive `-r` and `-d` arguments, and unmapped Windows
+  cell artifact paths mapped through `/mnt/<drive>/...`, `.peval/state.json`
+  source metadata reads for mapped workspace cells, and unmapped Windows
   absolute-like paths not being resolved under the current directory. Raw report
   output for cell directory input includes `artifact_ref` while preserving the
   original `data_ref`; inspect v2 omits provenance-only metadata, and exported
@@ -254,10 +254,15 @@ Coverage must verify:
   and ignore session-root notes.
 - report artifact aggregation preserves and remaps both cached analysis and
   cell-local notes when serve composes active source artifacts.
-- serve state persists Trial agent artifacts as only `agent/trajectory.json`
-  and `agent/trajectory_meta.json`, stores the Trial cell artifact pointer
-  directly on `peval_py_sources`, and does not create a separate
-  `peval_py_trials` table.
+- serve state persists Trial agent artifacts as `agent/trajectory.json` and
+  `agent/trajectory_meta.json`, stores only source management overlays in
+  `.peval/state.json`, derives source identity and display summary from the
+  cell path plus agent artifacts, and does not require a workspace `state.db`
+  or SQLite trial table.
+- serve source display metadata tests cover `source_alias` and `source_tags`
+  persistence in `.peval/state.json`, projection through `source_payload()` and
+  served `trajectory_meta[]`, clearing values, and preserving existing display
+  metadata when a source is re-imported.
 - serve active report composition reads current cell-local `analysis.json`,
   `analysis.md`, and `notes.md` from each active source's stored Trial artifact
   cell path for all active sources, including snapshots and refreshable sources
@@ -546,18 +551,13 @@ Coverage must verify:
   outside the workspace, including adapter `default_db_path` expansion through
   `-d @adapter`; `view trajectory -r DIR` recognizing cached
   `analysis.json` / `analysis.md`; `view trajectory --list -r DIR -d @adapter`
-  using the root-selected config; `view/export trajectory -r DIR -d
-  <workspace-state-db>` reading saved source snapshots from `peval_py_sources`
-  and `runs/...` artifacts, including `--list`, active-source default
-  selection, explicit `source_key`, `#N`, unique session/trial selectors,
-  archived source selection, stored trajectory export, multiple-active export
-  diagnostics, and original-source-unavailable cases; unrooted workspace state
-  DB inputs failing clearly with `-r <workspace>` and `-d @adapter` guidance; and
+  using the root-selected config; direct Trial cell path input reading
+  `.peval/state.json` source aliases and current cell-local overlays; and
   `view/export trajectory -r DIR` failing clearly when `DIR` is missing or does
   not contain `peval-py.toml`.
 - init tests verify `peval-py init` creates only `<workspace>/peval-py.toml` and
-  `<workspace>/state.db`, preserves existing valid `peval-py.toml`
-  state DB paths and adapter defaults, writes built-in Psychevo, OpenCode, and
+  `<workspace>/logs/`, preserves existing valid `peval-py.toml`
+  adapter defaults, writes built-in Psychevo, OpenCode, and
   Hermes default DB paths with `~` for new workspaces, rejects invalid
   peval-py TOML, and does not create `peval.toml`, `runs/`, `datasets/`,
   `scripts/`, default templates, `$PSYCHEVO_HOME/peval-config.toml`, or
@@ -565,12 +565,21 @@ Coverage must verify:
 - saved-workspace tests verify peval-py workspace discovery from current-or-parent
   `peval-py.toml`, explicit `--root` and `PEVAL_ROOT` handling as a peval-py
   root override without requiring `peval.toml`, `<workspace>/peval-py.toml` defaults,
-  `<workspace>/state.db` creation, current `peval_py_*` tables, canonical
-  cell-derived stable source keys, source alias storage without changing stable
-  keys, duplicate imports resolving to the same cell updating one source row,
-  active/archive lifecycle, latest
+  no workspace `state.db` creation, canonical cell-derived stable source keys,
+  `.peval/state.json` schema v2 minimal overlay writes, older flat state files
+  being ignored until the next mutation overwrites them, source alias and tag
+  storage without changing stable keys,
+  duplicate imports resolving to the same cell updating one source,
+  active/archive lifecycle, JSONL refresh/import logging, latest
   canonical Trial snapshots including refreshed cached analysis JSON/Markdown
   and cell-local notes, refresh-log rows, and no non-peval-py table writes.
+- HTML interaction tests cover Leaderboard visible-scope search, all-session
+  search over active and archived sources, disabled mixed-state batch
+  Archive/Activate, inline alias/tag editing, flattened Any tag filters,
+  export scope after search, and source-key mapping after filtering.
+- Timeline HTML tests cover `N.M` numbering for Waterfall labels/tooltips and
+  Detail Table rows, including multiple Timeline items derived from one source
+  step and stable `#` sorting by trace order.
 - CLI smoke tests cover `init --root`, `init --root --json`, `serve -p`,
   `serve -d`, `serve -i`, persistent save-and-refresh behavior, default
   `58010..58029` port fallback, strict explicit-port failure, config-free

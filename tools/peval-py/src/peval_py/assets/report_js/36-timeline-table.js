@@ -33,7 +33,7 @@ function renderTimelineActiveShare(row, model) {
 }
 function timelineDetailColumns(model) {
   return [
-    { key: "number", label: t("timeline_col_row", "#"), type: "number", numeric: true, sortable: true, value: row => Number(row.number), format: value => fmtNum(value) },
+    { key: "number", label: t("timeline_col_row", "#"), type: "number", numeric: true, sortable: true, value: row => row.number_sort, format: (_value, row) => row.number || "-" },
     { key: "stage", label: t("timeline_col_stage", "Stage"), sortable: true, filterable: true, value: row => row.stage || "-", html: row => renderTimelineStageLabel(row), cellTitle: row => row.stage || "-", className: "timeline-label-cell" },
     { key: "wall_start_ms", label: t("timeline_col_start", "Start"), type: "number", numeric: true, sortable: true, value: row => row.wall_start_ms, format: (value, row) => fmtTimelineMaybeEstimated(fmtClockMs(value), row) },
     { key: "wall_end_ms", label: t("timeline_col_end", "End"), type: "number", numeric: true, sortable: true, value: row => row.wall_end_ms, format: (value, row) => fmtTimelineMaybeEstimated(fmtClockMs(value), row) },

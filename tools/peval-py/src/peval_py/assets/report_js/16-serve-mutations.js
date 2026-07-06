@@ -26,11 +26,160 @@ async function saveSourceAlias(button) {
   try {
     const payload = await serveApi(`/api/sources/${encodeURIComponent(sourceKey)}/alias`, {
       method: "POST",
-      body: { alias }
+      body: { alias, report_source_state: currentServeSourceMode() }
     });
     applyServeMutationPayload(payload, { preserveTrial: selectedKey() });
   } catch (error) {
     setServeStatus(error.message || String(error), true);
+  }
+}
+function bindLeaderboardSearchControls(target) {
+  if (!serveMode() || !target) return;
+  const input = target.querySelector("[data-leaderboard-search-input]");
+  if (input) {
+    input.addEventListener("click", event => event.stopPropagation());
+    input.addEventListener("input", event => {
+      event.stopPropagation();
+      state.search.query = String(input.value || "");
+      applyLeaderboardSearchMode();
+    });
+  }
+  target.querySelectorAll("input[name=\"leaderboard-search-scope\"]").forEach(control => {
+    control.addEventListener("click", event => event.stopPropagation());
+    control.addEventListener("change", event => {
+      event.stopPropagation();
+      state.search.scope = control.value === "all" ? "all" : "visible";
+      applyLeaderboardSearchMode();
+    });
+  });
+}
+async function applyLeaderboardSearchMode() {
+  if (!serveMode()) {
+    renderComparisonPanels();
+    return;
+  }
+  if (allSearchActive()) {
+    if (currentServeSourceMode() !== "all") {
+      state.search.normalSourceMode = currentServeSourceMode();
+    }
+    const cached = state.serveReportCache?.all;
+    if (cached) {
+      state.serveSourceMode = "all";
+      render(cached);
+      setServeStatus(serveSourceModeStatusText("all"));
+      focusLeaderboardSearchInput();
+      return;
+    }
+    try {
+      const sourceKey = state.selectedSourceKey || sourceForTrialKey(selectedKey())?.source_key;
+      const report = await serveApi("/api/report?source_state=all");
+      applyServeMutationPayload(
+        { report, report_source_key: sourceKey || null, report_source_state: "all" },
+        { selectedSourceKey: sourceKey || null }
+      );
+      focusLeaderboardSearchInput();
+    } catch (error) {
+      setServeStatus(error.message || String(error), true);
+      renderComparisonPanels({ trace: false });
+      focusLeaderboardSearchInput();
+    }
+    return;
+  }
+  if (currentServeSourceMode() === "all") {
+    const restoreMode = normalizeServeSourceMode(state.search.normalSourceMode || "active") === "all"
+      ? "active"
+      : normalizeServeSourceMode(state.search.normalSourceMode || "active");
+    const cached = state.serveReportCache?.[restoreMode];
+    if (cached) {
+      state.serveSourceMode = restoreMode;
+      render(cached);
+      setServeStatus(serveSourceModeStatusText(restoreMode));
+      focusLeaderboardSearchInput();
+      return;
+    }
+    await switchServeSourceMode(restoreMode);
+    focusLeaderboardSearchInput();
+    return;
+  }
+  renderComparisonPanels();
+  focusLeaderboardSearchInput();
+}
+function focusLeaderboardSearchInput() {
+  const apply = () => {
+    const input = document.querySelector("[data-leaderboard-search-input]");
+    if (!input) return;
+    input.focus();
+    const end = String(input.value || "").length;
+    if (typeof input.setSelectionRange === "function") input.setSelectionRange(end, end);
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(apply);
+  else apply();
+}
+function bindInlineSourceEditors(target) {
+  if (!serveMode() || !target) return;
+  target.querySelectorAll("[data-source-inline-edit]").forEach(cell => {
+    cell.addEventListener("click", event => event.stopPropagation());
+    cell.addEventListener("dblclick", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      beginInlineSourceEdit(cell);
+    });
+  });
+}
+function beginInlineSourceEdit(cell) {
+  const sourceKey = cell?.dataset?.sourceKey;
+  const field = cell?.dataset?.sourceInlineEdit;
+  if (!sourceKey || !field || cell.querySelector("input")) return;
+  const input = document.createElement("input");
+  input.className = "inline-source-edit";
+  input.value = cell.dataset.value || "";
+  input.setAttribute("aria-label", field === "tags" ? t("tags", "Tags") : t("session_alias", "Session Alias"));
+  const original = cell.innerHTML;
+  let finished = false;
+  const cancel = () => {
+    if (finished) return;
+    finished = true;
+    cell.innerHTML = original;
+    bindInlineSourceEditors(cell);
+  };
+  const save = async () => {
+    if (finished) return;
+    finished = true;
+    await saveInlineSourceEdit(cell, field, sourceKey, input.value);
+  };
+  input.addEventListener("click", event => event.stopPropagation());
+  input.addEventListener("dblclick", event => event.stopPropagation());
+  input.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      save();
+    }
+  });
+  input.addEventListener("blur", () => save());
+  cell.replaceChildren(input);
+  input.focus();
+  input.select();
+}
+async function saveInlineSourceEdit(cell, field, sourceKey, value) {
+  const action = field === "tags" ? "tags" : "alias";
+  const body = {
+    report_source_state: currentServeSourceMode(),
+    [action === "tags" ? "tags" : "alias"]: String(value || "").trim()
+  };
+  try {
+    const payload = await serveApi(`/api/sources/${encodeURIComponent(sourceKey)}/${action}`, {
+      method: "POST",
+      body
+    });
+    applyServeMutationPayload(payload, { preserveTrial: cell?.dataset?.trialKey || selectedKey(), selectedSourceKey: sourceKey });
+  } catch (error) {
+    setServeStatus(error.message || String(error), true);
+    renderComparisonPanels({ trace: false });
   }
 }
 function selectedAdapterValue(form) {

@@ -10,7 +10,7 @@ workflows:
   init, and serve workflows.
 - input loading turns CLI or serve source selections into loaded session
   descriptors without owning conversion, report building, or workspace state.
-- workspace state owns peval-py workspace discovery, SQLite source indexes,
+- workspace state owns peval-py workspace discovery, cell-local source overlays,
   Trial cell artifacts, snapshot discovery, source lifecycle mutations, and
   report composition over persisted artifacts.
 - report building owns report JSON v19 assembly, timing metadata, annotations,

@@ -13,10 +13,9 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
             root = Path(tmp) / "workspace"
             result = init_workspace(str(root))
 
-            self.assertEqual(result.schema_version, 4)
+            self.assertEqual(result.schema_version, 1)
             self.assertEqual(result.root, root.resolve())
             config_text = (root / "peval-py.toml").read_text(encoding="utf-8")
-            self.assertIn('state_db = "state.db"\n', config_text)
             self.assertIn("[adapters.psychevo]\n", config_text)
             self.assertIn('default_db_path = "~/.psychevo/state.db"\n', config_text)
             self.assertIn("[adapters.opencode]\n", config_text)
@@ -26,7 +25,9 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
             )
             self.assertIn("[adapters.hermes]\n", config_text)
             self.assertIn('default_db_path = "~/.hermes/state.db"\n', config_text)
-            self.assertTrue((root / "state.db").is_file())
+            self.assertEqual(result.log_path, root.resolve() / "logs" / "peval-py-serve.jsonl")
+            self.assertTrue((root / "logs").is_dir())
+            self.assertFalse((root / "state.db").exists())
             for unwanted in [
                 "peval.toml",
                 "runs",
@@ -38,15 +39,14 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
                 self.assertFalse((root / unwanted).exists(), unwanted)
 
             config = root / "peval-py.toml"
-            config.write_text('state_db = "custom.db"\n', encoding="utf-8")
+            config.write_text('[adapters.psychevo]\ndefault_db_path = "custom.db"\n', encoding="utf-8")
             second = init_workspace(str(root))
 
-            self.assertEqual(second.state_db, root.resolve() / "custom.db")
+            self.assertEqual(second.log_path, root.resolve() / "logs" / "peval-py-serve.jsonl")
             self.assertEqual(
                 config.read_text(encoding="utf-8"),
-                'state_db = "custom.db"\n',
+                '[adapters.psychevo]\ndefault_db_path = "custom.db"\n',
             )
-            self.assertTrue((root / "custom.db").is_file())
 
     def test_init_defaults_to_current_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -58,13 +58,14 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
                 os.chdir(old_cwd)
             self.assertEqual(result.root, Path(tmp).resolve())
             self.assertTrue((Path(tmp) / "peval-py.toml").is_file())
-            self.assertTrue((Path(tmp) / "state.db").is_file())
+            self.assertTrue((Path(tmp) / "logs").is_dir())
+            self.assertFalse((Path(tmp) / "state.db").exists())
             self.assertFalse((Path(tmp) / "peval.toml").exists())
 
     def test_init_rejects_invalid_peval_py_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            root.joinpath("peval-py.toml").write_text("state_db = [\n", encoding="utf-8")
+            root.joinpath("peval-py.toml").write_text("locale = [\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "failed to parse"):
                 init_workspace(str(root))
 
@@ -75,10 +76,11 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
             self.assertEqual(text.returncode, 0, text.stderr)
             self.assertIn(f"peval-py workspace: {root.resolve()}", text.stdout)
             self.assertIn("peval-py config:", text.stdout)
-            self.assertIn("state db:", text.stdout)
+            self.assertIn("serve log:", text.stdout)
             self.assertNotIn("default workspace:", text.stdout)
             self.assertNotIn("templates:", text.stdout)
-            self.assertTrue((root / "state.db").is_file())
+            self.assertTrue((root / "logs").is_dir())
+            self.assertFalse((root / "state.db").exists())
             self.assertFalse((root / "peval.toml").exists())
 
             json_root = Path(tmp) / "json-workspace"
@@ -87,11 +89,14 @@ class PevalPyWorkspaceInitTests(unittest.TestCase):
             data = json.loads(payload.stdout)
             self.assertEqual(
                 sorted(data),
-                ["peval_py_config", "root", "schema_version", "state_db"],
+                ["log_path", "peval_py_config", "root", "schema_version"],
             )
-            self.assertEqual(data["schema_version"], 4)
+            self.assertEqual(data["schema_version"], 1)
             self.assertEqual(data["root"], str(json_root.resolve()))
-            self.assertEqual(data["state_db"], str(json_root.resolve() / "state.db"))
+            self.assertEqual(
+                data["log_path"],
+                str(json_root.resolve() / "logs" / "peval-py-serve.jsonl"),
+            )
 
     def test_cli_init_rejects_removed_default_flags(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

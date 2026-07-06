@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from peval_py._state.annotations import (
-    meta_with_source_alias,
+    meta_with_source_metadata,
     optional_int,
     optional_str,
     source_report_with_current_annotations,
@@ -17,13 +17,10 @@ from peval_py.state.constants import SOURCE_STATUS_MISSING
 
 class StateQueryMixin:
     def source_by_key(self, source_key: str) -> dict[str, Any]:
-        row = self.conn.execute(
-            "SELECT * FROM peval_py_sources WHERE source_key = ?",
-            (source_key,),
-        ).fetchone()
-        if row is None:
-            raise ValueError(f"unknown source: {source_key}")
-        return dict(row)
+        for row in self.source_rows(active_only=False):
+            if row.get("source_key") == source_key:
+                return row
+        raise ValueError(f"unknown source: {source_key}")
 
     def active_report(
         self,
@@ -39,8 +36,10 @@ class StateQueryMixin:
                 active_filter = True
             elif source_state == "archived":
                 active_filter = False
+            elif source_state == "all":
+                active_filter = None
             else:
-                raise ValueError("source_state must be active or archived")
+                raise ValueError("source_state must be active, archived, or all")
         rows = self.source_rows(
             source_keys=source_keys,
             active=active_filter,
@@ -69,7 +68,11 @@ class StateQueryMixin:
         trajectories = [item["trajectory"] for item in stored]
         metas = uniquify_trial_keys(
             [
-                meta_with_source_alias(item["meta"], row.get("source_alias"))
+                meta_with_source_metadata(
+                    item["meta"],
+                    row.get("source_alias"),
+                    row.get("source_tags"),
+                )
                 for row, item in zip(readable_rows, stored, strict=True)
             ]
         )
@@ -131,34 +134,24 @@ class StateQueryMixin:
         active_only: bool = False,
         active: bool | None = None,
     ) -> list[dict[str, Any]]:
-        where = []
-        params: list[Any] = []
-        if source_keys:
-            where.append(
-                "source_key IN (" + ",".join("?" for _ in source_keys) + ")"
-            )
-            params.extend(source_keys)
+        wanted = set(source_keys or [])
+        rows = [
+            self.source_row_from_cell_dir(cell_dir)
+            for cell_dir in self.discover_source_cell_dirs()
+        ]
+        rows = [row for row in rows if row.get("source_key")]
+        if wanted:
+            rows = [row for row in rows if row.get("source_key") in wanted]
         if active is not None:
-            where.append("active = ?")
-            params.append(1 if active else 0)
+            rows = [row for row in rows if bool(row.get("active")) is active]
         elif active_only:
-            where.append("active = 1")
-        sql = "SELECT * FROM peval_py_sources"
-        if where:
-            sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY created_at_ms ASC, source_key ASC"
-        return [dict(row) for row in self.conn.execute(sql, params).fetchall()]
+            rows = [row for row in rows if bool(row.get("active"))]
+        rows.sort(key=lambda row: (int(row.get("created_at_ms") or 0), str(row.get("source_key") or "")))
+        return rows
 
     def source_payload(self) -> list[dict[str, Any]]:
-        rows = self.conn.execute(
-            """
-            SELECT *
-            FROM peval_py_sources
-            ORDER BY created_at_ms ASC, source_key ASC
-            """
-        ).fetchall()
         payload: list[dict[str, Any]] = []
-        for row in rows:
+        for row in self.source_rows(active_only=False):
             item = dict(row)
             item["refreshable"] = bool(item["refreshable"])
             item["active"] = bool(item["active"])

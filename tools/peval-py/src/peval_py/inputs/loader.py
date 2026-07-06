@@ -18,15 +18,10 @@ from peval_py._inputs.workspace_snapshots import (
     canonical_trial_cell_paths_for_inputs,
     infer_workspace_root_from_trial_cell_path,
     infer_workspace_root_from_trial_cell_paths,
-    is_peval_py_state_db_input,
-    is_workspace_state_db_input,
-    load_workspace_snapshot_sessions,
     loaded_trial_cell_artifact_session,
     optional_text,
-    peval_py_state_db_error,
     resolved_local_path,
     same_local_path,
-    workspace_snapshot_sources_for_input,
 )
 
 ADAPTER_SELECTOR_RE = re.compile(r"^([pd])([1-9][0-9]*)=(.+)$")
@@ -134,17 +129,6 @@ def load_sessions(
     )
     for index, db in enumerate(dbs, start=1):
         raw_session_ids = session_ids_by_db.get(index) or []
-        if is_workspace_state_db_input(db, config):
-            sessions.extend(
-                load_workspace_snapshot_sessions(
-                    args,
-                    index,
-                    str(db),
-                    raw_session_ids,
-                    config,
-                )
-            )
-            continue
         resolved_db, token_adapter = resolve_db_input(db, index, adapter_assignments, config)
         db_path = Path(resolved_db)
         adapter_id = token_adapter or adapter_for_input_path(
@@ -286,8 +270,6 @@ def resolve_db_input(
     text = str(raw_db).strip()
     match = DEFAULT_DB_TOKEN_RE.fullmatch(text)
     if not match:
-        if is_peval_py_state_db_input(text):
-            raise ValueError(peval_py_state_db_error(text))
         return raw_db, None
     adapter_id = normalize_adapter_id(match.group(1))
     selected_adapter = adapter_assignments.db_adapters.get(index)

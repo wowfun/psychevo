@@ -13,14 +13,14 @@ class InitWorkspaceResult:
     schema_version: int
     root: Path
     peval_py_config: Path
-    state_db: Path
+    log_path: Path
 
     def to_jsonable(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "root": str(self.root),
             "peval_py_config": str(self.peval_py_config),
-            "state_db": str(self.state_db),
+            "log_path": str(self.log_path),
         }
 
 
@@ -33,7 +33,7 @@ def init_workspace(root: str | None = None) -> InitWorkspaceResult:
         schema_version=STATE_SCHEMA_VERSION,
         root=paths.root,
         peval_py_config=paths.config_path,
-        state_db=paths.state_db_path,
+        log_path=paths.log_path,
     )
 
 
@@ -41,7 +41,7 @@ def render_init_text(result: InitWorkspaceResult) -> str:
     return (
         f"peval-py workspace: {result.root}\n"
         f"peval-py config: {result.peval_py_config}\n"
-        f"state db: {result.state_db}\n"
+        f"serve log: {result.log_path}\n"
     )
 
 

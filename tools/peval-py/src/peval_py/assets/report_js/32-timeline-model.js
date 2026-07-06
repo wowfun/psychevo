@@ -100,21 +100,34 @@ function timelineTrace(trajectory, meta) {
     fallbackCursor = Math.max(fallbackCursor, stepEnd ?? stepStart ?? fallbackCursor);
     if (hasMetricValue(stepStart)) previousTimestamp = Number(stepStart);
   });
-  const orderedStages = stages.sort(timelineStageSort).map((stage, index) => ({
+  const orderedStagesRaw = stages.sort(timelineStageSort);
+  const orderedMarkersRaw = markers.sort(timelineStageSort);
+  timelineAssignStepNumbers([...orderedStagesRaw, ...orderedMarkersRaw].sort(timelineStageSort));
+  const orderedStages = orderedStagesRaw.map((stage, index) => ({
     ...stage,
-    number: String(index + 1),
+    sequence_index: index + 1,
     category_meta: timelineCategoryMeta(stage.category),
   }));
   const model = timelineModel(orderedStages, markers);
   const displayStages = timelineAssignActiveOffsets(orderedStages, model);
-  const displayMarkers = markers.map((marker, index) => ({
+  const displayMarkers = orderedMarkersRaw.map((marker, index) => ({
     ...marker,
-    number: String(index + 1),
+    sequence_index: index + 1,
     category_meta: timelineCategoryMeta(marker.category),
     active_total_ms: model.active_total_ms,
     display_offset_ms: timelineMarkerActiveOffset(marker, displayStages),
   }));
   return { stages: displayStages, markers: displayMarkers, model };
+}
+function timelineAssignStepNumbers(items) {
+  const counts = {};
+  items.forEach((item, index) => {
+    const step = item?.step_id ?? index + 1;
+    const key = String(step);
+    counts[key] = (counts[key] || 0) + 1;
+    item.number = `${key}.${counts[key]}`;
+    item.number_sort = index + 1;
+  });
 }
 function timelineAllowsTimestampEstimates(meta) {
   return meta?.timestamp_semantics !== "order_only";

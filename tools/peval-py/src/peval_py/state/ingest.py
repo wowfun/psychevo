@@ -122,42 +122,37 @@ class StateIngestMixin:
             )
 
         timestamp = now_ms()
-        try:
-            for source_key in ordered_keys:
-                (
-                    source,
-                    trajectory,
-                    meta,
-                    warning_count,
-                    eval_slug,
-                    refreshable,
-                    snapshot,
-                    sidecar_source,
-                ) = prepared[source_key]
-                artifact_dir = self.store_trial(
-                    trajectory,
-                    meta,
-                    eval_slug,
-                    source=source,
-                )
-                if sidecar_source is not None:
-                    self.copy_trial_sidecars(sidecar_source, artifact_dir)
-                self.upsert_source_row(
-                    source_key,
-                    source,
-                    artifact_dir,
-                    timestamp,
-                    trajectory=trajectory,
-                    meta=meta,
-                    refreshable=refreshable,
-                    snapshot=snapshot,
-                    status=SOURCE_STATUS_OK,
-                )
-                self.log_refresh(source_key, SOURCE_STATUS_OK, warning_count, None, timestamp)
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
+        for source_key in ordered_keys:
+            (
+                source,
+                trajectory,
+                meta,
+                warning_count,
+                eval_slug,
+                refreshable,
+                snapshot,
+                sidecar_source,
+            ) = prepared[source_key]
+            artifact_dir = self.store_trial(
+                trajectory,
+                meta,
+                eval_slug,
+                source=source,
+            )
+            if sidecar_source is not None:
+                self.copy_trial_sidecars(sidecar_source, artifact_dir)
+            self.upsert_source_row(
+                source_key,
+                source,
+                artifact_dir,
+                timestamp,
+                trajectory=trajectory,
+                meta=meta,
+                refreshable=refreshable,
+                snapshot=snapshot,
+                status=SOURCE_STATUS_OK,
+            )
+            self.log_refresh(source_key, SOURCE_STATUS_OK, warning_count, None, timestamp)
         return ordered_keys
 
     def refresh_sources(self, source_keys: list[str] | None, config: ToolConfig) -> None:
@@ -180,30 +175,23 @@ class StateIngestMixin:
                 config,
                 source=source,
             )
-            self.conn.execute(
-                """
-                UPDATE peval_py_sources
-                SET artifact_dir = ?, artifact_updated_at_ms = ?,
-                    last_status = ?, last_error = NULL, last_refreshed_at_ms = ?,
-                    updated_at_ms = ?
-                WHERE source_key = ?
-                """,
-                (artifact_dir, timestamp, SOURCE_STATUS_OK, timestamp, timestamp, source_key),
+            trajectory, meta = trial_payload_from_report(report)
+            self.upsert_source_row(
+                source_key,
+                source,
+                artifact_dir,
+                timestamp,
+                trajectory=trajectory,
+                meta=meta,
+                refreshable=True,
+                snapshot=False,
+                status=SOURCE_STATUS_OK,
+                preserve_existing_source=True,
             )
-            self.update_source_summary(source_key, report["trajectory"][0], report["trajectory_meta"][0])
             self.log_refresh(source_key, SOURCE_STATUS_OK, warning_count, None, timestamp)
         except Exception as exc:  # noqa: BLE001 - state boundary.
-            self.conn.execute(
-                """
-                UPDATE peval_py_sources
-                SET last_status = ?, last_error = ?, last_refreshed_at_ms = ?,
-                    updated_at_ms = ?
-                WHERE source_key = ?
-                """,
-                ("error", str(exc), timestamp, timestamp, source_key),
-            )
+            self.update_source_status(source, "error", str(exc), timestamp)
             self.log_refresh(source_key, "error", 0, str(exc), timestamp)
-        self.conn.commit()
 
     def store_report_for_source(
         self,
@@ -357,39 +345,34 @@ class StateIngestMixin:
             )
 
         timestamp = now_ms()
-        try:
-            for source_key in ordered_keys:
-                source, trajectory, meta, warning_count = prepared[source_key]
-                artifact_dir = self.store_trial(
-                    trajectory,
-                    meta,
-                    eval_slug,
-                    source=source,
-                )
-                if materialize_annotations:
-                    self.materialize_snapshot_annotations(report, meta, artifact_dir)
-                self.upsert_source_row(
-                    source_key,
-                    source,
-                    artifact_dir,
-                    timestamp,
-                    trajectory=trajectory,
-                    meta=meta,
-                    refreshable=False,
-                    snapshot=True,
-                    status=SOURCE_STATUS_OK,
-                )
-                self.log_refresh(
-                    source_key,
-                    SOURCE_STATUS_OK,
-                    warning_count,
-                    None,
-                    timestamp,
-                )
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
+        for source_key in ordered_keys:
+            source, trajectory, meta, warning_count = prepared[source_key]
+            artifact_dir = self.store_trial(
+                trajectory,
+                meta,
+                eval_slug,
+                source=source,
+            )
+            if materialize_annotations:
+                self.materialize_snapshot_annotations(report, meta, artifact_dir)
+            self.upsert_source_row(
+                source_key,
+                source,
+                artifact_dir,
+                timestamp,
+                trajectory=trajectory,
+                meta=meta,
+                refreshable=False,
+                snapshot=True,
+                status=SOURCE_STATUS_OK,
+            )
+            self.log_refresh(
+                source_key,
+                SOURCE_STATUS_OK,
+                warning_count,
+                None,
+                timestamp,
+            )
         return ordered_keys
 
     def materialize_snapshot_annotations(
@@ -423,51 +406,46 @@ class StateIngestMixin:
         )
         timestamp = now_ms()
         seen_keys: list[str] = []
-        try:
-            for cell_dir in self.discover_trial_cell_dirs(eval_slug):
-                artifacts = trial_artifacts(cell_dir)
-                try:
-                    trajectory = read_json_object(artifacts.trajectory_path)
-                    meta = read_json_object(artifacts.meta_path)
-                except Exception:
-                    continue
-                source = self.source_row_for_artifact_cell(cell_dir, trajectory, meta)
-                source_key = source_key_for_trial(eval_slug, source, trajectory, meta)
-                artifact_dir = relative_to_root(self.paths.root, cell_dir)
-                if self.source_exists(source_key):
-                    self.update_existing_artifact_source(
-                        source_key,
-                        artifact_dir,
-                        timestamp,
-                        trajectory,
-                        meta,
-                    )
-                else:
-                    self.upsert_source_row(
-                        source_key,
-                        source,
-                        artifact_dir,
-                        timestamp,
-                        trajectory=trajectory,
-                        meta=meta,
-                        refreshable=False,
-                        snapshot=True,
-                        status=SOURCE_STATUS_OK,
-                    )
-                seen_keys.append(source_key)
-            self.mark_missing_artifact_sources(timestamp)
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
+        del eval_slug
+        for cell_dir in self.discover_source_cell_dirs():
+            artifacts = trial_artifacts(cell_dir)
+            if not (artifacts.trajectory_path.is_file() and artifacts.meta_path.is_file()):
+                continue
+            try:
+                trajectory = read_json_object(artifacts.trajectory_path)
+                meta = read_json_object(artifacts.meta_path)
+            except Exception:
+                continue
+            source = self.source_row_for_artifact_cell(cell_dir, trajectory, meta)
+            cell_eval_slug = self.eval_slug_for_cell_dir(cell_dir)
+            source_key = source_key_for_trial(cell_eval_slug, source, trajectory, meta)
+            artifact_dir = relative_to_root(self.paths.root, cell_dir)
+            if self.source_exists(source_key):
+                self.update_existing_artifact_source(
+                    source_key,
+                    artifact_dir,
+                    timestamp,
+                    trajectory,
+                    meta,
+                )
+            else:
+                self.upsert_source_row(
+                    source_key,
+                    source,
+                    artifact_dir,
+                    timestamp,
+                    trajectory=trajectory,
+                    meta=meta,
+                    refreshable=False,
+                    snapshot=True,
+                    status=SOURCE_STATUS_OK,
+                )
+            seen_keys.append(source_key)
+        self.mark_missing_artifact_sources(timestamp)
         return seen_keys
 
     def source_exists(self, source_key: str) -> bool:
-        row = self.conn.execute(
-            "SELECT 1 FROM peval_py_sources WHERE source_key = ?",
-            (source_key,),
-        ).fetchone()
-        return row is not None
+        return any(row.get("source_key") == source_key for row in self.source_rows(active_only=False))
 
     def update_existing_artifact_source(
         self,
@@ -478,53 +456,49 @@ class StateIngestMixin:
         meta: dict[str, Any],
     ) -> None:
         summary = trial_summary(trajectory, meta)
-        self.conn.execute(
-            """
-            UPDATE peval_py_sources
-            SET artifact_dir = ?,
-                artifact_updated_at_ms = ?,
-                trial_key = ?,
-                trial_session_id = ?,
-                last_turn_finished_at_ms = ?,
-                last_status = CASE
-                    WHEN last_status = ? THEN ?
-                    ELSE last_status
-                END,
-                last_error = CASE
-                    WHEN last_status = ? THEN NULL
-                    ELSE last_error
-                END,
-                updated_at_ms = ?
-            WHERE source_key = ?
-            """,
-            (
-                artifact_dir,
-                timestamp,
-                summary["trial_key"],
-                summary["trial_session_id"],
-                summary["last_turn_finished_at_ms"],
-                SOURCE_STATUS_MISSING,
-                SOURCE_STATUS_OK,
-                SOURCE_STATUS_MISSING,
-                timestamp,
-                source_key,
-            ),
+        row = self.source_by_key(source_key)
+        cell_dir = self.resolve_artifact_dir(artifact_dir)
+        state = {**row, **self.read_source_state(cell_dir)}
+        state.update(
+            {
+                "artifact_dir": artifact_dir,
+                "artifact_updated_at_ms": timestamp,
+                "trial_key": summary["trial_key"],
+                "trial_session_id": summary["trial_session_id"],
+                "last_turn_finished_at_ms": summary["last_turn_finished_at_ms"],
+                "updated_at_ms": timestamp,
+            }
         )
+        if state.get("last_status") == SOURCE_STATUS_MISSING:
+            state["last_status"] = SOURCE_STATUS_OK
+            state["last_error"] = None
+        self.write_source_state(cell_dir, state)
 
     def mark_missing_artifact_sources(self, timestamp: int) -> None:
         for row in self.source_rows(active_only=False):
             if not row.get("artifact_dir") or not self.artifact_missing(row):
                 continue
-            self.conn.execute(
-                """
-                UPDATE peval_py_sources
-                SET last_status = ?, last_error = ?, updated_at_ms = ?
-                WHERE source_key = ?
-                """,
-                (
-                    SOURCE_STATUS_MISSING,
-                    self.missing_artifact_message(row),
-                    timestamp,
-                    row["source_key"],
-                ),
+            self.update_source_status(
+                row,
+                SOURCE_STATUS_MISSING,
+                self.missing_artifact_message(row),
+                timestamp,
             )
+
+    def update_source_status(
+        self,
+        source: dict[str, Any],
+        status: str,
+        error: str | None,
+        timestamp: int,
+    ) -> None:
+        artifact_dir = source.get("artifact_dir")
+        if not artifact_dir:
+            return
+        cell_dir = self.resolve_artifact_dir(str(artifact_dir))
+        state = {**source, **self.read_source_state(cell_dir)}
+        state["last_status"] = status
+        state["last_error"] = error
+        state["last_refreshed_at_ms"] = timestamp
+        state["updated_at_ms"] = timestamp
+        self.write_source_state(cell_dir, state)

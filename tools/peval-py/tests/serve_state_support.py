@@ -36,7 +36,7 @@ from peval_py.state import (
 
 def peval_py_workspace(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "peval-py.toml").write_text('state_db = "state.db"\n', encoding="utf-8")
+    (root / "peval-py.toml").write_text("", encoding="utf-8")
     return root
 
 

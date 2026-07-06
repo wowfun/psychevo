@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from peval_py.config import default_workspace_config_text
+from peval_py.state.constants import SERVE_LOG_RELATIVE_PATH
 
 PEVAL_PY_CONFIG = "peval-py.toml"
 PEVAL_ROOT_ENV = "PEVAL_ROOT"
@@ -15,7 +16,7 @@ PEVAL_ROOT_ENV = "PEVAL_ROOT"
 class WorkspacePaths:
     root: Path
     config_path: Path
-    state_db_path: Path
+    log_path: Path
 
 
 def resolve_workspace_root(explicit_root: str | None = None) -> Path:
@@ -63,16 +64,15 @@ def workspace_paths(root: Path) -> WorkspacePaths:
     root = root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     config_path = root / PEVAL_PY_CONFIG
-    state_db_path = root / "state.db"
     if config_path.is_file():
         try:
-            data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            tomllib.loads(config_path.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as exc:
             raise ValueError(f"failed to parse {config_path}: {exc}") from exc
-        raw_state_db = data.get("state_db", "state.db")
-        state_db_path = Path(str(raw_state_db)).expanduser()
-        if not state_db_path.is_absolute():
-            state_db_path = root / state_db_path
     else:
         config_path.write_text(default_workspace_config_text(), encoding="utf-8")
-    return WorkspacePaths(root=root, config_path=config_path, state_db_path=state_db_path)
+    return WorkspacePaths(
+        root=root,
+        config_path=config_path,
+        log_path=root / SERVE_LOG_RELATIVE_PATH,
+    )

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
-
 from peval_py.state.artifacts import StateArtifactMixin
 from peval_py.state.ingest import StateIngestMixin
 from peval_py.state.mutations import StateMutationMixin
@@ -24,19 +22,13 @@ class ServeStateStore(
         initialize: bool = True,
         readonly: bool = False,
     ) -> None:
+        del readonly
         self.paths = paths
-        if readonly:
-            uri = self.paths.state_db_path.resolve().as_uri() + "?mode=ro"
-            self.conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
-        else:
-            self.paths.state_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(self.paths.state_db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
         if initialize:
             self.initialize_schema()
 
     def close(self) -> None:
-        self.conn.close()
+        return None
 
 
 

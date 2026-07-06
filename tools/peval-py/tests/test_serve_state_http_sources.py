@@ -192,6 +192,20 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 status, _, body = request_json(
                     port,
                     "POST",
+                    f"/api/sources/{source_key}/tags",
+                    {"tags": "alpha，beta, alpha"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["sources"][0]["source_tags"], ["alpha", "beta"])
+                self.assertEqual(
+                    body["report"]["trajectory_meta"][0]["source_tags"],
+                    ["alpha", "beta"],
+                )
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
                     "/api/sources",
                     {"path": "common_session.jsonl", "adapter": "opencode"},
                     origin=origin,
@@ -199,6 +213,7 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(body["sources"][0]["source_key"], source_key)
                 self.assertEqual(body["sources"][0]["source_alias"], "Renamed source")
+                self.assertEqual(body["sources"][0]["source_tags"], ["alpha", "beta"])
 
                 status, _, body = request_json(
                     port,
@@ -211,6 +226,17 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(body["sources"][0]["source_key"], source_key)
                 self.assertIsNone(body["sources"][0]["source_alias"])
                 self.assertNotIn("source_alias", body["report"]["trajectory_meta"][0])
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_key}/tags",
+                    {"tags": ""},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body["sources"][0]["source_tags"], [])
+                self.assertNotIn("source_tags", body["report"]["trajectory_meta"][0])
             finally:
                 server.shutdown()
                 server.server_close()
@@ -384,7 +410,7 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                     port,
                     "POST",
                     "/api/sources",
-                    {"path": '"common one.jsonl" common_two.jsonl', "adapter": "auto"},
+                    {"path": "common one.jsonl\ncommon_two.jsonl", "adapter": "auto"},
                     origin=origin,
                 )
                 self.assertEqual(status, 200)
@@ -450,37 +476,22 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(len(body["sources"]), 2)
                 self.assertEqual(len(body["report"]["trajectory"]), 2)
-                log_count = store.conn.execute(
-                    "SELECT COUNT(*) FROM peval_py_refresh_log"
-                ).fetchone()[0]
+                log_count = len(store.paths.log_path.read_text(encoding="utf-8").splitlines())
 
                 status, _, failed = request_json(
                     port,
                     "POST",
                     "/api/sources",
-                    {"path": '"common one.jsonl" missing.jsonl', "adapter": "auto"},
+                    {"path": "missing.jsonl", "adapter": "auto"},
                     origin=origin,
                 )
                 self.assertEqual(status, 400)
                 self.assertIn("missing.jsonl", failed["error"])
                 self.assertEqual(len(store.source_payload()), 2)
                 self.assertEqual(
-                    store.conn.execute(
-                        "SELECT COUNT(*) FROM peval_py_refresh_log"
-                    ).fetchone()[0],
+                    len(store.paths.log_path.read_text(encoding="utf-8").splitlines()),
                     log_count,
                 )
-
-                status, _, malformed = request_json(
-                    port,
-                    "POST",
-                    "/api/sources",
-                    {"path": '"unterminated', "adapter": "auto"},
-                    origin=origin,
-                )
-                self.assertEqual(status, 400)
-                self.assertIn("path list is invalid", malformed["error"])
-                self.assertEqual(len(store.source_payload()), 2)
 
                 status, _, body = request_json(
                     port,
@@ -496,20 +507,7 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertTrue(source_a.exists())
                 self.assertFalse(artifact_dirs[source_keys[0]].exists())
                 self.assertTrue(artifact_dirs[source_keys[1]].is_dir())
-                self.assertEqual(
-                    store.conn.execute(
-                        "SELECT COUNT(*) FROM peval_py_sources WHERE source_key = ?",
-                        (source_keys[0],),
-                    ).fetchone()[0],
-                    0,
-                )
-                self.assertEqual(
-                    store.conn.execute(
-                        "SELECT COUNT(*) FROM peval_py_refresh_log WHERE source_key = ?",
-                        (source_keys[0],),
-                    ).fetchone()[0],
-                    0,
-                )
+                self.assertNotIn(source_keys[0], [source["source_key"] for source in store.source_payload()])
 
                 status, _, rejected = request_json(
                     port,
@@ -573,7 +571,7 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                     port,
                     "POST",
                     "/api/sources",
-                    {"path": "common_one.jsonl common_two.jsonl common_three.jsonl"},
+                    {"path": "common_one.jsonl\ncommon_two.jsonl\ncommon_three.jsonl"},
                     origin=origin,
                 )
                 self.assertEqual(status, 200)
@@ -616,9 +614,13 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(len(single_report["trajectory"]), 1)
-                status, invalid_state = get_report("/api/report?source_state=all")
-                self.assertEqual(status, 400)
-                self.assertIn("source_state must be active or archived", invalid_state["error"])
+                status, all_report = get_report("/api/report?source_state=all")
+                self.assertEqual(status, 200)
+                self.assertEqual(len(all_report["trajectory"]), 3)
+                self.assertEqual(
+                    [meta["trial_key"] for meta in all_report["trajectory_meta"]],
+                    ["session:t001", "session:t001:2", "session:t001:3"],
+                )
 
                 status, _, bad_keys = request_json(
                     port,
@@ -724,9 +726,7 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
             source_key = store.ingest_upload("saved-report.json", json.dumps(report), config)[0]
             source = store.source_payload()[0]
             artifact_dir = root / source["artifact_dir"]
-            store.conn.execute("DELETE FROM peval_py_refresh_log")
-            store.conn.execute("DELETE FROM peval_py_sources")
-            store.conn.commit()
+            shutil.rmtree(artifact_dir / ".peval")
             server = LocalHTTPServer(
                 ("127.0.0.1", 0),
                 make_handler(store, config),
@@ -756,7 +756,7 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertEqual(len(payload["trajectory"]), 1)
 
-                shutil.rmtree(artifact_dir)
+                shutil.rmtree(artifact_dir / "agent")
                 status, _, html = request_text(port, "/")
                 self.assertEqual(status, 200)
                 options = script_json(html, "peval-py-render-options")
@@ -829,6 +829,50 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 copied_note = root / body["sources"][0]["artifact_dir"] / "notes.md"
                 self.assertEqual(copied_note.read_text(encoding="utf-8"), "Imported note.")
                 self.assertTrue((first_cell / "notes.md").is_file())
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_path_batch_import_continues_after_failed_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp) / "workspace")
+            shutil.copy(FIXTURES / "common_session.jsonl", root / "common_session.jsonl")
+            config = ToolConfig(adapter="opencode", workspace_root=str(root))
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/sources",
+                    {
+                        "path": "missing.jsonl\ncommon_session.jsonl",
+                        "adapter": "opencode",
+                    },
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(
+                    [result["status"] for result in body["import_results"]],
+                    ["error", "ok"],
+                )
+                self.assertIn("missing.jsonl", body["import_results"][0]["error"])
+                self.assertEqual(len(body["import_results"][1]["source_keys"]), 1)
+                self.assertEqual(len(body["sources"]), 1)
+                self.assertEqual(len(body["report"]["trajectory"]), 1)
+                self.assertEqual(
+                    body["report"]["trajectory"][0]["session_id"],
+                    "common_session",
+                )
             finally:
                 server.shutdown()
                 server.server_close()

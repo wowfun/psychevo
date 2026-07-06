@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import replace
-from pathlib import Path
 
 from peval_py.cli.parser import build_parser
 from peval_py.cli.sessions import interactive_session_selection, print_session_lists
@@ -55,19 +53,6 @@ def main(argv: list[str] | None = None) -> int:
             config.adapter,
         )
         config = config_for_adapter(config, adapter_assignments.default_adapter)
-        if (
-            args.command in {"view", "export"}
-            and workspace_root
-            and (getattr(args, "root", None) or inferred_workspace_root)
-        ):
-            from peval_py.state import workspace_paths
-
-            config = replace(
-                config,
-                workspace_state_db_path=str(
-                    workspace_paths(Path(workspace_root)).state_db_path
-                ),
-            )
         if args.command == "serve":
             from peval_py.serve import run_serve_command
 

@@ -3,6 +3,108 @@ from __future__ import annotations
 from reports_html_support import *
 
 class PevalPyReportHtmlTimelineTests(unittest.TestCase):
+    def test_timeline_numbers_are_step_scoped(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js timeline helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        report = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:numbering",
+                    "session_id": "numbering",
+                    "agent": {"name": "custom", "model_name": "test-model"},
+                    "steps": [
+                        {"step_id": 1, "source": "user", "message": "start"},
+                        {
+                            "step_id": 2,
+                            "source": "agent",
+                            "message": "run tool",
+                            "tool_calls": [
+                                {"tool_call_id": "call-read", "function_name": "read_file"}
+                            ],
+                        },
+                    ],
+                    "final_metrics": {},
+                }
+            ],
+            "trajectory_meta": [
+                {
+                    "trial_key": "trial:numbering",
+                    "status": "passed",
+                    "started_at_ms": 1_000,
+                    "duration_ms": 80,
+                    "steps": [
+                        {"step_id": 1, "timestamp_ms": 1_000, "duration_ms": None},
+                        {
+                            "step_id": 2,
+                            "timestamp_ms": 1_100,
+                            "duration_ms": 80,
+                            "tool_calls": [
+                                {
+                                    "tool_call_id": "call-read",
+                                    "title": "read_file",
+                                    "timestamp_ms": 1_130,
+                                    "execution_duration_ms": 20,
+                                    "status": "ok",
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+        }
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const report = {json.dumps(report)};
+const context = {{
+  document: {{
+    body: {{ classList: {{ add() {{}}, remove() {{}}, toggle() {{}} }} }},
+    addEventListener() {{}},
+    getElementById() {{ return null; }},
+    querySelector() {{ return null; }},
+    querySelectorAll() {{ return []; }},
+  }},
+  window: {{ addEventListener() {{}} }},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  requestAnimationFrame(callback) {{ callback(); }},
+  report,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`(() => {{
+  const trace = timelineTrace(report.trajectory[0], report.trajectory_meta[0]);
+  return JSON.stringify(trace.stages.map(stage => [stage.number, stage.stage]));
+}})()`, context);
+console.log(result);
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        self.assertEqual(
+            json.loads(node.stdout),
+            [["2.1", "Model: test-model"], ["2.2", "Tool: read_file"]],
+        )
+
     def test_html_renders_wall_time_timeline_diagnostics_without_new_json_fields(self) -> None:
         report = {
             "schema_version": 19,

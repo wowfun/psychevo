@@ -13,15 +13,10 @@ The command supports path and DB input sources:
 - `-d, --db PATH` reads an adapter-owned SQLite persistence format. `view
   trajectory` may repeat `-d` to compare sessions across adapters. `-d
   @adapter` expands to that adapter's configured `default_db_path` and binds
-  that DB input to the token adapter.
-  `<workspace>/state.db` is peval-py workspace state, not an adapter-owned
-  source database. When `view trajectory` or `export trajectory` is invoked
-  with an explicit `-r <workspace>` and a `-d` input resolves to that
-  workspace's configured state DB, peval-py treats the DB as a saved-source
-  registry and reads stored Trial snapshots from `peval_py_sources` and each
-  row's `artifact_dir`. Without explicit `-r`, passing a peval-py workspace
-  state DB as `-d` fails with a clear diagnostic that suggests `-r <workspace>`
-  for saved snapshots or `-d @adapter` for adapter default DBs.
+  that DB input to the token adapter. Peval-py workspace source state is not a
+  DB input; saved workspace snapshots are read through direct Trial cell paths
+  or workspace/runs paths, while `-d` remains reserved for adapter-owned SQLite
+  persistence.
 - `-i, --input-table PATH` reads a structured input manifest and appends its
   rows after any direct `-p/--path` and `-d/--db` inputs. CSV and JSON manifests
   use only the Python standard library. `.xlsx` manifests are supported only
@@ -151,30 +146,6 @@ accessible Windows drive path maps to that local cell path. If explicit
 the command fails with a clear conflict diagnostic instead of silently using
 either root.
 
-Workspace state DB input is a saved snapshot input only when all of these are
-true: `view` or `export` was invoked with explicit `-r <workspace>`, the `-d`
-path resolves to that workspace's configured `state_db`, and `peval_py_sources`
-contains rows with `artifact_dir` values. This path is read-only: it does not
-refresh sources, read original DBs, scan orphaned `runs/` directories, mutate
-`peval_py_sources`, or change `serve` source persistence semantics. Raw adapter
-DB access remains explicit through `-d @adapter` or a real adapter DB path.
-
-For saved workspace snapshots, `view trajectory -r W -d W/state.db --list`
-lists saved source rows with `#`, `source_key`, `session_id`,
-`trial_key`, `active`, `kind`, `adapter`, and alias/name. `view trajectory -r W
--d W/state.db` with no `-s` inspects all active saved sources by default.
-`view trajectory -m raw -r W -d W/state.db` renders all active saved sources by
-reading `agent/trajectory.json` and `agent/trajectory_meta.json` under each
-selected source's `artifact_dir`, then composing the report with current
-cell-local notes and analysis overlays just as `serve` does. Repeated `-s`
-selectors choose saved sources by `source_key`, `#N`, unique stored `session_id` or
-`trial_session_id`, or unique `trial_key`; ambiguous selectors fail and ask for
-`source_key` or `#N`. Archived sources are excluded by default but may be
-selected explicitly. `export trajectory -r W -d W/state.db -s SELECTOR` writes
-that saved source's stored `trajectory.json`. Without `-s`, saved-snapshot
-export succeeds only when exactly one active saved source exists; otherwise it
-fails with a selection diagnostic.
-
 For direct Trial cell artifact directory input, `view trajectory -p
 W/runs/E/A/S/C` and `export trajectory -p W/runs/E/A/S/C` read
 `agent/trajectory.json` and `agent/trajectory_meta.json` from that cell. If the
@@ -188,12 +159,14 @@ non-cell `-p` values, and ignores `-r`, `-a`, `-d`, `-s`, `-i`, `--list`, and
 `--list-interactive`. In cell-path mode no warning is emitted for ignored input
 selectors because the Trial cell path is the stronger explicit source.
 
-If the canonical cell path is under an inferred workspace and a matching
-`peval_py_sources.artifact_dir` row exists, peval-py uses that saved source row
-so source aliases, current cell-local notes, and cached analysis overlays remain
-consistent with workspace snapshot rendering. If no matching row exists, peval-py
-renders the artifact snapshot directly without requiring registration in
-workspace state. A path under `runs/...` that looks like a Trial cell but lacks
+If the canonical cell path is under an inferred workspace and
+`.peval/state.json` exists, peval-py uses that cell-local source state so source
+aliases, active state, current cell-local notes, and cached analysis overlays
+remain consistent with serve rendering. The state file is an overlay only:
+artifact identity, source key, adapter/session/model fields, and Trial summary
+fields are still derived from the cell path and agent artifacts. Missing
+`.peval/` or `.peval/state.json` is allowed and renders the artifact snapshot
+with default source state. A path under `runs/...` that looks like a Trial cell but lacks
 either required agent artifact must fail with an actionable diagnostic naming
 `agent/trajectory.json` and `agent/trajectory_meta.json`.
 
@@ -205,8 +178,8 @@ changing the original provenance. Inspect v2 remains a minimal digest and does
 not include `artifact_ref`. `artifact_ref.kind` is `trial-cell-artifact`;
 `path` is the readable path relative to the current working directory when
 possible; `workspace_relative_path` is present when the cell belongs to a
-discovered workspace; and `source_key` is present when the cell matched
-`peval_py_sources.artifact_dir`. `export
+discovered workspace; and `source_key` is present when the cell has a
+matching `.peval/state.json`. `export
 trajectory -p <cell-dir>` still writes only the ATIF trajectory object and does
 not include `artifact_ref`.
 
@@ -228,37 +201,37 @@ warnings. Import mutates only the selected Trial cell files.
 
 `init` accepts `-r, --root DIR` and `--json`. Without `--root`, it initializes
 the current directory. It creates `<workspace>/peval-py.toml` when missing and
-creates or opens `<workspace>/state.db`. Existing valid `peval-py.toml` files are
-preserved, including custom relative or absolute `state_db` paths and custom
-adapter defaults. New config files include built-in adapter default DB paths
-using `~`: Psychevo `~/.psychevo/state.db`, OpenCode
+creates `<workspace>/logs/` when needed. Existing valid `peval-py.toml` files are
+preserved, including custom adapter defaults; legacy `state_db` keys are ignored
+by peval-py workspace state. New config files include built-in adapter default
+DB paths using `~`: Psychevo `~/.psychevo/state.db`, OpenCode
 `~/.local/share/opencode/opencode.db`, and Hermes `~/.hermes/state.db`. It must
 not create or edit `peval.toml`, `runs/`, `datasets/`, `scripts/`, workspace
 templates, `$PSYCHEVO_HOME/peval-config.toml`, or `.gitignore`. `--json` emits
-`schema_version`, `root`, `peval_py_config`, and `state_db`.
+`schema_version`, `root`, `peval_py_config`, and `log_path`.
 
 `serve` accepts `-r, --root DIR` to select a peval-py workspace root. Explicit
 `--root` and `PEVAL_ROOT` roots are accepted directly and create missing
-`peval-py.toml` / `state.db` defaults as needed. `PEVAL_ROOT` is only a shared
-environment variable name for the root path override; it does not imply Rust
-`peval` workspace discovery or validation. Without an explicit or environment
-root, discovery walks the current directory and parents for `peval-py.toml`; if
-none is found, `serve` fails clearly and names `peval-py init`, `--root/-r`,
-and `PEVAL_ROOT`. `serve` discovery must not read or require Rust
+`peval-py.toml` defaults as needed. `PEVAL_ROOT` is only a shared environment
+variable name for the root path override; it does not imply Rust `peval`
+workspace discovery or validation. Without an explicit or environment root,
+discovery walks the current directory and parents for `peval-py.toml`; if none
+is found, `serve` fails clearly and names `peval-py init`, `--root/-r`, and
+`PEVAL_ROOT`. `serve` discovery must not read or require Rust
 `peval.toml` or `$PSYCHEVO_HOME/peval-config.toml`.
 
 `serve` accepts `-c`, `-a`, `-p`, `-d`, `-s`, `-i`, `-n`, and
 `--source-alias` with the same trajectory-source semantics as `view
 trajectory`. Source flags are persistent: they create or update stable saved
-sources in `<workspace>/state.db` after conversion succeeds and before the
-server starts. In serve state, one source is one Trial cell: it is the
-user-facing management object for that cell and is not a separate provenance row
-that can share artifacts with another source. Stable source keys are derived
-from the canonical cell identity after conversion: analysis eval slug, effective
-agent id, session id, and `trajectory_meta.trial_key`. Repeated imports that
-resolve to the same cell update the same source instead of appending duplicates.
-Source aliases are display-only metadata and must not contribute to source
-keys.
+sources by writing each Trial cell's minimal `.peval/state.json` overlay after conversion
+succeeds and before the server starts. In serve state, one source is one Trial
+cell: it is the user-facing management object for that cell and is not a
+separate provenance row that can share artifacts with another source. Stable
+source keys are derived from the canonical cell identity after conversion:
+analysis eval slug, effective agent id, session id, and
+`trajectory_meta.trial_key`. Repeated imports that resolve to the same cell
+update the same source instead of appending duplicates. Source aliases are
+display-only metadata and must not contribute to source keys.
 Uploaded JSONL, ATIF JSON, and report JSON sources are stored as canonical
 snapshots and are not refreshable.
 In the web UI, DB sources may also be added through a session picker: the user

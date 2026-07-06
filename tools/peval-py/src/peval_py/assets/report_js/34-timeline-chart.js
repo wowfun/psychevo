@@ -168,7 +168,7 @@ function timelineTooltipFormatter(params) {
 function timelineTooltipHtml(item) {
   if (!item) return "";
   const isMarker = item.kind === "marker";
-  const title = isMarker ? item.name : `#${item.number} ${item.stage}`;
+  const title = isMarker ? `#${item.number} ${item.name}` : `#${item.number} ${item.stage}`;
   const pct = !isMarker && positiveMetric(item.duration_ms) && positiveMetric(item.active_total_ms)
     ? `${(Number(item.duration_ms) / Number(item.active_total_ms) * 100).toFixed(1)}%`
     : "-";

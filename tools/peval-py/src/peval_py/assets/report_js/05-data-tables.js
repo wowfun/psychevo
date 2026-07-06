@@ -8,7 +8,7 @@ function selectionColumn() {
   };
 }
 function leaderboardColumns() {
-  return [
+  const columns = [
     { key: "session_id", label: t("session", "Session"), width: "180px", filterable: true, value: row => sourceIdentityFor(row), cellTitle: row => row.trial_key && row.trial_key !== sourceIdentityFor(row) ? row.trial_key : "" },
     { key: "source_alias", label: t("session_alias", "Session Alias"), width: "140px", value: row => sessionAliasValue(row), html: row => renderSessionAliasCell(row) },
     { key: "agent", label: t("agent", "Agent"), width: "120px", filterable: true, value: row => agentNameFor(row) },
@@ -27,6 +27,9 @@ function leaderboardColumns() {
       return text && text !== noteSnippetFor(row.trial_key) ? text : "";
     } }
   ];
+  return serveMode()
+    ? [{ key: "source_tags", label: t("tags", "Tags"), width: "156px", filterable: true, filterValues: row => sourceTagsFor(row), value: row => sourceTagsValue(row), html: row => renderSourceTagsCell(row) }, ...columns]
+    : columns;
 }
 function displayLeaderboardColumns() {
   return serveMode() ? [selectionColumn(), ...leaderboardColumns()] : leaderboardColumns();
@@ -59,7 +62,7 @@ function renderLeaderboard(rows = leaderboardRows()) {
 }
 function renderLeaderboardPanelControls(rows) {
   if (!serveMode()) return "";
-  return `<div class="leaderboard-actions">${renderServeSourceStateControls(rows)}${renderLeaderboardExportControls()}</div>`;
+  return `<div class="leaderboard-actions">${renderServeSourceStateControls(rows)}<div class="leaderboard-action-stack">${renderLeaderboardExportControls()}${renderLeaderboardSearchControls()}</div></div>`;
 }
 function renderLeaderboardExportControls() {
   if (!serveMode()) return "";
@@ -74,8 +77,20 @@ function renderLeaderboardExportControls() {
     </details>
   </div>`;
 }
+function renderLeaderboardSearchControls() {
+  if (!serveMode()) return "";
+  const query = state.search?.query || "";
+  const scope = searchScope();
+  return `<div class="leaderboard-search" data-leaderboard-search>
+    <input type="search" data-leaderboard-search-input value="${esc(query)}" placeholder="${esc(t("search_sessions", "Search sessions"))}" aria-label="${esc(t("search_sessions", "Search sessions"))}">
+    <div class="leaderboard-search-scope" role="group" aria-label="${esc(t("search_scope", "Search scope"))}">
+      <label><input type="radio" name="leaderboard-search-scope" value="visible" ${scope === "visible" ? "checked" : ""}> <span>${esc(t("search_visible_sessions", "Visible sessions"))}</span></label>
+      <label><input type="radio" name="leaderboard-search-scope" value="all" ${scope === "all" ? "checked" : ""}> <span>${esc(t("search_all_sessions", "All sessions"))}</span></label>
+    </div>
+  </div>`;
+}
 function leaderboardRows() {
-  return applyDataTableControls("leaderboard", reportRows(), leaderboardColumns(), reportRows());
+  return applyDataTableControls("leaderboard", applySessionSearch(reportRows()), leaderboardColumns(), reportRows());
 }
 function tableControls(tableId) {
   const controls = state.tables[tableId] || {};
@@ -93,10 +108,16 @@ function activeFilterValues(tableId, key) {
   return Array.isArray(values) ? values : [];
 }
 function filterValue(row, column) {
+  return filterValues(row, column)[0] || "-";
+}
+function filterValues(row, column) {
+  if (column.filterValues) {
+    return listValue(column.filterValues(row)).map(value => String(value || "").trim()).filter(Boolean);
+  }
   const source = column.filterValue || column.value || (item => item?.[column.key]);
   const raw = source(row);
   const text = raw === null || raw === undefined || raw === "" ? "-" : String(raw);
-  return text;
+  return [text];
 }
 function filterLabel(column, value) {
   return column.filterLabel ? column.filterLabel(value) : value;
@@ -107,11 +128,12 @@ function applyDataTableFilters(tableId, rows, columns) {
     if (!activeColumns.includes(column)) return true;
     const selected = activeFilterValues(tableId, column.key);
     if (!selected.length) return true;
-    return selected.includes(filterValue(row, column));
+    const values = filterValues(row, column);
+    return values.some(value => selected.includes(value));
   }));
 }
 function filterOptions(column, rows) {
-  const values = rows.map(row => filterValue(row, column));
+  const values = rows.flatMap(row => filterValues(row, column));
   return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
 }
 function setFilterValue(tableId, key, value, checked) {
@@ -298,5 +320,7 @@ function bindLeaderboardControls() {
   bindServeSelectionControls(target);
   bindServeSourceStateControls(target);
   bindServeExportControls(target);
+  bindLeaderboardSearchControls(target);
+  bindInlineSourceEditors(target);
   bindTrialSelection(target);
 }

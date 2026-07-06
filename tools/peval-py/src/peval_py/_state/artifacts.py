@@ -31,8 +31,12 @@ def source_key_for_trial(
         trajectory=trajectory,
         meta=meta,
     )
+    return source_key_for_components(payload)
+
+
+def source_key_for_components(components: dict[str, str]) -> str:
     return "cell_" + hashlib.sha256(
-        json.dumps(payload, sort_keys=True).encode("utf-8")
+        json.dumps(components, sort_keys=True).encode("utf-8")
     ).hexdigest()[:20]
 
 
@@ -62,6 +66,23 @@ def trial_cell_components(
         ),
         "cell_key": required_artifact_segment(meta.get("trial_key"), "trial_key"),
     }
+
+
+def source_key_for_trial_cell_components(
+    *,
+    eval_slug: str,
+    agent_id: str,
+    session_id: str,
+    cell_key: str,
+) -> str:
+    return source_key_for_components(
+        {
+            "eval_slug": artifact_segment(eval_slug, DEFAULT_ANALYSIS_EVAL_SLUG),
+            "agent_id": artifact_segment(agent_id, "unknown-agent"),
+            "session_id": artifact_segment(session_id, "unknown-session"),
+            "cell_key": required_artifact_segment(cell_key, "trial_key"),
+        }
+    )
 
 
 def normalized_optional_path(path: str | None) -> str | None:

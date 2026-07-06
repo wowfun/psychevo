@@ -39,7 +39,7 @@ function initialAdapterDefaults() {
 function adapterDefaults() {
   return state.adapterDefaults || {};
 }
-const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], selectedSourceKey: null, serveSourceMode: "active", serveReportCache: {}, adapterDefaults: initialAdapterDefaults(), notesEditor: null };
+const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], selectedSourceKey: null, serveSourceMode: "active", serveReportCache: {}, adapterDefaults: initialAdapterDefaults(), notesEditor: null, search: { query: "", scope: "visible", normalSourceMode: "active" } };
 const SUBMENU_DETAILS_SELECTOR = ".export-menu,.filter-control";
 const OPEN_SUBMENU_DETAILS_SELECTOR = ".export-menu[open],.filter-control[open]";
 function closeOpenSubmenus(except = null) {
@@ -55,20 +55,24 @@ function reportRows() {
   const metas = listValue(state.view?.trajectory_meta);
   if (metas.length >= 1) {
     return metas
-      .map((meta, index) => synthesizedReportRow(trajectories[index] || {}, meta))
+      .map((meta, index) => synthesizedReportRow(trajectories[index] || {}, meta, index))
       .filter(row => row.trial_key);
   }
   return [];
 }
-function synthesizedReportRow(trajectory, meta) {
+function synthesizedReportRow(trajectory, meta, index = -1) {
   const metrics = trajectory?.final_metrics || {};
   const totalToolCalls = hasMetricValue(finalMetric(metrics, "total_tool_calls")) ? Number(finalMetric(metrics, "total_tool_calls")) : 0;
   const totalToolErrors = hasMetricValue(finalMetric(metrics, "total_tool_errors")) ? Number(finalMetric(metrics, "total_tool_errors")) : 0;
   const agent = trajectory?.agent || {};
+  const source = serveMode() ? sourceForTrialIndex(index) : null;
   return {
     trial_key: meta?.trial_key,
     session_id: trajectory?.session_id || "-",
     source_alias: meta?.source_alias,
+    source_tags: sourceTagsForMeta(meta, source),
+    source_key: source?.source_key || null,
+    source_active: source?.active !== false,
     adapter: meta?.adapter,
     model: agent.model_name,
     status: meta?.status,
@@ -173,6 +177,7 @@ function rowAnalysised(row) {
   return analysisArtifactPathsFor(row?.trial_key).some(isAnalysisArtifactPath) ? "True" : "False";
 }
 function normalizeServeSourceMode(mode) {
+  if (mode === "all") return "all";
   return mode === "archived" ? "archived" : "active";
 }
 function currentServeSourceMode() {
@@ -183,6 +188,7 @@ function serveSourcesForMode(mode = currentServeSourceMode()) {
 }
 function serveSourcesForModeFrom(sources, mode = currentServeSourceMode()) {
   const sourceMode = normalizeServeSourceMode(mode);
+  if (sourceMode === "all") return Array.isArray(sources) ? sources : [];
   return (Array.isArray(sources) ? sources : []).filter(source => {
     const active = source?.active !== false;
     return sourceMode === "archived" ? !active : active;
@@ -254,7 +260,77 @@ function sessionAliasValue(row) {
 }
 function renderSessionAliasCell(row) {
   const alias = sourceAliasFor(row);
-  return alias ? esc(alias) : `<span class="muted">-</span>`;
+  return renderEditableSourceCell(row, "alias", alias, alias ? esc(alias) : `<span class="muted">-</span>`);
+}
+function sourceTagsForMeta(meta, source = null) {
+  const rawTags = listValue(meta?.source_tags).length ? meta.source_tags : source?.source_tags;
+  return sourceTagsFromValue(rawTags);
+}
+function sourceTagsFromValue(value) {
+  const tags = [];
+  const seen = new Set();
+  listValue(value).forEach(rawTag => {
+    const tag = String(rawTag || "").trim();
+    if (!tag || seen.has(tag)) return;
+    seen.add(tag);
+    tags.push(tag);
+  });
+  return tags;
+}
+function sourceTagsFor(row) {
+  return sourceTagsFromValue(row?.source_tags);
+}
+function sourceTagsValue(row) {
+  return sourceTagsFor(row).join(", ") || "-";
+}
+function sourceTagsEditValue(row) {
+  return sourceTagsFor(row).join(", ");
+}
+function renderSourceTagsCell(row) {
+  const tags = sourceTagsFor(row);
+  const html = tags.length
+    ? `<span class="source-tag-list">${tags.map(tag => `<span class="source-tag-chip">${esc(tag)}</span>`).join("")}</span>`
+    : `<span class="muted">-</span>`;
+  return renderEditableSourceCell(row, "tags", sourceTagsEditValue(row), html);
+}
+function renderEditableSourceCell(row, field, value, html) {
+  if (!serveMode() || !row?.source_key) return html;
+  return `<span class="editable-source-cell" data-source-inline-edit="${esc(field)}" data-source-key="${esc(row.source_key)}" data-trial-key="${esc(row.trial_key || "")}" data-value="${esc(value || "")}" title="${esc(t("double_click_to_edit", "Double-click to edit"))}">${html}</span>`;
+}
+function searchQuery() {
+  return String(state.search?.query || "").trim().toLowerCase();
+}
+function searchScope() {
+  return state.search?.scope === "all" ? "all" : "visible";
+}
+function allSearchActive() {
+  return serveMode() && searchScope() === "all" && Boolean(searchQuery());
+}
+function applySessionSearch(rows) {
+  const query = searchQuery();
+  if (!query) return rows;
+  return rows.filter(row => sessionSearchText(row).includes(query));
+}
+function sessionSearchText(row) {
+  const trajectory = trajectoryFor(row?.trial_key);
+  const meta = metaFor(row?.trial_key);
+  const parts = [];
+  listValue(trajectory?.steps).forEach(step => {
+    parts.push(step?.message, step?.reasoning_content);
+    parts.push(searchJson(step?.tool_calls), searchJson(step?.observation), searchJson(step?.observations));
+  });
+  listValue(meta?.steps).forEach(step => {
+    parts.push(searchJson(step?.tool_calls), searchJson(step?.observations));
+  });
+  return parts.filter(value => value !== null && value !== undefined).join("\n").replace(/\s+/g, " ").toLowerCase();
+}
+function searchJson(value) {
+  if (value === null || value === undefined) return "";
+  try {
+    return typeof value === "string" ? value : JSON.stringify(value);
+  } catch {
+    return String(value || "");
+  }
 }
 function renderComparisonPanels(options = {}) {
   const scrollState = options.preserveScroll === false ? null : comparisonScrollState();
@@ -262,6 +338,7 @@ function renderComparisonPanels(options = {}) {
   syncSelectionWithVisibleRows(rows);
   renderLeaderboard(rows);
   if (rows.length > 1 && $("leaderboard-summary")) renderLeaderboardSummary(rows);
+  else if ($("leaderboard-summary")) $("leaderboard-summary").innerHTML = "";
   renderTrajectoryOverview(rows);
   restoreComparisonScrollState(scrollState);
   bindComparisonScrollSync();

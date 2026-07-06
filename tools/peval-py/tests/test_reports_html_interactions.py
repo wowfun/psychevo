@@ -3,6 +3,130 @@ from __future__ import annotations
 from reports_html_support import *
 
 class PevalPyReportHtmlInteractionTests(unittest.TestCase):
+    def test_leaderboard_search_and_tag_filters_use_serve_source_rows(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        sources = [
+            {
+                "source_key": "source-active",
+                "active": True,
+                "artifact_dir": "runs/a",
+                "last_status": "ok",
+                "trial_key": "trial:active",
+                "source_tags": ["green"],
+            },
+            {
+                "source_key": "source-archived",
+                "active": False,
+                "artifact_dir": "runs/b",
+                "last_status": "ok",
+                "trial_key": "trial:archived",
+                "source_tags": ["red", "blue"],
+            },
+        ]
+        report = {
+            "schema_version": 19,
+            "includes": ["core"],
+            "trajectory": [
+                {
+                    "trajectory_id": "trial:active",
+                    "session_id": "active",
+                    "steps": [{"step_id": 1, "source": "user", "message": "needle in message"}],
+                    "final_metrics": {},
+                },
+                {
+                    "trajectory_id": "trial:archived",
+                    "session_id": "archived",
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "source": "agent",
+                            "reasoning_content": "hidden thought",
+                            "tool_calls": [{"function_name": "lookup", "arguments": {"q": "blue"}}],
+                            "observation": {"content": "observed target"},
+                        }
+                    ],
+                    "final_metrics": {},
+                },
+            ],
+            "trajectory_meta": [
+                {"trial_key": "trial:active", "status": "passed", "steps": [], "source_tags": ["green"]},
+                {"trial_key": "trial:archived", "status": "passed", "steps": [], "source_tags": ["red", "blue"]},
+            ],
+        }
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const report = {json.dumps(report)};
+const sources = {json.dumps(sources)};
+const nodes = {{
+  "peval-py-data": {{ textContent: "{{}}" }},
+  "peval-py-i18n": {{ textContent: "{{}}" }},
+  "peval-py-token-estimates": {{ textContent: "{{}}" }},
+  "peval-py-render-options": {{ textContent: JSON.stringify({{ mode: "serve", sources }}) }},
+}};
+const context = {{
+  document: {{
+    body: {{ classList: {{ add() {{}}, remove() {{}}, toggle() {{}} }} }},
+    addEventListener() {{}},
+    getElementById(id) {{ return nodes[id] || null; }},
+    querySelector() {{ return null; }},
+    querySelectorAll() {{ return []; }},
+  }},
+  window: {{ addEventListener() {{}} }},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  requestAnimationFrame(callback) {{ callback(); }},
+  report,
+  sources,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`(() => {{
+  state.view = report;
+  state.serveSources = sources;
+  state.serveSourceMode = "all";
+  state.search.scope = "all";
+  state.search.query = "needle";
+  const messageRows = leaderboardRows().map(row => [row.trial_key, row.source_key, row.source_tags]);
+  state.search.query = "observed target";
+  const observationRows = leaderboardRows().map(row => row.trial_key);
+  state.search.query = "";
+  setFilterValue("leaderboard", "source_tags", "blue", true);
+  const tagRows = leaderboardRows().map(row => row.trial_key);
+  return JSON.stringify({{ messageRows, observationRows, tagRows }});
+}})()`, context);
+console.log(result);
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(
+            result["messageRows"],
+            [["trial:active", "source-active", ["green"]]],
+        )
+        self.assertEqual(result["observationRows"], ["trial:archived"])
+        self.assertEqual(result["tagRows"], ["trial:archived"])
+
     def test_markdown_renderer_renders_analysis_md_headings_tables_and_escapes(self) -> None:
         if not shutil.which("node"):
             self.skipTest("node is required to execute report.js interaction helpers")

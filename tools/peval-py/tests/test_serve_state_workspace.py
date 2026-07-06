@@ -2,6 +2,27 @@ from __future__ import annotations
 
 from serve_state_support import *
 
+DERIVED_SOURCE_STATE_FIELDS = {
+    "source_key",
+    "kind",
+    "adapter",
+    "label",
+    "input_path",
+    "db_path",
+    "session_id",
+    "agent_name",
+    "agent_version",
+    "model",
+    "artifact_dir",
+    "artifact_updated_at_ms",
+    "trial_key",
+    "trial_session_id",
+    "last_turn_finished_at_ms",
+    "refreshable",
+    "snapshot",
+}
+
+
 class PevalPyServeStateWorkspaceTests(unittest.TestCase):
     def test_workspace_discovery_and_missing_workspace_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -24,7 +45,8 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
             store = open_workspace_state(str(created))
             try:
                 self.assertTrue((created / "peval-py.toml").is_file())
-                self.assertTrue((created / "state.db").is_file())
+                self.assertTrue((created / "logs").is_dir())
+                self.assertFalse((created / "state.db").exists())
                 self.assertFalse((created / "peval.toml").exists())
             finally:
                 store.close()
@@ -108,20 +130,9 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
 
                 self.assertEqual(len(keys), 1)
                 self.assertTrue((root / "peval-py.toml").is_file())
-                self.assertTrue((root / "state.db").is_file())
+                self.assertFalse((root / "state.db").exists())
                 config_text = (root / "peval-py.toml").read_text(encoding="utf-8")
-                self.assertIn('state_db = "state.db"\n', config_text)
-
-                table_names = [
-                    row[0]
-                    for row in store.conn.execute(
-                        "SELECT name FROM sqlite_master WHERE type = 'table'"
-                    ).fetchall()
-                ]
-                self.assertTrue(table_names)
-                self.assertTrue(
-                    all(name.startswith("peval_py_") or name == "sqlite_sequence" for name in table_names)
-                )
+                self.assertNotIn("state_db", config_text)
                 self.assertEqual(len(store.source_payload()), 1)
                 active_report = store.active_report()
                 self.assertEqual(len(active_report["trajectory"]), 1)
@@ -142,24 +153,25 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                         "trajectory_meta.json",
                     },
                 )
-                source_columns = {
-                    row["name"]
-                    for row in store.conn.execute(
-                        "PRAGMA table_info(peval_py_sources)"
-                    ).fetchall()
-                }
-                self.assertIn("artifact_dir", source_columns)
-                self.assertIn("artifact_updated_at_ms", source_columns)
-                trial_table = store.conn.execute(
-                    """
-                    SELECT name
-                    FROM sqlite_master
-                    WHERE type = 'table' AND name = 'peval_py_trials'
-                    """
-                ).fetchone()
-                self.assertIsNone(
-                    trial_table,
-                    "Trial cell artifact pointers belong on peval_py_sources",
+                source_state_path = artifact_dir / ".peval" / "state.json"
+                self.assertTrue(source_state_path.is_file())
+                source_state = json.loads(source_state_path.read_text(encoding="utf-8"))
+                self.assertEqual(source_state["schema_version"], 2)
+                self.assertTrue(DERIVED_SOURCE_STATE_FIELDS.isdisjoint(source_state))
+                self.assertEqual(
+                    source_state["source"],
+                    {
+                        "kind": "path",
+                        "adapter": "opencode",
+                        "label": "common_session.jsonl",
+                        "input_path": str(source.resolve()),
+                        "session_id": "common_session",
+                        "refreshable": True,
+                    },
+                )
+                self.assertTrue(
+                    store.paths.log_path.is_file(),
+                    "refresh/import evidence belongs in the workspace JSONL log",
                 )
                 self.assertEqual(
                     active_report["annotations"]["analysis"][0]["summary"],
@@ -182,6 +194,17 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 self.assertEqual(duplicate_keys, keys)
                 self.assertEqual(len(store.source_payload()), 1)
 
+                store.close()
+                store = open_workspace_state(str(root))
+                reopened_source = store.source_payload()[0]
+                self.assertEqual(reopened_source["source_key"], keys[0])
+                self.assertTrue(reopened_source["refreshable"])
+                store.refresh_sources(keys, config)
+                self.assertEqual(
+                    store.source_payload()[0]["source_key"],
+                    keys[0],
+                )
+
                 analysis_path.write_text(
                     json.dumps({"summary": "Updated cached analysis.", "checks": {}}),
                     encoding="utf-8",
@@ -201,21 +224,19 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 store.set_source_active(keys[0], False)
                 self.assertEqual(store.active_report()["trajectory"], [])
                 self.assertFalse(store.source_payload()[0]["active"])
+                store.refresh_sources(keys, config)
+                self.assertEqual(store.active_report()["trajectory"], [])
+                self.assertFalse(store.source_payload()[0]["active"])
 
                 store.set_source_active(keys[0], True)
                 self.assertEqual(len(store.active_report()["trajectory"]), 1)
-                log_count = store.conn.execute(
-                    "SELECT COUNT(*) FROM peval_py_refresh_log"
-                ).fetchone()[0]
-                self.assertGreaterEqual(log_count, 1)
+                log_lines = store.paths.log_path.read_text(encoding="utf-8").splitlines()
+                self.assertGreaterEqual(len(log_lines), 1)
 
                 for index in range(REFRESH_LOG_LIMIT + 5):
                     store.log_refresh(keys[0], "ok", 0, None, index)
-                store.conn.commit()
-                bounded_count = store.conn.execute(
-                    "SELECT COUNT(*) FROM peval_py_refresh_log"
-                ).fetchone()[0]
-                self.assertEqual(bounded_count, REFRESH_LOG_LIMIT)
+                appended_lines = store.paths.log_path.read_text(encoding="utf-8").splitlines()
+                self.assertGreaterEqual(len(appended_lines), REFRESH_LOG_LIMIT + 5)
             finally:
                 store.close()
 
@@ -245,15 +266,12 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 )
 
                 artifact_dir = root / store.source_payload()[0]["artifact_dir"]
-                store.conn.execute(
-                    """
-                    UPDATE peval_py_sources
-                    SET last_status = 'error', last_error = 'source session vanished'
-                    WHERE source_key = ?
-                    """,
-                    (keys[0],),
+                store.update_source_status(
+                    store.source_payload()[0],
+                    "error",
+                    "source session vanished",
+                    1,
                 )
-                store.conn.commit()
 
                 analysis_json = artifact_dir / "analysis.json"
                 analysis_json.write_text(
@@ -315,8 +333,10 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 self.assertNotIn("relative_paths", deleted_annotations["analysis"][0])
 
                 store.set_source_alias(keys[0], "Readable source")
+                store.set_source_tags(keys[0], ["triage", "fast"])
                 payload = store.source_payload()[0]
                 self.assertEqual(payload["source_alias"], "Readable source")
+                self.assertEqual(payload["source_tags"], ["triage", "fast"])
                 self.assertEqual(payload["trial_key"], "session:t001")
                 self.assertEqual(payload["trial_session_id"], "common_session")
                 self.assertEqual(
@@ -326,6 +346,10 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 self.assertEqual(
                     store.active_report(config)["trajectory"][0]["session_id"],
                     "common_session",
+                )
+                self.assertEqual(
+                    store.active_report(config)["trajectory_meta"][0]["source_tags"],
+                    ["triage", "fast"],
                 )
 
                 snapshot_report = sample_report(config)
@@ -362,6 +386,71 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 self.assertEqual(snapshot_analysis["status"], "cached")
                 self.assertEqual(snapshot_analysis["summary"], "Snapshot live summary.")
                 self.assertEqual(snapshot_analysis["md_report"], "Snapshot live analysis.")
+            finally:
+                store.close()
+
+    def test_v1_flat_source_state_is_ignored_and_rewritten_as_v2_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            cell_dir = (
+                root
+                / "runs"
+                / "default"
+                / "psychevo"
+                / "legacy-session"
+                / "session_t001"
+            )
+            write_trial_cell_artifacts(cell_dir, session_id="legacy-session")
+            state_path = cell_dir / ".peval" / "state.json"
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "source_key": "legacy-source-key",
+                        "kind": "trial-artifact",
+                        "adapter": "psychevo",
+                        "label": "legacy label",
+                        "input_path": str(cell_dir),
+                        "db_path": None,
+                        "session_id": "legacy-session",
+                        "source_alias": "Legacy alias",
+                        "agent_name": "psychevo",
+                        "model": "legacy-model",
+                        "artifact_dir": "runs/default/psychevo/legacy-session/session_t001",
+                        "artifact_updated_at_ms": 10,
+                        "trial_key": "session:t001",
+                        "trial_session_id": "legacy-session",
+                        "last_turn_finished_at_ms": 1200,
+                        "refreshable": False,
+                        "active": False,
+                        "snapshot": True,
+                        "created_at_ms": 100,
+                        "updated_at_ms": 200,
+                        "last_status": "error",
+                        "last_error": "legacy error",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            store = open_workspace_state(str(root))
+            try:
+                source = store.source_payload()[0]
+                self.assertIsNone(source["source_alias"])
+                self.assertTrue(source["active"])
+                self.assertEqual(source["last_status"], "ok")
+                self.assertIsNone(source["last_error"])
+
+                store.set_source_alias(source["source_key"], "Rewritten alias")
+                rewritten = json.loads(state_path.read_text(encoding="utf-8"))
+                self.assertEqual(rewritten["schema_version"], 2)
+                self.assertEqual(rewritten["source_alias"], "Rewritten alias")
+                self.assertNotIn("active", rewritten)
+                self.assertNotIn("last_status", rewritten)
+                self.assertNotIn("last_error", rewritten)
+                self.assertTrue(DERIVED_SOURCE_STATE_FIELDS.isdisjoint(rewritten))
+                self.assertNotIn("source", rewritten)
             finally:
                 store.close()
 
@@ -451,6 +540,13 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 self.assertTrue(sources[0]["snapshot"])
                 self.assertFalse(sources[0]["refreshable"])
                 artifact_dir = root / sources[0]["artifact_dir"]
+                source_state = json.loads(
+                    (artifact_dir / ".peval" / "state.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(source_state["schema_version"], 2)
+                self.assertTrue(DERIVED_SOURCE_STATE_FIELDS.isdisjoint(source_state))
+                self.assertEqual(source_state["source"]["kind"], "snapshot")
+                self.assertNotIn("refreshable", source_state["source"])
                 agent_artifact_files = {
                     path.relative_to(artifact_dir / "agent").as_posix()
                     for path in (artifact_dir / "agent").rglob("*.json")
@@ -582,14 +678,14 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 backup_dir = Path(tmp) / "backup-cell"
                 shutil.copytree(artifact_dir, backup_dir)
 
-                shutil.rmtree(artifact_dir)
+                shutil.rmtree(artifact_dir / "agent")
                 missing_source = store.source_payload()[0]
                 self.assertEqual(missing_source["source_key"], source_key)
                 self.assertEqual(missing_source["last_status"], "missing")
                 self.assertIn("Trial cell artifacts not found", missing_source["last_error"])
                 self.assertEqual(store.active_report(config)["trajectory"], [])
 
-                shutil.copytree(backup_dir, artifact_dir)
+                shutil.copytree(backup_dir / "agent", artifact_dir / "agent")
                 store.set_source_alias(source_key, "Restored cell")
                 first_sync = store.sync_artifact_sources(config)
                 second_sync = store.sync_artifact_sources(config)
@@ -616,10 +712,9 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
             try:
                 source_key = store.ingest_upload("saved-report.json", json.dumps(report), config)[0]
                 artifact_dir = root / store.source_payload()[0]["artifact_dir"]
-                store.conn.execute("DELETE FROM peval_py_refresh_log")
-                store.conn.execute("DELETE FROM peval_py_sources")
-                store.conn.commit()
-                self.assertEqual(store.source_payload(), [])
+                shutil.rmtree(artifact_dir / ".peval")
+                self.assertFalse((artifact_dir / ".peval" / "state.json").exists())
+                self.assertEqual(len(store.source_payload()), 1)
 
                 synced = store.sync_artifact_sources(config)
                 self.assertEqual(synced, [source_key])
@@ -630,6 +725,13 @@ class PevalPyServeStateWorkspaceTests(unittest.TestCase):
                 self.assertFalse(sources[0]["refreshable"])
                 self.assertTrue(sources[0]["snapshot"])
                 self.assertEqual(sources[0]["trial_key"], "session:t001")
+                self.assertTrue((artifact_dir / ".peval" / "state.json").is_file())
+                source_state = json.loads(
+                    (artifact_dir / ".peval" / "state.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(source_state["schema_version"], 2)
+                self.assertTrue(DERIVED_SOURCE_STATE_FIELDS.isdisjoint(source_state))
+                self.assertNotIn("source", source_state)
 
                 store.sync_artifact_sources(config)
                 self.assertEqual(len(store.source_payload()), 1)

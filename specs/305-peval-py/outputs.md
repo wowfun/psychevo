@@ -187,13 +187,17 @@ writes either JSON or HTML:
   edge indicator on the first cell; it must not draw repeated vertical
   selection bars across every table column. Sortable data-table headers cycle
   through ascending, descending, and no-sort states; the no-sort state restores
-  the filtered rows to their source order. Timeline Detail Table supports
-  sorting by `#`, `Stage`, `Start`, `End`, `Duration`, and `Active Share`,
-  filters only by `Stage` text, applies metric shading only to `Duration` and
-  `Active Share`, and renders `Active Share` with an in-cell proportional fill
-  based on the same active-share percentage. It does not render a separate
-  Distribution column. Timeline Detail Table sorting and filtering do not
-  affect Timeline Waterfall row order, bars, markers, or active-latency axis.
+  the filtered rows to their source order. Timeline Waterfall item labels and
+  Timeline Detail Table `#` values use `N.M`, where `N` is the source step id
+  and `M` is the one-based Timeline item number within that step. Timeline
+  Detail Table supports sorting by `#`, `Stage`, `Start`, `End`, `Duration`,
+  and `Active Share`; `#` sorting uses the derived trace order rather than
+  parsing the displayed `N.M` string. The table filters only by `Stage` text,
+  applies metric shading only to `Duration` and `Active Share`, and renders
+  `Active Share` with an in-cell proportional fill based on the same
+  active-share percentage. It does not render a separate Distribution column.
+  Timeline Detail Table sorting and filtering do not affect Timeline Waterfall
+  row order, bars, markers, or active-latency axis.
   Timeline diagnostic section shells are structural carriers in the report body
   and must not use pink or tinted filled panel backgrounds; they may keep
   borders and spacing while chart/table surfaces stay readable.
@@ -218,9 +222,10 @@ one primary section title without a duplicate eyebrow label. `Leaderboard` is a
 preserved report UI term and remains English in localized reports.
 `peval-py` treats each input session as one Trial. Multi-session HTML no longer
 renders a separate Visible Heatmap panel. The Leaderboard shows the canonical
-session id, a separate Session Alias column that displays `source_alias` or
-`-`, agent, model, result, Last Turn End, active duration, turns, tools, tokens,
-cost, HTML-only `Analysised`, and notes. Last Turn End is the Trial's
+session id, a serve-only Tags column immediately to the left of Session, a
+separate Session Alias column that displays `source_alias` or `-`, agent,
+model, result, Last Turn End, active duration, turns, tools, tokens, cost,
+HTML-only `Analysised`, and notes. Last Turn End is the Trial's
 `trajectory_meta.finished_at_ms`;
 missing values render as `-` and sort after present values. The
 Agent column uses the trajectory agent name and falls back to the adapter id
@@ -228,7 +233,8 @@ when the trajectory does not provide an agent name. The Session, Agent, Model,
 Result, and `Analysised` columns provide multi-value filters whose values are
 collected from the complete Leaderboard row set. Empty selections are
 equivalent to no filter, values within one column are OR-ed, and multiple
-filtered columns are AND-ed.
+filtered columns are AND-ed. Serve-mode Tags filters flatten each tag into its
+own option; selecting multiple tags matches rows with any selected tag.
 Filtering happens before sorting and before metric shading. If filters hide the
 currently selected Trial and visible rows remain, HTML selects the first visible
 Trial; if filters hide all rows, the selected Trial detail remains visible but
@@ -268,6 +274,17 @@ Leaderboard horizontal table scrolling remains independent. The rendered
 comparison sections must not show benchmark, task, task-set, task-family, or
 matrix task-axis fields.
 
+Serve-mode Leaderboard search renders below the Export menu. It is a
+case-insensitive literal text search over each session's step messages,
+reasoning content, tool calls, and observations from both trajectory and
+metadata. `Visible sessions` searches within the current active or archived
+view; `All sessions` lazily loads `GET /api/report?source_state=all` and
+temporarily projects matching active and archived rows together. Search is an
+additional row filter combined with table filters, selection, Leaderboard
+Summary, Trajectory Overview, and export scope. While the all-session search
+projection is active, batch Archive/Activate is disabled so mixed active and
+archived rows cannot be mutated through one ambiguous action.
+
 Serve UI mode keeps the report body as the primary mental model rather than
 turning the page into a separate dashboard. It shows a compact source/status
 toolbar with a persistent language select above the report title and opens
@@ -298,7 +315,11 @@ still inspects exactly one DB path at a time. Adapter choices in the source mana
 	  Source aliases can be edited from the source list and affect only display in
 	  the source list, the Leaderboard Session Alias column, Trajectory Overview,
 	  and selected Trial summary; Evidence/Input Source continues to show the
-	  original path. Source Manager rows also expose the latest stored Trial's
+	  original path. Serve Leaderboard Session Alias and Tags cells are also
+	  editable by double-clicking the cell. Enter or blur saves, Escape cancels,
+	  and editing controls do not select the Trial row. Tags are split on English
+	  and Chinese commas, stored as ordered unique strings, and empty input clears
+	  the tag list. Source Manager rows also expose the latest stored Trial's
 	  Last Turn End using `trajectory_meta.finished_at_ms`, without requiring a
 	  source refresh.
 	  It does not add a persistent left sidebar or reduce the report body width.
@@ -411,9 +432,10 @@ for complete Trial cells, registers new artifact sources, updates lightweight
 source summaries, marks missing registered artifacts, and returns the standard
 serve mutation payload. Serve's main view always embeds or returns a report for
 all active readable sources, including initial `GET /`, refresh, add/reload,
-archive/activate/delete, alias, and notes mutations. `GET
-/api/report?source_state=active|archived` returns the full readable source
-report for that source state; omitted `source_state` means `active`. `GET
+archive/activate/delete, alias, tags, and notes mutations. `GET
+/api/report?source_state=active|archived|all` returns the full readable source
+report for that source state; omitted `source_state` means `active`, while
+`all` is a read-only projection over active and archived readable sources. `GET
 /api/report?source_key=KEY` returns a report for one readable source and takes
 precedence over `source_state`; missing or unreadable sources fail with a clear
 JSON error. `GET /api/report` remains available for explicit full-report loads
@@ -424,10 +446,14 @@ standard mutation payload whose `report` is rebuilt for `report_source_state`.
 Mutation payload `report_source_key` is only a selection hint for the browser;
 it does not mean the payload `report` has been narrowed to that source. Mutation
 payloads may include `report_source_state` so the browser can keep the active or
-archived report cache coherent. `POST
-/api/sources/{source_key}/alias` accepts JSON `{ "alias": "..." }`, updates only
-the display alias for that source, and does not refresh or mutate the original
-source file or DB. An empty alias clears the alias. `POST
+archived report cache coherent. Source-state Archive/Activate mutations do not
+accept `all` as `report_source_state`. `POST
+/api/sources/{source_key}/alias` accepts JSON `{ "alias": "...",
+"report_source_state": "active|archived|all" }`, updates only the display alias
+for that source, and does not refresh or mutate the original source file or DB.
+An empty alias clears the alias. `POST /api/sources/{source_key}/tags` accepts
+JSON `{ "tags": "a,b，c", "report_source_state": "active|archived|all" }`,
+persists normalized source tags, and clears the tag list on empty input. `POST
 /api/sources/{source_key}/delete` deletes only peval-py state for that source
 and refresh-log rows; it never deletes the original local file or DB. Because
 serve enforces one source per Trial cell, it also deletes that source's
