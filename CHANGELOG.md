@@ -4,6 +4,10 @@
 
 - Added voice ASR/TTS policy, fake providers, Gateway and realtime RPCs,
   Workbench controls, and `/voice` commands with text fallback.
+- Reworked `peval-py serve` source state, Source Manager imports, and
+  Leaderboard filtering around cell-local overlays and workspace logs.
+- Refined Workbench voice controls and shell scrolling so dictation stays in
+  the composer flow and pinned sessions remain contained.
 
 ## 2026-07-05
 
