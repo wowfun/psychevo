@@ -4,6 +4,7 @@ import type { CompletionItem, CompletionListResult, GatewayMention, PendingActio
 import { IconButton, Switch } from "./primitives";
 
 export interface ComposerProps {
+  addMenuOptions?: ReactNode;
   attachments?: ComposerAttachmentView[] | undefined;
   completionProvider?: (text: string, cursor: number) => Promise<CompletionListResult>;
   disabled?: boolean;
@@ -11,6 +12,7 @@ export interface ComposerProps {
   leftControls?: ReactNode;
   mode?: string;
   planModeAvailable?: boolean;
+  preActionControls?: ReactNode;
   promptSubmitBlockReason?: string | undefined;
   promptSubmitDisabled?: boolean;
   requestPanel?: ReactNode;
@@ -40,6 +42,7 @@ export interface ComposerAttachmentView {
 }
 
 export function Composer({
+  addMenuOptions,
   attachments,
   completionProvider,
   disabled,
@@ -47,6 +50,7 @@ export function Composer({
   leftControls,
   mode = "default",
   planModeAvailable = true,
+  preActionControls,
   promptSubmitBlockReason,
   promptSubmitDisabled = false,
   requestPanel,
@@ -470,6 +474,7 @@ export function Composer({
                   }}
                   size="compact"
                 />
+                {addMenuOptions}
               </div>
             )}
           </div>
@@ -500,6 +505,7 @@ export function Composer({
         <div className="pevo-composerRightControls">
           {rightControls && <div className="pevo-composerInlineStatus">{rightControls}</div>}
           <div className="pevo-composerActions">
+            {preActionControls}
             {actionButton}
           </div>
         </div>

@@ -180,4 +180,59 @@ test.describe("pevo Web Workbench", () => {
       await server.stop();
     }
   });
+
+  test("keeps long pinned sessions inside the fixed desktop shell", async ({ page, isMobile }) => {
+    test.skip(isMobile, "desktop shell overflow is covered by the desktop viewport");
+    await page.setViewportSize({ width: 1427, height: 431 });
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByPlaceholder("Ask Psychevo...")).toBeVisible();
+
+      await page.locator(".leftPinnedPanel").evaluate((panel) => {
+        panel.querySelector("p")?.remove();
+        const list = document.createElement("div");
+        list.className = "pinnedSessionList";
+        for (let index = 0; index < 12; index += 1) {
+          const row = document.createElement("div");
+          row.className = "pinnedSessionRow";
+
+          const openButton = document.createElement("button");
+          openButton.type = "button";
+          const title = document.createElement("span");
+          title.textContent = `Pinned regression session ${index + 1}`;
+          const cwd = document.createElement("small");
+          cwd.textContent = "/tmp/project";
+          openButton.append(title, cwd);
+
+          const unpinButton = document.createElement("button");
+          unpinButton.type = "button";
+          unpinButton.setAttribute("aria-label", "Unpin session");
+          unpinButton.textContent = "x";
+
+          row.append(openButton, unpinButton);
+          list.append(row);
+        }
+        panel.append(list);
+      });
+
+      const pinnedMetrics = await page.locator(".pinnedSessionList").evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight
+      }));
+      expect(pinnedMetrics.scrollHeight).toBeGreaterThan(pinnedMetrics.clientHeight + 1);
+
+      const [viewport, utilityBox] = await Promise.all([
+        page.viewportSize(),
+        page.locator(".leftUtilityRail").boundingBox()
+      ]);
+      expect(viewport).not.toBeNull();
+      expect(utilityBox).not.toBeNull();
+      expect(utilityBox!.y).toBeGreaterThanOrEqual(0);
+      expect(utilityBox!.y + utilityBox!.height).toBeLessThanOrEqual(viewport!.height + 1);
+      await assertNoPageVerticalOverflow(page);
+    } finally {
+      await server.stop();
+    }
+  });
 });

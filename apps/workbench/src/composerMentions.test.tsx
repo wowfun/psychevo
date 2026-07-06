@@ -659,6 +659,51 @@ describe("Composer completion mentions", () => {
     expect(onModeChange).toHaveBeenCalledWith("default");
   });
 
+  it("renders additional plus menu options below Plan mode", () => {
+    render(
+      <Composer
+        addMenuOptions={(
+          <>
+            <button aria-checked="false" role="switch" type="button">Auto-speak</button>
+            <button aria-checked="false" role="switch" type="button">Realtime voice</button>
+          </>
+        )}
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add attachments and options" }));
+    const planSwitch = screen.getByRole("switch", { name: "Plan mode" });
+    const autoSpeakSwitch = screen.getByRole("switch", { name: "Auto-speak" });
+    const realtimeSwitch = screen.getByRole("switch", { name: "Realtime voice" });
+
+    expect(planSwitch.compareDocumentPosition(autoSpeakSwitch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(autoSpeakSwitch.compareDocumentPosition(realtimeSwitch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("renders pre-action controls immediately before the send button", () => {
+    render(
+      <Composer
+        preActionControls={<button aria-label="Start dictation" type="button">mic</button>}
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const dictation = screen.getByRole("button", { name: "Start dictation" });
+    const sendButton = screen.getByRole("button", { name: "Send message" });
+    const actions = document.querySelector(".pevo-composerActions");
+
+    expect(actions?.contains(dictation)).toBe(true);
+    expect(actions?.contains(sendButton)).toBe(true);
+    expect(dictation.compareDocumentPosition(sendButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("swaps the send button for the interrupt button while running", () => {
     const { rerender } = render(
       <Composer

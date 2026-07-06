@@ -6,7 +6,7 @@ import { WorkspaceCreateDialog, LeftUtilityRail, MainSurface, PinnedPanel } from
 import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
 import { ComposerRequests, ComposerStatusLine, ComposerSubmitControls } from "./composer-controls";
 import { ComposerRuntimeControls } from "./runtime-controls";
-import { ComposerVoiceControls } from "./voice-controls";
+import { ComposerDictationButton, ComposerVoiceOptionSwitches } from "./voice-controls";
 import { RightWorkspace, rightWorkspaceTabLabel } from "./right-workspace";
 import { DEFAULT_RIGHT_WIDTH_PX } from "./storage";
 import { EMPTY_BACKEND_DRAFT, backendDraftFromBackend } from "./settings-panels";
@@ -504,19 +504,26 @@ export function WorkbenchLayout(props: Record<string, any>) {
                       }
                     }}
                   />
-                  <ComposerVoiceControls
-                    autoSpeak={Boolean(voiceAutoSpeak)}
-                    disabled={disabled}
-                    listening={Boolean(voiceListening)}
-                    realtimeActive={Boolean(voiceRealtimeActive)}
-                    onToggleAutoSpeak={onVoiceAutoSpeakToggle}
-                    onToggleDictation={onVoiceDictationToggle}
-                    onToggleRealtime={onVoiceRealtimeToggle}
-                  />
                 </>
+              )}
+              addMenuOptions={(
+                <ComposerVoiceOptionSwitches
+                  autoSpeak={Boolean(voiceAutoSpeak)}
+                  disabled={disabled}
+                  realtimeActive={Boolean(voiceRealtimeActive)}
+                  onToggleAutoSpeak={onVoiceAutoSpeakToggle}
+                  onToggleRealtime={onVoiceRealtimeToggle}
+                />
               )}
               mode={workMode}
               planModeAvailable={planModeAvailable}
+              preActionControls={(
+                <ComposerDictationButton
+                  disabled={disabled}
+                  listening={Boolean(voiceListening)}
+                  onToggle={onVoiceDictationToggle}
+                />
+              )}
               promptSubmitBlockReason={modelTurnBlockReason}
               promptSubmitDisabled={!modelReady}
               rightControls={(

@@ -27,7 +27,9 @@ The Web and Desktop Workbench shell fills the visible window without using
 document-level vertical scrolling. Internal panes such as the transcript,
 session list, Settings content, and long form bodies may scroll, but the outer
 `html`/`body`/app shell must not reveal blank space below the primary workbench
-in normal, non-fullscreen Desktop windows.
+in normal, non-fullscreen Desktop windows. Pinned sessions in the left sidebar
+must stay bounded and scroll within the pinned area when long; they must not
+expand the left shell or create document-level scrolling.
 
 On startup, Workbench creates and selects a local detached draft. The launch
 scope is preferred; if unavailable, Workbench uses the most recent project
@@ -259,10 +261,14 @@ non-text files as bounded visible metadata when their contents cannot be
 embedded safely. Attachment chips remain in the composer until the next prompt
 is accepted or the user removes them; attaching files must not require opening
 the right Files tab.
-Voice controls share the same compact composer/transcript control vocabulary:
-mic dictation inserts ASR text into the draft, read-aloud lives on assistant
-messages, auto-speak is off by default, and realtime conversation is a distinct
-thread control with visible live state. These controls are defined by
+Voice controls share the same compact composer/transcript control vocabulary.
+Mic dictation sits immediately before Send/Interrupt in the composer action
+cluster, matches the Send button's circular footprint, and uses inline activity
+motion while recording instead of a composer feedback bubble. When dictation
+successfully inserts text into the draft, it does not show a success popup.
+Read-aloud lives on assistant messages. Auto-speak and realtime voice live in
+the `+` drawer as labelled switch rows below Plan mode. These controls are
+defined by
 [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md) and must not create an
 additional Settings section or a second transcript model.
 The same shared composer provides Web and generic Desktop shell mode. The

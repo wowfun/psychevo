@@ -781,12 +781,10 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
           language: null
         });
         patchComposerDraft(result.transcript);
-        setVoiceFeedback(true, "voice/asr/transcribe", "Dictation inserted.");
         return;
       }
       voiceRecorderRef.current = await startWavRecorder();
       setVoiceListening(true);
-      setVoiceFeedback(true, "voice/asr/transcribe", "Listening.");
     });
   }
 

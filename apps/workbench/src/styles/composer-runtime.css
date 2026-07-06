@@ -224,41 +224,97 @@
   color: var(--pevo-danger);
 }
 
-.composerVoiceControls {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.composerVoiceButton {
+.composerDictationButton {
+  position: relative;
   display: inline-grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
   place-items: center;
   padding: 0;
   color: var(--pevo-muted);
   background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: 999px;
   cursor: pointer;
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, color, transform;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.composerVoiceButton:hover:not(:disabled),
-.composerVoiceButton:focus-visible,
-.composerVoiceButton.is-active {
+.composerDictationButton svg {
+  position: relative;
+  z-index: 1;
+}
+
+.composerDictationPulse {
+  position: absolute;
+  inset: 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.composerDictationButton:hover:not(:disabled),
+.composerDictationButton:focus-visible {
   color: var(--pevo-ink);
   background: color-mix(in oklch, var(--pevo-panel), var(--pevo-accent) 8%);
   border-color: color-mix(in oklch, var(--pevo-border), var(--pevo-accent) 26%);
 }
 
-.composerVoiceButton:focus-visible {
+.composerDictationButton.is-listening {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-accent) 12%);
+  border-color: color-mix(in oklch, var(--pevo-border), var(--pevo-accent) 42%);
+}
+
+.composerDictationButton.is-listening .composerDictationPulse {
+  border-color: color-mix(in oklch, var(--pevo-accent), transparent 10%);
+  animation: composerDictationPulse 1.1s ease-out infinite;
+}
+
+.composerDictationButton:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.composerDictationButton:focus-visible {
   outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
   outline-offset: 2px;
 }
 
-.composerVoiceButton:disabled {
+.composerDictationButton:disabled {
   color: var(--pevo-faint);
   background: var(--pevo-panel-muted);
   cursor: not-allowed;
+  opacity: 0.56;
+}
+
+@keyframes composerDictationPulse {
+  0% {
+    opacity: 0.62;
+    transform: scale(0.72);
+  }
+  68% {
+    opacity: 0.08;
+    transform: scale(1.35);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.48);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composerDictationButton,
+  .composerDictationPulse {
+    transition-duration: var(--pevo-motion-reduce, 0ms);
+  }
+
+  .composerDictationButton.is-listening .composerDictationPulse {
+    inset: -3px;
+    opacity: 0.75;
+    animation: none;
+  }
 }

@@ -2,32 +2,56 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ComposerVoiceControls } from "./voice-controls";
+import { ComposerDictationButton, ComposerVoiceOptionSwitches } from "./voice-controls";
 
-describe("ComposerVoiceControls", () => {
-  it("routes dictation, auto-speak, and realtime toggles", () => {
-    const onToggleAutoSpeak = vi.fn();
-    const onToggleDictation = vi.fn();
-    const onToggleRealtime = vi.fn();
+describe("ComposerDictationButton", () => {
+  it("routes dictation and switches labels while listening", () => {
+    const onToggle = vi.fn();
 
-    render(
-      <ComposerVoiceControls
-        autoSpeak={false}
+    const { rerender } = render(
+      <ComposerDictationButton
         disabled={false}
         listening={false}
-        realtimeActive={false}
-        onToggleAutoSpeak={onToggleAutoSpeak}
-        onToggleDictation={onToggleDictation}
-        onToggleRealtime={onToggleRealtime}
+        onToggle={onToggle}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Start dictation" }));
-    fireEvent.click(screen.getByRole("button", { name: "Enable auto-speak" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start realtime voice" }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
 
-    expect(onToggleDictation).toHaveBeenCalledTimes(1);
+    rerender(
+      <ComposerDictationButton
+        disabled={false}
+        listening
+        onToggle={onToggle}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+    expect(onToggle).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ComposerVoiceOptionSwitches", () => {
+  it("renders auto-speak and realtime as labelled switches without icons", () => {
+    const onToggleAutoSpeak = vi.fn();
+    const onToggleRealtime = vi.fn();
+
+    const { container } = render(
+      <ComposerVoiceOptionSwitches
+        autoSpeak={false}
+        disabled={false}
+        realtimeActive={false}
+        onToggleAutoSpeak={onToggleAutoSpeak}
+        onToggleRealtime={onToggleRealtime}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: "Auto-speak" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Realtime voice" }));
+
     expect(onToggleAutoSpeak).toHaveBeenCalledTimes(1);
     expect(onToggleRealtime).toHaveBeenCalledTimes(1);
+    expect(container.querySelector("svg")).toBeNull();
   });
 });

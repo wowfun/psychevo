@@ -143,16 +143,19 @@ through ordinary thread entries.
 
 ## Workbench UX
 
-Workbench uses compact icon controls in the existing composer/transcript
-surfaces:
+Workbench uses compact controls in the existing composer/transcript surfaces:
 
 - mic dictation records one utterance, transcribes it, and inserts the final
-  transcript into the composer draft
+  transcript into the composer draft; the button is inline with Send/Interrupt
+  and shows listening state through button animation rather than a feedback
+  popover. Successful insertion is silent; only errors and missing audio need
+  composer feedback.
 - read-aloud appears on assistant messages and synthesizes only that message
-- auto-speak is off by default and speaks assistant replies only after a
-  successful assistant final text
-- realtime conversation is a distinct thread control with visible listening,
-  speaking, error, and closed states
+- auto-speak is a labelled switch in the composer `+` drawer, off by default,
+  and speaks assistant replies only after a successful assistant final text
+- realtime conversation is a labelled switch in the composer `+` drawer and is
+  a distinct thread control with visible listening, speaking, error, and closed
+  states
 
 Controls do not explain implementation details in the UI. Errors state the
 action that failed and the next available action. Browser microphone

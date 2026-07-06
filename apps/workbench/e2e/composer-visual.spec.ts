@@ -109,6 +109,8 @@ test.describe("Workbench composer visual contract", () => {
 
       await page.getByRole("button", { name: "Add attachments and options" }).click();
       await expect(page.getByRole("menuitem", { name: "Add images and files" })).toBeVisible();
+      await expect(page.getByRole("switch", { name: "Auto-speak" })).toBeVisible();
+      await expect(page.getByRole("switch", { name: "Realtime voice" })).toBeVisible();
       await page.screenshot({
         path: path.join(screenshotDir, `composer-menu-${testInfo.project.name}.png`)
       });
@@ -442,15 +444,17 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   const input = page.locator(".pevo-composerInput");
   const footer = page.locator(".pevo-composerFooter");
   const action = page.locator(".pevo-sendButton");
+  const dictation = page.getByRole("button", { name: /dictation/ });
   const agent = page.getByRole("button", { name: "Agent", exact: true });
   const model = page.getByRole("button", { name: "Model" });
   const context = page.getByRole("button", { name: "Context usage" });
   const chip = page.locator(".pevo-planChip");
-  const [addBox, inputBox, footerBox, actionBox, agentBox, modelBox, contextBox, chipBox] = await Promise.all([
+  const [addBox, inputBox, footerBox, actionBox, dictationBox, agentBox, modelBox, contextBox, chipBox] = await Promise.all([
     add.boundingBox(),
     input.boundingBox(),
     footer.boundingBox(),
     action.boundingBox(),
+    dictation.boundingBox(),
     agent.boundingBox(),
     model.boundingBox(),
     context.boundingBox(),
@@ -461,12 +465,16 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   expect(inputBox).not.toBeNull();
   expect(footerBox).not.toBeNull();
   expect(actionBox).not.toBeNull();
+  expect(dictationBox).not.toBeNull();
   expect(agentBox).not.toBeNull();
   expect(modelBox).not.toBeNull();
   expect(contextBox).not.toBeNull();
   expect(agentBox!.width).toBeLessThanOrEqual(210);
+  expect(Math.abs(dictationBox!.width - actionBox!.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(dictationBox!.height - actionBox!.height)).toBeLessThanOrEqual(1);
 
   const actionCenterY = actionBox!.y + actionBox!.height / 2;
+  const dictationCenterY = dictationBox!.y + dictationBox!.height / 2;
   const addCenterY = addBox!.y + addBox!.height / 2;
   const agentCenterY = agentBox!.y + agentBox!.height / 2;
   const modelCenterY = modelBox!.y + modelBox!.height / 2;
@@ -474,12 +482,13 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   if (options.isMobile) {
     const viewport = await page.viewportSize();
     expect(viewport).not.toBeNull();
-    const visibleBoxes = [addBox!, agentBox!, modelBox!, contextBox!, actionBox!];
+    const visibleBoxes = [addBox!, agentBox!, modelBox!, contextBox!, dictationBox!, actionBox!];
     for (const box of visibleBoxes) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(viewport!.width);
     }
     expect(Math.abs(addCenterY - agentCenterY)).toBeLessThanOrEqual(5);
+    expect(Math.abs(actionCenterY - dictationCenterY)).toBeLessThanOrEqual(5);
     expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(5);
     expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(5);
     if (options.plan) {
@@ -489,9 +498,11 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
     expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
     expect(addBox!.x).toBeLessThan(agentBox!.x);
     expect(contextBox!.x).toBeGreaterThan(modelBox!.x);
-    expect(contextBox!.x).toBeLessThan(actionBox!.x);
+    expect(contextBox!.x).toBeLessThan(dictationBox!.x);
+    expect(dictationBox!.x).toBeLessThan(actionBox!.x);
     return;
   }
+  expect(Math.abs(actionCenterY - dictationCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - agentCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(4);
@@ -506,9 +517,10 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
   expect(addBox!.x).toBeLessThan(agentBox!.x);
   expect(modelBox!.x).toBeGreaterThan(agentBox!.x);
-  expect(modelBox!.x).toBeLessThan(actionBox!.x);
+  expect(modelBox!.x).toBeLessThan(dictationBox!.x);
   expect(contextBox!.x).toBeGreaterThan(modelBox!.x);
-  expect(contextBox!.x).toBeLessThan(actionBox!.x);
+  expect(contextBox!.x).toBeLessThan(dictationBox!.x);
+  expect(dictationBox!.x).toBeLessThan(actionBox!.x);
 }
 
 async function forceInterruptVisualState(page: Page) {
