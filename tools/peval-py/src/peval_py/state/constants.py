@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 STATE_SCHEMA_VERSION = 1
-SOURCE_STATE_SCHEMA_VERSION = 2
 SOURCE_STATE_DIR = ".peval"
 SOURCE_STATE_FILENAME = "state.json"
 SERVE_LOG_RELATIVE_PATH = "logs/peval-py-serve.jsonl"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from serve_state_support import *
 
 class PevalPyServeStateNotesDbTests(unittest.TestCase):
-    def test_http_source_notes_save_refreshes_snapshot_and_validates_source(self) -> None:
+    def test_http_artifact_only_source_notes_save_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = peval_py_workspace(Path(tmp))
             source = root / "common_session.jsonl"
@@ -34,6 +34,7 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
                 source_key = body["sources"][0]["source_key"]
+                self.assertFalse(body["sources"][0]["refreshable"])
                 self.assertEqual(
                     body["report"]["annotations"]["notes"][0]["markdown"],
                     "Initial HTTP note.",
@@ -46,36 +47,9 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                     {"markdown": "Updated HTTP note."},
                     origin=origin,
                 )
-                self.assertEqual(status, 200)
-                self.assertEqual(note_path.read_text(encoding="utf-8"), "Updated HTTP note.")
-                self.assertEqual(
-                    body["report"]["annotations"]["notes"][0]["markdown"],
-                    "Updated HTTP note.",
-                )
-
-                note_path.unlink()
-                analysis_path = write_cached_markdown(
-                    root,
-                    agent_id="opencode",
-                    session_id="common_session",
-                    markdown="Analysis-only cell.",
-                )
-                status, _, body = request_json(
-                    port,
-                    "POST",
-                    f"/api/sources/{source_key}/notes",
-                    {"markdown": "Saved beside analysis."},
-                    origin=origin,
-                )
-                self.assertEqual(status, 200)
-                self.assertEqual(
-                    (analysis_path.parent / "notes.md").read_text(encoding="utf-8"),
-                    "Saved beside analysis.",
-                )
-                self.assertEqual(
-                    body["report"]["annotations"]["notes"][0]["markdown"],
-                    "Saved beside analysis.",
-                )
+                self.assertEqual(status, 400)
+                self.assertIn("refreshable", body["error"])
+                self.assertEqual(note_path.read_text(encoding="utf-8"), "Initial HTTP note.")
 
                 status, _, rejected = request_json(
                     port,
@@ -86,16 +60,6 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 403)
                 self.assertIn("same-origin", rejected["error"])
-
-                status, _, too_large = request_json(
-                    port,
-                    "POST",
-                    f"/api/sources/{source_key}/notes",
-                    {"markdown": "x" * (1024 * 1024 + 1)},
-                    origin=origin,
-                )
-                self.assertEqual(status, 400)
-                self.assertIn("1 MiB", too_large["error"])
 
                 snapshot_keys = store.ingest_upload(
                     "saved-report.json",
@@ -131,18 +95,12 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                 )
                 keys = store.upsert_loaded_sources(loaded, config)
                 store.refresh_sources(keys, config)
-                store.save_source_notes(keys[0], "", config)
-                created = root / store.source_payload()[0]["artifact_dir"] / "notes.md"
-                self.assertTrue(created.is_file())
-                self.assertEqual(created.read_text(encoding="utf-8"), "")
-                self.assertEqual(
-                    store.active_report()["annotations"]["notes"][0]["source_ref"]["relative_path"],
-                    created.relative_to(root).as_posix(),
-                )
+                with self.assertRaisesRegex(ValueError, "refreshable"):
+                    store.save_source_notes(keys[0], "", config)
             finally:
                 store.close()
 
-    def test_source_notes_save_uses_exact_trial_cell(self) -> None:
+    def test_artifact_only_notes_read_uses_exact_trial_cell(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = peval_py_workspace(Path(tmp))
             source = root / "common_session.jsonl"
@@ -171,8 +129,16 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                 )
                 keys = store.upsert_loaded_sources(loaded, config)
                 store.refresh_sources(keys, config)
-                store.save_source_notes(keys[0], "exact cell", config)
                 created = root / store.source_payload()[0]["artifact_dir"] / "notes.md"
+                created.write_text("exact cell", encoding="utf-8")
+                self.assertEqual(
+                    store.active_report()["annotations"]["notes"][0]["markdown"],
+                    "exact cell",
+                )
+                self.assertEqual(
+                    store.active_report()["annotations"]["notes"][0]["source_ref"]["relative_path"],
+                    created.relative_to(root).as_posix(),
+                )
                 self.assertEqual(created.read_text(encoding="utf-8"), "exact cell")
                 self.assertEqual(
                     (root / "runs" / "default" / "opencode" / "common_session" / "one" / "notes.md").read_text(encoding="utf-8"),
@@ -181,54 +147,6 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                 self.assertEqual(
                     (root / "runs" / "default" / "opencode" / "common_session" / "two" / "notes.md").read_text(encoding="utf-8"),
                     "two",
-                )
-            finally:
-                store.close()
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = peval_py_workspace(Path(tmp))
-            source = root / "common_session.jsonl"
-            shutil.copy(FIXTURES / "common_session.jsonl", source)
-            config = ToolConfig(adapter="opencode", workspace_root=str(root))
-            write_cached_markdown(
-                root,
-                agent_id="opencode",
-                session_id="common_session",
-                cell_key="one",
-                markdown="one",
-            )
-            write_cached_markdown(
-                root,
-                agent_id="opencode",
-                session_id="common_session",
-                cell_key="two",
-                markdown="two",
-            )
-            store = open_workspace_state(str(root))
-            try:
-                args = serve_args(path=[str(source)])
-                loaded = load_serve_inputs(
-                    args,
-                    parse_adapter_assignments(["opencode"], config.adapter),
-                )
-                keys = store.upsert_loaded_sources(loaded, config)
-                store.refresh_sources(keys, config)
-                store.save_source_notes(keys[0], "exact cell from analysis siblings", config)
-                created = root / store.source_payload()[0]["artifact_dir"] / "notes.md"
-                self.assertEqual(
-                    created.read_text(encoding="utf-8"),
-                    "exact cell from analysis siblings",
-                )
-                self.assertFalse(
-                    (
-                        root
-                        / "runs"
-                        / "default"
-                        / "opencode"
-                        / "common_session"
-                        / "one"
-                        / "notes.md"
-                    ).exists()
                 )
             finally:
                 store.close()
@@ -360,6 +278,8 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(len(body["sources"]), 2)
+                self.assertTrue(all(not source["refreshable"] for source in body["sources"]))
+                self.assertTrue(all(source["snapshot"] for source in body["sources"]))
                 self.assertEqual(
                     {
                         source["session_id"]
@@ -374,6 +294,9 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                     },
                     {"hermes-latest", "hermes-old"},
                 )
+                for source in body["sources"]:
+                    artifact_dir = root / source["artifact_dir"]
+                    self.assertFalse((artifact_dir / ".peval" / "state.json").exists())
             finally:
                 server.shutdown()
                 server.server_close()
@@ -427,8 +350,11 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                         origin=origin,
                     )
                     self.assertEqual(status, 200)
-                    self.assertEqual(body["sources"][0]["db_path"], str(mapped_db))
+                    self.assertIsNone(body["sources"][0]["db_path"])
                     self.assertEqual(body["sources"][0]["session_id"], "hermes-latest")
+                    self.assertFalse(body["sources"][0]["refreshable"])
+                    db_artifact = root / body["sources"][0]["artifact_dir"]
+                    self.assertFalse((db_artifact / ".peval" / "state.json").exists())
 
                     status, _, body = request_json(
                         port,
@@ -441,10 +367,12 @@ class PevalPyServeStateNotesDbTests(unittest.TestCase):
                         origin=origin,
                     )
                     self.assertEqual(status, 200)
-                    self.assertIn(
-                        str(mapped_path),
-                        {source["input_path"] for source in body["sources"]},
-                    )
+                    self.assertTrue(any(source["session_id"] == "common" for source in body["sources"]))
+                    path_source = next(source for source in body["sources"] if source["session_id"] == "common")
+                    self.assertNotEqual(path_source["input_path"], str(mapped_path))
+                    self.assertFalse(path_source["refreshable"])
+                    path_artifact = root / path_source["artifact_dir"]
+                    self.assertFalse((path_artifact / ".peval" / "state.json").exists())
             finally:
                 server.shutdown()
                 server.server_close()

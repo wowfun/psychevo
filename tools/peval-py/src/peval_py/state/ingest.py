@@ -186,7 +186,6 @@ class StateIngestMixin:
                 refreshable=True,
                 snapshot=False,
                 status=SOURCE_STATUS_OK,
-                preserve_existing_source=True,
             )
             self.log_refresh(source_key, SOURCE_STATUS_OK, warning_count, None, timestamp)
         except Exception as exc:  # noqa: BLE001 - state boundary.

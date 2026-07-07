@@ -3,6 +3,472 @@ from __future__ import annotations
 from reports_html_support import *
 
 class PevalPyReportHtmlInteractionTests(unittest.TestCase):
+    def test_serve_startup_loading_status_recovers_after_ready_payload(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = """
+const vm = require("vm");
+const asset = __ASSET__;
+function makeNode() {
+  return {
+    textContent: "",
+    innerHTML: "",
+    listeners: {},
+    classList: {
+      values: new Set(),
+      toggle(name, force) {
+        const active = force === undefined ? !this.values.has(name) : Boolean(force);
+        if (active) this.values.add(name);
+        else this.values.delete(name);
+        return active;
+      },
+      contains(name) { return this.values.has(name); }
+    },
+    addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    setAttribute() {}
+  };
+}
+const countNode = makeNode();
+const statusNode = makeNode();
+const listNode = makeNode();
+const nodes = {
+  "peval-py-data": { textContent: "{}" },
+  "peval-py-token-estimates": { textContent: "{}" },
+  "peval-py-i18n": { textContent: JSON.stringify({
+    serve_loading_sources: "Loading sources",
+    serve_scanning_runs: "Scanning runs; sessions will appear when discovery finishes.",
+    serve_latest_snapshots: "Latest snapshots",
+    serve_active_snapshots: "Active snapshots",
+    serve_source_count: "source",
+    serve_sources_count: "sources",
+    serve_no_sources: "No sources loaded"
+  }) },
+  "peval-py-render-options": { textContent: JSON.stringify({ mode: "serve", loading: true, sources: [] }) }
+};
+const context = {
+  document: {
+    body: { classList: { add() {}, remove() {}, toggle() {} } },
+    addEventListener() {},
+    getElementById(id) { return nodes[id] || null; },
+    querySelector(selector) {
+      if (selector === "[data-source-count]") return countNode;
+      if (selector === "[data-source-status]") return statusNode;
+      if (selector === "[data-source-list]") return listNode;
+      return null;
+    },
+    querySelectorAll() { return []; },
+  },
+  window: { addEventListener() {} },
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  requestAnimationFrame(callback) { callback(); },
+  countNode,
+  statusNode,
+  listNode,
+};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`(() => {
+  renderServeSources();
+  const loading = {
+    count: countNode.textContent,
+    status: statusNode.textContent,
+    statusLoading: statusNode.classList.contains("loading"),
+    statusDanger: statusNode.classList.contains("danger"),
+    list: listNode.innerHTML,
+  };
+  render = view => {
+    state.view = view;
+    renderServeSources();
+  };
+  applyServeMutationPayload({
+    loading: false,
+    sources: [{
+      source_key: "source-1",
+      label: "source one",
+      artifact_dir: "runs/a",
+      active: true,
+      last_status: "ok",
+      snapshot: true,
+      refreshable: false
+    }],
+    report: { schema_version: 19, includes: ["core"], trajectory: [], trajectory_meta: [] },
+    report_source_key: "source-1",
+    report_source_state: "active"
+  });
+  const ready = {
+    count: countNode.textContent,
+    status: statusNode.textContent,
+    statusLoading: statusNode.classList.contains("loading"),
+    statusDanger: statusNode.classList.contains("danger"),
+    list: listNode.innerHTML,
+  };
+  return JSON.stringify({ loading, ready });
+})()`, context);
+console.log(result);
+""".replace("__ASSET__", json.dumps(asset))
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["loading"]["count"], "Loading sources")
+        self.assertEqual(
+            result["loading"]["status"],
+            "Scanning runs; sessions will appear when discovery finishes.",
+        )
+        self.assertTrue(result["loading"]["statusLoading"])
+        self.assertFalse(result["loading"]["statusDanger"])
+        self.assertIn("source-row empty loading", result["loading"]["list"])
+        self.assertNotIn("No sources loaded", result["loading"]["list"])
+        self.assertEqual(result["ready"]["count"], "1 source")
+        self.assertEqual(result["ready"]["status"], "Active snapshots")
+        self.assertFalse(result["ready"]["statusLoading"])
+        self.assertFalse(result["ready"]["statusDanger"])
+        self.assertIn("source one", result["ready"]["list"])
+
+    def test_inline_source_edit_click_does_not_trigger_trial_selection_rerender(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const listeners = {{ click: [], dblclick: [] }};
+const probe = {{ renderCount: 0, replaced: false, focused: false, selected: false }};
+const input = {{
+  className: "",
+  value: "",
+  setAttribute() {{}},
+  addEventListener() {{}},
+  focus() {{ probe.focused = true; }},
+  select() {{ probe.selected = true; }}
+}};
+const cell = {{
+  dataset: {{
+    sourceKey: "source-1",
+    sourceInlineEdit: "alias",
+    value: "",
+    trialKey: "trial-1"
+  }},
+  innerHTML: "<span>-</span>",
+  addEventListener(type, handler) {{
+    if (listeners[type]) listeners[type].push(handler);
+  }},
+  querySelector(selector) {{
+    return probe.replaced && selector === "input" ? input : null;
+  }},
+  replaceChildren(node) {{
+    probe.replaced = node === input;
+  }},
+  getAttribute(name) {{
+    return name === "data-trial-key" ? "trial-1" : null;
+  }}
+}};
+const target = {{
+  querySelector() {{ return null; }},
+  querySelectorAll(selector) {{
+    if (selector === "[data-source-inline-edit]") return [cell];
+    if (selector === "[data-trial-key]") return [cell];
+    return [];
+  }}
+}};
+const nodes = {{
+  "peval-py-data": {{ textContent: "{{}}" }},
+  "peval-py-i18n": {{ textContent: "{{}}" }},
+  "peval-py-token-estimates": {{ textContent: "{{}}" }},
+  "peval-py-render-options": {{ textContent: JSON.stringify({{
+    mode: "serve",
+    sources: [{{ source_key: "source-1", trial_key: "trial-1", active: true, artifact_dir: "runs/a", last_status: "ok" }}]
+  }}) }},
+}};
+const context = {{
+  document: {{
+    body: {{ classList: {{ add() {{}}, remove() {{}}, toggle() {{}} }} }},
+    addEventListener() {{}},
+    createElement() {{ return input; }},
+    getElementById(id) {{ return nodes[id] || null; }},
+    querySelector() {{ return null; }},
+    querySelectorAll() {{ return []; }},
+  }},
+  window: {{ addEventListener() {{}} }},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  requestAnimationFrame(callback) {{ callback(); }},
+  target,
+  listeners,
+  probe,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`(() => {{
+  state.view = {{
+    trajectory: [{{ session_id: "session-1", final_metrics: {{}} }}],
+    trajectory_meta: [{{ trial_key: "trial-1", status: "passed", steps: [] }}]
+  }};
+  state.serveSources = [{{ source_key: "source-1", trial_key: "trial-1", active: true, artifact_dir: "runs/a", last_status: "ok" }}];
+  renderComparisonPanels = () => {{ probe.renderCount += 1; }};
+  bindInlineSourceEditors(target);
+  bindTrialSelection(target);
+  const clickEvent = {{ preventDefault() {{}}, stopPropagation() {{ this.stopped = true; }} }};
+  listeners.click.forEach(handler => handler(clickEvent));
+  const afterClick = {{ renderCount: probe.renderCount, replaced: probe.replaced, stopped: Boolean(clickEvent.stopped) }};
+  const dblclickEvent = {{ preventDefault() {{ this.defaultPrevented = true; }}, stopPropagation() {{ this.stopped = true; }} }};
+  listeners.dblclick.forEach(handler => handler(dblclickEvent));
+  return JSON.stringify({{ afterClick, afterDoubleClick: {{ renderCount: probe.renderCount, replaced: probe.replaced, focused: probe.focused, selected: probe.selected, stopped: Boolean(dblclickEvent.stopped), defaultPrevented: Boolean(dblclickEvent.defaultPrevented) }} }});
+}})()`, context);
+console.log(result);
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["afterClick"]["renderCount"], 0)
+        self.assertFalse(result["afterClick"]["replaced"])
+        self.assertTrue(result["afterClick"]["stopped"])
+        self.assertEqual(result["afterDoubleClick"]["renderCount"], 0)
+        self.assertTrue(result["afterDoubleClick"]["replaced"])
+        self.assertTrue(result["afterDoubleClick"]["focused"])
+        self.assertTrue(result["afterDoubleClick"]["selected"])
+
+    def test_inline_source_tags_editor_can_toggle_existing_tags(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is required to execute report.js interaction helpers")
+        asset = load_asset_text("report.js")
+        self.assertIn("\nrender(data());", asset)
+        asset = asset.rsplit("\nrender(data());", 1)[0]
+        script = f"""
+const vm = require("vm");
+const asset = {json.dumps(asset)};
+const probe = {{ renderCount: 0, focused: false, selected: false }};
+class Element {{
+  constructor(tagName = "div") {{
+    this.tagName = String(tagName).toUpperCase();
+    this.children = [];
+    this.dataset = {{}};
+    this.attributes = {{}};
+    this.listeners = {{}};
+    this.className = "";
+    this.value = "";
+    this.textContent = "";
+    this.innerHTML = "";
+    this.type = "";
+    this.classList = {{
+      values: new Set(),
+      toggle: (name, force) => {{
+        const active = force === undefined ? !this.classList.values.has(name) : Boolean(force);
+        if (active) this.classList.values.add(name);
+        else this.classList.values.delete(name);
+        return active;
+      }},
+      contains: name => this.classList.values.has(name)
+    }};
+  }}
+  appendChild(node) {{
+    this.children.push(node);
+    node.parentNode = this;
+    return node;
+  }}
+  replaceChildren(...nodes) {{
+    this.children = nodes;
+    nodes.forEach(node => {{ node.parentNode = this; }});
+  }}
+  addEventListener(type, handler) {{
+    (this.listeners[type] ||= []).push(handler);
+  }}
+  dispatch(type) {{
+    const event = {{
+      defaultPrevented: false,
+      stopped: false,
+      preventDefault() {{ this.defaultPrevented = true; }},
+      stopPropagation() {{ this.stopped = true; }}
+    }};
+    (this.listeners[type] || []).forEach(handler => handler(event));
+    return event;
+  }}
+  setAttribute(name, value) {{
+    this.attributes[name] = String(value);
+  }}
+  getAttribute(name) {{
+    return this.attributes[name] || null;
+  }}
+  querySelector(selector) {{
+    return this.querySelectorAll(selector)[0] || null;
+  }}
+  querySelectorAll(selector) {{
+    const matches = node => {{
+      if (selector === "input") return node.tagName === "INPUT";
+      if (selector === "[data-source-tag-option]") return Object.prototype.hasOwnProperty.call(node.dataset, "sourceTagOption");
+      return false;
+    }};
+    const found = [];
+    const visit = node => {{
+      if (matches(node)) found.push(node);
+      node.children.forEach(visit);
+    }};
+    this.children.forEach(visit);
+    return found;
+  }}
+  focus() {{ probe.focused = true; }}
+  select() {{ probe.selected = true; }}
+}}
+const cell = new Element("span");
+cell.dataset = {{
+  sourceKey: "source-1",
+  sourceInlineEdit: "tags",
+  value: "green, custom",
+  trialKey: "trial-1"
+}};
+const nodes = {{
+  "peval-py-data": {{ textContent: "{{}}" }},
+  "peval-py-i18n": {{ textContent: "{{}}" }},
+  "peval-py-token-estimates": {{ textContent: "{{}}" }},
+  "peval-py-render-options": {{ textContent: JSON.stringify({{
+    mode: "serve",
+    sources: [
+      {{ source_key: "source-1", trial_key: "trial-1", active: true, artifact_dir: "runs/a", last_status: "ok", source_tags: ["green", "blue"] }},
+      {{ source_key: "source-2", trial_key: "trial-2", active: false, artifact_dir: "runs/b", last_status: "ok", source_tags: ["red"] }}
+    ]
+  }}) }},
+}};
+const context = {{
+  document: {{
+    body: {{ classList: {{ add() {{}}, remove() {{}}, toggle() {{}} }} }},
+    addEventListener() {{}},
+    createElement(tagName) {{ return new Element(tagName); }},
+    getElementById(id) {{ return nodes[id] || null; }},
+    querySelector() {{ return null; }},
+    querySelectorAll() {{ return []; }},
+  }},
+  window: {{ addEventListener() {{}} }},
+  console,
+  JSON,
+  Number,
+  String,
+  Object,
+  Math,
+  Date,
+  Set,
+  Array,
+  RegExp,
+  requestAnimationFrame(callback) {{ callback(); }},
+  probe,
+  cell,
+}};
+vm.createContext(context);
+vm.runInContext(asset, context);
+const result = vm.runInContext(`(() => {{
+  state.view = {{
+    trajectory: [{{ session_id: "session-1", final_metrics: {{}} }}],
+    trajectory_meta: [{{ trial_key: "trial-1", status: "passed", steps: [], source_tags: ["blue", "yellow"] }}]
+  }};
+  state.serveReportCache = {{
+    archived: {{ trajectory_meta: [{{ trial_key: "trial-2", source_tags: ["purple"] }}] }}
+  }};
+  renderComparisonPanels = () => {{ probe.renderCount += 1; }};
+  beginInlineSourceEdit(cell);
+  const editor = cell.children[0];
+  const input = editor.querySelector("input");
+  const options = editor.querySelectorAll("[data-source-tag-option]");
+  const labels = options.map(option => option.textContent);
+  const before = {{
+    value: input.value,
+    labels,
+    greenSelected: options.find(option => option.textContent === "green").classList.contains("selected"),
+    blueSelected: options.find(option => option.textContent === "blue").classList.contains("selected")
+  }};
+  const blueClick = options.find(option => option.textContent === "blue").dispatch("click");
+  const afterBlue = {{
+    value: input.value,
+    blueSelected: options.find(option => option.textContent === "blue").classList.contains("selected"),
+    stopped: blueClick.stopped,
+    defaultPrevented: blueClick.defaultPrevented
+  }};
+  const greenClick = options.find(option => option.textContent === "green").dispatch("click");
+  input.value = input.value + ", manual";
+  input.listeners.input.forEach(handler => handler({{}}));
+  const redClick = options.find(option => option.textContent === "red").dispatch("click");
+  return JSON.stringify({{
+    before,
+    afterBlue,
+    afterGreenAndRed: {{
+      value: input.value,
+      greenSelected: options.find(option => option.textContent === "green").classList.contains("selected"),
+      redSelected: options.find(option => option.textContent === "red").classList.contains("selected"),
+      greenStopped: greenClick.stopped,
+      redStopped: redClick.stopped
+    }},
+    renderCount: probe.renderCount,
+    focused: probe.focused,
+    selected: probe.selected
+  }});
+}})()`, context);
+console.log(result);
+"""
+        node = subprocess.run(
+            ["node"],
+            input=script,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(node.returncode, 0, node.stderr)
+        result = json.loads(node.stdout)
+
+        self.assertEqual(result["before"]["value"], "green, custom")
+        self.assertEqual(result["before"]["labels"], ["green", "blue", "red", "yellow", "purple"])
+        self.assertTrue(result["before"]["greenSelected"])
+        self.assertFalse(result["before"]["blueSelected"])
+        self.assertEqual(result["afterBlue"]["value"], "green, custom, blue")
+        self.assertTrue(result["afterBlue"]["blueSelected"])
+        self.assertTrue(result["afterBlue"]["stopped"])
+        self.assertTrue(result["afterBlue"]["defaultPrevented"])
+        self.assertEqual(result["afterGreenAndRed"]["value"], "custom, blue, manual, red")
+        self.assertFalse(result["afterGreenAndRed"]["greenSelected"])
+        self.assertTrue(result["afterGreenAndRed"]["redSelected"])
+        self.assertTrue(result["afterGreenAndRed"]["greenStopped"])
+        self.assertTrue(result["afterGreenAndRed"]["redStopped"])
+        self.assertEqual(result["renderCount"], 0)
+        self.assertTrue(result["focused"])
+        self.assertTrue(result["selected"])
+
     def test_leaderboard_search_and_tag_filters_use_serve_source_rows(self) -> None:
         if not shutil.which("node"):
             self.skipTest("node is required to execute report.js interaction helpers")

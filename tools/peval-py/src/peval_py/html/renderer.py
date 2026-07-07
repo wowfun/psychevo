@@ -17,6 +17,8 @@ def render_html(
     mode: str = "report",
     sources: list[dict[str, Any]] | None = None,
     adapter_defaults: dict[str, str] | None = None,
+    loading: bool = False,
+    load_error: str | None = None,
 ) -> str:
     normalized_mode = normalize_render_mode(mode)
     normalized_locale = normalize_locale(locale)
@@ -30,6 +32,9 @@ def render_html(
     }
     if normalized_mode == "serve":
         render_options["adapter_defaults"] = adapter_defaults or {}
+        render_options["loading"] = bool(loading)
+        if load_error:
+            render_options["load_error"] = load_error
     payload = load_asset_text("report.html").replace("__LANG__", escape(normalized_locale))
     payload = payload.replace("__TITLE__", escape(messages["title"]))
     payload = payload.replace("__BODY_CLASS__", escape(f"{normalized_mode}-mode"))
@@ -40,6 +45,7 @@ def render_html(
             messages,
             normalized_locale,
             adapter_defaults or {},
+            loading=bool(loading),
         )
         if normalized_mode == "serve"
         else "",
@@ -75,6 +81,8 @@ def render_serve_html(
     locale: str = "en",
     sources: list[dict[str, Any]] | None = None,
     adapter_defaults: dict[str, str] | None = None,
+    loading: bool = False,
+    load_error: str | None = None,
 ) -> str:
     return render_html(
         report,
@@ -82,6 +90,8 @@ def render_serve_html(
         mode="serve",
         sources=sources,
         adapter_defaults=adapter_defaults,
+        loading=loading,
+        load_error=load_error,
     )
 
 

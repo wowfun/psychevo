@@ -14,6 +14,7 @@ from peval_py.serve import (
     ECHARTS_ASSET_PATH,
     HttpError,
     LocalHTTPServer,
+    ServeRuntime,
     bind_server,
     cached_echarts_asset,
     echarts_cache_path,

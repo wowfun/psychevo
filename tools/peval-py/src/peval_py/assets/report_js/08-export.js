@@ -41,7 +41,7 @@ function bindServeExportControls(target) {
   });
 }
 function bindTrialSelection(root) {
-  root.querySelectorAll("[data-trial-key]").forEach(node => {
+  root.querySelectorAll("tr[data-trial-key]").forEach(node => {
     node.addEventListener("click", event => {
       event.stopPropagation();
       state.selectedTrial = node.getAttribute("data-trial-key");

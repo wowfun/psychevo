@@ -3,6 +3,80 @@ from __future__ import annotations
 from serve_state_support import *
 
 class PevalPyServeStateHttpSourceTests(unittest.TestCase):
+    def test_http_sources_returns_loading_shell_until_initial_load_finishes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            source = root / "common_session.jsonl"
+            shutil.copy(FIXTURES / "common_session.jsonl", source)
+            config = ToolConfig(adapter="opencode")
+            store = open_workspace_state(str(root))
+            original_sync = store.sync_artifact_sources
+            release_sync = threading.Event()
+
+            def slow_sync(sync_config):
+                release_sync.wait(timeout=5)
+                return original_sync(sync_config)
+
+            store.sync_artifact_sources = slow_sync
+            runtime = ServeRuntime(store, config)
+            runtime.start_initial_load(
+                serve_args(path=[str(source)]),
+                parse_adapter_assignments(["opencode"], config.adapter),
+            )
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(runtime),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            try:
+                status, _, html = request_text(port, "/")
+                self.assertEqual(status, 200)
+                self.assertEqual(script_json(html, "peval-py-data")["trajectory"], [])
+                options = script_json(html, "peval-py-render-options")
+                self.assertTrue(options["loading"])
+                self.assertEqual(options["sources"], [])
+                self.assertIn(">Loading sources</strong>", html)
+                self.assertIn(
+                    ">Scanning runs; sessions will appear when discovery finishes.</span>",
+                    html,
+                )
+                self.assertIn(
+                    '<li class="source-row empty loading">'
+                    "Scanning runs; sessions will appear when discovery finishes.</li>",
+                    html,
+                )
+                self.assertNotIn(">0 sources</strong>", html)
+
+                status, _, body_bytes = request_bytes(port, "/api/sources")
+                self.assertEqual(status, 200)
+                body = json.loads(body_bytes.decode("utf-8"))
+                self.assertTrue(body["loading"])
+                self.assertEqual(body["sources"], [])
+                self.assertEqual(body["report"]["trajectory"], [])
+
+                release_sync.set()
+                runtime.wait_until_ready(timeout=5)
+
+                status, _, body_bytes = request_bytes(port, "/api/sources")
+                self.assertEqual(status, 200)
+                body = json.loads(body_bytes.decode("utf-8"))
+                self.assertFalse(body["loading"])
+                self.assertEqual(len(body["sources"]), 1)
+                self.assertEqual(len(body["report"]["trajectory"]), 1)
+                self.assertEqual(
+                    body["report"]["trajectory"][0]["session_id"],
+                    "common_session",
+                )
+            finally:
+                release_sync.set()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                runtime.wait_until_ready(timeout=5)
+                store.close()
+
     def test_http_upload_report_json_and_same_origin_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = peval_py_workspace(Path(tmp))
@@ -44,7 +118,9 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertNotIn("access-control-allow-origin", headers)
                 self.assertEqual(len(body["sources"]), 1)
-                self.assertEqual(body["sources"][0]["kind"], "snapshot")
+                self.assertEqual(body["sources"][0]["kind"], "trial-artifact")
+                self.assertFalse(body["sources"][0]["refreshable"])
+                self.assertTrue(body["sources"][0]["snapshot"])
                 self.assertEqual(len(body["report"]["trajectory"]), 1)
 
                 conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
@@ -726,7 +802,6 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
             source_key = store.ingest_upload("saved-report.json", json.dumps(report), config)[0]
             source = store.source_payload()[0]
             artifact_dir = root / source["artifact_dir"]
-            shutil.rmtree(artifact_dir / ".peval")
             server = LocalHTTPServer(
                 ("127.0.0.1", 0),
                 make_handler(store, config),
@@ -756,6 +831,14 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertEqual(len(payload["trajectory"]), 1)
 
+                status, _, _ = request_json(
+                    port,
+                    "POST",
+                    f"/api/sources/{source_key}/alias",
+                    {"alias": "Missing source"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 200)
                 shutil.rmtree(artifact_dir / "agent")
                 status, _, html = request_text(port, "/")
                 self.assertEqual(status, 200)
@@ -868,11 +951,14 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertIn("missing.jsonl", body["import_results"][0]["error"])
                 self.assertEqual(len(body["import_results"][1]["source_keys"]), 1)
                 self.assertEqual(len(body["sources"]), 1)
+                self.assertFalse(body["sources"][0]["refreshable"])
                 self.assertEqual(len(body["report"]["trajectory"]), 1)
                 self.assertEqual(
                     body["report"]["trajectory"][0]["session_id"],
                     "common_session",
                 )
+                artifact_dir = root / body["sources"][0]["artifact_dir"]
+                self.assertFalse((artifact_dir / ".peval" / "state.json").exists())
             finally:
                 server.shutdown()
                 server.server_close()

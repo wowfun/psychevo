@@ -19,8 +19,9 @@ workflows:
   note writes, and path safety for Trial cell annotation artifacts.
 - HTML rendering owns package asset loading, safe payload injection, serve shell
   markup, and token estimates.
-- serve owns local HTTP protocol handling, route controllers, request payload
-  validation, source mutation response envelopes, and ECharts cache serving.
+- serve owns local HTTP protocol handling, startup background loading, route
+  controllers, request payload validation, source mutation response envelopes,
+  and ECharts cache serving.
 
 Adapters must not import the refactored internals directly. The adapter-facing
 modules `peval_py.config`, `peval_py.sources`, and `peval_py.redaction` remain
@@ -73,6 +74,12 @@ report:
 `report` and `report_source_key` are omitted only when no readable source can be
 selected. The browser must treat absent report data as an empty report and must
 not keep stale report content after all sources become unreadable.
+
+During startup, the serve runtime may return `loading = true` with an empty
+report while the background initial load imports explicit source flags and scans
+workspace Trial cells. Handlers use the runtime snapshot for `GET /` and
+`GET /api/sources`; they should not synchronously scan the workspace on the
+first page request.
 
 ## Assets
 

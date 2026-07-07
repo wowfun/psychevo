@@ -64,6 +64,10 @@
   color:var(--muted);
   font:700 13px/1.35 var(--mono);
 }
+.source-row.empty.loading {
+  color:var(--focus);
+  border-style:dashed;
+}
 .source-row-main {
   min-width:0;
   display:grid;

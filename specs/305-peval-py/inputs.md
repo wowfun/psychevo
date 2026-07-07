@@ -222,9 +222,9 @@ is found, `serve` fails clearly and names `peval-py init`, `--root/-r`, and
 
 `serve` accepts `-c`, `-a`, `-p`, `-d`, `-s`, `-i`, `-n`, and
 `--source-alias` with the same trajectory-source semantics as `view
-trajectory`. Source flags are persistent: they create or update stable saved
-sources by writing each Trial cell's minimal `.peval/state.json` overlay after conversion
-succeeds and before the server starts. In serve state, one source is one Trial
+trajectory`. Source flags persist only canonical Trial artifacts plus optional
+user overlay data such as `--source-alias`; a successful import with no overlay
+does not create `.peval/state.json`. In serve state, one source is one Trial
 cell: it is the user-facing management object for that cell and is not a
 separate provenance row that can share artifacts with another source. Stable
 source keys are derived from the canonical cell identity after conversion:
@@ -236,7 +236,7 @@ Uploaded JSONL, ATIF JSON, and report JSON sources are stored as canonical
 snapshots and are not refreshable.
 In the web UI, DB sources may also be added through a session picker: the user
 enters a DB path, inspects it, selects one or more listed sessions, and saves
-each selected session as its own refreshable source. This picker must reuse the
+each selected session as its own artifact-only source. This picker must reuse the
 same path-token adapter inference rules as direct `-d` inputs, but inspection
 does not fall back to the default adapter when inference cannot choose one; the
 user must provide an explicit adapter and retry.

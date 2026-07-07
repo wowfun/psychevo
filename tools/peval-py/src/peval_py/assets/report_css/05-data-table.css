@@ -119,6 +119,25 @@ td.num,th.num {
   font:700 12px/1.2 var(--mono);
   box-shadow:0 0 0 2px color-mix(in oklch,var(--focus),transparent 84%);
 }
+.inline-source-tag-editor {
+  display:grid;
+  gap:6px;
+  min-width:180px;
+}
+.inline-source-tag-options {
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  align-items:center;
+}
+.inline-source-tag-option {
+  cursor:pointer;
+}
+.inline-source-tag-option.selected {
+  border-color:color-mix(in oklch,var(--focus),var(--ink) 18%);
+  background:color-mix(in oklch,var(--focus),var(--surface) 72%);
+  box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--focus),transparent 34%);
+}
 .table-head-cell {
   display:grid;
   gap:6px;

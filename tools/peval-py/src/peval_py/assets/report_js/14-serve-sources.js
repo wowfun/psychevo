@@ -14,15 +14,15 @@ function closeServeSourceManager() {
 function renderServeSources() {
   if (!serveMode()) return;
   const sources = Array.isArray(state.serveSources) ? state.serveSources : [];
-  const countNode = document.querySelector("[data-source-count]");
-  if (countNode) {
-    const word = sources.length === 1 ? t("serve_source_count", "source") : t("serve_sources_count", "sources");
-    countNode.textContent = `${sources.length} ${word}`;
-  }
+  syncServeLoadingStatus(sources);
   const list = document.querySelector("[data-source-list]");
   if (list) {
     if (!sources.length) {
-      list.innerHTML = `<li class="source-row empty">${esc(t("serve_no_sources", "No sources loaded"))}</li>`;
+      const message = state.serveLoading
+        ? t("serve_scanning_runs", "Scanning runs; sessions will appear when discovery finishes.")
+        : t("serve_no_sources", "No sources loaded");
+      const loadingClass = state.serveLoading ? " loading" : "";
+      list.innerHTML = `<li class="source-row empty${loadingClass}">${esc(message)}</li>`;
       return;
     }
     const rows = sourceRows();
@@ -38,6 +38,25 @@ function renderServeSources() {
     })}</li>`;
     bindDataTableControls(list, "sources", () => renderServeSources());
   }
+}
+function syncServeLoadingStatus(sources = state.serveSources) {
+  const countNode = document.querySelector("[data-source-count]");
+  const statusNode = document.querySelector("[data-source-status]");
+  if (state.serveLoading) {
+    if (countNode) countNode.textContent = t("serve_loading_sources", "Loading sources");
+    if (statusNode) {
+      statusNode.textContent = t("serve_scanning_runs", "Scanning runs; sessions will appear when discovery finishes.");
+      statusNode.classList.toggle("danger", false);
+      statusNode.classList.toggle("loading", true);
+    }
+    return;
+  }
+  const list = Array.isArray(sources) ? sources : [];
+  if (countNode) {
+    const word = list.length === 1 ? t("serve_source_count", "source") : t("serve_sources_count", "sources");
+    countNode.textContent = `${list.length} ${word}`;
+  }
+  if (statusNode) statusNode.classList.toggle("loading", false);
 }
 function sourceColumns() {
   return [

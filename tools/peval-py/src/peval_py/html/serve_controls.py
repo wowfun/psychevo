@@ -11,17 +11,29 @@ def render_serve_source_manager(
     messages: dict[str, str],
     locale: str,
     adapter_defaults: dict[str, str],
+    *,
+    loading: bool = False,
 ) -> str:
     count = len(sources)
     source_word = messages["serve_source_count"]
     if count != 1:
         source_word = messages["serve_sources_count"]
+    source_summary = (
+        messages["serve_loading_sources"]
+        if loading
+        else f"{count} {source_word}"
+    )
+    source_status = (
+        messages["serve_scanning_runs"]
+        if loading
+        else messages["serve_latest_snapshots"]
+    )
     return replace_template_tokens(
         load_asset_text("serve_source_manager.html"),
         {
-            "SOURCE_COUNT": str(count),
-            "SOURCE_WORD": escape(source_word),
-            "LATEST_SNAPSHOTS": escape(messages["serve_latest_snapshots"]),
+            "SOURCE_SUMMARY": escape(source_summary),
+            "SOURCE_STATUS": escape(source_status),
+            "SOURCE_STATUS_CLASS": "loading" if loading else "",
             "REFRESH": escape(messages["serve_refresh"]),
             "SOURCE_MANAGER": escape(messages["serve_source_manager"]),
             "LANGUAGE_CONTROL": render_language_control(messages, locale),
@@ -42,7 +54,7 @@ def render_serve_source_manager(
             ),
             "SOURCES": escape(messages["serve_sources"]),
             "RELOAD": escape(messages["serve_reload"]),
-            "SOURCE_LIST_ITEMS": render_source_list_items(sources, messages),
+            "SOURCE_LIST_ITEMS": render_source_list_items(sources, messages, loading=loading),
         },
     )
 
@@ -216,7 +228,11 @@ def render_adapter_option(
 def render_source_list_items(
     sources: list[dict[str, Any]],
     messages: dict[str, str],
+    *,
+    loading: bool = False,
 ) -> str:
+    if loading:
+        return f'<li class="source-row empty loading">{escape(messages["serve_scanning_runs"])}</li>'
     if not sources:
         return f'<li class="source-row empty">{escape(messages["serve_no_sources"])}</li>'
     return "".join(render_source_list_item(source, messages) for source in sources)

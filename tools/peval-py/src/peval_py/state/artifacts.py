@@ -18,26 +18,11 @@ from peval_py._state.artifacts import (
 from peval_py.state.constants import (
     SOURCE_STATE_DIR,
     SOURCE_STATE_FILENAME,
-    SOURCE_STATE_SCHEMA_VERSION,
     SOURCE_STATUS_MISSING,
     SOURCE_STATUS_OK,
     TRIAL_CELL_SIDECARS,
 )
 from peval_py.state.summaries import now_ms, trial_summary
-
-
-SOURCE_PROVENANCE_FIELDS = (
-    "kind",
-    "adapter",
-    "label",
-    "input_path",
-    "db_path",
-    "session_id",
-    "agent_name",
-    "agent_version",
-    "model",
-)
-SOURCE_PROVENANCE_CONTROL_FIELDS = ("refreshable", "snapshot")
 
 
 class StateArtifactMixin:
@@ -190,7 +175,6 @@ class StateArtifactMixin:
     def source_row_from_cell_dir(self, cell_dir: Path) -> dict[str, Any]:
         cell_dir = cell_dir.expanduser().resolve()
         state = self.read_source_state(cell_dir)
-        stored_source = self.source_provenance_from_state(state)
         artifact_dir = relative_to_root(self.paths.root, cell_dir)
         artifacts = trial_artifacts(cell_dir)
         has_artifacts = artifacts.trajectory_path.is_file() and artifacts.meta_path.is_file()
@@ -200,13 +184,6 @@ class StateArtifactMixin:
             trajectory = read_json_object(artifacts.trajectory_path)
             meta = read_json_object(artifacts.meta_path)
             source = self.source_row_for_artifact_cell(cell_dir, trajectory, meta)
-            source.update(
-                {
-                    key: stored_source[key]
-                    for key in SOURCE_PROVENANCE_FIELDS
-                    if key in stored_source
-                }
-            )
             source["source_alias"] = optional_str(state.get("source_alias"))
             source["source_tags"] = self.source_tags_from_state(state)
             eval_slug = self.eval_slug_for_cell_dir(cell_dir)
@@ -219,7 +196,6 @@ class StateArtifactMixin:
             source = self.missing_source_row(
                 artifact_dir,
                 identity,
-                stored_source,
                 state,
             )
             source_key = (
@@ -227,56 +203,26 @@ class StateArtifactMixin:
                 or optional_str(state.get("source_key"))
                 or ""
             )
-            summary = self.missing_trial_summary(identity, source, state)
+            summary = self.missing_trial_summary(identity)
             status = SOURCE_STATUS_MISSING
             error = self.missing_artifact_message({"artifact_dir": artifact_dir, **state})
         timestamp = self.artifact_updated_at_ms(cell_dir)
-        refreshable = self.refreshable_from_state(state, stored_source)
         row = {
             "source_key": source_key,
             **source,
             "artifact_dir": artifact_dir,
             "artifact_updated_at_ms": timestamp,
             **summary,
-            "refreshable": refreshable,
+            "refreshable": False,
             "active": bool(state.get("active", True)),
-            "snapshot": self.snapshot_from_state(state, stored_source, refreshable),
+            "snapshot": True,
             "created_at_ms": int(state.get("created_at_ms") or timestamp),
             "updated_at_ms": int(state.get("updated_at_ms") or timestamp),
             "last_status": status,
             "last_error": error,
-            "last_refreshed_at_ms": state.get("last_refreshed_at_ms"),
+            "last_refreshed_at_ms": None,
         }
         return row
-
-    def source_provenance_from_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        source = state.get("source")
-        if isinstance(source, dict):
-            return {
-                key: source.get(key)
-                for key in [*SOURCE_PROVENANCE_FIELDS, *SOURCE_PROVENANCE_CONTROL_FIELDS]
-                if source.get(key) is not None
-            }
-        return {}
-
-    def refreshable_from_state(
-        self,
-        state: dict[str, Any],
-        source: dict[str, Any],
-    ) -> bool:
-        if source.get("refreshable") is not None:
-            return bool(source["refreshable"])
-        return False
-
-    def snapshot_from_state(
-        self,
-        state: dict[str, Any],
-        source: dict[str, Any],
-        refreshable: bool,
-    ) -> bool:
-        if source.get("snapshot") is not None:
-            return bool(source["snapshot"])
-        return not refreshable
 
     def cell_path_identity(self, cell_dir: Path) -> dict[str, str]:
         try:
@@ -307,24 +253,23 @@ class StateArtifactMixin:
         self,
         artifact_dir: str,
         identity: dict[str, str],
-        source: dict[str, Any],
         state: dict[str, Any],
     ) -> dict[str, Any]:
-        adapter = optional_str(source.get("adapter") or identity.get("agent_id")) or "artifact"
-        session_id = optional_str(source.get("session_id") or identity.get("session_id"))
-        agent_name = optional_str(source.get("agent_name") or identity.get("agent_id"))
+        adapter = optional_str(identity.get("agent_id")) or "artifact"
+        session_id = optional_str(identity.get("session_id"))
+        agent_name = optional_str(identity.get("agent_id"))
         return {
-            "kind": source.get("kind") or "trial-artifact",
+            "kind": "trial-artifact",
             "adapter": adapter,
-            "label": source.get("label") or artifact_dir,
-            "input_path": source.get("input_path"),
-            "db_path": source.get("db_path"),
+            "label": artifact_dir,
+            "input_path": None,
+            "db_path": None,
             "session_id": session_id,
             "source_alias": optional_str(state.get("source_alias")),
             "source_tags": self.source_tags_from_state(state),
             "agent_name": agent_name,
-            "agent_version": source.get("agent_version"),
-            "model": source.get("model"),
+            "agent_version": None,
+            "model": None,
         }
 
     def source_tags_from_state(self, state: dict[str, Any]) -> list[str]:
@@ -344,15 +289,10 @@ class StateArtifactMixin:
     def missing_trial_summary(
         self,
         identity: dict[str, str],
-        source: dict[str, Any],
-        state: dict[str, Any],
     ) -> dict[str, Any]:
         return {
             "trial_key": identity.get("cell_key"),
-            "trial_session_id": (
-                source.get("session_id")
-                or identity.get("session_id")
-            ),
+            "trial_session_id": identity.get("session_id"),
             "last_turn_finished_at_ms": None,
         }
 
@@ -379,28 +319,26 @@ class StateArtifactMixin:
             raise ValueError(f"failed to parse {path}: {exc}") from exc
         if not isinstance(parsed, dict):
             raise ValueError(f"{path} must contain a JSON object")
-        if parsed.get("schema_version") != SOURCE_STATE_SCHEMA_VERSION:
-            return {}
         return parsed
 
     def write_source_state(self, cell_dir: Path, state: dict[str, Any]) -> None:
         payload = self.compact_source_state(state)
+        if not payload:
+            self.remove_source_state(cell_dir)
+            return
         write_json_file(self.source_state_path(cell_dir), payload)
 
+    def remove_source_state(self, cell_dir: Path) -> None:
+        path = self.source_state_path(cell_dir)
+        if path.is_file():
+            path.unlink()
+        try:
+            path.parent.rmdir()
+        except OSError:
+            return
+
     def compact_source_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        timestamp = self.state_timestamp(
-            state.get("updated_at_ms")
-            or state.get("last_refreshed_at_ms")
-            or state.get("created_at_ms")
-            or state.get("artifact_updated_at_ms")
-            or now_ms()
-        )
-        created_at = self.state_timestamp(state.get("created_at_ms") or timestamp)
-        payload: dict[str, Any] = {
-            "schema_version": SOURCE_STATE_SCHEMA_VERSION,
-            "created_at_ms": created_at,
-            "updated_at_ms": timestamp,
-        }
+        payload: dict[str, Any] = {}
         source_alias = optional_str(state.get("source_alias"))
         if source_alias:
             payload["source_alias"] = source_alias
@@ -415,53 +353,7 @@ class StateArtifactMixin:
         error = optional_str(state.get("last_error"))
         if error:
             payload["last_error"] = error
-        if state.get("last_refreshed_at_ms") is not None:
-            payload["last_refreshed_at_ms"] = self.state_timestamp(
-                state["last_refreshed_at_ms"]
-            )
-        source = self.compact_source_provenance(state)
-        if source:
-            payload["source"] = source
         return payload
-
-    def compact_source_provenance(self, state: dict[str, Any]) -> dict[str, Any]:
-        source = self.source_provenance_for_write(state)
-        if not self.should_persist_source_provenance(source):
-            return {}
-        compact: dict[str, Any] = {}
-        for key in SOURCE_PROVENANCE_FIELDS:
-            value = source.get(key)
-            if value is not None:
-                compact[key] = value
-        if source.get("refreshable"):
-            compact["refreshable"] = True
-        return compact
-
-    def source_provenance_for_write(self, state: dict[str, Any]) -> dict[str, Any]:
-        source = self.source_provenance_from_state(state)
-        if source:
-            return source
-        return {
-            key: state.get(key)
-            for key in [*SOURCE_PROVENANCE_FIELDS, *SOURCE_PROVENANCE_CONTROL_FIELDS]
-            if state.get(key) is not None
-        }
-
-    def should_persist_source_provenance(self, source: dict[str, Any]) -> bool:
-        kind = optional_str(source.get("kind")) or "trial-artifact"
-        if kind != "trial-artifact":
-            return True
-        if source.get("refreshable"):
-            return True
-        if source.get("db_path"):
-            return True
-        return False
-
-    def state_timestamp(self, value: Any) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return now_ms()
 
     def artifact_updated_at_ms(self, cell_dir: Path) -> int:
         artifacts = trial_artifacts(cell_dir)

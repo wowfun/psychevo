@@ -3,14 +3,14 @@ from __future__ import annotations
 from argparse import Namespace
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any
 
 from peval_py.config import ToolConfig
-from peval_py.inputs import AdapterAssignments, LoadedInputs
+from peval_py.inputs import AdapterAssignments
 from peval_py.serve.constants import DEFAULT_PORT_END, DEFAULT_PORT_START, LOCALHOSTS
 from peval_py.serve.handler import make_handler
-from peval_py.serve.sources import load_serve_inputs
+from peval_py.serve.runtime import ServeRuntime
 from peval_py.state import open_workspace_state
+
 
 class LocalHTTPServer(HTTPServer):
     allow_reuse_address = True
@@ -25,20 +25,21 @@ def run_serve_command(
     store = open_workspace_state(getattr(args, "root", None))
     config = replace(config, workspace_root=str(store.paths.root))
     server: HTTPServer | None = None
+    runtime: ServeRuntime | None = None
     try:
-        loaded_inputs = load_serve_inputs(args, adapter_assignments, config)
-        store.import_loaded_sources(loaded_inputs, config)
-        store.sync_artifact_sources(config)
-
-        handler = make_handler(store, config)
+        runtime = ServeRuntime(store, config, initialize_snapshot=False)
+        handler = make_handler(runtime)
         server = bind_server(host, getattr(args, "port", None), handler)
         print(f"peval-py serve: {format_url(host, server.server_port)}", flush=True)
+        runtime.start_initial_load(args, adapter_assignments)
         server.serve_forever()
     except KeyboardInterrupt:
         return
     finally:
         if server is not None:
             server.server_close()
+        if runtime is not None:
+            runtime.wait_until_ready(timeout=5)
         store.close()
 
 

@@ -21,7 +21,7 @@ same command tree.
   Python-owned file-backed state layer, with active and archived source
   comparison views that recover to the target view when a batch source-state
   action empties the current view, plus serve-only Leaderboard search, source
-  tags, and inline display-metadata editing
+  tags, inline display-metadata editing, and existing-tag quick selection
 - Source Manager import of complete Trial cells from local external `runs/`
   trees into the selected peval-py workspace
 - read-only peval cell cached analysis and manual cell notes enrichment, plus
@@ -68,14 +68,17 @@ It must not update Psychevo state databases, benchmark artifacts, Rust peval
 workspace registries, or live provider state. `init` creates only the
 Python-owned files required by `peval-py serve`: `<workspace>/peval-py.toml`
 and the workspace log directory. Serve source state is stored beside each Trial
-cell under `.peval/state.json` as a minimal overlay; source identity and
-display summary are derived from the Trial cell path and agent artifacts.
-Display metadata such as aliases and tags belongs to this overlay, not to the
-canonical Trial trajectory artifacts.
+cell under `.peval/state.json` only when local source overlay data exists;
+source identity and display summary are derived from the Trial cell path and
+agent artifacts. Display metadata such as aliases and tags belongs to this
+overlay, not to the canonical Trial trajectory artifacts.
 Peval-py does not create, read, or write a workspace `state.db`. `serve`
-startup must not depend on unrelated Rust peval
-workspace files such as `peval.toml`, `runs/`, `datasets/`, `scripts/`, eval
-templates, or `$PSYCHEVO_HOME/peval-config.toml`.
+startup must bind the local HTTP server before importing explicit CLI sources
+or scanning workspace `runs/` Trial cells; while that background startup scan is
+running, the served page must show an explicit loading status in the top Sources
+toolbar instead of presenting the empty shell as no data. `serve` must not depend
+on unrelated Rust peval workspace files such as `peval.toml`, `datasets/`,
+`scripts/`, eval templates, or `$PSYCHEVO_HOME/peval-config.toml`.
 CLI path input resolution treats Windows drive paths and UNC paths as
 absolute-like values so Git Bash and WSL users can paste accessible Windows
 paths without peval-py joining them to the current working directory.

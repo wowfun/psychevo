@@ -297,8 +297,10 @@ forms and source list; saving a non-empty path updates that adapter's
 `default_db_path`, while saving or clearing an empty value removes that default.
 Session/ATIF/runs path and DB path fields accept one or more
 whitespace-separated paths and honor single- or double-quoted paths. Ordinary
-Session/ATIF paths import refreshable local paths and do not upload file
-contents. Path entries that resolve to a workspace root, `runs/`, `runs/<eval>`,
+Session/ATIF paths and DB sessions are converted immediately into canonical
+Trial artifacts; after import they are displayed like artifact-only
+non-refreshable sources and do not retain the original path or DB provenance in
+cell state. Path entries that resolve to a workspace root, `runs/`, `runs/<eval>`,
 or a directory above complete Trial cells recursively import those cells as
 copied non-refreshable snapshots in the current workspace. The DB Inspect action
 still inspects exactly one DB path at a time. Adapter choices in the source manager are
@@ -319,7 +321,9 @@ still inspects exactly one DB path at a time. Adapter choices in the source mana
 	  editable by double-clicking the cell. Enter or blur saves, Escape cancels,
 	  and editing controls do not select the Trial row. Tags are split on English
 	  and Chinese commas, stored as ordered unique strings, and empty input clears
-	  the tag list. Source Manager rows also expose the latest stored Trial's
+	  the tag list. The Tags editor also shows existing tags from loaded serve
+	  sources/reports as chips that can be clicked to add or remove them while
+	  leaving custom text entry available. Source Manager rows also expose the latest stored Trial's
 	  Last Turn End using `trajectory_meta.finished_at_ms`, without requiring a
 	  source refresh.
 	  It does not add a persistent left sidebar or reduce the report body width.
@@ -349,10 +353,14 @@ still inspects exactly one DB path at a time. Adapter choices in the source mana
 	reports do not render these source-state controls.
 
 `serve` does not refresh original path or DB sources on startup unless source
-flags were supplied on that invocation. It does scan the current
+flags were supplied on that invocation, and imported path/DB sources do not
+remain refreshable after they have been materialized as Trial artifacts. It does scan the current
 `runs/<analysis_eval_slug>` tree on startup and explicit source reload, so a
 complete Trial cell moved into the workspace appears in source management
-without a separate import command. The page opens from the latest canonical
+without a separate import command. During the startup background scan, the top
+Sources toolbar shows a loading summary and a short scanning status instead of
+showing `0 sources` with the normal latest-snapshots status; the Source Manager
+empty list uses the same loading state. The page opens from the latest canonical
 Trial artifacts and marks sources with their latest status. Missing or
 unreadable cell paths are shown in source management and skipped by multi-source
 report composition instead of failing page load. When composing a served report,
@@ -362,15 +370,16 @@ those annotations on the stored artifacts without mutating the stored trajectory
 or requiring the original source file/DB session to refresh successfully. This
 scan includes non-refreshable report snapshots and observes both added and
 deleted analysis files on the next page/API reload.
-Refresh is explicit from the source manager or through source flags on the
-`serve` command.
+Refresh is explicit from the source manager only for sources that still have
+refreshable provenance, or through source flags on the `serve` command.
 
 In serve UI mode, the selected Trial Notes section shows `Edit notes` when the
 selected Trial maps to a refreshable source with an existing cell-local note and
 `Add notes` when the selected Trial maps to a refreshable source without one.
 The editor only edits the peval cell `notes.md`; CLI and input-table notes
-remain read-only. Snapshot and uploaded non-refreshable sources must not expose
-a save entry point, though their persisted notes still render read-only.
+remain read-only. Artifact-only, snapshot, imported path/DB, and uploaded
+non-refreshable sources must not expose a save entry point, though their
+persisted notes still render read-only.
 
 Serve HTTP APIs are same-origin local APIs. The server must not enable CORS.
 Mutating APIs require JSON `POST` requests and must reject non-same-origin
@@ -408,7 +417,7 @@ adapter. On success it returns the resolved DB path, adapter id, whether the
 adapter was inferred, and session rows with one-based `index`, `session_id`, and
 `name`. `POST /api/sources` continues to accept a single `session_id` and also
 accepts `session_ids` for DB payloads; each selected session creates or updates
-one independent refreshable source before the response report is rebuilt. For
+one independent Trial artifact before the response report is rebuilt. For
 path and DB payloads, a single string may contain multiple paths parsed with
 Windows-safe shell-like quoting: quoted paths may contain spaces, unquoted
 Windows drive paths such as `C:\Users\me\state.db` keep their backslashes,
@@ -420,12 +429,12 @@ current workspace, preserve cell-local `analysis.json`, `analysis.md`, and
 `notes.md`, and register the copied cells as non-refreshable snapshots. New
 source imports are all-or-nothing: if any newly submitted source fails to load,
 convert, or refresh, the endpoint returns a JSON error and does not persist any
-source from that request. Refreshing an
-already persisted source keeps the existing artifact directory when conversion
-fails, and records the latest status/error/log entry. If refreshing a persisted
-source converts to a different canonical cell identity, refresh fails and keeps
-the existing source/artifact unchanged instead of silently changing one source
-into another Trial.
+source from that request. Refreshing a source that still has refreshable
+provenance keeps the existing artifact directory when conversion fails, and
+records the latest status/error/log entry. If refreshing a persisted source
+converts to a different canonical cell identity, refresh fails and keeps the
+existing source/artifact unchanged instead of silently changing one source into
+another Trial.
 
 `POST /api/sources/reload` scans the workspace `runs/<analysis_eval_slug>` tree
 for complete Trial cells, registers new artifact sources, updates lightweight

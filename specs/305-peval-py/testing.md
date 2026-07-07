@@ -258,15 +258,20 @@ Coverage must verify:
   `agent/trajectory_meta.json`, stores only source management overlays in
   `.peval/state.json`, derives source identity and display summary from the
   cell path plus agent artifacts, and does not require a workspace `state.db`
-  or SQLite trial table.
+  or SQLite trial table. Complete artifact-only Trial cells do not create an
+  empty `.peval/state.json` during source discovery. Ordinary path/session/DB
+  imports also do not create `.peval/state.json` unless the request carries
+  alias/tags/archive/error overlay data; after import they are artifact-only
+  non-refreshable sources. Clearing the last overlay field removes the state
+  file.
 - serve source display metadata tests cover `source_alias` and `source_tags`
   persistence in `.peval/state.json`, projection through `source_payload()` and
   served `trajectory_meta[]`, clearing values, and preserving existing display
   metadata when a source is re-imported.
 - serve active report composition reads current cell-local `analysis.json`,
   `analysis.md`, and `notes.md` from each active source's stored Trial artifact
-  cell path for all active sources, including snapshots and refreshable sources
-  whose latest refresh status is `error`; tests cover added and deleted analysis
+  cell path for all active sources, including snapshots and imported artifact
+  sources whose latest status is `error`; tests cover added and deleted analysis
   files across repeated `active_report()` calls and `/api/report` reloads
   without `refresh_sources()`.
 - report JSON uploads materialize matching Trial annotations into cell-local
@@ -317,24 +322,25 @@ Coverage must verify:
   `Show archived` and bulk Archive/Activate controls.
 - serve UI source manager renders Session/ATIF/runs path, DB, and input-table
   forms, JSONL/ATIF JSON/report JSON upload affordance, explicit refresh
-  controls, active/archive/delete controls, non-refreshable snapshot labels, and
-  latest source status without a persistent sidebar or duplicate form titles.
+  controls only where provenance remains refreshable, active/archive/delete
+  controls, non-refreshable artifact labels, and latest source status without a
+  persistent sidebar or duplicate form titles.
 - serve UI source manager renders a DB Inspect control, adapter single-choice
   controls defaulting to `auto`, session multi-select table, select-all-visible
   control, and add-selected action only in serve mode.
 - serve UI selected Trial Notes section renders Edit/Add notes controls only in
   serve mode for refreshable sources, saves through the source-specific notes
   endpoint, rerenders from the returned mutation payload, keeps CLI/table notes
-  read-only, hides save controls for snapshot sources, and escapes raw HTML in
-  Markdown notes.
+  read-only, hides save controls for artifact-only/imported/snapshot sources,
+  and escapes raw HTML in Markdown notes.
 - serve HTTP exposes `POST /api/db-sessions` for local DB inspection. Tests cover
   `.hermes`, `.psychevo`, and `.opencode` path-token adapter inference,
   explicit adapter retry after failed inference, ambiguous path errors,
   unsupported session-list adapters, missing DB diagnostics, and same-origin
   rejection.
 - serve HTTP `POST /api/sources` accepts DB `session_ids` arrays and creates one
-  independent refreshable source/trial per selected session while preserving the
-  existing single `session_id` payload behavior.
+  independent artifact-only source/trial per selected session while preserving
+  the existing single `session_id` payload behavior.
 - serve HTTP `POST /api/sources` accepts shell-quoted multi-path strings for
   path and DB payloads, rejects malformed quoted input clearly, treats `auto`
   adapter as no override, and persists no new source/trial/log rows when a
@@ -365,6 +371,11 @@ Coverage must verify:
   cover duplicate raw Trial keys that are uniquified in the full report and
   Source Manager row selection mapping back to the corresponding uniquified
   Trial without clearing comparison panels.
+- serve startup binds the HTTP listener before importing explicit CLI sources
+  or scanning workspace Trial cells. Tests cover a loading empty shell before a
+  delayed initial load completes, a top-toolbar scanning status instead of a
+  misleading normal empty-source status, and a full `/api/sources` envelope
+  after the background load finishes.
 - serve main-view archived mode is lazy and mutually exclusive with active mode:
   `GET /api/report?source_state=archived` returns archived readable sources,
   `GET /api/report` remains active by default, `source_key` report loads still
@@ -566,8 +577,8 @@ Coverage must verify:
   `peval-py.toml`, explicit `--root` and `PEVAL_ROOT` handling as a peval-py
   root override without requiring `peval.toml`, `<workspace>/peval-py.toml` defaults,
   no workspace `state.db` creation, canonical cell-derived stable source keys,
-  `.peval/state.json` schema v2 minimal overlay writes, older flat state files
-  being ignored until the next mutation overwrites them, source alias and tag
+  `.peval/state.json` minimal overlay writes, older flat state files
+  being read best-effort until the next mutation rewrites them, source alias and tag
   storage without changing stable keys,
   duplicate imports resolving to the same cell updating one source,
   active/archive lifecycle, JSONL refresh/import logging, latest
@@ -575,8 +586,11 @@ Coverage must verify:
   and cell-local notes, refresh-log rows, and no non-peval-py table writes.
 - HTML interaction tests cover Leaderboard visible-scope search, all-session
   search over active and archived sources, disabled mixed-state batch
-  Archive/Activate, inline alias/tag editing, flattened Any tag filters,
-  export scope after search, and source-key mapping after filtering.
+  Archive/Activate, inline alias/tag editing, existing-tag quick selection,
+  flattened Any tag filters,
+  startup loading status rendering and ready-state recovery,
+  inline edit click isolation from row selection, export scope after search, and
+  source-key mapping after filtering.
 - Timeline HTML tests cover `N.M` numbering for Waterfall labels/tooltips and
   Detail Table rows, including multiple Timeline items derived from one source
   step and stable `#` sorting by trace order.

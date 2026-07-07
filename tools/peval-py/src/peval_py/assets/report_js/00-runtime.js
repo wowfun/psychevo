@@ -39,7 +39,7 @@ function initialAdapterDefaults() {
 function adapterDefaults() {
   return state.adapterDefaults || {};
 }
-const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], selectedSourceKey: null, serveSourceMode: "active", serveReportCache: {}, adapterDefaults: initialAdapterDefaults(), notesEditor: null, search: { query: "", scope: "visible", normalSourceMode: "active" } };
+const state = { view: null, selectedTrial: null, selectedStep: null, rowSelection: new Set(), tables: {}, timelineChart: null, boundGlobalControls: false, serveSources: Array.isArray(RENDER_OPTIONS?.sources) ? RENDER_OPTIONS.sources : [], selectedSourceKey: null, serveSourceMode: "active", serveReportCache: {}, adapterDefaults: initialAdapterDefaults(), notesEditor: null, search: { query: "", scope: "visible", normalSourceMode: "active" }, serveLoading: Boolean(RENDER_OPTIONS?.loading), serveStartupPolling: false };
 const SUBMENU_DETAILS_SELECTOR = ".export-menu,.filter-control";
 const OPEN_SUBMENU_DETAILS_SELECTOR = ".export-menu[open],.filter-control[open]";
 function closeOpenSubmenus(except = null) {
@@ -120,6 +120,7 @@ function render(view) {
   if (serveMode()) syncSelectedSourceFromView();
   if (serveMode()) renderServeSources();
   bindGlobalControls();
+  if (serveMode()) scheduleServeStartupPoll();
   renderReportNotes(view.annotations?.report_notes || []);
   renderComparison();
   renderTrace();

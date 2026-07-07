@@ -160,10 +160,95 @@ function beginInlineSourceEdit(cell) {
       save();
     }
   });
-  input.addEventListener("blur", () => save());
-  cell.replaceChildren(input);
+  input.addEventListener("blur", event => {
+    if (event.relatedTarget?.dataset?.sourceTagOption) return;
+    save();
+  });
+  if (field === "tags") {
+    cell.replaceChildren(inlineSourceTagEditor(input));
+  } else {
+    cell.replaceChildren(input);
+  }
   input.focus();
   input.select();
+}
+function inlineSourceTagEditor(input) {
+  const editor = document.createElement("div");
+  editor.className = "inline-source-tag-editor";
+  editor.addEventListener("click", event => event.stopPropagation());
+  editor.addEventListener("dblclick", event => event.stopPropagation());
+  editor.appendChild(input);
+  const options = existingSourceTagOptions();
+  if (!options.length) return editor;
+  const picker = document.createElement("div");
+  picker.className = "inline-source-tag-options";
+  picker.setAttribute("aria-label", t("tags", "Tags"));
+  options.forEach(tag => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "source-tag-chip inline-source-tag-option";
+    button.textContent = tag;
+    button.dataset.sourceTagOption = tag;
+    button.addEventListener("mousedown", event => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleInlineSourceTag(input, tag);
+      syncInlineSourceTagOptions(editor, input);
+      input.focus();
+    });
+    picker.appendChild(button);
+  });
+  input.addEventListener("input", () => syncInlineSourceTagOptions(editor, input));
+  editor.appendChild(picker);
+  syncInlineSourceTagOptions(editor, input);
+  return editor;
+}
+function existingSourceTagOptions() {
+  const tags = [];
+  const seen = new Set();
+  const addTags = value => {
+    sourceTagsFromValue(value).forEach(tag => {
+      if (seen.has(tag)) return;
+      seen.add(tag);
+      tags.push(tag);
+    });
+  };
+  listValue(state.serveSources).forEach(source => addTags(source?.source_tags));
+  listValue(state.view?.trajectory_meta).forEach(meta => addTags(meta?.source_tags));
+  Object.values(state.serveReportCache || {}).forEach(report => {
+    listValue(report?.trajectory_meta).forEach(meta => addTags(meta?.source_tags));
+  });
+  return tags;
+}
+function inlineSourceTagsFromText(value) {
+  const tags = [];
+  const seen = new Set();
+  String(value || "").split(/[,，]/).forEach(rawTag => {
+    const tag = String(rawTag || "").trim();
+    if (!tag || seen.has(tag)) return;
+    seen.add(tag);
+    tags.push(tag);
+  });
+  return tags;
+}
+function toggleInlineSourceTag(input, tag) {
+  const tags = inlineSourceTagsFromText(input.value);
+  const index = tags.indexOf(tag);
+  if (index >= 0) tags.splice(index, 1);
+  else tags.push(tag);
+  input.value = tags.join(", ");
+}
+function syncInlineSourceTagOptions(editor, input) {
+  const selected = new Set(inlineSourceTagsFromText(input.value));
+  editor.querySelectorAll("[data-source-tag-option]").forEach(button => {
+    const active = selected.has(button.dataset.sourceTagOption);
+    button.classList.toggle("selected", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
 }
 async function saveInlineSourceEdit(cell, field, sourceKey, value) {
   const action = field === "tags" ? "tags" : "alias";
@@ -224,6 +309,36 @@ async function refreshServeSourcesFromServer() {
     setServeStatus(error.message || String(error), true);
   }
 }
+function scheduleServeStartupPoll() {
+  if (!serveMode() || !state.serveLoading || state.serveStartupPolling) return;
+  state.serveStartupPolling = true;
+  syncServeLoadingStatus();
+  pollServeStartupSources();
+}
+async function pollServeStartupSources() {
+  try {
+    const payload = await serveApi("/api/sources");
+    if (payload?.loading) {
+      state.serveLoading = true;
+      syncServeLoadingStatus(payload?.sources);
+      setTimeout(pollServeStartupSources, 150);
+      return;
+    }
+    state.serveLoading = false;
+    state.serveStartupPolling = false;
+    if (payload?.error) {
+      renderServeSources();
+      setServeStatus(payload.error, true);
+      return;
+    }
+    applyServeMutationPayload(payload, { selectedSourceKey: payload?.report_source_key || null });
+  } catch (error) {
+    state.serveLoading = false;
+    state.serveStartupPolling = false;
+    renderServeSources();
+    setServeStatus(error.message || String(error), true);
+  }
+}
 function selectServeSource(sourceKey) {
   if (!sourceKey) return;
   const nextSourceKey = readableSourceKey(sourceKey);
@@ -276,6 +391,8 @@ async function serveApi(path, options = {}) {
 }
 function applyServeMutationPayload(payload, options = {}) {
   hideServeNotice();
+  if (payload?.loading === false) state.serveLoading = false;
+  if (payload?.loading === true) state.serveLoading = true;
   if (Array.isArray(payload?.sources)) {
     state.serveSources = payload.sources;
     renderServeSources();
@@ -314,6 +431,7 @@ function setServeStatus(text, error = false) {
   const node = document.querySelector("[data-source-status]");
   if (!node) return;
   node.textContent = text;
+  node.classList.toggle("loading", false);
   node.classList.toggle("danger", Boolean(error));
 }
 function showServeNotice(text, error = false) {

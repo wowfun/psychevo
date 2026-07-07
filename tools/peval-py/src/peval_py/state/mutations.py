@@ -22,7 +22,6 @@ class StateMutationMixin:
         snapshot: bool,
         status: str,
         error: str | None = None,
-        preserve_existing_source: bool = False,
     ) -> None:
         cell_dir = self.resolve_artifact_dir(artifact_dir)
         existing = self.read_source_state(cell_dir)
@@ -62,8 +61,6 @@ class StateMutationMixin:
                 timestamp if refreshable else existing.get("last_refreshed_at_ms")
             ),
         }
-        if preserve_existing_source and isinstance(existing.get("source"), dict):
-            state["source"] = existing["source"]
         self.write_source_state(cell_dir, state)
 
     def set_source_active(self, source_key: str, active: bool) -> None:

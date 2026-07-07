@@ -17,17 +17,18 @@ Runtime source state lives beside each Trial cell in
 `<cell>/.peval/state.json`. Missing `.peval/` or missing
 `.peval/state.json` is not an error: a complete Trial cell without local source
 state is treated as a readable active, non-refreshable artifact source with
-default metadata. The state file is a minimal overlay with `schema_version = 2`,
-`created_at_ms`, `updated_at_ms`, optional `source_alias`, optional
-`source_tags` as an ordered string array, optional archived state
-(`active = false`), optional latest status/error fields, optional
-`last_refreshed_at_ms`, and an optional compact `source` object only when
-provenance cannot be reconstructed from the Trial artifacts. Derived fields
-such as source key, artifact path, adapter/session/model display fields,
-refreshability, snapshot state, and Trial summary fields are computed from the
-cell path plus `agent/trajectory.json` and `agent/trajectory_meta.json`.
-Older non-v2 state files are ignored as overlays and are overwritten with v2
-shape on the next source mutation.
+default metadata. The state file is a minimal overlay with optional
+`source_alias`, optional `source_tags` as an ordered string array, optional
+archived state (`active = false`), optional latest status/error fields,
+and no source provenance object. Derived fields such as source key, artifact
+path, adapter/session/model display fields, refreshability, snapshot state, and
+Trial summary fields are computed from the cell path plus
+`agent/trajectory.json` and `agent/trajectory_meta.json`. Successful imports and
+refreshes do not create or update a cell overlay unless they carry user overlay
+data. When a mutation leaves no overlay fields, `state.json` is removed. Older
+overlay files remain best-effort readable for alias, tags, active state, and
+status/error, but legacy source provenance is ignored and dropped on the next
+source mutation.
 
 Refresh and import attempts append JSONL records to
 `<workspace>/logs/peval-py-serve.jsonl` with time, status, source key, warning
@@ -50,7 +51,7 @@ unit is the Trial cell:
 <workspace>/runs/<analysis_eval_slug>/<agent-id>/<session-id>/<cell-key>/
   agent/trajectory.json
   agent/trajectory_meta.json
-  .peval/state.json
+  .peval/state.json        # optional; present only for local overlay data
   notes.md
   analysis.json
   analysis.md
@@ -65,14 +66,16 @@ and `notes.md` are the persisted annotation truth for that Trial. Session-root
 `analysis.json`, `analysis.md`, and `notes.md` belong to the whole session and
 are reserved but not read by this version.
 
-`serve` startup and explicit source reload scan
-`<workspace>/runs/<analysis_eval_slug>/*/*/*` for complete Trial cells and
-derive source rows from their artifacts plus optional `.peval/state.json`
-overlays. The
+`serve` startup binds the local HTTP server first, then imports explicit CLI
+sources and scans `<workspace>/runs/<analysis_eval_slug>/*/*/*` for complete
+Trial cells in the background. Until this initial load completes, the browser
+may receive an empty report and source payload marked as loading. Explicit
+source reload still scans the run tree synchronously and derives source rows
+from artifacts plus optional `.peval/state.json` overlays. The
 Path source form may also import a local external workspace root, `runs/`,
 `runs/<eval>`, or a directory above Trial cells; that import recursively finds
 complete Trial cells, copies each cell into the current workspace run tree, and
-writes only the minimal overlay needed for user state. External run trees are
+writes an overlay only when needed for user state. External run trees are
 read-only provenance; deleting a source deletes only the current workspace copy.
 The served report JSON is computed from active readable source overlays plus
 these artifacts and is not persisted as a complete blob.
@@ -80,9 +83,9 @@ these artifacts and is not persisted as a complete blob.
 Uploaded JSONL files are converted through the selected adapter. Uploaded ATIF
 JSON trajectory objects and uploaded peval-py report JSON are accepted without
 requiring a message adapter. Uploaded source payloads are limited to 20 MiB,
-converted immediately, persisted only as canonical Trial artifacts plus a
-cell-local overlay, and discarded after ingestion; raw uploaded files are not
-written to disk or stored as blobs. When the uploaded source is a peval-py
+converted immediately, persisted only as canonical Trial artifacts plus optional
+cell-local overlay data, and discarded after ingestion; raw uploaded files are
+not written to disk or stored as blobs. When the uploaded source is a peval-py
 report JSON, matching Trial `annotations.notes[]` are materialized into that
 Trial cell's `notes.md`, matching `annotations.analysis[]` entries are
 materialized into `analysis.json` and `analysis.md`, and report-level notes are
@@ -99,7 +102,9 @@ Serve source mutation endpoints return a shared JSON envelope with `sources`
 and, when a readable source exists, `report` plus `report_source_key`. Reload,
 add, upload, archive, activate, refresh, alias, notes, and delete actions use
 this envelope so the browser can clear stale report state consistently when no
-source is readable.
+source is readable. `GET /api/sources` may return `loading = true` during
+startup; after startup it returns the current source list and the current
+active report envelope.
 
 `peval-py init` writes only the Python-owned serve state described above.
 Existing unrelated workspace files, including any old workspace `state.db`, are

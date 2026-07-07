@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler
-from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -25,15 +24,24 @@ from peval_py.serve.payloads import (
     source_state_payload,
     tags_payload,
 )
-from peval_py.serve.reporting import mutation_payload, single_query_value
+from peval_py.serve.reporting import single_query_value
+from peval_py.serve.runtime import ServeRuntime
 from peval_py.serve.sources import add_source_payload, db_sessions_payload
 from peval_py.state import ServeStateStore
 
+
 def make_handler(
-    store: ServeStateStore,
-    config: ToolConfig,
+    store_or_runtime: ServeStateStore | ServeRuntime,
+    config: ToolConfig | None = None,
 ) -> type[BaseHTTPRequestHandler]:
-    runtime = SimpleNamespace(config=config)
+    if isinstance(store_or_runtime, ServeRuntime):
+        runtime = store_or_runtime
+        store = runtime.store
+    else:
+        if config is None:
+            raise ValueError("config is required when make_handler receives a store")
+        store = store_or_runtime
+        runtime = ServeRuntime(store, config)
 
     class ServeHandler(BaseHTTPRequestHandler):
         server_version = "peval-py-serve/1"
@@ -46,12 +54,15 @@ def make_handler(
             path = parsed_url.path
             try:
                 if path == "/":
+                    envelope = runtime.source_envelope(refresh=True)
                     self.write_html(
                         render_serve_html(
-                            store.active_report(runtime.config),
+                            envelope["report"],
                             locale=runtime.config.locale,
-                            sources=store.source_payload(),
+                            sources=envelope["sources"],
                             adapter_defaults=runtime.config.adapter_default_db_paths,
+                            loading=bool(envelope.get("loading")),
+                            load_error=envelope.get("error"),
                         )
                     )
                     return
@@ -70,8 +81,7 @@ def make_handler(
                     )
                     try:
                         self.write_json(
-                            store.active_report(
-                                runtime.config,
+                            runtime.report(
                                 source_keys=[source_key] if source_key else None,
                                 source_state=source_state,
                             )
@@ -80,7 +90,7 @@ def make_handler(
                         raise HttpError(400, str(exc)) from exc
                     return
                 if path == "/api/sources":
-                    self.write_json({"sources": store.source_payload()})
+                    self.write_json(runtime.source_envelope(refresh=True))
                     return
                 raise HttpError(404, "not found")
             except HttpError as exc:
@@ -93,12 +103,14 @@ def make_handler(
             try:
                 payload = self.read_json_payload()
                 if path == "/api/config/locale":
+                    runtime.ensure_ready()
                     locale = normalize_locale(required_string(payload, "locale"))
                     write_workspace_locale(store.paths.config_path, locale)
-                    runtime.config = replace(runtime.config, locale=locale)
+                    runtime.set_config(replace(runtime.config, locale=locale))
                     self.write_json({"locale": locale})
                     return
                 if path == "/api/config/adapter-default-db":
+                    runtime.ensure_ready()
                     adapter_id, raw_db_path = adapter_default_db_payload(payload)
                     resolved = write_workspace_adapter_default_db(
                         store.paths.config_path,
@@ -110,9 +122,11 @@ def make_handler(
                         adapter_defaults[adapter_id] = resolved
                     else:
                         adapter_defaults.pop(adapter_id, None)
-                    runtime.config = replace(
-                        runtime.config,
-                        adapter_default_db_paths=adapter_defaults,
+                    runtime.set_config(
+                        replace(
+                            runtime.config,
+                            adapter_default_db_paths=adapter_defaults,
+                        )
                     )
                     self.write_json(
                         {
@@ -123,9 +137,11 @@ def make_handler(
                     )
                     return
                 if path == "/api/db-sessions":
+                    runtime.ensure_ready()
                     self.write_json(db_sessions_payload(store, payload))
                     return
                 if path == "/api/sources/state":
+                    runtime.ensure_ready()
                     source_keys = source_keys_payload(payload)
                     if not source_keys:
                         raise HttpError(400, "source_keys must include at least one source")
@@ -139,18 +155,15 @@ def make_handler(
                     for source_key in source_keys:
                         store.set_source_active(source_key, active)
                     self.write_json(
-                        mutation_payload(
-                            store,
-                            runtime.config,
+                        runtime.mutation_envelope(
                             source_state=report_source_state,
                         )
                     )
                     return
                 if path == "/api/sources":
+                    runtime.ensure_ready()
                     result = add_source_payload(store, runtime.config, payload)
-                    response = mutation_payload(
-                        store,
-                        runtime.config,
+                    response = runtime.mutation_envelope(
                         source_key=result.keys[0] if result.keys else None,
                     )
                     if result.import_results is not None:
@@ -158,10 +171,12 @@ def make_handler(
                     self.write_json(response)
                     return
                 if path == "/api/sources/reload":
+                    runtime.ensure_ready()
                     store.sync_artifact_sources(runtime.config)
-                    self.write_json(mutation_payload(store, runtime.config))
+                    self.write_json(runtime.mutation_envelope())
                     return
                 if path == "/api/upload":
+                    runtime.ensure_ready()
                     filename = required_string(payload, "filename")
                     content = required_string(payload, "content")
                     adapter = adapter_override_payload(payload)
@@ -176,20 +191,17 @@ def make_handler(
                         for source_key in keys:
                             store.set_source_alias(source_key, upload_alias)
                     self.write_json(
-                        mutation_payload(
-                            store,
-                            runtime.config,
+                        runtime.mutation_envelope(
                             source_key=keys[0] if keys else None,
                         )
                     )
                     return
                 if path == "/api/refresh":
+                    runtime.ensure_ready()
                     source_keys = source_keys_payload(payload)
                     store.refresh_sources(source_keys, runtime.config)
                     self.write_json(
-                        mutation_payload(
-                            store,
-                            runtime.config,
+                        runtime.mutation_envelope(
                             source_key=source_keys[0] if source_keys else None,
                         )
                     )
@@ -197,6 +209,7 @@ def make_handler(
 
                 source_action = source_action_path(path)
                 if source_action is not None:
+                    runtime.ensure_ready()
                     source_key, action = source_action
                     mutation_source_state = "active"
                     if action == "archive":
@@ -230,9 +243,7 @@ def make_handler(
                     else:
                         raise HttpError(404, "unknown source action")
                     self.write_json(
-                        mutation_payload(
-                            store,
-                            runtime.config,
+                        runtime.mutation_envelope(
                             source_key=None if action == "delete" else source_key,
                             source_state=mutation_source_state,
                         )

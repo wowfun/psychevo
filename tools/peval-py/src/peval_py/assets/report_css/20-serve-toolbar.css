@@ -19,6 +19,19 @@
   color:var(--muted);
   font:700 12px/1.2 var(--mono);
 }
+.serve-source-status span.loading {
+  color:var(--focus);
+}
+.serve-source-status span.loading::before {
+  content:"";
+  display:inline-block;
+  width:6px;
+  height:6px;
+  margin-right:6px;
+  border-radius:999px;
+  background:currentColor;
+  vertical-align:1px;
+}
 .serve-source-actions {
   display:flex;
   align-items:center;
