@@ -843,6 +843,10 @@ pub(crate) fn insert_agent(
     winners: &mut BTreeMap<String, PathBuf>,
     agent: AgentDefinition,
 ) {
+    if !agent.enabled {
+        catalog.disabled_agents.push(agent);
+        return;
+    }
     let loser_path = agent
         .file_path
         .clone()

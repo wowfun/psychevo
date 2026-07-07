@@ -21,10 +21,17 @@ export type ContextUsageCategory = ContextReadResult["categories"][number];
 export type WorkbenchAgent = {
   name: string;
   description: string;
+  enabled: boolean;
   source: string;
+  sourceLabel: string;
   generated: boolean;
+  target?: BackendConfigTarget | null;
+  mutable: boolean;
   path?: string | null;
   entrypoints: string[];
+  tools: string[];
+  mcpServers: string[];
+  diagnostics: WorkbenchDiagnostic[];
   backend?: { ref?: string } | null;
 };
 
@@ -111,6 +118,7 @@ export type RightWorkspaceTab = {
 };
 
 export type MainView = "transcript" | "search" | "settings" | "automations" | "capabilities";
+export type CapabilityTab = "agents" | "skills" | "plugins" | "mcp" | "tools";
 export type SettingsSection = "appearance" | "models" | "slash" | "usage" | "debug" | "agents" | "channels" | "archived";
 export type WorkbenchUsageStats = UsageReadResult;
 export type WorkbenchAutomation = AutomationTaskView;
@@ -157,8 +165,10 @@ export type PendingAttachment = {
   input: GatewayInputPart;
   kind: "file" | "image" | "text";
   name: string;
+  previewUrl?: string | null;
   size: number;
   sizeLabel: string;
+  error?: string | null;
 };
 
 export type SearchResult = {

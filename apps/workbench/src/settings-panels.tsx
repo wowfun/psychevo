@@ -15,20 +15,16 @@ import {
 } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, ModelOptionView, SessionSummary } from "@psychevo/protocol";
-import { Switch } from "@psychevo/components";
+import { ActionButton, Switch } from "@psychevo/components";
 import type {
   Appearance,
-  BackendDraft,
   SessionBrowserWorkspaceState,
   SettingsSection,
-  WorkbenchBackend,
-  WorkbenchBackendDoctor,
   WorkbenchChannel,
   WorkbenchChannelDoctor,
   WorkbenchChannelSource,
   WorkbenchUsageStats
 } from "./types";
-import { AgentsConfigPanel } from "./settings-panels/agents";
 import { ChannelsSettingsPanel } from "./settings-panels/channels";
 import { ModelsSettingsPanel } from "./settings-panels/models";
 import { SlashCommandsSettingsPanel } from "./settings-panels/slash";
@@ -43,16 +39,13 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
   { id: "slash", label: "Slash Commands", description: "Aliases and TUI shortcuts" },
   { id: "usage", label: "Usage", description: "Tokens and cost" },
   { id: "debug", label: "Debug", description: "Developer diagnostics" },
-  { id: "agents", label: "Agents", description: "Profile ACP backends" },
+  { id: "agents", label: "Agents", description: "Open Capabilities agents" },
   { id: "channels", label: "Channels", description: "Messaging connections" },
   { id: "archived", label: "Archived sessions", description: "Restore or delete" }
 ];
 export function SettingsPage({
   appearance,
   archivedSessions,
-  backendDraft,
-  backendDoctor,
-  backends,
   channelDoctor,
   channels,
   client,
@@ -64,29 +57,21 @@ export function SettingsPage({
   usageStatsError,
   usageStatsLoading,
   onAppearanceChange,
-  onCancelBackendEdit,
-  onChangeBackendDraft,
   onDebugChange,
   onDeleteArchivedSession,
-  onDeleteBackend,
   onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
-  onDoctorBackend,
-  onEditBackend,
-  onNewBackend,
   onOpenTranscript,
   onLoadChannelSources,
   onModelAssignmentSaved,
   onModelCatalogLoaded,
+  onOpenAgents,
   onPollWechatQrSetup,
   onRestoreArchivedSession,
-  onSaveBackendDraft,
   onSectionChange,
   onSlashSettingsSaved,
   onRefreshUsageStats,
-  onSetBackendEnabled,
-  onSetBackendEntrypoints,
   onSetChannelEnabled,
   onStartWechatQrSetup,
   onUpdateChannel,
@@ -95,9 +80,6 @@ export function SettingsPage({
 }: {
   appearance: Appearance;
   archivedSessions: SessionSummary[];
-  backendDraft: BackendDraft | null;
-  backendDoctor: Record<string, WorkbenchBackendDoctor>;
-  backends: WorkbenchBackend[];
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
   client: GatewayClient | null;
@@ -109,29 +91,21 @@ export function SettingsPage({
   usageStatsError: string | null;
   usageStatsLoading: boolean;
   onAppearanceChange(value: Appearance): void;
-  onCancelBackendEdit(): void;
-  onChangeBackendDraft(draft: BackendDraft): void;
   onDebugChange(value: boolean): void;
   onDeleteArchivedSession(threadId: string): void;
-  onDeleteBackend(backend: WorkbenchBackend): void;
   onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
-  onDoctorBackend(backend: WorkbenchBackend): void;
-  onEditBackend(backend: WorkbenchBackend): void;
-  onNewBackend(): void;
   onOpenTranscript(): void;
   onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
+  onOpenAgents(): void;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRestoreArchivedSession(threadId: string): void;
-  onSaveBackendDraft(draft: BackendDraft): void;
   onSectionChange(value: SettingsSection): void;
   onSlashSettingsSaved(): Promise<void>;
   onRefreshUsageStats(): void;
-  onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
-  onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
   onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
@@ -212,9 +186,6 @@ export function SettingsPage({
             <SettingsSectionPanel
               appearance={appearance}
               archivedSessions={archivedSessions}
-              backendDraft={backendDraft}
-              backendDoctor={backendDoctor}
-              backends={backends}
               channelDoctor={channelDoctor}
               channels={channels}
               client={client}
@@ -226,27 +197,19 @@ export function SettingsPage({
               usageStatsError={usageStatsError}
               usageStatsLoading={usageStatsLoading}
               onAppearanceChange={onAppearanceChange}
-              onCancelBackendEdit={onCancelBackendEdit}
-              onChangeBackendDraft={onChangeBackendDraft}
               onDebugChange={onDebugChange}
               onDeleteArchivedSession={onDeleteArchivedSession}
-              onDeleteBackend={onDeleteBackend}
               onDeleteChannel={onDeleteChannel}
               onDoctorChannel={onDoctorChannel}
               onDoctorChannels={onDoctorChannels}
-              onDoctorBackend={onDoctorBackend}
-              onEditBackend={onEditBackend}
-              onNewBackend={onNewBackend}
               onLoadChannelSources={onLoadChannelSources}
               onModelAssignmentSaved={onModelAssignmentSaved}
               onModelCatalogLoaded={onModelCatalogLoaded}
+              onOpenAgents={onOpenAgents}
               onPollWechatQrSetup={onPollWechatQrSetup}
               onRestoreArchivedSession={onRestoreArchivedSession}
-              onSaveBackendDraft={onSaveBackendDraft}
               onSlashSettingsSaved={onSlashSettingsSaved}
               onRefreshUsageStats={onRefreshUsageStats}
-              onSetBackendEnabled={onSetBackendEnabled}
-              onSetBackendEntrypoints={onSetBackendEntrypoints}
               onSetChannelEnabled={onSetChannelEnabled}
               onStartWechatQrSetup={onStartWechatQrSetup}
               onUpdateChannel={onUpdateChannel}
@@ -263,9 +226,6 @@ export function SettingsPage({
 function SettingsSectionPanel({
   appearance,
   archivedSessions,
-  backendDraft,
-  backendDoctor,
-  backends,
   channelDoctor,
   channels,
   client,
@@ -277,26 +237,18 @@ function SettingsSectionPanel({
   usageStatsError,
   usageStatsLoading,
   onAppearanceChange,
-  onCancelBackendEdit,
-  onChangeBackendDraft,
   onDebugChange,
   onDeleteArchivedSession,
-  onDeleteBackend,
   onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
-  onDoctorBackend,
-  onEditBackend,
-  onNewBackend,
   onLoadChannelSources,
   onModelAssignmentSaved,
   onModelCatalogLoaded,
+  onOpenAgents,
   onPollWechatQrSetup,
   onRefreshUsageStats,
   onRestoreArchivedSession,
-  onSaveBackendDraft,
-  onSetBackendEnabled,
-  onSetBackendEntrypoints,
   onSetChannelEnabled,
   onSlashSettingsSaved,
   onStartWechatQrSetup,
@@ -306,9 +258,6 @@ function SettingsSectionPanel({
 }: {
   appearance: Appearance;
   archivedSessions: SessionSummary[];
-  backendDraft: BackendDraft | null;
-  backendDoctor: Record<string, WorkbenchBackendDoctor>;
-  backends: WorkbenchBackend[];
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
   client: GatewayClient | null;
@@ -320,26 +269,18 @@ function SettingsSectionPanel({
   usageStatsError: string | null;
   usageStatsLoading: boolean;
   onAppearanceChange(value: Appearance): void;
-  onCancelBackendEdit(): void;
-  onChangeBackendDraft(draft: BackendDraft): void;
   onDebugChange(value: boolean): void;
   onDeleteArchivedSession(threadId: string): void;
-  onDeleteBackend(backend: WorkbenchBackend): void;
   onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
-  onDoctorBackend(backend: WorkbenchBackend): void;
-  onEditBackend(backend: WorkbenchBackend): void;
-  onNewBackend(): void;
   onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
+  onOpenAgents(): void;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRefreshUsageStats(): void;
   onRestoreArchivedSession(threadId: string): void;
-  onSaveBackendDraft(draft: BackendDraft): void;
-  onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
-  onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onSlashSettingsSaved(): Promise<void>;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
@@ -419,21 +360,13 @@ function SettingsSectionPanel({
       );
     case "agents":
       return (
-        <AgentsConfigPanel
-          backendDraft={backendDraft}
-          backendDoctor={backendDoctor}
-          backends={backends}
-          disabled={disabled}
-          onCancelBackendEdit={onCancelBackendEdit}
-          onChangeBackendDraft={onChangeBackendDraft}
-          onDeleteBackend={onDeleteBackend}
-          onDoctorBackend={onDoctorBackend}
-          onEditBackend={onEditBackend}
-          onNewBackend={onNewBackend}
-          onSaveBackendDraft={onSaveBackendDraft}
-          onSetBackendEnabled={onSetBackendEnabled}
-          onSetBackendEntrypoints={onSetBackendEntrypoints}
-        />
+        <section className="settingsRows" aria-label="Agents">
+          <SettingsOptionRow title="Agent management" description="Create, edit, enable, disable, and delete agents from Capabilities.">
+            <ActionButton disabled={disabled} onClick={onOpenAgents} variant="primary">
+              Open Agents
+            </ActionButton>
+          </SettingsOptionRow>
+        </section>
       );
     case "channels":
       return (

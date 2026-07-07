@@ -56,13 +56,17 @@ the agent instruction body. Runtime accepts compatibility fields including
 `name`, `description`, `model`, `tools`, `disallowedTools`, `permission`,
 `permissions`, `permissionMode`, `mcpServers`, `skills`, `hooks`,
 `background`, `initialPrompt`, `maxTurns`, `maxSpawnDepth`,
-`projectInstructions`, `effort`, `backend`, and `entrypoints`. `backend.ref`
-references a configured external agent backend when this definition delegates
-execution to a peer agent; command-bearing backend details are never declared
-directly in Markdown agent files. `entrypoints` declares where the definition
-may be used, with supported values `peer` and `subagent`. Local Markdown
-definitions default to `subagent`; Markdown definitions with `backend.ref`
-default to `peer` and `subagent` unless they explicitly narrow the list.
+`projectInstructions`, `effort`, `backend`, `entrypoints`, and `enabled`.
+`backend.ref` references a configured external agent backend when this
+definition delegates execution to a peer agent; command-bearing backend details
+are never declared directly in Markdown agent files. `entrypoints` declares
+where the definition may be used, with supported values `peer` and `subagent`.
+Local Markdown definitions default to `subagent`; Markdown definitions with
+`backend.ref` default to `peer` and `subagent` unless they explicitly narrow
+the list. `enabled` defaults to `true`. When `enabled: false`, the definition
+remains visible to management clients but is excluded from active runtime
+catalogs, prompt catalogs, completion targets, selected-agent validation, and
+model-visible spawn targets.
 `maxSpawnDepth` is a
 Psychevo extension that defaults to `0`; it controls how many additional
 descendant spawn levels a child created from this definition may use, as
@@ -86,6 +90,11 @@ Discovery is deterministic. Precedence is:
 The first definition for a name wins. Later duplicates are omitted from the
 model-visible active catalog with a diagnostic, but interactive clients may
 surface them as shadowed definitions so users can see which source is active.
+Disabled definitions do not participate in the active precedence table; a
+disabled higher-precedence definition therefore allows a lower-precedence
+enabled definition with the same name to become active. Management clients may
+surface disabled definitions alongside active and shadowed definitions, with
+their source and target path preserved for re-enable, edit, or delete actions.
 Supported definition files that fail to parse or validate must surface a
 diagnostic to interactive clients instead of being silently discarded. The TUI
 may render such files as disabled/error entries in Available, while model
@@ -102,6 +111,42 @@ referenced backend is enabled. Their description uses the configured backend
 description when present, otherwise the backend label, otherwise the backend id,
 so descriptive metadata is useful but not required to launch a configured ACP
 backend.
+
+## Management Interfaces
+
+GUI management writes target either the current project or the active profile.
+Project agents are stored as `<cwd>/.psychevo/agents/<name>.md`. Profile agents
+are stored as `<active-profile-config-dir>/agents/<name>.md`, where the active
+profile config directory follows the same `PSYCHEVO_CONFIG`-aware resolution
+used by profile-scoped Workbench settings. Management writes must not mutate
+Claude-compatible agent directories, built-in agents, generated backend agents,
+or plugin-provided agents.
+
+Gateway exposes target-aware agent management RPCs:
+
+- `agent/list` returns active, shadowed, and disabled definitions with source,
+  target, mutability, path, enablement, entrypoints, backend reference, and
+  diagnostics.
+- `agent/read` can address a Project or Profile definition directly so a
+  shadowed Profile agent is still editable.
+- `agent/write` supports structured form writes and raw Markdown writes.
+- `agent/setEnabled` updates only the `enabled` frontmatter field for a
+  mutable Project or Profile definition.
+- `agent/delete` deletes only the requested Project or Profile definition file.
+
+Structured `agent/write` updates only fields owned by the form (`name`,
+`description`, `enabled`, `backend`, `entrypoints`, `tools`, `mcpServers`, and
+the Markdown body). It must preserve frontmatter keys that the GUI does not
+display, such as `model`, `permissionMode`, `skills`, hooks, and future
+compatibility fields. Raw Markdown writes must parse and validate the requested
+definition before saving; invalid raw content is rejected and the previous file
+is left untouched.
+
+Workbench creates and edits Project/Profile Markdown definitions from the
+right-side Capabilities detail panel. Existing definitions keep name and target
+read-only during edit; rename remains create-new plus delete-old. The detail
+preview renders the raw Markdown file source, including YAML frontmatter, with
+the shared Markdown renderer.
 
 ## Selected-Agent Behavior
 

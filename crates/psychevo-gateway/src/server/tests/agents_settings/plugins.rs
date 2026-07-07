@@ -338,6 +338,128 @@ async fn capability_skill_read_and_uninstall_accept_path_selector_for_collisions
 }
 
 #[tokio::test]
+async fn capability_skill_write_updates_project_and_profile_skill_markdown() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    write_capability_package_skill(
+        &state.inner.cwd.join(".psychevo").join("skills"),
+        "same-skill",
+        "Project skill",
+        "project body",
+    );
+    write_capability_package_skill(
+        &state.inner.home.join("skills"),
+        "same-skill",
+        "Profile skill",
+        "profile body",
+    );
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let project_path = state
+        .inner
+        .cwd
+        .join(".psychevo/skills/same-skill/SKILL.md");
+    let profile_path = state.inner.home.join("skills/same-skill/SKILL.md");
+
+    let project = capability_rpc(
+        &state,
+        "skill/write",
+        json!({
+            "scope": scope.clone(),
+            "name": "same-skill",
+            "path": project_path.clone(),
+            "target": "project",
+            "rawMarkdown": "---\nname: same-skill\ndescription: Project updated\n---\n\nproject updated body\n"
+        }),
+    )
+    .await
+    .expect("project skill/write");
+    assert_eq!(project["written"], true);
+    assert_eq!(project["target"], "project");
+    assert!(std::fs::read_to_string(&project_path)
+        .expect("project skill")
+        .contains("project updated body"));
+
+    let profile = capability_rpc(
+        &state,
+        "skill/write",
+        json!({
+            "scope": scope.clone(),
+            "name": "same-skill",
+            "path": profile_path.clone(),
+            "target": "profile",
+            "rawMarkdown": "---\nname: same-skill\ndescription: Profile updated\n---\n\nprofile updated body\n"
+        }),
+    )
+    .await
+    .expect("profile skill/write");
+    assert_eq!(profile["written"], true);
+    assert_eq!(profile["target"], "global");
+    assert!(std::fs::read_to_string(&profile_path)
+        .expect("profile skill")
+        .contains("profile updated body"));
+
+    let invalid = capability_rpc(
+        &state,
+        "skill/write",
+        json!({
+            "scope": scope,
+            "name": "same-skill",
+            "path": project_path.clone(),
+            "target": "project",
+            "rawMarkdown": "---\nname: wrong-name\n---\n\nmissing description\n"
+        }),
+    )
+    .await
+    .expect_err("invalid markdown is rejected");
+    assert!(invalid.to_string().contains("name \"wrong-name\""));
+    assert!(std::fs::read_to_string(&project_path)
+        .expect("project skill unchanged")
+        .contains("project updated body"));
+}
+
+#[tokio::test]
+async fn capability_skill_write_rejects_configured_external_skill() {
+    let (temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::create_dir_all(state.inner.home.join("skills")).expect("profile skills root");
+    let external = temp.path().join("external-skills");
+    write_capability_package_skill(&external, "external-skill", "External skill", "external body");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        format!("[skills]\npaths = [\"{}\"]\n", external.display()),
+    )
+    .expect("config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let external_path = external.join("external-skill/SKILL.md");
+
+    let listed = capability_rpc(&state, "skill/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("skill/list");
+    assert!(listed["skills"].as_array().expect("skills").iter().any(|skill| {
+        skill["name"] == "external-skill" && skill["source"] == "config"
+    }));
+
+    let rejected = capability_rpc(
+        &state,
+        "skill/write",
+        json!({
+            "scope": scope,
+            "name": "external-skill",
+            "path": external_path,
+            "target": "profile",
+            "rawMarkdown": "---\nname: external-skill\ndescription: Edited\n---\n\nedited\n"
+        }),
+    )
+    .await
+    .expect_err("configured skill is read-only");
+    assert!(rejected.to_string().contains("not writable from global scope"));
+}
+
+#[tokio::test]
 async fn capability_plugin_rpcs_install_toggle_and_uninstall_profile_plugin() {
     let (temp, state) = web_state();
     std::fs::create_dir_all(&state.inner.home).expect("home");

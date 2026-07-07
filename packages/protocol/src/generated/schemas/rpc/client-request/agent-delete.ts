@@ -4,6 +4,13 @@ export const clientRequestAgentDeleteSchema = {
   "$id": "ClientRequest/agent-delete.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
     "AgentDeleteParams": {
       "properties": {
         "name": {
@@ -13,6 +20,17 @@ export const clientRequestAgentDeleteSchema = {
           "anyOf": [
             {
               "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
             },
             {
               "type": "null"

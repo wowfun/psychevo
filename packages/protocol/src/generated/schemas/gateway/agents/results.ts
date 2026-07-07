@@ -15,6 +15,13 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "object"
     },
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
     "AgentDefinitionView": {
       "properties": {
         "backend": {
@@ -37,6 +44,9 @@ export const gatewayAgentResultSchemas = {
           },
           "type": "array"
         },
+        "enabled": {
+          "type": "boolean"
+        },
         "entrypoints": {
           "items": {
             "type": "string"
@@ -44,6 +54,15 @@ export const gatewayAgentResultSchemas = {
           "type": "array"
         },
         "generated": {
+          "type": "boolean"
+        },
+        "mcpServers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mutable": {
           "type": "boolean"
         },
         "name": {
@@ -58,15 +77,40 @@ export const gatewayAgentResultSchemas = {
         },
         "source": {
           "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
         "description",
         "diagnostics",
+        "enabled",
         "entrypoints",
         "generated",
+        "mcpServers",
+        "mutable",
         "name",
-        "source"
+        "source",
+        "sourceLabel",
+        "tools"
       ],
       "type": "object"
     },
@@ -106,6 +150,12 @@ export const gatewayAgentResultSchemas = {
       },
       "type": "array"
     },
+    "disabledAgents": {
+      "items": {
+        "$ref": "#/definitions/AgentDefinitionView"
+      },
+      "type": "array"
+    },
     "shadowedAgents": {
       "items": {
         "$ref": "#/definitions/AgentDefinitionView"
@@ -116,6 +166,7 @@ export const gatewayAgentResultSchemas = {
   "required": [
     "agents",
     "diagnostics",
+    "disabledAgents",
     "shadowedAgents"
   ],
   "title": "AgentListResult",
@@ -134,6 +185,13 @@ export const gatewayAgentResultSchemas = {
         "ref"
       ],
       "type": "object"
+    },
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
     },
     "AgentDefinitionView": {
       "properties": {
@@ -157,6 +215,9 @@ export const gatewayAgentResultSchemas = {
           },
           "type": "array"
         },
+        "enabled": {
+          "type": "boolean"
+        },
         "entrypoints": {
           "items": {
             "type": "string"
@@ -164,6 +225,15 @@ export const gatewayAgentResultSchemas = {
           "type": "array"
         },
         "generated": {
+          "type": "boolean"
+        },
+        "mcpServers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mutable": {
           "type": "boolean"
         },
         "name": {
@@ -178,15 +248,40 @@ export const gatewayAgentResultSchemas = {
         },
         "source": {
           "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
         "description",
         "diagnostics",
+        "enabled",
         "entrypoints",
         "generated",
+        "mcpServers",
+        "mutable",
         "name",
-        "source"
+        "source",
+        "sourceLabel",
+        "tools"
       ],
       "type": "object"
     },
@@ -219,38 +314,356 @@ export const gatewayAgentResultSchemas = {
     },
     "instructions": {
       "type": "string"
+    },
+    "rawMarkdown": {
+      "type": "string"
     }
   },
   "required": [
     "agent",
-    "instructions"
+    "instructions",
+    "rawMarkdown"
   ],
   "title": "AgentReadResult",
   "type": "object"
 },
   AgentWriteResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentBackendRefView": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "AgentDefinitionView": {
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentBackendRefView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "entrypoints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "mcpServers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "enabled",
+        "entrypoints",
+        "generated",
+        "mcpServers",
+        "mutable",
+        "name",
+        "source",
+        "sourceLabel",
+        "tools"
+      ],
+      "type": "object"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
+    "agent": {
+      "$ref": "#/definitions/AgentDefinitionView"
+    },
     "name": {
       "type": "string"
     },
     "path": {
       "type": "string"
     },
+    "target": {
+      "$ref": "#/definitions/AgentConfigTarget"
+    },
     "written": {
       "type": "boolean"
     }
   },
   "required": [
+    "agent",
     "name",
     "path",
+    "target",
     "written"
   ],
   "title": "AgentWriteResult",
   "type": "object"
 },
+  AgentSetEnabledResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentBackendRefView": {
+      "properties": {
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    },
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "AgentDefinitionView": {
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentBackendRefView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "entrypoints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "mcpServers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "enabled",
+        "entrypoints",
+        "generated",
+        "mcpServers",
+        "mutable",
+        "name",
+        "source",
+        "sourceLabel",
+        "tools"
+      ],
+      "type": "object"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "agent": {
+      "$ref": "#/definitions/AgentDefinitionView"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/AgentConfigTarget"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "agent",
+    "name",
+    "path",
+    "target",
+    "written"
+  ],
+  "title": "AgentSetEnabledResult",
+  "type": "object"
+},
   AgentDeleteResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
     "deleted": {
       "type": "boolean"
@@ -260,12 +673,16 @@ export const gatewayAgentResultSchemas = {
     },
     "path": {
       "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/AgentConfigTarget"
     }
   },
   "required": [
     "deleted",
     "name",
-    "path"
+    "path",
+    "target"
   ],
   "title": "AgentDeleteResult",
   "type": "object"

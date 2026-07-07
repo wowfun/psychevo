@@ -95,6 +95,9 @@
       "$ref": "ClientRequest/agent-write.json"
     },
     {
+      "$ref": "ClientRequest/agent-set-enabled.json"
+    },
+    {
       "$ref": "ClientRequest/agent-delete.json"
     },
     {
@@ -159,6 +162,9 @@
     },
     {
       "$ref": "ClientRequest/skill-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-write.json"
     },
     {
       "$ref": "ClientRequest/tool-list.json"

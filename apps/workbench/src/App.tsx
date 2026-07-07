@@ -79,6 +79,7 @@ import type {
   CommandOverlay,
   DebugEvent,
   GatewayEventFeed,
+  CapabilityTab,
   MainView,
   PendingAttachment,
   RightWorkspaceTab,
@@ -143,6 +144,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const [rightTabs, setRightTabs] = useState<RightWorkspaceTab[]>([]);
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<MainView>("transcript");
+  const [capabilitiesTab, setCapabilitiesTab] = useState<CapabilityTab>("skills");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(true);
@@ -562,6 +564,13 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setMobilePanel("transcript");
   }
 
+  function openCapabilitiesTab(tab: CapabilityTab = "skills") {
+    setActiveCommandOverlay(null);
+    setCapabilitiesTab(tab);
+    updateMainView("capabilities");
+    setMobilePanel("transcript");
+  }
+
   function openCommandOverlay(kind: CommandOverlay) {
     setActiveCommandOverlay(kind);
     updateMainView("transcript");
@@ -613,6 +622,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     doctorBackend,
     doctorChannels,
     handleAttachment,
+    handleAttachmentFiles,
     loadChannelSources,
     loadThreadSearchText,
     openDiffPreview,
@@ -901,6 +911,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     beginExplicitViewSwitch,
     clearCommandTransientUi,
     handleAttachment,
+    openCapabilitiesTab,
     openCommandOverlay,
     openReviewTab,
     openRightWorkspaceTab,
@@ -981,12 +992,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   return <WorkbenchLayout {...{
     acceptWorkspaceChange, activeCommandOverlay, activeRightTab, activeRightTabId, activeScope, activeWorkbenchCwd,
     automations, automationsError, automationsLoading,
-    activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch,
+    activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch, capabilitiesTab,
     beginRightResize, changeAgentSelection, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
     channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyText, createWorkspace, currentThreadId,
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
-    executeCommand, extraRuntimeModeValues, handleAttachment, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
-    loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
+    executeCommand, extraRuntimeModeValues, handleAttachment, handleAttachmentFiles, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
+    loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openCapabilitiesTab, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
     openAutomationThread,
     onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
     pendingClarifyActions, pendingPermissionActions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable, pollWechatQrSetup,
@@ -996,7 +1007,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     runCommandAlternateAction, running, runtimeAcceptsAgentPersona, runtimeBackends, runtimeModeOption,
     runtimeModeUnavailable, runtimeOptionsError, saveBackendDraft, saveFileFromEditor, selectedAgentName, selectedModel,
     selectedRuntimeMode, selectedRuntimeRef, selectedVariant, modelReady, modelTurnBlockReason, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
-    setAttachments, setBackendDraft, setChannelEnabled, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
+    setAttachments, setBackendDraft, setCapabilitiesTab, setChannelEnabled, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
     setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx, setRuntimeOptionsError,
     setRuntimeOptionsResult, setRuntimeSessionId, setSelectedModel: changeComposerModel, setSelectedModelSelection: changeComposerModelSelection, setSelectedRuntimeMode, setSelectedRuntimeRef,
     setSelectedVariant: changeComposerVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, fallbackCwd, settings, settingsSection,

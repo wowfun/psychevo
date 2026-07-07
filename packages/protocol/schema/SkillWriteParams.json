@@ -1,13 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "AgentConfigTarget": {
-      "enum": [
-        "project",
-        "profile"
-      ],
-      "type": "string"
-    },
     "GatewayRequestScope": {
       "properties": {
         "cwd": {
@@ -75,6 +68,16 @@
     "name": {
       "type": "string"
     },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rawMarkdown": {
+      "type": "string"
+    },
     "scope": {
       "anyOf": [
         {
@@ -87,20 +90,17 @@
       "default": null
     },
     "target": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/AgentConfigTarget"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
-    "name"
+    "name",
+    "rawMarkdown"
   ],
-  "title": "AgentDeleteParams",
+  "title": "SkillWriteParams",
   "type": "object"
 }

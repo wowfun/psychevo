@@ -287,17 +287,17 @@ describe("Workbench command routing", () => {
     });
   });
 
-  it("does not expose /agents as a GUI command surface", async () => {
+  it("routes /agents to Capabilities Agents", async () => {
     gatewayMock.commandList = [
       commandItem("commands", "navigate", "commands")
     ];
     gatewayMock.commandExecute = (command: string) => ({
-      accepted: false,
+      accepted: true,
       command,
       known: true,
-      message: "/agents is managed by the Workbench agent selector and Settings Agents.",
+      message: "Opened Agents.",
       feedbackAnchor: "composer",
-      action: null
+      action: { type: "showPanel", panel: "agents" }
     });
 
     render(<App />);
@@ -306,9 +306,8 @@ describe("Workbench command routing", () => {
     fireEvent.change(textarea, { target: { value: "/agents" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("/agents is managed by the Workbench agent selector and Settings Agents.")).toBeTruthy();
-    });
+    const capabilitiesRegion = await screen.findByRole("region", { name: "Capabilities" });
+    expect(within(capabilitiesRegion).getByRole("tab", { name: "Agents" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.queryByRole("region", { name: "Commands overlay" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Agents overlay" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Settings" })).toBeNull();

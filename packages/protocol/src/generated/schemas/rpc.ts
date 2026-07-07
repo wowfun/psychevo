@@ -31,6 +31,7 @@ import { clientRequestSlashSettingsUpdateSchema } from './rpc/client-request/sla
 import { clientRequestAgentListSchema } from './rpc/client-request/agent-list';
 import { clientRequestAgentReadSchema } from './rpc/client-request/agent-read';
 import { clientRequestAgentWriteSchema } from './rpc/client-request/agent-write';
+import { clientRequestAgentSetEnabledSchema } from './rpc/client-request/agent-set-enabled';
 import { clientRequestAgentDeleteSchema } from './rpc/client-request/agent-delete';
 import { clientRequestAgentStatusSchema } from './rpc/client-request/agent-status';
 import { clientRequestBackendListSchema } from './rpc/client-request/backend-list';
@@ -53,6 +54,7 @@ import { clientRequestSkillReadSchema } from './rpc/client-request/skill-read';
 import { clientRequestSkillInstallSchema } from './rpc/client-request/skill-install';
 import { clientRequestSkillUninstallSchema } from './rpc/client-request/skill-uninstall';
 import { clientRequestSkillSetEnabledSchema } from './rpc/client-request/skill-set-enabled';
+import { clientRequestSkillWriteSchema } from './rpc/client-request/skill-write';
 import { clientRequestToolListSchema } from './rpc/client-request/tool-list';
 import { clientRequestToolReadSchema } from './rpc/client-request/tool-read';
 import { clientRequestToolSetEnabledSchema } from './rpc/client-request/tool-set-enabled';
@@ -415,6 +417,9 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/agent-write.json"
     },
     {
+      "$ref": "ClientRequest/agent-set-enabled.json"
+    },
+    {
       "$ref": "ClientRequest/agent-delete.json"
     },
     {
@@ -479,6 +484,9 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ClientRequest/skill-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/skill-write.json"
     },
     {
       "$ref": "ClientRequest/tool-list.json"
@@ -748,6 +756,7 @@ export const rpcSchemaRefs = [
   clientRequestAgentListSchema,
   clientRequestAgentReadSchema,
   clientRequestAgentWriteSchema,
+  clientRequestAgentSetEnabledSchema,
   clientRequestAgentDeleteSchema,
   clientRequestAgentStatusSchema,
   clientRequestBackendListSchema,
@@ -770,6 +779,7 @@ export const rpcSchemaRefs = [
   clientRequestSkillInstallSchema,
   clientRequestSkillUninstallSchema,
   clientRequestSkillSetEnabledSchema,
+  clientRequestSkillWriteSchema,
   clientRequestToolListSchema,
   clientRequestToolReadSchema,
   clientRequestToolSetEnabledSchema,

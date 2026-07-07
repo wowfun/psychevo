@@ -72,6 +72,9 @@
     }
   },
   "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
     "name": {
       "type": "string"
     },
@@ -99,8 +102,9 @@
     }
   },
   "required": [
+    "enabled",
     "name"
   ],
-  "title": "AgentDeleteParams",
+  "title": "AgentSetEnabledParams",
   "type": "object"
 }

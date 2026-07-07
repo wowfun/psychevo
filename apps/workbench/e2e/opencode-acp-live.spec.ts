@@ -25,13 +25,8 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await capture(page, testInfo, "00-transcript");
 
-      await page.getByRole("button", { name: "Settings" }).click();
-      const settings = page.getByRole("region", { name: "Settings" });
-      await expect(settings).toBeVisible();
-      await settings.getByRole("button", { name: "Agents" }).click();
-      const agentsPanel = settings.getByRole("region", { name: "Agents" });
-      await expect(agentsPanel).toBeVisible();
-      await expect(agentsPanel.getByText("No Profile ACP backends configured.")).toBeVisible();
+      const agentsPanel = await openSettingsAgents(page);
+      await expect(agentsPanel.getByText("No ACP backends configured.")).toBeVisible();
       await expectElementInsideViewport(page, agentsPanel);
       await capture(page, testInfo, "01-agents-empty");
 
@@ -64,7 +59,8 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(agentsPanel.getByText(/command: ok/)).toBeVisible();
       await capture(page, testInfo, "04-opencode-doctor");
 
-      await settings.getByRole("button", { name: "Back to app" }).click();
+      await page.getByRole("button", { name: "New Session", exact: true }).click();
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await page.getByRole("button", { name: "Agent", exact: true }).click();
       const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
       const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
@@ -133,7 +129,8 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       const agentsPanel = await openSettingsAgents(page);
       await ensureOpenCodeBackend(agentsPanel);
-      await page.getByRole("button", { name: "Back to app" }).click();
+      await page.getByRole("button", { name: "New Session", exact: true }).click();
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
 
       await page.getByRole("button", { name: "Agent", exact: true }).click();
       const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
@@ -194,11 +191,12 @@ async function openPanel(page: Page, isMobile: boolean, name: "History" | "Statu
 }
 
 async function openSettingsAgents(page: Page): Promise<Locator> {
-  await page.getByRole("button", { name: "Settings" }).click();
-  const settings = page.getByRole("region", { name: "Settings" });
-  await expect(settings).toBeVisible();
-  await settings.getByRole("button", { name: "Agents" }).click();
-  const agentsPanel = settings.getByRole("region", { name: "Agents" });
+  await page.getByRole("button", { name: "Capabilities" }).click();
+  const capabilities = page.getByRole("region", { name: "Capabilities" });
+  await expect(capabilities).toBeVisible();
+  await capabilities.getByRole("tab", { name: "Agents" }).click();
+  await capabilities.getByRole("tab", { name: "ACP Backends" }).click();
+  const agentsPanel = capabilities.getByRole("region", { name: "Agents" });
   await expect(agentsPanel).toBeVisible();
   return agentsPanel;
 }

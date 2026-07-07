@@ -23,6 +23,7 @@ Coordinate.
     let catalog = AgentCatalog {
         agents: vec![worker, researcher, explore],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
 
@@ -73,6 +74,9 @@ Coordinate.
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
+            home: tmp.path().join(".psychevo"),
+            image_input_enabled: true,
+            image_generation: None,
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
             extension_inputs: Default::default(),
@@ -191,6 +195,80 @@ pub(crate) fn recursively_discovers_agent_markdown_files() {
     })
     .expect("catalog");
     assert!(catalog.agents.iter().any(|agent| agent.name == "reviewer"));
+}
+
+#[test]
+pub(crate) fn disabled_agent_is_listed_but_not_active_and_allows_fallback() {
+    let tmp = TempDir::new().expect("tmp");
+    let home = tmp.path().join("home");
+    let cwd = tmp.path().join("repo");
+    fs::create_dir_all(cwd.join(".psychevo/agents")).expect("project dirs");
+    fs::create_dir_all(home.join("agents")).expect("home dirs");
+    fs::write(
+        cwd.join(".psychevo/agents/review.md"),
+        "---\ndescription: Project review\nenabled: false\n---\nProject.\n",
+    )
+    .expect("write project");
+    fs::write(
+        home.join("agents/review.md"),
+        "---\ndescription: Profile review\n---\nProfile.\n",
+    )
+    .expect("write profile");
+
+    let catalog = discover_agents(&AgentDiscoveryOptions {
+        home,
+        cwd: cwd.clone(),
+        env: env(tmp.path()),
+        explicit_inputs: Vec::new(),
+        no_agents: false,
+    })
+    .expect("catalog");
+
+    let active = catalog
+        .agents
+        .iter()
+        .find(|agent| agent.name == "review")
+        .expect("active review");
+    assert_eq!(active.description, "Profile review");
+    assert!(active.enabled);
+    let disabled = catalog
+        .disabled_agents
+        .iter()
+        .find(|agent| agent.name == "review")
+        .expect("disabled review");
+    assert!(!disabled.enabled);
+    assert_eq!(disabled.description, "Project review");
+    assert!(
+        catalog
+            .shadowed_agents
+            .iter()
+            .all(|agent| agent.name != "review")
+    );
+
+    let value = list_agents_value(&catalog);
+    assert_eq!(value["disabled_agents"][0]["name"], "review");
+    assert_eq!(value["agents"][0]["description"], "Profile review");
+}
+
+#[test]
+pub(crate) fn invalid_enabled_value_defaults_to_enabled_with_diagnostic() {
+    let tmp = TempDir::new().expect("tmp");
+    let path = tmp.path().join("review.md");
+    fs::write(
+        &path,
+        "---\ndescription: Review\nenabled: off\n---\nReview.\n",
+    )
+    .expect("write");
+
+    let agent = parse_agent_file(&path, AgentSource::Explicit).expect("agent");
+
+    assert!(agent.enabled);
+    assert!(
+        agent
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("enabled"))
+    );
 }
 
 #[test]
@@ -479,6 +557,7 @@ pub(crate) fn agent_tool_schema_omits_name_argument() {
         AgentCatalog {
             agents: vec![built_in_agent("general", "General", "General.", None)],
             shadowed_agents: Vec::new(),
+            disabled_agents: Vec::new(),
             diagnostics: Vec::new(),
         },
     );

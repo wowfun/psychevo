@@ -16,6 +16,7 @@ pub mod hooks;
 mod host_paths;
 pub(crate) mod managed_tools;
 pub(crate) mod mcp;
+pub mod media;
 pub(crate) mod messages;
 pub mod model_state;
 pub(crate) mod paths;
@@ -54,11 +55,12 @@ pub use agents::{
     LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP, SESSION_MAIN_AGENT_METADATA_KEY,
     agent_source_display_label, agent_spawn_paused, agent_status_records, agent_status_value,
     close_agent_id, discover_agents, list_agents_value, main_agent_default_metadata,
-    main_agent_from_session_metadata, main_agent_metadata, resolve_agent_definition,
-    resume_agent_id, send_agent_message, session_agent_input_from_metadata,
-    session_base_agent_name_from_metadata, session_main_agent_explicit_default,
-    set_agent_spawn_paused, stop_agent_id_with_grace, valid_agent_name, view_agent_value,
-    view_agent_value_with_catalog, wait_agent_id, wait_agent_mailbox,
+    main_agent_from_session_metadata, main_agent_metadata, parse_agent_definition_text,
+    resolve_agent_definition, resume_agent_id, send_agent_message,
+    session_agent_input_from_metadata, session_base_agent_name_from_metadata,
+    session_main_agent_explicit_default, set_agent_spawn_paused, stop_agent_id_with_grace,
+    valid_agent_name, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
+    wait_agent_mailbox,
 };
 pub use automations::{AutomationSchedule, latest_due_at_ms, next_run_at_ms};
 pub use compaction::{
@@ -75,20 +77,20 @@ pub use config::{
     config_provider_list_value, config_show_value, configured_models,
     create_global_custom_provider, create_local_toolset, create_scoped_custom_provider,
     custom_provider_api_key_env, delete_channel_connection, fetch_and_cache_model_catalog,
-    fetch_model_catalog, load_agent_backend_configs, load_mcp_oauth_access_token,
-    mcp_oauth_keyring_account, mcp_server_value, mcp_servers_value, model_catalog_endpoint,
-    model_catalog_entry_is_free, model_catalog_provider, model_catalog_providers,
-    normalize_provider_id, permission_rules_value, provider_models_cache_path_for_home,
-    read_cached_model_catalog, refresh_model_metadata_cache, remove_config_value,
-    remove_local_permission_rule, remove_local_toolset, remove_mcp_server,
-    resolve_default_workspace_cwd, resolve_voice_asr_config, resolve_voice_realtime_config,
-    resolve_voice_tts_config, resolve_workspace_root, save_mcp_oauth_access_token,
-    selected_configured_model, set_auxiliary_model, set_auxiliary_model_with_reasoning,
-    set_channel_enabled, set_config_value, set_default_model, set_default_model_with_reasoning,
-    set_local_toolset_enabled, set_mcp_server_enabled, set_mcp_server_tool_policy,
-    set_provider_api_key, set_provider_model_config, setup_channel_connection, toolsets_value,
-    update_channel_connection, upsert_channel_connection, upsert_mcp_server, voice_config_value,
-    write_cached_model_catalog,
+    fetch_model_catalog, image_generation_config_value, load_agent_backend_configs,
+    load_mcp_oauth_access_token, mcp_oauth_keyring_account, mcp_server_value, mcp_servers_value,
+    model_catalog_endpoint, model_catalog_entry_is_free, model_catalog_provider,
+    model_catalog_providers, normalize_provider_id, permission_rules_value,
+    provider_models_cache_path_for_home, read_cached_model_catalog, refresh_model_metadata_cache,
+    remove_config_value, remove_local_permission_rule, remove_local_toolset, remove_mcp_server,
+    resolve_default_workspace_cwd, resolve_image_generation_config, resolve_voice_asr_config,
+    resolve_voice_realtime_config, resolve_voice_tts_config, resolve_workspace_root,
+    save_mcp_oauth_access_token, selected_configured_model, set_auxiliary_model,
+    set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value, set_default_model,
+    set_default_model_with_reasoning, set_local_toolset_enabled, set_mcp_server_enabled,
+    set_mcp_server_tool_policy, set_provider_api_key, set_provider_model_config,
+    setup_channel_connection, toolsets_value, update_channel_connection, upsert_channel_connection,
+    upsert_mcp_server, voice_config_value, write_cached_model_catalog,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -112,6 +114,11 @@ pub use host_paths::{
     resolve_input_path, shell_is_git_bash,
 };
 pub use mcp::mcp_test_server_value;
+pub use media::{
+    GeneratedImageArtifact, ImageMimeKind, MAX_IMAGE_SOURCE_BYTES, ResolvedImageSource,
+    media_agent_visible_source, media_artifact_path, media_display_url, read_media_artifact,
+    resolve_explicit_image_source, validate_media_artifact_id, write_generated_image_artifact,
+};
 pub use model_state::{
     MODEL_STATE_FILE, MODEL_STATE_RECENT_LIMIT, MODEL_STATE_VERSION, ModelCwdState,
     ModelRecentEntry, ModelState, SESSION_COMPOSER_MODEL_METADATA_KEY, normalize_reasoning_effort,
@@ -171,7 +178,8 @@ pub use skills::{
     patch_skill, remove_installed_skill, remove_skill, remove_skill_file, resolve_skills_home,
     save_skill_bundle, scan_skill_path, select_explicit_skills, select_skills_for_prompt,
     set_skill_config_value, set_skill_enabled, skill_context_messages, skill_source_display_label,
-    target_skills_dir, view_skill_value, view_skill_value_selected, write_skill_file,
+    target_skills_dir, view_skill_value, view_skill_value_selected, write_installed_skill,
+    write_skill_file,
 };
 pub use state_runtime::StateRuntime;
 pub use stats::{session_usage_summary, usage_read, usage_stats};

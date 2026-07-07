@@ -367,7 +367,7 @@ describe("Workbench settings and backend controls", () => {
     ))).toBe(true);
   });
 
-  it("switches Settings sections while keeping session controls in the composer", async () => {
+  it("routes Settings Agents to Capabilities Agents", async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
@@ -376,14 +376,17 @@ describe("Workbench settings and backend controls", () => {
 
     expect(within(settingsRegion).getByRole("button", { name: "Agents" }).getAttribute("aria-current")).toBe("page");
     expect(within(settingsRegion).getByRole("region", { name: "Agents" })).toBeTruthy();
-    expect(within(settingsRegion).getByText("Profile ACP Backends")).toBeTruthy();
+    expect(within(settingsRegion).getByRole("button", { name: "Open Agents" })).toBeTruthy();
+    expect(within(settingsRegion).queryByText("Profile ACP Backends")).toBeNull();
     expect(within(settingsRegion).queryByText("Translate user messages")).toBeNull();
     expect(within(settingsRegion).queryByRole("combobox", { name: "Agent" })).toBeNull();
     expect(within(settingsRegion).queryByRole("combobox", { name: "Model" })).toBeNull();
     expect(within(settingsRegion).queryByRole("combobox", { name: "Permission mode" })).toBeNull();
 
-    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
-    expect(await screen.findByRole("button", { name: "Agent" })).toBeTruthy();
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Open Agents" }));
+    const capabilitiesRegion = await screen.findByRole("region", { name: "Capabilities" });
+    expect(within(capabilitiesRegion).getByRole("tab", { name: "Agents" }).getAttribute("aria-selected")).toBe("true");
+    expect(within(capabilitiesRegion).getByRole("tab", { name: "Definitions" })).toBeTruthy();
   });
 
   it("shows Channels as Settings rows with switches and an independent detail page", async () => {
@@ -1062,11 +1065,11 @@ describe("Workbench settings and backend controls", () => {
     await waitFor(() => expect(within(runtimeGroup).getByRole("radio", { name: "OpenCode" }).getAttribute("aria-checked")).toBe("true"));
 
     gatewayMock.agentRecords = [agentRecord("opencode", ["subagent"], "opencode")];
-    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
-    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
-    const agentsPanel = await within(settingsRegion).findByRole("region", { name: "Agents" });
-    fireEvent.click(await within(agentsPanel).findByLabelText("opencode peer entrypoint"));
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const capabilitiesRegion = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(capabilitiesRegion).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(capabilitiesRegion).findByRole("tab", { name: "ACP Backends" }));
+    fireEvent.click(await within(capabilitiesRegion).findByLabelText("opencode peer entrypoint"));
 
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -1079,21 +1082,22 @@ describe("Workbench settings and backend controls", () => {
       });
     });
 
-    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
     const nextPopover = await openAgentRuntimePopover();
     const nextRuntimeGroup = within(nextPopover).getByRole("radiogroup", { name: "Runtime" });
     await waitFor(() => expect(within(nextRuntimeGroup).getByRole("radio", { name: "Native Runtime" }).getAttribute("aria-checked")).toBe("true"));
     expect(within(nextRuntimeGroup).queryByRole("radio", { name: "OpenCode" })).toBeNull();
   });
 
-  it("creates a Profile ACP backend from the generic Settings Agents add action", async () => {
+  it("creates a Profile ACP backend from Capabilities Agents", async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
-    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const capabilitiesRegion = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(capabilitiesRegion).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(capabilitiesRegion).findByRole("tab", { name: "ACP Backends" }));
 
-    const agentsPanel = await within(settingsRegion).findByRole("region", { name: "Agents" });
+    const agentsPanel = await within(capabilitiesRegion).findByRole("region", { name: "Agents" });
     const addButton = within(agentsPanel).getByRole("button", { name: "Add ACP backend" });
     expect(addButton.textContent).toContain("Add backend");
     fireEvent.click(addButton);
@@ -1158,7 +1162,7 @@ describe("Workbench settings and backend controls", () => {
     });
   });
 
-  it("updates Profile ACP backend enabled and entrypoints from Settings Agents rows", async () => {
+  it("updates Profile ACP backend enabled and entrypoints from Capabilities Agents", async () => {
     gatewayMock.backendRecords = [
       {
         id: "opencode",
@@ -1180,10 +1184,11 @@ describe("Workbench settings and backend controls", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
-    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
-    const agentsPanel = await within(settingsRegion).findByRole("region", { name: "Agents" });
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const capabilitiesRegion = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(capabilitiesRegion).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(capabilitiesRegion).findByRole("tab", { name: "ACP Backends" }));
+    const agentsPanel = await within(capabilitiesRegion).findByRole("region", { name: "Agents" });
     expect(within(agentsPanel).queryByText("Enabled")).toBeNull();
     expect(within(agentsPanel).queryByText("Disabled")).toBeNull();
 

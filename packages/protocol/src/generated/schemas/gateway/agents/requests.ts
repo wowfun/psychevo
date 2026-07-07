@@ -86,6 +86,13 @@ export const gatewayAgentRequestSchemas = {
   AgentReadParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
     "GatewayRequestScope": {
       "properties": {
         "cwd": {
@@ -163,6 +170,17 @@ export const gatewayAgentRequestSchemas = {
         }
       ],
       "default": null
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AgentConfigTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [
@@ -184,6 +202,13 @@ export const gatewayAgentRequestSchemas = {
         "ref"
       ],
       "type": "object"
+    },
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
     },
     "GatewayRequestScope": {
       "properties": {
@@ -263,6 +288,13 @@ export const gatewayAgentRequestSchemas = {
     "description": {
       "type": "string"
     },
+    "enabled": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "entrypoints": {
       "default": [],
       "items": {
@@ -284,10 +316,28 @@ export const gatewayAgentRequestSchemas = {
     "name": {
       "type": "string"
     },
+    "rawMarkdown": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "scope": {
       "anyOf": [
         {
           "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AgentConfigTarget"
         },
         {
           "type": "null"
@@ -310,9 +360,126 @@ export const gatewayAgentRequestSchemas = {
   "title": "AgentWriteParams",
   "type": "object"
 },
+  AgentSetEnabledParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AgentConfigTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "enabled",
+    "name"
+  ],
+  "title": "AgentSetEnabledParams",
+  "type": "object"
+},
   AgentDeleteParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
     "GatewayRequestScope": {
       "properties": {
         "cwd": {
@@ -384,6 +551,17 @@ export const gatewayAgentRequestSchemas = {
       "anyOf": [
         {
           "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AgentConfigTarget"
         },
         {
           "type": "null"

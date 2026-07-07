@@ -71,6 +71,14 @@ length 64. Invalid names are diagnostics but do not prevent loading. Missing or
 empty descriptions are diagnostics and prevent loading. Descriptions longer than
 1024 characters are diagnostics and are truncated for prompt display.
 
+Management surfaces may replace a mutable Project or Profile(Global)
+`SKILL.md` file by writing raw Markdown. The write must parse frontmatter,
+validate the resulting skill name and required description, and reject content
+that would make the skill undiscoverable. The write must target only skills
+under `<cwd>/.psychevo/skills` or `$PSYCHEVO_HOME/skills`; plugin-provided,
+configured external, explicit, `.agents/skills`, and system/built-in skills are
+read-only from GUI management.
+
 `platforms: [linux|macos|windows]` restricts normal activation to matching OSes.
 Unsupported skills remain inspectable through explicit view/detail surfaces but
 are omitted from automatic prompt indexes, dynamic slash, and marker activation.

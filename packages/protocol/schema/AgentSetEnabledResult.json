@@ -138,18 +138,26 @@
     "agent": {
       "$ref": "#/definitions/AgentDefinitionView"
     },
-    "instructions": {
+    "name": {
       "type": "string"
     },
-    "rawMarkdown": {
+    "path": {
       "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/AgentConfigTarget"
+    },
+    "written": {
+      "type": "boolean"
     }
   },
   "required": [
     "agent",
-    "instructions",
-    "rawMarkdown"
+    "name",
+    "path",
+    "target",
+    "written"
   ],
-  "title": "AgentReadResult",
+  "title": "AgentSetEnabledResult",
   "type": "object"
 }

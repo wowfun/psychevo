@@ -112,6 +112,106 @@ pub fn edit_skill(
     Ok(json!({"success": true, "name": skill.name, "path": skill.file_path}))
 }
 
+pub fn write_installed_skill(
+    home: &Path,
+    cwd: &Path,
+    target: SkillTarget,
+    name: &str,
+    selector_path: Option<&Path>,
+    raw_markdown: &str,
+) -> Result<Value> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Error::Message("skill name is required".to_string()));
+    }
+    let root = target_skills_dir(home, cwd, target);
+    let file = if let Some(selector_path) = selector_path {
+        installed_skill_write_path_at_selector(&root, target, selector_path)?
+    } else {
+        root.join(name).join("SKILL.md")
+    };
+    if !file.is_file() {
+        return Err(Error::Message(format!(
+            "skill not found in {} scope: {name}",
+            target.as_str()
+        )));
+    }
+    validate_installed_skill_markdown(&file, raw_markdown)?;
+    fs::write(&file, raw_markdown)?;
+    Ok(json!({
+        "written": true,
+        "name": name,
+        "target": target.as_str(),
+        "path": file,
+    }))
+}
+
+fn installed_skill_write_path_at_selector(
+    root: &Path,
+    target: SkillTarget,
+    selector_path: &Path,
+) -> Result<PathBuf> {
+    let canonical_root = root.canonicalize().map_err(|_| {
+        Error::Message(format!(
+            "skill root not found in {} scope: {}",
+            target.as_str(),
+            root.display()
+        ))
+    })?;
+    let canonical_selector = selector_path.canonicalize()?;
+    if !canonical_selector.starts_with(&canonical_root) {
+        return Err(Error::Message(format!(
+            "skill is not writable from {} scope: {}",
+            target.as_str(),
+            selector_path.display()
+        )));
+    }
+    if canonical_selector
+        .file_name()
+        .and_then(|value| value.to_str())
+        != Some("SKILL.md")
+    {
+        return Err(Error::Message(format!(
+            "skill write only supports SKILL.md package files: {}",
+            selector_path.display()
+        )));
+    }
+    Ok(canonical_selector)
+}
+
+fn validate_installed_skill_markdown(file: &Path, raw_markdown: &str) -> Result<()> {
+    if raw_markdown.as_bytes().contains(&0) {
+        return Err(Error::Message(
+            "skill markdown content must be text".to_string(),
+        ));
+    }
+    let (frontmatter, _body) = parse_frontmatter(raw_markdown)
+        .map_err(|err| Error::Message(format!("failed to parse skill frontmatter: {err}")))?;
+    let parent = file
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("skill");
+    let name = frontmatter.name.unwrap_or_else(|| parent.to_string());
+    if let Some(err) = validate_name(&name, parent).into_iter().next() {
+        return Err(Error::Message(err));
+    }
+    let Some(description) = frontmatter
+        .description
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(Error::Message("description is required".to_string()));
+    };
+    if description.len() > MAX_DESCRIPTION_LENGTH {
+        return Err(Error::Message(format!(
+            "description exceeds {MAX_DESCRIPTION_LENGTH} characters ({})",
+            description.len()
+        )));
+    }
+    Ok(())
+}
+
 pub fn write_skill_file(
     catalog: &SkillCatalog,
     home: &Path,

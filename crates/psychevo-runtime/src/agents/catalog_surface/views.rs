@@ -187,6 +187,7 @@ pub struct AgentDefinition {
     pub name: String,
     pub description: String,
     pub instructions: String,
+    pub enabled: bool,
     pub file_path: Option<PathBuf>,
     pub source: AgentSource,
     pub backend: Option<AgentBackendRef>,
@@ -214,6 +215,7 @@ impl AgentDefinition {
 pub struct AgentCatalog {
     pub agents: Vec<AgentDefinition>,
     pub shadowed_agents: Vec<AgentDefinition>,
+    pub disabled_agents: Vec<AgentDefinition>,
     pub diagnostics: Vec<AgentDiagnostic>,
 }
 

@@ -1,7 +1,22 @@
 use super::*;
 
-pub(super) fn write_project_agent_definition(
-    cwd: &Path,
+pub(super) fn read_agent_definition(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::AgentReadParams,
+) -> psychevo_runtime::Result<Value> {
+    let target = agent_config_target(params.target);
+    let path = agent_definition_path(state, scope, target, &params.name)?;
+    let text = std::fs::read_to_string(&path)?;
+    let agent = parse_managed_agent_text(&text, &params.name, &path, target)?;
+    Ok(serde_json::to_value(agent_read_result_with_raw(
+        &agent, text,
+    ))?)
+}
+
+pub(super) fn write_agent_definition(
+    state: &WebState,
+    scope: &ResolvedScope,
     params: wire::AgentWriteParams,
 ) -> psychevo_runtime::Result<Value> {
     if !valid_agent_name(&params.name) {
@@ -10,6 +25,75 @@ pub(super) fn write_project_agent_definition(
             params.name
         )));
     }
+    let target = agent_config_target(params.target);
+    let path = agent_definition_path(state, scope, target, &params.name)?;
+    let text = if let Some(raw_markdown) = params.raw_markdown.as_deref() {
+        let agent = parse_managed_agent_text(raw_markdown, &params.name, &path, target)?;
+        if agent.name != params.name {
+            return Err(Error::Message(format!(
+                "raw agent name `{}` must match requested name `{}`",
+                agent.name, params.name
+            )));
+        }
+        raw_markdown.to_string()
+    } else {
+        structured_agent_markdown(&path, &params)?
+    };
+    let agent = parse_managed_agent_text(&text, &params.name, &path, target)?;
+    if agent.name != params.name {
+        return Err(Error::Message(format!(
+            "agent name `{}` must match requested name `{}`",
+            agent.name, params.name
+        )));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, &text)?;
+    Ok(serde_json::to_value(wire::AgentWriteResult {
+        written: true,
+        name: params.name,
+        path: path.display().to_string(),
+        target,
+        agent: agent_definition_view(&agent),
+    })?)
+}
+
+pub(super) fn set_agent_definition_enabled(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::AgentSetEnabledParams,
+) -> psychevo_runtime::Result<Value> {
+    if !valid_agent_name(&params.name) {
+        return Err(Error::Message(format!(
+            "invalid agent name: {}",
+            params.name
+        )));
+    }
+    let target = agent_config_target(params.target);
+    let path = agent_definition_path(state, scope, target, &params.name)?;
+    let existing = std::fs::read_to_string(&path)?;
+    let (mut frontmatter, body) = split_agent_markdown(&existing)?;
+    set_yaml_bool(&mut frontmatter, "enabled", params.enabled);
+    let text = render_agent_markdown(frontmatter, &body)?;
+    let agent = parse_managed_agent_text(&text, &params.name, &path, target)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, &text)?;
+    Ok(serde_json::to_value(wire::AgentSetEnabledResult {
+        written: true,
+        name: params.name,
+        path: path.display().to_string(),
+        target,
+        agent: agent_definition_view(&agent),
+    })?)
+}
+
+fn structured_agent_markdown(
+    path: &Path,
+    params: &wire::AgentWriteParams,
+) -> psychevo_runtime::Result<String> {
     let description = params.description.trim();
     if description.is_empty() {
         return Err(Error::Message(
@@ -33,26 +117,28 @@ pub(super) fn write_project_agent_definition(
         })?;
         entrypoints.push(parsed.as_str().to_string());
     }
-    let path = project_agent_definition_path(cwd, &params.name);
-    let mut frontmatter = serde_yaml::Mapping::new();
-    frontmatter.insert(
-        serde_yaml::Value::String("name".to_string()),
-        serde_yaml::Value::String(params.name.clone()),
-    );
-    frontmatter.insert(
-        serde_yaml::Value::String("description".to_string()),
-        serde_yaml::Value::String(description.to_string()),
-    );
-    if let Some(backend) = params.backend {
+    let (mut frontmatter, _body) = match std::fs::read_to_string(path) {
+        Ok(existing) => split_agent_markdown(&existing)?,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            (serde_yaml::Mapping::new(), String::new())
+        }
+        Err(err) => return Err(err.into()),
+    };
+    set_yaml_string(&mut frontmatter, "name", params.name.trim());
+    set_yaml_string(&mut frontmatter, "description", description);
+    set_yaml_bool(&mut frontmatter, "enabled", params.enabled.unwrap_or(true));
+    if let Some(backend) = params.backend.as_ref() {
         let mut backend_value = serde_yaml::Mapping::new();
         backend_value.insert(
             serde_yaml::Value::String("ref".to_string()),
-            serde_yaml::Value::String(backend.name),
+            serde_yaml::Value::String(backend.name.clone()),
         );
         frontmatter.insert(
             serde_yaml::Value::String("backend".to_string()),
             serde_yaml::Value::Mapping(backend_value),
         );
+    } else {
+        remove_yaml_key(&mut frontmatter, "backend");
     }
     if !entrypoints.is_empty() {
         frontmatter.insert(
@@ -64,6 +150,8 @@ pub(super) fn write_project_agent_definition(
                     .collect(),
             ),
         );
+    } else {
+        remove_yaml_key(&mut frontmatter, "entrypoints");
     }
     if !params.tools.is_empty() {
         frontmatter.insert(
@@ -71,12 +159,14 @@ pub(super) fn write_project_agent_definition(
             serde_yaml::Value::Sequence(
                 params
                     .tools
-                    .into_iter()
+                    .iter()
                     .filter(|tool| !tool.trim().is_empty())
                     .map(|tool| serde_yaml::Value::String(tool.trim().to_string()))
                     .collect(),
             ),
         );
+    } else {
+        remove_yaml_key(&mut frontmatter, "tools");
     }
     if !params.mcp_servers.is_empty() {
         frontmatter.insert(
@@ -84,39 +174,31 @@ pub(super) fn write_project_agent_definition(
             serde_yaml::Value::Sequence(
                 params
                     .mcp_servers
-                    .into_iter()
+                    .iter()
                     .filter(|server| !server.trim().is_empty())
                     .map(|server| serde_yaml::Value::String(server.trim().to_string()))
                     .collect(),
             ),
         );
-    }
-    let frontmatter = serde_yaml::to_string(&frontmatter)?;
-    let body = params.instructions.trim();
-    let text = if body.is_empty() {
-        format!("---\n{frontmatter}---\n")
     } else {
-        format!("---\n{frontmatter}---\n{body}\n")
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        remove_yaml_key(&mut frontmatter, "mcpServers");
     }
-    std::fs::write(&path, text)?;
-    Ok(serde_json::to_value(wire::AgentWriteResult {
-        written: true,
-        name: params.name,
-        path: path.display().to_string(),
-    })?)
+    render_agent_markdown(frontmatter, params.instructions.trim())
 }
 
-pub(super) fn delete_project_agent_definition(
-    cwd: &Path,
-    name: &str,
+pub(super) fn delete_agent_definition(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::AgentDeleteParams,
 ) -> psychevo_runtime::Result<Value> {
-    if !valid_agent_name(name) {
-        return Err(Error::Message(format!("invalid agent name: {name}")));
+    if !valid_agent_name(&params.name) {
+        return Err(Error::Message(format!(
+            "invalid agent name: {}",
+            params.name
+        )));
     }
-    let path = project_agent_definition_path(cwd, name);
+    let target = agent_config_target(params.target);
+    let path = agent_definition_path(state, scope, target, &params.name)?;
     let deleted = match std::fs::remove_file(&path) {
         Ok(()) => true,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
@@ -124,15 +206,112 @@ pub(super) fn delete_project_agent_definition(
     };
     Ok(serde_json::to_value(wire::AgentDeleteResult {
         deleted,
-        name: name.to_string(),
+        name: params.name,
         path: path.display().to_string(),
+        target,
     })?)
 }
 
-fn project_agent_definition_path(cwd: &Path, name: &str) -> PathBuf {
-    cwd.join(".psychevo")
-        .join("agents")
-        .join(format!("{name}.md"))
+fn agent_config_target(target: Option<wire::AgentConfigTarget>) -> wire::AgentConfigTarget {
+    target.unwrap_or(wire::AgentConfigTarget::Project)
+}
+
+fn agent_definition_path(
+    state: &WebState,
+    scope: &ResolvedScope,
+    target: wire::AgentConfigTarget,
+    name: &str,
+) -> psychevo_runtime::Result<PathBuf> {
+    if !valid_agent_name(name) {
+        return Err(Error::Message(format!("invalid agent name: {name}")));
+    }
+    let root = match target {
+        wire::AgentConfigTarget::Project => scope.cwd.join(".psychevo"),
+        wire::AgentConfigTarget::Profile => active_profile_config_dir(state, scope),
+    };
+    Ok(root.join("agents").join(format!("{name}.md")))
+}
+
+fn agent_source_for_target(target: wire::AgentConfigTarget) -> AgentSource {
+    match target {
+        wire::AgentConfigTarget::Project => AgentSource::Project,
+        wire::AgentConfigTarget::Profile => AgentSource::Global,
+    }
+}
+
+fn parse_managed_agent_text(
+    text: &str,
+    name: &str,
+    path: &Path,
+    target: wire::AgentConfigTarget,
+) -> psychevo_runtime::Result<AgentDefinition> {
+    let agent = parse_agent_definition_text(
+        text,
+        name,
+        Some(path.to_path_buf()),
+        agent_source_for_target(target),
+    )?;
+    if !valid_agent_name(&agent.name) {
+        return Err(Error::Message(format!(
+            "invalid agent name: {}",
+            agent.name
+        )));
+    }
+    Ok(agent)
+}
+
+fn split_agent_markdown(content: &str) -> psychevo_runtime::Result<(serde_yaml::Mapping, String)> {
+    let Some(rest) = content.strip_prefix("---\n") else {
+        return Ok((serde_yaml::Mapping::new(), content.to_string()));
+    };
+    let Some(end) = rest.find("\n---") else {
+        return Err(Error::Config("agent frontmatter is not closed".to_string()));
+    };
+    let frontmatter = &rest[..end];
+    let body = rest[end + "\n---".len()..]
+        .strip_prefix('\n')
+        .unwrap_or(&rest[end + "\n---".len()..])
+        .to_string();
+    let parsed = serde_yaml::from_str::<serde_yaml::Value>(frontmatter)?;
+    let mapping = match parsed {
+        serde_yaml::Value::Mapping(mapping) => mapping,
+        serde_yaml::Value::Null => serde_yaml::Mapping::new(),
+        _ => {
+            return Err(Error::Config(
+                "agent frontmatter must be a YAML mapping".to_string(),
+            ));
+        }
+    };
+    Ok((mapping, body))
+}
+
+fn render_agent_markdown(
+    frontmatter: serde_yaml::Mapping,
+    body: &str,
+) -> psychevo_runtime::Result<String> {
+    let frontmatter = serde_yaml::to_string(&frontmatter)?;
+    let body = body.trim();
+    Ok(if body.is_empty() {
+        format!("---\n{frontmatter}---\n")
+    } else {
+        format!("---\n{frontmatter}---\n{body}\n")
+    })
+}
+
+fn yaml_key(key: &str) -> serde_yaml::Value {
+    serde_yaml::Value::String(key.to_string())
+}
+
+fn remove_yaml_key(frontmatter: &mut serde_yaml::Mapping, key: &str) {
+    frontmatter.remove(yaml_key(key));
+}
+
+fn set_yaml_string(frontmatter: &mut serde_yaml::Mapping, key: &str, value: &str) {
+    frontmatter.insert(yaml_key(key), serde_yaml::Value::String(value.to_string()));
+}
+
+fn set_yaml_bool(frontmatter: &mut serde_yaml::Mapping, key: &str, value: bool) {
+    frontmatter.insert(yaml_key(key), serde_yaml::Value::Bool(value));
 }
 
 pub(super) fn agent_list_result(catalog: &AgentCatalog) -> wire::AgentListResult {
@@ -140,6 +319,11 @@ pub(super) fn agent_list_result(catalog: &AgentCatalog) -> wire::AgentListResult
         agents: catalog.agents.iter().map(agent_definition_view).collect(),
         shadowed_agents: catalog
             .shadowed_agents
+            .iter()
+            .map(agent_definition_view)
+            .collect(),
+        disabled_agents: catalog
+            .disabled_agents
             .iter()
             .map(agent_definition_view)
             .collect(),
@@ -152,18 +336,42 @@ pub(super) fn agent_list_result(catalog: &AgentCatalog) -> wire::AgentListResult
 }
 
 pub(super) fn agent_read_result(agent: &AgentDefinition) -> wire::AgentReadResult {
+    let raw_markdown = agent
+        .file_path
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .unwrap_or_default();
+    agent_read_result_with_raw(agent, raw_markdown)
+}
+
+fn agent_read_result_with_raw(
+    agent: &AgentDefinition,
+    raw_markdown: String,
+) -> wire::AgentReadResult {
     wire::AgentReadResult {
         agent: agent_definition_view(agent),
         instructions: agent.instructions.clone(),
+        raw_markdown,
     }
 }
 
 fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
+    let target = agent_definition_target(agent);
+    let tools = agent
+        .tool_policy
+        .allowed
+        .as_ref()
+        .map(|tools| tools.iter().cloned().collect())
+        .unwrap_or_default();
     wire::AgentDefinitionView {
         name: agent.name.clone(),
         description: agent.description.clone(),
+        enabled: agent.enabled,
         source: agent.source.as_str().to_string(),
+        source_label: agent.source.display_label().to_string(),
         generated: matches!(agent.source, psychevo_runtime::AgentSource::Generated),
+        target,
+        mutable: target.is_some(),
         path: agent
             .file_path
             .as_ref()
@@ -179,11 +387,21 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
             .iter()
             .map(|entrypoint| entrypoint.as_str().to_string())
             .collect(),
+        tools,
+        mcp_servers: agent.tool_policy.mcp_servers.iter().cloned().collect(),
         diagnostics: agent
             .diagnostics
             .iter()
             .map(agent_diagnostic_view)
             .collect(),
+    }
+}
+
+fn agent_definition_target(agent: &AgentDefinition) -> Option<wire::AgentConfigTarget> {
+    match agent.source {
+        AgentSource::Project => Some(wire::AgentConfigTarget::Project),
+        AgentSource::Global => Some(wire::AgentConfigTarget::Profile),
+        _ => None,
     }
 }
 

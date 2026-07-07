@@ -55,7 +55,7 @@ export function AgentsConfigPanel({
   return (
     <section className="agentSurfacePanel agentsConfigPanel" aria-label="Agents">
       <header className="agentSurfaceHeaderWithAction">
-        <span><PlugZap size={15} /> Profile ACP Backends <b>{profileBackends.length}</b></span>
+        <span><PlugZap size={15} /> ACP Backends <b>{profileBackends.length}</b></span>
         {!backendDraft && (
           <ActionButton ariaLabel="Add ACP backend" disabled={disabled} icon={<Plus size={14} />} onClick={onNewBackend} size="compact" tooltip="Add ACP backend" variant="primary">
             Add backend
@@ -129,7 +129,7 @@ export function AgentsConfigPanel({
             </div>
           );
         })}
-        {profileBackends.length === 0 && <p>No Profile ACP backends configured.</p>}
+        {profileBackends.length === 0 && <p>No ACP backends configured.</p>}
       </div>}
     </section>
   );

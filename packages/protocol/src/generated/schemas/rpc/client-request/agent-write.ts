@@ -15,6 +15,13 @@ export const clientRequestAgentWriteSchema = {
       ],
       "type": "object"
     },
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
     "AgentWriteParams": {
       "properties": {
         "backend": {
@@ -30,6 +37,13 @@ export const clientRequestAgentWriteSchema = {
         },
         "description": {
           "type": "string"
+        },
+        "enabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "entrypoints": {
           "default": [],
@@ -52,10 +66,28 @@ export const clientRequestAgentWriteSchema = {
         "name": {
           "type": "string"
         },
+        "rawMarkdown": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "scope": {
           "anyOf": [
             {
               "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
             },
             {
               "type": "null"

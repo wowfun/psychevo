@@ -32,6 +32,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     backends,
     beginExplicitViewSwitch,
     beginRightResize,
+    capabilitiesTab,
     changeAgentSelection,
     clearRightWorkspaceTabPendingPrompt,
     channelDoctor,
@@ -60,6 +61,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     extraRuntimeModeValues,
     fallbackCwd,
     handleAttachment,
+    handleAttachmentFiles,
     host,
     init,
     leftCollapsed,
@@ -73,6 +75,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     modelReady,
     modelTurnBlockReason,
     openDiffPreview,
+    openCapabilitiesTab,
     openAgentSessionTab,
     openAutomationThread,
     openFilePreview,
@@ -124,6 +127,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     setAppearance,
     setAttachments,
     setBackendDraft,
+    setCapabilitiesTab,
     setChannelEnabled,
     setDebugEnabled,
     setDirtyRightTabs,
@@ -364,6 +368,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               backendDraft={backendDraft}
               backendDoctor={backendDoctor}
               backends={backends}
+              capabilitiesTab={capabilitiesTab}
               channelDoctor={channelDoctor}
               channels={settings?.channels.channels ?? []}
               client={client}
@@ -383,6 +388,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               loadThreadSearchText={loadThreadSearchText}
               onCopyText={copyText}
               onAppearanceChange={setAppearance}
+              onAgentSurfaceChanged={() => refreshAgentSurface()}
               onDeleteAutomation={(id) => deleteAutomation(id)}
               onDraftAutomation={(params) => draftAutomation(params)}
               onDeleteArchivedSession={(threadId) => void runAction(async () => deleteArchivedSession(threadId))}
@@ -396,6 +402,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onDoctorChannel={(channel) => void runAction(async () => doctorChannel(channel))}
               onDoctorChannels={() => void runAction(async () => doctorChannels())}
               onEditBackend={(backend) => setBackendDraft(backendDraftFromBackend(backend))}
+              onCapabilitiesTabChange={setCapabilitiesTab}
               onLoadChannelSources={(channel) => loadChannelSources(channel)}
               onPollWechatQrSetup={(sessionId) => pollWechatQrSetup(sessionId)}
               onSetChannelEnabled={(channel, enabled) => void runAction(async () => setChannelEnabled(channel, enabled))}
@@ -408,9 +415,10 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onModelAssignmentSaved={onModelAssignmentSaved}
               onModelCatalogLoaded={onModelCatalogLoaded}
               onNewBackend={() => {
-                setSettingsSection("agents");
+                openCapabilitiesTab("agents");
                 setBackendDraft({ ...EMPTY_BACKEND_DRAFT });
               }}
+              onOpenCapabilitiesAgents={() => openCapabilitiesTab("agents")}
               onOpenSession={(threadId) => void runAction(async () => {
                 const epoch = beginExplicitViewSwitch();
                 await refreshSnapshot(client, threadId, undefined, false, epoch);
@@ -588,6 +596,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               running={running}
               runningStartedAtMs={activity.startedAtMs ?? null}
               onAttach={() => void runAction(async () => handleAttachment())}
+              onAttachFiles={(files) => void runAction(async () => handleAttachmentFiles(files))}
               onCommand={(command) => void runAction(async () => executeCommand(command, "composer"))}
               onInterrupt={() => void runAction(async () => {
                 const threadId = snapshot.thread?.id ?? null;

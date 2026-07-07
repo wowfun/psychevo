@@ -236,6 +236,7 @@ pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let (_tx, rx) = watch::channel(false);
@@ -337,6 +338,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
     let catalog = AgentCatalog {
         agents: vec![agent],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let (_tx, rx) = watch::channel(false);
@@ -440,6 +442,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let (_tx, rx) = watch::channel(false);
@@ -618,6 +621,7 @@ for line in sys.stdin:
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let (_tx, rx) = watch::channel(false);
@@ -676,6 +680,7 @@ pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extens
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let provider = ChildRequestCaptureProvider::default();
@@ -733,6 +738,7 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let (_tx, rx) = watch::channel(false);
@@ -803,6 +809,7 @@ pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let (_tx, rx) = watch::channel(false);
@@ -856,6 +863,7 @@ pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let provider = Arc::new(AbortAwareProvider::default());
@@ -909,6 +917,7 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let delegate = Arc::new(FakeExternalAgentDelegate::default());
@@ -977,6 +986,7 @@ pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let delegate = Arc::new(AbortAwareExternalAgentDelegate::default());
@@ -1040,6 +1050,7 @@ pub(crate) async fn backend_backed_agent_tool_without_delegate_returns_unavailab
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
         diagnostics: Vec::new(),
     };
     let (_tx, rx) = watch::channel(false);

@@ -57,11 +57,18 @@ export function agentRecord(
   return {
     name,
     description: `${name} agent`,
+    enabled: true,
     source: backendRef ? "generated" : "project",
+    sourceLabel: backendRef ? "Generated" : "Project",
     generated: Boolean(backendRef),
+    target: backendRef ? null : "project",
+    mutable: !backendRef,
     path: backendRef ? null : `/tmp/project/.psychevo/agents/${name}.md`,
     backend: backendRef ? { ref: backendRef } : null,
-    entrypoints
+    entrypoints,
+    tools: [],
+    mcpServers: [],
+    diagnostics: []
   };
 }
 

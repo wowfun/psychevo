@@ -35,6 +35,7 @@ import type {
   CommandFeedback,
   CommandOverlay,
   CommandTrigger,
+  CapabilityTab,
   MainView,
   PendingAttachment,
   RightWorkspaceTab,
@@ -84,6 +85,7 @@ type CommandActionsParams = {
   openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch?: Partial<RightWorkspaceTab>, forceNew?: boolean): void;
   patchComposerDraft(text: string): void;
   openCommandOverlay(kind: CommandOverlay): void;
+  openCapabilitiesTab(tab?: CapabilityTab): void;
   refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<SessionSummary[]>;
   refreshRevertedThreadSnapshot(nextClient: GatewayClient | null, threadId: string | null): Promise<void>;
   refreshSnapshot: RefreshSnapshot;
@@ -130,6 +132,9 @@ export function createCommandActions(params: CommandActionsParams) {
       case "help":
         revealCommandsPanel(trigger);
         return;
+      case "agents":
+        params.openCapabilitiesTab("agents");
+        return;
       case "preview":
         params.openRightWorkspaceTab("review", { diff: params.workspaceDiff, title: "Review" });
         return;
@@ -165,6 +170,7 @@ export function createCommandActions(params: CommandActionsParams) {
         case "history":
         case "sessions":
         case "commands":
+        case "agents":
         case "status":
         case "preview":
           revealHostPanel(action.target);

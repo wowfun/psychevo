@@ -127,6 +127,9 @@ pub(crate) struct AgentToolContext {
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
     pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
+    pub(crate) home: PathBuf,
+    pub(crate) image_input_enabled: bool,
+    pub(crate) image_generation: Option<crate::config::ResolvedImageGenerationConfig>,
     pub(crate) tool_selection: ToolSelectionConfig,
     pub(crate) custom_toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) extension_inputs: crate::extensions::AcceptedExtensionInputs,
@@ -226,7 +229,11 @@ pub fn resolve_agent_definition(
     env: &BTreeMap<String, String>,
 ) -> Result<AgentDefinition> {
     if let Some(path) = existing_agent_path(input, cwd, env)? {
-        return parse_agent_file(&path, AgentSource::Explicit);
+        let agent = parse_agent_file(&path, AgentSource::Explicit)?;
+        if !agent.enabled {
+            return Err(Error::Config(format!("agent `{}` is disabled", agent.name)));
+        }
+        return Ok(agent);
     }
 
     catalog
@@ -265,6 +272,7 @@ pub(crate) fn generated_agent_from_backend(
         name: backend.id.clone(),
         description,
         instructions: String::new(),
+        enabled: true,
         file_path: None,
         source: AgentSource::Generated,
         backend: Some(AgentBackendRef {
@@ -294,6 +302,7 @@ pub fn list_agents_value(catalog: &AgentCatalog) -> Value {
             json!({
                 "name": agent.name,
                 "description": agent.description,
+                "enabled": agent.enabled,
                 "source": agent.source.as_str(),
                 "source_label": agent.source.display_label(),
                 "generated": agent.source == AgentSource::Generated,
@@ -316,6 +325,30 @@ pub fn list_agents_value(catalog: &AgentCatalog) -> Value {
             json!({
                 "name": agent.name,
                 "description": agent.description,
+                "enabled": agent.enabled,
+                "source": agent.source.as_str(),
+                "source_label": agent.source.display_label(),
+                "generated": agent.source == AgentSource::Generated,
+                "path": agent.file_path,
+                "backend": agent.backend,
+                "entrypoints": agent.entrypoints,
+                "model": agent.model,
+                "tools": agent.tool_policy.allowed,
+                "disallowed_tools": agent.tool_policy.denied,
+                "allowed_agents": agent.tool_policy.allowed_agents,
+                "disallowed_agents": agent.tool_policy.denied_agents,
+                "permission_mode": agent.tool_policy.permission_mode,
+                "max_spawn_depth": agent.max_spawn_depth,
+                "project_instructions": agent.project_instructions,
+                "effective_policy": agent_effective_policy_value(agent, Some(catalog)),
+                "diagnostics": agent.diagnostics,
+            })
+        }).collect::<Vec<_>>(),
+        "disabled_agents": catalog.disabled_agents.iter().map(|agent| {
+            json!({
+                "name": agent.name,
+                "description": agent.description,
+                "enabled": agent.enabled,
                 "source": agent.source.as_str(),
                 "source_label": agent.source.display_label(),
                 "generated": agent.source == AgentSource::Generated,
@@ -350,6 +383,7 @@ pub fn view_agent_value_with_catalog(
         "name": agent.name,
         "description": agent.description,
         "instructions": agent.instructions,
+        "enabled": agent.enabled,
         "source": agent.source.as_str(),
         "source_label": agent.source.display_label(),
         "generated": agent.source == AgentSource::Generated,

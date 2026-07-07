@@ -21,6 +21,8 @@ async fn handle_rpc(
                 "turns": true,
                 "historyManagement": true,
                 "downloads": true,
+                "media": true,
+                "imageGeneration": true,
                 "automations": true,
                 "settingsWrite": "structured",
                 "workspaceCreate": true,
@@ -599,6 +601,9 @@ async fn handle_rpc(
         "agent/read" => {
             let params = request.required_params::<wire::AgentReadParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if params.target.is_some() {
+                return read_agent_definition(&state, &scope, params);
+            }
             let catalog = discover_gateway_agents(&state, &scope)?;
             let agent = resolve_agent_definition(
                 &catalog,
@@ -611,12 +616,17 @@ async fn handle_rpc(
         "agent/write" => {
             let params = request.required_params::<wire::AgentWriteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            write_project_agent_definition(&scope.cwd, params)
+            write_agent_definition(&state, &scope, params)
+        }
+        "agent/setEnabled" => {
+            let params = request.required_params::<wire::AgentSetEnabledParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            set_agent_definition_enabled(&state, &scope, params)
         }
         "agent/delete" => {
             let params = request.required_params::<wire::AgentDeleteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            delete_project_agent_definition(&scope.cwd, &params.name)
+            delete_agent_definition(&state, &scope, params)
         }
         "agent/status" => {
             let params = request.params::<wire::AgentStatusParams>()?;
@@ -871,6 +881,18 @@ async fn handle_rpc(
                 parse_skill_target(params.target.as_deref())?,
                 &params.name,
                 params.enabled,
+            )
+        }
+        "skill/write" => {
+            let params = request.required_params::<wire::SkillWriteParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            write_installed_skill(
+                &state.inner.home,
+                &scope.cwd,
+                parse_skill_target(params.target.as_deref())?,
+                &params.name,
+                params.path.as_deref().map(std::path::Path::new),
+                &params.raw_markdown,
             )
         }
         "tool/list" => {

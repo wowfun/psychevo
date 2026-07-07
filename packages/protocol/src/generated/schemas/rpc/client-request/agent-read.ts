@@ -4,6 +4,13 @@ export const clientRequestAgentReadSchema = {
   "$id": "ClientRequest/agent-read.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
     "AgentReadParams": {
       "properties": {
         "name": {
@@ -13,6 +20,17 @@ export const clientRequestAgentReadSchema = {
           "anyOf": [
             {
               "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
             },
             {
               "type": "null"

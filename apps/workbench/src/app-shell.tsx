@@ -24,6 +24,7 @@ import { shortSessionId } from "./session-utils";
 import type {
   Appearance,
   BackendDraft,
+  CapabilityTab,
   MainView,
   SettingsSection,
   SessionBrowserWorkspaceState,
@@ -180,6 +181,7 @@ export function MainSurface({
   backendDraft,
   backendDoctor,
   backends,
+  capabilitiesTab,
   channelDoctor,
   channels,
   client,
@@ -193,6 +195,7 @@ export function MainSurface({
   onCopyText,
   onAppearanceChange,
   onDeleteAutomation,
+  onAgentSurfaceChanged,
   onDraftAutomation,
   onCancelBackendEdit,
   onChangeBackendDraft,
@@ -205,7 +208,9 @@ export function MainSurface({
   onDoctorBackend,
   onEditBackend,
   onMainViewChange,
+  onCapabilitiesTabChange,
   onOpenAutomationThread,
+  onOpenCapabilitiesAgents,
   onModelAssignmentSaved,
   onModelCatalogLoaded,
   onNewBackend,
@@ -244,6 +249,7 @@ export function MainSurface({
   backendDraft: BackendDraft | null;
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
+  capabilitiesTab: CapabilityTab;
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
   client: GatewayClient | null;
@@ -257,6 +263,7 @@ export function MainSurface({
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onAppearanceChange(value: Appearance): void;
   onDeleteAutomation(id: string): Promise<void>;
+  onAgentSurfaceChanged(): Promise<void> | void;
   onDraftAutomation(params: AutomationDraftParams): Promise<AutomationDraftView>;
   onCancelBackendEdit(): void;
   onChangeBackendDraft(draft: BackendDraft): void;
@@ -269,7 +276,9 @@ export function MainSurface({
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
   onMainViewChange(value: MainView): void;
+  onCapabilitiesTabChange(value: CapabilityTab): void;
   onOpenAutomationThread(threadId: string): void;
+  onOpenCapabilitiesAgents(): void;
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
   onNewBackend(): void;
@@ -308,9 +317,6 @@ export function MainSurface({
       <SettingsPage
         appearance={appearance}
         archivedSessions={archivedSessions}
-        backendDraft={backendDraft}
-        backendDoctor={backendDoctor}
-        backends={backends}
         channelDoctor={channelDoctor}
         channels={channels}
         client={client}
@@ -322,28 +328,20 @@ export function MainSurface({
         usageStatsError={usageStatsError}
         usageStatsLoading={usageStatsLoading}
         onAppearanceChange={onAppearanceChange}
-        onCancelBackendEdit={onCancelBackendEdit}
-        onChangeBackendDraft={onChangeBackendDraft}
         onDebugChange={onDebugChange}
         onDeleteArchivedSession={onDeleteArchivedSession}
-        onDeleteBackend={onDeleteBackend}
         onDeleteChannel={onDeleteChannel}
         onDoctorChannel={onDoctorChannel}
         onDoctorChannels={onDoctorChannels}
-        onDoctorBackend={onDoctorBackend}
-        onEditBackend={onEditBackend}
         onModelAssignmentSaved={onModelAssignmentSaved}
         onModelCatalogLoaded={onModelCatalogLoaded}
-        onNewBackend={onNewBackend}
+        onOpenAgents={onOpenCapabilitiesAgents}
         onOpenTranscript={() => onMainViewChange("transcript")}
         onLoadChannelSources={onLoadChannelSources}
         onPollWechatQrSetup={onPollWechatQrSetup}
         onRefreshUsageStats={onRefreshUsageStats}
         onRestoreArchivedSession={onRestoreArchivedSession}
-        onSaveBackendDraft={onSaveBackendDraft}
         onSectionChange={onSettingsSectionChange}
-        onSetBackendEnabled={onSetBackendEnabled}
-        onSetBackendEntrypoints={onSetBackendEntrypoints}
         onSetChannelEnabled={onSetChannelEnabled}
         onSlashSettingsSaved={onSlashSettingsSaved}
         onStartWechatQrSetup={onStartWechatQrSetup}
@@ -379,10 +377,25 @@ export function MainSurface({
   if (mainView === "capabilities") {
     return (
       <CapabilitiesPage
+        activeTab={capabilitiesTab}
+        backendDraft={backendDraft}
+        backendDoctor={backendDoctor}
+        backends={backends}
         client={client}
         cwd={cwd}
         disabled={disabled}
+        onActiveTabChange={onCapabilitiesTabChange}
+        onAgentSurfaceChanged={onAgentSurfaceChanged}
+        onCancelBackendEdit={onCancelBackendEdit}
+        onChangeBackendDraft={onChangeBackendDraft}
         onCopyText={onCopyText}
+        onDeleteBackend={onDeleteBackend}
+        onDoctorBackend={onDoctorBackend}
+        onEditBackend={onEditBackend}
+        onNewBackend={onNewBackend}
+        onSaveBackendDraft={onSaveBackendDraft}
+        onSetBackendEnabled={onSetBackendEnabled}
+        onSetBackendEntrypoints={onSetBackendEntrypoints}
         scope={scope}
       />
     );

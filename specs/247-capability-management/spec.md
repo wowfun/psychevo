@@ -5,13 +5,14 @@ psychevo_self_edit: deny
 
 # 247. Capability Management
 
-Define the Workbench product surface for managing skills, plugins, MCP servers,
-and toolsets.
+Define the Workbench product surface for managing agents, skills, plugins, MCP
+servers, and toolsets.
 
 ## Scope
 
 - top-level Workbench Capabilities navigation
 - profile-scoped management defaults for GUI capability writes
+- Project/Profile agent definition and backend management composition
 - skill, plugin, MCP, and toolset management composition
 - MCP OAuth, bearer-token environment references, and per-tool exposure policy
 - deterministic frontend and Gateway validation expectations
@@ -26,8 +27,8 @@ Out of scope:
 ## Workbench Surface
 
 Workbench exposes `Capabilities` as a top-level view beside transcript,
-settings, automations, and other app-level surfaces. The view has four tabs:
-`Skills`, `Plugins`, `MCP`, and `Tools`. There is no `All` tab.
+settings, automations, and other app-level surfaces. The view has five tabs:
+`Agents`, `Skills`, `Plugins`, `MCP`, and `Tools`. There is no `All` tab.
 
 The frontend composes domain RPCs directly. It must not introduce a generic
 capability object that hides the owning runtime module. Search filters the
@@ -41,21 +42,63 @@ timing clear: saved configuration refreshes the management view immediately,
 but running sessions are not implicitly restarted. Current-session runtime may
 therefore differ from the next run until an explicit reload or new run occurs.
 Create and install flows are opened from the active tab header instead of being
-always-visible forms at the bottom of the page. `Install skill`, `Install
-plugin`, `Add MCP server`, and `Create toolset` open scoped create panels that
-use shared Workbench action, field, and panel primitives. Successful writes
-close the panel, refresh the active tab, and show the existing next-run effect
-message; failed writes keep the panel open with the user's draft. The active
-create panel must remain inside the visible Capabilities page bounds at desktop
-and narrow widths, and long forms must be reachable by scrolling the page or
-panel without horizontal overflow.
+always-visible forms at the bottom of the page. `Create agent`, `Install
+skill`, `Install plugin`, `Add MCP server`, and `Create toolset` open scoped
+create panels that use shared Workbench action, field, and panel primitives.
+Successful writes close the panel, refresh the active tab, and show the
+existing next-run effect message; failed writes keep the panel open with the
+user's draft. The active create panel must remain inside the visible
+Capabilities page bounds at desktop and narrow widths, and long forms must be
+reachable by scrolling the page or panel without horizontal overflow.
+
+Settings must not duplicate the full Agents management surface. If a Settings
+entry for Agents remains for discoverability, it routes to `Capabilities >
+Agents`.
+
+## Agents
+
+The Agents tab lists and manages Project and Profile Markdown agent
+definitions, plus configured ACP backends. It uses agent-owned and
+backend-owned Gateway RPCs directly; it must not introduce a generic capability
+object that hides the owning runtime module.
+
+The tab has an internal segmented view with `Definitions` and `ACP Backends`.
+`Definitions` lists mutable Project/Profile Markdown agents across active,
+shadowed, and disabled states. Rows show name, description, source label,
+enablement, entrypoints, backend reference when present, and compact
+diagnostics. Truncated row descriptions keep the full description in the native
+hover title. Each mutable row owns one enablement switch; edit is exposed from
+the Markdown preview action stack and delete lives in the detail header.
+Built-in, generated, Claude-compatible, and plugin-provided agents are not
+directly edited here; generated ACP agents are controlled by their backend.
+
+Creating an agent defaults to the current Project target and allows switching
+to Profile. Create and edit are both in the right-side detail panel rather than
+an overlay create/edit panel. Editing an existing agent keeps name and target
+read-only; users create a new agent and delete the old one to rename. The
+editor defaults to a structured form with description, instructions,
+enablement, entrypoints, optional backend ref, tools, and MCP servers. A
+Markdown mode exposes the raw definition source for advanced edits. Structured
+saves preserve frontmatter fields the form does not display. Raw saves are
+validated before the file is written. Agent detail previews render the raw
+Markdown definition, including YAML frontmatter, through the same shared
+Markdown renderer used for `SKILL.md`.
+
+`ACP Backends` carries the existing profile/project backend management
+workflow: add/edit/delete, enablement, entrypoint controls, client capability
+controls, MCP server list, and doctor checks. Backend command environment
+values remain write-only; management responses may expose environment variable
+names but never resolved secret values.
 
 ## Skills
 
 The Skills tab lists, reads, installs, uninstalls, enables, and disables skills
-through skill-owned Gateway RPCs. Installation accepts a local path or Git
-source. Scanner-blocked dangerous results and overwrite operations require an
-explicit confirmation before the frontend sends a force request.
+through skill-owned Gateway RPCs. Project/Profile-managed skills can also
+replace their `SKILL.md` source through `skill/write`; plugin, system,
+configured external, explicit, and compatibility roots remain preview-only.
+Installation accepts a local path or Git source. Scanner-blocked dangerous
+results and overwrite operations require an explicit confirmation before the
+frontend sends a force request.
 
 The tab is skill-domain specific, not a lossy generic capability row. It shows
 all valid discovered skills in the management catalog, including disabled,
@@ -72,12 +115,14 @@ preview rendered with the shared Markdown renderer. The preview uses
 `preview_content` when present and falls back to `content`; it must not recreate
 Markdown, frontmatter parsing, or preview copy chrome inside the Capabilities
 page. Its shared copy action copies the raw preview source through the host
-clipboard boundary. The detail card
-fills the available detail-column height, and the `SKILL.md` preview owns
-internal scrolling inside that card. Details hide empty fields and show linked files,
-paths, tags, missing environment variable names, missing credential file paths,
-tools/toolsets hints, platform status, and compact diagnostics when present.
-Redundant entry file paths are hidden when they are equivalent to
+clipboard boundary. Mutable Markdown previews show an edit action below the
+copy action; disabled edit actions state why the source is read-only. Delete or
+uninstall actions live in the detail header's top-right action area. The detail
+card fills the available detail-column height, and the `SKILL.md` preview owns
+internal scrolling inside that card. Details hide empty fields and show linked
+files, paths, tags, missing environment variable names, missing credential file
+paths, tools/toolsets hints, platform status, and compact diagnostics when
+present. Redundant entry file paths are hidden when they are equivalent to
 `skill_dir/SKILL.md`; non-standard entrypoints remain visible. Raw JSON is not
 the primary detail view. Enablement is name-scoped and remains
 available for disabled rows through the row switch. Uninstall is enabled only
@@ -173,8 +218,11 @@ tools, and they do not own execution bindings.
 
 Gateway exposes domain RPCs instead of a capability aggregate:
 
+- `agent/list`, `agent/read`, `agent/write`, `agent/setEnabled`,
+  `agent/delete`, `backend/list`, `backend/doctor`, `backend/write`,
+  `backend/delete`
 - `skill/list`, `skill/read`, `skill/install`, `skill/uninstall`,
-  `skill/setEnabled`
+  `skill/setEnabled`, `skill/write`
 - `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
   `plugin/uninstall`, `plugin/setEnabled`, `plugin/import/inspect`,
   `plugin/setTrust`, `plugin/catalog/list`, `plugin/catalog/add`,
@@ -194,18 +242,23 @@ Runtime tests cover MCP config parsing/writing, OAuth fields, bearer-token env
 references, per-tool policy, inline token rejection, auth precedence, and fake
 keyring save/load/delete behavior.
 
-Gateway tests cover skill, plugin, toolset, and MCP write methods, force
-confirmation paths, secret-free responses, and MCP OAuth start/status/logout
-against a fake local OAuth server and fake keyring.
+Gateway tests cover agent definition and backend writes, skill read/write,
+plugin, toolset, and MCP write methods, force confirmation paths, secret-free
+responses, and MCP OAuth start/status/logout against a fake local OAuth server
+and fake keyring.
 
 Workbench tests cover top-level navigation, tab search, detail panels, force
-confirmations, plugin import inspection, trust flow, unsupported target
-rendering, MCP per-tool policy, OAuth polling states, and next-run effect
-messaging. Visual validation must include desktop and mobile Capabilities
-screens without text overlap.
+confirmations, agent detail-panel create/edit, Markdown preview copy/edit
+actions, skill `SKILL.md` editing, delete/uninstall header placement, agent
+enablement, backend management, plugin import inspection, trust flow,
+unsupported target rendering, MCP per-tool policy, OAuth polling states, and
+next-run effect messaging. Visual validation must include desktop and mobile
+Capabilities screens without text overlap.
 
 ## Related Topics
 
+- [051 Agents](../051-agents/spec.md) owns agent definition, discovery,
+  enablement, and backend-reference semantics.
 - [055 Skills](../055-skills/spec.md) owns skill package and lifecycle
   semantics.
 - [056 MCP](../056-mcp/spec.md) owns MCP runtime normalization, auth, and

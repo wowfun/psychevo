@@ -207,6 +207,8 @@ afterEach(() => {
   gatewayMock.archivedSessionSummaries = [];
   gatewayMock.browserWorkspaces = null;
   gatewayMock.agentRecords = [];
+  gatewayMock.shadowedAgentRecords = [];
+  gatewayMock.disabledAgentRecords = [];
   gatewayMock.backendRecords = [];
   gatewayMock.skillRecords = defaultSkillRecords();
   gatewayMock.automationRecords = [];
@@ -268,6 +270,10 @@ afterEach(() => {
       }
     }
   ];
+  gatewayMock.agentRecords = [];
+  gatewayMock.shadowedAgentRecords = [];
+  gatewayMock.disabledAgentRecords = [];
+  gatewayMock.backendRecords = [];
   gatewayMock.sessionSummaries = [];
   gatewayMock.snapshot.thread = {
     id: "thread-1",

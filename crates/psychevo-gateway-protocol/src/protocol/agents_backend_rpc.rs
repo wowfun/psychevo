@@ -1,3 +1,10 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentConfigTarget {
+    Project,
+    Profile,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentListParams {
@@ -9,6 +16,8 @@ pub struct AgentListParams {
 #[serde(rename_all = "camelCase")]
 pub struct AgentReadParams {
     pub name: String,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
@@ -26,6 +35,10 @@ pub struct AgentWriteParams {
     pub name: String,
     pub description: String,
     #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
     pub instructions: String,
     #[serde(default)]
     pub backend: Option<AgentBackendRefInput>,
@@ -36,6 +49,8 @@ pub struct AgentWriteParams {
     #[serde(default, rename = "mcpServers")]
     pub mcp_servers: Vec<String>,
     #[serde(default)]
+    pub raw_markdown: Option<String>,
+    #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
 
@@ -43,6 +58,19 @@ pub struct AgentWriteParams {
 #[serde(rename_all = "camelCase")]
 pub struct AgentDeleteParams {
     pub name: String,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSetEnabledParams {
+    pub name: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
@@ -63,6 +91,7 @@ pub struct AgentStatusParams {
 pub struct AgentListResult {
     pub agents: Vec<AgentDefinitionView>,
     pub shadowed_agents: Vec<AgentDefinitionView>,
+    pub disabled_agents: Vec<AgentDefinitionView>,
     pub diagnostics: Vec<AgentDiagnosticView>,
 }
 
@@ -71,6 +100,7 @@ pub struct AgentListResult {
 pub struct AgentReadResult {
     pub agent: AgentDefinitionView,
     pub instructions: String,
+    pub raw_markdown: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -79,6 +109,8 @@ pub struct AgentWriteResult {
     pub written: bool,
     pub name: String,
     pub path: String,
+    pub target: AgentConfigTarget,
+    pub agent: AgentDefinitionView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -87,6 +119,17 @@ pub struct AgentDeleteResult {
     pub deleted: bool,
     pub name: String,
     pub path: String,
+    pub target: AgentConfigTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSetEnabledResult {
+    pub written: bool,
+    pub name: String,
+    pub path: String,
+    pub target: AgentConfigTarget,
+    pub agent: AgentDefinitionView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -117,13 +160,21 @@ pub struct AgentDiagnosticView {
 pub struct AgentDefinitionView {
     pub name: String,
     pub description: String,
+    pub enabled: bool,
     pub source: String,
+    pub source_label: String,
     pub generated: bool,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
+    pub mutable: bool,
     #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
     pub backend: Option<AgentBackendRefView>,
     pub entrypoints: Vec<String>,
+    pub tools: Vec<String>,
+    #[serde(rename = "mcpServers")]
+    pub mcp_servers: Vec<String>,
     pub diagnostics: Vec<AgentDiagnosticView>,
 }
 
@@ -321,6 +372,28 @@ pub struct SkillSetEnabledParams {
     pub target: Option<String>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillWriteParams {
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    pub raw_markdown: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillWriteResult {
+    pub written: bool,
+    pub name: String,
+    pub path: String,
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -823,6 +896,8 @@ pub enum ClientRequest {
     AgentRead(AgentReadParams),
     #[serde(rename = "agent/write")]
     AgentWrite(AgentWriteParams),
+    #[serde(rename = "agent/setEnabled")]
+    AgentSetEnabled(AgentSetEnabledParams),
     #[serde(rename = "agent/delete")]
     AgentDelete(AgentDeleteParams),
     #[serde(rename = "agent/status")]
@@ -867,6 +942,8 @@ pub enum ClientRequest {
     SkillUninstall(SkillUninstallParams),
     #[serde(rename = "skill/setEnabled")]
     SkillSetEnabled(SkillSetEnabledParams),
+    #[serde(rename = "skill/write")]
+    SkillWrite(SkillWriteParams),
     #[serde(rename = "tool/list")]
     ToolList(ToolListParams),
     #[serde(rename = "tool/read")]

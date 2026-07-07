@@ -32,7 +32,7 @@ use psychevo_runtime::command_registry::{
 };
 use psychevo_runtime::{
     AgentBackendConfig, AgentCatalog, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions,
-    AgentEntrypoint, AgentRunRecord, AutomationRunFinishInput, AutomationRunRecord,
+    AgentEntrypoint, AgentRunRecord, AgentSource, AutomationRunFinishInput, AutomationRunRecord,
     AutomationSchedule, AutomationTaskInput, AutomationTaskRecord, ChildSessionSnapshotInput,
     ClarifyAnswer, ClarifyResponse, ClarifyResult, ConfigScope, ContextOptions, Error,
     ExecutableResolveOptions, HostPlatform, InstallOptions, ListSkillsOptions, LoadedMainAgent,
@@ -50,11 +50,12 @@ use psychevo_runtime::{
     agent_status_records, auth_status_value, canonicalize_cwd, clear_mcp_oauth_access_token,
     config_show_value, configured_models, context_snapshot, create_local_toolset, discover_agents,
     discover_skills, fetch_and_cache_model_catalog, format_context_total_value,
-    format_context_total_value_parts, install_skill, latest_due_at_ms, list_skill_bundles,
-    list_skills_value_with_options, load_agent_backend_configs, main_agent_default_metadata,
-    main_agent_from_session_metadata, main_agent_metadata, mcp_server_value, mcp_servers_value,
-    mcp_test_server_value, model_catalog_entry_is_free, model_catalog_provider,
-    model_catalog_providers, next_run_at_ms, normalize_provider_id, normalize_reasoning_effort,
+    format_context_total_value_parts, image_generation_config_value, install_skill,
+    latest_due_at_ms, list_skill_bundles, list_skills_value_with_options,
+    load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
+    main_agent_metadata, mcp_server_value, mcp_servers_value, mcp_test_server_value,
+    model_catalog_entry_is_free, model_catalog_provider, model_catalog_providers, next_run_at_ms,
+    normalize_provider_id, normalize_reasoning_effort, parse_agent_definition_text,
     plugin_doctor_value, plugin_import_inspect_value, plugin_install_value, plugin_list_value,
     plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
     plugin_set_enabled_value, plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
@@ -67,7 +68,7 @@ use psychevo_runtime::{
     set_mcp_server_enabled, set_mcp_server_tool_policy, set_provider_api_key,
     set_provider_model_config, set_skill_enabled, side_conversation_boundary_prompt,
     side_conversation_session_source, toolsets_value, undo_session, upsert_mcp_server, usage_read,
-    valid_agent_name, view_skill_value_selected, voice_config_value,
+    valid_agent_name, view_skill_value_selected, voice_config_value, write_installed_skill,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -99,8 +100,9 @@ mod workspace;
 
 use agents::{
     active_profile_config_dir, agent_list_result, agent_read_result, agent_status_result,
-    backend_doctor_value, backend_values_for_scope, delete_backend_config,
-    delete_project_agent_definition, write_backend_config, write_project_agent_definition,
+    backend_doctor_value, backend_values_for_scope, delete_agent_definition, delete_backend_config,
+    read_agent_definition, set_agent_definition_enabled, write_agent_definition,
+    write_backend_config,
 };
 use automations::{
     automation_delete_result, automation_draft_result, automation_list_result,

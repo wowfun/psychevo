@@ -38,6 +38,103 @@ function uniqueList(values: string[]): string[] {
   return next;
 }
 
+function defaultAgentRecord(): Record<string, unknown> {
+  return managedAgentRecord({
+    name: "translate",
+    description: "Translate user messages",
+    target: "project",
+    enabled: true,
+    instructions: "Translate user messages."
+  });
+}
+
+function managedAgentRecord(input: {
+  name?: string;
+  description?: string;
+  target?: "project" | "profile";
+  enabled?: boolean;
+  instructions?: string;
+  backend?: { ref?: string } | null;
+  entrypoints?: string[];
+  tools?: string[];
+  mcpServers?: string[];
+  rawMarkdown?: string;
+}): Record<string, unknown> {
+  const target = input.target ?? "project";
+  const name = input.name ?? "agent";
+  const description = input.description ?? "";
+  const enabled = input.enabled !== false;
+  const path = target === "project"
+    ? `/tmp/project/.psychevo/agents/${name}.md`
+    : `/tmp/profile/agents/${name}.md`;
+  const entrypoints = input.entrypoints ?? ["subagent"];
+  const instructions = input.instructions ?? "";
+  return {
+    name,
+    description,
+    enabled,
+    source: target,
+    sourceLabel: target === "project" ? "Project" : "Profile",
+    generated: false,
+    target,
+    mutable: true,
+    path,
+    backend: input.backend ?? null,
+    entrypoints,
+    tools: input.tools ?? [],
+    mcpServers: input.mcpServers ?? [],
+    diagnostics: [],
+    instructions,
+    rawMarkdown: input.rawMarkdown ?? renderMockAgentMarkdown(name, description, enabled, entrypoints, instructions)
+  };
+}
+
+function renderMockAgentMarkdown(
+  name: string,
+  description: string,
+  enabled: boolean,
+  entrypoints: string[],
+  instructions: string
+): string {
+  return [
+    "---",
+    `name: ${name}`,
+    `description: ${description}`,
+    `enabled: ${enabled ? "true" : "false"}`,
+    `entrypoints: [${entrypoints.join(", ")}]`,
+    "---",
+    instructions
+  ].join("\n");
+}
+
+function findMockAgent(name: string | undefined, target: string | undefined): Record<string, unknown> | null {
+  const all = [
+    ...gatewayMock.agentRecords,
+    ...gatewayMock.shadowedAgentRecords,
+    ...gatewayMock.disabledAgentRecords
+  ];
+  return all.find((agent) => agent.name === name && (!target || agent.target === target)) ?? null;
+}
+
+function upsertMockAgent(agent: Record<string, unknown>) {
+  const sameIdentity = (item: Record<string, unknown>) => item.name === agent.name && item.target === agent.target;
+  gatewayMock.agentRecords = gatewayMock.agentRecords.filter((item) => !sameIdentity(item));
+  gatewayMock.shadowedAgentRecords = gatewayMock.shadowedAgentRecords.filter((item) => !sameIdentity(item));
+  gatewayMock.disabledAgentRecords = gatewayMock.disabledAgentRecords.filter((item) => !sameIdentity(item));
+  if (agent.enabled === false) {
+    gatewayMock.disabledAgentRecords = [...gatewayMock.disabledAgentRecords, agent];
+  } else {
+    gatewayMock.agentRecords = [...gatewayMock.agentRecords, agent];
+  }
+}
+
+function deleteMockAgent(name: string | undefined, target: string | undefined) {
+  const keep = (agent: Record<string, unknown>) => !(agent.name === name && (!target || agent.target === target));
+  gatewayMock.agentRecords = gatewayMock.agentRecords.filter(keep);
+  gatewayMock.shadowedAgentRecords = gatewayMock.shadowedAgentRecords.filter(keep);
+  gatewayMock.disabledAgentRecords = gatewayMock.disabledAgentRecords.filter(keep);
+}
+
 function defaultCredentialEnv(channel: string): string | null {
   switch (channel) {
     case "wechat":
@@ -376,18 +473,80 @@ vi.mock("@psychevo/client", async () => {
       }
       if (method === "agent/list") {
         return {
-          agents: gatewayMock.agentRecords.length > 0 ? gatewayMock.agentRecords : [
-            {
-              name: "translate",
-              description: "Translate user messages",
-              source: "project",
-              generated: false,
-              path: "/tmp/project/.psychevo/agents/translate.md",
-              entrypoints: ["main"]
-            }
-          ],
-          shadowedAgents: [],
+          agents: gatewayMock.agentRecords.length > 0 ? gatewayMock.agentRecords : [defaultAgentRecord()],
+          shadowedAgents: gatewayMock.shadowedAgentRecords,
+          disabledAgents: gatewayMock.disabledAgentRecords,
           diagnostics: []
+        };
+      }
+      if (method === "agent/read") {
+        const record = params as { name?: string; target?: "project" | "profile" | null };
+        const agent = findMockAgent(record.name, record.target ?? undefined) ?? defaultAgentRecord();
+        return {
+          agent,
+          instructions: typeof agent.instructions === "string" ? agent.instructions : "",
+          rawMarkdown: typeof agent.rawMarkdown === "string" ? agent.rawMarkdown : ""
+        };
+      }
+      if (method === "agent/write") {
+        const record = params as {
+          name?: string;
+          description?: string;
+          target?: "project" | "profile" | null;
+          enabled?: boolean | null;
+          instructions?: string;
+          backend?: { ref?: string } | null;
+          entrypoints?: string[];
+          tools?: string[];
+          mcpServers?: string[];
+          rawMarkdown?: string | null;
+        };
+        if (record.rawMarkdown?.includes("invalid-frontmatter")) {
+          throw new Error("agent markdown is invalid");
+        }
+        const agent = managedAgentRecord({
+          name: record.name ?? "agent",
+          description: record.description ?? "",
+          target: record.target ?? "project",
+          enabled: record.enabled !== false,
+          instructions: record.instructions ?? "",
+          backend: record.backend ?? null,
+          entrypoints: record.entrypoints ?? [],
+          tools: record.tools ?? [],
+          mcpServers: record.mcpServers ?? [],
+          ...(record.rawMarkdown ? { rawMarkdown: record.rawMarkdown } : {})
+        });
+        upsertMockAgent(agent);
+        return {
+          written: true,
+          name: agent.name,
+          path: agent.path,
+          target: agent.target,
+          agent
+        };
+      }
+      if (method === "agent/setEnabled") {
+        const record = params as { name?: string; target?: "project" | "profile" | null; enabled?: boolean };
+        const existing = findMockAgent(record.name, record.target ?? undefined) ?? managedAgentRecord({ name: record.name ?? "agent", target: record.target ?? "project" });
+        const agent: Record<string, unknown> = { ...existing, enabled: record.enabled === true };
+        upsertMockAgent(agent);
+        return {
+          written: true,
+          name: agent.name,
+          path: agent.path,
+          target: agent.target,
+          agent
+        };
+      }
+      if (method === "agent/delete") {
+        const record = params as { name?: string; target?: "project" | "profile" | null };
+        const agent = findMockAgent(record.name, record.target ?? undefined) ?? managedAgentRecord({ name: record.name ?? "agent", target: record.target ?? "project" });
+        deleteMockAgent(record.name, record.target ?? undefined);
+        return {
+          deleted: true,
+          name: agent.name,
+          path: agent.path,
+          target: agent.target
         };
       }
       if (method === "agent/status") {
@@ -701,12 +860,26 @@ vi.mock("@psychevo/client", async () => {
           ?? gatewayMock.skillRecords.find((item) => item.name === record?.name);
         if (!skill) throw new Error("skill not found");
         const body = `# ${skill.name} workflow\n\nFollow the ${skill.name} workflow.\n\n- Confirm prerequisites\n\n\`\`\`sh\npevo ${skill.name}\n\`\`\``;
+        const rawMarkdown = typeof skill.rawMarkdown === "string" ? skill.rawMarkdown : null;
         return {
           ...skill,
           success: true,
-          content: body,
-          preview_content: `---\nname: ${skill.name}\ndescription: ${skill.description}\nallowed-tools:\n  - Bash\n  - Read\n---\n${body}`,
+          content: rawMarkdown ?? body,
+          preview_content: rawMarkdown ?? `---\nname: ${skill.name}\ndescription: ${skill.description}\nallowed-tools:\n  - Bash\n  - Read\n---\n${body}`,
           linked_files: skill.name === "imagegen" ? {} : { references: ["references/guide.md"] }
+        };
+      }
+      if (method === "skill/write") {
+        const record = params as { name?: string; path?: string | null; target?: string | null; rawMarkdown?: string } | undefined;
+        const skill = gatewayMock.skillRecords.find((item) => item.name === record?.name && (!record?.path || item.location === record.path))
+          ?? gatewayMock.skillRecords.find((item) => item.name === record?.name);
+        if (!skill) throw new Error("skill not found");
+        skill.rawMarkdown = record?.rawMarkdown ?? "";
+        return {
+          written: true,
+          name: skill.name,
+          path: skill.location,
+          target: record?.target ?? "global"
         };
       }
       if (method === "skill/setEnabled") {

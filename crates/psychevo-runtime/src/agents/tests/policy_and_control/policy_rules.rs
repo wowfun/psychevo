@@ -139,6 +139,7 @@ pub(crate) fn agent_permission_mode_can_only_narrow_parent_mode() {
         name: "worker".to_string(),
         description: "Worker".to_string(),
         instructions: String::new(),
+        enabled: true,
         file_path: None,
         source: AgentSource::Explicit,
         backend: None,

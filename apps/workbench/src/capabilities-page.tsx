@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { GatewayClient } from "@psychevo/client";
 import { ActionButton, CreatePanel, MarkdownText, Switch } from "@psychevo/components";
 import type { GatewayRequestScope } from "@psychevo/protocol";
-import { LogIn, LogOut, Play, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, X } from "lucide-react";
+import { AgentsConfigPanel } from "./settings-panels/agents";
+import type { BackendConfigTarget, BackendDraft, CapabilityTab, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
-type CapabilityTab = "skills" | "plugins" | "mcp" | "tools";
 type JsonObject = Record<string, unknown>;
 
 type CapabilityRow = {
@@ -28,6 +29,50 @@ type PluginInstallDraft = {
   inspection: JsonObject | null;
 };
 type MutationOptions = { notice?: string; refresh?: boolean };
+type AgentDefinitionState = "active" | "shadowed" | "disabled";
+type AgentsSegment = "definitions" | "backends";
+
+type AgentDefinitionRow = {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  source: string;
+  sourceLabel: string;
+  target: BackendConfigTarget | null;
+  mutable: boolean;
+  path: string | null;
+  entrypoints: string[];
+  tools: string[];
+  mcpServers: string[];
+  diagnostics: string[];
+  backendRef: string;
+  state: AgentDefinitionState;
+  raw: JsonObject;
+};
+
+type AgentDraft = {
+  mode: "form" | "markdown";
+  target: BackendConfigTarget;
+  name: string;
+  description: string;
+  enabled: boolean;
+  instructions: string;
+  backendRef: string;
+  entrypointsText: string;
+  toolsText: string;
+  mcpServersText: string;
+  rawMarkdown: string;
+};
+
+type AgentDetailState = {
+  id: string;
+  loading: boolean;
+  value: JsonObject | null;
+  instructions: string;
+  rawMarkdown: string;
+  error: string | null;
+};
 
 type SkillRow = CapabilityRow & {
   collisionGroup: string[];
@@ -47,6 +92,7 @@ type SkillRow = CapabilityRow & {
 };
 
 const TABS: Array<{ id: CapabilityTab; label: string }> = [
+  { id: "agents", label: "Agents" },
   { id: "skills", label: "Skills" },
   { id: "plugins", label: "Plugins" },
   { id: "mcp", label: "MCP" },
@@ -54,27 +100,58 @@ const TABS: Array<{ id: CapabilityTab; label: string }> = [
 ];
 
 export function CapabilitiesPage({
+  activeTab,
+  backendDraft,
+  backendDoctor,
+  backends,
   client,
   cwd,
   disabled,
+  onActiveTabChange,
+  onAgentSurfaceChanged,
+  onCancelBackendEdit,
+  onChangeBackendDraft,
   onCopyText,
+  onDeleteBackend,
+  onDoctorBackend,
+  onEditBackend,
+  onNewBackend,
+  onSaveBackendDraft,
+  onSetBackendEnabled,
+  onSetBackendEntrypoints,
   scope
 }: {
+  activeTab: CapabilityTab;
+  backendDraft: BackendDraft | null;
+  backendDoctor: Record<string, WorkbenchBackendDoctor>;
+  backends: WorkbenchBackend[];
   client: GatewayClient | null;
   cwd: string;
   disabled: boolean;
+  onActiveTabChange(value: CapabilityTab): void;
+  onAgentSurfaceChanged?: (() => Promise<void> | void) | undefined;
+  onCancelBackendEdit(): void;
+  onChangeBackendDraft(draft: BackendDraft): void;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
+  onDeleteBackend(backend: WorkbenchBackend): void;
+  onDoctorBackend(backend: WorkbenchBackend): void;
+  onEditBackend(backend: WorkbenchBackend): void;
+  onNewBackend(): void;
+  onSaveBackendDraft(draft: BackendDraft): void;
+  onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
+  onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
   scope: GatewayRequestScope | null;
 }) {
-  const [activeTab, setActiveTab] = useState<CapabilityTab>("skills");
   const [query, setQuery] = useState("");
   const [data, setData] = useState<Record<CapabilityTab, JsonObject | null>>({
+    agents: null,
     skills: null,
     plugins: null,
     mcp: null,
     tools: null
   });
   const [selected, setSelected] = useState<Record<CapabilityTab, string | null>>({
+    agents: null,
     skills: null,
     plugins: null,
     mcp: null,
@@ -200,7 +277,7 @@ export function CapabilitiesPage({
             className={activeTab === tab.id ? "is-selected" : ""}
             key={tab.id}
             onClick={() => {
-              setActiveTab(tab.id);
+              onActiveTabChange(tab.id);
               setCreatePanel(null);
               setQuery("");
             }}
@@ -212,21 +289,23 @@ export function CapabilitiesPage({
         ))}
       </div>
 
-      <div className="capabilitiesToolbar">
-        <label>
-          <Search size={15} />
-          <input aria-label={`Search ${tabLabel(activeTab)}`} onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
-        </label>
-        <ActionButton
-          active={createPanel === activeTab}
-          disabled={busy}
-          icon={<Plus size={14} />}
-          onClick={() => setCreatePanel((current) => current === activeTab ? null : activeTab)}
-          variant={createPanel === activeTab ? "neutral" : "primary"}
-        >
-          {createActionLabel(activeTab)}
-        </ActionButton>
-      </div>
+      {activeTab !== "agents" && (
+        <div className="capabilitiesToolbar">
+          <label>
+            <Search size={15} />
+            <input aria-label={`Search ${tabLabel(activeTab)}`} onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
+          </label>
+          <ActionButton
+            active={createPanel === activeTab}
+            disabled={busy}
+            icon={<Plus size={14} />}
+            onClick={() => setCreatePanel((current) => current === activeTab ? null : activeTab)}
+            variant={createPanel === activeTab ? "neutral" : "primary"}
+          >
+            {createActionLabel(activeTab)}
+          </ActionButton>
+        </div>
+      )}
 
       {(error || notice || oauthSession) && (
         <div className={`capabilityBanner ${error ? "is-error" : ""}`}>
@@ -234,7 +313,31 @@ export function CapabilitiesPage({
         </div>
       )}
 
-      {activeTab === "skills" ? (
+      {activeTab === "agents" ? (
+        <AgentsCapabilityPanel
+          backendDraft={backendDraft}
+          backendDoctor={backendDoctor}
+          backends={backends}
+          busy={busy}
+          client={client}
+          data={data.agents}
+          disabled={disabled}
+          loading={loading}
+          mutate={mutate}
+          onAgentSurfaceChanged={onAgentSurfaceChanged}
+          onCancelBackendEdit={onCancelBackendEdit}
+          onChangeBackendDraft={onChangeBackendDraft}
+          onCopyText={onCopyText}
+          onDeleteBackend={onDeleteBackend}
+          onDoctorBackend={onDoctorBackend}
+          onEditBackend={onEditBackend}
+          onNewBackend={onNewBackend}
+          onSaveBackendDraft={onSaveBackendDraft}
+          onSetBackendEnabled={onSetBackendEnabled}
+          onSetBackendEntrypoints={onSetBackendEntrypoints}
+          scope={requestScope}
+        />
+      ) : activeTab === "skills" ? (
         <SkillsPanel
           busy={busy}
           client={client}
@@ -287,7 +390,7 @@ export function CapabilitiesPage({
                       >
                         <span className="capabilityRowMain">
                           <strong>{row.name}</strong>
-                          <small>{row.description || row.status}</small>
+                          <RowDescription fallback={row.status} value={row.description} />
                         </span>
                         <CapabilityBadges row={row} />
                       </button>
@@ -313,7 +416,7 @@ export function CapabilitiesPage({
                   >
                     <span className="capabilityRowMain">
                       <strong>{row.name}</strong>
-                      <small>{row.description || row.status}</small>
+                      <RowDescription fallback={row.status} value={row.description} />
                     </span>
                     <span className="capabilityRowMeta">
                       <span className={row.enabled ? "capabilityChip is-on" : "capabilityChip"}>{row.enabled ? "On" : "Off"}</span>
@@ -357,6 +460,531 @@ export function CapabilitiesPage({
   );
 }
 
+function AgentsCapabilityPanel({
+  backendDraft,
+  backendDoctor,
+  backends,
+  busy,
+  client,
+  data,
+  disabled,
+  loading,
+  mutate,
+  onAgentSurfaceChanged,
+  onCancelBackendEdit,
+  onChangeBackendDraft,
+  onCopyText,
+  onDeleteBackend,
+  onDoctorBackend,
+  onEditBackend,
+  onNewBackend,
+  onSaveBackendDraft,
+  onSetBackendEnabled,
+  onSetBackendEntrypoints,
+  scope
+}: {
+  backendDraft: BackendDraft | null;
+  backendDoctor: Record<string, WorkbenchBackendDoctor>;
+  backends: WorkbenchBackend[];
+  busy: boolean;
+  client: GatewayClient | null;
+  data: JsonObject | null;
+  disabled: boolean;
+  loading: boolean;
+  mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
+  onAgentSurfaceChanged?: (() => Promise<void> | void) | undefined;
+  onCancelBackendEdit(): void;
+  onChangeBackendDraft(draft: BackendDraft): void;
+  onCopyText?: ((text: string) => void | Promise<void>) | undefined;
+  onDeleteBackend(backend: WorkbenchBackend): void;
+  onDoctorBackend(backend: WorkbenchBackend): void;
+  onEditBackend(backend: WorkbenchBackend): void;
+  onNewBackend(): void;
+  onSaveBackendDraft(draft: BackendDraft): void;
+  onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
+  onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
+  scope: GatewayRequestScope | null;
+}) {
+  const [segment, setSegment] = useState<AgentsSegment>("definitions");
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<AgentDraft | null>(null);
+  const [editing, setEditing] = useState<AgentDefinitionRow | null>(null);
+  const [detail, setDetail] = useState<AgentDetailState | null>(null);
+  const [pendingSelection, setPendingSelection] = useState<{ name: string; target: BackendConfigTarget } | null>(null);
+  const [panelError, setPanelError] = useState<string | null>(null);
+
+  const allRows = useMemo(() => agentRowsFromData(data), [data]);
+  const rows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return allRows.filter((row) => !needle || `${row.name} ${row.description} ${row.sourceLabel}`.toLowerCase().includes(needle));
+  }, [allRows, query]);
+  const selected = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
+  const selectedDetail = selected && detail?.id === selected.id ? detail : null;
+
+  useEffect(() => {
+    if (!pendingSelection) return;
+    const next = allRows.find((row) => row.name === pendingSelection.name && row.target === pendingSelection.target);
+    if (!next) return;
+    setSelectedId(next.id);
+    setPendingSelection(null);
+  }, [allRows, pendingSelection]);
+
+  useEffect(() => {
+    if (!client || !scope || !selected || !selected.target || draft) {
+      if (!selected || draft) setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setDetail({
+      id: selected.id,
+      loading: true,
+      value: null,
+      instructions: "",
+      rawMarkdown: "",
+      error: null
+    });
+    void client.request("agent/read", { name: selected.name, target: selected.target, scope }).then((value) => {
+      const result = objectValue(value);
+      if (cancelled) return;
+      setDetail({
+        id: selected.id,
+        loading: false,
+        value: objectField(result, "agent"),
+        instructions: stringField(result, "instructions"),
+        rawMarkdown: stringField(result, "rawMarkdown"),
+        error: null
+      });
+    }).catch((error) => {
+      if (!cancelled) {
+        setDetail({
+          id: selected.id,
+          loading: false,
+          value: null,
+          instructions: "",
+          rawMarkdown: "",
+          error: errorMessage(error)
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, draft, scope?.cwd, selected?.id, selected?.target]);
+
+  if (!client || !scope) {
+    return <div className="capabilityEmpty">Gateway unavailable</div>;
+  }
+
+  function openCreate() {
+    setEditing(null);
+    setPanelError(null);
+    setSelectedId(null);
+    setDraft(emptyAgentDraft());
+  }
+
+  function closeDraft() {
+    setDraft(null);
+    setEditing(null);
+    setPanelError(null);
+  }
+
+  async function openEdit(row: AgentDefinitionRow) {
+    if (!row.target) return;
+    setPanelError(null);
+    try {
+      const result = detail?.id === row.id && detail.value
+        ? {
+            agent: detail.value,
+            instructions: detail.instructions,
+            rawMarkdown: detail.rawMarkdown
+          }
+        : objectValue(await client!.request("agent/read", { name: row.name, target: row.target, scope }));
+      const agent = objectField(result, "agent");
+      setEditing(row);
+      setDraft(agentDraftFromRead(row, agent, stringField(result, "instructions"), stringField(result, "rawMarkdown")));
+    } catch (error) {
+      setPanelError(errorMessage(error));
+    }
+  }
+
+  async function saveDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!draft) return;
+    if (!client) return;
+    const activeClient = client;
+    const name = draft.name.trim();
+    if (!name) return;
+    const ok = await mutate(async () => {
+      const result = await activeClient.request("agent/write", {
+        name,
+        description: draft.description.trim(),
+        target: draft.target,
+        enabled: draft.enabled,
+        instructions: draft.instructions,
+        backend: draft.backendRef.trim() ? { ref: draft.backendRef.trim() } : null,
+        entrypoints: splitList(draft.entrypointsText) ?? [],
+        tools: splitList(draft.toolsText) ?? [],
+        mcpServers: splitList(draft.mcpServersText) ?? [],
+        rawMarkdown: draft.mode === "markdown" ? draft.rawMarkdown : null,
+        scope
+      });
+      await onAgentSurfaceChanged?.();
+      return result;
+    }, { notice: "Agent saved." });
+    if (ok) {
+      setPendingSelection({ name, target: draft.target });
+      closeDraft();
+    }
+  }
+
+  function setDraftMode(mode: AgentDraft["mode"]) {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      mode,
+      rawMarkdown: draft.rawMarkdown.trim() ? draft.rawMarkdown : renderAgentDraftMarkdown(draft)
+    });
+  }
+
+  return (
+    <div className="agentsCapability">
+      <div className="agentCapabilitySegments" role="tablist" aria-label="Agent management">
+        <button className={segment === "definitions" ? "is-selected" : ""} onClick={() => setSegment("definitions")} role="tab" aria-selected={segment === "definitions"} type="button">
+          Definitions
+        </button>
+        <button className={segment === "backends" ? "is-selected" : ""} onClick={() => setSegment("backends")} role="tab" aria-selected={segment === "backends"} type="button">
+          ACP Backends
+        </button>
+      </div>
+
+      {segment === "backends" ? (
+        <AgentsConfigPanel
+          backendDraft={backendDraft}
+          backendDoctor={backendDoctor}
+          backends={backends}
+          disabled={disabled}
+          onCancelBackendEdit={onCancelBackendEdit}
+          onChangeBackendDraft={onChangeBackendDraft}
+          onDeleteBackend={onDeleteBackend}
+          onDoctorBackend={onDoctorBackend}
+          onEditBackend={onEditBackend}
+          onNewBackend={onNewBackend}
+          onSaveBackendDraft={onSaveBackendDraft}
+          onSetBackendEnabled={onSetBackendEnabled}
+          onSetBackendEntrypoints={onSetBackendEntrypoints}
+        />
+      ) : (
+        <>
+          <div className="capabilitiesToolbar agentDefinitionsToolbar">
+            <label>
+              <Search size={15} />
+              <input aria-label="Search Agents" onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
+            </label>
+            <ActionButton disabled={busy} icon={<Plus size={14} />} onClick={openCreate} variant="primary">
+              Create agent
+            </ActionButton>
+          </div>
+
+          {panelError && <div className="capabilityBanner is-error">{panelError}</div>}
+
+          <div className="capabilitiesGrid agentsDefinitionsGrid">
+            <div className="capabilityList" role="list">
+              {loading && <div className="capabilityEmpty">Loading</div>}
+              {!loading && rows.length === 0 && <div className="capabilityEmpty">No agent definitions</div>}
+              {rows.map((row) => (
+                <div className={row.id === selected?.id ? "capabilityRow capabilityRowWithSwitch agentDefinitionRow is-selected" : "capabilityRow capabilityRowWithSwitch agentDefinitionRow"} key={row.id} role="listitem">
+                  <button aria-label={`Agent ${row.name}`} className="capabilityRowSelect" onClick={() => setSelectedId(row.id)} type="button">
+                    <span className="capabilityRowMain">
+                      <strong>{row.name}</strong>
+                      <RowDescription fallback={agentStateLabel(row.state)} value={row.description} />
+                      <span className="skillRowMetadata">{agentRowMetadata(row)}</span>
+                    </span>
+                    <CapabilityBadges row={{
+                      ...row,
+                      badges: [targetLabel(row.target), agentStateLabel(row.state)].filter(Boolean),
+                      status: agentStateLabel(row.state)
+                    }} />
+                  </button>
+                  <Switch
+                    ariaLabel={row.enabled ? `Disable ${row.name}` : `Enable ${row.name}`}
+                    checked={row.enabled}
+                    className="capabilityRowSwitch"
+                    disabled={busy || !row.mutable || !row.target}
+                    label={row.enabled ? "Enabled" : "Disabled"}
+                    onCheckedChange={(enabled) => {
+                      if (!row.target) return;
+                      void mutate(async () => {
+                        const result = await client.request("agent/setEnabled", { name: row.name, target: row.target, enabled, scope });
+                        await onAgentSurfaceChanged?.();
+                        return result;
+                      }, { notice: enabled ? "Agent enabled." : "Agent disabled." });
+                    }}
+                    showLabel={false}
+                    size="compact"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <aside className="capabilityDetail agentDefinitionDetail" aria-label="Agent definition detail">
+              {draft ? (
+                <>
+                  <div className="capabilityDetailHeader">
+                    <div>
+                      <h3>{editing ? editing.name : "Create agent"}</h3>
+                      <span>{editing ? [targetLabel(editing.target), editing.sourceLabel].filter(Boolean).join(" · ") : "Project/Profile Markdown definition"}</span>
+                    </div>
+                  </div>
+                  <AgentDefinitionEditorForm
+                    busy={busy}
+                    draft={draft}
+                    editing={Boolean(editing)}
+                    onCancel={closeDraft}
+                    onChange={setDraft}
+                    onModeChange={setDraftMode}
+                    onSubmit={saveDraft}
+                  />
+                </>
+              ) : selected ? (
+                <>
+                  <div className="capabilityDetailHeader">
+                    <div>
+                      <h3>{selected.name}</h3>
+                      <span>{[targetLabel(selected.target), selected.sourceLabel, agentStateLabel(selected.state)].filter(Boolean).join(" · ")}</span>
+                    </div>
+                    <div className="capabilityDetailHeaderActions">
+                      <button
+                        disabled={busy || !selected.mutable || !selected.target}
+                        onClick={() => {
+                          if (!selected.target || !confirmAction(`Delete agent ${selected.name}?`)) return;
+                          void mutate(async () => {
+                            const result = await client.request("agent/delete", { name: selected.name, target: selected.target, scope });
+                            await onAgentSurfaceChanged?.();
+                            return result;
+                          }, { notice: "Agent deleted." });
+                        }}
+                        title={selected.mutable && selected.target ? "Delete" : "Only mutable Project/Profile agents can be deleted here"}
+                        type="button"
+                      >
+                        <Trash2 size={14} /> Delete
+                      </button>
+                    </div>
+                  </div>
+                  <AgentDefinitionFields row={selected} />
+                  <MarkdownDefinitionPreview
+                    copyLabel="Copy agent Markdown"
+                    editDisabled={busy || !selected.mutable || !selected.target || selectedDetail?.loading === true}
+                    editDisabledReason={selected.mutable && selected.target ? "Agent Markdown is still loading" : "Only mutable Project/Profile agents can be edited here"}
+                    editLabel={`Edit ${selected.name} Markdown`}
+                    label="Agent Markdown preview"
+                    loading={selectedDetail?.loading}
+                    onCopyText={onCopyText}
+                    onEdit={() => void openEdit(selected)}
+                    preview={selectedDetail?.rawMarkdown ?? ""}
+                    error={selectedDetail?.error}
+                  />
+                </>
+              ) : (
+                <div className="capabilityEmpty">Select an agent</div>
+              )}
+            </aside>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AgentDefinitionEditorForm({
+  busy,
+  draft,
+  editing,
+  onCancel,
+  onChange,
+  onModeChange,
+  onSubmit
+}: {
+  busy: boolean;
+  draft: AgentDraft;
+  editing: boolean;
+  onCancel(): void;
+  onChange(draft: AgentDraft): void;
+  onModeChange(mode: AgentDraft["mode"]): void;
+  onSubmit(event: FormEvent<HTMLFormElement>): void;
+}) {
+  return (
+    <form aria-label="Agent definition" className="capabilityForm agentDefinitionForm" onSubmit={onSubmit}>
+      <div className="agentEditorMode" role="tablist" aria-label="Agent editor mode">
+        <button aria-selected={draft.mode === "form"} className={draft.mode === "form" ? "is-selected" : ""} onClick={() => onModeChange("form")} role="tab" type="button">Form</button>
+        <button aria-selected={draft.mode === "markdown"} className={draft.mode === "markdown" ? "is-selected" : ""} onClick={() => onModeChange("markdown")} role="tab" type="button">Markdown</button>
+      </div>
+
+      <label>
+        <span>Target</span>
+        <select aria-label="Agent target" disabled={editing || busy} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
+          <option value="project">Project</option>
+          <option value="profile">Profile</option>
+        </select>
+      </label>
+      <label>
+        <span>Name</span>
+        <input aria-label="Agent name" disabled={editing || busy} onChange={(event) => onChange({ ...draft, name: event.target.value })} value={draft.name} />
+      </label>
+      {draft.mode === "form" ? (
+        <>
+          <label>
+            <span>Description</span>
+            <input aria-label="Agent description" disabled={busy} onChange={(event) => onChange({ ...draft, description: event.target.value })} value={draft.description} />
+          </label>
+          <label className="agentDefinitionSwitch">
+            <span>Enabled</span>
+            <Switch ariaLabel="Agent enabled" checked={draft.enabled} disabled={busy} label={draft.enabled ? "Enabled" : "Disabled"} onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
+          </label>
+          <label className="agentWideField">
+            <span>Instructions</span>
+            <textarea aria-label="Agent instructions" disabled={busy} onChange={(event) => onChange({ ...draft, instructions: event.target.value })} value={draft.instructions} />
+          </label>
+          <label>
+            <span>Backend ref</span>
+            <input aria-label="Agent backend ref" disabled={busy} onChange={(event) => onChange({ ...draft, backendRef: event.target.value })} value={draft.backendRef} />
+          </label>
+          <label>
+            <span>Entrypoints</span>
+            <input aria-label="Agent entrypoints" disabled={busy} onChange={(event) => onChange({ ...draft, entrypointsText: event.target.value })} value={draft.entrypointsText} />
+          </label>
+          <label>
+            <span>Tools</span>
+            <input aria-label="Agent tools" disabled={busy} onChange={(event) => onChange({ ...draft, toolsText: event.target.value })} value={draft.toolsText} />
+          </label>
+          <label>
+            <span>MCP servers</span>
+            <input aria-label="Agent MCP servers" disabled={busy} onChange={(event) => onChange({ ...draft, mcpServersText: event.target.value })} value={draft.mcpServersText} />
+          </label>
+        </>
+      ) : (
+        <label className="agentWideField">
+          <span>Markdown</span>
+          <textarea aria-label="Agent Markdown" disabled={busy} onChange={(event) => onChange({ ...draft, rawMarkdown: event.target.value })} spellCheck={false} value={draft.rawMarkdown} />
+        </label>
+      )}
+      <div className="capabilityFormActions">
+        <ActionButton disabled={busy} icon={<X size={14} />} onClick={onCancel} type="button" variant="ghost">Cancel</ActionButton>
+        <ActionButton disabled={busy || !draft.name.trim()} icon={<Save size={14} />} type="submit" variant="primary">Save</ActionButton>
+      </div>
+    </form>
+  );
+}
+
+function MarkdownDefinitionPreview({
+  copyLabel,
+  editDisabled,
+  editDisabledReason,
+  editLabel,
+  error,
+  label,
+  loading,
+  onCopyText,
+  onEdit,
+  preview
+}: {
+  copyLabel: string;
+  editDisabled?: boolean;
+  editDisabledReason?: string;
+  editLabel: string;
+  error?: string | null | undefined;
+  label: string;
+  loading?: boolean | undefined;
+  onCopyText?: ((text: string) => void | Promise<void>) | undefined;
+  onEdit?: (() => void) | undefined;
+  preview: string;
+}) {
+  return (
+    <section className="skillPreview markdownDefinitionPreview" aria-label={label}>
+      {loading ? "Loading" : error ? error : preview ? (
+        <>
+          <MarkdownText
+            copyLabel={copyLabel}
+            copyText={preview}
+            onCopyText={onCopyText}
+            text={boundedText(preview, 4000)}
+          />
+          {onEdit && (
+            <button
+              aria-label={editLabel}
+              className="markdownDefinitionEdit"
+              disabled={editDisabled}
+              onClick={onEdit}
+              title={editDisabled ? editDisabledReason : editLabel}
+              type="button"
+            >
+              <Edit3 size={14} aria-hidden />
+              <span className="pevo-srOnly">{editLabel}</span>
+            </button>
+          )}
+        </>
+      ) : "No preview"}
+    </section>
+  );
+}
+
+function MarkdownDefinitionEditor({
+  ariaLabel,
+  busy,
+  onCancel,
+  onChange,
+  onSave,
+  value
+}: {
+  ariaLabel: string;
+  busy: boolean;
+  onCancel(): void;
+  onChange(value: string): void;
+  onSave(): void;
+  value: string;
+}) {
+  return (
+    <section className="markdownDefinitionEditor" aria-label={ariaLabel}>
+      <textarea
+        aria-label={ariaLabel}
+        disabled={busy}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+        value={value}
+      />
+      <div className="capabilityFormActions">
+        <ActionButton disabled={busy} icon={<X size={14} />} onClick={onCancel} type="button" variant="ghost">Cancel</ActionButton>
+        <ActionButton disabled={busy || !value.trim()} icon={<Save size={14} />} onClick={onSave} type="button" variant="primary">Save</ActionButton>
+      </div>
+    </section>
+  );
+}
+
+function AgentDefinitionFields({ row }: { row: AgentDefinitionRow }) {
+  const detailFields = ([
+    ["Target", targetLabel(row.target)],
+    ["Source", row.sourceLabel],
+    ["State", agentStateLabel(row.state)],
+    ["Path", row.path ?? ""],
+    ["Backend", row.backendRef],
+    ["Entrypoints", row.entrypoints.join(", ")],
+    ["Tools", row.tools.join(", ")],
+    ["MCP Servers", row.mcpServers.join(", ")]
+  ] as Array<[string, string]>).filter((entry): entry is [string, string] => entry[1].trim().length > 0);
+  return (
+    <div className="capabilityStack">
+      <dl className="capabilityKeyValues">
+        {detailFields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+      </dl>
+      {row.diagnostics.length > 0 && (
+        <section className="skillDiagnostics" aria-label="Agent diagnostics">
+          {row.diagnostics.map((diagnostic) => <span className="skillIssue" key={diagnostic}>{diagnostic}</span>)}
+        </section>
+      )}
+    </div>
+  );
+}
+
 function SkillsPanel({
   busy,
   client,
@@ -391,6 +1019,7 @@ function SkillsPanel({
   skillInstall: SkillInstallDraft;
 }) {
   const [detail, setDetail] = useState<{ id: string; loading: boolean; value: JsonObject | null; error: string | null } | null>(null);
+  const [markdownDraft, setMarkdownDraft] = useState<{ id: string; text: string } | null>(null);
 
   const allRows = useMemo(() => skillRowsFromData(data), [data]);
   const rows = useMemo(() => {
@@ -400,6 +1029,10 @@ function SkillsPanel({
 
   const activeId = selectedId && rows.some((row) => row.id === selectedId) ? selectedId : rows[0]?.id ?? null;
   const row = rows.find((item) => item.id === activeId) ?? null;
+
+  useEffect(() => {
+    setMarkdownDraft(null);
+  }, [row?.id]);
 
   useEffect(() => {
     if (!client || !scope || !row) {
@@ -466,7 +1099,7 @@ function SkillsPanel({
                 <button aria-label={`Skill ${item.name}`} className="skillRowSelect" onClick={() => onSelect(item.id)} type="button">
                   <span className="capabilityRowMain">
                     <strong>{item.name}</strong>
-                    <small>{item.description || readinessLabel(item.readiness)}</small>
+                    <RowDescription fallback={readinessLabel(item.readiness)} value={item.description} />
                     {metadata && <span className="skillRowMetadata">{metadata}</span>}
                   </span>
                 </button>
@@ -493,24 +1126,45 @@ function SkillsPanel({
                   <h3>{row.name}</h3>
                   <span>{skillDetailSummary(row)}</span>
                 </div>
+                <div className="capabilityDetailHeaderActions">
+                  <button
+                    disabled={busy || !mutableTargetForSkill(row)}
+                    onClick={() => {
+                      const target = mutableTargetForSkill(row);
+                      if (!target || !confirmAction(`Uninstall skill ${row.name}?`)) return;
+                      void mutate(() => client.request("skill/uninstall", { name: row.name, path: row.location || null, target, scope }));
+                    }}
+                    title={mutableTargetForSkill(row) ? "Uninstall" : "Only profile/project-installed skills can be uninstalled here"}
+                    type="button"
+                  >
+                    <Trash2 size={14} /> Uninstall
+                  </button>
+                </div>
               </div>
 
-              <div className="capabilityActionGrid">
-                <button
-                  disabled={busy || !mutableTargetForSkill(row)}
-                  onClick={() => {
-                    const target = mutableTargetForSkill(row);
-                    if (!target || !confirmAction(`Uninstall skill ${row.name}?`)) return;
-                    void mutate(() => client.request("skill/uninstall", { name: row.name, path: row.location || null, target, scope }));
-                  }}
-                  title={mutableTargetForSkill(row) ? "Uninstall" : "Only profile/project-installed skills can be uninstalled here"}
-                  type="button"
-                >
-                  <Trash2 size={14} /> Uninstall
-                </button>
-              </div>
-
-              <SkillDetailFields row={row} detail={detail?.id === row.id ? detail : null} onCopyText={onCopyText} />
+              <SkillDetailFields
+                busy={busy}
+                detail={detail?.id === row.id ? detail : null}
+                markdownDraft={markdownDraft?.id === row.id ? markdownDraft.text : null}
+                onCancelMarkdownEdit={() => setMarkdownDraft(null)}
+                onChangeMarkdownDraft={(text) => setMarkdownDraft({ id: row.id, text })}
+                onCopyText={onCopyText}
+                onEditMarkdown={(preview) => setMarkdownDraft({ id: row.id, text: preview })}
+                onSaveMarkdown={(text) => {
+                  const target = mutableMarkdownTargetForSkill(row);
+                  if (!target) return;
+                  void mutate(() => client.request("skill/write", {
+                    name: row.name,
+                    path: row.location || null,
+                    target,
+                    rawMarkdown: text,
+                    scope
+                  }), { notice: "Skill saved." }).then((ok) => {
+                    if (ok) setMarkdownDraft(null);
+                  });
+                }}
+                row={row}
+              />
             </>
           ) : (
             <div className="capabilityEmpty">Select an item</div>
@@ -523,12 +1177,24 @@ function SkillsPanel({
 }
 
 function SkillDetailFields({
+  busy,
   detail,
+  markdownDraft,
+  onCancelMarkdownEdit,
+  onChangeMarkdownDraft,
   onCopyText,
+  onEditMarkdown,
+  onSaveMarkdown,
   row
 }: {
+  busy: boolean;
   detail: { loading: boolean; value: JsonObject | null; error: string | null } | null;
+  markdownDraft: string | null;
+  onCancelMarkdownEdit(): void;
+  onChangeMarkdownDraft(text: string): void;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
+  onEditMarkdown(preview: string): void;
+  onSaveMarkdown(text: string): void;
   row: SkillRow;
 }) {
   const value = detail?.value ?? {};
@@ -560,16 +1226,29 @@ function SkillDetailFields({
           </section>
         )}
       </div>
-      <section className="skillPreview" aria-label="SKILL.md preview">
-        {detail?.loading ? "Loading" : detail?.error ? detail.error : preview ? (
-          <MarkdownText
-            copyLabel="Copy SKILL.md"
-            copyText={preview}
-            onCopyText={onCopyText}
-            text={boundedText(preview, 4000)}
-          />
-        ) : "No preview"}
-      </section>
+      {markdownDraft !== null ? (
+        <MarkdownDefinitionEditor
+          ariaLabel="SKILL.md editor"
+          busy={busy}
+          onCancel={onCancelMarkdownEdit}
+          onChange={onChangeMarkdownDraft}
+          onSave={() => onSaveMarkdown(markdownDraft)}
+          value={markdownDraft}
+        />
+      ) : (
+        <MarkdownDefinitionPreview
+          copyLabel="Copy SKILL.md"
+          editDisabled={busy || !mutableMarkdownTargetForSkill(row) || detail?.loading === true}
+          editDisabledReason={skillMarkdownEditReason(row, detail?.loading === true)}
+          editLabel={`Edit ${row.name} SKILL.md`}
+          error={detail?.error}
+          label="SKILL.md preview"
+          loading={detail?.loading}
+          onCopyText={onCopyText}
+          onEdit={preview ? () => onEditMarkdown(preview) : undefined}
+          preview={preview}
+        />
+      )}
     </div>
   );
 }
@@ -819,7 +1498,133 @@ function CapabilityForms(props: {
   );
 }
 
+function agentRowsFromData(data: JsonObject | null): AgentDefinitionRow[] {
+  if (!data) return [];
+  return [
+    ...agentRowsFromArray(arrayObjects(data.agents), "active"),
+    ...agentRowsFromArray(arrayObjects(data.shadowedAgents), "shadowed"),
+    ...agentRowsFromArray(arrayObjects(data.disabledAgents), "disabled")
+  ].filter((row) => row.target === "project" || row.target === "profile");
+}
+
+function agentRowsFromArray(values: JsonObject[], state: AgentDefinitionState): AgentDefinitionRow[] {
+  return values.map((agent, index) => {
+    const target = parseAgentTarget(objectValue(agent).target);
+    const name = stringField(agent, "name");
+    const source = stringField(agent, "source");
+    const sourceLabel = stringField(agent, "sourceLabel") || source;
+    const path = optionalString(agent.path);
+    const backend = objectField(agent, "backend");
+    return {
+      id: `${state}:${target ?? source}:${name}:${path ?? index}`,
+      name,
+      description: stringField(agent, "description"),
+      enabled: objectValue(agent).enabled !== false,
+      source,
+      sourceLabel: sourceLabel || targetLabel(target),
+      target,
+      mutable: boolField(agent, "mutable"),
+      path,
+      entrypoints: arrayStrings(agent.entrypoints),
+      tools: arrayStrings(agent.tools),
+      mcpServers: arrayStrings(agent.mcpServers),
+      diagnostics: arrayObjects(agent.diagnostics).map((diagnostic) => stringField(diagnostic, "message")).filter(Boolean),
+      backendRef: stringField(backend, "ref"),
+      state,
+      raw: agent
+    };
+  }).filter((row) => row.name);
+}
+
+function emptyAgentDraft(): AgentDraft {
+  return {
+    mode: "form",
+    target: "project",
+    name: "",
+    description: "",
+    enabled: true,
+    instructions: "",
+    backendRef: "",
+    entrypointsText: "subagent",
+    toolsText: "",
+    mcpServersText: "",
+    rawMarkdown: "---\nname: \ndescription: \nenabled: true\nentrypoints: [subagent]\n---\n"
+  };
+}
+
+function agentDraftFromRead(row: AgentDefinitionRow, agent: JsonObject, instructions: string, rawMarkdown: string): AgentDraft {
+  const backend = objectField(agent, "backend");
+  return {
+    mode: "form",
+    target: row.target ?? parseAgentTarget(agent.target) ?? "project",
+    name: stringField(agent, "name") || row.name,
+    description: stringField(agent, "description") || row.description,
+    enabled: objectValue(agent).enabled !== false,
+    instructions,
+    backendRef: stringField(backend, "ref"),
+    entrypointsText: arrayStrings(agent.entrypoints).join(", "),
+    toolsText: arrayStrings(agent.tools).join(", "),
+    mcpServersText: arrayStrings(agent.mcpServers).join(", "),
+    rawMarkdown
+  };
+}
+
+function renderAgentDraftMarkdown(draft: AgentDraft): string {
+  const lines = [
+    "---",
+    `name: ${draft.name.trim()}`,
+    `description: ${draft.description.trim()}`,
+    `enabled: ${draft.enabled ? "true" : "false"}`
+  ];
+  const entrypoints = splitList(draft.entrypointsText) ?? [];
+  if (draft.backendRef.trim()) {
+    lines.push("backend:", `  ref: ${draft.backendRef.trim()}`);
+  }
+  if (entrypoints.length > 0) {
+    lines.push(`entrypoints: [${entrypoints.join(", ")}]`);
+  }
+  const tools = splitList(draft.toolsText) ?? [];
+  if (tools.length > 0) {
+    lines.push("tools:", ...tools.map((tool) => `  - ${tool}`));
+  }
+  const mcpServers = splitList(draft.mcpServersText) ?? [];
+  if (mcpServers.length > 0) {
+    lines.push("mcpServers:", ...mcpServers.map((server) => `  - ${server}`));
+  }
+  lines.push("---", draft.instructions);
+  return lines.join("\n");
+}
+
+function parseAgentTarget(value: unknown): BackendConfigTarget | null {
+  return value === "project" || value === "profile" ? value : null;
+}
+
+function agentTargetValue(value: string): BackendConfigTarget {
+  return value === "profile" ? "profile" : "project";
+}
+
+function targetLabel(value: BackendConfigTarget | null): string {
+  if (value === "project") return "Project";
+  if (value === "profile") return "Profile";
+  return "";
+}
+
+function agentStateLabel(value: AgentDefinitionState): string {
+  if (value === "shadowed") return "Shadowed";
+  if (value === "disabled") return "Disabled";
+  return "Active";
+}
+
+function agentRowMetadata(row: AgentDefinitionRow): string {
+  const values = [targetLabel(row.target), row.sourceLabel];
+  if (row.state !== "active") values.push(agentStateLabel(row.state));
+  if (!row.mutable) values.push("Read-only");
+  if (row.diagnostics.length > 0) values.push("Diagnostics");
+  return values.filter(Boolean).join(" · ");
+}
+
 async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: GatewayRequestScope) {
+  if (tab === "agents") return client.request("agent/list", { scope });
   if (tab === "skills") return client.request("skill/list", { scope });
   if (tab === "plugins") return client.request("plugin/list", { scope });
   if (tab === "mcp") return client.request("mcp/list", { scope });
@@ -935,6 +1740,20 @@ function mutableTargetForSkill(row: SkillRow): "global" | "project" | null {
   if (row.source === "project") return "project";
   if (row.source === "global") return "global";
   return null;
+}
+
+function mutableMarkdownTargetForSkill(row: SkillRow): "global" | "project" | null {
+  if (!row.location || !row.skillDir) return null;
+  const location = normalizePathText(row.location);
+  const skillDir = normalizePathText(row.skillDir);
+  if (location !== `${skillDir}/SKILL.md`) return null;
+  return mutableTargetForSkill(row);
+}
+
+function skillMarkdownEditReason(row: SkillRow, loading: boolean): string {
+  if (loading) return "SKILL.md is still loading";
+  if (!mutableTargetForSkill(row)) return "Only Project/Profile skills can be edited here";
+  return "Only SKILL.md package files can be edited here";
 }
 
 function linkedFilesText(value: JsonObject): string {
@@ -1097,6 +1916,10 @@ function stringField(value: unknown, key: string): string {
   return typeof entry === "string" ? entry : "";
 }
 
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
 function boolField(value: unknown, key: string): boolean {
   return objectValue(value)[key] === true;
 }
@@ -1119,6 +1942,7 @@ function tabLabel(tab: CapabilityTab): string {
 }
 
 function createActionLabel(tab: CapabilityTab): string {
+  if (tab === "agents") return "Create agent";
   if (tab === "skills") return "Install skill";
   if (tab === "plugins") return "Install plugin";
   if (tab === "mcp") return "Add MCP server";
@@ -1130,6 +1954,7 @@ function hasCapabilityRowSwitch(tab: CapabilityTab): boolean {
 }
 
 function rowKindLabel(tab: CapabilityTab): string {
+  if (tab === "agents") return "Agent";
   if (tab === "plugins") return "Plugin";
   if (tab === "mcp") return "MCP";
   if (tab === "tools") return "Toolset";
@@ -1143,6 +1968,11 @@ function CapabilityBadges({ row }: { row: CapabilityRow }) {
       {row.badges.slice(0, 2).map((badge) => <span className="capabilityChip" key={badge}>{badge}</span>)}
     </span>
   );
+}
+
+function RowDescription({ fallback, value }: { fallback: string; value: string }) {
+  const text = value || fallback;
+  return <small title={text}>{text}</small>;
 }
 
 function labelForKey(value: string): string {

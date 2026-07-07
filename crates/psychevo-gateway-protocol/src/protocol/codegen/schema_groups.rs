@@ -10,13 +10,21 @@ fn schema_group_module(name: &str) -> &'static str {
     }
     if matches!(
         name,
-        "AgentListParams" | "AgentReadParams" | "AgentWriteParams" | "AgentDeleteParams"
+        "AgentListParams"
+            | "AgentReadParams"
+            | "AgentWriteParams"
+            | "AgentSetEnabledParams"
+            | "AgentDeleteParams"
     ) {
         return "gateway/agents/requests";
     }
     if matches!(
         name,
-        "AgentListResult" | "AgentReadResult" | "AgentWriteResult" | "AgentDeleteResult"
+        "AgentListResult"
+            | "AgentReadResult"
+            | "AgentWriteResult"
+            | "AgentSetEnabledResult"
+            | "AgentDeleteResult"
     ) {
         return "gateway/agents/results";
     }

@@ -18,10 +18,17 @@ export function parseAgentList(value: unknown): WorkbenchAgent[] {
         return {
           name: stringField(item.name),
           description: stringField(item.description),
+          enabled: item.enabled !== false,
           source: stringField(item.source),
+          sourceLabel: stringField(item.sourceLabel) || stringField(item.source),
           generated: item.generated === true,
+          target: parseBackendTarget(item.target),
+          mutable: item.mutable === true,
           path: optionalStringField(item.path),
           entrypoints: stringArray(item.entrypoints),
+          tools: stringArray(item.tools),
+          mcpServers: stringArray(item.mcpServers),
+          diagnostics: parseDiagnostics(item.diagnostics),
           backend: asOptionalRecord(item.backend) as { ref?: string } | null
         };
       }).filter((agent) => agent.name)
@@ -74,6 +81,10 @@ export function parseBackendDoctor(value: unknown): WorkbenchBackendDoctor {
 function parseBackendTargets(value: unknown): BackendConfigTarget[] {
   return stringArray(value)
     .filter((item): item is BackendConfigTarget => item === "project" || item === "profile");
+}
+
+function parseBackendTarget(value: unknown): BackendConfigTarget | null {
+  return value === "project" || value === "profile" ? value : null;
 }
 
 function parseDiagnostics(value: unknown): WorkbenchDiagnostic[] {

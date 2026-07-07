@@ -228,6 +228,43 @@ no_auth = true
 }
 
 #[tokio::test]
+async fn model_settings_read_includes_image_generation_config() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        r#"
+[image_generation]
+provider = "fake"
+model = "fake-image"
+size = "1024x1536"
+format = "webp"
+"#,
+    )
+    .expect("config");
+
+    let result = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        mpsc::unbounded_channel().0,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("model-settings-read")),
+            method: "model/settings/read".to_string(),
+            params: Some(json!({ "scope": "global" })),
+        },
+    )
+    .await
+    .expect("model/settings/read");
+
+    assert_eq!(result["imageGeneration"]["provider"], "fake");
+    assert_eq!(result["imageGeneration"]["model"], "fake-image");
+    assert_eq!(result["imageGeneration"]["size"], "1024x1536");
+    assert_eq!(result["imageGeneration"]["format"], "webp");
+    assert_eq!(result["imageGeneration"]["credentialStatus"], "notRequired");
+}
+
+#[tokio::test]
 async fn model_settings_global_scope_ignores_project_model_override() {
     let (_temp, state) = web_state();
     std::fs::create_dir_all(&state.inner.home).expect("home");

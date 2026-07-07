@@ -1,5 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
     "deleted": {
       "type": "boolean"
@@ -9,12 +18,16 @@
     },
     "path": {
       "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/AgentConfigTarget"
     }
   },
   "required": [
     "deleted",
     "name",
-    "path"
+    "path",
+    "target"
   ],
   "title": "AgentDeleteResult",
   "type": "object"

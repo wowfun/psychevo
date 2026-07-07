@@ -3,21 +3,33 @@ pub(crate) use super::*;
 
 pub(crate) fn parse_agent_file(path: &Path, source: AgentSource) -> Result<AgentDefinition> {
     let content = fs::read_to_string(path)?;
-    let (frontmatter, instructions) = split_frontmatter(&content)?;
+    parse_agent_definition_text(
+        &content,
+        path.file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("agent"),
+        Some(path.to_path_buf()),
+        source,
+    )
+}
+
+pub fn parse_agent_definition_text(
+    content: &str,
+    default_name: &str,
+    file_path: Option<PathBuf>,
+    source: AgentSource,
+) -> Result<AgentDefinition> {
+    let (frontmatter, instructions) = split_frontmatter(content)?;
     let raw = match frontmatter {
         Some(frontmatter) => serde_yaml::from_str::<RawAgentFrontmatter>(frontmatter)
             .map_err(|err| Error::Config(format!("agent frontmatter failed: {err}")))?,
         None => RawAgentFrontmatter::default(),
     };
-    let default_name = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("agent");
     agent_from_raw(
         raw,
         default_name,
         instructions,
-        Some(path.to_path_buf()),
+        file_path,
         source,
     )
 }
@@ -83,6 +95,10 @@ pub(crate) fn agent_from_raw(
     if let Some(message) = project_instructions_diagnostic {
         diagnostics.push(AgentDiagnostic::warning(message, path.clone()));
     }
+    let (enabled, enabled_diagnostic) = parse_agent_enabled(raw.enabled.as_ref());
+    if let Some(message) = enabled_diagnostic {
+        diagnostics.push(AgentDiagnostic::warning(message, path.clone()));
+    }
     let tool_policy = parse_agent_tool_policy(
         raw.tools.as_ref(),
         raw.disallowed_tools.as_ref(),
@@ -102,6 +118,7 @@ pub(crate) fn agent_from_raw(
         name,
         description,
         instructions: instructions.trim().to_string(),
+        enabled,
         file_path,
         source,
         backend,
@@ -125,7 +142,6 @@ pub(crate) fn agent_from_raw(
 
 pub(crate) fn raw_declares_backend_details(raw: &RawAgentFrontmatter) -> bool {
     raw.kind.is_some()
-        || raw.enabled.is_some()
         || raw.label.is_some()
         || raw.command.is_some()
         || raw.args.is_some()
@@ -452,6 +468,17 @@ pub(crate) fn parse_project_instructions(value: Option<&Value>) -> (Option<bool>
     }
 }
 
+pub(crate) fn parse_agent_enabled(value: Option<&Value>) -> (bool, Option<String>) {
+    match value {
+        None | Some(Value::Null) => (true, None),
+        Some(Value::Bool(enabled)) => (*enabled, None),
+        Some(_) => (
+            true,
+            Some("enabled must be a boolean when set; defaulting to enabled".to_string()),
+        ),
+    }
+}
+
 pub(crate) fn parse_string_set(value: Option<&Value>) -> Option<BTreeSet<String>> {
     let items = parse_string_vec(value);
     (!items.is_empty()).then(|| items.into_iter().collect())
@@ -760,6 +787,7 @@ pub(crate) fn built_in_agent(
         name: name.to_string(),
         description: description.to_string(),
         instructions: instructions.to_string(),
+        enabled: true,
         file_path: None,
         source: AgentSource::BuiltIn,
         backend: None,

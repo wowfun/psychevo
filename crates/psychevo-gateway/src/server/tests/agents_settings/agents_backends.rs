@@ -175,6 +175,221 @@ command = "cursor-agent"
     assert_eq!(delete["deleted"], true);
 }
 
+#[tokio::test]
+async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
+    let (_temp, state) = web_state();
+    let project_agents = state.inner.cwd.join(".psychevo/agents");
+    let profile_agents = state.inner.home.join("agents");
+    std::fs::create_dir_all(&project_agents).expect("project agents");
+    std::fs::create_dir_all(&profile_agents).expect("profile agents");
+    std::fs::write(
+        project_agents.join("review.md"),
+        "---\ndescription: Project review\nenabled: false\nmodel: keep-model\n---\nProject body.\n",
+    )
+    .expect("project agent");
+    std::fs::write(
+        profile_agents.join("review.md"),
+        "---\ndescription: Profile review\n---\nProfile body.\n",
+    )
+    .expect("profile agent");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let list = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("1")),
+            method: "agent/list".to_string(),
+            params: Some(json!({ "scope": scope.clone() })),
+        },
+    )
+    .await
+    .expect("agent/list");
+    let active = list["agents"]
+        .as_array()
+        .expect("agents")
+        .iter()
+        .find(|agent| agent["name"] == "review")
+        .expect("active review");
+    assert_eq!(active["description"], "Profile review");
+    assert_eq!(active["enabled"], true);
+    assert_eq!(active["target"], "profile");
+    let disabled = list["disabledAgents"]
+        .as_array()
+        .expect("disabled agents")
+        .iter()
+        .find(|agent| agent["name"] == "review")
+        .expect("disabled project review");
+    assert_eq!(disabled["target"], "project");
+    assert_eq!(disabled["mutable"], true);
+
+    let read_project = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("2")),
+            method: "agent/read".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "review",
+                "target": "project"
+            })),
+        },
+    )
+    .await
+    .expect("agent/read project");
+    assert_eq!(read_project["agent"]["enabled"], false);
+    assert!(read_project["rawMarkdown"]
+        .as_str()
+        .expect("raw")
+        .contains("model: keep-model"));
+
+    let write_project = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("3")),
+            method: "agent/write".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "review",
+                "target": "project",
+                "description": "Project review updated",
+                "enabled": true,
+                "instructions": "Updated body.",
+                "entrypoints": ["subagent"],
+                "tools": ["read"],
+                "mcpServers": ["repo"]
+            })),
+        },
+    )
+    .await
+    .expect("agent/write project");
+    assert_eq!(write_project["agent"]["enabled"], true);
+    assert_eq!(write_project["agent"]["target"], "project");
+    let text = std::fs::read_to_string(project_agents.join("review.md")).expect("project text");
+    assert!(text.contains("model: keep-model"));
+    assert!(text.contains("enabled: true"));
+    assert!(text.contains("mcpServers"));
+
+    let list = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("4")),
+            method: "agent/list".to_string(),
+            params: Some(json!({ "scope": scope.clone() })),
+        },
+    )
+    .await
+    .expect("agent/list after enable");
+    let active = list["agents"]
+        .as_array()
+        .expect("agents")
+        .iter()
+        .find(|agent| agent["name"] == "review")
+        .expect("project active review");
+    assert_eq!(active["description"], "Project review updated");
+    assert_eq!(active["target"], "project");
+    assert!(list["shadowedAgents"]
+        .as_array()
+        .expect("shadowed")
+        .iter()
+        .any(|agent| agent["name"] == "review" && agent["target"] == "profile"));
+
+    let invalid_raw = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("5")),
+            method: "agent/write".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "raw-agent",
+                "target": "profile",
+                "description": "Ignored",
+                "rawMarkdown": "---\nname: other\ndescription: Other\n---\nOther.\n"
+            })),
+        },
+    )
+    .await;
+    assert!(invalid_raw.is_err());
+
+    let raw = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("6")),
+            method: "agent/write".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "raw-agent",
+                "target": "profile",
+                "description": "Ignored",
+                "rawMarkdown": "---\nname: raw-agent\ndescription: Raw agent\nenabled: false\n---\nRaw body.\n"
+            })),
+        },
+    )
+    .await
+    .expect("raw write");
+    assert_eq!(raw["agent"]["enabled"], false);
+    assert_eq!(raw["target"], "profile");
+
+    let enabled = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("7")),
+            method: "agent/setEnabled".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "raw-agent",
+                "target": "profile",
+                "enabled": true
+            })),
+        },
+    )
+    .await
+    .expect("set enabled");
+    assert_eq!(enabled["agent"]["enabled"], true);
+
+    let deleted = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("8")),
+            method: "agent/delete".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "raw-agent",
+                "target": "profile"
+            })),
+        },
+    )
+    .await
+    .expect("delete raw");
+    assert_eq!(deleted["deleted"], true);
+}
+
 #[test]
 fn backend_doctor_resolves_windows_pathext_command_shim() {
     let temp = tempfile::tempdir().expect("temp");

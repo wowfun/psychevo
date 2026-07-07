@@ -145,6 +145,7 @@ mod tests {
                 name: "opencode".to_string(),
                 description: "OpenCode".to_string(),
                 instructions: String::new(),
+                enabled: true,
                 file_path: None,
                 source: psychevo_runtime::AgentSource::Generated,
                 backend: Some(psychevo_runtime::AgentBackendRef {

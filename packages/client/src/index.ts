@@ -8,6 +8,8 @@ import {
   type AgentListResult,
   type AgentReadParams,
   type AgentReadResult,
+  type AgentSetEnabledParams,
+  type AgentSetEnabledResult,
   type AgentStatusParams,
   type AgentStatusResult,
   type AgentWriteParams,
@@ -100,6 +102,8 @@ import {
   type SkillReadParams,
   type SkillSetEnabledParams,
   type SkillUninstallParams,
+  type SkillWriteParams,
+  type SkillWriteResult,
   type ShellStartResult,
   type SlashSettingsReadParams,
   type SlashSettingsResult,
@@ -216,6 +220,7 @@ export interface GatewayRequestParams {
   "agent/delete": AgentDeleteParams;
   "agent/list": AgentListParams;
   "agent/read": AgentReadParams;
+  "agent/setEnabled": AgentSetEnabledParams;
   "agent/status": AgentStatusParams;
   "agent/write": AgentWriteParams;
   "automation/delete": AutomationIdParams;
@@ -269,6 +274,7 @@ export interface GatewayRequestParams {
   "skill/read": SkillReadParams;
   "skill/setEnabled": SkillSetEnabledParams;
   "skill/uninstall": SkillUninstallParams;
+  "skill/write": SkillWriteParams;
   "tool/create": ToolCreateParams;
   "tool/list": ToolListParams;
   "tool/read": ToolReadParams;
@@ -333,6 +339,7 @@ export interface GatewayRequestResults {
   "agent/delete": AgentDeleteResult;
   "agent/list": AgentListResult;
   "agent/read": AgentReadResult;
+  "agent/setEnabled": AgentSetEnabledResult;
   "agent/status": AgentStatusResult;
   "agent/write": AgentWriteResult;
   "automation/delete": AutomationDeleteResult;
@@ -386,6 +393,7 @@ export interface GatewayRequestResults {
   "skill/read": GatewayJsonResult;
   "skill/setEnabled": GatewayJsonResult;
   "skill/uninstall": GatewayJsonResult;
+  "skill/write": SkillWriteResult;
   "tool/create": GatewayJsonResult;
   "tool/list": GatewayJsonResult;
   "tool/read": GatewayJsonResult;

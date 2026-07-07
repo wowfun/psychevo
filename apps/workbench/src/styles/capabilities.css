@@ -10,6 +10,8 @@
 
 .capabilitiesHeader,
 .capabilitiesToolbar,
+.agentCapabilitySegments,
+.agentEditorMode,
 .capabilityDetailHeader,
 .capabilityActionGrid,
 .capabilityInlineFields,
@@ -69,6 +71,8 @@
 }
 
 .capabilityTabs button,
+.agentCapabilitySegments button,
+.agentEditorMode button,
 .capabilitiesHeader button:not(.pevo-actionButton),
 .capabilityDetailHeader button:not(.pevo-actionButton),
 .capabilityActionGrid button:not(.pevo-actionButton),
@@ -91,6 +95,8 @@
 }
 
 .capabilityTabs button.is-selected,
+.agentCapabilitySegments button.is-selected,
+.agentEditorMode button.is-selected,
 .capabilityActionGrid button:not(.pevo-actionButton),
 .capabilityInlineFields button:not(.pevo-actionButton),
 .capabilityForm button:not(.pevo-actionButton),
@@ -101,6 +107,8 @@
 }
 
 .capabilityTabs button:disabled,
+.agentCapabilitySegments button:disabled,
+.agentEditorMode button:disabled,
 .capabilitiesHeader button:not(.pevo-actionButton):disabled,
 .capabilityDetailHeader button:not(.pevo-actionButton):disabled,
 .capabilityActionGrid button:not(.pevo-actionButton):disabled,
@@ -115,6 +123,93 @@
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
+}
+
+.agentsCapability {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.agentCapabilitySegments,
+.agentEditorMode {
+  gap: 4px;
+  padding: 3px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 48%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.agentCapabilitySegments {
+  width: max-content;
+  max-width: 100%;
+}
+
+.agentDefinitionsToolbar {
+  padding-top: 0;
+}
+
+.agentsDefinitionsGrid {
+  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+}
+
+.agentDefinitionRow {
+  min-height: 66px;
+}
+
+.agentDefinitionDetail {
+  max-height: 100%;
+}
+
+.agentDefinitionForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
+}
+
+.agentDefinitionForm .agentEditorMode,
+.agentDefinitionForm .capabilityFormActions,
+.agentDefinitionForm .agentWideField {
+  grid-column: 1 / -1;
+}
+
+.agentDefinitionForm label {
+  display: grid;
+  align-items: start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agentDefinitionForm label > span {
+  color: var(--pevo-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.agentDefinitionForm input,
+.agentDefinitionForm select,
+.agentDefinitionForm textarea {
+  width: 100%;
+}
+
+.agentDefinitionForm textarea {
+  min-height: 180px;
+  padding: 8px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+  resize: vertical;
+}
+
+.agentDefinitionSwitch {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center !important;
 }
 
 .capabilitiesToolbar label {
@@ -328,6 +423,15 @@
   gap: 12px;
 }
 
+.capabilityDetailHeader > .capabilityDetailHeaderActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: max-content;
+}
+
 .capabilityActionGrid {
   flex-wrap: wrap;
   gap: 6px;
@@ -366,7 +470,7 @@
 }
 
 .skillDetail {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   max-height: 100%;
   overflow: hidden;
 }
@@ -417,6 +521,82 @@
 
 .skillPreview .pevo-markdown {
   max-width: 76ch;
+}
+
+.markdownDefinitionPreview {
+  position: relative;
+}
+
+.markdownDefinitionPreview .pevo-markdownFrame {
+  min-height: 62px;
+}
+
+.markdownDefinitionEdit {
+  position: absolute;
+  top: 44px;
+  right: 12px;
+  z-index: 1;
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 12%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
+  border-radius: var(--pevo-radius-xs);
+  box-shadow: none;
+  cursor: pointer;
+  opacity: 0.78;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.markdownDefinitionEdit:hover,
+.markdownDefinitionEdit:focus-visible {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+  border-color: var(--pevo-border);
+  opacity: 1;
+}
+
+.markdownDefinitionEdit:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+.markdownDefinitionEdit:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdownDefinitionEdit {
+    transition: none;
+  }
+}
+
+.markdownDefinitionEditor {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.markdownDefinitionEditor textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 220px;
+  padding: 10px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), black 3%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  resize: none;
 }
 
 .skillPreview .pevo-markdown > *:first-child {
@@ -506,6 +686,18 @@
   font-weight: 650;
 }
 
+.agentDefinitionForm.capabilityForm label {
+  display: grid;
+  align-items: start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agentDefinitionForm.capabilityForm .agentDefinitionSwitch {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
 .capabilityEmpty {
   display: grid;
   min-height: 54px;
@@ -519,6 +711,8 @@
 
 @media (hover: hover) {
   .capabilityTabs button:hover,
+  .agentCapabilitySegments button:hover,
+  .agentEditorMode button:hover,
   .capabilitiesHeader button:not(.pevo-actionButton):hover,
   .capabilityDetailHeader button:not(.pevo-actionButton):hover,
   .capabilityActionGrid button:not(.pevo-actionButton):hover,
@@ -542,6 +736,11 @@
   }
 
   .skillsGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agentsDefinitionsGrid,
+  .agentDefinitionForm {
     grid-template-columns: minmax(0, 1fr);
   }
 

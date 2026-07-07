@@ -41,7 +41,10 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await expect(settings.getByLabel("visual-acp subagent entrypoint")).toBeChecked();
       await capture(page, testInfo, `02-backend-configured-${projectSuffix(isMobile)}`);
 
-      await settings.getByRole("button", { name: "Back to app" }).click();
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      }
+      await page.getByRole("button", { name: "New Session", exact: true }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openPanel(page, isMobile, "Transcript");
       await page.getByRole("button", { name: "Agent", exact: true }).click();
@@ -239,18 +242,23 @@ async function expectVisibleTextGrowth(locator: Locator) {
 async function openSettingsAgents(page: Page): Promise<Locator> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      let settings = page.getByRole("region", { name: "Settings" });
-      if (!(await settings.count()) || !(await settings.isVisible().catch(() => false))) {
-        await page.getByRole("button", { name: "Settings" }).click();
-        settings = page.getByRole("region", { name: "Settings" });
+      let capabilities = page.getByRole("region", { name: "Capabilities" });
+      if (!(await capabilities.count()) || !(await capabilities.isVisible().catch(() => false))) {
+        await page.getByRole("button", { name: "Capabilities" }).click();
+        capabilities = page.getByRole("region", { name: "Capabilities" });
       }
-      await expect(settings).toBeVisible();
-      const agentsPanel = settings.getByRole("region", { name: "Agents" });
-      if (!(await agentsPanel.isVisible().catch(() => false))) {
-        await settings.getByRole("button", { name: "Agents" }).click();
+      await expect(capabilities).toBeVisible();
+      const agentsTopTab = capabilities.getByRole("tab", { name: "Agents" });
+      if ((await agentsTopTab.getAttribute("aria-selected")) !== "true") {
+        await agentsTopTab.click();
       }
-      await expect(settings.getByRole("region", { name: "Agents" })).toBeVisible();
-      return settings;
+      const backendsTab = capabilities.getByRole("tab", { name: "ACP Backends" });
+      if ((await backendsTab.getAttribute("aria-selected")) !== "true") {
+        await backendsTab.click();
+      }
+      const agentsPanel = capabilities.getByRole("region", { name: "Agents" });
+      await expect(agentsPanel).toBeVisible();
+      return agentsPanel;
     } catch (error) {
       if (attempt === 2) {
         throw error;

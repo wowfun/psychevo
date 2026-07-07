@@ -12,6 +12,13 @@
       ],
       "type": "object"
     },
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
     "AgentDefinitionView": {
       "properties": {
         "backend": {
@@ -34,6 +41,9 @@
           },
           "type": "array"
         },
+        "enabled": {
+          "type": "boolean"
+        },
         "entrypoints": {
           "items": {
             "type": "string"
@@ -41,6 +51,15 @@
           "type": "array"
         },
         "generated": {
+          "type": "boolean"
+        },
+        "mcpServers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mutable": {
           "type": "boolean"
         },
         "name": {
@@ -55,15 +74,40 @@
         },
         "source": {
           "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
         "description",
         "diagnostics",
+        "enabled",
         "entrypoints",
         "generated",
+        "mcpServers",
+        "mutable",
         "name",
-        "source"
+        "source",
+        "sourceLabel",
+        "tools"
       ],
       "type": "object"
     },
@@ -103,6 +147,12 @@
       },
       "type": "array"
     },
+    "disabledAgents": {
+      "items": {
+        "$ref": "#/definitions/AgentDefinitionView"
+      },
+      "type": "array"
+    },
     "shadowedAgents": {
       "items": {
         "$ref": "#/definitions/AgentDefinitionView"
@@ -113,6 +163,7 @@
   "required": [
     "agents",
     "diagnostics",
+    "disabledAgents",
     "shadowedAgents"
   ],
   "title": "AgentListResult",
