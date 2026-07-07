@@ -123,7 +123,9 @@ Workbench Vite production builds use stable manual chunk boundaries for
 third-party vendor code, icons, workspace packages, and generated protocol
 schema groups so no ordinary production chunk exceeds Vite's default chunk-size
 warning threshold. The build must not silence this warning by raising the
-threshold when a maintainable chunk split is available.
+threshold when a maintainable chunk split is available. Workspace package
+chunks must use explicit boundaries so client runtime chunks do not absorb
+generated protocol schema modules or their validation vendor dependencies.
 
 Native Desktop reuses Workbench through the host/runtime interface, but native
 packaging, Tauri bridge behavior, and Desktop window lifecycle belong to
@@ -243,6 +245,8 @@ after prompt submission.
   locations.
 - [125 Model Config](../125-model-config/spec.md) defines saved model defaults,
   shared composer model state, provider setup UX, and catalog-fetch UX.
+- [249 Vision and Image Artifacts](../249-vision-and-image-artifacts/spec.md)
+  defines image attachment thumbnails and generated-image transcript cards.
 - [250 UI Display Model](../250-ui-display-model/spec.md) defines shared
   transcript projection and display-only boundaries.
 - [260 UI Rendering](../260-ui-rendering/spec.md) defines shared transcript,

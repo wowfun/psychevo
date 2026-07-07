@@ -15,7 +15,9 @@ pub(crate) use serde_json::{Value, json};
 pub(crate) use similar::TextDiff;
 pub(crate) use tokio::time;
 
-pub(crate) use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
+pub(crate) use crate::config::{
+    CustomToolsetConfig, LspConfig, ResolvedImageGenerationConfig, ToolSelectionConfig,
+};
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::prompt_templates;
 pub(crate) use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
@@ -57,6 +59,9 @@ pub(crate) struct ToolRuntimeContext {
     pub(crate) path_prefixes: Vec<PathBuf>,
     pub(crate) sandbox_policy: SandboxPolicy,
     pub(crate) sandbox_grants: SandboxWriteGrants,
+    pub(crate) home: Option<PathBuf>,
+    pub(crate) image_input_enabled: bool,
+    pub(crate) image_generation: Option<ResolvedImageGenerationConfig>,
 }
 
 impl Default for ToolRuntimeContext {
@@ -71,6 +76,9 @@ impl Default for ToolRuntimeContext {
             path_prefixes: Vec::new(),
             sandbox_policy: SandboxPolicy::disabled(),
             sandbox_grants: SandboxWriteGrants::default(),
+            home: None,
+            image_input_enabled: true,
+            image_generation: None,
         }
     }
 }
@@ -139,7 +147,13 @@ pub(crate) fn skill_tools_for_mode(
 
 pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
     match mode {
-        RunMode::Plan => vec!["read", "exec_command", "write_stdin", "web_fetch"],
+        RunMode::Plan => vec![
+            "read",
+            "exec_command",
+            "write_stdin",
+            "web_fetch",
+            "view_image",
+        ],
         RunMode::Default => vec![
             "read",
             "write",
@@ -147,6 +161,8 @@ pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
             "exec_command",
             "write_stdin",
             "web_fetch",
+            "view_image",
+            "image_generate",
         ],
     }
 }
@@ -212,7 +228,7 @@ fn disabled_toolset_names_for_mode(
 }
 
 pub(crate) fn builtin_toolset_names() -> &'static [&'static str] {
-    &["coding-core", "web"]
+    &["coding-core", "web", "vision"]
 }
 
 pub(crate) fn default_enabled_toolsets() -> &'static [&'static str] {
@@ -225,6 +241,7 @@ pub(crate) fn builtin_toolset_description(name: &str) -> Option<&'static str> {
             Some("Local coding tools for reading files, editing files, and running shell commands.")
         }
         "web" => Some("Read-only URL fetch tools for known web resources."),
+        "vision" => Some("Image inspection and deterministic image generation tools."),
         _ => None,
     }
 }
@@ -233,16 +250,28 @@ pub(crate) fn builtin_toolset_tools(name: &str) -> Option<&'static [&'static str
     match name {
         "coding-core" => Some(&["read", "write", "edit", "exec_command", "write_stdin"]),
         "web" => Some(&["web_fetch"]),
+        "vision" => Some(&["view_image", "image_generate"]),
         _ => None,
     }
 }
 
 pub(crate) fn tool_allowed_in_mode(name: &str, mode: RunMode) -> bool {
     match mode {
-        RunMode::Plan => matches!(name, "read" | "exec_command" | "write_stdin" | "web_fetch"),
+        RunMode::Plan => matches!(
+            name,
+            "read" | "exec_command" | "write_stdin" | "web_fetch" | "view_image"
+        ),
         RunMode::Default => matches!(
             name,
-            "read" | "write" | "edit" | "exec_command" | "write_stdin" | "web_fetch"
+            "read"
+                | "write"
+                | "edit"
+                | "exec_command"
+                | "write_stdin"
+                | "web_fetch"
+                | "view_image"
+                | "image_generate"
+                | "image_generation.generate"
         ),
     }
 }
@@ -250,11 +279,19 @@ pub(crate) fn tool_allowed_in_mode(name: &str, mode: RunMode) -> bool {
 pub(crate) fn known_tool_name(name: &str) -> bool {
     matches!(
         name,
-        "read" | "write" | "edit" | "exec_command" | "write_stdin" | "web_fetch"
+        "read"
+            | "write"
+            | "edit"
+            | "exec_command"
+            | "write_stdin"
+            | "web_fetch"
+            | "view_image"
+            | "image_generate"
+            | "image_generation.generate"
     )
 }
 
-pub(crate) const DEFAULT_ENABLED_TOOLSETS: [&str; 2] = ["coding-core", "web"];
+pub(crate) const DEFAULT_ENABLED_TOOLSETS: [&str; 3] = ["coding-core", "web", "vision"];
 
 pub(crate) fn collect_toolset_tools(
     name: &str,
@@ -322,6 +359,10 @@ pub(crate) fn tool_by_name(
         "exec_command" => Some(Arc::new(ExecCommandTool::new(cwd.to_path_buf(), context))),
         "write_stdin" => Some(Arc::new(WriteStdinTool::new())),
         "web_fetch" => Some(Arc::new(WebFetchTool::new())),
+        "view_image" => Some(Arc::new(ViewImageTool::new(cwd.to_path_buf(), context))),
+        "image_generate" | "image_generation.generate" => {
+            Some(Arc::new(ImageGenerateTool::new(cwd.to_path_buf(), context)))
+        }
         _ => None,
     }
 }
@@ -395,3 +436,7 @@ pub(crate) use truncation::*;
 pub(crate) mod web_fetch;
 #[allow(unused_imports)]
 pub(crate) use web_fetch::*;
+#[path = "image_tools.rs"]
+pub(crate) mod image_tools;
+#[allow(unused_imports)]
+pub(crate) use image_tools::*;

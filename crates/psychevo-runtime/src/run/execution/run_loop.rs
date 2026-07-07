@@ -100,6 +100,12 @@ pub(crate) async fn run_live_internal(
         resolved_options.reasoning_effort = Some(effort);
     }
     let resolved = resolve_run_provider(&resolved_options, &loaded)?;
+    let image_generation = crate::config::resolve_image_generation_config_from_loaded(
+        &loaded, None, None, None, None,
+    )
+    .ok();
+    let image_input_enabled =
+        !crate::prompt_image::model_metadata_explicitly_disallows_image_input(&resolved.metadata);
     let managed_tools = ensure_rg(&loaded.env).await?;
     let skills_home = resolve_skills_home(&loaded.env, &cwd)?;
     let mut explicit_skill_inputs = options.skill_inputs.clone();
@@ -420,6 +426,9 @@ pub(crate) async fn run_live_internal(
             env: loaded.env.clone(),
             path_prefixes: managed_tools.path_prefixes.clone(),
             sandbox_policy: sandbox_policy.clone(),
+            home: home.clone(),
+            image_input_enabled,
+            image_generation: image_generation.clone(),
             tool_selection: loaded.config.tools.clone(),
             custom_toolsets: loaded.config.toolsets.clone(),
             extension_inputs: extension_assembly.accepted_inputs(),
@@ -495,6 +504,9 @@ pub(crate) async fn run_live_internal(
         path_prefixes: managed_tools.path_prefixes.clone(),
         sandbox_policy,
         sandbox_grants,
+        home: Some(home.clone()),
+        image_input_enabled,
+        image_generation,
         tool_selection: loaded.config.tools.clone(),
         custom_toolsets: loaded.config.toolsets.clone(),
         contributed_toolsets: extension_assembly.toolsets.clone(),

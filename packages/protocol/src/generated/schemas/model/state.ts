@@ -512,6 +512,9 @@ export const modelStateSchemas = {
         "null"
       ]
     },
+    "imageGeneration": {
+      "default": null
+    },
     "modelOptions": {
       "items": {
         "$ref": "#/definitions/ModelOptionView"

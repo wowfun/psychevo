@@ -1,5 +1,5 @@
-import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Volume2 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, Image as ImageIcon, Maximize2, Volume2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   sideInheritedMetadataHidden,
   type GatewayActivity,
@@ -52,7 +52,7 @@ export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSess
   const scrollMemoryRef = useRef<Map<string, TranscriptScrollMemory>>(new Map());
   const activeThreadKeyRef = useRef<string | null>(null);
   const orderedEntries = useMemo(() => orderTranscriptEntries(entries), [entries]);
-  const visibleEntries = useMemo(() => orderedEntries.filter((entry) => visibleBlocks(entry).length > 0), [orderedEntries]);
+  const visibleEntries = useMemo(() => visibleTranscriptEntries(orderedEntries), [orderedEntries]);
   const threadKey = useMemo(() => transcriptThreadKey(threadId, visibleEntries), [threadId, visibleEntries]);
   const hasRunningActivityBlock = useMemo(
     () => visibleEntries.some((entry) => visibleBlocks(entry).some(isRunningActivityBlock)),
@@ -265,6 +265,31 @@ function visibleBlocks(entry: TranscriptEntry): TranscriptBlock[] {
     .filter((block) => !isHiddenTranscriptBlock(entry, block));
 }
 
+function visibleTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
+  const visibleEntries: TranscriptEntry[] = [];
+  let previousGeneratedImage: GeneratedImageArtifact | null = null;
+  for (const entry of entries) {
+    const blocks = visibleBlocks(entry);
+    const nextBlocks: TranscriptBlock[] = [];
+    for (const block of blocks) {
+      if (isDuplicateGeneratedImageProse(block, previousGeneratedImage)) {
+        continue;
+      }
+      nextBlocks.push(block);
+      const generatedImage = generatedImageArtifact(block);
+      if (generatedImage) {
+        previousGeneratedImage = generatedImage;
+      } else if (transcriptBlockText(block).trim()) {
+        previousGeneratedImage = null;
+      }
+    }
+    if (nextBlocks.length > 0) {
+      visibleEntries.push(nextBlocks.length === entry.blocks.length ? entry : { ...entry, blocks: nextBlocks });
+    }
+  }
+  return visibleEntries;
+}
+
 function isHiddenTranscriptBlock(entry: TranscriptEntry, block: TranscriptBlock): boolean {
   if (metadataHidden(block.metadata)) {
     return true;
@@ -422,6 +447,16 @@ function TranscriptBlockView({
       </article>
     );
   }
+  const generatedImage = generatedImageArtifact(block);
+  if (generatedImage) {
+    return (
+      <GeneratedImageArtifactView
+        artifact={generatedImage}
+        block={block}
+        entry={entry}
+      />
+    );
+  }
   const agentSession = agentSessionFromBlock(block, display);
   const canOpenAgentSession = Boolean(agentSession && onOpenAgentSession);
   const runningTool = isRunningToolActivityBlock(block);
@@ -478,6 +513,284 @@ function TranscriptBlockView({
       )}
     </article>
   );
+}
+
+type GeneratedImageArtifact = {
+  agentVisibleSource: string | null;
+  artifactId: string | null;
+  display: string | null;
+  displayUrl: string | null;
+  error: string | null;
+  height: number | null;
+  mimeType: string | null;
+  model: string | null;
+  phase: "pending" | "loaded" | "failed";
+  prompt: string | null;
+  provider: string | null;
+  revisedPrompt: string | null;
+  savedPath: string | null;
+  width: number | null;
+};
+
+function GeneratedImageArtifactView({
+  artifact,
+  block,
+  entry
+}: {
+  artifact: GeneratedImageArtifact;
+  block: TranscriptBlock;
+  entry: TranscriptEntry;
+}) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const imageVisible = Boolean(artifact.displayUrl && artifact.phase !== "failed");
+  const frameStyle: CSSProperties = { aspectRatio: generatedImageAspectRatio(artifact) };
+  const title = artifact.display ?? "Generated image";
+  const providerModel = [artifact.provider, artifact.model].filter(Boolean).join(" / ");
+  const downloadName = generatedImageDownloadName(artifact);
+
+  useEffect(() => {
+    setLoaded(false);
+    setLightboxOpen(false);
+  }, [artifact.displayUrl, block.id]);
+
+  return (
+    <article
+      className={`pevo-generatedImageArtifact is-${artifact.phase}`}
+      {...transcriptBlockDataAttributes(entry, block)}
+    >
+      <div className="pevo-generatedImageFrame" style={frameStyle}>
+        {imageVisible && artifact.displayUrl ? (
+          <button
+            aria-label="Preview generated image"
+            className="pevo-generatedImageButton"
+            onClick={() => setLightboxOpen(true)}
+            type="button"
+          >
+            <img
+              alt={artifact.prompt ? `Generated image: ${artifact.prompt}` : "Generated image"}
+              className={loaded ? "is-loaded" : ""}
+              onLoad={() => setLoaded(true)}
+              src={artifact.displayUrl}
+            />
+          </button>
+        ) : (
+          <div className="pevo-generatedImagePlaceholder">
+            <ImageIcon size={22} aria-hidden />
+            <span>{artifact.phase === "failed" ? "Image unavailable" : "Generating"}</span>
+          </div>
+        )}
+      </div>
+      <div className="pevo-generatedImageMeta">
+        <div>
+          <strong>{title}</strong>
+          {artifact.prompt && <span>{artifact.prompt}</span>}
+          {artifact.savedPath && <code>{artifact.savedPath}</code>}
+          {artifact.phase === "failed" && artifact.error && <em>{artifact.error}</em>}
+        </div>
+        <div className="pevo-generatedImageActions" aria-label="Generated image actions">
+          {imageVisible && artifact.displayUrl && (
+            <>
+              <button
+                aria-label="Open generated image preview"
+                onClick={() => setLightboxOpen(true)}
+                title="Preview"
+                type="button"
+              >
+                <Maximize2 size={14} aria-hidden />
+              </button>
+              <a
+                aria-label="Download generated image"
+                download={downloadName}
+                href={artifact.displayUrl}
+                title="Download"
+              >
+                <Download size={14} aria-hidden />
+              </a>
+              <a
+                aria-label="Open generated image"
+                href={artifact.displayUrl}
+                rel="noreferrer"
+                target="_blank"
+                title="Open"
+              >
+                <ExternalLink size={14} aria-hidden />
+              </a>
+            </>
+          )}
+        </div>
+      </div>
+      {providerModel && <small className="pevo-generatedImageProvider">{providerModel}</small>}
+      {lightboxOpen && imageVisible && artifact.displayUrl && (
+        <div
+          aria-label="Generated image preview"
+          aria-modal="true"
+          className="pevo-generatedImageLightbox"
+          onClick={() => setLightboxOpen(false)}
+          role="dialog"
+        >
+          <button
+            aria-label="Close image preview"
+            className="pevo-generatedImageLightboxClose"
+            onClick={() => setLightboxOpen(false)}
+            type="button"
+          >
+            <X size={18} aria-hidden />
+          </button>
+          <img
+            alt={artifact.prompt ? `Generated image: ${artifact.prompt}` : "Generated image"}
+            onClick={(event) => event.stopPropagation()}
+            src={artifact.displayUrl}
+          />
+        </div>
+      )}
+    </article>
+  );
+}
+
+function generatedImageArtifact(block: TranscriptBlock): GeneratedImageArtifact | null {
+  const metadata = asRecord(block.metadata);
+  const result = generatedImageResultRecord(block, metadata);
+  const toolName = stringValue(metadata.tool_name ?? metadata.toolName ?? result.tool_name ?? result.toolName);
+  const mediaKind = stringValue(result.mediaKind ?? result.media_kind ?? metadata.mediaKind ?? metadata.media_kind);
+  const isGenerated = mediaKind === "generated_image" || imageGenerationToolName(toolName);
+  if (!isGenerated || (block.kind !== "artifact" && !imageGenerationToolName(toolName))) {
+    return null;
+  }
+  const artifactIds = transcriptArtifactIds(block);
+  const artifactId = firstStringField([result, metadata], ["artifactId", "artifact_id"]) ?? artifactIds[0] ?? null;
+  const displayUrl = firstStringField([result, metadata], ["displayUrl", "display_url", "hostUrl", "host_url"]);
+  const savedPath = firstStringField([result, metadata], ["savedPath", "saved_path", "path"]);
+  const phase = generatedImagePhase(block, result, displayUrl, artifactId);
+  return {
+    agentVisibleSource: firstStringField([result, metadata], ["agentVisibleSource", "agent_visible_source"]),
+    artifactId,
+    display: firstStringField([result, metadata], ["display", "title"]),
+    displayUrl,
+    error: firstStringField([result, metadata], ["error", "message"]),
+    height: firstNumberField([result, metadata], ["height"]),
+    mimeType: firstStringField([result, metadata], ["mimeType", "mime_type"]),
+    model: firstStringField([result, metadata], ["model"]),
+    phase,
+    prompt: firstStringField([result, metadata, asRecord(metadata.args ?? metadata.arguments)], ["prompt"]),
+    provider: firstStringField([result, metadata], ["provider"]),
+    revisedPrompt: firstStringField([result, metadata], ["revisedPrompt", "revised_prompt"]),
+    savedPath,
+    width: firstNumberField([result, metadata], ["width"])
+  };
+}
+
+function generatedImageResultRecord(block: TranscriptBlock, metadata: Record<string, unknown>): Record<string, unknown> {
+  const result = asRecord(metadata.result);
+  if (Object.keys(result).length > 0) {
+    return result;
+  }
+  const resultMetadata = asRecord(block.result?.metadata);
+  const nestedResult = asRecord(resultMetadata.result);
+  if (Object.keys(nestedResult).length > 0) {
+    return nestedResult;
+  }
+  const contentResult = jsonRecord(block.result?.content);
+  if (Object.keys(contentResult).length > 0) {
+    return contentResult;
+  }
+  return jsonRecord(block.body);
+}
+
+function generatedImagePhase(
+  block: TranscriptBlock,
+  result: Record<string, unknown>,
+  displayUrl: string | null,
+  artifactId: string | null
+): GeneratedImageArtifact["phase"] {
+  const status = (stringValue(result.status) ?? block.status).toLowerCase();
+  if (block.status === "failed" || status === "failed" || status === "error") {
+    return "failed";
+  }
+  if (displayUrl || artifactId) {
+    return "loaded";
+  }
+  return "pending";
+}
+
+function generatedImageAspectRatio(artifact: GeneratedImageArtifact): string {
+  if (artifact.width && artifact.height && artifact.width > 0 && artifact.height > 0) {
+    return `${artifact.width} / ${artifact.height}`;
+  }
+  return "1 / 1";
+}
+
+function generatedImageDownloadName(artifact: GeneratedImageArtifact): string {
+  const extension = imageExtensionForMime(artifact.mimeType) ?? extensionFromPath(artifact.savedPath) ?? "png";
+  return `${artifact.artifactId ?? "generated-image"}.${extension}`;
+}
+
+function imageExtensionForMime(mimeType: string | null): string | null {
+  switch (mimeType) {
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    default:
+      return null;
+  }
+}
+
+function extensionFromPath(path: string | null): string | null {
+  const match = path?.match(/\.([a-z0-9]+)(?:$|[?#])/i);
+  const extension = match?.[1];
+  return extension ? extension.toLowerCase() : null;
+}
+
+function imageGenerationToolName(toolName: string | null): boolean {
+  return toolName === "image_generate"
+    || toolName === "image_generation.generate"
+    || toolName === "image_generation__generate";
+}
+
+function firstNumberField(records: Array<Record<string, unknown>>, keys: string[]): number | null {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+function isDuplicateGeneratedImageProse(block: TranscriptBlock, artifact: GeneratedImageArtifact | null): boolean {
+  if (!artifact || block.kind !== "text") {
+    return false;
+  }
+  const text = normalizeGeneratedImageProse(transcriptBlockText(block));
+  if (!text) {
+    return false;
+  }
+  const duplicateValues = [
+    artifact.savedPath,
+    artifact.displayUrl,
+    artifact.agentVisibleSource
+  ].map(normalizeGeneratedImageProse).filter((value): value is string => Boolean(value));
+  return duplicateValues.some((value) => text === value || text === `saved ${value}` || text === `saved to ${value}`);
+}
+
+function normalizeGeneratedImageProse(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed
+    .replace(/^`+|`+$/g, "")
+    .replace(/^saved(?: image)?(?::|\s+to)\s+/i, "")
+    .replace(/^generated image(?: saved)?(?::|\s+to)\s+/i, "")
+    .trim()
+    .toLowerCase();
 }
 
 function agentSessionFromBlock(block: TranscriptBlock, display: EvidenceDisplay): TranscriptAgentSession | null {

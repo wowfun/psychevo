@@ -43,6 +43,7 @@ pub(crate) mod lsp_tests {
                 path_prefixes: Vec::new(),
                 sandbox_policy: SandboxPolicy::disabled(),
                 sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+                ..ToolRuntimeContext::default()
             },
         )
     }

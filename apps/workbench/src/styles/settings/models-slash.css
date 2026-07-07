@@ -428,7 +428,8 @@
 
 .modelAssignmentPanel,
 .modelProvidersPanel,
-.voiceSettingsPanel {
+.voiceSettingsPanel,
+.imageGenerationSettingsPanel {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -526,7 +527,8 @@
   border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 58%);
 }
 
-.voiceSettingsRow {
+.voiceSettingsRow,
+.imageGenerationSettingsRow {
   display: grid;
   grid-template-columns: minmax(116px, 0.24fr) minmax(180px, 1fr) minmax(84px, auto);
   align-items: center;
@@ -733,7 +735,8 @@
 
   .modelAssignmentRow,
   .modelProviderRow,
-  .voiceSettingsRow {
+  .voiceSettingsRow,
+  .imageGenerationSettingsRow {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }

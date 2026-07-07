@@ -105,6 +105,7 @@ pub async fn bind_gateway_web_server(
             "/download/session/{session_id}/{kind}",
             get(download_session),
         )
+        .route("/_gateway/media/{artifact_id}", get(read_media_artifact))
         .fallback(get(static_asset))
         .with_state(state);
     Ok(BoundGatewayWebServer {

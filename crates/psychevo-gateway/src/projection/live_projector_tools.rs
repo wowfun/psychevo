@@ -611,7 +611,7 @@ impl GatewayLiveProjector {
         let turn_id = update.turn_id;
         let segment = update.segment;
         let completed = update.completed;
-        let block = self.live_tool_block_from_metadata(LiveToolBlockBuild {
+        let mut block = self.live_tool_block_from_metadata(LiveToolBlockBuild {
             turn_id: update.turn_id,
             segment: update.segment,
             tool_call_id: update.tool_call_id,
@@ -621,6 +621,22 @@ impl GatewayLiveProjector {
             metadata: update.metadata,
             order: None,
         });
+        if let Some(artifact_id) = block
+            .metadata
+            .as_ref()
+            .and_then(generated_image_artifact_id)
+        {
+            block.kind = TranscriptBlockKind::Artifact;
+            block.artifact_ids = vec![artifact_id];
+            if let Some(body) = block
+                .metadata
+                .as_ref()
+                .and_then(generated_image_body_from_metadata)
+            {
+                block.body = Some(body.clone());
+                block.preview = Some(compact_text(&body, 240));
+            }
+        }
         self.upsert_block(segment, block);
         self.emit_entry_event(turn_id, segment, completed, false)
     }

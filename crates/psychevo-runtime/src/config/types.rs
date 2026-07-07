@@ -219,6 +219,25 @@ pub(crate) struct VoiceRealtimeConfig {
     pub(crate) voice: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ImageGenerationConfig {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) size: String,
+    pub(crate) format: ImageGenerationFormat,
+}
+
+impl Default for ImageGenerationConfig {
+    fn default() -> Self {
+        Self {
+            provider: "openai".to_string(),
+            model: "gpt-image-2".to_string(),
+            size: "1024x1024".to_string(),
+            format: ImageGenerationFormat::Png,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedVoiceAsrConfig {
     pub provider: String,
@@ -240,6 +259,18 @@ pub struct ResolvedVoiceTtsConfig {
     pub api_key: Option<String>,
     pub voice: String,
     pub format: VoiceAudioFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedImageGenerationConfig {
+    pub provider: String,
+    pub display_label: String,
+    pub model: String,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+    pub api_key: Option<String>,
+    pub size: String,
+    pub format: ImageGenerationFormat,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

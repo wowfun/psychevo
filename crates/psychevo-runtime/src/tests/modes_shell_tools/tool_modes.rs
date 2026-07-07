@@ -12,7 +12,13 @@ pub(crate) fn run_mode_tool_names_enforce_plan_read_only_surface() {
     let default = tool_names_for_mode(RunMode::Default);
     assert_eq!(
         plan,
-        vec!["read", "exec_command", "write_stdin", "web_fetch"]
+        vec![
+            "read",
+            "exec_command",
+            "write_stdin",
+            "web_fetch",
+            "view_image"
+        ]
     );
     assert_eq!(
         default,
@@ -22,7 +28,9 @@ pub(crate) fn run_mode_tool_names_enforce_plan_read_only_surface() {
             "edit",
             "exec_command",
             "write_stdin",
-            "web_fetch"
+            "web_fetch",
+            "view_image",
+            "image_generate"
         ]
     );
     assert!(plan.iter().all(|name| default.contains(name)));
@@ -60,6 +68,7 @@ pub(crate) async fn exec_command_prepends_managed_tool_path() {
             path_prefixes: vec![tools_dir],
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+            ..crate::tools::ToolRuntimeContext::default()
         },
     );
     let exec = tools
@@ -100,7 +109,9 @@ pub(crate) fn exec_command_provider_schema_replaces_bash() {
             "edit",
             "exec_command",
             "write_stdin",
-            "web_fetch"
+            "web_fetch",
+            "view_image",
+            "image_generate"
         ]
     );
 
@@ -161,7 +172,10 @@ pub(crate) fn toolset_config_controls_effective_core_tools() {
         &selection,
         &BTreeMap::new(),
     );
-    assert_eq!(names, vec!["read", "exec_command", "write_stdin"]);
+    assert_eq!(
+        names,
+        vec!["read", "exec_command", "write_stdin", "view_image"]
+    );
 
     let mut custom = BTreeMap::new();
     custom.insert(

@@ -128,6 +128,62 @@
     }
 
     #[test]
+    fn projector_promotes_generated_image_tool_result_to_artifact_block() {
+        let content = json!({
+            "status": "completed",
+            "mediaKind": "generated_image",
+            "artifactId": "img_test",
+            "prompt": "a red cube",
+            "savedPath": "/tmp/psychevo/media/generated/img_test.png",
+            "displayUrl": "/_gateway/media/img_test",
+            "agentVisibleSource": "psychevo-media://img_test",
+            "mimeType": "image/png",
+            "provider": "fake",
+            "model": "fake-image"
+        });
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_image",
+                        "image_generate",
+                        json!({"prompt": "a red cube"}),
+                    )],
+                    timestamp_ms: 10,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("model".to_string()),
+                    provider: Some("provider".to_string()),
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call_image".to_string(),
+                    tool_name: "image_generate".to_string(),
+                    content: content.to_string(),
+                    is_error: false,
+                    timestamp_ms: 20,
+                },
+            ),
+        ];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+
+        assert_eq!(entries.len(), 1);
+        let block = &entries[0].blocks[0];
+        assert_eq!(block.kind, TranscriptBlockKind::Artifact);
+        assert_eq!(block.artifact_ids, vec!["img_test".to_string()]);
+        assert_eq!(block.title.as_deref(), Some("Generated image"));
+        assert!(block.body.as_deref().unwrap_or_default().contains("a red cube"));
+        assert_eq!(
+            block.metadata.as_ref().unwrap()["result"]["displayUrl"],
+            "/_gateway/media/img_test"
+        );
+    }
+
+    #[test]
     fn projector_titles_pending_exec_command_from_arguments() {
         let command = "sqlite3 /home/kevin/Projects/feedgarden/feeds/.cache/hn.db \"SELECT id, title FROM stories ORDER BY score DESC;\"";
         let summaries = vec![summary(

@@ -125,6 +125,7 @@ fn model_settings_result(
         ],
         model_options,
         voice: voice_config_value(&options).ok(),
+        image_generation: image_generation_config_value(&options).ok(),
     })
 }
 

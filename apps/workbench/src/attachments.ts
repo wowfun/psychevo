@@ -10,11 +10,13 @@ export async function attachmentFromFile(file: File): Promise<PendingAttachment>
     if (file.size > MAX_IMAGE_ATTACHMENT_BYTES) {
       throw new Error(`Image attachment is too large: ${file.name} (${sizeLabel})`);
     }
+    const dataUrl = await fileToDataUrl(file);
     return {
       id,
-      input: { type: "image", input: { kind: "url", url: await fileToDataUrl(file) } },
+      input: { type: "image", input: { kind: "url", url: dataUrl } },
       kind: "image",
       name: file.name || "image",
+      previewUrl: dataUrl,
       size: file.size,
       sizeLabel
     };

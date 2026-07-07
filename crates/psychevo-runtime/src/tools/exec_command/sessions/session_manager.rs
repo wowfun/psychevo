@@ -187,6 +187,7 @@ pub(crate) async fn exec_command_tool_impl(
             path_prefixes: Vec::new(),
             sandbox_policy: SandboxPolicy::disabled(),
             sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+            ..ToolRuntimeContext::default()
         },
         "exec_command".to_string(),
         args,

@@ -1,5 +1,5 @@
-import { ArrowUp, Bot, Command, FileText, Folder, Settings2, Sparkles, X, Plus } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowUp, Bot, Command, FileText, Folder, Image as ImageIcon, Settings2, Sparkles, X, Plus } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { CompletionItem, CompletionListResult, GatewayMention, PendingAction } from "@psychevo/protocol";
 import { IconButton, Switch } from "./primitives";
 
@@ -21,6 +21,7 @@ export interface ComposerProps {
   runningStartedAtMs?: number | null;
   onCommand?(command: string): void;
   onAttach?(): void;
+  onAttachFiles?(files: File[]): void | Promise<void>;
   onInterrupt(): void;
   onModeChange?(mode: string): void;
   onRemoveAttachment?(id: string): void;
@@ -38,7 +39,9 @@ export interface ComposerAttachmentView {
   id: string;
   kind: "file" | "image" | "text";
   name: string;
+  previewUrl?: string | null;
   sizeLabel: string;
+  error?: string | null;
 }
 
 export function Composer({
@@ -58,6 +61,7 @@ export function Composer({
   running,
   runningStartedAtMs,
   onAttach,
+  onAttachFiles,
   onCommand,
   onInterrupt,
   onModeChange,
@@ -320,6 +324,32 @@ export function Composer({
     }
   }
 
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = filesFromList(event.clipboardData?.files);
+    if (files.length === 0 || !onAttachFiles) {
+      return;
+    }
+    event.preventDefault();
+    void onAttachFiles(files);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLFormElement>) {
+    if (!onAttachFiles || !event.dataTransfer?.types.includes("Files")) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleDrop(event: DragEvent<HTMLFormElement>) {
+    const files = filesFromList(event.dataTransfer?.files);
+    if (files.length === 0 || !onAttachFiles) {
+      return;
+    }
+    event.preventDefault();
+    void onAttachFiles(files);
+  }
+
   const actionButton = running ? (
     <button
       aria-label="Interrupt active turn"
@@ -342,7 +372,12 @@ export function Composer({
   );
 
   return (
-    <form className={`pevo-composer ${shellMode ? "is-shellMode" : ""} ${running ? "is-running" : ""} ${planMode ? "is-planMode" : ""}`} onSubmit={submit}>
+    <form
+      className={`pevo-composer ${shellMode ? "is-shellMode" : ""} ${running ? "is-running" : ""} ${planMode ? "is-planMode" : ""}`}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      onSubmit={submit}
+    >
       {requestPanel && <div className="pevo-composerRequestPanel">{requestPanel}</div>}
       {showTurnModeControls && (
         <div className="pevo-segmented" role="tablist" aria-label="Turn mode">
@@ -372,6 +407,7 @@ export function Composer({
             scheduleCompletion(nextDraft, enteringShell ? Math.max(0, event.target.selectionStart - 1) : event.target.selectionStart, nextMode);
           }}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onSelect={(event) => scheduleCompletion(event.currentTarget.value, event.currentTarget.selectionStart)}
           placeholder={shellMode ? "shell command" : "Ask Psychevo..."}
           rows={1}
@@ -384,9 +420,19 @@ export function Composer({
       {attachmentItems.length > 0 && (
         <div className="pevo-attachmentList" aria-label="Attachments">
           {attachmentItems.map((attachment) => (
-            <span className="pevo-attachmentChip" key={attachment.id}>
-              <strong>{attachment.name}</strong>
-              <small>{attachment.kind} · {attachment.sizeLabel}</small>
+            <span className={`pevo-attachmentChip is-${attachment.kind}`} key={attachment.id}>
+              {attachment.kind === "image" && attachment.previewUrl ? (
+                <img alt="" className="pevo-attachmentThumb" src={attachment.previewUrl} />
+              ) : attachment.kind === "image" ? (
+                <span className="pevo-attachmentIcon" aria-hidden>
+                  <ImageIcon size={14} />
+                </span>
+              ) : null}
+              <span className="pevo-attachmentCopy">
+                <strong>{attachment.name}</strong>
+                <small>{attachment.kind} · {attachment.sizeLabel}</small>
+                {attachment.error && <small className="is-error">{attachment.error}</small>}
+              </span>
               <button
                 aria-label={`Remove ${attachment.name}`}
                 onClick={() => onRemoveAttachment?.(attachment.id)}
@@ -512,6 +558,10 @@ export function Composer({
       </div>
     </form>
   );
+}
+
+function filesFromList(files: FileList | null | undefined): File[] {
+  return files ? Array.from(files).filter((file) => file.size > 0) : [];
 }
 
 function resizeTextarea(textarea: HTMLTextAreaElement | null) {

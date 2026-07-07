@@ -35,6 +35,13 @@ type VoiceSettingsRow = {
   credentialStatus: string;
 };
 
+type ImageGenerationSettingsRow = {
+  providerLabel: string;
+  model: string;
+  detail: string;
+  credentialStatus: string;
+};
+
 export function ModelsSettingsPanel({
   client,
   disabled,
@@ -333,6 +340,7 @@ export function ModelsSettingsPanel({
         ))}
       </section>
       <VoiceSettingsPanel voice={settings?.voice ?? null} />
+      <ImageGenerationSettingsPanel value={settings?.imageGeneration ?? null} />
       <section className="modelProvidersPanel" aria-label="Available providers">
         <div className="modelProvidersHeader">
           <div>
@@ -392,6 +400,33 @@ function VoiceSettingsPanel({ voice }: { voice: unknown }) {
           </div>
         </div>
       ))}
+    </section>
+  );
+}
+
+function ImageGenerationSettingsPanel({ value }: { value: unknown }) {
+  const row = imageGenerationSettingsRow(value);
+  return (
+    <section className="imageGenerationSettingsPanel" aria-label="Image generation">
+      <div className="modelProvidersHeader">
+        <div>
+          <strong>Images</strong>
+          <span>Generation provider</span>
+        </div>
+      </div>
+      <div className="imageGenerationSettingsRow">
+        <div className="modelProviderIdentity">
+          <strong>Image generation</strong>
+          <span>{row.providerLabel}</span>
+        </div>
+        <div className="voiceSettingsModel">
+          <strong>{row.model}</strong>
+          <span>{row.detail}</span>
+        </div>
+        <div className="modelProviderStatus" data-status={row.credentialStatus}>
+          {voiceCredentialStatusLabel(row.credentialStatus)}
+        </div>
+      </div>
     </section>
   );
 }
@@ -486,6 +521,28 @@ function voiceProviderLabel(value: Record<string, unknown> | null): string {
   }
   return stringField(value.providerLabel) ?? stringField(value.provider) ?? "Unknown provider";
 }
+
+function imageGenerationSettingsRow(value: unknown): ImageGenerationSettingsRow {
+  const imageGeneration = objectValue(value);
+  if (!imageGeneration) {
+    return {
+      providerLabel: "Not configured",
+      model: "No default",
+      detail: "image_generation",
+      credentialStatus: "notConfigured"
+    };
+  }
+  return {
+    providerLabel: stringField(imageGeneration.label) ?? stringField(imageGeneration.provider) ?? "Unknown provider",
+    model: stringField(imageGeneration.model) ?? "Not configured",
+    detail: [
+      stringField(imageGeneration.size),
+      stringField(imageGeneration.format)
+    ].filter(Boolean).join(" / ") || "Default output",
+    credentialStatus: stringField(imageGeneration.credentialStatus) ?? "missing"
+  };
+}
+
 
 function voiceCredentialStatusLabel(status: string): string {
   switch (status) {

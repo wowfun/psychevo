@@ -273,6 +273,46 @@
   border-radius: var(--pevo-radius-sm);
 }
 
+.pevo-attachmentChip.is-image {
+  grid-template-columns: 34px minmax(0, 1fr) 24px;
+  min-height: 42px;
+  padding-left: 5px;
+}
+
+.pevo-attachmentThumb,
+.pevo-attachmentIcon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--pevo-radius-xs);
+}
+
+.pevo-attachmentThumb {
+  object-fit: cover;
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
+}
+
+.pevo-attachmentIcon {
+  display: grid;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
+}
+
+.pevo-attachmentCopy {
+  display: grid;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+
+.pevo-attachmentChip.is-image .pevo-attachmentCopy {
+  grid-column: 2;
+}
+
 .pevo-attachmentChip strong,
 .pevo-attachmentChip small {
   min-width: 0;
@@ -291,6 +331,10 @@
   font-size: var(--pevo-font-size-xsmall);
 }
 
+.pevo-attachmentChip small.is-error {
+  color: var(--pevo-danger);
+}
+
 .pevo-attachmentChip button {
   grid-column: 2;
   grid-row: 1 / span 2;
@@ -304,6 +348,10 @@
   border: 0;
   border-radius: var(--pevo-radius-sm);
   cursor: pointer;
+}
+
+.pevo-attachmentChip.is-image button {
+  grid-column: 3;
 }
 
 .pevo-attachmentChip button:hover {

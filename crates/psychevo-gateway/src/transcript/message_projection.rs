@@ -342,6 +342,9 @@ fn tool_block_kind(tool_name: &str) -> TranscriptBlockKind {
         "mcp" | "mcp_call" => TranscriptBlockKind::Mcp,
         "clarify" => TranscriptBlockKind::Clarify,
         "spawn_agent" => TranscriptBlockKind::Agent,
+        "image_generate" | "image_generation.generate" | "image_generation__generate" => {
+            TranscriptBlockKind::Artifact
+        }
         _ => TranscriptBlockKind::ToolCall,
     }
 }

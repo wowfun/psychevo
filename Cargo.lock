@@ -2865,6 +2865,7 @@ dependencies = [
  "futures",
  "html2text",
  "http",
+ "image",
  "keyring",
  "landlock",
  "libc",

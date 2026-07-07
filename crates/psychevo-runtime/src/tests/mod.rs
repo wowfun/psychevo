@@ -214,6 +214,8 @@ pub(crate) fn collect_missing_schema_descriptions(
 pub(crate) mod config;
 #[path = "event_stream.rs"]
 pub(crate) mod event_stream;
+#[path = "media.rs"]
+pub(crate) mod media;
 #[path = "model_catalog.rs"]
 pub(crate) mod model_catalog;
 #[path = "modes_shell_tools.rs"]

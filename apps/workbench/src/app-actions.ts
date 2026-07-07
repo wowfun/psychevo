@@ -456,8 +456,15 @@ export function createAppActions(params: AppActionsParams) {
       params.setError("Attachments are not supported by this host yet.");
       return;
     }
-    const attachment = await attachmentFromFile(result.value);
-    params.setAttachments((current) => [...current, attachment]);
+    await handleAttachmentFiles([result.value]);
+  }
+
+  async function handleAttachmentFiles(files: File[]) {
+    if (files.length === 0) {
+      return;
+    }
+    const attachments = await Promise.all(files.map((file) => attachmentFromFile(file)));
+    params.setAttachments((current) => [...current, ...attachments]);
     params.setError(null);
   }
 
@@ -693,6 +700,7 @@ export function createAppActions(params: AppActionsParams) {
     doctorBackend,
     doctorChannels,
     handleAttachment,
+    handleAttachmentFiles,
     loadThreadSearchText,
     openDiffPreview,
     openFilePreview,

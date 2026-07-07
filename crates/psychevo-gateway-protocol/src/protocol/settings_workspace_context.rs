@@ -210,6 +210,9 @@ pub struct ModelSettingsResult {
     #[serde(default)]
     #[ts(type = "unknown | null")]
     pub voice: Option<Value>,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub image_generation: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

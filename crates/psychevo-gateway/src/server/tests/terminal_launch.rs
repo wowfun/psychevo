@@ -973,6 +973,53 @@ async fn download_session_defaults_to_markdown_artifact() {
 }
 
 #[tokio::test]
+async fn media_artifact_endpoint_requires_auth_and_serves_image_bytes() {
+    use base64::Engine as _;
+
+    let (_temp, state) = web_state_with_static();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(psychevo_ai::DEFAULT_FAKE_IMAGE_BASE64)
+        .expect("png fixture");
+    let artifact = psychevo_runtime::write_generated_image_artifact(
+        &state.inner.home,
+        &bytes,
+        "image/png",
+    )
+    .expect("artifact");
+
+    let unauthorized = read_media_artifact(
+        State(state.clone()),
+        HeaderMap::new(),
+        AxumPath(artifact.artifact_id.clone()),
+    )
+    .await
+    .into_response();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", state.inner.token)).expect("auth"),
+    );
+    let response = read_media_artifact(State(state), headers, AxumPath(artifact.artifact_id))
+        .await
+        .into_response();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/png")
+    );
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    assert_eq!(body.as_ref(), bytes.as_slice());
+}
+
+#[tokio::test]
 async fn consumed_launch_without_browser_session_returns_recovery_page() {
     let (_temp, state) = web_state_with_static();
 

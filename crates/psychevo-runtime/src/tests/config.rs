@@ -17,6 +17,10 @@ pub use channels::*;
 mod voice;
 #[allow(unused_imports)]
 pub use voice::*;
+#[path = "config/image_generation.rs"]
+mod image_generation;
+#[allow(unused_imports)]
+pub use image_generation::*;
 
 #[test]
 fn profile_mcp_servers_parse_stdio_and_http_descriptors() {

@@ -196,6 +196,12 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             env: env.clone(),
             path_prefixes: Vec::new(),
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
+            home: home.clone(),
+            image_input_enabled:
+                !crate::prompt_image::model_metadata_explicitly_disallows_image_input(
+                    &model_metadata,
+                ),
+            image_generation: None,
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
             extension_inputs: extension_assembly.accepted_inputs(),
@@ -225,6 +231,11 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         path_prefixes: Vec::new(),
         sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
         sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+        home: Some(home.clone()),
+        image_input_enabled: !crate::prompt_image::model_metadata_explicitly_disallows_image_input(
+            &model_metadata,
+        ),
+        image_generation: None,
         tool_selection: Default::default(),
         custom_toolsets: BTreeMap::new(),
         contributed_toolsets: extension_assembly.toolsets.clone(),
@@ -484,6 +495,11 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             })),
         )?
     };
+    let image_generation =
+        crate::config::resolve_image_generation_config_from_loaded(&loaded, None, None, None, None)
+            .ok();
+    let image_input_enabled =
+        !crate::prompt_image::model_metadata_explicitly_disallows_image_input(&resolved.metadata);
     let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
         resolved.base_url.clone(),
         resolved.api_key.clone(),
@@ -526,6 +542,9 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             options.mode,
             &loaded.env,
         )?,
+        home,
+        image_input_enabled,
+        image_generation,
         tool_selection: loaded.config.tools.clone(),
         custom_toolsets: loaded.config.toolsets.clone(),
         extension_inputs: extension_assembly.accepted_inputs(),

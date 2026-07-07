@@ -58,6 +58,9 @@ pub(crate) struct ToolSurfaceAssembly {
     pub(crate) path_prefixes: Vec<PathBuf>,
     pub(crate) sandbox_policy: SandboxPolicy,
     pub(crate) sandbox_grants: SandboxWriteGrants,
+    pub(crate) home: Option<PathBuf>,
+    pub(crate) image_input_enabled: bool,
+    pub(crate) image_generation: Option<crate::config::ResolvedImageGenerationConfig>,
     pub(crate) tool_selection: ToolSelectionConfig,
     pub(crate) custom_toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) contributed_toolsets: Vec<ToolsetContribution>,
@@ -95,6 +98,9 @@ pub(crate) fn assemble_tool_surface_with_warnings(
         path_prefixes: input.path_prefixes.clone(),
         sandbox_policy: input.sandbox_policy.clone(),
         sandbox_grants: input.sandbox_grants.clone(),
+        home: input.home.clone(),
+        image_input_enabled: input.image_input_enabled,
+        image_generation: input.image_generation.clone(),
     };
 
     for name in tool_names_for_mode(input.mode) {
@@ -816,6 +822,9 @@ mod tests {
             path_prefixes: Vec::new(),
             sandbox_policy: SandboxPolicy::disabled(),
             sandbox_grants: SandboxWriteGrants::default(),
+            home: None,
+            image_input_enabled: true,
+            image_generation: None,
             tool_selection: ToolSelectionConfig::default(),
             custom_toolsets: BTreeMap::new(),
             contributed_toolsets: Vec::new(),

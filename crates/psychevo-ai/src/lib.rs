@@ -43,6 +43,9 @@ pub use stream_raw::*;
 #[path = "voice.rs"]
 pub(crate) mod voice;
 pub use voice::*;
+#[path = "image_generation.rs"]
+pub(crate) mod image_generation;
+pub use image_generation::*;
 #[path = "fake.rs"]
 pub(crate) mod fake;
 pub use fake::*;

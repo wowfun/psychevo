@@ -346,6 +346,82 @@ describe("TranscriptPanel read evidence", () => {
   });
 });
 
+describe("TranscriptPanel generated image artifacts", () => {
+  it("renders generated image artifacts as image cards with lightbox and download controls", () => {
+    const block = transcriptBlock({
+      kind: "artifact",
+      title: "Generated image",
+      body: "Generated image\nPrompt: a red cube\nSaved: /tmp/img_test.png",
+      artifactIds: ["img_test"],
+      metadata: {
+        result: {
+          mediaKind: "generated_image",
+          artifactId: "img_test",
+          prompt: "a red cube",
+          savedPath: "/tmp/img_test.png",
+          displayUrl: "/_gateway/media/img_test",
+          agentVisibleSource: "psychevo-media://img_test",
+          mimeType: "image/png",
+          provider: "fake",
+          model: "fake-image",
+          width: 1,
+          height: 1
+        }
+      }
+    });
+
+    render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
+
+    const image = screen.getByRole("img", { name: "Generated image: a red cube" }) as HTMLImageElement;
+    expect(image.src).toContain("/_gateway/media/img_test");
+    expect(screen.getByText("a red cube")).toBeTruthy();
+    expect(screen.getByText("/tmp/img_test.png")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("link", { name: "Download generated image" })
+        .getAttribute("download")
+    ).toBe("img_test.png");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open generated image preview" }));
+    expect(screen.getByRole("dialog", { name: "Generated image preview" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close image preview" }));
+    expect(screen.queryByRole("dialog", { name: "Generated image preview" })).toBeNull();
+  });
+
+  it("hides duplicate saved-path prose immediately after a generated image artifact", () => {
+    const savedPath = "/tmp/img_test.png";
+    const artifact = transcriptBlock({
+      id: "artifact",
+      kind: "artifact",
+      title: "Generated image",
+      order: 0,
+      artifactIds: ["img_test"],
+      metadata: {
+        result: {
+          mediaKind: "generated_image",
+          artifactId: "img_test",
+          prompt: "a red cube",
+          savedPath,
+          displayUrl: "/_gateway/media/img_test",
+          agentVisibleSource: "psychevo-media://img_test",
+          mimeType: "image/png"
+        }
+      }
+    });
+    const duplicateText = transcriptBlock({
+      id: "text",
+      kind: "text",
+      body: `Saved: ${savedPath}`,
+      order: 1,
+      metadata: null
+    });
+
+    render(<TranscriptPanel entries={[transcriptEntry([artifact, duplicateText])]} />);
+
+    expect(screen.getAllByText(savedPath)).toHaveLength(1);
+  });
+});
+
 describe("TranscriptPanel session scroll behavior", () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
   const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");

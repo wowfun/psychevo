@@ -504,7 +504,10 @@ function AttachmentStrip({
   return (
     <div className="pevo-floating-attachmentStrip">
       {attachments.map((attachment) => (
-        <span className="pevo-floating-attachmentChip" key={attachment.id} title={attachment.preview}>
+        <span className={`pevo-floating-attachmentChip is-${attachment.kind}`} key={attachment.id} title={attachment.preview}>
+          {attachment.kind === "image" && (
+            <img className="pevo-floating-attachmentThumb" src={attachment.dataUrl} alt="" />
+          )}
           <span>{attachment.name}</span>
           <button aria-label={`Remove ${attachment.name}`} onClick={() => onRemove(attachment.id)} type="button">
             <X aria-hidden="true" size={12} />

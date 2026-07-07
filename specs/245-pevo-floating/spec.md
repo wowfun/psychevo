@@ -271,3 +271,5 @@ opt-in. Real provider tests are not part of default Floating validation.
   lifecycle and token state.
 - [246 pevo Desktop](../246-pevo-desktop/spec.md) defines the native desktop
   shell, Tauri project, bridge, and window lifecycle.
+- [249 Vision and Image Artifacts](../249-vision-and-image-artifacts/spec.md)
+  defines generated-image artifact metadata and compact media rendering.

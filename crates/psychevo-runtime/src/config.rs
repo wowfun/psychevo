@@ -4,7 +4,7 @@ pub(crate) use std::fs;
 pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::time::Duration;
 
-pub use psychevo_ai::{VoiceAudioFormat, VoiceRealtimeTransport};
+pub use psychevo_ai::{ImageGenerationFormat, VoiceAudioFormat, VoiceRealtimeTransport};
 pub(crate) use serde_json::{Value, json};
 
 pub(crate) use crate::agents::{
@@ -41,6 +41,7 @@ pub(crate) struct RunConfig {
     pub(crate) agent_backends: BTreeMap<String, AgentBackendConfig>,
     pub(crate) channels: ChannelsConfig,
     pub(crate) voice: VoiceConfig,
+    pub(crate) image_generation: ImageGenerationConfig,
     pub(crate) plugins: PluginPolicyConfig,
 }
 
@@ -51,8 +52,9 @@ pub(crate) mod config_types;
 pub(crate) use config_types::*;
 pub use config_types::{
     DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, REASONING_EFFORT_VALUES,
-    ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig, ResolvedVoiceTtsConfig,
-    load_agent_backend_configs, resolve_default_workspace_cwd, resolve_workspace_root,
+    ResolvedImageGenerationConfig, ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig,
+    ResolvedVoiceTtsConfig, load_agent_backend_configs, resolve_default_workspace_cwd,
+    resolve_workspace_root,
 };
 #[path = "config/file_env.rs"]
 pub(crate) mod config_file_env;
@@ -101,3 +103,6 @@ pub use config_channels::*;
 #[path = "config/voice.rs"]
 pub(crate) mod config_voice;
 pub use config_voice::*;
+#[path = "config/image_generation.rs"]
+pub(crate) mod config_image_generation;
+pub use config_image_generation::*;

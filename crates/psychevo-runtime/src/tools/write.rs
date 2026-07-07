@@ -108,6 +108,7 @@ pub(crate) mod write_tool_tests {
                 path_prefixes: Vec::new(),
                 sandbox_policy: SandboxPolicy::disabled(),
                 sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+                ..ToolRuntimeContext::default()
             },
         )
     }
@@ -128,6 +129,7 @@ pub(crate) mod write_tool_tests {
                 path_prefixes: Vec::new(),
                 sandbox_policy: SandboxPolicy::disabled(),
                 sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+                ..ToolRuntimeContext::default()
             },
         )
     }

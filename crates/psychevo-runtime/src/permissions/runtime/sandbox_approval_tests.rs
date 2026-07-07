@@ -83,6 +83,7 @@ mod sandbox_approval_tests {
             path_prefixes: Vec::new(),
             sandbox_policy: policy,
             sandbox_grants: grants,
+            ..crate::tools::ToolRuntimeContext::default()
         }
     }
 

@@ -24,6 +24,55 @@ async fn download_session(
     }
 }
 
+async fn read_media_artifact(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    AxumPath(artifact_id): AxumPath<String>,
+) -> impl IntoResponse {
+    if state.auth_from_headers(&headers).is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match render_media_artifact(&state, &artifact_id) {
+        Ok(response) => response.into_response(),
+        Err(err) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": {"message": err.to_string()}})),
+        )
+            .into_response(),
+    }
+}
+
+fn render_media_artifact(
+    state: &WebState,
+    artifact_id: &str,
+) -> psychevo_runtime::Result<Response<Body>> {
+    psychevo_runtime::validate_media_artifact_id(artifact_id)?;
+    let path = psychevo_runtime::media_artifact_path(&state.inner.home, artifact_id)?;
+    let bytes = std::fs::read(&path)?;
+    let media = psychevo_runtime::read_media_artifact(&state.inner.home, artifact_id)?;
+    let mut response = Response::new(Body::from(bytes));
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_str(&media.mime_type)
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    response.headers_mut().insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!(
+            "inline; filename=\"{}.{}\"",
+            artifact_id,
+            media
+                .mime_type
+                .split('/')
+                .nth(1)
+                .unwrap_or("img")
+                .replace("jpeg", "jpg")
+        ))
+        .unwrap_or_else(|_| HeaderValue::from_static("inline")),
+    );
+    Ok(response)
+}
+
 fn render_download(
     state: &WebState,
     session_id: &str,

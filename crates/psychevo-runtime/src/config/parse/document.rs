@@ -70,6 +70,12 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(voice) = object.get("voice") {
         config.voice = parse_voice_config(voice)?;
     }
+    if let Some(image_generation) = object
+        .get("image_generation")
+        .or_else(|| object.get("imageGeneration"))
+    {
+        config.image_generation = parse_image_generation_config(image_generation)?;
+    }
     if let Some(plugins) = object.get("plugins") {
         config.plugins = parse_plugin_policy_config(plugins)?;
     }

@@ -69,6 +69,7 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
         if tool_name == "spawn_agent" {
             enrich_committed_agent_metadata(&mut metadata);
         }
+        let generated_image = generated_image_metadata(&metadata);
         block.metadata = Some(Value::Object(metadata.clone()));
         block.result = Some(TranscriptToolResult {
             result_message_seq: summary.session_seq,
@@ -83,12 +84,88 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
         block.body = Some(content.clone());
         block.detail = Some(content.clone());
         block.preview = Some(compact_text(content, 240));
+        if let Some(artifact) = generated_image {
+            block.kind = TranscriptBlockKind::Artifact;
+            block.artifact_ids = vec![artifact.artifact_id.clone()];
+            block.title = Some(
+                artifact
+                    .display
+                    .clone()
+                    .unwrap_or_else(|| "Generated image".to_string()),
+            );
+            let body = generated_image_body(&artifact);
+            block.body = Some(body.clone());
+            block.preview = Some(compact_text(&body, 240));
+        }
         block.updated_at_ms = *timestamp_ms;
         if let Some(entry) = entries.get_mut(entry_index) {
             entry.status = entry_status_for_tool_result(&entry.blocks, entry.status);
             entry.updated_at_ms = entry.updated_at_ms.max(*timestamp_ms);
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct GeneratedImageMetadata {
+    artifact_id: String,
+    display: Option<String>,
+    saved_path: Option<String>,
+    prompt: Option<String>,
+}
+
+fn generated_image_metadata(metadata: &serde_json::Map<String, Value>) -> Option<GeneratedImageMetadata> {
+    let result = metadata.get("result")?;
+    let media_kind = result
+        .get("mediaKind")
+        .or_else(|| result.get("media_kind"))
+        .and_then(Value::as_str)?;
+    if media_kind != "generated_image" {
+        return None;
+    }
+    let artifact_id = result
+        .get("artifactId")
+        .or_else(|| result.get("artifact_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    Some(GeneratedImageMetadata {
+        artifact_id,
+        display: result
+            .get("display")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        saved_path: result
+            .get("savedPath")
+            .or_else(|| result.get("saved_path"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        prompt: result
+            .get("prompt")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
+}
+
+fn generated_image_body(artifact: &GeneratedImageMetadata) -> String {
+    let mut lines = vec!["Generated image".to_string()];
+    if let Some(prompt) = artifact
+        .prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+    {
+        lines.push(format!("Prompt: {}", compact_text(prompt, 180)));
+    }
+    if let Some(saved_path) = artifact
+        .saved_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        lines.push(format!("Saved: {saved_path}"));
+    }
+    lines.join("\n")
 }
 
 fn tool_result_status(tool_name: &str, is_error: bool, result: &Value) -> TranscriptBlockStatus {

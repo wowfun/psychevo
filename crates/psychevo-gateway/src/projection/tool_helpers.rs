@@ -409,8 +409,53 @@ fn tool_kind(tool_name: &str) -> TranscriptBlockKind {
         "mcp" | "mcp_call" => TranscriptBlockKind::Mcp,
         "clarify" => TranscriptBlockKind::Clarify,
         "spawn_agent" => TranscriptBlockKind::Agent,
+        "image_generate" | "image_generation.generate" | "image_generation__generate" => {
+            TranscriptBlockKind::Artifact
+        }
         _ => TranscriptBlockKind::ToolCall,
     }
+}
+
+fn generated_image_artifact_id(metadata: &Value) -> Option<String> {
+    let result = metadata.get("result").unwrap_or(metadata);
+    let media_kind = result
+        .get("mediaKind")
+        .or_else(|| result.get("media_kind"))
+        .and_then(Value::as_str)?;
+    if media_kind != "generated_image" {
+        return None;
+    }
+    result
+        .get("artifactId")
+        .or_else(|| result.get("artifact_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|artifact_id| !artifact_id.is_empty())
+        .map(str::to_string)
+}
+
+fn generated_image_body_from_metadata(metadata: &Value) -> Option<String> {
+    let result = metadata.get("result").unwrap_or(metadata);
+    generated_image_artifact_id(metadata)?;
+    let mut lines = vec!["Generated image".to_string()];
+    if let Some(prompt) = result
+        .get("prompt")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+    {
+        lines.push(format!("Prompt: {}", compact_text(prompt, 180)));
+    }
+    if let Some(saved_path) = result
+        .get("savedPath")
+        .or_else(|| result.get("saved_path"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        lines.push(format!("Saved: {saved_path}"));
+    }
+    Some(lines.join("\n"))
 }
 
 fn json_preview(value: &Value) -> Option<String> {
