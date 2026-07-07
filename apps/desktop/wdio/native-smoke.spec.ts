@@ -9,6 +9,8 @@ const artifactRoot = path.resolve(
 const screenshotRoot = path.join(artifactRoot, "screenshots");
 const providerLive = process.env.PSYCHEVO_DESKTOP_PROVIDER_LIVE === "1";
 const providerToken = process.env.PSYCHEVO_FLOATING_PROVIDER_TOKEN ?? "PEVO_DESKTOP_FLOATING_PROVIDER_LIVE_OK";
+const compactFloatingHeightLimit = 220;
+const compositorFloatingHeightLimit = 280;
 
 interface PageVerticalMetrics {
   bodyClientHeight: number;
@@ -24,6 +26,7 @@ interface FloatingWindowMetrics {
   capsuleHeight: number;
   capsuleLeft: number;
   capsuleWidth: number;
+  devicePixelRatio: number;
   innerHeight: number;
   innerWidth: number;
   rootBackground: string;
@@ -90,12 +93,12 @@ describe("Psychevo Desktop native smoke", () => {
     await waitForFloatingCapsule("Floating visual capsule did not render in the native window");
     await browser.waitUntil(async () => {
       const metrics = await floatingWindowMetrics();
-      return metrics.innerHeight <= Math.max(metrics.capsuleHeight + 24, 220);
+      return floatingWindowFitsVisualBounds(metrics);
     }, {
       timeoutMsg: "Floating native window did not fit the visual capsule content"
     });
     const floatingMetrics = await floatingWindowMetrics();
-    expect(floatingMetrics.innerHeight).toBeLessThanOrEqual(Math.max(floatingMetrics.capsuleHeight + 24, 220));
+    expect(floatingWindowFitsVisualBounds(floatingMetrics)).toBe(true);
     expect(floatingMetrics.capsuleLeft).toBeLessThanOrEqual(1);
     expect(floatingMetrics.capsuleWidth).toBeGreaterThanOrEqual(floatingMetrics.innerWidth - 1);
     expect(isTransparentColor(floatingMetrics.rootBackground)).toBe(false);
@@ -250,11 +253,27 @@ async function floatingWindowMetrics(): Promise<FloatingWindowMetrics> {
       capsuleHeight: capsuleRect?.height ?? 0,
       capsuleLeft: capsuleRect?.left ?? 0,
       capsuleWidth: capsuleRect?.width ?? 0,
+      devicePixelRatio: window.devicePixelRatio || 1,
       innerHeight: window.innerHeight,
       innerWidth: window.innerWidth,
       rootBackground: window.getComputedStyle(document.documentElement).backgroundColor
     };
   }) as Promise<FloatingWindowMetrics>;
+}
+
+function floatingWindowFitsVisualBounds(metrics: FloatingWindowMetrics): boolean {
+  const contentFitLimit = Math.max(metrics.capsuleHeight + 24, compactFloatingHeightLimit);
+  if (metrics.innerHeight <= contentFitLimit) {
+    return true;
+  }
+
+  // WSLg/WebKitGTK can enforce a larger native minimum height; the Desktop spec
+  // permits that only when Floating fills the bounded viewport without a transparent gutter.
+  return metrics.innerHeight <= compositorFloatingHeightLimit
+    && metrics.capsuleLeft <= 1
+    && metrics.capsuleWidth >= metrics.innerWidth - 1
+    && !isTransparentColor(metrics.rootBackground)
+    && !isTransparentColor(metrics.bodyBackground);
 }
 
 function isTransparentColor(color: string): boolean {

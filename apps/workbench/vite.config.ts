@@ -1,75 +1,143 @@
 import react from "@vitejs/plugin-react";
 import { configDefaults, defineConfig } from "vitest/config";
 
+function packageSegment(packageName: string): string {
+  return packageName.replace("/", "+");
+}
+
+function includesNodePackage(id: string, packageName: string): boolean {
+  return (
+    id.includes(`/node_modules/${packageName}/`) ||
+    id.includes(`/node_modules/.pnpm/${packageSegment(packageName)}@`)
+  );
+}
+
+function includesNodePackagePrefix(id: string, prefix: string): boolean {
+  return (
+    id.includes(`/node_modules/${prefix}`) ||
+    id.includes(`/node_modules/.pnpm/${packageSegment(prefix)}`)
+  );
+}
+
+function protocolSchemaChunkName(id: string): string | null {
+  const prefix = "/packages/protocol/src/generated/schemas/";
+  const schemaPath = id.split(prefix)[1]?.split(/[?#]/)[0];
+  if (!schemaPath?.endsWith(".ts")) {
+    return null;
+  }
+  return `protocol-schema-${schemaPath
+    .replace(/\.ts$/, "")
+    .replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+function normalizedModuleId(id: string): string {
+  return id.replace(/\\/g, "/");
+}
+
+function isMarkdownVendor(id: string): boolean {
+  const normalized = normalizedModuleId(id);
+  return (
+    includesNodePackage(normalized, "react-markdown") ||
+    includesNodePackagePrefix(normalized, "remark-") ||
+    includesNodePackage(normalized, "unified") ||
+    includesNodePackagePrefix(normalized, "micromark") ||
+    includesNodePackagePrefix(normalized, "mdast-") ||
+    includesNodePackagePrefix(normalized, "hast-") ||
+    includesNodePackagePrefix(normalized, "unist-") ||
+    includesNodePackagePrefix(normalized, "vfile") ||
+    includesNodePackage(normalized, "markdown-table") ||
+    includesNodePackage(normalized, "property-information")
+  );
+}
+
+function isValidationVendor(id: string): boolean {
+  const normalized = normalizedModuleId(id);
+  return (
+    includesNodePackage(normalized, "ajv") ||
+    includesNodePackage(normalized, "fast-uri") ||
+    includesNodePackage(normalized, "json-schema-traverse")
+  );
+}
+
 export default defineConfig({
   plugins: [react()],
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks(id) {
-          const normalized = id.replace(/\\/g, "/");
-          if (
-            normalized.includes("/node_modules/react/") ||
-            normalized.includes("/node_modules/react-dom/") ||
-            normalized.includes("/node_modules/scheduler/")
-          ) {
-            return "vendor-react";
-          }
-          if (normalized.includes("/node_modules/highlight.js/")) {
-            return "vendor-highlight";
-          }
-          if (
-            normalized.includes("/node_modules/react-markdown/") ||
-            normalized.includes("/node_modules/remark-") ||
-            normalized.includes("/node_modules/unified/") ||
-            normalized.includes("/node_modules/micromark") ||
-            normalized.includes("/node_modules/mdast-") ||
-            normalized.includes("/node_modules/hast-") ||
-            normalized.includes("/node_modules/unist-") ||
-            normalized.includes("/node_modules/vfile") ||
-            normalized.includes("/node_modules/markdown-table/") ||
-            normalized.includes("/node_modules/property-information/")
-          ) {
-            return "vendor-markdown";
-          }
-          if (
-            normalized.includes("/node_modules/ajv/") ||
-            normalized.includes("/node_modules/fast-uri/") ||
-            normalized.includes("/node_modules/json-schema-traverse/")
-          ) {
-            return "vendor-validation";
-          }
-          if (normalized.includes("/node_modules/lucide-react/")) {
-            return "vendor-icons";
-          }
-          if (normalized.includes("/node_modules/@xterm/")) {
-            return "vendor-terminal";
-          }
-          if (normalized.includes("/node_modules/")) {
-            return "vendor";
-          }
-          const schemaMatch = normalized.match(
-            /\/packages\/protocol\/src\/generated\/schemas\/(.+)\.ts$/
-          );
-          if (schemaMatch?.[1]) {
-            return `protocol-schema-${schemaMatch[1].replace(/\//g, "-")}`;
-          }
-          if (normalized.includes("/packages/protocol/")) {
-            return "protocol-runtime";
-          }
-          if (normalized.includes("/packages/components/")) {
-            return "ui-components";
-          }
-          if (normalized.includes("/packages/client/")) {
-            return "client-runtime";
-          }
-          if (normalized.includes("/packages/host/")) {
-            return "host-runtime";
-          }
-          if (normalized.includes("/packages/assets/")) {
-            return "assets";
-          }
-          return undefined;
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor-react",
+              priority: 100,
+              test: (id) => {
+                const normalized = normalizedModuleId(id);
+                return (
+                  includesNodePackage(normalized, "react") ||
+                  includesNodePackage(normalized, "react-dom") ||
+                  includesNodePackage(normalized, "scheduler")
+                );
+              }
+            },
+            {
+              name: "vendor-validation",
+              priority: 95,
+              test: isValidationVendor
+            },
+            {
+              name: "vendor-highlight",
+              priority: 90,
+              test: (id) => includesNodePackage(normalizedModuleId(id), "highlight.js")
+            },
+            {
+              name: "vendor-markdown",
+              priority: 85,
+              test: isMarkdownVendor
+            },
+            {
+              name: "vendor-icons",
+              priority: 80,
+              test: (id) => includesNodePackage(normalizedModuleId(id), "lucide-react")
+            },
+            {
+              name: "vendor-terminal",
+              priority: 75,
+              test: (id) => includesNodePackagePrefix(normalizedModuleId(id), "@xterm/")
+            },
+            {
+              name: "vendor",
+              priority: 70,
+              test: (id) => normalizedModuleId(id).includes("/node_modules/")
+            },
+            {
+              name: (id) => protocolSchemaChunkName(normalizedModuleId(id)),
+              priority: 65
+            },
+            {
+              name: "protocol-runtime",
+              priority: 60,
+              test: (id) => normalizedModuleId(id).includes("/packages/protocol/")
+            },
+            {
+              name: "ui-components",
+              priority: 55,
+              test: (id) => normalizedModuleId(id).includes("/packages/components/")
+            },
+            {
+              name: "client-runtime",
+              priority: 50,
+              test: (id) => normalizedModuleId(id).includes("/packages/client/")
+            },
+            {
+              name: "host-runtime",
+              priority: 45,
+              test: (id) => normalizedModuleId(id).includes("/packages/host/")
+            },
+            {
+              name: "assets",
+              priority: 40,
+              test: (id) => normalizedModuleId(id).includes("/packages/assets/")
+            }
+          ]
         }
       }
     },
