@@ -29,8 +29,12 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
         &state.inner.cwd,
         psychevo_runtime::PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: psychevo_runtime::PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -402,6 +406,66 @@ async fn capability_plugin_rpcs_install_toggle_and_uninstall_profile_plugin() {
     .await
     .expect("plugin/uninstall");
     assert_eq!(removed["success"], true);
+}
+
+#[tokio::test]
+async fn plugin_inspect_and_trust_rpcs_return_adapter_state() {
+    let (temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    let source = temp.path().join("hermes-plugin");
+    std::fs::create_dir_all(&source).expect("source");
+    std::fs::write(
+        source.join("plugin.yaml"),
+        "name: hermes-managed\nversion: 0.2.0\ndescription: hermes\nprovides_tools:\n  - helper\n",
+    )
+    .expect("manifest");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    let inspected = capability_rpc(
+        &state,
+        "plugin/import/inspect",
+        json!({
+            "scope": scope.clone(),
+            "source": source,
+            "sourceKind": "local",
+            "adapterMode": "adapter_host"
+        }),
+    )
+    .await
+    .expect("plugin/import/inspect");
+    assert_eq!(inspected["inspection"]["framework"], "hermes");
+    assert_eq!(inspected["inspection"]["status"], "Needs trust");
+
+    let installed = capability_rpc(
+        &state,
+        "plugin/install",
+        json!({
+            "scope": scope.clone(),
+            "source": source,
+            "sourceKind": "local",
+            "adapterMode": "adapter_host",
+            "scopeName": "profile"
+        }),
+    )
+    .await
+    .expect("plugin/install");
+    assert_eq!(installed["plugin"]["manifest_kind"], "hermes");
+
+    let trusted = capability_rpc(
+        &state,
+        "plugin/setTrust",
+        json!({
+            "scope": scope,
+            "selector": "hermes-managed",
+            "trusted": true,
+            "scopeName": "profile"
+        }),
+    )
+    .await
+    .expect("plugin/setTrust");
+    assert_eq!(trusted["trust"]["status"], "trusted");
 }
 
 #[tokio::test]

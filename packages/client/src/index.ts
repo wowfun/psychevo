@@ -77,11 +77,16 @@ import {
   type ObservabilityReadParams,
   type ObservabilityReadResult,
   type PermissionRespondParams,
+  type PluginCatalogAddParams,
+  type PluginCatalogListParams,
+  type PluginCatalogRemoveParams,
   type PluginDoctorParams,
+  type PluginInspectParams,
   type PluginInstallParams,
   type PluginListParams,
   type PluginReadParams,
   type PluginSetEnabledParams,
+  type PluginSetTrustParams,
   type PluginUninstallParams,
   type RpcNotification,
   type RuntimeOptionsParams,
@@ -248,11 +253,16 @@ export interface GatewayRequestParams {
   "usage/read": UsageReadParams;
   "initialize": InitializeParams;
   "permission/respond": PermissionRespondParams;
+  "plugin/catalog/add": PluginCatalogAddParams;
+  "plugin/catalog/list": PluginCatalogListParams;
+  "plugin/catalog/remove": PluginCatalogRemoveParams;
   "plugin/doctor": PluginDoctorParams;
+  "plugin/import/inspect": PluginInspectParams;
   "plugin/install": PluginInstallParams;
   "plugin/list": PluginListParams;
   "plugin/read": PluginReadParams;
   "plugin/setEnabled": PluginSetEnabledParams;
+  "plugin/setTrust": PluginSetTrustParams;
   "plugin/uninstall": PluginUninstallParams;
   "skill/install": SkillInstallParams;
   "skill/list": SkillListParams;
@@ -360,11 +370,16 @@ export interface GatewayRequestResults {
   "usage/read": UsageReadResult;
   "initialize": InitializeResult;
   "permission/respond": InteractionRespondResult;
+  "plugin/catalog/add": GatewayJsonResult;
+  "plugin/catalog/list": GatewayJsonResult;
+  "plugin/catalog/remove": GatewayJsonResult;
   "plugin/doctor": GatewayJsonResult;
+  "plugin/import/inspect": GatewayJsonResult;
   "plugin/install": GatewayJsonResult;
   "plugin/list": GatewayJsonResult;
   "plugin/read": GatewayJsonResult;
   "plugin/setEnabled": GatewayJsonResult;
+  "plugin/setTrust": GatewayJsonResult;
   "plugin/uninstall": GatewayJsonResult;
   "skill/install": GatewayJsonResult;
   "skill/list": GatewayJsonResult;

@@ -68,11 +68,32 @@ export const clientRequestPluginInstallSchema = {
     },
     "PluginInstallParams": {
       "properties": {
+        "adapterMode": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "force": {
           "default": false,
           "type": "boolean"
         },
         "gitRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "npmRegistry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "npmVersion": {
           "default": null,
           "type": [
             "string",
@@ -99,6 +120,13 @@ export const clientRequestPluginInstallSchema = {
         },
         "source": {
           "type": "string"
+        },
+        "sourceKind": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

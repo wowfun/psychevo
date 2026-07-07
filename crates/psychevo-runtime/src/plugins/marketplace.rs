@@ -45,9 +45,9 @@ fn validate_marketplace_entry(entry: &PluginMarketplaceEntry) -> Result<()> {
             "plugin marketplace entry source must not be empty".to_string(),
         ));
     }
-    if !matches!(entry.kind.as_str(), "local" | "git") {
+    if !matches!(entry.kind.as_str(), "local" | "git" | "npm") {
         return Err(Error::Config(format!(
-            "plugin marketplace entry `{}` has unsupported kind `{}`; expected local or git",
+            "plugin marketplace entry `{}` has unsupported kind `{}`; expected local, git, or npm",
             entry.name, entry.kind
         )));
     }

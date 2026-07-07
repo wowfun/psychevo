@@ -19,14 +19,16 @@ Out of scope:
 - hosted marketplace accounts, signatures, ratings, sharing, graphical stores, or hot reload
 - in-process third-party plugin ABI
 - whole-process sandboxing of workers, MCP servers, hooks, provider clients, skills, or agents
+- executing Codex apps or foreign dashboard/UI extension runtimes
 
 ## Plugin Model
 
-A plugin package is a directory or materialized Git source with one recognized
-manifest. Installing a plugin makes a package available to policy. Installing
-does not enable the plugin, make any declaration model-visible, execute worker
-code, trust hooks, grant permissions, create credentials, or mutate the runtime
-extension registry.
+A plugin package is a directory, materialized Git source, or materialized npm
+package with one recognized manifest or one recognized adapter descriptor.
+Installing a plugin makes a package available to policy. Installing does not
+enable the plugin, make any declaration model-visible, execute worker code,
+trust hooks or foreign adapters, grant permissions, create credentials, or
+mutate the runtime extension registry.
 
 A plugin declaration is candidate material declared statically in a manifest or
 reported by a runtime helper such as a Psychevo worker. Candidate declarations
@@ -45,11 +47,14 @@ must be mapped by Psychevo host code before use:
 Plugin identity must be preserved for diagnostics, conflict handling, data-root
 selection, and evidence.
 
-Codex-compatible manifest fields keep their Codex semantics. `skills`,
-`mcpServers`, `hooks`, `apps`, and `interface.*` declare package resources or
-model/UI metadata. Psychevo-only plugin behavior must live under a Psychevo
-namespace such as `psychevo.runtime`; it must not redefine a shared Codex field
-as executable authority.
+Codex-compatible manifest fields keep their Codex semantics. `.codex-plugin`
+packages are first-class compatibility packages when they provide a resolvable
+name and version for install. `skills`, `mcpServers`, `hooks`, `apps`, and
+`interface.*` declare package resources, setup facts, or model/UI metadata.
+Psychevo-only plugin behavior must live under a Psychevo namespace such as
+`psychevo.runtime`; it must not redefine a shared Codex field as executable
+authority. Codex `apps` and auth/setup metadata are descriptive readiness facts
+in this slice, not executable app runtimes.
 
 Plugin hook declarations are candidate hook declarations. Installing or enabling
 a plugin does not trust or run them. Runtime passes accepted plugin hook
@@ -61,6 +66,17 @@ trust review before execution.
 Profile and project configuration declare plugin policy. The effective policy
 for one invocation is the profile policy overlaid by project-local policy for
 the selected cwd.
+
+Adapter policy has two levels. Framework defaults declare whether foreign
+packages use `adapter_host`, `manifest_only`, or `disabled`. Per-plugin policy
+may downgrade an adapter to manifest-only or disabled, but it must not silently
+upgrade a disabled framework into execution. Before trust, foreign packages may
+only be inspected without importing or executing foreign runtime code.
+
+Plugin trust is package-content scoped. Trust binds a normalized plugin
+identity to a package fingerprint. A changed package fingerprint invalidates
+trust and returns the plugin to manifest-only inspection until the user trusts
+the new fingerprint.
 
 Policy can enable or disable a plugin package. Enabling a plugin makes its
 accepted declarations available to the owning runtime modules, but it does not
@@ -93,24 +109,33 @@ Project plugin stores live under:
 <cwd>/.psychevo/plugins/data
 ```
 
-The cache root contains materialized packages. The data root is the only
-plugin-owned writable state directory granted by plugin identity. Runtime must
-not treat the install cache as mutable plugin state.
+The cache root contains materialized packages from local, Git, and npm sources.
+Npm package materialization must use an install-time staging directory and must
+not run lifecycle scripts. The data root is the only plugin-owned writable state
+directory granted by plugin identity. Runtime must not treat the install cache
+as mutable plugin state.
 
 ## Compatibility
 
-Psychevo can recognize native Psychevo plugin manifests and selected
-compatibility manifest paths. Compatibility means package-entry and field-subset
-compatibility only. Psychevo does not execute Codex, Claude Code, Hermes, or
+Psychevo can recognize native Psychevo plugin manifests, Codex package
+manifests, and selected compatibility manifest paths. Compatibility means
+package-entry and field-subset compatibility unless an adapter host explicitly
+claims a target lane. Psychevo does not execute Codex, Claude Code, Hermes, or
 OpenCode in-process plugin APIs directly.
 
-Hermes or OpenCode plugin business logic may be adapted into a Psychevo worker,
-skill, MCP server, command, or agent backend.
+Hermes or OpenCode plugin business logic may be inspected by an independent
+Python or Node adapter host, then projected into Psychevo lanes. Supported v1
+adapter lanes are tools, hooks, skills, MCP/toolsets, manifest/status, and
+diagnostics. Provider execution, UI/TUI routes, slots, themes, dashboard auth,
+and arbitrary command execution remain unsupported or future-support
+diagnostics unless an owning Psychevo runtime module defines a safe acceptance
+path.
 
 ## Related Topics
 
 - [155 Plugin Manifest](../155-plugin-manifest/spec.md) defines package manifest loading.
 - [150 Plugin Runtime](../150-plugin-runtime/spec.md) defines store, policy, worker, and declaration loading.
+- [150 Plugin Runtime Adapter Hosts](../150-plugin-runtime/adapter-hosts.md) defines foreign adapter inspection boundaries.
 - [053 Hooks](../053-hooks/spec.md) defines the hook declaration boundary.
 - [140 Hook Runtime](../140-hook-runtime/spec.md) defines hook execution.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines

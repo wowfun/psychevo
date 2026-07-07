@@ -40,9 +40,14 @@ import { clientRequestBackendDeleteSchema } from './rpc/client-request/backend-d
 import { clientRequestPluginListSchema } from './rpc/client-request/plugin-list';
 import { clientRequestPluginReadSchema } from './rpc/client-request/plugin-read';
 import { clientRequestPluginDoctorSchema } from './rpc/client-request/plugin-doctor';
+import { clientRequestPluginImportInspectSchema } from './rpc/client-request/plugin-import-inspect';
 import { clientRequestPluginInstallSchema } from './rpc/client-request/plugin-install';
 import { clientRequestPluginUninstallSchema } from './rpc/client-request/plugin-uninstall';
 import { clientRequestPluginSetEnabledSchema } from './rpc/client-request/plugin-set-enabled';
+import { clientRequestPluginSetTrustSchema } from './rpc/client-request/plugin-set-trust';
+import { clientRequestPluginCatalogListSchema } from './rpc/client-request/plugin-catalog-list';
+import { clientRequestPluginCatalogAddSchema } from './rpc/client-request/plugin-catalog-add';
+import { clientRequestPluginCatalogRemoveSchema } from './rpc/client-request/plugin-catalog-remove';
 import { clientRequestSkillListSchema } from './rpc/client-request/skill-list';
 import { clientRequestSkillReadSchema } from './rpc/client-request/skill-read';
 import { clientRequestSkillInstallSchema } from './rpc/client-request/skill-install';
@@ -437,6 +442,9 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/plugin-doctor.json"
     },
     {
+      "$ref": "ClientRequest/plugin-import-inspect.json"
+    },
+    {
       "$ref": "ClientRequest/plugin-install.json"
     },
     {
@@ -444,6 +452,18 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ClientRequest/plugin-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-set-trust.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-catalog-list.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-catalog-add.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-catalog-remove.json"
     },
     {
       "$ref": "ClientRequest/skill-list.json"
@@ -737,9 +757,14 @@ export const rpcSchemaRefs = [
   clientRequestPluginListSchema,
   clientRequestPluginReadSchema,
   clientRequestPluginDoctorSchema,
+  clientRequestPluginImportInspectSchema,
   clientRequestPluginInstallSchema,
   clientRequestPluginUninstallSchema,
   clientRequestPluginSetEnabledSchema,
+  clientRequestPluginSetTrustSchema,
+  clientRequestPluginCatalogListSchema,
+  clientRequestPluginCatalogAddSchema,
+  clientRequestPluginCatalogRemoveSchema,
   clientRequestSkillListSchema,
   clientRequestSkillReadSchema,
   clientRequestSkillInstallSchema,

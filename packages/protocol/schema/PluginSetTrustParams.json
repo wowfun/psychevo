@@ -65,38 +65,6 @@
     }
   },
   "properties": {
-    "adapterMode": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "force": {
-      "default": false,
-      "type": "boolean"
-    },
-    "gitRef": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "npmRegistry": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "npmVersion": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "scope": {
       "anyOf": [
         {
@@ -115,20 +83,17 @@
         "null"
       ]
     },
-    "source": {
+    "selector": {
       "type": "string"
     },
-    "sourceKind": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
+    "trusted": {
+      "default": true,
+      "type": "boolean"
     }
   },
   "required": [
-    "source"
+    "selector"
   ],
-  "title": "PluginInstallParams",
+  "title": "PluginSetTrustParams",
   "type": "object"
 }

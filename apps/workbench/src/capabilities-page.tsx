@@ -18,6 +18,16 @@ type CapabilityRow = {
 };
 
 type SkillInstallDraft = { source: string; name: string; target: "profile" | "project"; force: boolean };
+type PluginInstallDraft = {
+  source: string;
+  kind: "local" | "git" | "npm";
+  npmVersion: string;
+  npmRegistry: string;
+  adapterMode: "manifest_only" | "adapter_host" | "disabled";
+  force: boolean;
+  inspection: JsonObject | null;
+};
+type MutationOptions = { notice?: string; refresh?: boolean };
 
 type SkillRow = CapabilityRow & {
   collisionGroup: string[];
@@ -77,7 +87,7 @@ export function CapabilitiesPage({
   const [refreshToken, setRefreshToken] = useState(0);
   const [createPanel, setCreatePanel] = useState<CapabilityTab | null>(null);
   const [skillInstall, setSkillInstall] = useState<SkillInstallDraft>({ source: "", name: "", target: "profile", force: false });
-  const [pluginInstall, setPluginInstall] = useState({ source: "", force: false });
+  const [pluginInstall, setPluginInstall] = useState<PluginInstallDraft>({ source: "", kind: "local", npmVersion: "", npmRegistry: "", adapterMode: "manifest_only", force: false, inspection: null });
   const [toolDraft, setToolDraft] = useState({ name: "", description: "", tools: "", includes: "", force: false });
   const [mcpDraft, setMcpDraft] = useState({
     name: "",
@@ -152,14 +162,14 @@ export function CapabilitiesPage({
   const selectedId = selected[activeTab] ?? rows[0]?.id ?? null;
   const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
 
-  async function mutate(action: () => Promise<unknown>): Promise<boolean> {
+  async function mutate(action: () => Promise<unknown>, options: MutationOptions = {}): Promise<boolean> {
     if (!client || !requestScope) return false;
     setSaving(true);
     setError(null);
     try {
       await action();
-      setNotice("Saved. Changes apply to the next run/session; current sessions may differ.");
-      setRefreshToken((value) => value + 1);
+      setNotice(options.notice ?? "Saved. Changes apply to the next run/session; current sessions may differ.");
+      if (options.refresh !== false) setRefreshToken((value) => value + 1);
       return true;
     } catch (err) {
       setError(errorMessage(err));
@@ -369,7 +379,7 @@ function SkillsPanel({
   createOpen: boolean;
   data: JsonObject | null;
   loading: boolean;
-  mutate(action: () => Promise<unknown>): Promise<boolean>;
+  mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
   onCloseCreate(): void;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onSelect(id: string): void;
@@ -587,7 +597,7 @@ function CapabilityActions({
 }: {
   busy: boolean;
   client: GatewayClient | null;
-  mutate(action: () => Promise<unknown>): Promise<boolean>;
+  mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
   onOAuthSession(sessionId: string | null): void;
   row: CapabilityRow;
   scope: GatewayRequestScope | null;
@@ -651,11 +661,18 @@ function CapabilityActions({
     );
   }
   if (tab === "plugins") {
+    const trust = objectField(row.raw, "trust");
+    const needsTrust = boolField(trust, "required") && stringField(trust, "status") !== "trusted";
     return (
       <div className="capabilityActionGrid">
         <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/doctor", { selector: row.id, scope }))} type="button">
           <Play size={14} /> Doctor
         </button>
+        {needsTrust && (
+          <button disabled={busy} onClick={() => confirmAction(`Trust plugin ${row.name} for its current package fingerprint?`) && void mutate(() => client.request("plugin/setTrust", { selector: row.id, trusted: true, scope }))} type="button">
+            <LogIn size={14} /> Trust
+          </button>
+        )}
         <button disabled={busy} onClick={() => confirmAction(`Uninstall plugin ${row.name}?`) && void mutate(() => client.request("plugin/uninstall", { selector: row.id, scope }))} type="button">
           <Trash2 size={14} /> Uninstall
         </button>
@@ -675,13 +692,13 @@ function CapabilityForms(props: {
   busy: boolean;
   client: GatewayClient | null;
   mcpDraft: { name: string; transport: string; command: string; url: string; bearerTokenEnvVar: string; oauthClientId: string };
-  mutate(action: () => Promise<unknown>): Promise<boolean>;
+  mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
   onClose(): void;
   open: boolean;
-  pluginInstall: { source: string; force: boolean };
+  pluginInstall: PluginInstallDraft;
   scope: GatewayRequestScope | null;
   setMcpDraft(value: { name: string; transport: string; command: string; url: string; bearerTokenEnvVar: string; oauthClientId: string }): void;
-  setPluginInstall(value: { source: string; force: boolean }): void;
+  setPluginInstall(value: PluginInstallDraft): void;
   setToolDraft(value: { name: string; description: string; tools: string; includes: string; force: boolean }): void;
   tab: CapabilityTab;
   toolDraft: { name: string; description: string; tools: string; includes: string; force: boolean };
@@ -690,18 +707,53 @@ function CapabilityForms(props: {
   if (!client || !scope || !open) return null;
   if (tab === "plugins") {
     const draft = props.pluginInstall;
+    const inspectParams = {
+      source: draft.source,
+      sourceKind: draft.kind,
+      gitRef: null,
+      npmVersion: draft.kind === "npm" ? draft.npmVersion || null : null,
+      npmRegistry: draft.kind === "npm" ? draft.npmRegistry || null : null,
+      adapterMode: draft.adapterMode,
+      scope
+    };
     return (
-      <CreatePanel className="capabilityCreatePanel" description="Install a plugin from a local path or Git source." icon={<Plus size={14} />} layout="side" onClose={onClose} title="Install plugin">
+      <CreatePanel className="capabilityCreatePanel" description="Inspect and install a plugin package." icon={<Plus size={14} />} layout="side" onClose={onClose} title="Install plugin">
         <form className="capabilityForm" onSubmit={(event) => {
           event.preventDefault();
           if (draft.force && !confirmAction("Install plugin with force?")) return;
-          void mutate(() => client.request("plugin/install", { source: draft.source, force: draft.force, scope })).then((ok) => {
+          void mutate(() => client.request("plugin/install", { ...inspectParams, force: draft.force })).then((ok) => {
             if (ok) onClose();
           });
         }}>
-          <input aria-label="Plugin source" onChange={(event) => props.setPluginInstall({ ...draft, source: event.target.value })} placeholder="path or git source" value={draft.source} />
+          <input aria-label="Plugin source" onChange={(event) => props.setPluginInstall({ ...draft, source: event.target.value, inspection: null })} placeholder="path, git source, or npm package" value={draft.source} />
+          <select aria-label="Plugin source kind" onChange={(event) => props.setPluginInstall({ ...draft, kind: pluginKindValue(event.target.value), inspection: null })} value={draft.kind}>
+            <option value="local">Local</option>
+            <option value="git">Git</option>
+            <option value="npm">npm</option>
+          </select>
+          {draft.kind === "npm" && (
+            <>
+              <input aria-label="Npm package version" onChange={(event) => props.setPluginInstall({ ...draft, npmVersion: event.target.value, inspection: null })} placeholder="version" value={draft.npmVersion} />
+              <input aria-label="Npm registry" onChange={(event) => props.setPluginInstall({ ...draft, npmRegistry: event.target.value, inspection: null })} placeholder="registry" value={draft.npmRegistry} />
+            </>
+          )}
+          <select aria-label="Plugin adapter mode" onChange={(event) => props.setPluginInstall({ ...draft, adapterMode: pluginAdapterModeValue(event.target.value), inspection: null })} value={draft.adapterMode}>
+            <option value="manifest_only">Manifest only</option>
+            <option value="adapter_host">Adapter host</option>
+            <option value="disabled">Disabled</option>
+          </select>
           <label><input checked={draft.force} onChange={(event) => props.setPluginInstall({ ...draft, force: event.target.checked })} type="checkbox" /> Force</label>
-          <ActionButton disabled={busy || !draft.source.trim()} icon={<Plus size={14} />} type="submit" variant="primary">Install</ActionButton>
+          <div className="capabilityFormActions">
+            <ActionButton disabled={busy || !draft.source.trim()} icon={<Search size={14} />} onClick={() => {
+              void mutate(async () => {
+                const result = await client.request("plugin/import/inspect", inspectParams);
+                props.setPluginInstall({ ...draft, inspection: objectField(result, "inspection") });
+                return result;
+              }, { notice: "Inspection complete.", refresh: false });
+            }} type="button" variant="neutral">Inspect</ActionButton>
+            <ActionButton disabled={busy || !draft.source.trim()} icon={<Plus size={14} />} type="submit" variant="primary">Install</ActionButton>
+          </div>
+          {draft.inspection && <PluginInspectionSummary inspection={draft.inspection} />}
         </form>
       </CreatePanel>
     );
@@ -917,8 +969,8 @@ function rowsForTab(tab: CapabilityTab, data: JsonObject | null): CapabilityRow[
       name: stringField(plugin, "name"),
       description: stringField(plugin, "description"),
       enabled: boolField(plugin, "enabled"),
-      status: stringField(plugin, "scope") || "plugin",
-      badges: [stringField(plugin, "manifest_kind"), stringField(plugin, "source")].filter(Boolean),
+      status: stringField(plugin, "status") || stringField(plugin, "readiness") || "Installed",
+      badges: [stringField(plugin, "manifest_kind"), stringField(plugin, "source_kind"), stringField(plugin, "source")].filter(Boolean),
       raw: plugin
     }));
   }
@@ -969,6 +1021,44 @@ function toolsetRemovable(row: CapabilityRow): boolean {
 
 function isBuiltInToolsetName(value: string): boolean {
   return ["coding-core", "web"].includes(value.trim());
+}
+
+function PluginInspectionSummary({ inspection }: { inspection: JsonObject }) {
+  const lanes = arrayStrings(inspection.target_lanes);
+  const unsupported = arrayStrings(inspection.unsupported_lanes);
+  const stages = arrayObjects(inspection.stages);
+  return (
+    <section className="pluginInspection" aria-label="Plugin inspection">
+      <div>
+        <strong>{stringField(inspection, "name") || "Plugin"}</strong>
+        <span>{[stringField(inspection, "framework"), stringField(inspection, "status")].filter(Boolean).join(" / ")}</span>
+      </div>
+      <dl className="capabilityKeyValues pluginInspectionGrid">
+        <div><dt>Source</dt><dd>{stringField(inspection, "source_kind") || "local"}</dd></div>
+        <div><dt>Mode</dt><dd>{stringField(inspection, "adapter_mode") || "manifest_only"}</dd></div>
+        {lanes.length > 0 && <div><dt>Lanes</dt><dd>{lanes.join(", ")}</dd></div>}
+        {unsupported.length > 0 && <div><dt>Unsupported</dt><dd>{unsupported.join(", ")}</dd></div>}
+      </dl>
+      {stages.length > 0 && (
+        <div className="pluginInspectionStages">
+          {stages.slice(0, 5).map((stage, index) => (
+            <span className="capabilityChip" key={`${stringField(stage, "stage")}-${index}`}>
+              {stringField(stage, "stage")}: {stringField(stage, "status")}
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function pluginKindValue(value: string): PluginInstallDraft["kind"] {
+  return value === "git" || value === "npm" ? value : "local";
+}
+
+function pluginAdapterModeValue(value: string): PluginInstallDraft["adapterMode"] {
+  if (value === "adapter_host" || value === "disabled") return value;
+  return "manifest_only";
 }
 
 function KeyValueView({ value }: { value: JsonObject }) {

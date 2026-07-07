@@ -249,6 +249,24 @@ pub struct PluginDoctorParams {
     pub scope: Option<GatewayRequestScope>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInspectParams {
+    pub source: String,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub git_ref: Option<String>,
+    #[serde(default)]
+    pub npm_version: Option<String>,
+    #[serde(default)]
+    pub npm_registry: Option<String>,
+    #[serde(default)]
+    pub adapter_mode: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillListParams {
@@ -310,7 +328,15 @@ pub struct SkillSetEnabledParams {
 pub struct PluginInstallParams {
     pub source: String,
     #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
     pub git_ref: Option<String>,
+    #[serde(default)]
+    pub npm_version: Option<String>,
+    #[serde(default)]
+    pub npm_registry: Option<String>,
+    #[serde(default)]
+    pub adapter_mode: Option<String>,
     #[serde(default)]
     pub scope_name: Option<String>,
     #[serde(default)]
@@ -338,6 +364,66 @@ pub struct PluginSetEnabledParams {
     pub scope_name: Option<String>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSetTrustParams {
+    pub selector: String,
+    #[serde(default = "default_true")]
+    pub trusted: bool,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCatalogListParams {
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCatalogAddParams {
+    pub name: String,
+    pub source: String,
+    #[serde(default = "default_plugin_catalog_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub git_ref: Option<String>,
+    #[serde(default)]
+    pub npm_version: Option<String>,
+    #[serde(default)]
+    pub npm_registry: Option<String>,
+    #[serde(default)]
+    pub adapter_mode: Option<String>,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCatalogRemoveParams {
+    pub name: String,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_plugin_catalog_kind() -> String {
+    "local".to_string()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
@@ -755,12 +841,22 @@ pub enum ClientRequest {
     PluginRead(PluginReadParams),
     #[serde(rename = "plugin/doctor")]
     PluginDoctor(PluginDoctorParams),
+    #[serde(rename = "plugin/import/inspect")]
+    PluginInspect(PluginInspectParams),
     #[serde(rename = "plugin/install")]
     PluginInstall(PluginInstallParams),
     #[serde(rename = "plugin/uninstall")]
     PluginUninstall(PluginUninstallParams),
     #[serde(rename = "plugin/setEnabled")]
     PluginSetEnabled(PluginSetEnabledParams),
+    #[serde(rename = "plugin/setTrust")]
+    PluginSetTrust(PluginSetTrustParams),
+    #[serde(rename = "plugin/catalog/list")]
+    PluginCatalogList(PluginCatalogListParams),
+    #[serde(rename = "plugin/catalog/add")]
+    PluginCatalogAdd(PluginCatalogAddParams),
+    #[serde(rename = "plugin/catalog/remove")]
+    PluginCatalogRemove(PluginCatalogRemoveParams),
     #[serde(rename = "skill/list")]
     SkillList(SkillListParams),
     #[serde(rename = "skill/read")]

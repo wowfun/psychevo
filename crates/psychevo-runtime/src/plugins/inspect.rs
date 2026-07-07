@@ -1,0 +1,932 @@
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use serde_json::{Value, json};
+use tempfile::TempDir;
+
+use super::manifest::load_plugin_manifest;
+use super::store::PluginStore;
+use super::types::{
+    LoadedPluginManifest, PluginAdapterMode, PluginDiagnostic, PluginInspectOptions,
+    PluginInspection, PluginInstallOptions, PluginManifestKind, PluginSourceKind,
+    PluginStageDiagnostic,
+};
+use super::util::{directory_fingerprint, directory_size, source_slug};
+use crate::error::{Error, Result};
+
+const MAX_NPM_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_NPM_EXTRACTED_BYTES: u64 = 200 * 1024 * 1024;
+
+pub(crate) struct PluginMaterializedSource {
+    pub(crate) root: PathBuf,
+    pub(crate) source_id: String,
+    pub(crate) source_kind: PluginSourceKind,
+    pub(crate) npm_registry: Option<String>,
+    #[allow(dead_code)]
+    pub(crate) temp_dir: Option<TempDir>,
+}
+
+pub fn plugin_import_inspect_value(
+    home: &Path,
+    cwd: &Path,
+    options: PluginInspectOptions,
+) -> Result<Value> {
+    let temp = TempDir::new()?;
+    let staging_root = temp.path().to_path_buf();
+    let materialized = materialize_source_in_dir(
+        home,
+        cwd,
+        &staging_root,
+        &SourceRequest {
+            source: options.source,
+            source_kind: options.source_kind,
+            git_ref: options.git_ref,
+            npm_version: options.npm_version,
+            npm_registry: options.npm_registry,
+        },
+        Some(temp),
+    )?;
+    let inspection = inspect_materialized_source(
+        &materialized,
+        options.adapter_mode.unwrap_or_default(),
+        "Available",
+    )?;
+    Ok(json!({
+        "success": inspection.status != "Failed",
+        "inspection": inspection,
+    }))
+}
+
+pub(crate) struct SourceRequest {
+    pub(crate) source: String,
+    pub(crate) source_kind: Option<PluginSourceKind>,
+    pub(crate) git_ref: Option<String>,
+    pub(crate) npm_version: Option<String>,
+    pub(crate) npm_registry: Option<String>,
+}
+
+impl SourceRequest {
+    pub(crate) fn from_install(options: &PluginInstallOptions) -> Self {
+        Self {
+            source: options.source.clone(),
+            source_kind: options.source_kind,
+            git_ref: options.git_ref.clone(),
+            npm_version: options.npm_version.clone(),
+            npm_registry: options.npm_registry.clone(),
+        }
+    }
+}
+
+pub(crate) fn materialize_source_for_install(
+    store: &PluginStore,
+    home: &Path,
+    cwd: &Path,
+    request: &SourceRequest,
+) -> Result<PluginMaterializedSource> {
+    let staging = store.cache.join(format!(
+        "incoming-{}",
+        source_slug(&format!(
+            "{}{:?}{:?}{:?}",
+            request.source, request.git_ref, request.npm_version, request.npm_registry
+        ))
+    ));
+    if staging.exists() {
+        fs::remove_dir_all(&staging)?;
+    }
+    fs::create_dir_all(&staging)?;
+    materialize_source_in_dir(home, cwd, &staging, request, None)
+}
+
+fn materialize_source_in_dir(
+    _home: &Path,
+    cwd: &Path,
+    staging_root: &Path,
+    request: &SourceRequest,
+    temp_dir: Option<TempDir>,
+) -> Result<PluginMaterializedSource> {
+    let source_kind = match request.source_kind {
+        Some(kind) => kind,
+        None => infer_source_kind(&request.source, cwd),
+    };
+    match source_kind {
+        PluginSourceKind::Local => materialize_local(cwd, request, temp_dir),
+        PluginSourceKind::Git => materialize_git(staging_root, request, temp_dir),
+        PluginSourceKind::Npm => materialize_npm(staging_root, cwd, request, temp_dir),
+    }
+}
+
+pub(crate) fn inspect_materialized_source(
+    materialized: &PluginMaterializedSource,
+    adapter_mode: PluginAdapterMode,
+    status: &str,
+) -> Result<PluginInspection> {
+    let fingerprint = directory_fingerprint(&materialized.root)?;
+    let mut stages = vec![PluginStageDiagnostic::new(
+        "resolve/fetch",
+        "ok",
+        format!("resolved {} source", materialized.source_kind.as_str()),
+        Some(materialized.root.clone()),
+    )];
+    match load_plugin_manifest(&materialized.root, false) {
+        Ok(manifest) => Ok(inspection_from_manifest(
+            materialized,
+            manifest,
+            fingerprint,
+            adapter_mode,
+            status,
+            stages,
+        )),
+        Err(manifest_err) => {
+            if let Some(inspection) = inspect_hermes(
+                materialized,
+                &fingerprint,
+                adapter_mode,
+                status,
+                &mut stages,
+            )? {
+                return Ok(inspection);
+            }
+            if let Some(inspection) = inspect_opencode(
+                materialized,
+                &fingerprint,
+                adapter_mode,
+                status,
+                &mut stages,
+            )? {
+                return Ok(inspection);
+            }
+            stages.push(PluginStageDiagnostic::new(
+                "inspect manifest",
+                "failed",
+                manifest_err.to_string(),
+                Some(materialized.root.clone()),
+            ));
+            Ok(PluginInspection {
+                source_kind: materialized.source_kind,
+                source_id: materialized.source_id.clone(),
+                framework: PluginManifestKind::Unknown,
+                canonical_id: source_slug(&materialized.source_id),
+                name: "unknown-plugin".to_string(),
+                version: None,
+                description: None,
+                manifest_path: materialized.root.clone(),
+                package_root: materialized.root.clone(),
+                package_fingerprint: fingerprint,
+                adapter_mode,
+                readiness: "Failed".to_string(),
+                status: "Failed".to_string(),
+                target_lanes: Vec::new(),
+                projected_contributions: Vec::new(),
+                unsupported_lanes: Vec::new(),
+                diagnostics: vec![PluginDiagnostic::invalid(
+                    manifest_err.to_string(),
+                    Some(materialized.root.clone()),
+                )],
+                stages,
+                interface: None,
+            })
+        }
+    }
+}
+
+pub(crate) fn inspection_value(inspection: &PluginInspection) -> Value {
+    serde_json::to_value(inspection).unwrap_or_else(|_| json!({}))
+}
+
+fn infer_source_kind(source: &str, cwd: &Path) -> PluginSourceKind {
+    if resolve_local_source(cwd, source).is_some_and(|path| path.exists()) {
+        PluginSourceKind::Local
+    } else if looks_like_git_source(source) {
+        PluginSourceKind::Git
+    } else {
+        PluginSourceKind::Local
+    }
+}
+
+fn materialize_local(
+    cwd: &Path,
+    request: &SourceRequest,
+    temp_dir: Option<TempDir>,
+) -> Result<PluginMaterializedSource> {
+    let source_path = resolve_local_source(cwd, &request.source)
+        .ok_or_else(|| Error::Config(format!("plugin source not found: {}", request.source)))?;
+    if !source_path.exists() {
+        return Err(Error::Config(format!(
+            "plugin source not found: {}",
+            request.source
+        )));
+    }
+    let root = source_path.canonicalize()?;
+    Ok(PluginMaterializedSource {
+        root,
+        source_id: format!("local:{}", source_path.display()),
+        source_kind: PluginSourceKind::Local,
+        npm_registry: None,
+        temp_dir,
+    })
+}
+
+fn materialize_git(
+    staging_root: &Path,
+    request: &SourceRequest,
+    temp_dir: Option<TempDir>,
+) -> Result<PluginMaterializedSource> {
+    let incoming = staging_root.join("git");
+    if incoming.exists() {
+        fs::remove_dir_all(&incoming)?;
+    }
+    let status = Command::new("git")
+        .arg("clone")
+        .arg(&request.source)
+        .arg(&incoming)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
+        return Err(Error::Config(format!(
+            "git clone failed for {}",
+            request.source
+        )));
+    }
+    if let Some(git_ref) = &request.git_ref {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&incoming)
+            .arg("checkout")
+            .arg(git_ref)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?;
+        if !status.success() {
+            return Err(Error::Config(format!(
+                "git checkout `{git_ref}` failed for {}",
+                request.source
+            )));
+        }
+    }
+    Ok(PluginMaterializedSource {
+        root: incoming,
+        source_id: format!(
+            "git:{}{}",
+            request.source,
+            request
+                .git_ref
+                .as_ref()
+                .map(|git_ref| format!("#{git_ref}"))
+                .unwrap_or_default()
+        ),
+        source_kind: PluginSourceKind::Git,
+        npm_registry: None,
+        temp_dir,
+    })
+}
+
+fn materialize_npm(
+    staging_root: &Path,
+    cwd: &Path,
+    request: &SourceRequest,
+    temp_dir: Option<TempDir>,
+) -> Result<PluginMaterializedSource> {
+    fs::create_dir_all(staging_root)?;
+    let package_spec = npm_package_spec(cwd, request);
+    let mut command = Command::new("npm");
+    command
+        .arg("pack")
+        .arg(&package_spec)
+        .arg("--ignore-scripts")
+        .arg("--json")
+        .arg("--pack-destination")
+        .arg(staging_root);
+    if let Some(registry) = request
+        .npm_registry
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        command.arg("--registry").arg(registry);
+    }
+    let output = command.output()?;
+    if !output.status.success() {
+        return Err(Error::Config(format!(
+            "npm pack failed for {}",
+            request.source
+        )));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pack = serde_json::from_str::<Value>(&stdout)
+        .map_err(|err| Error::Config(format!("npm pack returned invalid JSON: {err}")))?;
+    let first = pack
+        .as_array()
+        .and_then(|items| items.first())
+        .ok_or_else(|| Error::Config("npm pack returned no package".to_string()))?;
+    let filename = first
+        .get("filename")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Config("npm pack result missing filename".to_string()))?;
+    let tarball = staging_root.join(filename);
+    let archive_size = fs::metadata(&tarball)?.len();
+    if archive_size > MAX_NPM_ARCHIVE_BYTES {
+        return Err(Error::Config(format!(
+            "npm package archive exceeds {} bytes",
+            MAX_NPM_ARCHIVE_BYTES
+        )));
+    }
+    let extract_root = staging_root.join("extract");
+    fs::create_dir_all(&extract_root)?;
+    let status = Command::new("tar")
+        .arg("-xzf")
+        .arg(&tarball)
+        .arg("-C")
+        .arg(&extract_root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
+        return Err(Error::Config(format!(
+            "failed to extract npm package {}",
+            tarball.display()
+        )));
+    }
+    let root = if extract_root.join("package").is_dir() {
+        extract_root.join("package")
+    } else {
+        single_child_dir(&extract_root)?
+    };
+    let package_json = read_json_file(&root.join("package.json"))?;
+    let name = package_json
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Config("npm package.json missing name".to_string()))?;
+    let version = package_json
+        .get("version")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Config("npm package.json missing version".to_string()))?;
+    if let Some(expected_name) = npm_expected_package_name(cwd, &request.source)
+        && expected_name != name
+    {
+        return Err(Error::Config(format!(
+            "npm package name mismatch: expected `{expected_name}`, got `{name}`"
+        )));
+    }
+    if let Some(expected_version) = request.npm_version.as_deref()
+        && expected_version != version
+    {
+        return Err(Error::Config(format!(
+            "npm package version mismatch: expected `{expected_version}`, got `{version}`"
+        )));
+    }
+    let extracted_size = directory_size(&root)?;
+    if extracted_size > MAX_NPM_EXTRACTED_BYTES {
+        return Err(Error::Config(format!(
+            "npm package contents exceed {} bytes",
+            MAX_NPM_EXTRACTED_BYTES
+        )));
+    }
+    let registry_suffix = request
+        .npm_registry
+        .as_ref()
+        .filter(|registry| !registry.is_empty())
+        .map(|registry| format!("?registry={registry}"))
+        .unwrap_or_default();
+    Ok(PluginMaterializedSource {
+        root,
+        source_id: format!("npm:{name}@{version}{registry_suffix}"),
+        source_kind: PluginSourceKind::Npm,
+        npm_registry: request.npm_registry.clone(),
+        temp_dir,
+    })
+}
+
+fn inspection_from_manifest(
+    materialized: &PluginMaterializedSource,
+    manifest: LoadedPluginManifest,
+    fingerprint: String,
+    adapter_mode: PluginAdapterMode,
+    status: &str,
+    mut stages: Vec<PluginStageDiagnostic>,
+) -> PluginInspection {
+    let invalid = manifest
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == "invalid");
+    stages.push(PluginStageDiagnostic::new(
+        "inspect manifest",
+        if invalid { "failed" } else { "ok" },
+        format!("loaded {} manifest", manifest.kind.as_str()),
+        Some(manifest.manifest_path.clone()),
+    ));
+    stages.push(PluginStageDiagnostic::new(
+        "compatibility",
+        "ok",
+        "compatible manifest fields are mapped by Psychevo-owned loaders",
+        Some(manifest.manifest_path.clone()),
+    ));
+
+    let mut target_lanes = BTreeSet::new();
+    let mut projected = BTreeSet::new();
+    for resource in &manifest.manifest_resources {
+        match resource.as_str() {
+            "skills" => {
+                target_lanes.insert("skills".to_string());
+                projected.insert("skill_roots".to_string());
+            }
+            "mcpServers" => {
+                target_lanes.insert("mcp".to_string());
+                projected.insert("mcp_servers".to_string());
+            }
+            "hooks" => {
+                target_lanes.insert("hooks".to_string());
+                projected.insert("hook_sources".to_string());
+            }
+            "interface" => {
+                target_lanes.insert("interface".to_string());
+            }
+            "apps" => {
+                target_lanes.insert("apps".to_string());
+            }
+            other => {
+                target_lanes.insert(other.to_string());
+            }
+        }
+    }
+    for extension in &manifest.psychevo_extensions {
+        match extension.as_str() {
+            "runtime" => {
+                target_lanes.insert("tools".to_string());
+                projected.insert("worker_tools".to_string());
+            }
+            "agents" => {
+                target_lanes.insert("agents".to_string());
+                projected.insert("agent_roots".to_string());
+            }
+            "toolsets" => {
+                target_lanes.insert("toolsets".to_string());
+                projected.insert("toolsets".to_string());
+            }
+            other => {
+                target_lanes.insert(other.to_string());
+            }
+        }
+    }
+    let mut unsupported = Vec::new();
+    if manifest.manifest_resources.contains("apps") {
+        unsupported.push("apps".to_string());
+    }
+    for extension in ["commands", "providers"] {
+        if manifest.psychevo_extensions.contains(extension) {
+            unsupported.push(extension.to_string());
+        }
+    }
+    stages.push(PluginStageDiagnostic::new(
+        "target lanes",
+        "ok",
+        if target_lanes.is_empty() {
+            "no runtime lanes declared".to_string()
+        } else {
+            format!(
+                "declared lanes: {}",
+                target_lanes.iter().cloned().collect::<Vec<_>>().join(", ")
+            )
+        },
+        Some(manifest.manifest_path.clone()),
+    ));
+    stages.push(PluginStageDiagnostic::new(
+        "policy",
+        "ok",
+        "native and Codex-compatible manifests use Psychevo-owned policy gates",
+        None,
+    ));
+    stages.push(PluginStageDiagnostic::new(
+        "trust",
+        "ok",
+        "package fingerprint trust is not required for manifest-only native loading",
+        None,
+    ));
+    let readiness = if invalid {
+        "Failed"
+    } else if unsupported.iter().any(|lane| lane == "apps") {
+        "Needs setup"
+    } else {
+        "Ready"
+    };
+    stages.push(PluginStageDiagnostic::new(
+        "readiness",
+        if readiness == "Failed" {
+            "failed"
+        } else {
+            "ok"
+        },
+        readiness,
+        None,
+    ));
+    PluginInspection {
+        source_kind: materialized.source_kind,
+        source_id: materialized.source_id.clone(),
+        framework: manifest.kind,
+        canonical_id: manifest.name.clone(),
+        name: manifest.name,
+        version: manifest.version,
+        description: manifest.description,
+        manifest_path: manifest.manifest_path,
+        package_root: materialized.root.clone(),
+        package_fingerprint: fingerprint,
+        adapter_mode,
+        readiness: readiness.to_string(),
+        status: if readiness == "Failed" {
+            "Failed".to_string()
+        } else {
+            status.to_string()
+        },
+        target_lanes: target_lanes.into_iter().collect(),
+        projected_contributions: projected.into_iter().collect(),
+        unsupported_lanes: unsupported,
+        diagnostics: manifest.diagnostics,
+        stages,
+        interface: manifest.interface,
+    }
+}
+
+fn inspect_hermes(
+    materialized: &PluginMaterializedSource,
+    fingerprint: &str,
+    adapter_mode: PluginAdapterMode,
+    status: &str,
+    stages: &mut Vec<PluginStageDiagnostic>,
+) -> Result<Option<PluginInspection>> {
+    let manifest_path = ["plugin.yaml", "plugin.yml", ".hermes-plugin/plugin.yaml"]
+        .into_iter()
+        .map(|path| materialized.root.join(path))
+        .find(|path| path.is_file());
+    let Some(manifest_path) = manifest_path else {
+        return Ok(None);
+    };
+    let raw = fs::read_to_string(&manifest_path)?;
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&raw)
+        .map_err(|err| Error::Config(format!("{}: {err}", manifest_path.display())))?;
+    let name = yaml_string(&yaml, "name").unwrap_or_else(|| "hermes-plugin".to_string());
+    let version = yaml_string(&yaml, "version");
+    let description = yaml_string(&yaml, "description");
+    let mut target_lanes = Vec::new();
+    let mut projected = Vec::new();
+    let mut unsupported = Vec::new();
+    if yaml_sequence_non_empty(&yaml, "provides_tools") {
+        target_lanes.push("tools".to_string());
+        projected.push("adapter_tools".to_string());
+    }
+    if yaml_sequence_non_empty(&yaml, "provides_hooks") {
+        target_lanes.push("hooks".to_string());
+        projected.push("adapter_hooks".to_string());
+    }
+    if yaml.get("provides_skills").is_some() {
+        target_lanes.push("skills".to_string());
+        projected.push("adapter_skills".to_string());
+    }
+    if yaml.get("requires_env").is_some() {
+        unsupported.push("provider_credentials".to_string());
+    }
+    if materialized.root.join("dashboard").is_dir() {
+        unsupported.push("dashboard".to_string());
+    }
+    unsupported.push("provider_execution".to_string());
+    stages.push(PluginStageDiagnostic::new(
+        "inspect manifest",
+        "ok",
+        "loaded Hermes plugin.yaml as adapter descriptor",
+        Some(manifest_path.clone()),
+    ));
+    adapter_stages(
+        stages,
+        adapter_mode,
+        &manifest_path,
+        !target_lanes.is_empty(),
+    );
+    Ok(Some(PluginInspection {
+        source_kind: materialized.source_kind,
+        source_id: materialized.source_id.clone(),
+        framework: PluginManifestKind::Hermes,
+        canonical_id: name.clone(),
+        name,
+        version,
+        description,
+        manifest_path,
+        package_root: materialized.root.clone(),
+        package_fingerprint: fingerprint.to_string(),
+        adapter_mode,
+        readiness: foreign_readiness(adapter_mode).to_string(),
+        status: foreign_status(status, adapter_mode),
+        target_lanes,
+        projected_contributions: projected,
+        unsupported_lanes: unsupported,
+        diagnostics: vec![PluginDiagnostic::warning(
+            "Hermes register(ctx) is not imported into the Rust process; adapter output is manifest-scoped",
+            None,
+        )],
+        stages: stages.clone(),
+        interface: None,
+    }))
+}
+
+fn inspect_opencode(
+    materialized: &PluginMaterializedSource,
+    fingerprint: &str,
+    adapter_mode: PluginAdapterMode,
+    status: &str,
+    stages: &mut Vec<PluginStageDiagnostic>,
+) -> Result<Option<PluginInspection>> {
+    let package_path = materialized.root.join("package.json");
+    if !package_path.is_file() {
+        return Ok(None);
+    }
+    let package = read_json_file(&package_path)?;
+    let exports = package.get("exports");
+    let has_server = export_target(exports, "./server").is_some() || package.get("main").is_some();
+    let has_tui = export_target(exports, "./tui").is_some();
+    let has_theme = package.get("oc-themes").is_some();
+    if !has_server && !has_tui && !has_theme {
+        return Ok(None);
+    }
+    let name = package
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("opencode-plugin")
+        .to_string();
+    let version = package
+        .get("version")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let description = package
+        .get("description")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let mut diagnostics = Vec::new();
+    for (label, target) in [
+        ("exports./server", export_target(exports, "./server")),
+        ("exports./tui", export_target(exports, "./tui")),
+        (
+            "main",
+            package
+                .get("main")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+        ),
+    ] {
+        if let Some(target) = target
+            && invalid_package_entrypoint(&target)
+        {
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("OpenCode {label} entrypoint `{target}` escapes package root"),
+                Some(package_path.clone()),
+            ));
+        }
+    }
+    let failed = diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == "invalid");
+    let mut target_lanes = Vec::new();
+    let mut projected = Vec::new();
+    let mut unsupported = Vec::new();
+    if has_server {
+        target_lanes.push("tools".to_string());
+        target_lanes.push("hooks".to_string());
+        projected.push("adapter_server".to_string());
+    }
+    if has_tui {
+        target_lanes.push("tui".to_string());
+        unsupported.push("tui".to_string());
+    }
+    if has_theme {
+        target_lanes.push("theme".to_string());
+        unsupported.push("theme".to_string());
+    }
+    stages.push(PluginStageDiagnostic::new(
+        "inspect manifest",
+        if failed { "failed" } else { "ok" },
+        "loaded OpenCode package descriptor",
+        Some(package_path.clone()),
+    ));
+    adapter_stages(
+        stages,
+        adapter_mode,
+        &package_path,
+        !target_lanes.is_empty(),
+    );
+    Ok(Some(PluginInspection {
+        source_kind: materialized.source_kind,
+        source_id: materialized.source_id.clone(),
+        framework: PluginManifestKind::OpenCode,
+        canonical_id: name.clone(),
+        name,
+        version,
+        description,
+        manifest_path: package_path,
+        package_root: materialized.root.clone(),
+        package_fingerprint: fingerprint.to_string(),
+        adapter_mode,
+        readiness: if failed {
+            "Failed".to_string()
+        } else {
+            foreign_readiness(adapter_mode).to_string()
+        },
+        status: if failed {
+            "Failed".to_string()
+        } else {
+            foreign_status(status, adapter_mode)
+        },
+        target_lanes,
+        projected_contributions: projected,
+        unsupported_lanes: unsupported,
+        diagnostics,
+        stages: stages.clone(),
+        interface: None,
+    }))
+}
+
+fn adapter_stages(
+    stages: &mut Vec<PluginStageDiagnostic>,
+    adapter_mode: PluginAdapterMode,
+    manifest_path: &Path,
+    has_targets: bool,
+) {
+    stages.push(PluginStageDiagnostic::new(
+        "compatibility",
+        "ok",
+        "foreign package is compatible through adapter inspection only",
+        Some(manifest_path.to_path_buf()),
+    ));
+    stages.push(PluginStageDiagnostic::new(
+        "target lanes",
+        if has_targets { "ok" } else { "warning" },
+        if has_targets {
+            "adapter descriptor declares target lanes"
+        } else {
+            "adapter descriptor declares no supported Psychevo target lanes"
+        },
+        Some(manifest_path.to_path_buf()),
+    ));
+    stages.push(PluginStageDiagnostic::new(
+        "policy",
+        "ok",
+        format!("adapter mode is {}", adapter_mode.as_str()),
+        None,
+    ));
+    stages.push(PluginStageDiagnostic::new(
+        "trust",
+        if adapter_mode == PluginAdapterMode::AdapterHost {
+            "blocked"
+        } else {
+            "ok"
+        },
+        if adapter_mode == PluginAdapterMode::AdapterHost {
+            "adapter host execution requires installed package fingerprint trust"
+        } else {
+            "manifest-only inspection does not execute foreign code"
+        },
+        None,
+    ));
+    stages.push(PluginStageDiagnostic::new(
+        "readiness",
+        "ok",
+        foreign_readiness(adapter_mode),
+        None,
+    ));
+}
+
+fn foreign_readiness(adapter_mode: PluginAdapterMode) -> &'static str {
+    match adapter_mode {
+        PluginAdapterMode::AdapterHost => "Needs trust",
+        PluginAdapterMode::ManifestOnly => "Ready",
+        PluginAdapterMode::Disabled => "Unsupported target",
+    }
+}
+
+fn foreign_status(status: &str, adapter_mode: PluginAdapterMode) -> String {
+    match adapter_mode {
+        PluginAdapterMode::AdapterHost => "Needs trust".to_string(),
+        PluginAdapterMode::Disabled => "Unsupported target".to_string(),
+        PluginAdapterMode::ManifestOnly => status.to_string(),
+    }
+}
+
+fn resolve_local_source(cwd: &Path, source: &str) -> Option<PathBuf> {
+    let raw = PathBuf::from(source);
+    if raw.is_absolute() {
+        Some(raw)
+    } else {
+        Some(cwd.join(raw))
+    }
+}
+
+fn looks_like_git_source(source: &str) -> bool {
+    source.starts_with("file://")
+        || source.contains("://")
+        || source.ends_with(".git")
+        || source.starts_with("git@")
+}
+
+fn npm_package_spec(cwd: &Path, request: &SourceRequest) -> String {
+    if let Some(path) = resolve_local_source(cwd, &request.source)
+        && path.exists()
+    {
+        return path.display().to_string();
+    }
+    if npm_locator_version(&request.source).is_some() {
+        request.source.clone()
+    } else if let Some(version) = &request.npm_version {
+        format!("{}@{}", request.source, version)
+    } else {
+        request.source.clone()
+    }
+}
+
+fn npm_expected_package_name(cwd: &Path, source: &str) -> Option<String> {
+    if resolve_local_source(cwd, source).is_some_and(|path| path.exists()) {
+        None
+    } else {
+        Some(npm_locator_name(source).to_string())
+    }
+}
+
+fn npm_locator_name(source: &str) -> &str {
+    let Some(index) = npm_locator_version_index(source) else {
+        return source;
+    };
+    &source[..index]
+}
+
+fn npm_locator_version(source: &str) -> Option<&str> {
+    let index = npm_locator_version_index(source)?;
+    source.get(index + 1..)
+}
+
+fn npm_locator_version_index(source: &str) -> Option<usize> {
+    let slash = source.rfind('/').unwrap_or(0);
+    let index = source.rfind('@')?;
+    (index > slash).then_some(index)
+}
+
+fn single_child_dir(root: &Path) -> Result<PathBuf> {
+    let dirs = fs::read_dir(root)?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    match dirs.as_slice() {
+        [dir] => Ok(dir.clone()),
+        _ => Err(Error::Config(format!(
+            "npm package extraction did not produce one package root under {}",
+            root.display()
+        ))),
+    }
+}
+
+fn read_json_file(path: &Path) -> Result<Value> {
+    let text = fs::read_to_string(path)?;
+    serde_json::from_str(&text).map_err(|err| Error::Config(format!("{}: {err}", path.display())))
+}
+
+fn yaml_string(value: &serde_yaml::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|value| match value {
+            serde_yaml::Value::String(value) => Some(value.trim().to_string()),
+            serde_yaml::Value::Number(value) => Some(value.to_string()),
+            _ => None,
+        })
+        .filter(|value| !value.is_empty())
+}
+
+fn yaml_sequence_non_empty(value: &serde_yaml::Value, key: &str) -> bool {
+    value.get(key).is_some_and(|value| match value {
+        serde_yaml::Value::Sequence(items) => !items.is_empty(),
+        serde_yaml::Value::String(value) => !value.trim().is_empty(),
+        serde_yaml::Value::Bool(value) => *value,
+        _ => false,
+    })
+}
+
+fn export_target(exports: Option<&Value>, key: &str) -> Option<String> {
+    let exports = exports?;
+    match exports {
+        Value::Object(object) => object.get(key).and_then(export_value_target),
+        _ => None,
+    }
+}
+
+fn export_value_target(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Object(object) => object
+            .get("default")
+            .or_else(|| object.get("import"))
+            .or_else(|| object.get("require"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        _ => None,
+    }
+}
+
+fn invalid_package_entrypoint(target: &str) -> bool {
+    let path = Path::new(target);
+    path.is_absolute() || target.split('/').any(|part| part == "..")
+}

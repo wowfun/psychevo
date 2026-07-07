@@ -1,5 +1,5 @@
 {
-  "$id": "ClientRequest/plugin-install.json",
+  "$id": "ClientRequest/plugin-import-inspect.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayRequestScope": {
@@ -64,7 +64,7 @@
       ],
       "type": "string"
     },
-    "PluginInstallParams": {
+    "PluginInspectParams": {
       "properties": {
         "adapterMode": {
           "default": null,
@@ -72,10 +72,6 @@
             "string",
             "null"
           ]
-        },
-        "force": {
-          "default": false,
-          "type": "boolean"
         },
         "gitRef": {
           "default": null,
@@ -109,13 +105,6 @@
           ],
           "default": null
         },
-        "scopeName": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "source": {
           "type": "string"
         },
@@ -136,18 +125,18 @@
   "properties": {
     "method": {
       "enum": [
-        "plugin/install"
+        "plugin/import/inspect"
       ],
       "type": "string"
     },
     "params": {
-      "$ref": "#/definitions/PluginInstallParams"
+      "$ref": "#/definitions/PluginInspectParams"
     }
   },
   "required": [
     "method",
     "params"
   ],
-  "title": "ClientRequest plugin/install",
+  "title": "ClientRequest plugin/import/inspect",
   "type": "object"
 }

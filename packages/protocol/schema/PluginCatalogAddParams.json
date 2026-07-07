@@ -72,16 +72,19 @@
         "null"
       ]
     },
-    "force": {
-      "default": false,
-      "type": "boolean"
-    },
     "gitRef": {
       "default": null,
       "type": [
         "string",
         "null"
       ]
+    },
+    "kind": {
+      "default": "local",
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
     },
     "npmRegistry": {
       "default": null,
@@ -117,18 +120,12 @@
     },
     "source": {
       "type": "string"
-    },
-    "sourceKind": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [
+    "name",
     "source"
   ],
-  "title": "PluginInstallParams",
+  "title": "PluginCatalogAddParams",
   "type": "object"
 }

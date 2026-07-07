@@ -573,8 +573,12 @@ for line in sys.stdin:
         &cwd,
         crate::plugins::PluginInstallOptions {
             source: plugin_source_root.display().to_string(),
+            source_kind: None,
             scope: crate::plugins::PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )

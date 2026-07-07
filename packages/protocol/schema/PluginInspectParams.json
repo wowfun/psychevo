@@ -72,10 +72,6 @@
         "null"
       ]
     },
-    "force": {
-      "default": false,
-      "type": "boolean"
-    },
     "gitRef": {
       "default": null,
       "type": [
@@ -108,13 +104,6 @@
       ],
       "default": null
     },
-    "scopeName": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "source": {
       "type": "string"
     },
@@ -129,6 +118,6 @@
   "required": [
     "source"
   ],
-  "title": "PluginInstallParams",
+  "title": "PluginInspectParams",
   "type": "object"
 }

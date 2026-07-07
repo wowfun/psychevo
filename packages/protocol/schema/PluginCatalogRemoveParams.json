@@ -65,37 +65,8 @@
     }
   },
   "properties": {
-    "adapterMode": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "force": {
-      "default": false,
-      "type": "boolean"
-    },
-    "gitRef": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "npmRegistry": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "npmVersion": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
+    "name": {
+      "type": "string"
     },
     "scope": {
       "anyOf": [
@@ -114,21 +85,11 @@
         "string",
         "null"
       ]
-    },
-    "source": {
-      "type": "string"
-    },
-    "sourceKind": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [
-    "source"
+    "name"
   ],
-  "title": "PluginInstallParams",
+  "title": "PluginCatalogRemoveParams",
   "type": "object"
 }

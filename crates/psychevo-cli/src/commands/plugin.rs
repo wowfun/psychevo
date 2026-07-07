@@ -4,16 +4,17 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::CommandFactory;
 use psychevo_runtime::{
-    PluginInstallOptions, PluginMarketplaceEntry, PluginScope, plugin_doctor_value,
+    PluginAdapterMode, PluginInspectOptions, PluginInstallOptions, PluginMarketplaceEntry,
+    PluginScope, PluginSourceKind, plugin_doctor_value, plugin_import_inspect_value,
     plugin_install_value, plugin_list_value, plugin_marketplace_add_value,
     plugin_marketplace_list_value, plugin_marketplace_remove_value, plugin_set_enabled_value,
-    plugin_uninstall_value, plugin_view_value,
+    plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
 };
 use serde_json::Value;
 
 use crate::args::{
-    PluginArgs, PluginCommand, PluginDoctorArgs, PluginInstallArgs, PluginListArgs,
-    PluginMarketplaceArgs, PluginMarketplaceCommand, PluginViewArgs,
+    PluginArgs, PluginCommand, PluginDoctorArgs, PluginInspectArgs, PluginInstallArgs,
+    PluginListArgs, PluginMarketplaceArgs, PluginMarketplaceCommand, PluginViewArgs,
 };
 use crate::commands::common::base_run_options;
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
@@ -35,6 +36,7 @@ pub(crate) fn run_plugin_command(args: PluginArgs) -> Result<ExitCode> {
         PluginCommand::List(args) => list_plugins(args, &env_map, &home, &cwd)?,
         PluginCommand::View(args) => view_plugin(args, &env_map, &home, &cwd)?,
         PluginCommand::Doctor(args) => doctor_plugins(args, &env_map, &home, &cwd)?,
+        PluginCommand::Inspect(args) => inspect_plugin(args, &home, &cwd)?,
         PluginCommand::Install(args) => install_plugin(args, &home, &cwd)?,
         PluginCommand::Uninstall(args) => {
             let value = plugin_uninstall_value(
@@ -65,6 +67,17 @@ pub(crate) fn run_plugin_command(args: PluginArgs) -> Result<ExitCode> {
             )?;
             print_plugin_value(&value, args.json)?;
         }
+        PluginCommand::Trust(args) => {
+            let value = plugin_set_trust_value(
+                &home,
+                &cwd,
+                write_scope(args.global, args.local),
+                &args.selector,
+                true,
+            )?;
+            print_plugin_value(&value, args.json)?;
+        }
+        PluginCommand::Catalog(args) => marketplace_command(args, &home, &cwd)?,
         PluginCommand::Marketplace(args) => marketplace_command(args, &home, &cwd)?,
     }
 
@@ -104,6 +117,26 @@ fn doctor_plugins(
     print_plugin_value(&value, args.json)
 }
 
+fn inspect_plugin(
+    args: PluginInspectArgs,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    let value = plugin_import_inspect_value(
+        home,
+        cwd,
+        PluginInspectOptions {
+            source: args.source,
+            source_kind: parse_source_kind(args.kind.as_deref())?,
+            git_ref: args.git_ref,
+            npm_version: args.npm_version,
+            npm_registry: args.npm_registry,
+            adapter_mode: parse_adapter_mode(args.adapter_mode.as_deref())?,
+        },
+    )?;
+    print_plugin_value(&value, args.json)
+}
+
 fn install_plugin(
     args: PluginInstallArgs,
     home: &std::path::Path,
@@ -114,8 +147,12 @@ fn install_plugin(
         cwd,
         PluginInstallOptions {
             source: args.source,
+            source_kind: parse_source_kind(args.kind.as_deref())?,
             scope: write_scope(args.global, args.local),
             git_ref: args.git_ref,
+            npm_version: args.npm_version,
+            npm_registry: args.npm_registry,
+            adapter_mode: parse_adapter_mode(args.adapter_mode.as_deref())?,
             force: args.force,
         },
     )?;
@@ -143,6 +180,9 @@ fn marketplace_command(
                     source: args.source,
                     kind: args.kind,
                     git_ref: args.git_ref,
+                    npm_version: args.npm_version,
+                    npm_registry: args.npm_registry,
+                    adapter_mode: parse_adapter_mode(args.adapter_mode.as_deref())?,
                 },
             )?;
             print_plugin_value(&value, args.json)?;
@@ -166,6 +206,28 @@ fn write_scope(_global: bool, local: bool) -> PluginScope {
     } else {
         PluginScope::Global
     }
+}
+
+fn parse_source_kind(value: Option<&str>) -> Result<Option<PluginSourceKind>> {
+    value
+        .map(|value| {
+            PluginSourceKind::parse(value).ok_or_else(|| {
+                anyhow::anyhow!("unknown plugin source kind `{value}`; expected local, git, or npm")
+            })
+        })
+        .transpose()
+}
+
+fn parse_adapter_mode(value: Option<&str>) -> Result<Option<PluginAdapterMode>> {
+    value
+        .map(|value| {
+            PluginAdapterMode::parse(value).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown plugin adapter mode `{value}`; expected adapter_host, manifest_only, or disabled"
+                )
+            })
+        })
+        .transpose()
 }
 
 fn print_plugin_value(value: &Value, json_output: bool) -> Result<()> {
@@ -216,6 +278,22 @@ fn print_plugin_value(value: &Value, json_output: bool) -> Result<()> {
         {
             print_interface_summary(interface);
         }
+        return Ok(());
+    }
+    if let Some(inspection) = value.get("inspection").and_then(Value::as_object) {
+        let name = inspection
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("plugin");
+        let framework = inspection
+            .get("framework")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let status = inspection
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("Available");
+        println!("{name} [{framework}] {status}");
         return Ok(());
     }
     println!("{}", serde_json::to_string_pretty(value)?);

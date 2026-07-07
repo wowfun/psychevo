@@ -1,12 +1,18 @@
 use std::fs;
 use std::path::Path;
 
+use chrono::Utc;
 use serde_json::{Map, Value, json};
 
+use super::inspect::{PluginMaterializedSource, inspect_materialized_source, inspection_value};
 use super::manifest::load_plugin_manifest;
 use super::records::{all_records, policy_entry, policy_key_for_selector, select_record};
 use super::store::PluginStore;
-use super::types::{LoadedPluginManifest, PluginInstallRecord, PluginScope};
+use super::types::{
+    LoadedPluginManifest, PluginAdapterMode, PluginInstallRecord, PluginManifestKind, PluginScope,
+    PluginTrustRecord,
+};
+use super::util::directory_fingerprint;
 use super::worker::worker_tools;
 use crate::config::{
     CONFIG_FILE_NAME, PluginPolicyConfig, PluginPolicyEntry, load_run_config,
@@ -23,7 +29,7 @@ pub fn plugin_list_value(options: &RunOptions) -> Result<Value> {
     let records = all_records(&home, &cwd)?;
     let plugins = records
         .iter()
-        .map(|record| record_value(record, &loaded.config.plugins))
+        .map(|record| record_value(&home, &cwd, record, &loaded.config.plugins))
         .collect::<Vec<_>>();
     Ok(json!({
         "plugins": plugins,
@@ -37,10 +43,12 @@ pub fn plugin_view_value(options: &RunOptions, selector: &str) -> Result<Value> 
     let home = resolve_psychevo_home(&loaded.env)?;
     let records = all_records(&home, &cwd)?;
     let record = select_record(&records, selector)?;
-    let manifest = load_plugin_manifest(&record.package_root, true)?;
+    let inspection = inspect_record(record)?;
+    let manifest = load_plugin_manifest(&record.package_root, true).ok();
     Ok(json!({
-        "plugin": record_value(record, &loaded.config.plugins),
-        "manifest": manifest_value(&manifest),
+        "plugin": record_value(&home, &cwd, record, &loaded.config.plugins),
+        "manifest": manifest.as_ref().map(manifest_value).unwrap_or_else(|| inspection_value(&inspection)),
+        "inspection": inspection,
     }))
 }
 
@@ -56,13 +64,18 @@ pub fn plugin_doctor_value(options: &RunOptions, selector: Option<&str>) -> Resu
     };
     let mut plugins = Vec::new();
     for record in selected {
-        let manifest = load_plugin_manifest(&record.package_root, true)?;
+        let inspection = inspect_record(&record)?;
+        let manifest = load_plugin_manifest(&record.package_root, true).ok();
         let policy = policy_entry(&loaded.config.plugins, &record);
-        let mut worker = json!({"configured": manifest.worker.is_some(), "tools": []});
-        if policy.is_some_and(PluginPolicyEntry::plugin_enabled)
+        let mut worker = json!({
+            "configured": manifest.as_ref().and_then(|manifest| manifest.worker.as_ref()).is_some(),
+            "tools": [],
+        });
+        if let Some(manifest) = manifest.as_ref()
+            && policy.is_some_and(PluginPolicyEntry::plugin_enabled)
             && let Some(spec) = &manifest.worker
         {
-            worker = match worker_tools(&record, &manifest, spec, &loaded.env) {
+            worker = match worker_tools(&record, manifest, spec, &loaded.env) {
                 Ok(tools) => json!({"configured": true, "tools": tools, "status": "ok"}),
                 Err(err) => {
                     json!({"configured": true, "tools": [], "status": "failed", "error": err})
@@ -70,8 +83,9 @@ pub fn plugin_doctor_value(options: &RunOptions, selector: Option<&str>) -> Resu
             };
         }
         plugins.push(json!({
-            "plugin": record_value(&record, &loaded.config.plugins),
-            "manifest": manifest_value(&manifest),
+            "plugin": record_value(&home, &cwd, &record, &loaded.config.plugins),
+            "manifest": manifest.as_ref().map(manifest_value).unwrap_or_else(|| inspection_value(&inspection)),
+            "inspection": inspection,
             "worker": worker,
             "sandbox": {
                 "worker_process_confined": false,
@@ -149,6 +163,48 @@ pub fn plugin_set_enabled_value(
     }))
 }
 
+pub fn plugin_set_trust_value(
+    home: &Path,
+    cwd: &Path,
+    scope: PluginScope,
+    selector: &str,
+    trusted: bool,
+) -> Result<Value> {
+    let records = match scope {
+        PluginScope::Global => PluginStore::new(home, cwd, PluginScope::Global)?.records()?,
+        PluginScope::Local => all_records(home, cwd)?,
+    };
+    let record = select_record(&records, selector)?.clone();
+    let store = PluginStore::new(home, cwd, record.scope)?;
+    let key = trust_key(&record);
+    let fingerprint =
+        current_fingerprint(&record).unwrap_or_else(|| record.package_fingerprint.clone());
+    if fingerprint.is_empty() {
+        return Err(Error::Config(format!(
+            "plugin `{}` has no package fingerprint to trust",
+            record.name
+        )));
+    }
+    let mut trust = store.trust_records()?;
+    trust.retain(|entry| entry.key != key);
+    if trusted {
+        trust.push(PluginTrustRecord {
+            key: key.clone(),
+            fingerprint: fingerprint.clone(),
+            trusted_at_ms: Utc::now().timestamp_millis(),
+        });
+    }
+    store.write_trust_records(&trust)?;
+    Ok(json!({
+        "success": true,
+        "scope": record.scope.as_str(),
+        "plugin": record.name,
+        "source": record.source_slug,
+        "trusted": trusted,
+        "trust": trust_value(home, cwd, &record),
+    }))
+}
+
 fn set_plugin_policy_document_value(
     root: &mut Value,
     key: &str,
@@ -167,22 +223,37 @@ fn set_plugin_policy_document_value(
     Ok(())
 }
 
-fn record_value(record: &PluginInstallRecord, policy: &PluginPolicyConfig) -> Value {
+fn record_value(
+    home: &Path,
+    cwd: &Path,
+    record: &PluginInstallRecord,
+    policy: &PluginPolicyConfig,
+) -> Value {
     let policy = policy_entry(policy, record);
+    let enabled = policy.is_some_and(PluginPolicyEntry::plugin_enabled);
+    let trust = trust_value(home, cwd, record);
+    let readiness = readiness_status(record, enabled, &trust);
     json!({
         "name": record.name,
         "version": record.version,
         "description": record.description,
         "source_id": record.source_id,
         "source": record.source_slug,
+        "source_kind": record.source_kind.as_str(),
+        "npm_registry": record.npm_registry,
         "scope": record.scope.as_str(),
         "package_root": record.package_root,
         "data_root": record.data_root,
         "manifest_path": record.manifest_path,
         "manifest_kind": record.manifest_kind.as_str(),
+        "package_fingerprint": current_fingerprint(record).unwrap_or_else(|| record.package_fingerprint.clone()),
+        "adapter_mode": record.adapter_mode.as_str(),
         "manifest_resources": record.manifest_resources,
         "psychevo_extensions": record.psychevo_extensions,
-        "enabled": policy.is_some_and(PluginPolicyEntry::plugin_enabled),
+        "enabled": enabled,
+        "readiness": readiness,
+        "status": readiness,
+        "trust": trust,
         "diagnostics": record.diagnostics,
     })
 }
@@ -206,4 +277,90 @@ fn manifest_value(manifest: &LoadedPluginManifest) -> Value {
         "interface": manifest.interface,
         "diagnostics": manifest.diagnostics,
     })
+}
+
+fn inspect_record(record: &PluginInstallRecord) -> Result<super::types::PluginInspection> {
+    let materialized = PluginMaterializedSource {
+        root: record.package_root.clone(),
+        source_id: record.source_id.clone(),
+        source_kind: record.source_kind,
+        npm_registry: record.npm_registry.clone(),
+        temp_dir: None,
+    };
+    inspect_materialized_source(&materialized, record.adapter_mode, "Installed")
+}
+
+fn current_fingerprint(record: &PluginInstallRecord) -> Option<String> {
+    directory_fingerprint(&record.package_root).ok()
+}
+
+fn trust_key(record: &PluginInstallRecord) -> String {
+    format!("{}@{}", record.name, record.source_slug)
+}
+
+fn trust_value(home: &Path, cwd: &Path, record: &PluginInstallRecord) -> Value {
+    let key = trust_key(record);
+    let current = current_fingerprint(record).unwrap_or_else(|| record.package_fingerprint.clone());
+    let trust = PluginStore::new(home, cwd, record.scope)
+        .and_then(|store| store.trust_records())
+        .ok()
+        .and_then(|entries| entries.into_iter().find(|entry| entry.key == key));
+    let required = trust_required(record);
+    let status = if !required {
+        "not_required"
+    } else {
+        match trust.as_ref() {
+            Some(entry) if !current.is_empty() && entry.fingerprint == current => "trusted",
+            Some(_) => "modified",
+            None => "untrusted",
+        }
+    };
+    json!({
+        "required": required,
+        "key": key,
+        "status": status,
+        "fingerprint": current,
+        "trusted_fingerprint": trust.as_ref().map(|entry| entry.fingerprint.clone()),
+        "trusted_at_ms": trust.as_ref().map(|entry| entry.trusted_at_ms),
+    })
+}
+
+fn trust_required(record: &PluginInstallRecord) -> bool {
+    matches!(
+        record.manifest_kind,
+        PluginManifestKind::Hermes | PluginManifestKind::OpenCode
+    ) && record.adapter_mode == PluginAdapterMode::AdapterHost
+}
+
+fn readiness_status(record: &PluginInstallRecord, enabled: bool, trust: &Value) -> &'static str {
+    if !enabled {
+        return "Disabled";
+    }
+    if record
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == "invalid")
+    {
+        return "Failed";
+    }
+    if matches!(
+        record.manifest_kind,
+        PluginManifestKind::Hermes | PluginManifestKind::OpenCode
+    ) {
+        if record.adapter_mode == PluginAdapterMode::Disabled {
+            return "Unsupported target";
+        }
+        if trust
+            .get("required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && trust.get("status").and_then(Value::as_str) != Some("trusted")
+        {
+            return "Needs trust";
+        }
+    }
+    if record.manifest_resources.iter().any(|lane| lane == "apps") {
+        return "Needs setup";
+    }
+    "Installed"
 }

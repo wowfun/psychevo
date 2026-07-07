@@ -10,6 +10,7 @@ Define plugin package manifest loading and validation.
 - recognized manifest paths
 - native required fields and compatibility loading
 - shared Codex-compatible manifest fields and Psychevo namespaced extensions
+- descriptive detection of Hermes and OpenCode package shapes for adapter inspection
 - path safety for local package resources
 - diagnostics for supported, ignored, and invalid fields
 
@@ -30,6 +31,9 @@ Runtime checks these paths in order from a package root:
 
 The first existing path wins. If more than one recognized manifest exists,
 runtime loads the first path and reports the others as ignored diagnostics.
+Hermes `plugin.yaml`/`plugin.yml` and OpenCode package descriptors are adapter
+descriptors, not native manifests, and are handled by plugin inspection rather
+than by the normal manifest loader.
 
 ## Native Manifest
 
@@ -99,20 +103,27 @@ typed package display metadata for CLI and Gateway read surfaces. Runtime must
 not claim inert descriptors are executable or supported merely because the
 manifest recognized their fields.
 
+`apps` is a Codex-compatible descriptive readiness field in this slice. It may
+produce `Needs setup` diagnostics, but it does not authorize app connector
+execution, OAuth launch, remote auth calls, or UI extension loading.
+
 ## Compatibility Manifests
 
-`.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` are compatibility
-manifest paths. They may load as local development packages when native-required
-fields are missing, but marketplace install requires a resolvable name and
-version.
+`.codex-plugin/plugin.json` is a first-class Codex-compatible package path.
+`.claude-plugin/plugin.json` is a compatibility manifest path. They may load as
+local development packages when native-required fields are missing, but install
+requires a resolvable name and version.
 
 Compatibility fields are mapped only when their semantics match Psychevo's
 shared package-resource semantics. Compatibility does not imply command, hook,
 app, UI, LSP, theme, or SDK runtime compatibility.
 
-Hermes `plugin.yaml` packages are not executable compatibility packages in this
-slice. If surfaced by diagnostics, their manifest fields are descriptive only;
-Psychevo must not import or execute Hermes Python `register(ctx)` behavior.
+Hermes `plugin.yaml` packages and OpenCode package descriptors are adapter
+inspection inputs, not executable compatibility packages in the manifest loader.
+If surfaced by diagnostics, their manifest fields are descriptive only until
+adapter policy, enablement, and fingerprint trust allow an out-of-process
+adapter host. Psychevo must not import or execute Hermes Python `register(ctx)`
+or OpenCode server/TUI modules in the Rust process.
 
 ## Path Safety
 
@@ -153,7 +164,16 @@ plugin tools must come from worker `contributions/list`, MCP tool listing, or a
 future static tool path that can prove each declaration has a registered
 execution binding.
 
+## Source Metadata
+
+Install and inspect records preserve source kind as `local`, `git`, or `npm`.
+Npm package descriptors record the requested package, selected version when
+known, registry when present, and the package fingerprint computed from the
+materialized package contents. These fields are identity and diagnostic facts;
+they are not permission grants.
+
 ## Related Topics
 
 - [054 Plugins](../054-plugins/spec.md) defines plugin package boundaries.
 - [150 Plugin Runtime](../150-plugin-runtime/spec.md) defines store, policy, and worker behavior.
+- [150 Plugin Runtime Adapter Hosts](../150-plugin-runtime/adapter-hosts.md) defines foreign adapter inspection boundaries.

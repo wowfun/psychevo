@@ -1,13 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::types::{PluginInstallRecord, PluginMarketplaceEntry, PluginScope};
+use super::types::{PluginInstallRecord, PluginMarketplaceEntry, PluginScope, PluginTrustRecord};
 use super::util::sanitize_path_segment;
 use crate::error::Result;
 use crate::paths::canonical_cwd;
 
 const RECORDS_DIR: &str = "records";
 const CATALOG_FILE: &str = "catalogs.json";
+const TRUST_FILE: &str = "trust.json";
 
 pub(crate) struct PluginStore {
     pub(crate) cache: PathBuf,
@@ -79,6 +80,24 @@ impl PluginStore {
         fs::write(
             self.cache.join(CATALOG_FILE),
             serde_json::to_string_pretty(entries)?,
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn trust_records(&self) -> Result<Vec<PluginTrustRecord>> {
+        let path = self.cache.join(TRUST_FILE);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let text = fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    pub(crate) fn write_trust_records(&self, records: &[PluginTrustRecord]) -> Result<()> {
+        self.ensure()?;
+        fs::write(
+            self.cache.join(TRUST_FILE),
+            serde_json::to_string_pretty(records)?,
         )?;
         Ok(())
     }

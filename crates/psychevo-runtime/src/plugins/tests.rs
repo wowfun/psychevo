@@ -257,6 +257,179 @@ fn hermes_plugin_yaml_is_diagnostic_only() {
 }
 
 #[test]
+fn inspect_hermes_adapter_descriptor_does_not_execute_register_module() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let root = temp.path().join("hermes-plugin");
+    fs::create_dir_all(&root).expect("root");
+    fs::write(
+        root.join("plugin.yaml"),
+        "name: hermes-cleanup\nversion: 1.2.0\ndescription: cleanup\nprovides_tools:\n  - cleanup\n",
+    )
+    .expect("plugin yaml");
+    fs::write(
+        root.join("__init__.py"),
+        format!(
+            "from pathlib import Path\nPath({:?}).write_text('executed')\n",
+            temp.path().join("executed")
+        ),
+    )
+    .expect("module");
+
+    let value = plugin_import_inspect_value(
+        &home,
+        &cwd,
+        PluginInspectOptions {
+            source: root.display().to_string(),
+            source_kind: Some(PluginSourceKind::Local),
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: Some(PluginAdapterMode::AdapterHost),
+        },
+    )
+    .expect("inspect");
+
+    assert_eq!(value["inspection"]["framework"], "hermes");
+    assert_eq!(value["inspection"]["status"], "Needs trust");
+    assert_eq!(value["inspection"]["target_lanes"][0], "tools");
+    assert!(!temp.path().join("executed").exists());
+}
+
+#[test]
+fn install_foreign_adapter_records_fingerprint_and_trust() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let root = temp.path().join("hermes-plugin");
+    fs::create_dir_all(&root).expect("root");
+    fs::write(
+        root.join("plugin.yaml"),
+        "name: hermes-cleanup\nversion: 1.2.0\ndescription: cleanup\nprovides_hooks:\n  - pre_tool_call\n",
+    )
+    .expect("plugin yaml");
+
+    let record = install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: root.display().to_string(),
+            source_kind: Some(PluginSourceKind::Local),
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: Some(PluginAdapterMode::AdapterHost),
+            force: false,
+        },
+    )
+    .expect("install");
+
+    assert_eq!(record.manifest_kind, PluginManifestKind::Hermes);
+    assert_eq!(record.adapter_mode, PluginAdapterMode::AdapterHost);
+    assert!(!record.package_fingerprint.is_empty());
+
+    let value = plugin_set_trust_value(&home, &cwd, PluginScope::Global, "hermes-cleanup", true)
+        .expect("trust");
+
+    assert_eq!(value["trust"]["status"], "trusted");
+    assert_eq!(value["trust"]["fingerprint"], record.package_fingerprint);
+}
+
+#[test]
+fn inspect_opencode_rejects_entrypoint_outside_package_root() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let root = temp.path().join("opencode-plugin");
+    fs::create_dir_all(&root).expect("root");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+          "name": "opencode-bad",
+          "version": "0.1.0",
+          "exports": {"./server": "../outside.js"}
+        }"#,
+    )
+    .expect("package");
+
+    let value = plugin_import_inspect_value(
+        &home,
+        &cwd,
+        PluginInspectOptions {
+            source: root.display().to_string(),
+            source_kind: Some(PluginSourceKind::Local),
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
+        },
+    )
+    .expect("inspect");
+
+    assert_eq!(value["success"], false);
+    assert_eq!(value["inspection"]["framework"], "opencode");
+    assert!(
+        value["inspection"]["diagnostics"][0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("escapes package root"))
+    );
+}
+
+#[test]
+fn install_npm_source_uses_local_pack_fixture() {
+    if Command::new("npm")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_err()
+    {
+        return;
+    }
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("npm-plugin");
+    fs::create_dir_all(source.join(".codex-plugin")).expect("codex");
+    fs::write(
+        source.join("package.json"),
+        r#"{"name":"npm-codex-plugin","version":"1.2.3","files":[".codex-plugin"]}"#,
+    )
+    .expect("package");
+    fs::write(
+        source.join(".codex-plugin/plugin.json"),
+        r#"{"name":"npm-codex-plugin","version":"1.2.3","description":"npm plugin"}"#,
+    )
+    .expect("manifest");
+
+    let record = install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: Some(PluginSourceKind::Npm),
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
+            force: false,
+        },
+    )
+    .expect("npm install");
+
+    assert_eq!(record.source_kind, PluginSourceKind::Npm);
+    assert_eq!(record.name, "npm-codex-plugin");
+    assert!(record.source_id.starts_with("npm:npm-codex-plugin@1.2.3"));
+}
+
+#[test]
 fn manifest_parses_mcp_servers_object_without_discarding_valid_siblings() {
     let temp = tempdir().expect("temp");
     let root = temp.path().join("plugin");
@@ -497,8 +670,12 @@ fn install_record_preserves_scope_source_and_data_root() {
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Local,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -544,8 +721,12 @@ fn install_rejects_package_symlink_without_copying_escape_content() {
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -596,8 +777,12 @@ fn selector_conflict_requires_source_qualified_name() {
         &cwd,
         PluginInstallOptions {
             source: source_a.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -607,8 +792,12 @@ fn selector_conflict_requires_source_qualified_name() {
         &cwd,
         PluginInstallOptions {
             source: source_b.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -652,8 +841,12 @@ fn local_policy_can_target_profile_installed_plugin() {
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -698,8 +891,12 @@ fn enabled_plugin_contributions_materialize_mcp_servers_toolsets_and_projection(
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -777,8 +974,12 @@ for line in sys.stdin:
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -855,8 +1056,12 @@ fn compatibility_manifest_install_allows_missing_description() {
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -883,11 +1088,14 @@ fn marketplace_rejects_unsupported_kind() {
             source: "file:///tmp/cleanup".to_string(),
             kind: "archive".to_string(),
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
         },
     )
     .expect_err("unsupported kind");
 
-    assert!(err.to_string().contains("expected local or git"));
+    assert!(err.to_string().contains("expected local, git, or npm"));
 }
 
 #[test]
@@ -929,8 +1137,12 @@ for line in sys.stdin:
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -992,8 +1204,12 @@ for line in sys.stdin:
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -1045,8 +1261,12 @@ for line in sys.stdin:
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -1096,8 +1316,12 @@ for line in sys.stdin:
         &cwd,
         PluginInstallOptions {
             source: source.display().to_string(),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )
@@ -1188,8 +1412,12 @@ fn install_from_local_git_source_materializes_record() {
         &cwd,
         PluginInstallOptions {
             source: format!("file://{}", repo.display()),
+            source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
             force: false,
         },
     )

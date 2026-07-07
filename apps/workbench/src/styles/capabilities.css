@@ -110,6 +110,13 @@
   opacity: 0.54;
 }
 
+.capabilityFormActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
 .capabilitiesToolbar label {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -157,6 +164,41 @@
   color: var(--pevo-danger);
   background: color-mix(in oklch, var(--pevo-danger), transparent 88%);
   border-color: color-mix(in oklch, var(--pevo-danger), transparent 62%);
+}
+
+.pluginInspection {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 48%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 38%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pluginInspection > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.pluginInspection strong,
+.pluginInspection span,
+.pluginInspection dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pluginInspectionGrid {
+  max-height: none;
+  overflow: visible;
+}
+
+.pluginInspectionStages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
 }
 
 .capabilitiesGrid {

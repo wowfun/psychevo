@@ -1,12 +1,14 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::manifest::load_plugin_manifest;
+use super::inspect::{
+    PluginMaterializedSource, SourceRequest, inspect_materialized_source,
+    materialize_source_for_install,
+};
 use super::store::PluginStore;
-use super::types::{PluginInstallOptions, PluginInstallRecord};
+use super::types::{PluginAdapterMode, PluginInstallOptions, PluginInstallRecord};
 use super::util::{sanitize_path_segment, source_slug};
 use crate::error::{Error, Result};
 
@@ -29,13 +31,16 @@ pub fn install_plugin(
 ) -> Result<PluginInstallRecord> {
     let store = PluginStore::new(home, cwd, options.scope)?;
     store.ensure()?;
-    let materialized = materialize_source(&store, &options)?;
-    let manifest = load_plugin_manifest(&materialized.root, false)?;
-    let invalid = manifest
+    let materialized =
+        materialize_source_for_install(&store, home, cwd, &SourceRequest::from_install(&options))?;
+    let adapter_mode = options.adapter_mode.unwrap_or_default();
+    let inspection = inspect_materialized_source(&materialized, adapter_mode, "Installed")?;
+    let invalid = inspection
         .diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.kind == "invalid")
         .map(|diagnostic| diagnostic.message.clone())
+        .chain((inspection.status == "Failed").then_some(inspection.readiness.clone()))
         .collect::<Vec<_>>();
     if !invalid.is_empty() {
         return Err(Error::Config(format!(
@@ -43,22 +48,22 @@ pub fn install_plugin(
             invalid.join("; ")
         )));
     }
-    let version = manifest
+    let version = inspection
         .version
         .clone()
         .ok_or_else(|| Error::Config("plugin version is required for install".to_string()))?;
-    let description = manifest.description.clone().unwrap_or_default();
+    let description = inspection.description.clone().unwrap_or_default();
     let source_slug = source_slug(&materialized.source_id);
     let package_root = store
         .cache
-        .join(package_dir_name(&manifest.name, &version, &source_slug));
+        .join(package_dir_name(&inspection.name, &version, &source_slug));
     if package_root.exists() {
         if options.force {
             fs::remove_dir_all(&package_root)?;
         } else {
             return Err(Error::Config(format!(
                 "plugin `{}` from `{}` is already installed; use --force to replace it",
-                manifest.name, materialized.source_id
+                inspection.name, materialized.source_id
             )));
         }
     }
@@ -66,119 +71,54 @@ pub fn install_plugin(
         let _ = fs::remove_dir_all(&package_root);
         return Err(err);
     }
-    let installed_manifest = load_plugin_manifest(&package_root, false)?;
+    let installed = PluginMaterializedSource {
+        root: package_root.clone(),
+        source_id: materialized.source_id.clone(),
+        source_kind: materialized.source_kind,
+        npm_registry: materialized.npm_registry.clone(),
+        temp_dir: None,
+    };
+    let installed_inspection = inspect_materialized_source(&installed, adapter_mode, "Installed")?;
+    let (manifest_resources, psychevo_extensions) =
+        match super::manifest::load_plugin_manifest(&package_root, true) {
+            Ok(manifest) => (
+                manifest.manifest_resources.iter().cloned().collect(),
+                manifest.psychevo_extensions.iter().cloned().collect(),
+            ),
+            Err(_) => (
+                installed_inspection.target_lanes.clone(),
+                installed_inspection.projected_contributions.clone(),
+            ),
+        };
     let data_root = store.data.join(format!(
         "{}-{}",
-        sanitize_path_segment(&installed_manifest.name),
+        sanitize_path_segment(&installed_inspection.name),
         source_slug
     ));
     fs::create_dir_all(&data_root)?;
     let record = PluginInstallRecord {
-        name: installed_manifest.name.clone(),
+        name: installed_inspection.name.clone(),
         version,
         description,
         source_id: materialized.source_id,
         source_slug,
+        source_kind: materialized.source_kind,
+        npm_registry: materialized.npm_registry,
         scope: options.scope,
         package_root,
         data_root,
-        manifest_path: installed_manifest.manifest_path,
-        manifest_kind: installed_manifest.kind,
-        manifest_resources: installed_manifest
-            .manifest_resources
-            .iter()
-            .cloned()
-            .collect(),
-        psychevo_extensions: installed_manifest
-            .psychevo_extensions
-            .iter()
-            .cloned()
-            .collect(),
-        diagnostics: installed_manifest.diagnostics,
+        manifest_path: installed_inspection.manifest_path,
+        manifest_kind: installed_inspection.framework,
+        package_fingerprint: installed_inspection.package_fingerprint,
+        adapter_mode: options
+            .adapter_mode
+            .unwrap_or(PluginAdapterMode::ManifestOnly),
+        manifest_resources,
+        psychevo_extensions,
+        diagnostics: installed_inspection.diagnostics,
     };
     store.write_record(&record)?;
     Ok(record)
-}
-
-struct MaterializedSource {
-    root: PathBuf,
-    source_id: String,
-}
-
-fn materialize_source(
-    store: &PluginStore,
-    options: &PluginInstallOptions,
-) -> Result<MaterializedSource> {
-    let source_path = PathBuf::from(&options.source);
-    if source_path.exists() {
-        let root = source_path.canonicalize()?;
-        return Ok(MaterializedSource {
-            root,
-            source_id: format!("local:{}", source_path.display()),
-        });
-    }
-    if looks_like_git_source(&options.source) {
-        let incoming = store.cache.join(format!(
-            "incoming-{}",
-            source_slug(&format!("{}{:?}", options.source, options.git_ref))
-        ));
-        if incoming.exists() {
-            fs::remove_dir_all(&incoming)?;
-        }
-        fs::create_dir_all(&store.cache)?;
-        let status = Command::new("git")
-            .arg("clone")
-            .arg(&options.source)
-            .arg(&incoming)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()?;
-        if !status.success() {
-            return Err(Error::Config(format!(
-                "git clone failed for {}",
-                options.source
-            )));
-        }
-        if let Some(git_ref) = &options.git_ref {
-            let status = Command::new("git")
-                .arg("-C")
-                .arg(&incoming)
-                .arg("checkout")
-                .arg(git_ref)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()?;
-            if !status.success() {
-                return Err(Error::Config(format!(
-                    "git checkout `{git_ref}` failed for {}",
-                    options.source
-                )));
-            }
-        }
-        return Ok(MaterializedSource {
-            root: incoming,
-            source_id: format!(
-                "git:{}{}",
-                options.source,
-                options
-                    .git_ref
-                    .as_ref()
-                    .map(|git_ref| format!("#{git_ref}"))
-                    .unwrap_or_default()
-            ),
-        });
-    }
-    Err(Error::Config(format!(
-        "plugin source not found: {}",
-        options.source
-    )))
-}
-
-fn looks_like_git_source(source: &str) -> bool {
-    source.starts_with("file://")
-        || source.contains("://")
-        || source.ends_with(".git")
-        || source.starts_with("git@")
 }
 
 fn copy_dir(source: &Path, dest: &Path) -> Result<()> {

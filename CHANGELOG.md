@@ -2,6 +2,8 @@
 
 ## 2026-07-06
 
+- Added inspected plugin imports with npm materialization, adapter trust,
+  catalog RPCs, CLI commands, and Workbench controls.
 - Added voice ASR/TTS policy, fake providers, Gateway and realtime RPCs,
   Workbench controls, and `/voice` commands with text fallback.
 - Reworked `peval-py serve` source state, Source Manager imports, and

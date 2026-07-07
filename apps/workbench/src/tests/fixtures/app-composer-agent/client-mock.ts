@@ -731,14 +731,41 @@ vi.mock("@psychevo/client", async () => {
               description: "Writing helper plugin",
               source_id: "local:/plugins/writer-kit",
               source: "writer-kit",
+              source_kind: "local",
               scope: "global",
               manifest_kind: "psychevo",
               enabled: true,
+              status: "Installed",
+              readiness: "Installed",
+              adapter_mode: "manifest_only",
+              package_fingerprint: "abc123",
+              trust: { required: false, status: "not_required", fingerprint: "abc123" },
               diagnostics: []
             }
           ],
           count: 1
         };
+      }
+      if (method === "plugin/import/inspect") {
+        return {
+          success: true,
+          inspection: {
+            name: "writer-kit",
+            framework: "codex",
+            status: "Available",
+            source_kind: "local",
+            adapter_mode: "manifest_only",
+            target_lanes: ["skills", "mcp"],
+            unsupported_lanes: ["apps"],
+            stages: [
+              { stage: "resolve/fetch", status: "ok", message: "resolved local source" },
+              { stage: "inspect manifest", status: "ok", message: "loaded codex manifest" }
+            ]
+          }
+        };
+      }
+      if (method === "plugin/setTrust") {
+        return { success: true, trusted: true };
       }
       if (method === "mcp/list") {
         return {

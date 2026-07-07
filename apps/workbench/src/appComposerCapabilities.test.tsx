@@ -253,4 +253,24 @@ describe("Workbench capabilities management", () => {
     });
     confirm.mockRestore();
   });
+
+  it("inspects plugin sources before install", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Plugins" }));
+    await within(region).findByRole("button", { name: /writer-kit/i });
+
+    fireEvent.click(within(region).getByRole("button", { name: "Install plugin" }));
+    fireEvent.change(await within(region).findByLabelText("Plugin source"), { target: { value: "/tmp/plugins/writer-kit" } });
+    fireEvent.click(within(region).getByRole("button", { name: "Inspect" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "plugin/import/inspect")).toBe(true);
+    });
+    expect(within(region).getByText("codex / Available")).toBeTruthy();
+    expect(within(region).getByText("skills, mcp")).toBeTruthy();
+    expect(within(region).getByText("apps")).toBeTruthy();
+  });
 });

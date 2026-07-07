@@ -118,11 +118,12 @@ pub use model_state::{
 };
 pub use paths::{canonicalize_cwd, workspace_snapshot_id};
 pub use plugins::{
-    LoadedPluginManifest, PluginDiagnostic, PluginInstallOptions, PluginInstallRecord,
-    PluginInterfaceMetadata, PluginManifestKind, PluginMarketplaceEntry, PluginScope,
-    PluginWorkerSpec, install_plugin, load_plugin_manifest, plugin_doctor_value,
-    plugin_install_value, plugin_list_value, plugin_marketplace_add_value,
-    plugin_marketplace_list_value, plugin_marketplace_remove_value, plugin_set_enabled_value,
+    LoadedPluginManifest, PluginAdapterMode, PluginDiagnostic, PluginInspectOptions,
+    PluginInstallOptions, PluginInstallRecord, PluginInterfaceMetadata, PluginManifestKind,
+    PluginMarketplaceEntry, PluginScope, PluginSourceKind, PluginWorkerSpec, install_plugin,
+    load_plugin_manifest, plugin_doctor_value, plugin_import_inspect_value, plugin_install_value,
+    plugin_list_value, plugin_marketplace_add_value, plugin_marketplace_list_value,
+    plugin_marketplace_remove_value, plugin_set_enabled_value, plugin_set_trust_value,
     plugin_uninstall_value, plugin_view_value,
 };
 pub use process_env::{

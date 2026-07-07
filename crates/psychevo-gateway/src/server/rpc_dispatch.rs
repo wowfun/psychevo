@@ -693,6 +693,22 @@ async fn handle_rpc(
             let options = plugin_runtime_options(&state, scope.cwd);
             plugin_doctor_value(&options, params.selector.as_deref())
         }
+        "plugin/import/inspect" => {
+            let params = request.required_params::<wire::PluginInspectParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            plugin_import_inspect_value(
+                &state.inner.home,
+                &scope.cwd,
+                PluginInspectOptions {
+                    source: params.source,
+                    source_kind: parse_plugin_source_kind(params.source_kind.as_deref())?,
+                    git_ref: params.git_ref,
+                    npm_version: params.npm_version,
+                    npm_registry: params.npm_registry,
+                    adapter_mode: parse_plugin_adapter_mode(params.adapter_mode.as_deref())?,
+                },
+            )
+        }
         "plugin/install" => {
             let params = request.required_params::<wire::PluginInstallParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
@@ -701,8 +717,12 @@ async fn handle_rpc(
                 &scope.cwd,
                 PluginInstallOptions {
                     source: params.source,
+                    source_kind: parse_plugin_source_kind(params.source_kind.as_deref())?,
                     scope: parse_plugin_scope(params.scope_name.as_deref())?,
                     git_ref: params.git_ref,
+                    npm_version: params.npm_version,
+                    npm_registry: params.npm_registry,
+                    adapter_mode: parse_plugin_adapter_mode(params.adapter_mode.as_deref())?,
                     force: params.force,
                 },
             )
@@ -726,6 +746,54 @@ async fn handle_rpc(
                 parse_plugin_scope(params.scope_name.as_deref())?,
                 &params.selector,
                 params.enabled,
+            )
+        }
+        "plugin/setTrust" => {
+            let params = request.required_params::<wire::PluginSetTrustParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            plugin_set_trust_value(
+                &state.inner.home,
+                &scope.cwd,
+                parse_plugin_scope(params.scope_name.as_deref())?,
+                &params.selector,
+                params.trusted,
+            )
+        }
+        "plugin/catalog/list" => {
+            let params = request.params::<wire::PluginCatalogListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            plugin_marketplace_list_value(
+                &state.inner.home,
+                &scope.cwd,
+                parse_plugin_scope(params.scope_name.as_deref())?,
+            )
+        }
+        "plugin/catalog/add" => {
+            let params = request.required_params::<wire::PluginCatalogAddParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            plugin_marketplace_add_value(
+                &state.inner.home,
+                &scope.cwd,
+                parse_plugin_scope(params.scope_name.as_deref())?,
+                PluginMarketplaceEntry {
+                    name: params.name,
+                    source: params.source,
+                    kind: params.kind,
+                    git_ref: params.git_ref,
+                    npm_version: params.npm_version,
+                    npm_registry: params.npm_registry,
+                    adapter_mode: parse_plugin_adapter_mode(params.adapter_mode.as_deref())?,
+                },
+            )
+        }
+        "plugin/catalog/remove" => {
+            let params = request.required_params::<wire::PluginCatalogRemoveParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            plugin_marketplace_remove_value(
+                &state.inner.home,
+                &scope.cwd,
+                parse_plugin_scope(params.scope_name.as_deref())?,
+                &params.name,
             )
         }
         "skill/list" => {
@@ -1223,6 +1291,34 @@ fn parse_plugin_scope(value: Option<&str>) -> psychevo_runtime::Result<PluginSco
         "local" | "project" => Ok(PluginScope::Local),
         other => Err(Error::Config(format!("unknown plugin scope: {other}"))),
     }
+}
+
+fn parse_plugin_source_kind(
+    value: Option<&str>,
+) -> psychevo_runtime::Result<Option<PluginSourceKind>> {
+    value
+        .map(|value| {
+            PluginSourceKind::parse(value).ok_or_else(|| {
+                Error::Config(format!(
+                    "unknown plugin source kind `{value}`; expected local, git, or npm"
+                ))
+            })
+        })
+        .transpose()
+}
+
+fn parse_plugin_adapter_mode(
+    value: Option<&str>,
+) -> psychevo_runtime::Result<Option<PluginAdapterMode>> {
+    value
+        .map(|value| {
+            PluginAdapterMode::parse(value).ok_or_else(|| {
+                Error::Config(format!(
+                    "unknown plugin adapter mode `{value}`; expected adapter_host, manifest_only, or disabled"
+                ))
+            })
+        })
+        .transpose()
 }
 
 fn parse_tool_mode(value: &str) -> psychevo_runtime::Result<RunMode> {

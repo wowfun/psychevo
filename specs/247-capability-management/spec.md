@@ -100,6 +100,19 @@ overwriting a plugin package requires explicit confirmation when the runtime
 reports an existing package or force-worthy condition, and the install form is
 opened through the `Install plugin` action.
 
+The Plugins tab also supports compact catalog/import inspection. The scoped
+install panel can inspect a local path, Git source, npm source, or catalog row
+before installation. Inspection shows framework, canonical id, source kind,
+scope, adapter mode, trust state, target lanes, projected contributions,
+unsupported lanes, stage diagnostics, readiness, and whether changes affect the
+current session or the next run.
+
+Plugin row and detail states use the fixed status vocabulary `Available`,
+`Installed`, `Disabled`, `Needs trust`, `Needs setup`, `Failed`, and
+`Unsupported target`. Status text must describe the next useful action rather
+than internal implementation state. Trust actions require explicit user intent
+and record trust only for the current package fingerprint.
+
 ## MCP
 
 The MCP tab manages profile-scoped stdio and streamable HTTP server
@@ -163,7 +176,9 @@ Gateway exposes domain RPCs instead of a capability aggregate:
 - `skill/list`, `skill/read`, `skill/install`, `skill/uninstall`,
   `skill/setEnabled`
 - `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
-  `plugin/uninstall`, `plugin/setEnabled`
+  `plugin/uninstall`, `plugin/setEnabled`, `plugin/import/inspect`,
+  `plugin/setTrust`, `plugin/catalog/list`, `plugin/catalog/add`,
+  `plugin/catalog/remove`
 - `tool/list`, `tool/read`, `tool/setEnabled`, `tool/create`, `tool/remove`
 - `mcp/list`, `mcp/read`, `mcp/upsert`, `mcp/remove`, `mcp/setEnabled`,
   `mcp/setToolPolicy`, `mcp/test`, `mcp/oauth/start`,
@@ -184,7 +199,8 @@ confirmation paths, secret-free responses, and MCP OAuth start/status/logout
 against a fake local OAuth server and fake keyring.
 
 Workbench tests cover top-level navigation, tab search, detail panels, force
-confirmations, MCP per-tool policy, OAuth polling states, and next-run effect
+confirmations, plugin import inspection, trust flow, unsupported target
+rendering, MCP per-tool policy, OAuth polling states, and next-run effect
 messaging. Visual validation must include desktop and mobile Capabilities
 screens without text overlap.
 

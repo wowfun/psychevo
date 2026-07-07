@@ -122,6 +122,9 @@
       "$ref": "ClientRequest/plugin-doctor.json"
     },
     {
+      "$ref": "ClientRequest/plugin-import-inspect.json"
+    },
+    {
       "$ref": "ClientRequest/plugin-install.json"
     },
     {
@@ -129,6 +132,18 @@
     },
     {
       "$ref": "ClientRequest/plugin-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-set-trust.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-catalog-list.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-catalog-add.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-catalog-remove.json"
     },
     {
       "$ref": "ClientRequest/skill-list.json"
