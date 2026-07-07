@@ -2,12 +2,20 @@
 
 ## 2026-07-06
 
+- Added Vision V1 with safe image inputs, generated media artifacts, and
+  Workbench transcript/composer previews.
 - Added inspected plugin imports with npm materialization, adapter trust,
   catalog RPCs, CLI commands, and Workbench controls.
+- Moved Agent management into `Capabilities > Agents` and unified Agent/Skill
+  Markdown definition editing, previews, and Project/Profile writes.
+- Split Workbench and Desktop production chunks through Rolldown code-splitting
+  groups so runtime output stays below Vite's default large-chunk warning.
 - Added voice ASR/TTS policy, fake providers, Gateway and realtime RPCs,
   Workbench controls, and `/voice` commands with text fallback.
 - Reworked `peval-py serve` source state, Source Manager imports, and
   Leaderboard filtering around cell-local overlays and workspace logs.
+- Tightened `peval-py serve` startup discovery, artifact-only cells, import
+  provenance handling, and inline Source Manager/Leaderboard controls.
 - Refined Workbench voice controls and shell scrolling so dictation stays in
   the composer flow and pinned sessions remain contained.
 
