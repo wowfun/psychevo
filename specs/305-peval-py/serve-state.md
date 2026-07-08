@@ -96,15 +96,22 @@ ignored. Each non-blank line is parsed and imported independently, so one bad
 path does not block later paths. Multi-line requests return the normal source
 mutation envelope plus `import_results[]` entries with per-line `status`,
 `source_keys`, or `error`. Single-line failures keep the existing HTTP error
-response behavior.
+response behavior. The same Path form may call same-origin `POST
+/api/path-picker` to open a local native file picker and fill the textarea with
+absolute file paths, one per line. Browser-native file inputs are not used for
+this path-fill behavior because they do not expose absolute filesystem paths to
+JavaScript. If no native picker backend is available or the picker fails, the
+API returns a JSON error and the browser preserves the existing textarea value.
 
 Serve source mutation endpoints return a shared JSON envelope with `sources`
 and, when a readable source exists, `report` plus `report_source_key`. Reload,
 add, upload, archive, activate, refresh, alias, notes, and delete actions use
 this envelope so the browser can clear stale report state consistently when no
-source is readable. `GET /api/sources` may return `loading = true` during
-startup; after startup it returns the current source list and the current
-active report envelope.
+source is readable. Source aliases remain display metadata and API/state
+capability, but the Source Manager add/upload forms do not expose alias inputs;
+aliases are edited from the source list or provided by non-UI callers. `GET
+/api/sources` may return `loading = true` during startup; after startup it
+returns the current source list and the current active report envelope.
 
 `peval-py init` writes only the Python-owned serve state described above.
 Existing unrelated workspace files, including any old workspace `state.db`, are

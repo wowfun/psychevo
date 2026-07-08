@@ -21,9 +21,11 @@ same command tree.
   Python-owned file-backed state layer, with active and archived source
   comparison views that recover to the target view when a batch source-state
   action empties the current view, plus serve-only Leaderboard search, source
-  tags, inline display-metadata editing, and existing-tag quick selection
+  tags, inline display-metadata editing, existing-tag quick selection, and
+  first-User-step details from Leaderboard row selection
 - Source Manager import of complete Trial cells from local external `runs/`
-  trees into the selected peval-py workspace
+  trees into the selected peval-py workspace, including a local native file
+  picker that can fill the Path import textarea with absolute file paths
 - read-only peval cell cached analysis and manual cell notes enrichment, plus
   explicit serve editing of cell-local `notes.md`
 - a bundled `peval-py` agent skill that guides offline session diagnostics,

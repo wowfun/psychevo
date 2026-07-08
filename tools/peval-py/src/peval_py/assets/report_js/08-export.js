@@ -47,10 +47,16 @@ function bindTrialSelection(root) {
       state.selectedTrial = node.getAttribute("data-trial-key");
       const sourceKey = sourceKeyForTrialKey(state.selectedTrial);
       if (sourceKey) state.selectedSourceKey = sourceKey;
-      state.selectedStep = null;
+      state.selectedStep = firstUserStepSelection(state.selectedTrial);
       renderComparisonPanels();
     });
   });
+}
+function firstUserStepSelection(trialKey) {
+  const step = listValue(trajectoryFor(trialKey)?.steps).find(item => {
+    return lower(item?.source) === "user" && item?.step_id !== null && item?.step_id !== undefined;
+  });
+  return step ? { trialKey, stepId: String(step.step_id) } : null;
 }
 function exportScopeRows() {
   const rows = leaderboardRows();

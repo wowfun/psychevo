@@ -102,6 +102,25 @@ function renderServeSourceAliasEdit(source) {
     <button type="button" data-source-alias-save data-source-key="${esc(key)}">${esc(t("serve_save_alias", "Save alias"))}</button>
   </label>`;
 }
+async function choosePathSourceFiles(button) {
+  const form = button?.closest?.("[data-source-add-form]");
+  const field = form?.querySelector?.("[name=\"path\"]");
+  if (!field) return;
+  try {
+    const payload = await serveApi("/api/path-picker", {
+      method: "POST",
+      body: { multiple: true }
+    });
+    const paths = Array.isArray(payload?.paths) ? payload.paths.map(path => String(path || "").trim()).filter(Boolean) : [];
+    if (!paths.length) return;
+    field.value = paths.join("\n");
+    setServeStatus(t("serve_path_picker_selected", "Path selection updated"));
+  } catch (error) {
+    const message = error.message || String(error);
+    showServeNotice(message, true);
+    setServeStatus(message, true);
+  }
+}
 function renderServeSourceActions(source) {
   const key = source?.source_key || "";
   const active = source?.active !== false;

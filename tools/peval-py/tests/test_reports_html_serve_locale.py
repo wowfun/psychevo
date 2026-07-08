@@ -36,6 +36,7 @@ class PevalPyReportHtmlServeLocaleTests(unittest.TestCase):
             report,
             adapter_defaults={"opencode": "/tmp/opencode.db"},
         )
+        compact_serve_html = compact_css_text(serve_html)
 
         self.assertIn('<body class="report-mode">', static_html)
         self.assertNotIn('class="serve-import-panel"', static_html)
@@ -89,6 +90,9 @@ class PevalPyReportHtmlServeLocaleTests(unittest.TestCase):
         self.assertIn("Session / ATIF / runs Path", serve_html)
         self.assertNotIn("<strong>Session / ATIF / runs Path</strong>", serve_html)
         self.assertIn('<textarea name="path"', serve_html)
+        self.assertIn("data-path-picker-target", serve_html)
+        self.assertIn("data-path-picker", serve_html)
+        self.assertIn("Choose files", serve_html)
         self.assertIn('<textarea name="db"', serve_html)
         self.assertIn("Inspect DB", serve_html)
         self.assertIn("data-db-inspect", serve_html)
@@ -100,8 +104,24 @@ class PevalPyReportHtmlServeLocaleTests(unittest.TestCase):
         self.assertIn('name="adapter" aria-label="Adapter"', serve_html)
         self.assertIn('<option value="auto" selected>Auto</option>', serve_html)
         self.assertIn('<option value="opencode"  data-default-db="/tmp/opencode.db">opencode</option>', serve_html)
-        self.assertEqual(serve_html.count('name="alias"'), 4)
+        self.assertNotIn('name="alias"', serve_html)
         self.assertIn('data-source-alias-save', serve_html)
+        self.assertIn(
+            compact_css_text(
+                ".source-manager-body{min-height:0;display:grid;"
+                "grid-template-columns:minmax(360px,480px) minmax(0,1fr);"
+                "gap:14px;padding:16px;overflow:hidden}"
+            ),
+            compact_serve_html,
+        )
+        self.assertIn(
+            compact_css_text(
+                ".source-manager-list{min-height:0;display:grid;gap:8px;"
+                "align-content:start;margin:0;padding:0;list-style:none;"
+                "overflow:auto;overscroll-behavior:contain}"
+            ),
+            compact_serve_html,
+        )
         self.assertNotIn("adapter-choice-group", serve_html)
         self.assertNotIn('type="radio" name="adapter"', serve_html)
         self.assertIn('data-source-action="delete"', serve_html)
@@ -129,8 +149,10 @@ class PevalPyReportHtmlServeLocaleTests(unittest.TestCase):
         self.assertIn("data-row-select", serve_html)
         self.assertIn("leaderboard-export", serve_html)
         self.assertIn("function bindServeSourceControls()", serve_html)
+        self.assertIn("function choosePathSourceFiles(button)", serve_html)
         self.assertIn('serveApi("/api/config/locale"', serve_html)
         self.assertIn('serveApi("/api/config/adapter-default-db"', serve_html)
+        self.assertIn('serveApi("/api/path-picker"', serve_html)
         self.assertIn("adapterDefaults: initialAdapterDefaults()", serve_html)
         self.assertIn("function saveAdapterDefaultDb(form)", serve_html)
         self.assertIn("function updateAdapterDefaultOptions()", serve_html)

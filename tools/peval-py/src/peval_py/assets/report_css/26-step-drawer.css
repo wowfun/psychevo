@@ -121,6 +121,12 @@
     width:100%;
     height:calc(100vh - 20px);
   }
+  .source-manager-body {
+    overflow:auto;
+  }
+  .source-manager-forms {
+    overflow:visible;
+  }
   .adapter-default-db-actions {
     justify-content:flex-start;
   }

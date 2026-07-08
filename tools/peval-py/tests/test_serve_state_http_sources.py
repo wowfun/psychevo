@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from serve_state_support import *
+from peval_py.serve.path_picker import PathPickerUnavailable
+
 
 class PevalPyServeStateHttpSourceTests(unittest.TestCase):
     def test_http_sources_returns_loading_shell_until_initial_load_finishes(self) -> None:
@@ -143,6 +145,80 @@ class PevalPyServeStateHttpSourceTests(unittest.TestCase):
                 self.assertTrue(comparison["hasLeaderboard"])
                 self.assertFalse(comparison["hasSummary"])
                 self.assertTrue(comparison["hasOverview"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                store.close()
+
+    def test_http_path_picker_returns_paths_and_preserves_source_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = peval_py_workspace(Path(tmp))
+            config = ToolConfig(adapter="opencode")
+            store = open_workspace_state(str(root))
+            server = LocalHTTPServer(
+                ("127.0.0.1", 0),
+                make_handler(store, config),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            port = server.server_port
+            origin = f"http://127.0.0.1:{port}"
+            try:
+                status, headers, body = request_json(
+                    port,
+                    "POST",
+                    "/api/path-picker",
+                    {"multiple": True},
+                    origin="http://example.test",
+                )
+                self.assertEqual(status, 403)
+                self.assertNotIn("access-control-allow-origin", headers)
+                self.assertIn("same-origin", body["error"])
+
+                with patch(
+                    "peval_py.serve.handler.pick_file_paths",
+                    return_value=["/tmp/one.jsonl", "/tmp/two.json"],
+                ) as picker:
+                    status, headers, body = request_json(
+                        port,
+                        "POST",
+                        "/api/path-picker",
+                        {"multiple": True},
+                        origin=origin,
+                    )
+                self.assertEqual(status, 200)
+                self.assertNotIn("access-control-allow-origin", headers)
+                self.assertEqual(body, {"paths": ["/tmp/one.jsonl", "/tmp/two.json"]})
+                picker.assert_called_once_with(multiple=True)
+
+                status, _, body_bytes = request_bytes(port, "/api/sources")
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body_bytes.decode("utf-8"))["sources"], [])
+
+                with patch(
+                    "peval_py.serve.handler.pick_file_paths",
+                    side_effect=PathPickerUnavailable("native file picker unavailable"),
+                ):
+                    status, _, body = request_json(
+                        port,
+                        "POST",
+                        "/api/path-picker",
+                        {"multiple": True},
+                        origin=origin,
+                    )
+                self.assertEqual(status, 503)
+                self.assertIn("native file picker unavailable", body["error"])
+
+                status, _, body = request_json(
+                    port,
+                    "POST",
+                    "/api/path-picker",
+                    {"multiple": "yes"},
+                    origin=origin,
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("multiple must be true or false", body["error"])
             finally:
                 server.shutdown()
                 server.server_close()

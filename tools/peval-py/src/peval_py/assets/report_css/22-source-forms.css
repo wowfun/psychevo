@@ -4,12 +4,15 @@
   grid-template-columns:minmax(360px,480px) minmax(0,1fr);
   gap:14px;
   padding:16px;
-  overflow:auto;
+  overflow:hidden;
 }
 .source-manager-forms {
+  min-height:0;
   display:grid;
   gap:10px;
   align-content:start;
+  overflow:auto;
+  padding-right:2px;
 }
 .source-form {
   display:grid;
@@ -76,6 +79,10 @@
   gap:8px;
   flex:0 0 auto;
   min-width:0;
+}
+.source-picker-actions {
+  display:flex;
+  justify-content:flex-end;
 }
 .source-form-actions,.db-picker-actions {
   display:flex;

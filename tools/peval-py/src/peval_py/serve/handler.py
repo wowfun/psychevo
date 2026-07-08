@@ -24,6 +24,7 @@ from peval_py.serve.payloads import (
     source_state_payload,
     tags_payload,
 )
+from peval_py.serve.path_picker import PathPickerUnavailable, pick_file_paths
 from peval_py.serve.reporting import single_query_value
 from peval_py.serve.runtime import ServeRuntime
 from peval_py.serve.sources import add_source_payload, db_sessions_payload
@@ -139,6 +140,15 @@ def make_handler(
                 if path == "/api/db-sessions":
                     runtime.ensure_ready()
                     self.write_json(db_sessions_payload(store, payload))
+                    return
+                if path == "/api/path-picker":
+                    multiple = payload.get("multiple", True)
+                    if not isinstance(multiple, bool):
+                        raise HttpError(400, "multiple must be true or false")
+                    try:
+                        self.write_json({"paths": pick_file_paths(multiple=multiple)})
+                    except PathPickerUnavailable as exc:
+                        raise HttpError(503, str(exc)) from exc
                     return
                 if path == "/api/sources/state":
                     runtime.ensure_ready()

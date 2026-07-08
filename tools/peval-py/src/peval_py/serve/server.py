@@ -6,6 +6,7 @@ from peval_py.serve.constants import *  # noqa: F401,F403
 from peval_py.serve.handler import *  # noqa: F401,F403
 from peval_py.serve.lifecycle import *  # noqa: F401,F403
 from peval_py.serve.payloads import *  # noqa: F401,F403
+from peval_py.serve.path_picker import *  # noqa: F401,F403
 from peval_py.serve.reporting import *  # noqa: F401,F403
 from peval_py.serve.runtime import *  # noqa: F401,F403
 from peval_py.serve.sources import *  # noqa: F401,F403

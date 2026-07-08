@@ -139,11 +139,17 @@ def render_source_add_form(
     }[kind]
     name = "input_table" if kind == "input_table" else kind
     if kind == "path":
-        field_tag = f'<textarea name="{escape(name)}" autocomplete="off" required rows="4"></textarea>'
+        field_tag = f'<textarea name="{escape(name)}" autocomplete="off" required rows="4" data-path-picker-target></textarea>'
     elif kind == "db":
         field_tag = f'<textarea name="{escape(name)}" autocomplete="off" required rows="2"></textarea>'
     else:
         field_tag = f'<input name="{escape(name)}" autocomplete="off" required>'
+    path_picker = ""
+    if kind == "path":
+        path_picker = f"""
+            <div class="source-picker-actions">
+              <button class="step-toggle-button" type="button" data-path-picker>{escape(messages["serve_choose_path_files"])}</button>
+            </div>"""
     session_field = ""
     if kind == "db":
         session_field = f"""
@@ -162,9 +168,7 @@ def render_source_add_form(
             <label>{escape(messages[label_key])}
               {field_tag}
             </label>
-            <label>{escape(messages["serve_source_alias"])}
-              <input name="alias" autocomplete="off">
-            </label>
+            {path_picker}
             {session_field}
             <div class="source-form-actions">
               {inspect_button}
@@ -183,9 +187,6 @@ def render_upload_form(messages: dict[str, str], adapter_defaults: dict[str, str
             <strong>{escape(messages["serve_upload_snapshot"])}</strong>
             <label>{escape(messages["serve_upload_file"])}
               <input name="file" type="file" accept=".json,.jsonl,application/json,application/x-ndjson" required>
-            </label>
-            <label>{escape(messages["serve_source_alias"])}
-              <input name="alias" autocomplete="off">
             </label>
             <div class="source-form-actions">
               <span class="source-add-actions">

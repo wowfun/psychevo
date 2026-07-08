@@ -319,12 +319,16 @@ Coverage must verify:
   checkbox column, a header select-visible checkbox, and one Leaderboard
   `Export` menu with `Table`, `JSON Report`, and `HTML Report` choices.
   Leaderboard and Trajectory Overview also render synchronized serve-only
-  `Show archived` and bulk Archive/Activate controls.
+  `Show archived` and bulk Archive/Activate controls. Clicking a Leaderboard
+  session row selects that Trial and opens the step drawer on its first User
+  step when one exists; sessions without a User step remain selectable without
+  opening stale step details.
 - serve UI source manager renders Session/ATIF/runs path, DB, and input-table
-  forms, JSONL/ATIF JSON/report JSON upload affordance, explicit refresh
-  controls only where provenance remains refreshable, active/archive/delete
-  controls, non-refreshable artifact labels, and latest source status without a
-  persistent sidebar or duplicate form titles.
+  forms, JSONL/ATIF JSON/report JSON upload affordance, a native file picker
+  trigger for the Path textarea, explicit refresh controls only where
+  provenance remains refreshable, active/archive/delete controls,
+  non-refreshable artifact labels, and latest source status without a
+  persistent sidebar, duplicate form titles, or add-form alias fields.
 - serve UI source manager renders a DB Inspect control, adapter single-choice
   controls defaulting to `auto`, session multi-select table, select-all-visible
   control, and add-selected action only in serve mode.
@@ -513,10 +517,11 @@ Coverage must verify:
   use the old pink/tinted filled background, source adapters render as compact
   single-select dropdowns in each form action row rather than radio groups,
   configured adapter default DB paths are exposed to the DB form, source alias
-  inputs and alias edit controls render in serve mode, the language select
-  renders only in serve mode, Export and table filter submenus stay open for
-  inside clicks, close on outside clicks, and do not apply this outside-click
-  behavior to Timeline or Step collapsible sections.
+  edit controls render only in the source list, left-side add/upload forms omit
+  alias inputs, the Source Manager source list scrolls independently, the
+  language select renders only in serve mode, Export and table filter submenus
+  stay open for inside clicks, close on outside clicks, and do not apply this
+  outside-click behavior to Timeline or Step collapsible sections.
 - HTML shows visibly marked estimated token chips for steps that lack real
   token metrics, preserves exact token chips when real step metrics exist, can
   use an optional `tiktoken` module, falls back to a deterministic byte-length
@@ -589,8 +594,11 @@ Coverage must verify:
   Archive/Activate, inline alias/tag editing, existing-tag quick selection,
   flattened Any tag filters,
   startup loading status rendering and ready-state recovery,
-  inline edit click isolation from row selection, export scope after search, and
-  source-key mapping after filtering.
+  inline edit click isolation from row selection, first-User-step drawer
+  selection from Leaderboard rows, Path picker textarea filling with
+  newline-separated absolute paths while preserving existing input on
+  cancel/error, export scope after search, and source-key mapping after
+  filtering.
 - Timeline HTML tests cover `N.M` numbering for Waterfall labels/tooltips and
   Detail Table rows, including multiple Timeline items derived from one source
   step and stable `#` sorting by trace order.
@@ -605,7 +613,8 @@ Coverage must verify:
   same-origin rejection for mutating APIs, `/api/config/locale` TOML updates,
   `/api/config/adapter-default-db` TOML updates and clears, Source Manager HTML
   regeneration with updated adapter defaults, recursive external `runs/` import
-  through `/api/sources`, `/api/sources/{source_key}/alias`, batch
+  through `/api/sources`, `/api/sources/{source_key}/alias`, local native path
+  picker results and unavailable-picker errors through `/api/path-picker`, batch
   `/api/sources/state`, and the ECharts cached asset route using fake
   cache/download paths rather than real network.
 - serve UI HTML and interaction tests verify the near-full-screen Source Manager

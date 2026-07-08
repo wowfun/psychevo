@@ -80,6 +80,12 @@ function bindServeSourceControls() {
       submitServeSourceForm(form);
     });
   });
+  document.querySelectorAll("[data-path-picker]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      choosePathSourceFiles(button);
+    });
+  });
   document.querySelectorAll("[data-db-inspect]").forEach(button => {
     button.addEventListener("click", event => {
       event.preventDefault();
