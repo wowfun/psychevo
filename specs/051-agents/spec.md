@@ -14,6 +14,8 @@ the same definition model.
 - agent definition discovery, precedence, validation, and diagnostics
 - main-session selected-agent behavior
 - runtime tool-policy resolution for selected agents
+- durable agent team template discovery and management
+- mission orchestration entrypoint and run metadata
 - model preference, skill, hook, and MCP-scope contributions
 - compatibility input formats for local agent definitions
 - external peer-agent backend references and generated agent identities
@@ -21,6 +23,8 @@ the same definition model.
 Out of scope:
 
 - parent/child and forked agent run control, defined by [Subagents](subagents.md)
+- agent team runtime control, defined by [Agent Teams](teams.md)
+- mission orchestration, defined by [Missions](missions.md)
 - concrete CLI command spelling, terminal rendering, process behavior, or exit
   codes
 - byte-for-byte compatibility with any external product
@@ -309,6 +313,10 @@ permission, resource, context, tool, or registry boundaries.
 ## Attachments
 
 - [Subagents](subagents.md) defines child and forked agent run semantics.
+- [Agent Teams](teams.md) defines team template discovery, management,
+  runtime context, status projection, and child-run metadata.
+- [Missions](missions.md) defines prompt-led mission orchestration and
+  mission-run metadata.
 - [Peer Agents](peer-agents.md) defines configured external backend references,
   generated agent identities, ACP client behavior, and unified surface
   projection.

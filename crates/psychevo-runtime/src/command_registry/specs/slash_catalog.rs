@@ -484,6 +484,22 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         common: false,
     },
     SlashCommandSpec {
+        canonical: "/mission",
+        aliases: &[],
+        usage: "/mission [--team <name>] <goal>",
+        summary: "start a multi-agent mission",
+        help_detail: Some(
+            "Submits a lead-orchestration prompt that asks the active agent to decompose, delegate, verify, and summarize.",
+        ),
+        surface: TUI_SLASH,
+        group: COMMANDS,
+        argument_kind: CommandArgumentKind::FreeFormTrailingText,
+        output_kind: CommandOutputKind::PromptSubmission,
+        status: CommandStatus::Active,
+        action: SlashCommandAction::Mission,
+        common: false,
+    },
+    SlashCommandSpec {
         canonical: "/fork",
         aliases: &[],
         usage: "/fork <prompt>",

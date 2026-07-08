@@ -646,6 +646,65 @@ async fn handle_rpc(
                 params.all.unwrap_or(false),
             ))?)
         }
+        "agent/control" => {
+            let params = request.required_params::<wire::AgentControlParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let _ = scope;
+            Ok(serde_json::to_value(agent_control_result(
+                state.inner.state.store(),
+                params,
+            )?)?)
+        }
+        "team/list" => {
+            let params = request.params::<wire::TeamListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            let agents = discover_gateway_agents(&state, &scope)?;
+            let teams = discover_gateway_teams(&state, &scope, &agents)?;
+            Ok(serde_json::to_value(team_list_result(&teams))?)
+        }
+        "team/read" => {
+            let params = request.required_params::<wire::TeamReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if params.target.is_some() {
+                return read_team_definition(&state, &scope, params);
+            }
+            let agents = discover_gateway_agents(&state, &scope)?;
+            let teams = discover_gateway_teams(&state, &scope, &agents)?;
+            let team = resolve_agent_team_definition(&teams, &params.name)?;
+            Ok(serde_json::to_value(team_read_result(&team))?)
+        }
+        "team/write" => {
+            let params = request.required_params::<wire::TeamWriteParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            write_team_definition(&state, &scope, params)
+        }
+        "team/setEnabled" => {
+            let params = request.required_params::<wire::TeamSetEnabledParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            set_team_definition_enabled(&state, &scope, params)
+        }
+        "team/delete" => {
+            let params = request.required_params::<wire::TeamDeleteParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            delete_team_definition(&state, &scope, params)
+        }
+        "team/status" => {
+            let params = request.params::<wire::TeamStatusParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            let source_thread_id = if params.thread_id.is_some() {
+                None
+            } else {
+                state.inner.gateway.resolve_source_thread(&scope.source)?
+            };
+            let thread_id = params.thread_id.as_deref().or(source_thread_id.as_deref());
+            Ok(serde_json::to_value(team_status_result(
+                state.inner.state.store(),
+                thread_id,
+            )?)?)
+        }
         "backend/list" => {
             let params = request.params::<wire::BackendListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;

@@ -34,7 +34,8 @@ pub(crate) use crate::prompt_templates;
 pub(crate) use crate::skills::resolve_skills_home;
 pub(crate) use crate::state_runtime::StateRuntime;
 pub(crate) use crate::store::{
-    AgentEdgeRecord, AgentEdgeStatus, AgentMailboxEventInput, AgentMailboxEventRecord, SqliteStore,
+    AgentEdgeRecord, AgentEdgeStatus, AgentMailboxEventInput, AgentMailboxEventRecord,
+    AgentMissionRunRecord, AgentTeamRunRecord, SqliteStore,
 };
 pub(crate) use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
@@ -72,6 +73,10 @@ pub use child_runs::*;
 mod mailbox_tools;
 #[allow(unused_imports)]
 pub use mailbox_tools::*;
+#[path = "agents/teams.rs"]
+mod teams;
+#[allow(unused_imports)]
+pub use teams::*;
 #[path = "agents/test_support.rs"]
 mod test_support;
 #[allow(unused_imports)]

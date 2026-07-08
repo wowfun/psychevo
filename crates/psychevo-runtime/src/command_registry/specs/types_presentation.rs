@@ -94,6 +94,7 @@ pub enum SlashCommandAction {
     Bundles,
     Curator,
     Agents,
+    Mission,
     Fork,
     Compact,
     Voice,
@@ -352,7 +353,7 @@ pub fn command_presentation(action: SlashCommandAction) -> CommandPresentation {
         SlashCommandAction::Agents => {
             presentation(Kind::Navigate, Destination::Agents, Anchor::CommandsPanel)
         }
-        SlashCommandAction::Fork | SlashCommandAction::Compact => {
+        SlashCommandAction::Mission | SlashCommandAction::Fork | SlashCommandAction::Compact => {
             presentation(Kind::Submit, Destination::Composer, Anchor::Composer)
         }
         SlashCommandAction::Export | SlashCommandAction::Share => {

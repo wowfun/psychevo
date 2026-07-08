@@ -393,6 +393,7 @@ pub(crate) fn parse_registered_slash_command(
             Ok(SlashCommand::Agents)
         }
         SlashCommandAction::Fork => parse_fork_command(spec, rest),
+        SlashCommandAction::Mission => parse_mission_command(spec, rest),
         SlashCommandAction::Compact => Ok(SlashCommand::Compact(parse_optional_trailing(rest))),
         SlashCommandAction::Voice => Err(anyhow!(
             "/voice is available in Workbench and messaging channels."
@@ -531,6 +532,18 @@ pub(crate) fn parse_fork_command(spec: &SlashCommandSpec, rest: &[&str]) -> Resu
         return Err(anyhow!("usage: {}", spec.usage));
     }
     Ok(SlashCommand::Fork(prompt))
+}
+
+pub(crate) fn parse_mission_command(
+    spec: &SlashCommandSpec,
+    rest: &[&str],
+) -> Result<SlashCommand> {
+    let args = rest.join(" ");
+    if args.trim().is_empty() {
+        return Err(anyhow!("usage: {}", spec.usage));
+    }
+    let (team, goal) = parse_mission_args(&args).map_err(|message| anyhow!(message))?;
+    Ok(SlashCommand::Mission { team, goal })
 }
 
 pub(crate) fn parse_optional_trailing(rest: &[&str]) -> Option<String> {

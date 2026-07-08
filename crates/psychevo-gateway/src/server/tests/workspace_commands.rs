@@ -416,6 +416,84 @@
     }
 
     #[tokio::test]
+    async fn command_execute_mission_records_team_metadata_and_returns_thread() {
+        let (_temp, state) = web_state();
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("seed")),
+                method: "team/write".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "name": "ship",
+                    "target": "project",
+                    "description": "Ship changes",
+                    "leader": "general",
+                    "members": [{"id": "researcher", "agent": "general"}],
+                    "instructions": "Coordinate shipping."
+                })),
+            },
+        )
+        .await
+        .expect("team/write");
+
+        let result = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/mission --team ship implement feature",
+                    "threadId": null
+                })),
+            },
+        )
+        .await
+        .expect("command/execute mission");
+
+        assert_eq!(result["accepted"], true);
+        assert_eq!(result["action"]["type"], "submitPrompt");
+        assert_eq!(result["action"]["displayText"], "/mission --team ship implement feature");
+        assert!(result["action"]["text"]
+            .as_str()
+            .expect("mission prompt")
+            .contains("Team template: ship"));
+        let thread_id = result["action"]["threadId"]
+            .as_str()
+            .expect("thread id")
+            .to_string();
+        let team = state
+            .inner
+            .state
+            .store()
+            .find_active_agent_team_run(&thread_id)
+            .expect("team")
+            .expect("active team");
+        let mission = state
+            .inner
+            .state
+            .store()
+            .find_active_agent_mission_run(&thread_id)
+            .expect("mission")
+            .expect("active mission");
+        assert_eq!(team.team_name, "ship");
+        assert_eq!(mission.goal, "implement feature");
+        assert_eq!(mission.team_run_id.as_deref(), Some(team.id.as_str()));
+    }
+
+    #[tokio::test]
     async fn command_execute_btw_creates_side_chat_session() {
         let (_temp, state) = web_state();
         let scope = default_resolved_scope(&state, &AuthContext::Bearer)

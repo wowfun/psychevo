@@ -441,6 +441,12 @@ pub(crate) async fn run_live_internal(
                 .unwrap_or_default(),
             required_agent_names: required_agent_mentions.clone(),
             spawn_depth_remaining: None,
+            active_team: crate::agents::active_agent_team_context_for_session(
+                options.state.store(),
+                &session_id,
+            )
+                .ok()
+                .flatten(),
             external_delegate: options.external_agent_delegate.clone(),
         })
     } else {

@@ -107,6 +107,69 @@ function renderMockAgentMarkdown(
   ].join("\n");
 }
 
+function managedTeamRecord(input: {
+  name?: string;
+  description?: string;
+  target?: "project" | "profile";
+  enabled?: boolean;
+  leader?: string;
+  members?: Array<Record<string, unknown>>;
+  maxParallelAgents?: number;
+  instructions?: string;
+  rawMarkdown?: string;
+}): Record<string, unknown> {
+  const target = input.target ?? "project";
+  const name = input.name ?? "team";
+  const description = input.description ?? "";
+  const enabled = input.enabled !== false;
+  const leader = input.leader ?? "general";
+  const members = input.members ?? [{ id: "researcher", agent: "general" }];
+  const maxParallelAgents = input.maxParallelAgents ?? 4;
+  const instructions = input.instructions ?? "";
+  const path = target === "project"
+    ? `/tmp/project/.psychevo/teams/${name}.md`
+    : `/tmp/profile/teams/${name}.md`;
+  return {
+    name,
+    description,
+    enabled,
+    source: target,
+    sourceLabel: target === "project" ? "Project" : "Profile",
+    target,
+    mutable: true,
+    path,
+    leader,
+    members,
+    maxParallelAgents,
+    diagnostics: [],
+    instructions,
+    rawMarkdown: input.rawMarkdown ?? renderMockTeamMarkdown(name, description, enabled, leader, members, maxParallelAgents, instructions)
+  };
+}
+
+function renderMockTeamMarkdown(
+  name: string,
+  description: string,
+  enabled: boolean,
+  leader: string,
+  members: Array<Record<string, unknown>>,
+  maxParallelAgents: number,
+  instructions: string
+): string {
+  return [
+    "---",
+    `name: ${name}`,
+    `description: ${description}`,
+    `enabled: ${enabled ? "true" : "false"}`,
+    `leader: ${leader}`,
+    `maxParallelAgents: ${maxParallelAgents}`,
+    "members:",
+    ...members.map((member) => `  - id: ${member.id}\n    agent: ${member.agent}`),
+    "---",
+    instructions
+  ].join("\n");
+}
+
 function findMockAgent(name: string | undefined, target: string | undefined): Record<string, unknown> | null {
   const all = [
     ...gatewayMock.agentRecords,
@@ -114,6 +177,15 @@ function findMockAgent(name: string | undefined, target: string | undefined): Re
     ...gatewayMock.disabledAgentRecords
   ];
   return all.find((agent) => agent.name === name && (!target || agent.target === target)) ?? null;
+}
+
+function findMockTeam(name: string | undefined, target: string | undefined): Record<string, unknown> | null {
+  const all = [
+    ...gatewayMock.teamRecords,
+    ...gatewayMock.shadowedTeamRecords,
+    ...gatewayMock.disabledTeamRecords
+  ];
+  return all.find((team) => team.name === name && (!target || team.target === target)) ?? null;
 }
 
 function upsertMockAgent(agent: Record<string, unknown>) {
@@ -128,11 +200,30 @@ function upsertMockAgent(agent: Record<string, unknown>) {
   }
 }
 
+function upsertMockTeam(team: Record<string, unknown>) {
+  const sameIdentity = (item: Record<string, unknown>) => item.name === team.name && item.target === team.target;
+  gatewayMock.teamRecords = gatewayMock.teamRecords.filter((item) => !sameIdentity(item));
+  gatewayMock.shadowedTeamRecords = gatewayMock.shadowedTeamRecords.filter((item) => !sameIdentity(item));
+  gatewayMock.disabledTeamRecords = gatewayMock.disabledTeamRecords.filter((item) => !sameIdentity(item));
+  if (team.enabled === false) {
+    gatewayMock.disabledTeamRecords = [...gatewayMock.disabledTeamRecords, team];
+  } else {
+    gatewayMock.teamRecords = [...gatewayMock.teamRecords, team];
+  }
+}
+
 function deleteMockAgent(name: string | undefined, target: string | undefined) {
   const keep = (agent: Record<string, unknown>) => !(agent.name === name && (!target || agent.target === target));
   gatewayMock.agentRecords = gatewayMock.agentRecords.filter(keep);
   gatewayMock.shadowedAgentRecords = gatewayMock.shadowedAgentRecords.filter(keep);
   gatewayMock.disabledAgentRecords = gatewayMock.disabledAgentRecords.filter(keep);
+}
+
+function deleteMockTeam(name: string | undefined, target: string | undefined) {
+  const keep = (team: Record<string, unknown>) => !(team.name === name && (!target || team.target === target));
+  gatewayMock.teamRecords = gatewayMock.teamRecords.filter(keep);
+  gatewayMock.shadowedTeamRecords = gatewayMock.shadowedTeamRecords.filter(keep);
+  gatewayMock.disabledTeamRecords = gatewayMock.disabledTeamRecords.filter(keep);
 }
 
 function defaultCredentialEnv(channel: string): string | null {
@@ -547,6 +638,102 @@ vi.mock("@psychevo/client", async () => {
           name: agent.name,
           path: agent.path,
           target: agent.target
+        };
+      }
+      if (method === "team/list") {
+        return {
+          teams: gatewayMock.teamRecords,
+          shadowedTeams: gatewayMock.shadowedTeamRecords,
+          disabledTeams: gatewayMock.disabledTeamRecords,
+          diagnostics: []
+        };
+      }
+      if (method === "team/read") {
+        const record = params as { name?: string; target?: "project" | "profile" | null };
+        const team = findMockTeam(record.name, record.target ?? undefined) ?? managedTeamRecord({ name: record.name ?? "team", target: record.target ?? "project" });
+        return {
+          team,
+          instructions: typeof team.instructions === "string" ? team.instructions : "",
+          rawMarkdown: typeof team.rawMarkdown === "string" ? team.rawMarkdown : ""
+        };
+      }
+      if (method === "team/write") {
+        const record = params as {
+          name?: string;
+          description?: string;
+          target?: "project" | "profile" | null;
+          enabled?: boolean | null;
+          leader?: string;
+          members?: Array<Record<string, unknown>>;
+          maxParallelAgents?: number | null;
+          instructions?: string;
+          rawMarkdown?: string | null;
+        };
+        const team = managedTeamRecord({
+          name: record.name ?? "team",
+          description: record.description ?? "",
+          target: record.target ?? "project",
+          enabled: record.enabled !== false,
+          leader: record.leader ?? "general",
+          members: record.members ?? [{ id: "researcher", agent: "general" }],
+          maxParallelAgents: record.maxParallelAgents ?? 4,
+          instructions: record.instructions ?? "",
+          ...(record.rawMarkdown ? { rawMarkdown: record.rawMarkdown } : {})
+        });
+        upsertMockTeam(team);
+        return {
+          written: true,
+          name: team.name,
+          path: team.path,
+          target: team.target,
+          team
+        };
+      }
+      if (method === "team/setEnabled") {
+        const record = params as { name?: string; target?: "project" | "profile" | null; enabled?: boolean };
+        const existing = findMockTeam(record.name, record.target ?? undefined) ?? managedTeamRecord({ name: record.name ?? "team", target: record.target ?? "project" });
+        const team: Record<string, unknown> = { ...existing, enabled: record.enabled === true };
+        upsertMockTeam(team);
+        return {
+          written: true,
+          name: team.name,
+          path: team.path,
+          target: team.target,
+          team
+        };
+      }
+      if (method === "team/delete") {
+        const record = params as { name?: string; target?: "project" | "profile" | null };
+        const team = findMockTeam(record.name, record.target ?? undefined) ?? managedTeamRecord({ name: record.name ?? "team", target: record.target ?? "project" });
+        deleteMockTeam(record.name, record.target ?? undefined);
+        return {
+          deleted: true,
+          name: team.name,
+          path: team.path,
+          target: team.target
+        };
+      }
+      if (method === "team/status") {
+        return gatewayMock.teamStatusResult ?? {
+          team: null,
+          mission: null,
+          agents: [],
+          control: {
+            spawningPaused: false,
+            maxSpawnDepthCap: 3,
+            concurrencyCap: null
+          }
+        };
+      }
+      if (method === "agent/control") {
+        return {
+          accepted: true,
+          agent: null,
+          control: {
+            spawningPaused: false,
+            maxSpawnDepthCap: 3,
+            concurrencyCap: null
+          }
         };
       }
       if (method === "agent/status") {

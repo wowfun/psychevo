@@ -29,16 +29,18 @@ pub(crate) use psychevo_gateway::{
     TranscriptEntryRole,
 };
 pub(crate) use psychevo_runtime::{
-    AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentEntrypoint, AgentSource,
-    AgentSpawnOptions, AutoCompactionCheckOptions, ChildSessionSnapshotInput, ClarifyAnswer,
-    ClarifyQuestion, ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason,
-    ClarifyResponse, ClarifyResult, CompactSessionOptions, CompactionReason, CompactionResult,
-    ConfigScope, ConfiguredModel, ContextFormatOptions, ContextOptions, ContextSnapshot,
-    GatewayLiveEventRecord, GatewayLiveSnapshotRecord, ImageInput, InstallOptions, LoadedMainAgent,
-    MAX_AGENT_SPAWN_DEPTH_CAP, ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget,
-    ModelState, PendingInputId, PermissionApprovalDecision, PermissionApprovalOutcome,
-    PermissionApprovalRequest, PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
-    ReloadContextOptions, RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
+    AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentEntrypoint, AgentMissionRunInput,
+    AgentSource, AgentSpawnOptions, AgentTeamRunInput, AutoCompactionCheckOptions,
+    ChildSessionSnapshotInput, ClarifyAnswer, ClarifyQuestion, ClarifyRequestEvent,
+    ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResponse, ClarifyResult,
+    CompactSessionOptions, CompactionReason, CompactionResult, ConfigScope, ConfiguredModel,
+    ContextFormatOptions, ContextOptions, ContextSnapshot, GatewayLiveEventRecord,
+    GatewayLiveSnapshotRecord, ImageInput, InstallOptions, LoadedMainAgent,
+    MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP, ModelCatalogEntry,
+    ModelCatalogProvider, ModelMetadataCacheTarget, ModelState, PendingInputId,
+    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
+    PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions,
+    RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
     SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
     SIDE_CONVERSATION_METADATA_KEY, SIDE_INHERITED_METADATA_KEY, ScopedCustomProviderInput,
     SessionArtifactKind, SessionExportFormat, SessionExportOptions, SessionExportWriteResult,
@@ -50,21 +52,22 @@ pub(crate) use psychevo_runtime::{
     agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot, canonicalize_cwd,
     collect_workspace_diff, compact_session, config_show_value, configured_models,
     context_snapshot, create_scoped_custom_provider, custom_provider_api_key_env,
-    default_session_export_filename, discover_agents, discover_skills,
-    fetch_and_cache_model_catalog, format_context_snapshot_text_with_options,
+    default_session_export_filename, discover_agent_teams_with_catalog, discover_agents,
+    discover_skills, fetch_and_cache_model_catalog, format_context_snapshot_text_with_options,
     format_context_total_value, format_context_total_value_parts, install_skill,
     list_skill_bundles, main_agent_default_metadata, main_agent_from_session_metadata,
     main_agent_metadata, model_catalog_providers, model_metadata_explicitly_disallows_image_input,
     normalize_context_bar_width, normalize_reasoning_effort, permission_rules_value,
     prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path,
     read_cached_model_catalog, redo_session, refresh_model_metadata_cache, reload_session_context,
-    remove_installed_skill, resolve_agent_definition, resolve_image_source, run_control,
-    run_user_shell_command_streaming_controlled, scan_skill_path, selected_configured_model,
-    session_base_agent_name_from_metadata, session_usage_summary, set_agent_spawn_paused,
-    set_default_model_with_reasoning, set_local_toolset_enabled, set_provider_api_key,
-    set_skill_config_value, set_skill_enabled, side_conversation_boundary_prompt,
-    side_inherited_metadata_hidden, spawn_agent_background, stop_agent_id_with_grace,
-    toolsets_value, undo_session, usage_stats, view_skill_value, write_session_export,
+    remove_installed_skill, resolve_agent_definition, resolve_agent_team_definition,
+    resolve_image_source, run_control, run_user_shell_command_streaming_controlled,
+    scan_skill_path, selected_configured_model, session_base_agent_name_from_metadata,
+    session_usage_summary, set_agent_spawn_paused, set_default_model_with_reasoning,
+    set_local_toolset_enabled, set_provider_api_key, set_skill_config_value, set_skill_enabled,
+    side_conversation_boundary_prompt, side_inherited_metadata_hidden, spawn_agent_background,
+    stop_agent_id_with_grace, toolsets_value, undo_session, usage_stats, view_skill_value,
+    write_session_export,
 };
 pub(crate) use ratatui::Frame;
 pub(crate) use ratatui::Terminal;
@@ -100,6 +103,7 @@ pub(crate) use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
     resolve_psychevo_home, resolve_state_db,
 };
+pub(crate) use psychevo_runtime::command_registry::{mission_prompt_marker, parse_mission_args};
 
 pub(crate) const TUI_CONTINUE_SESSION_SOURCES: &[&str] = &["run", "tui"];
 pub(crate) const TUI_INTERNAL_SESSION_SOURCES: &[&str] = &[TUI_SIDE_CONVERSATION_SESSION_SOURCE];

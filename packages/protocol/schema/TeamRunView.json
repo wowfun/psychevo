@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TeamMemberView": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxTurns": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "endedAtMs": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "finalSummary": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "leaderAgentName": {
+      "type": "string"
+    },
+    "maxParallelAgents": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "members": {
+      "items": {
+        "$ref": "#/definitions/TeamMemberView"
+      },
+      "type": "array"
+    },
+    "missionRunId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parentSessionId": {
+      "type": "string"
+    },
+    "sourcePath": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "startedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "status": {
+      "type": "string"
+    },
+    "teamName": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "leaderAgentName",
+    "maxParallelAgents",
+    "members",
+    "parentSessionId",
+    "startedAtMs",
+    "status",
+    "teamName"
+  ],
+  "title": "TeamRunView",
+  "type": "object"
+}

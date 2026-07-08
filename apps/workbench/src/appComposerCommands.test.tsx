@@ -227,6 +227,110 @@ describe("Workbench command routing", () => {
     });
   });
 
+  it("opens team status in the right workspace and controls child agents", async () => {
+    gatewayMock.teamStatusResult = {
+      team: {
+        id: "team-run-1",
+        parentSessionId: "thread-1",
+        missionRunId: "mission-1",
+        teamName: "release",
+        description: "Release team",
+        sourcePath: "/tmp/project/.psychevo/teams/release.md",
+        leaderAgentName: "general",
+        members: [
+          { id: "reviewer", agentName: "general", role: "review", description: "Review changes", maxTurns: 2 }
+        ],
+        maxParallelAgents: 4,
+        status: "running",
+        startedAtMs: 1_000,
+        endedAtMs: null,
+        finalSummary: null
+      },
+      mission: {
+        id: "mission-1",
+        parentSessionId: "thread-1",
+        teamRunId: "team-run-1",
+        teamName: "release",
+        goal: "Ship release",
+        leadAgentName: "general",
+        status: "running",
+        startedAtMs: 1_000,
+        endedAtMs: null,
+        finalSummary: null
+      },
+      agents: [
+        {
+          id: "agent-1",
+          taskName: "Review patch",
+          agentName: "general",
+          task: "Review patch",
+          parentSessionId: "thread-1",
+          childSessionId: "child-reviewer",
+          role: "subagent",
+          background: false,
+          status: "running",
+          edgeStatus: "running",
+          startedAtMs: 1_000,
+          endedAtMs: null,
+          outcome: null,
+          finalAnswer: null,
+          error: null,
+          effectiveMaxSpawnDepth: 2,
+          teamRunId: "team-run-1",
+          missionRunId: "mission-1",
+          teamName: "release",
+          teamMemberId: "reviewer",
+          agentPath: ".psychevo/agents/general.md"
+        }
+      ],
+      control: {
+        spawningPaused: false,
+        maxSpawnDepthCap: 3,
+        concurrencyCap: 4
+      }
+    };
+
+    render(<App />);
+    await resumeSession();
+
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const workspace = await screen.findByRole("region", { name: "Right workspace" });
+    fireEvent.click(within(workspace).getByRole("button", { name: "Team" }));
+
+    const teamPanel = await within(workspace).findByRole("region", { name: "Team" });
+    expect(await within(teamPanel).findByText("Ship release")).toBeTruthy();
+    expect(within(teamPanel).getByRole("region", { name: "Member reviewer" })).toBeTruthy();
+    expect(within(teamPanel).getByText("Review patch")).toBeTruthy();
+
+    fireEvent.click(within(teamPanel).getByRole("button", { name: "Stop reviewer" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "agent/control",
+        params: expect.objectContaining({
+          action: "stop",
+          target: "agent-1"
+        })
+      });
+    });
+
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValueOnce("Please verify.");
+    fireEvent.click(within(teamPanel).getByRole("button", { name: "Send to reviewer" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "agent/control",
+        params: expect.objectContaining({
+          action: "send",
+          target: "agent-1",
+          message: "Please verify."
+        })
+      });
+    });
+    promptSpy.mockRestore();
+
+    fireEvent.click(within(teamPanel).getByRole("button", { name: "Open Review patch" }));
+    expect(await within(workspace).findByRole("region", { name: "Review patch" })).toBeTruthy();
+  });
+
   it("opens completed agent tool rows whose child session is stored in result metadata", async () => {
     const agentEntry: TranscriptEntry = {
       id: "entry-agent",
@@ -608,6 +712,38 @@ describe("Workbench command routing", () => {
       });
     });
     expect(gatewayMock.optimisticLog).toContain("/x-daily latest");
+  });
+
+  it("submits slash actions to a returned thread id", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "submit",
+      feedbackAnchor: "composer",
+      action: {
+        type: "submitPrompt",
+        text: "Start a multi-agent mission.",
+        displayText: command,
+        threadId: "mission-thread"
+      }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/mission --team ship implement feature" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          threadId: "mission-thread",
+          input: [{ type: "text", text: "Start a multi-agent mission." }]
+        })
+      });
+    });
   });
 
   it("blocks dynamic slash prompt submission when no concrete model is selected", async () => {

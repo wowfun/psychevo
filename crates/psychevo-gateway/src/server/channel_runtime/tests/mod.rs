@@ -84,13 +84,17 @@ impl crate::GatewayBackend for TestBackend {
                 .lock()
                 .expect("prompts poisoned")
                 .push(request.options.prompt.clone());
-            let session_id = request.options.state.store().create_session_with_metadata(
-                &request.options.cwd,
-                &request.runtime_source,
-                "fake-model",
-                "fake-provider",
-                None,
-            )?;
+            let session_id = if let Some(session_id) = request.options.session.clone() {
+                session_id
+            } else {
+                request.options.state.store().create_session_with_metadata(
+                    &request.options.cwd,
+                    &request.runtime_source,
+                    "fake-model",
+                    "fake-provider",
+                    None,
+                )?
+            };
             Ok(RunResult {
                 session_id,
                 outcome: Outcome::Normal,
@@ -211,6 +215,93 @@ async fn channel_message_runs_gateway_turn_and_sends_final_answer() {
     assert_eq!(sent[0].text, "answer 1");
     assert_eq!(runtime.runner_view("wechat").state, "running");
     assert!(runtime.runner_view("wechat").last_outbound_at_ms.is_some());
+}
+
+#[tokio::test]
+async fn channel_mission_records_team_metadata_before_running_prompt() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(cwd.join(".psychevo/agents")).expect("agents");
+    std::fs::create_dir_all(cwd.join(".psychevo/teams")).expect("teams");
+    std::fs::write(
+        cwd.join(".psychevo/agents/general.md"),
+        "---\nname: general\ndescription: General agent\n---\nGeneral agent.\n",
+    )
+    .expect("agent");
+    std::fs::write(
+        cwd.join(".psychevo/teams/release.md"),
+        concat!(
+            "---\n",
+            "name: release\n",
+            "description: Release team\n",
+            "leader: general\n",
+            "members:\n",
+            "  - id: reviewer\n",
+            "    agent: general\n",
+            "    role: review\n",
+            "maxParallelAgents: 2\n",
+            "---\n",
+            "Coordinate the release.\n"
+        ),
+    )
+    .expect("team");
+    let backend = Arc::new(TestBackend::default());
+    let prompts = Arc::clone(&backend.prompts);
+    let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let gateway = Gateway::with_backend(state_runtime, backend);
+    let state = WebState::new(GatewayWebServerConfig::new(
+        gateway,
+        home,
+        cwd.clone(),
+        None,
+        BTreeMap::new(),
+        temp.path().join("static"),
+    ));
+    let adapter = FakeImAdapter::new("wechat");
+    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+        "wechat",
+        Arc::new(adapter.clone()),
+        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+    )]);
+    let runtime = ChannelRuntimeState::new(temp.path());
+
+    handle_channel_message(
+        &state,
+        &runtime,
+        &ready_wechat_connection(None),
+        &channel_gateway,
+        wechat_message("/mission --team release Ship it", "wx-mission"),
+    )
+    .await
+    .expect("mission handled");
+
+    let sent = wait_for_sent(&adapter, 1).await;
+    assert_eq!(sent.len(), 1);
+    let prompt_log = prompts.lock().expect("prompts poisoned").clone();
+    assert_eq!(prompt_log.len(), 1, "sent={sent:?}");
+    assert!(
+        prompt_log[0].contains("Ship it"),
+        "{:?}",
+        prompt_log.as_slice()
+    );
+    let team = state
+        .inner
+        .state
+        .store()
+        .find_active_agent_team_run(&sent[0].thread_id)
+        .expect("team lookup")
+        .expect("team run");
+    let mission = state
+        .inner
+        .state
+        .store()
+        .find_active_agent_mission_run(&sent[0].thread_id)
+        .expect("mission lookup")
+        .expect("mission run");
+    assert_eq!(team.team_name, "release");
+    assert_eq!(team.max_parallel_agents, 2);
+    assert_eq!(mission.goal, "Ship it");
 }
 
 #[tokio::test]

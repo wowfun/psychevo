@@ -104,6 +104,27 @@
       "$ref": "ClientRequest/agent-status.json"
     },
     {
+      "$ref": "ClientRequest/team-list.json"
+    },
+    {
+      "$ref": "ClientRequest/team-read.json"
+    },
+    {
+      "$ref": "ClientRequest/team-write.json"
+    },
+    {
+      "$ref": "ClientRequest/team-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/team-delete.json"
+    },
+    {
+      "$ref": "ClientRequest/team-status.json"
+    },
+    {
+      "$ref": "ClientRequest/agent-control.json"
+    },
+    {
       "$ref": "ClientRequest/backend-list.json"
     },
     {

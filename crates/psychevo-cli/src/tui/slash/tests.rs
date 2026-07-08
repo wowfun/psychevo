@@ -573,8 +573,16 @@ pub(crate) mod tests {
             parse_slash_command("/compact focus on todos").unwrap(),
             Some(SlashCommand::Compact(Some("focus on todos".to_string())))
         );
+        assert_eq!(
+            parse_slash_command("/mission --team ship implement feature").unwrap(),
+            Some(SlashCommand::Mission {
+                team: Some("ship".to_string()),
+                goal: "implement feature".to_string(),
+            })
+        );
         assert!(parse_slash_command("/undo now").is_err());
         assert!(parse_slash_command("/redo now").is_err());
+        assert!(parse_slash_command("/mission").is_err());
         assert_eq!(slash_menu_items("/compact")[0].command, "/compact");
         assert!(!slash_menu_items("/compact")[0].upcoming);
         assert_eq!(slash_menu_items("/copy")[0].command, "/copy");

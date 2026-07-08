@@ -15,6 +15,13 @@ fn schema_group_module(name: &str) -> &'static str {
             | "AgentWriteParams"
             | "AgentSetEnabledParams"
             | "AgentDeleteParams"
+            | "TeamListParams"
+            | "TeamReadParams"
+            | "TeamMemberInput"
+            | "TeamWriteParams"
+            | "TeamDeleteParams"
+            | "TeamSetEnabledParams"
+            | "AgentControlParams"
     ) {
         return "gateway/agents/requests";
     }
@@ -25,16 +32,30 @@ fn schema_group_module(name: &str) -> &'static str {
             | "AgentWriteResult"
             | "AgentSetEnabledResult"
             | "AgentDeleteResult"
+            | "TeamListResult"
+            | "TeamReadResult"
+            | "TeamWriteResult"
+            | "TeamDeleteResult"
+            | "TeamSetEnabledResult"
+            | "AgentControlResult"
     ) {
         return "gateway/agents/results";
     }
-    if matches!(name, "AgentStatusParams" | "AgentStatusResult")
+    if matches!(
+        name,
+        "AgentStatusParams"
+            | "AgentStatusResult"
+            | "TeamStatusParams"
+            | "TeamStatusResult"
+            | "TeamRunView"
+            | "MissionRunView"
+    )
         || name.starts_with("AgentRun")
         || name == "AgentStatusControlView"
     {
         return "gateway/agents/runs";
     }
-    if name.starts_with("Agent") {
+    if name.starts_with("Agent") || matches!(name, "TeamMemberView" | "TeamDefinitionView") {
         return "gateway/agents/definitions";
     }
     if name.starts_with("BackendDoctor") {

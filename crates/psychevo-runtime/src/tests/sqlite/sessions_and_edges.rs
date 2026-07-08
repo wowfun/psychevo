@@ -3,8 +3,8 @@ pub(crate) use super::*;
 use crate::store::{PromptPrefixRecord, PromptPrefixSlotRecord};
 
 #[test]
-pub(crate) fn sqlite_schema_v23_rejects_old_state_databases() {
-    for version in 1..=22 {
+pub(crate) fn sqlite_schema_v24_rejects_old_state_databases() {
+    for version in 1..=23 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
         {
@@ -29,7 +29,7 @@ pub(crate) fn sqlite_schema_v23_rejects_old_state_databases() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v23_rejects_unknown_state_database() {
+pub(crate) fn sqlite_schema_v24_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -49,7 +49,7 @@ pub(crate) fn sqlite_schema_v23_rejects_unknown_state_database() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v23_stores_gateway_coordination_without_runtime_debug() {
+pub(crate) fn sqlite_schema_v24_stores_gateway_coordination_without_runtime_debug() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
@@ -71,7 +71,7 @@ pub(crate) fn sqlite_schema_v23_stores_gateway_coordination_without_runtime_debu
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 23);
+    assert_eq!(user_version, 24);
     assert!(sqlite_columns(&conn, "timeline_items").is_empty());
     assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
     assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());
@@ -97,6 +97,72 @@ pub(crate) fn sqlite_schema_v23_stores_gateway_coordination_without_runtime_debu
             .iter()
             .any(|name| name == "revision")
     );
+    assert!(
+        sqlite_columns(&conn, "agent_team_runs")
+            .iter()
+            .any(|name| name == "mission_run_id")
+    );
+    assert!(
+        sqlite_columns(&conn, "agent_mission_runs")
+            .iter()
+            .any(|name| name == "team_run_id")
+    );
+}
+
+#[test]
+pub(crate) fn sqlite_agent_team_and_mission_runs_round_trip() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .expect("session");
+    let members = json!([
+        {"id": "researcher", "agent": "general", "role": "research"},
+        {"id": "tester", "agent": "general", "role": "verify", "maxTurns": 2}
+    ]);
+
+    let team = store
+        .create_agent_team_run(AgentTeamRunInput {
+            id: "team-run-1",
+            parent_session_id: &session_id,
+            mission_run_id: Some("mission-run-1"),
+            team_name: "ship",
+            description: Some("Ship a feature"),
+            source_path: Some("/repo/.psychevo/teams/ship.md"),
+            leader_agent_name: "general",
+            members: members.clone(),
+            max_parallel_agents: 4,
+            status: "running",
+            metadata: Some(json!({"source": "test"})),
+        })
+        .expect("team run");
+    let mission = store
+        .create_agent_mission_run(AgentMissionRunInput {
+            id: "mission-run-1",
+            parent_session_id: &session_id,
+            team_run_id: Some(&team.id),
+            team_name: Some("ship"),
+            goal: "finish the feature",
+            lead_agent_name: "general",
+            status: "running",
+            metadata: Some(json!({"source": "test"})),
+        })
+        .expect("mission run");
+
+    assert_eq!(team.members, members);
+    assert_eq!(mission.team_run_id.as_deref(), Some("team-run-1"));
+    let active_team = store
+        .find_active_agent_team_run(&session_id)
+        .expect("active team")
+        .expect("team");
+    let active_mission = store
+        .find_active_agent_mission_run(&session_id)
+        .expect("active mission")
+        .expect("mission");
+    assert_eq!(active_team.id, "team-run-1");
+    assert_eq!(active_mission.id, "mission-run-1");
 }
 
 #[test]

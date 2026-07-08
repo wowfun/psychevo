@@ -84,6 +84,7 @@ Coordinate.
             denied_agent_names: coordinator.tool_policy.denied_agents.clone(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
+            active_team: None,
             external_delegate: None,
         },
         SpawnAgentArgs {
@@ -96,6 +97,7 @@ Coordinate.
             fork_turns: None,
             max_turns: None,
             max_spawn_depth: None,
+            team_member: None,
         },
         "call".to_string(),
         AbortSignal::new(rx),
@@ -103,6 +105,67 @@ Coordinate.
     .await
     .expect_err("unlisted agent should be rejected");
     assert!(err.to_string().contains("not allowed"));
+}
+
+#[test]
+pub(crate) fn agent_team_project_discovery_resolves_members_and_limits_parallelism() {
+    let tmp = TempDir::new().expect("tmp");
+    let home = tmp.path().join("home");
+    let cwd = tmp.path().join("work");
+    let agents_dir = cwd.join(".psychevo").join("agents");
+    let teams_dir = cwd.join(".psychevo").join("teams");
+    fs::create_dir_all(&agents_dir).expect("agents dir");
+    fs::create_dir_all(&teams_dir).expect("teams dir");
+    fs::write(
+        agents_dir.join("general.md"),
+        "---\nname: general\ndescription: General agent\n---\nHelp.\n",
+    )
+    .expect("general agent");
+    fs::write(
+        agents_dir.join("tester.md"),
+        "---\nname: tester\ndescription: Test agent\n---\nTest.\n",
+    )
+    .expect("tester agent");
+    fs::write(
+        teams_dir.join("ship.md"),
+        r#"---
+name: ship
+description: Ship with review and verification
+leader: general
+maxParallelAgents: 9
+members:
+  - id: reviewer
+    agent: general
+    role: review
+  - id: verifier
+    agent: tester
+    maxTurns: 2
+---
+Coordinate the delivery.
+"#,
+    )
+    .expect("team");
+
+    let options = AgentDiscoveryOptions {
+        home,
+        cwd,
+        env: BTreeMap::new(),
+        explicit_inputs: Vec::new(),
+        no_agents: false,
+    };
+    let agents = discover_agents(&options).expect("agents");
+    let teams = discover_agent_teams_with_catalog(&options, &agents).expect("teams");
+    let team = resolve_agent_team_definition(&teams, "ship").expect("ship team");
+
+    assert_eq!(team.leader, "general");
+    assert_eq!(team.max_parallel_agents, MAX_TEAM_PARALLEL_AGENTS_CAP);
+    assert_eq!(team.members.len(), 2);
+    assert_eq!(team.members[1].agent, "tester");
+    assert!(
+        team.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("exceeds cap"))
+    );
 }
 
 #[test]
@@ -579,18 +642,23 @@ pub(crate) fn required_agent_mention_supplies_omitted_agent_type() {
         fork_turns: None,
         max_turns: None,
         max_spawn_depth: None,
+        team_member: None,
     };
 
     assert_eq!(
-        resolve_agent_tool_name(&args, &["translate".to_string()]).expect("required"),
+        resolve_agent_tool_name(&args, &["translate".to_string()], None).expect("required"),
         "translate"
     );
     assert_eq!(
-        resolve_agent_tool_name(&args, &[]).expect("default"),
+        resolve_agent_tool_name(&args, &[], None).expect("default"),
         "general"
     );
-    let err = resolve_agent_tool_name(&args, &["translate".to_string(), "review".to_string()])
-        .expect_err("ambiguous");
+    let err = resolve_agent_tool_name(
+        &args,
+        &["translate".to_string(), "review".to_string()],
+        None,
+    )
+    .expect_err("ambiguous");
     assert!(err.to_string().contains("multiple agents"));
 }
 
@@ -683,6 +751,11 @@ pub(crate) fn stop_agent_with_grace_marks_live_run_interrupted() {
                     final_answer: None,
                     error: None,
                     effective_max_spawn_depth: Some(0),
+                    team_run_id: None,
+                    mission_run_id: None,
+                    team_name: None,
+                    team_member_id: None,
+                    agent_path: None,
                 },
                 control: Some(control),
             },

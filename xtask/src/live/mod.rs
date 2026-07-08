@@ -471,20 +471,18 @@ fn run_desktop_native_smoke_check(
     provider_required: bool,
     log: Arc<Mutex<fs::File>>,
 ) -> Result<CheckResult> {
-    let mut environment = None;
-    let mut live_environment = None;
+    let prerequisites = match LivePrerequisites::load(root) {
+        Ok(prerequisites) => prerequisites,
+        Err(reason) => return blocked(log, reason),
+    };
+    let live_env = match prerequisites.resolve(env_mode, check_dir) {
+        Ok(live_env) => live_env,
+        Err(error) => return failed_result(log, format!("{error:#}"), None),
+    };
+    let environment = Some(live_env.to_output());
+    let live_environment = Some(live_env);
     let mut provider = None;
     if provider_required {
-        let prerequisites = match LivePrerequisites::load(root) {
-            Ok(prerequisites) => prerequisites,
-            Err(reason) => return blocked(log, reason),
-        };
-        let live_env = match prerequisites.resolve(env_mode, check_dir) {
-            Ok(live_env) => live_env,
-            Err(error) => return failed_result(log, format!("{error:#}"), None),
-        };
-        environment = Some(live_env.to_output());
-        live_environment = Some(live_env);
         let Some(selected_provider) = providers.first().copied() else {
             return blocked_with_env(log, "no live provider selected".to_string(), environment);
         };
@@ -570,8 +568,8 @@ fn configure_desktop_wdio_command(
     pevo_bin: Option<&Path>,
     provider_token: Option<&str>,
 ) {
-    if let (Some(live_env), Some(provider)) = (live_env, provider) {
-        live_env.apply_to_command(command, Some(provider));
+    if let Some(live_env) = live_env {
+        live_env.apply_to_command(command, provider);
     }
     if let Some(pevo_bin) = pevo_bin {
         command.env("PSYCHEVO_PEVO_BIN", pevo_bin);
@@ -1392,5 +1390,61 @@ mod tests {
             text.chars().count() <= 80,
             "Desktop activation preview truncates after 80 characters: {text}"
         );
+    }
+
+    #[test]
+    fn desktop_native_wdio_command_uses_live_environment_without_provider() {
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-xtask-desktop-live-env-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let dev_home = root.join(".local").join(".psychevo-dev");
+        fs::create_dir_all(&dev_home).expect("dev home");
+        fs::write(dev_home.join("config.toml"), "").expect("config");
+        fs::write(dev_home.join(".env"), "DUMMY_ENV=1\n").expect("env");
+
+        let prerequisites = LivePrerequisites::load(&root).expect("prerequisites");
+        let check_dir = root.join("check");
+        let live_env = prerequisites
+            .resolve(LiveEnvMode::Shared, &check_dir)
+            .expect("live env");
+        let mut command = ProcessCommand::new("pnpm");
+        configure_desktop_wdio_command(
+            &mut command,
+            Path::new("/tmp/wdio-artifacts"),
+            "selected text",
+            Some(&live_env),
+            None,
+            Some(Path::new("/tmp/pevo")),
+            None,
+        );
+
+        assert_eq!(
+            command_env(&command, "PSYCHEVO_HOME").as_deref(),
+            Some(dev_home.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            command_env(&command, "PSYCHEVO_CONFIG").as_deref(),
+            Some(dev_home.join("config.toml").to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            command_env(&command, "PSYCHEVO_DB").as_deref(),
+            Some(dev_home.join("state.db").to_string_lossy().as_ref())
+        );
+        assert_eq!(command_env(&command, "DUMMY_ENV").as_deref(), Some("1"));
+        assert!(command_env(&command, "PSYCHEVO_INFERENCE_PROVIDER").is_none());
+        assert!(command_env(&command, "PSYCHEVO_DESKTOP_PROVIDER_LIVE").is_none());
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    fn command_env(command: &ProcessCommand, key: &str) -> Option<String> {
+        command.get_envs().find_map(|(env_key, value)| {
+            (env_key == key).then(|| value.map(|value| value.to_string_lossy().into_owned()))?
+        })
     }
 }

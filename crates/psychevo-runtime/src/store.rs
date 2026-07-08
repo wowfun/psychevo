@@ -23,7 +23,7 @@ pub(crate) use crate::types::{
     SessionSummary, TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 23;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 24;
 pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = SQLITE_SCHEMA_VERSION;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";

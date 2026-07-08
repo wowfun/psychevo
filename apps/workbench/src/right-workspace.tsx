@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { Bot, Bug, FolderTree, GitPullRequest, Home, MessageSquare, Plus, RefreshCw, TerminalSquare, X } from "lucide-react";
+import { Bot, Bug, FolderTree, GitPullRequest, Home, MessageSquare, Plus, RefreshCw, TerminalSquare, Users, X } from "lucide-react";
 import { DismissibleDetails, type TranscriptAgentSession } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
 import type {
@@ -17,6 +17,7 @@ import type { Appearance, DebugEvent, GatewayEventFeed, RightWorkspaceTab, Right
 import { DebugPanel } from "./right-workspace/debug";
 import { FilesPanel } from "./right-workspace/files";
 import { ReviewPanel } from "./right-workspace/review";
+import { TeamPanel } from "./right-workspace/team";
 import { ThreadPanel } from "./right-workspace/thread";
 import { TerminalPanel } from "./right-workspace/terminal";
 import { SessionObservability } from "./right-workspace/usage";
@@ -185,6 +186,16 @@ export function RightWorkspace({
                 onRefreshTrace={onRefreshTrace}
               />
             )}
+            {tab.kind === "team" && (
+              <TeamPanel
+                client={client}
+                disabled={status !== "connected"}
+                latestGatewayEvent={latestGatewayEvent}
+                scope={scope}
+                threadId={tab.parentThreadId ?? sessionId}
+                onOpenAgentSession={onOpenAgentSession}
+              />
+            )}
             {(tab.kind === "sideConversation" || tab.kind === "agentSession") && (
               <ThreadPanel
                 client={client}
@@ -212,7 +223,7 @@ export function RightWorkspace({
 }
 
 export function rightWorkspaceTabVisibleForSession(tab: RightWorkspaceTab, sessionId: string | null): boolean {
-  if (tab.kind !== "sideConversation" && tab.kind !== "agentSession") {
+  if (tab.kind !== "sideConversation" && tab.kind !== "agentSession" && tab.kind !== "team") {
     return true;
   }
   return Boolean(sessionId) && (tab.parentThreadId ?? null) === sessionId;
@@ -242,6 +253,7 @@ function RightWorkspaceTabs({
   ];
   if (sessionId) {
     menuItems.push({ icon: <MessageSquare size={14} />, kind: "sideConversation", label: "Side chat" });
+    menuItems.push({ icon: <Users size={14} />, kind: "team", label: "Team" });
   }
   return (
     <div className="rightWorkspaceTabs" aria-label="Right workspace tabs">
@@ -346,6 +358,12 @@ function RightWorkspaceHome({
             <span>Side chat</span>
           </button>
         )}
+        {sessionId && (
+          <button onClick={() => onOpenKind("team")} type="button">
+            <Users size={16} />
+            <span>Team</span>
+          </button>
+        )}
       </nav>
       <div className="rightChangedFiles">
         <div className="rightSectionLabel">
@@ -384,6 +402,8 @@ export function rightWorkspaceTabLabel(kind: RightWorkspaceTabKind): string {
       return "Side chat";
     case "agentSession":
       return "Agent";
+    case "team":
+      return "Team";
     case "review":
     default:
       return "Review";
@@ -402,6 +422,8 @@ function rightWorkspaceTabIcon(kind: RightWorkspaceTabKind): ReactNode {
       return <MessageSquare size={14} />;
     case "agentSession":
       return <Bot size={14} />;
+    case "team":
+      return <Users size={14} />;
     case "review":
     default:
       return <GitPullRequest size={14} />;

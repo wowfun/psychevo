@@ -65,6 +65,11 @@ pub enum SlashCommandEffect {
         args: Option<String>,
     },
     Agents,
+    Mission {
+        prompt: String,
+        team: Option<String>,
+        goal: String,
+    },
     Fork(String),
     Compact {
         instructions: Option<String>,

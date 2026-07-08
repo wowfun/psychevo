@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-08
+
+- Added multi-agent Teams and Missions with Markdown team templates, durable
+  run metadata, `/mission`, and team-aware `spawn_agent` across Gateway, ACP,
+  channel, and TUI flows.
+- Added Workbench team management and mission controls, including Capabilities
+  editing, Team workspace actions, and team/mission/member status labels.
+
 ## 2026-07-06
 
 - Added Vision V1 with safe image inputs, generated media artifacts, and

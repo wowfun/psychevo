@@ -29,6 +29,10 @@ impl PsychevoAcpAgent {
             }
             SlashCommandEffect::PassThroughPrompt(prompt)
             | SlashCommandEffect::SubmitPrompt(prompt) => Ok(SlashPromptAction::RunPrompt(prompt)),
+            SlashCommandEffect::Mission { prompt, team, goal } => {
+                self.record_acp_mission_metadata(session_id, session, team.as_deref(), &goal)?;
+                Ok(SlashPromptAction::RunPrompt(prompt))
+            }
             SlashCommandEffect::Steer(message) => self.apply_steer_effect(session_id, &message, cx),
             SlashCommandEffect::Queue(message) => {
                 self.queue_prompt(session_id, message.clone())?;
@@ -309,6 +313,97 @@ impl PsychevoAcpAgent {
             )),
             SlashCommandEffect::Unsupported(text) => Ok(send_slash_text(cx, session_id, text)),
         }
+    }
+
+    fn record_acp_mission_metadata(
+        &self,
+        session_id: &SessionId,
+        session: &AcpSession,
+        team: Option<&str>,
+        goal: &str,
+    ) -> Result<(), Error> {
+        let runtime_session_id = if let Some(runtime_session_id) = session.runtime_session_id.clone()
+        {
+            runtime_session_id
+        } else {
+            let runtime_session_id = self
+                .state
+                .store()
+                .create_session_with_metadata(&session.cwd, "acp", "pending", "pending", None)
+                .map_err(acp_internal_error)?;
+            let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
+            let Some(current) = sessions.get_mut(&session_id.to_string()) else {
+                return Err(Error::resource_not_found(Some(session_id.to_string())));
+            };
+            current.runtime_session_id = Some(runtime_session_id.clone());
+            runtime_session_id
+        };
+        let mission_id = Uuid::now_v7().to_string();
+        let metadata = Some(json!({"source": "acp:/mission"}));
+        if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
+            let options = AgentDiscoveryOptions {
+                home: self.options.home.clone(),
+                cwd: session.cwd.clone(),
+                env: self.options.inherited_env.clone(),
+                explicit_inputs: Vec::new(),
+                no_agents: false,
+            };
+            let agents = discover_agents(&options).map_err(acp_internal_error)?;
+            let teams =
+                discover_agent_teams_with_catalog(&options, &agents).map_err(acp_internal_error)?;
+            let team =
+                resolve_agent_team_definition(&teams, team_name).map_err(acp_internal_error)?;
+            let team_id = Uuid::now_v7().to_string();
+            let members = serde_json::to_value(&team.members).map_err(acp_internal_error)?;
+            let source_path = team
+                .file_path
+                .as_ref()
+                .map(|path| path.display().to_string());
+            self.state
+                .store()
+                .create_agent_team_run(AgentTeamRunInput {
+                    id: &team_id,
+                    parent_session_id: &runtime_session_id,
+                    mission_run_id: Some(&mission_id),
+                    team_name: &team.name,
+                    description: Some(&team.description),
+                    source_path: source_path.as_deref(),
+                    leader_agent_name: &team.leader,
+                    members,
+                    max_parallel_agents: team.max_parallel_agents,
+                    status: "running",
+                    metadata: metadata.clone(),
+                })
+                .map_err(acp_internal_error)?;
+            self.state
+                .store()
+                .create_agent_mission_run(AgentMissionRunInput {
+                    id: &mission_id,
+                    parent_session_id: &runtime_session_id,
+                    team_run_id: Some(&team_id),
+                    team_name: Some(&team.name),
+                    goal,
+                    lead_agent_name: &team.leader,
+                    status: "running",
+                    metadata,
+                })
+                .map_err(acp_internal_error)?;
+        } else {
+            self.state
+                .store()
+                .create_agent_mission_run(AgentMissionRunInput {
+                    id: &mission_id,
+                    parent_session_id: &runtime_session_id,
+                    team_run_id: None,
+                    team_name: None,
+                    goal,
+                    lead_agent_name: "general",
+                    status: "running",
+                    metadata,
+                })
+                .map_err(acp_internal_error)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn status_command_text(

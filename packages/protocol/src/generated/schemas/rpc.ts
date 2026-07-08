@@ -34,6 +34,13 @@ import { clientRequestAgentWriteSchema } from './rpc/client-request/agent-write'
 import { clientRequestAgentSetEnabledSchema } from './rpc/client-request/agent-set-enabled';
 import { clientRequestAgentDeleteSchema } from './rpc/client-request/agent-delete';
 import { clientRequestAgentStatusSchema } from './rpc/client-request/agent-status';
+import { clientRequestTeamListSchema } from './rpc/client-request/team-list';
+import { clientRequestTeamReadSchema } from './rpc/client-request/team-read';
+import { clientRequestTeamWriteSchema } from './rpc/client-request/team-write';
+import { clientRequestTeamSetEnabledSchema } from './rpc/client-request/team-set-enabled';
+import { clientRequestTeamDeleteSchema } from './rpc/client-request/team-delete';
+import { clientRequestTeamStatusSchema } from './rpc/client-request/team-status';
+import { clientRequestAgentControlSchema } from './rpc/client-request/agent-control';
 import { clientRequestBackendListSchema } from './rpc/client-request/backend-list';
 import { clientRequestBackendDoctorSchema } from './rpc/client-request/backend-doctor';
 import { clientRequestBackendWriteSchema } from './rpc/client-request/backend-write';
@@ -426,6 +433,27 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/agent-status.json"
     },
     {
+      "$ref": "ClientRequest/team-list.json"
+    },
+    {
+      "$ref": "ClientRequest/team-read.json"
+    },
+    {
+      "$ref": "ClientRequest/team-write.json"
+    },
+    {
+      "$ref": "ClientRequest/team-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/team-delete.json"
+    },
+    {
+      "$ref": "ClientRequest/team-status.json"
+    },
+    {
+      "$ref": "ClientRequest/agent-control.json"
+    },
+    {
       "$ref": "ClientRequest/backend-list.json"
     },
     {
@@ -759,6 +787,13 @@ export const rpcSchemaRefs = [
   clientRequestAgentSetEnabledSchema,
   clientRequestAgentDeleteSchema,
   clientRequestAgentStatusSchema,
+  clientRequestTeamListSchema,
+  clientRequestTeamReadSchema,
+  clientRequestTeamWriteSchema,
+  clientRequestTeamSetEnabledSchema,
+  clientRequestTeamDeleteSchema,
+  clientRequestTeamStatusSchema,
+  clientRequestAgentControlSchema,
   clientRequestBackendListSchema,
   clientRequestBackendDoctorSchema,
   clientRequestBackendWriteSchema,

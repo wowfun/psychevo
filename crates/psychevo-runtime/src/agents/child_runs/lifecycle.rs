@@ -20,6 +20,8 @@ pub(crate) struct SpawnAgentArgs {
     pub(crate) max_turns: Option<usize>,
     #[serde(default)]
     pub(crate) max_spawn_depth: Option<u8>,
+    #[serde(default)]
+    pub(crate) team_member: Option<String>,
 }
 
 pub(crate) async fn spawn_subagent(
@@ -40,7 +42,12 @@ pub(crate) async fn spawn_subagent(
             "agent spawning is disabled for this child agent".to_string(),
         ));
     }
-    let agent_name = resolve_agent_tool_name(&args, &context.required_agent_names)?;
+    let team_member = resolve_team_member_for_spawn(&context, &args)?;
+    let agent_name = resolve_agent_tool_name(
+        &args,
+        &context.required_agent_names,
+        team_member.as_ref(),
+    )?;
     let agent = context
         .catalog
         .agents
@@ -93,6 +100,7 @@ pub(crate) async fn spawn_subagent(
             background,
             fork_context: args.fork_context,
             spawn_depth_remaining,
+            team_member_id: team_member.as_ref().map(|member| member.id.as_str()),
             parent_tool_call_id: Some(&tool_call_id),
         })?)
     } else {
@@ -122,6 +130,14 @@ pub(crate) async fn spawn_subagent(
         final_answer: None,
         error: None,
         effective_max_spawn_depth: Some(spawn_depth_remaining),
+        team_run_id: context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+        mission_run_id: context
+            .active_team
+            .as_ref()
+            .and_then(|team| team.mission_run_id.clone()),
+        team_name: context.active_team.as_ref().map(|team| team.team_name.clone()),
+        team_member_id: team_member.as_ref().map(|member| member.id.clone()),
+        agent_path: Some(agent_path(&task_name)),
     };
     let response_record = record.clone();
     let (control_handle, control_receivers) = ControlHandle::new();
@@ -142,6 +158,7 @@ pub(crate) async fn spawn_subagent(
     let response_store = context.state.store().clone();
     let response_child_session_id = precreated_child_session.clone();
     let response_tool_call_id = tool_call_id.clone();
+    let child_team_member_id = team_member.as_ref().map(|member| member.id.clone());
     let parent_abort_bridge = if background {
         None
     } else {
@@ -155,7 +172,7 @@ pub(crate) async fn spawn_subagent(
         context,
         agent,
         prompt: args.message,
-        task_name,
+        task_name: task_name.clone(),
         model_override: args.model,
         fork_context: args.fork_context,
         fork_turns: args.fork_turns,
@@ -163,6 +180,7 @@ pub(crate) async fn spawn_subagent(
         spawn_depth_remaining,
         role,
         background,
+        team_member_id: child_team_member_id,
         parent_tool_call_id: Some(tool_call_id),
         existing_child_session: precreated_child_session,
         previous_messages_override,
@@ -249,6 +267,7 @@ struct InternalChildSessionInput<'a> {
     background: bool,
     fork_context: bool,
     spawn_depth_remaining: u8,
+    team_member_id: Option<&'a str>,
     parent_tool_call_id: Option<&'a str>,
 }
 
@@ -266,6 +285,7 @@ fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result
         background: input.background,
         fork_context: input.fork_context,
         spawn_depth_remaining: input.spawn_depth_remaining,
+        team_member_id: input.team_member_id,
         context: Some(context),
         parent_tool_call_id: input.parent_tool_call_id,
     });
@@ -357,6 +377,7 @@ async fn spawn_external_subagent(
 
     let id = Uuid::now_v7().to_string();
     let task_name = args.task_name.trim().to_string();
+    let team_member = resolve_team_member_for_spawn(&context, &args)?;
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, args.max_spawn_depth);
     let mut metadata = child_agent_metadata(ChildAgentMetadataInput {
         id: &id,
@@ -368,6 +389,7 @@ async fn spawn_external_subagent(
         background: false,
         fork_context: false,
         spawn_depth_remaining,
+        team_member_id: team_member.as_ref().map(|member| member.id.as_str()),
         context: Some(&context),
         parent_tool_call_id: Some(&tool_call_id),
     });
@@ -404,6 +426,14 @@ async fn spawn_external_subagent(
         final_answer: None,
         error: None,
         effective_max_spawn_depth: Some(spawn_depth_remaining),
+        team_run_id: context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+        mission_run_id: context
+            .active_team
+            .as_ref()
+            .and_then(|team| team.mission_run_id.clone()),
+        team_name: context.active_team.as_ref().map(|team| team.team_name.clone()),
+        team_member_id: team_member.as_ref().map(|member| member.id.clone()),
+        agent_path: Some(agent_path(&task_name)),
     };
     {
         let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
@@ -434,7 +464,7 @@ async fn spawn_external_subagent(
         agent_description: agent.description.clone(),
         backend_ref: backend.name.clone(),
         prompt: args.message.clone(),
-        task_name,
+        task_name: task_name.clone(),
         model: args.model.clone(),
         runtime_options: BTreeMap::new(),
         abort,
@@ -476,6 +506,14 @@ async fn spawn_external_subagent(
                         final_answer: None,
                         error: Some(err.to_string()),
                         effective_max_spawn_depth: Some(spawn_depth_remaining),
+                        team_run_id: context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+                        mission_run_id: context
+                            .active_team
+                            .as_ref()
+                            .and_then(|team| team.mission_run_id.clone()),
+                        team_name: context.active_team.as_ref().map(|team| team.team_name.clone()),
+                        team_member_id: team_member.as_ref().map(|member| member.id.clone()),
+                        agent_path: Some(agent_path(&task_name)),
                     })
             };
             let model_value = subagent_summary_value(Some(context.state.store()), &record, false);
@@ -526,7 +564,19 @@ async fn spawn_external_subagent(
 pub(crate) fn resolve_agent_tool_name(
     args: &SpawnAgentArgs,
     required_agent_names: &[String],
+    team_member: Option<&AgentTeamMember>,
 ) -> Result<String> {
+    if let Some(member) = team_member {
+        if let Some(agent_type) = normalized_optional_name(args.agent_type.as_deref())
+            && agent_type != member.agent
+        {
+            return Err(Error::Config(format!(
+                "team_member `{}` uses agent `{}`; spawn_agent agent_type `{agent_type}` does not match",
+                member.id, member.agent
+            )));
+        }
+        return Ok(member.agent.clone());
+    }
     let agent_type = normalized_optional_name(args.agent_type.as_deref());
     if let Some(name) = agent_type {
         return Ok(name);
@@ -539,6 +589,27 @@ pub(crate) fn resolve_agent_tool_name(
             many.join(", ")
         ))),
     }
+}
+
+pub(crate) fn resolve_team_member_for_spawn(
+    context: &AgentToolContext,
+    args: &SpawnAgentArgs,
+) -> Result<Option<AgentTeamMember>> {
+    let Some(member_id) = normalized_optional_name(args.team_member.as_deref()) else {
+        return Ok(None);
+    };
+    let Some(team) = &context.active_team else {
+        return Err(Error::Config(
+            "spawn_agent team_member is only valid inside an active team context".to_string(),
+        ));
+    };
+    let Some(member) = team.member(&member_id) else {
+        return Err(Error::Config(format!(
+            "unknown team member `{member_id}` for team `{}`",
+            team.team_name
+        )));
+    };
+    Ok(Some(member.clone()))
 }
 
 pub(crate) fn normalized_optional_name(value: Option<&str>) -> Option<String> {
@@ -615,6 +686,7 @@ pub(crate) fn spawn_child_agent_background(
         background,
         fork_context: false,
         spawn_depth_remaining,
+        team_member_id: None,
         context: Some(&context),
         parent_tool_call_id: None,
     });
@@ -649,6 +721,14 @@ pub(crate) fn spawn_child_agent_background(
         final_answer: None,
         error: None,
         effective_max_spawn_depth: Some(spawn_depth_remaining),
+        team_run_id: context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+        mission_run_id: context
+            .active_team
+            .as_ref()
+            .and_then(|team| team.mission_run_id.clone()),
+        team_name: context.active_team.as_ref().map(|team| team.team_name.clone()),
+        team_member_id: None,
+        agent_path: Some(agent_path(&task_name)),
     };
     let (control_handle, control_receivers) = ControlHandle::new();
     {
@@ -680,6 +760,7 @@ pub(crate) fn spawn_child_agent_background(
         spawn_depth_remaining,
         role,
         background,
+        team_member_id: None,
         parent_tool_call_id: None,
         existing_child_session: Some(child_session),
         previous_messages_override: Some(Vec::new()),
@@ -705,6 +786,7 @@ pub(crate) struct ChildRun {
     pub(crate) spawn_depth_remaining: u8,
     pub(crate) role: AgentInvocationRole,
     pub(crate) background: bool,
+    pub(crate) team_member_id: Option<String>,
     pub(crate) parent_tool_call_id: Option<String>,
     pub(crate) existing_child_session: Option<String>,
     pub(crate) previous_messages_override: Option<Vec<Message>>,

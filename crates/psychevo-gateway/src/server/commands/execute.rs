@@ -188,6 +188,20 @@ fn command_result_from_effect(
             action,
             json!({"type": "submitPrompt", "text": prompt, "displayText": raw}),
         )),
+        SlashCommandEffect::Mission { prompt, team, goal } => {
+            let mission_thread_id =
+                record_gateway_mission_metadata(state, scope, thread_id.clone(), team.as_deref(), &goal)?;
+            Ok(command_action(
+                raw,
+                action,
+                json!({
+                    "type": "submitPrompt",
+                    "text": prompt,
+                    "displayText": raw,
+                    "threadId": mission_thread_id,
+                }),
+            ))
+        }
         SlashCommandEffect::Compact { instructions } => Ok(command_action(
             raw,
             action,
@@ -237,6 +251,106 @@ fn command_result_from_effect(
             web_desktop_unavailable_message(raw.split_whitespace().next().unwrap_or(raw), action),
         )),
     }
+}
+
+fn record_gateway_mission_metadata(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<String>,
+    team: Option<&str>,
+    goal: &str,
+) -> psychevo_runtime::Result<String> {
+    let parent_thread_id = ensure_turn_start_thread(state, scope, thread_id)?.ok_or_else(|| {
+        Error::Message("mission requires a thread context".to_string())
+    })?;
+    record_gateway_mission_metadata_for_parent(
+        state,
+        scope,
+        &parent_thread_id,
+        team,
+        goal,
+        "web:/mission",
+    )?;
+    Ok(parent_thread_id)
+}
+
+pub(crate) fn record_gateway_mission_metadata_for_parent(
+    state: &WebState,
+    scope: &ResolvedScope,
+    parent_thread_id: &str,
+    team: Option<&str>,
+    goal: &str,
+    source: &str,
+) -> psychevo_runtime::Result<()> {
+    let mission_id = Uuid::now_v7().to_string();
+    let metadata = Some(json!({"source": source}));
+    if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
+        let options = AgentDiscoveryOptions {
+            home: state.inner.home.clone(),
+            cwd: scope.cwd.clone(),
+            env: state.inner.inherited_env.clone(),
+            explicit_inputs: Vec::new(),
+            no_agents: false,
+        };
+        let agents = discover_agents(&options)?;
+        let teams = discover_agent_teams_with_catalog(&options, &agents)?;
+        let team = resolve_agent_team_definition(&teams, team_name)?;
+        let team_id = Uuid::now_v7().to_string();
+        let members = serde_json::to_value(&team.members)?;
+        let source_path = team
+            .file_path
+            .as_ref()
+            .map(|path| path.display().to_string());
+        state
+            .inner
+            .state
+            .store()
+            .create_agent_team_run(AgentTeamRunInput {
+                id: &team_id,
+                parent_session_id: parent_thread_id,
+                mission_run_id: Some(&mission_id),
+                team_name: &team.name,
+                description: Some(&team.description),
+                source_path: source_path.as_deref(),
+                leader_agent_name: &team.leader,
+                members,
+                max_parallel_agents: team.max_parallel_agents,
+                status: "running",
+                metadata: metadata.clone(),
+            })?;
+        state
+            .inner
+            .state
+            .store()
+            .create_agent_mission_run(AgentMissionRunInput {
+                id: &mission_id,
+                parent_session_id: parent_thread_id,
+                team_run_id: Some(&team_id),
+                team_name: Some(&team.name),
+                goal,
+                lead_agent_name: &team.leader,
+                status: "running",
+                metadata,
+            })?;
+    } else {
+        let lead_agent = session_control_agent(state, Some(parent_thread_id))?
+            .unwrap_or_else(|| "general".to_string());
+        state
+            .inner
+            .state
+            .store()
+            .create_agent_mission_run(AgentMissionRunInput {
+                id: &mission_id,
+                parent_session_id: parent_thread_id,
+                team_run_id: None,
+                team_name: None,
+                goal,
+                lead_agent_name: &lead_agent,
+                status: "running",
+                metadata,
+            })?;
+    }
+    Ok(())
 }
 
 fn command_voice_result(

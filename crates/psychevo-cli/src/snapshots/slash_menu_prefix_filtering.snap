@@ -23,11 +23,11 @@ size=120x24
 
 
 
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Commands
 › /model  configure model
   /mode  set collaboration mode
+  /mission  start a multi-agent mission
   /permissions  view/edit permission policy
 › /mo
 mock/model  high  ~/work · main
@@ -49,11 +49,11 @@ mock/model  high  ~/work · main
 [default]
 [default]
 [default]
-[default]
 [default]────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [cyan]  [dim]Commands[default]
 [cyan]› /model[default]  [dim]configure model[default]
 [cyan]  /mode[default]  [dim]set collaboration mode[default]
+[cyan]  /mission[default]  [dim]start a multi-agent mission[default]
 [cyan]  /permissions[default]  [dim]view/edit permission policy[default]
 [dim]›[default] /mo
 [default]mock/model  [magenta]high[default]  [dim]~/work · main[default]

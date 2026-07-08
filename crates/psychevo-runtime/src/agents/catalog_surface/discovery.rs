@@ -31,6 +31,16 @@ pub struct AgentRunRecord {
     pub error: Option<String>,
     #[serde(default)]
     pub effective_max_spawn_depth: Option<u8>,
+    #[serde(default)]
+    pub team_run_id: Option<String>,
+    #[serde(default)]
+    pub mission_run_id: Option<String>,
+    #[serde(default)]
+    pub team_name: Option<String>,
+    #[serde(default)]
+    pub team_member_id: Option<String>,
+    #[serde(default)]
+    pub agent_path: Option<String>,
 }
 
 pub type AgentRun = AgentRunRecord;
@@ -137,6 +147,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) denied_agent_names: BTreeSet<String>,
     pub(crate) required_agent_names: Vec<String>,
     pub(crate) spawn_depth_remaining: Option<u8>,
+    pub(crate) active_team: Option<ActiveAgentTeamContext>,
     pub(crate) external_delegate: Option<Arc<dyn crate::types::ExternalAgentDelegate>>,
 }
 
@@ -651,7 +662,7 @@ pub fn agent_status_value(
         "control": {
             "spawning_paused": agent_spawn_paused(),
             "max_spawn_depth_cap": MAX_AGENT_SPAWN_DEPTH_CAP,
-            "concurrency_cap": Value::Null,
+            "concurrency_cap": MAX_TEAM_PARALLEL_AGENTS_CAP,
         }
     })
 }

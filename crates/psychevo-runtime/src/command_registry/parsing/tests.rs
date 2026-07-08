@@ -283,6 +283,29 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn shared_effect_parses_mission_team_and_goal() {
+        let SlashCommandParse::Known(invocation) =
+            parse_slash_command_line("/mission --team ship implement the feature")
+        else {
+            panic!("expected known command");
+        };
+        let effect = slash_invocation_effect(
+            &invocation,
+            &[],
+            SlashCommandSurface::WebDesktop,
+            false,
+        )
+        .expect("mission effect");
+        let SlashCommandEffect::Mission { prompt, team, goal } = effect else {
+            panic!("expected mission effect");
+        };
+        assert_eq!(team.as_deref(), Some("ship"));
+        assert_eq!(goal, "implement the feature");
+        assert!(prompt.contains("Team template: ship"));
+        assert!(prompt.contains("implement the feature"));
+    }
+
+    #[test]
     fn shared_effect_parses_voice_modes() {
         let SlashCommandParse::Known(invocation) = parse_slash_command_line("/voice tts") else {
             panic!("expected known command");

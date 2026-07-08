@@ -88,8 +88,8 @@ impl TuiApp {
                 "New Agent calls are allowed".to_string()
             }),
             detail: Some(format!(
-                "depth cap {}  concurrency unbounded",
-                MAX_AGENT_SPAWN_DEPTH_CAP
+                "depth cap {}  concurrency cap {}",
+                MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP
             )),
             group: Some("Controls".to_string()),
             search_text: "pause resume spawning depth cap concurrency".to_string(),
@@ -135,12 +135,35 @@ impl TuiApp {
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     let task_name = agent.get("task_name").and_then(Value::as_str);
+                    let team_name = agent.get("team_name").and_then(Value::as_str);
+                    let mission_run_id = agent.get("mission_run_id").and_then(Value::as_str);
+                    let team_member_id = agent.get("team_member_id").and_then(Value::as_str);
+                    let labels = [
+                        team_name.map(|value| format!("team {value}")),
+                        team_member_id.map(|value| format!("member {value}")),
+                        mission_run_id.map(|value| format!("mission {value}")),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>();
                     rows.push(BottomSelectionRow {
-                        label: name.to_string(),
+                        label: team_member_id.unwrap_or(name).to_string(),
                         description: Some(truncate_chars(task, 80)),
-                        detail: Some(task_name.unwrap_or(status).to_string()),
+                        detail: Some(
+                            [
+                                task_name.unwrap_or(status).to_string(),
+                                labels.join("  "),
+                            ]
+                            .into_iter()
+                            .filter(|value| !value.is_empty())
+                            .collect::<Vec<_>>()
+                            .join("  "),
+                        ),
                         group: Some("Live child agents".to_string()),
-                        search_text: format!("{id} {child_session_id} {name} {task} {status}"),
+                        search_text: format!(
+                            "{id} {child_session_id} {name} {task} {status} {}",
+                            labels.join(" ")
+                        ),
                         is_current: self.current_session.as_deref()
                             == Some(child_session_id.as_str()),
                         is_default: false,

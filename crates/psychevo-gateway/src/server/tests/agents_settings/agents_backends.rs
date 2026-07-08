@@ -390,6 +390,125 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
     assert_eq!(deleted["deleted"], true);
 }
 
+#[tokio::test]
+async fn team_rpc_round_trips_project_definition() {
+    let (_temp, state) = web_state();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    let written = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("1")),
+            method: "team/write".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "ship",
+                "target": "project",
+                "description": "Ship changes",
+                "enabled": true,
+                "leader": "general",
+                "maxParallelAgents": 8,
+                "members": [
+                    {"id": "researcher", "agent": "general", "role": "research"},
+                    {"id": "tester", "agent": "general", "maxTurns": 2}
+                ],
+                "instructions": "Coordinate the release."
+            })),
+        },
+    )
+    .await
+    .expect("team/write");
+    assert_eq!(written["team"]["name"], "ship");
+    assert_eq!(written["team"]["maxParallelAgents"], 4);
+
+    let list = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("2")),
+            method: "team/list".to_string(),
+            params: Some(json!({ "scope": scope.clone() })),
+        },
+    )
+    .await
+    .expect("team/list");
+    assert!(list["teams"]
+        .as_array()
+        .expect("teams")
+        .iter()
+        .any(|team| team["name"] == "ship" && team["target"] == "project"));
+
+    let read = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("3")),
+            method: "team/read".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "ship",
+                "target": "project"
+            })),
+        },
+    )
+    .await
+    .expect("team/read");
+    assert_eq!(read["team"]["leader"], "general");
+    assert!(read["rawMarkdown"]
+        .as_str()
+        .expect("raw")
+        .contains("members"));
+
+    let disabled = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("4")),
+            method: "team/setEnabled".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "name": "ship",
+                "target": "project",
+                "enabled": false
+            })),
+        },
+    )
+    .await
+    .expect("team/setEnabled");
+    assert_eq!(disabled["team"]["enabled"], false);
+
+    let deleted = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("5")),
+            method: "team/delete".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "name": "ship",
+                "target": "project"
+            })),
+        },
+    )
+    .await
+    .expect("team/delete");
+    assert_eq!(deleted["deleted"], true);
+}
+
 #[test]
 fn backend_doctor_resolves_windows_pathext_command_shim() {
     let temp = tempfile::tempdir().expect("temp");

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryDraftSession } from "@psychevo/components";
 import {
+  acceptThreadTurn,
+  bindThreadSnapshot,
   GatewayClient,
   latestAssistantTranscriptText,
+  prepareThreadTurn,
   scopeForCwd,
   threadTurnStartParams
 } from "@psychevo/client";
@@ -46,6 +49,7 @@ import {
   sessionsFromThreadBrowser,
   workspacesFromThreadBrowser
 } from "./surface-actions";
+import { normalizeSnapshot } from "./session-utils";
 import { WorkbenchLayout } from "./workbench-layout";
 import {
   rightWorkspaceTabVisibleForSession
@@ -701,7 +705,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     updateMainView
   });
 
-  async function submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]) {
+  async function submitThreadTurn(
+    threadId: string,
+    text: string,
+    mentions: GatewayMention[],
+    displayText?: string | null
+  ) {
     const trimmed = text.trim();
     if (!client || !trimmed) {
       return;
@@ -731,7 +740,10 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       ? { mode: selectedPeerRuntimeMode }
       : {};
     clearCommandTransientUi();
-    await client.request("turn/start", threadTurnStartParams({
+    const optimisticText = displayText?.trim() || trimmed;
+    const prepared = prepareThreadTurn(snapshot, optimisticText, threadId);
+    setSnapshot(prepared.snapshot);
+    const result = await client.request("turn/start", threadTurnStartParams({
       controls: {
         agentName: runtimeAcceptsAgentPersona ? selectedAgentName || null : null,
         mode: selectedRuntimeRef === "native" ? workMode : null,
@@ -745,9 +757,18 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       input: [{ type: "text", text: trimmed }],
       mentions: submittedMentions,
       scope: activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd || fallbackCwd),
-      threadId,
+      threadId: prepared.requestedThreadId,
       text: null
     }));
+    const accepted = acceptThreadTurn(prepared.snapshot, result, prepared.requestedThreadId);
+    selectedThreadIdRef.current = accepted.threadId;
+    setSnapshot((current) => {
+      const currentThreadId = current.thread?.id ?? null;
+      if (currentThreadId && currentThreadId !== accepted.threadId) {
+        return current;
+      }
+      return normalizeSnapshot(bindThreadSnapshot(current, accepted.threadId));
+    });
     await refreshHistory();
   }
 

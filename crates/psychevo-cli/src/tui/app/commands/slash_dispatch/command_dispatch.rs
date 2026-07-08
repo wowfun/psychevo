@@ -165,6 +165,12 @@ impl TuiApp {
                 let prompt = fork_prompt_marker(&prompt);
                 return self.submit_prompt(prompt).await.map(|_| false);
             }
+            SlashCommand::Mission { team, goal } => {
+                self.record_mission_metadata(team.as_deref(), &goal)?;
+                let args = mission_command_args(team.as_deref(), &goal);
+                let prompt = mission_prompt_marker(&args).map_err(|message| anyhow!(message))?;
+                return self.submit_prompt(prompt).await.map(|_| false);
+            }
             SlashCommand::Compact(instructions) => self.run_scripted_compaction(instructions).await,
             SlashCommand::SkillInvoke { name, args } => {
                 let Some(prompt) = self.skill_or_bundle_marker(&name, &args) else {

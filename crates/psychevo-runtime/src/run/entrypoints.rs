@@ -214,6 +214,12 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
                 .unwrap_or_default(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
+            active_team: crate::agents::active_agent_team_context_for_session(
+                options.state.store(),
+                &summary.id,
+            )
+            .ok()
+            .flatten(),
             external_delegate: None,
         })
     } else {
@@ -557,6 +563,12 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             .unwrap_or_default(),
         required_agent_names: Vec::new(),
         spawn_depth_remaining: None,
+        active_team: crate::agents::active_agent_team_context_for_session(
+            options.state.store(),
+            &parent_session_id,
+        )
+        .ok()
+        .flatten(),
         external_delegate: None,
     };
     let agent = spawn_child_agent_background(context, child_agent, options.prompt)?;

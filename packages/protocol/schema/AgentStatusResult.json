@@ -6,6 +6,13 @@
         "agentName": {
           "type": "string"
         },
+        "agentPath": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "background": {
           "type": "boolean"
         },
@@ -57,6 +64,13 @@
         "id": {
           "type": "string"
         },
+        "missionRunId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "outcome": {
           "default": null,
           "type": [
@@ -81,6 +95,27 @@
           "type": "string"
         },
         "taskName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamMemberId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamRunId": {
           "default": null,
           "type": [
             "string",

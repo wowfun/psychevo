@@ -175,6 +175,93 @@ describe("Workbench capabilities management", () => {
     confirm.mockRestore();
   });
 
+  it("manages Project/Profile Markdown team definitions", async () => {
+    gatewayMock.teamRecords = [
+      {
+        name: "release",
+        description: "Coordinate release",
+        enabled: true,
+        source: "project",
+        sourceLabel: "Project",
+        target: "project",
+        mutable: true,
+        path: "/tmp/project/.psychevo/teams/release.md",
+        leader: "general",
+        members: [{ id: "researcher", agent: "general", role: "research" }],
+        maxParallelAgents: 4,
+        diagnostics: [],
+        instructions: "Ship carefully.",
+        rawMarkdown: "---\nname: release\ndescription: Coordinate release\nleader: general\n---\nShip carefully."
+      }
+    ];
+    gatewayMock.disabledTeamRecords = [
+      {
+        name: "disabled-team",
+        description: "Paused team",
+        enabled: false,
+        source: "profile",
+        sourceLabel: "Profile",
+        target: "profile",
+        mutable: true,
+        path: "/tmp/profile/teams/disabled-team.md",
+        leader: "general",
+        members: [{ id: "tester", agent: "general" }],
+        maxParallelAgents: 2,
+        diagnostics: [],
+        instructions: "Verify carefully.",
+        rawMarkdown: "---\nname: disabled-team\ndescription: Paused team\nleader: general\n---\nVerify carefully."
+      }
+    ];
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "Teams" }));
+
+    expect(await within(region).findByRole("button", { name: "Team release" })).toBeTruthy();
+    expect(within(region).getByRole("button", { name: "Team disabled-team" })).toBeTruthy();
+    fireEvent.click(within(region).getByRole("switch", { name: "Enable disabled-team" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "team/setEnabled",
+        params: expect.objectContaining({
+          name: "disabled-team",
+          target: "profile",
+          enabled: true
+        })
+      });
+    });
+
+    fireEvent.click(within(region).getByRole("button", { name: "Create team" }));
+    const form = await within(region).findByRole("form", { name: "Team definition" });
+    fireEvent.change(within(form).getByLabelText("Team target"), { target: { value: "profile" } });
+    fireEvent.change(within(form).getByLabelText("Team name"), { target: { value: "ship" } });
+    fireEvent.change(within(form).getByLabelText("Team description"), { target: { value: "Ship feature" } });
+    fireEvent.change(within(form).getByLabelText("Team leader"), { target: { value: "general" } });
+    fireEvent.change(within(form).getByLabelText("Team members"), { target: { value: "reviewer: general | review\ntester: general | verify | run tests | 2" } });
+    fireEvent.change(within(form).getByLabelText("Team instructions"), { target: { value: "Coordinate implementation and verification." } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "team/write",
+        params: expect.objectContaining({
+          name: "ship",
+          target: "profile",
+          description: "Ship feature",
+          leader: "general",
+          rawMarkdown: null,
+          members: expect.arrayContaining([
+            expect.objectContaining({ id: "reviewer", agent: "general", role: "review" }),
+            expect.objectContaining({ id: "tester", agent: "general", role: "verify", maxTurns: 2 })
+          ])
+        })
+      });
+    });
+  });
+
   it("keeps disabled skills visible and can re-enable them", async () => {
     render(<App />);
 

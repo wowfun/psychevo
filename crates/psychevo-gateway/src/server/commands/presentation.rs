@@ -15,6 +15,7 @@ pub(super) fn web_desktop_command_visible(command: &AvailableSlashCommand) -> bo
             | SlashCommandAction::Pending
             | SlashCommandAction::Sandbox
             | SlashCommandAction::Fork
+            | SlashCommandAction::Mission
             | SlashCommandAction::Compact
             | SlashCommandAction::Export
             | SlashCommandAction::Share
@@ -42,6 +43,7 @@ fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
             | SlashCommandAction::Pending
             | SlashCommandAction::Sandbox
             | SlashCommandAction::Fork
+            | SlashCommandAction::Mission
             | SlashCommandAction::Compact
             | SlashCommandAction::Export
             | SlashCommandAction::Share

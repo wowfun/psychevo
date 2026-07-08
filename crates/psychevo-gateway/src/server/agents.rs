@@ -14,6 +14,230 @@ pub(super) fn read_agent_definition(
     ))?)
 }
 
+pub(super) fn discover_gateway_teams(
+    state: &WebState,
+    scope: &ResolvedScope,
+    agents: &AgentCatalog,
+) -> psychevo_runtime::Result<AgentTeamCatalog> {
+    discover_agent_teams_with_catalog(
+        &AgentDiscoveryOptions {
+            home: state.inner.home.clone(),
+            cwd: scope.cwd.clone(),
+            env: state.inner.inherited_env.clone(),
+            explicit_inputs: Vec::new(),
+            no_agents: false,
+        },
+        agents,
+    )
+}
+
+pub(super) fn read_team_definition(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::TeamReadParams,
+) -> psychevo_runtime::Result<Value> {
+    let target = agent_config_target(params.target);
+    let path = team_definition_path(state, scope, target, &params.name)?;
+    let text = std::fs::read_to_string(&path)?;
+    let agents = discover_gateway_agents(state, scope)?;
+    let team = parse_managed_team_text(&text, &params.name, &path, target, &agents)?;
+    Ok(serde_json::to_value(team_read_result_with_raw(
+        &team, text,
+    ))?)
+}
+
+pub(super) fn write_team_definition(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::TeamWriteParams,
+) -> psychevo_runtime::Result<Value> {
+    if !valid_agent_name(&params.name) {
+        return Err(Error::Message(format!(
+            "invalid team name: {}",
+            params.name
+        )));
+    }
+    let target = agent_config_target(params.target);
+    let path = team_definition_path(state, scope, target, &params.name)?;
+    let agents = discover_gateway_agents(state, scope)?;
+    let text = if let Some(raw_markdown) = params.raw_markdown.as_deref() {
+        let team = parse_managed_team_text(raw_markdown, &params.name, &path, target, &agents)?;
+        if team.name != params.name {
+            return Err(Error::Message(format!(
+                "raw team name `{}` must match requested name `{}`",
+                team.name, params.name
+            )));
+        }
+        raw_markdown.to_string()
+    } else {
+        structured_team_markdown(&path, &params)?
+    };
+    let team = parse_managed_team_text(&text, &params.name, &path, target, &agents)?;
+    if team.name != params.name {
+        return Err(Error::Message(format!(
+            "team name `{}` must match requested name `{}`",
+            team.name, params.name
+        )));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, &text)?;
+    Ok(serde_json::to_value(wire::TeamWriteResult {
+        written: true,
+        name: params.name,
+        path: path.display().to_string(),
+        target,
+        team: team_definition_view(&team),
+    })?)
+}
+
+pub(super) fn set_team_definition_enabled(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::TeamSetEnabledParams,
+) -> psychevo_runtime::Result<Value> {
+    if !valid_agent_name(&params.name) {
+        return Err(Error::Message(format!(
+            "invalid team name: {}",
+            params.name
+        )));
+    }
+    let target = agent_config_target(params.target);
+    let path = team_definition_path(state, scope, target, &params.name)?;
+    let existing = std::fs::read_to_string(&path)?;
+    let (mut frontmatter, body) = split_agent_markdown(&existing)?;
+    set_yaml_bool(&mut frontmatter, "enabled", params.enabled);
+    let text = render_agent_markdown(frontmatter, &body)?;
+    let agents = discover_gateway_agents(state, scope)?;
+    let team = parse_managed_team_text(&text, &params.name, &path, target, &agents)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, &text)?;
+    Ok(serde_json::to_value(wire::TeamSetEnabledResult {
+        written: true,
+        name: params.name,
+        path: path.display().to_string(),
+        target,
+        team: team_definition_view(&team),
+    })?)
+}
+
+pub(super) fn delete_team_definition(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::TeamDeleteParams,
+) -> psychevo_runtime::Result<Value> {
+    if !valid_agent_name(&params.name) {
+        return Err(Error::Message(format!(
+            "invalid team name: {}",
+            params.name
+        )));
+    }
+    let target = agent_config_target(params.target);
+    let path = team_definition_path(state, scope, target, &params.name)?;
+    let deleted = match std::fs::remove_file(&path) {
+        Ok(()) => true,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+        Err(err) => return Err(err.into()),
+    };
+    Ok(serde_json::to_value(wire::TeamDeleteResult {
+        deleted,
+        name: params.name,
+        path: path.display().to_string(),
+        target,
+    })?)
+}
+
+fn structured_team_markdown(
+    path: &Path,
+    params: &wire::TeamWriteParams,
+) -> psychevo_runtime::Result<String> {
+    let description = params.description.trim();
+    if description.is_empty() {
+        return Err(Error::Message(
+            "team description must be non-empty".to_string(),
+        ));
+    }
+    if !valid_agent_name(&params.leader) {
+        return Err(Error::Message(format!(
+            "invalid team leader: {}",
+            params.leader
+        )));
+    }
+    if params.members.is_empty() {
+        return Err(Error::Message(
+            "team members must include at least one member".to_string(),
+        ));
+    }
+    let (mut frontmatter, _body) = match std::fs::read_to_string(path) {
+        Ok(existing) => split_agent_markdown(&existing)?,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            (serde_yaml::Mapping::new(), String::new())
+        }
+        Err(err) => return Err(err.into()),
+    };
+    set_yaml_string(&mut frontmatter, "name", params.name.trim());
+    set_yaml_string(&mut frontmatter, "description", description);
+    set_yaml_bool(&mut frontmatter, "enabled", params.enabled.unwrap_or(true));
+    set_yaml_string(&mut frontmatter, "leader", params.leader.trim());
+    if let Some(max_parallel_agents) = params.max_parallel_agents {
+        frontmatter.insert(
+            serde_yaml::Value::String("maxParallelAgents".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(max_parallel_agents)),
+        );
+    } else {
+        remove_yaml_key(&mut frontmatter, "maxParallelAgents");
+    }
+    let mut members = Vec::new();
+    for member in &params.members {
+        if !valid_agent_name(&member.id) {
+            return Err(Error::Message(format!(
+                "invalid team member id: {}",
+                member.id
+            )));
+        }
+        if !valid_agent_name(&member.agent) {
+            return Err(Error::Message(format!(
+                "invalid team member agent: {}",
+                member.agent
+            )));
+        }
+        let mut value = serde_yaml::Mapping::new();
+        set_mapping_string(&mut value, "id", member.id.trim());
+        set_mapping_string(&mut value, "agent", member.agent.trim());
+        if let Some(role) = member
+            .role
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            set_mapping_string(&mut value, "role", role);
+        }
+        if let Some(description) = member
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            set_mapping_string(&mut value, "description", description);
+        }
+        if let Some(max_turns) = member.max_turns {
+            value.insert(
+                serde_yaml::Value::String("maxTurns".to_string()),
+                serde_yaml::Value::Number(serde_yaml::Number::from(max_turns as u64)),
+            );
+        }
+        members.push(serde_yaml::Value::Mapping(value));
+    }
+    frontmatter.insert(
+        serde_yaml::Value::String("members".to_string()),
+        serde_yaml::Value::Sequence(members),
+    );
+    render_agent_markdown(frontmatter, params.instructions.trim())
+}
+
 pub(super) fn write_agent_definition(
     state: &WebState,
     scope: &ResolvedScope,
@@ -232,10 +456,33 @@ fn agent_definition_path(
     Ok(root.join("agents").join(format!("{name}.md")))
 }
 
+fn team_definition_path(
+    state: &WebState,
+    scope: &ResolvedScope,
+    target: wire::AgentConfigTarget,
+    name: &str,
+) -> psychevo_runtime::Result<PathBuf> {
+    if !valid_agent_name(name) {
+        return Err(Error::Message(format!("invalid team name: {name}")));
+    }
+    let root = match target {
+        wire::AgentConfigTarget::Project => scope.cwd.join(".psychevo"),
+        wire::AgentConfigTarget::Profile => active_profile_config_dir(state, scope),
+    };
+    Ok(root.join("teams").join(format!("{name}.md")))
+}
+
 fn agent_source_for_target(target: wire::AgentConfigTarget) -> AgentSource {
     match target {
         wire::AgentConfigTarget::Project => AgentSource::Project,
         wire::AgentConfigTarget::Profile => AgentSource::Global,
+    }
+}
+
+fn team_source_for_target(target: wire::AgentConfigTarget) -> AgentTeamSource {
+    match target {
+        wire::AgentConfigTarget::Project => AgentTeamSource::Project,
+        wire::AgentConfigTarget::Profile => AgentTeamSource::Profile,
     }
 }
 
@@ -258,6 +505,26 @@ fn parse_managed_agent_text(
         )));
     }
     Ok(agent)
+}
+
+fn parse_managed_team_text(
+    text: &str,
+    name: &str,
+    path: &Path,
+    target: wire::AgentConfigTarget,
+    agents: &AgentCatalog,
+) -> psychevo_runtime::Result<AgentTeamDefinition> {
+    let team = parse_agent_team_definition_text(
+        text,
+        name,
+        Some(path.to_path_buf()),
+        team_source_for_target(target),
+        agents,
+    )?;
+    if !valid_agent_name(&team.name) {
+        return Err(Error::Message(format!("invalid team name: {}", team.name)));
+    }
+    Ok(team)
 }
 
 fn split_agent_markdown(content: &str) -> psychevo_runtime::Result<(serde_yaml::Mapping, String)> {
@@ -310,6 +577,10 @@ fn set_yaml_string(frontmatter: &mut serde_yaml::Mapping, key: &str, value: &str
     frontmatter.insert(yaml_key(key), serde_yaml::Value::String(value.to_string()));
 }
 
+fn set_mapping_string(mapping: &mut serde_yaml::Mapping, key: &str, value: &str) {
+    mapping.insert(yaml_key(key), serde_yaml::Value::String(value.to_string()));
+}
+
 fn set_yaml_bool(frontmatter: &mut serde_yaml::Mapping, key: &str, value: bool) {
     frontmatter.insert(yaml_key(key), serde_yaml::Value::Bool(value));
 }
@@ -335,6 +606,27 @@ pub(super) fn agent_list_result(catalog: &AgentCatalog) -> wire::AgentListResult
     }
 }
 
+pub(super) fn team_list_result(catalog: &AgentTeamCatalog) -> wire::TeamListResult {
+    wire::TeamListResult {
+        teams: catalog.teams.iter().map(team_definition_view).collect(),
+        shadowed_teams: catalog
+            .shadowed_teams
+            .iter()
+            .map(team_definition_view)
+            .collect(),
+        disabled_teams: catalog
+            .disabled_teams
+            .iter()
+            .map(team_definition_view)
+            .collect(),
+        diagnostics: catalog
+            .diagnostics
+            .iter()
+            .map(agent_diagnostic_view)
+            .collect(),
+    }
+}
+
 pub(super) fn agent_read_result(agent: &AgentDefinition) -> wire::AgentReadResult {
     let raw_markdown = agent
         .file_path
@@ -351,6 +643,26 @@ fn agent_read_result_with_raw(
     wire::AgentReadResult {
         agent: agent_definition_view(agent),
         instructions: agent.instructions.clone(),
+        raw_markdown,
+    }
+}
+
+pub(super) fn team_read_result(team: &AgentTeamDefinition) -> wire::TeamReadResult {
+    let raw_markdown = team
+        .file_path
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .unwrap_or_default();
+    team_read_result_with_raw(team, raw_markdown)
+}
+
+fn team_read_result_with_raw(
+    team: &AgentTeamDefinition,
+    raw_markdown: String,
+) -> wire::TeamReadResult {
+    wire::TeamReadResult {
+        team: team_definition_view(team),
+        instructions: team.instructions.clone(),
         raw_markdown,
     }
 }
@@ -397,11 +709,49 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
     }
 }
 
+fn team_definition_view(team: &AgentTeamDefinition) -> wire::TeamDefinitionView {
+    let target = team_definition_target(team);
+    wire::TeamDefinitionView {
+        name: team.name.clone(),
+        description: team.description.clone(),
+        enabled: team.enabled,
+        source: team.source.as_str().to_string(),
+        source_label: team.source.display_label().to_string(),
+        target,
+        mutable: target.is_some(),
+        path: team
+            .file_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        leader: team.leader.clone(),
+        members: team.members.iter().map(team_member_view).collect(),
+        max_parallel_agents: team.max_parallel_agents,
+        diagnostics: team.diagnostics.iter().map(agent_diagnostic_view).collect(),
+    }
+}
+
 fn agent_definition_target(agent: &AgentDefinition) -> Option<wire::AgentConfigTarget> {
     match agent.source {
         AgentSource::Project => Some(wire::AgentConfigTarget::Project),
         AgentSource::Global => Some(wire::AgentConfigTarget::Profile),
         _ => None,
+    }
+}
+
+fn team_definition_target(team: &AgentTeamDefinition) -> Option<wire::AgentConfigTarget> {
+    match team.source {
+        AgentTeamSource::Project => Some(wire::AgentConfigTarget::Project),
+        AgentTeamSource::Profile => Some(wire::AgentConfigTarget::Profile),
+    }
+}
+
+fn team_member_view(member: &AgentTeamMember) -> wire::TeamMemberView {
+    wire::TeamMemberView {
+        id: member.id.clone(),
+        agent: member.agent.clone(),
+        role: member.role.clone(),
+        description: member.description.clone(),
+        max_turns: member.max_turns,
     }
 }
 
@@ -426,11 +776,108 @@ pub(super) fn agent_status_result(
             .iter()
             .map(agent_run_view)
             .collect(),
-        control: wire::AgentStatusControlView {
-            spawning_paused: agent_spawn_paused(),
-            max_spawn_depth_cap: MAX_AGENT_SPAWN_DEPTH_CAP,
-            concurrency_cap: None,
-        },
+        control: agent_status_control_view(),
+    }
+}
+
+pub(super) fn team_status_result(
+    store: &psychevo_runtime::SqliteStore,
+    parent_session_id: Option<&str>,
+) -> psychevo_runtime::Result<wire::TeamStatusResult> {
+    let team = parent_session_id
+        .map(|thread| store.find_active_agent_team_run(thread))
+        .transpose()?
+        .flatten()
+        .or_else(|| {
+            parent_session_id.and_then(|thread| {
+                store
+                    .list_agent_team_runs_for_parent(thread)
+                    .ok()
+                    .and_then(|runs| runs.into_iter().next())
+            })
+        });
+    let mission = parent_session_id
+        .map(|thread| store.find_active_agent_mission_run(thread))
+        .transpose()?
+        .flatten()
+        .or_else(|| {
+            parent_session_id.and_then(|thread| {
+                store
+                    .list_agent_mission_runs_for_parent(thread)
+                    .ok()
+                    .and_then(|runs| runs.into_iter().next())
+            })
+        });
+    Ok(wire::TeamStatusResult {
+        team: team.as_ref().map(team_run_view),
+        mission: mission.as_ref().map(mission_run_view),
+        agents: agent_status_records(Some(store), parent_session_id, false)
+            .iter()
+            .map(agent_run_view)
+            .collect(),
+        control: agent_status_control_view(),
+    })
+}
+
+pub(super) fn agent_control_result(
+    store: &psychevo_runtime::SqliteStore,
+    params: wire::AgentControlParams,
+) -> psychevo_runtime::Result<wire::AgentControlResult> {
+    let action = params.action.trim();
+    let agent = match action {
+        "stop" => {
+            let target = required_control_target(&params)?;
+            stop_agent_id_with_grace(target, Some(store), std::time::Duration::from_millis(250))?
+        }
+        "resume" => {
+            let target = required_control_target(&params)?;
+            resume_agent_id(target, Some(store))?
+        }
+        "send" => {
+            let target = required_control_target(&params)?;
+            let message = params
+                .message
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| Error::Message("agent/control send requires message".to_string()))?;
+            send_agent_message(target, message, Some(store))?
+        }
+        "pauseSpawning" => {
+            set_agent_spawn_paused(true);
+            None
+        }
+        "resumeSpawning" => {
+            set_agent_spawn_paused(false);
+            None
+        }
+        other => {
+            return Err(Error::Message(format!(
+                "unsupported agent/control action: {other}"
+            )));
+        }
+    };
+    Ok(wire::AgentControlResult {
+        accepted: matches!(action, "pauseSpawning" | "resumeSpawning") || agent.is_some(),
+        agent: agent.as_ref().map(agent_run_view),
+        control: agent_status_control_view(),
+    })
+}
+
+fn required_control_target(params: &wire::AgentControlParams) -> psychevo_runtime::Result<&str> {
+    params
+        .target
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| Error::Message("agent/control action requires target".to_string()))
+}
+
+fn agent_status_control_view() -> wire::AgentStatusControlView {
+    wire::AgentStatusControlView {
+        spawning_paused: agent_spawn_paused(),
+        max_spawn_depth_cap: MAX_AGENT_SPAWN_DEPTH_CAP,
+        concurrency_cap: Some(MAX_TEAM_PARALLEL_AGENTS_CAP),
     }
 }
 
@@ -452,6 +899,48 @@ fn agent_run_view(record: &AgentRunRecord) -> wire::AgentRunView {
         final_answer: record.final_answer.clone(),
         error: record.error.clone(),
         effective_max_spawn_depth: record.effective_max_spawn_depth,
+        team_run_id: record.team_run_id.clone(),
+        mission_run_id: record.mission_run_id.clone(),
+        team_name: record.team_name.clone(),
+        team_member_id: record.team_member_id.clone(),
+        agent_path: record.agent_path.clone(),
+    }
+}
+
+fn team_run_view(record: &psychevo_runtime::AgentTeamRunRecord) -> wire::TeamRunView {
+    wire::TeamRunView {
+        id: record.id.clone(),
+        parent_session_id: record.parent_session_id.clone(),
+        mission_run_id: record.mission_run_id.clone(),
+        team_name: record.team_name.clone(),
+        description: record.description.clone(),
+        source_path: record.source_path.clone(),
+        leader_agent_name: record.leader_agent_name.clone(),
+        members: serde_json::from_value::<Vec<AgentTeamMember>>(record.members.clone())
+            .unwrap_or_default()
+            .iter()
+            .map(team_member_view)
+            .collect(),
+        max_parallel_agents: record.max_parallel_agents,
+        status: record.status.clone(),
+        started_at_ms: record.started_at_ms,
+        ended_at_ms: record.ended_at_ms,
+        final_summary: record.final_summary.clone(),
+    }
+}
+
+fn mission_run_view(record: &psychevo_runtime::AgentMissionRunRecord) -> wire::MissionRunView {
+    wire::MissionRunView {
+        id: record.id.clone(),
+        parent_session_id: record.parent_session_id.clone(),
+        team_run_id: record.team_run_id.clone(),
+        team_name: record.team_name.clone(),
+        goal: record.goal.clone(),
+        lead_agent_name: record.lead_agent_name.clone(),
+        status: record.status.clone(),
+        started_at_ms: record.started_at_ms,
+        ended_at_ms: record.ended_at_ms,
+        final_summary: record.final_summary.clone(),
     }
 }
 

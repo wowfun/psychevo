@@ -113,6 +113,7 @@ pub(super) async fn handle_channel_message(
     mut message: ImInboundMessage,
 ) -> psychevo_runtime::Result<()> {
     let source = gateway_source_for_im(&message);
+    let mut requested_thread_id = None;
     if let Some(action) = route_channel_command(state, runtime, connection, &message, &source)? {
         match action {
             ChannelCommandAction::Reply(reply) => {
@@ -126,8 +127,9 @@ pub(super) async fn handle_channel_message(
                 runtime.mark_outbound(&connection.id);
                 return Ok(());
             }
-            ChannelCommandAction::SubmitPrompt(prompt) => {
-                message.text = prompt;
+            ChannelCommandAction::SubmitPrompt { text, thread_id } => {
+                message.text = text;
+                requested_thread_id = thread_id;
             }
         }
     }
@@ -143,6 +145,7 @@ pub(super) async fn handle_channel_message(
             turn_gateway,
             message,
             source,
+            requested_thread_id,
         )
         .await
         {
@@ -165,9 +168,10 @@ async fn run_channel_inbound_turn(
     channel_gateway: ChannelGateway,
     message: ImInboundMessage,
     source: GatewaySource,
+    thread_id: Option<String>,
 ) -> psychevo_runtime::Result<()> {
     let cwd = channel_cwd(&state.inner.cwd, &connection);
-    let mut options = state.run_options(cwd, None);
+    let mut options = state.run_options(cwd, thread_id.clone());
     options.model = connection.model.clone();
     options.permission_mode = connection
         .permission_mode
@@ -185,7 +189,7 @@ async fn run_channel_inbound_turn(
         .inner
         .gateway
         .send_turn(crate::SendTurnRequest {
-            thread_id: None,
+            thread_id,
             source: Some(source.clone()),
             bind_source: Some(source.clone()),
             reset_source_binding: false,

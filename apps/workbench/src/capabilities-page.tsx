@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { GatewayClient } from "@psychevo/client";
 import { ActionButton, CreatePanel, MarkdownText, Switch } from "@psychevo/components";
-import type { GatewayRequestScope } from "@psychevo/protocol";
+import type { GatewayRequestScope, TeamMemberInput } from "@psychevo/protocol";
 import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, X } from "lucide-react";
 import { AgentsConfigPanel } from "./settings-panels/agents";
 import type { BackendConfigTarget, BackendDraft, CapabilityTab, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
@@ -30,7 +30,7 @@ type PluginInstallDraft = {
 };
 type MutationOptions = { notice?: string; refresh?: boolean };
 type AgentDefinitionState = "active" | "shadowed" | "disabled";
-type AgentsSegment = "definitions" | "backends";
+type AgentsSegment = "definitions" | "teams" | "backends";
 
 type AgentDefinitionRow = {
   id: string;
@@ -65,7 +65,47 @@ type AgentDraft = {
   rawMarkdown: string;
 };
 
+type AgentTeamRow = {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  source: string;
+  sourceLabel: string;
+  target: BackendConfigTarget | null;
+  mutable: boolean;
+  path: string | null;
+  leader: string;
+  members: JsonObject[];
+  maxParallelAgents: number;
+  diagnostics: string[];
+  state: AgentDefinitionState;
+  raw: JsonObject;
+};
+
+type TeamDraft = {
+  mode: "form" | "markdown";
+  target: BackendConfigTarget;
+  name: string;
+  description: string;
+  enabled: boolean;
+  leader: string;
+  membersText: string;
+  maxParallelAgents: string;
+  instructions: string;
+  rawMarkdown: string;
+};
+
 type AgentDetailState = {
+  id: string;
+  loading: boolean;
+  value: JsonObject | null;
+  instructions: string;
+  rawMarkdown: string;
+  error: string | null;
+};
+
+type TeamDetailState = {
   id: string;
   loading: boolean;
   value: JsonObject | null;
@@ -508,19 +548,31 @@ function AgentsCapabilityPanel({
   const [segment, setSegment] = useState<AgentsSegment>("definitions");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AgentDraft | null>(null);
+  const [teamDraft, setTeamDraft] = useState<TeamDraft | null>(null);
   const [editing, setEditing] = useState<AgentDefinitionRow | null>(null);
+  const [editingTeam, setEditingTeam] = useState<AgentTeamRow | null>(null);
   const [detail, setDetail] = useState<AgentDetailState | null>(null);
+  const [teamDetail, setTeamDetail] = useState<TeamDetailState | null>(null);
   const [pendingSelection, setPendingSelection] = useState<{ name: string; target: BackendConfigTarget } | null>(null);
+  const [pendingTeamSelection, setPendingTeamSelection] = useState<{ name: string; target: BackendConfigTarget } | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
 
   const allRows = useMemo(() => agentRowsFromData(data), [data]);
+  const allTeamRows = useMemo(() => agentTeamRowsFromData(data), [data]);
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return allRows.filter((row) => !needle || `${row.name} ${row.description} ${row.sourceLabel}`.toLowerCase().includes(needle));
   }, [allRows, query]);
+  const teamRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return allTeamRows.filter((row) => !needle || `${row.name} ${row.description} ${row.sourceLabel} ${row.leader}`.toLowerCase().includes(needle));
+  }, [allTeamRows, query]);
   const selected = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
+  const selectedTeam = teamRows.find((row) => row.id === selectedTeamId) ?? teamRows[0] ?? null;
   const selectedDetail = selected && detail?.id === selected.id ? detail : null;
+  const selectedTeamDetail = selectedTeam && teamDetail?.id === selectedTeam.id ? teamDetail : null;
 
   useEffect(() => {
     if (!pendingSelection) return;
@@ -529,6 +581,14 @@ function AgentsCapabilityPanel({
     setSelectedId(next.id);
     setPendingSelection(null);
   }, [allRows, pendingSelection]);
+
+  useEffect(() => {
+    if (!pendingTeamSelection) return;
+    const next = allTeamRows.find((row) => row.name === pendingTeamSelection.name && row.target === pendingTeamSelection.target);
+    if (!next) return;
+    setSelectedTeamId(next.id);
+    setPendingTeamSelection(null);
+  }, [allTeamRows, pendingTeamSelection]);
 
   useEffect(() => {
     if (!client || !scope || !selected || !selected.target || draft) {
@@ -572,6 +632,48 @@ function AgentsCapabilityPanel({
     };
   }, [client, draft, scope?.cwd, selected?.id, selected?.target]);
 
+  useEffect(() => {
+    if (!client || !scope || segment !== "teams" || !selectedTeam || !selectedTeam.target || teamDraft) {
+      if (!selectedTeam || teamDraft) setTeamDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setTeamDetail({
+      id: selectedTeam.id,
+      loading: true,
+      value: null,
+      instructions: "",
+      rawMarkdown: "",
+      error: null
+    });
+    void client.request("team/read", { name: selectedTeam.name, target: selectedTeam.target, scope }).then((value) => {
+      const result = objectValue(value);
+      if (cancelled) return;
+      setTeamDetail({
+        id: selectedTeam.id,
+        loading: false,
+        value: objectField(result, "team"),
+        instructions: stringField(result, "instructions"),
+        rawMarkdown: stringField(result, "rawMarkdown"),
+        error: null
+      });
+    }).catch((error) => {
+      if (!cancelled) {
+        setTeamDetail({
+          id: selectedTeam.id,
+          loading: false,
+          value: null,
+          instructions: "",
+          rawMarkdown: "",
+          error: errorMessage(error)
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, scope?.cwd, segment, selectedTeam?.id, selectedTeam?.target, teamDraft]);
+
   if (!client || !scope) {
     return <div className="capabilityEmpty">Gateway unavailable</div>;
   }
@@ -583,9 +685,22 @@ function AgentsCapabilityPanel({
     setDraft(emptyAgentDraft());
   }
 
+  function openCreateTeam() {
+    setEditingTeam(null);
+    setPanelError(null);
+    setSelectedTeamId(null);
+    setTeamDraft(emptyTeamDraft());
+  }
+
   function closeDraft() {
     setDraft(null);
     setEditing(null);
+    setPanelError(null);
+  }
+
+  function closeTeamDraft() {
+    setTeamDraft(null);
+    setEditingTeam(null);
     setPanelError(null);
   }
 
@@ -603,6 +718,25 @@ function AgentsCapabilityPanel({
       const agent = objectField(result, "agent");
       setEditing(row);
       setDraft(agentDraftFromRead(row, agent, stringField(result, "instructions"), stringField(result, "rawMarkdown")));
+    } catch (error) {
+      setPanelError(errorMessage(error));
+    }
+  }
+
+  async function openEditTeam(row: AgentTeamRow) {
+    if (!row.target) return;
+    setPanelError(null);
+    try {
+      const result = teamDetail?.id === row.id && teamDetail.value
+        ? {
+            team: teamDetail.value,
+            instructions: teamDetail.instructions,
+            rawMarkdown: teamDetail.rawMarkdown
+          }
+        : objectValue(await client!.request("team/read", { name: row.name, target: row.target, scope }));
+      const team = objectField(result, "team");
+      setEditingTeam(row);
+      setTeamDraft(teamDraftFromRead(row, team, stringField(result, "instructions"), stringField(result, "rawMarkdown")));
     } catch (error) {
       setPanelError(errorMessage(error));
     }
@@ -638,6 +772,34 @@ function AgentsCapabilityPanel({
     }
   }
 
+  async function saveTeamDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!teamDraft || !client) return;
+    const name = teamDraft.name.trim();
+    if (!name) return;
+    const members = parseTeamMembersText(teamDraft.membersText);
+    if (teamDraft.mode === "form" && members.length === 0) {
+      setPanelError("Team requires at least one member.");
+      return;
+    }
+    const ok = await mutate(async () => client.request("team/write", {
+      name,
+      description: teamDraft.description.trim(),
+      target: teamDraft.target,
+      enabled: teamDraft.enabled,
+      leader: teamDraft.leader.trim(),
+      members,
+      maxParallelAgents: Number(teamDraft.maxParallelAgents) || null,
+      instructions: teamDraft.instructions,
+      rawMarkdown: teamDraft.mode === "markdown" ? teamDraft.rawMarkdown : null,
+      scope
+    }), { notice: "Team saved." });
+    if (ok) {
+      setPendingTeamSelection({ name, target: teamDraft.target });
+      closeTeamDraft();
+    }
+  }
+
   function setDraftMode(mode: AgentDraft["mode"]) {
     if (!draft) return;
     setDraft({
@@ -647,11 +809,23 @@ function AgentsCapabilityPanel({
     });
   }
 
+  function setTeamDraftMode(mode: TeamDraft["mode"]) {
+    if (!teamDraft) return;
+    setTeamDraft({
+      ...teamDraft,
+      mode,
+      rawMarkdown: teamDraft.rawMarkdown.trim() ? teamDraft.rawMarkdown : renderTeamDraftMarkdown(teamDraft)
+    });
+  }
+
   return (
     <div className="agentsCapability">
       <div className="agentCapabilitySegments" role="tablist" aria-label="Agent management">
         <button className={segment === "definitions" ? "is-selected" : ""} onClick={() => setSegment("definitions")} role="tab" aria-selected={segment === "definitions"} type="button">
           Definitions
+        </button>
+        <button className={segment === "teams" ? "is-selected" : ""} onClick={() => setSegment("teams")} role="tab" aria-selected={segment === "teams"} type="button">
+          Teams
         </button>
         <button className={segment === "backends" ? "is-selected" : ""} onClick={() => setSegment("backends")} role="tab" aria-selected={segment === "backends"} type="button">
           ACP Backends
@@ -674,6 +848,115 @@ function AgentsCapabilityPanel({
           onSetBackendEnabled={onSetBackendEnabled}
           onSetBackendEntrypoints={onSetBackendEntrypoints}
         />
+      ) : segment === "teams" ? (
+        <>
+          <div className="capabilitiesToolbar agentDefinitionsToolbar">
+            <label>
+              <Search size={15} />
+              <input aria-label="Search Teams" onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
+            </label>
+            <ActionButton disabled={busy} icon={<Plus size={14} />} onClick={openCreateTeam} variant="primary">
+              Create team
+            </ActionButton>
+          </div>
+
+          {panelError && <div className="capabilityBanner is-error">{panelError}</div>}
+
+          <div className="capabilitiesGrid agentsDefinitionsGrid">
+            <div className="capabilityList" role="list">
+              {loading && <div className="capabilityEmpty">Loading</div>}
+              {!loading && teamRows.length === 0 && <div className="capabilityEmpty">No teams</div>}
+              {teamRows.map((row) => (
+                <div className={row.id === selectedTeam?.id ? "capabilityRow capabilityRowWithSwitch agentDefinitionRow is-selected" : "capabilityRow capabilityRowWithSwitch agentDefinitionRow"} key={row.id} role="listitem">
+                  <button aria-label={`Team ${row.name}`} className="capabilityRowSelect" onClick={() => setSelectedTeamId(row.id)} type="button">
+                    <span className="capabilityRowMain">
+                      <strong>{row.name}</strong>
+                      <RowDescription fallback={teamStateLabel(row.state)} value={row.description} />
+                      <span className="skillRowMetadata">{teamRowMetadata(row)}</span>
+                    </span>
+                    <CapabilityBadges row={{
+                      ...row,
+                      badges: [targetLabel(row.target), teamStateLabel(row.state)].filter(Boolean),
+                      status: teamStateLabel(row.state)
+                    }} />
+                  </button>
+                  <Switch
+                    ariaLabel={row.enabled ? `Disable ${row.name}` : `Enable ${row.name}`}
+                    checked={row.enabled}
+                    className="capabilityRowSwitch"
+                    disabled={busy || !row.mutable || !row.target}
+                    label={row.enabled ? "Enabled" : "Disabled"}
+                    onCheckedChange={(enabled) => {
+                      if (!row.target) return;
+                      void mutate(() => client.request("team/setEnabled", { name: row.name, target: row.target, enabled, scope }), { notice: enabled ? "Team enabled." : "Team disabled." });
+                    }}
+                    showLabel={false}
+                    size="compact"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <aside className="capabilityDetail agentDefinitionDetail" aria-label="Team definition detail">
+              {teamDraft ? (
+                <>
+                  <div className="capabilityDetailHeader">
+                    <div>
+                      <h3>{editingTeam ? editingTeam.name : "Create team"}</h3>
+                      <span>{editingTeam ? [targetLabel(editingTeam.target), editingTeam.sourceLabel].filter(Boolean).join(" · ") : "Project/Profile Markdown definition"}</span>
+                    </div>
+                  </div>
+                  <TeamDefinitionEditorForm
+                    busy={busy}
+                    draft={teamDraft}
+                    editing={Boolean(editingTeam)}
+                    onCancel={closeTeamDraft}
+                    onChange={setTeamDraft}
+                    onModeChange={setTeamDraftMode}
+                    onSubmit={saveTeamDraft}
+                  />
+                </>
+              ) : selectedTeam ? (
+                <>
+                  <div className="capabilityDetailHeader">
+                    <div>
+                      <h3>{selectedTeam.name}</h3>
+                      <span>{[targetLabel(selectedTeam.target), selectedTeam.sourceLabel, teamStateLabel(selectedTeam.state)].filter(Boolean).join(" · ")}</span>
+                    </div>
+                    <div className="capabilityDetailHeaderActions">
+                      <button
+                        disabled={busy || !selectedTeam.mutable || !selectedTeam.target}
+                        onClick={() => {
+                          if (!selectedTeam.target || !confirmAction(`Delete team ${selectedTeam.name}?`)) return;
+                          void mutate(() => client.request("team/delete", { name: selectedTeam.name, target: selectedTeam.target, scope }), { notice: "Team deleted." });
+                        }}
+                        title={selectedTeam.mutable && selectedTeam.target ? "Delete" : "Only mutable Project/Profile teams can be deleted here"}
+                        type="button"
+                      >
+                        <Trash2 size={14} /> Delete
+                      </button>
+                    </div>
+                  </div>
+                  <TeamDefinitionFields row={selectedTeam} />
+                  <MarkdownDefinitionPreview
+                    copyLabel="Copy team Markdown"
+                    editDisabled={busy || !selectedTeam.mutable || !selectedTeam.target || selectedTeamDetail?.loading === true}
+                    editDisabledReason={selectedTeam.mutable && selectedTeam.target ? "Team Markdown is still loading" : "Only mutable Project/Profile teams can be edited here"}
+                    editLabel={`Edit ${selectedTeam.name} Markdown`}
+                    label="Team Markdown preview"
+                    loading={selectedTeamDetail?.loading}
+                    onCopyText={onCopyText}
+                    onEdit={() => void openEditTeam(selectedTeam)}
+                    preview={selectedTeamDetail?.rawMarkdown ?? ""}
+                    error={selectedTeamDetail?.error}
+                  />
+                </>
+              ) : (
+                <div className="capabilityEmpty">Select a team</div>
+              )}
+            </aside>
+          </div>
+        </>
       ) : (
         <>
           <div className="capabilitiesToolbar agentDefinitionsToolbar">
@@ -876,6 +1159,82 @@ function AgentDefinitionEditorForm({
   );
 }
 
+function TeamDefinitionEditorForm({
+  busy,
+  draft,
+  editing,
+  onCancel,
+  onChange,
+  onModeChange,
+  onSubmit
+}: {
+  busy: boolean;
+  draft: TeamDraft;
+  editing: boolean;
+  onCancel(): void;
+  onChange(draft: TeamDraft): void;
+  onModeChange(mode: TeamDraft["mode"]): void;
+  onSubmit(event: FormEvent<HTMLFormElement>): void;
+}) {
+  return (
+    <form aria-label="Team definition" className="capabilityForm agentDefinitionForm" onSubmit={onSubmit}>
+      <div className="agentEditorMode" role="tablist" aria-label="Team editor mode">
+        <button aria-selected={draft.mode === "form"} className={draft.mode === "form" ? "is-selected" : ""} onClick={() => onModeChange("form")} role="tab" type="button">Form</button>
+        <button aria-selected={draft.mode === "markdown"} className={draft.mode === "markdown" ? "is-selected" : ""} onClick={() => onModeChange("markdown")} role="tab" type="button">Markdown</button>
+      </div>
+
+      <label>
+        <span>Target</span>
+        <select aria-label="Team target" disabled={editing || busy} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
+          <option value="project">Project</option>
+          <option value="profile">Profile</option>
+        </select>
+      </label>
+      <label>
+        <span>Name</span>
+        <input aria-label="Team name" disabled={editing || busy} onChange={(event) => onChange({ ...draft, name: event.target.value })} value={draft.name} />
+      </label>
+      {draft.mode === "form" ? (
+        <>
+          <label>
+            <span>Description</span>
+            <input aria-label="Team description" disabled={busy} onChange={(event) => onChange({ ...draft, description: event.target.value })} value={draft.description} />
+          </label>
+          <label>
+            <span>Leader</span>
+            <input aria-label="Team leader" disabled={busy} onChange={(event) => onChange({ ...draft, leader: event.target.value })} value={draft.leader} />
+          </label>
+          <label>
+            <span>Parallel agents</span>
+            <input aria-label="Team max parallel agents" disabled={busy} min={1} max={4} onChange={(event) => onChange({ ...draft, maxParallelAgents: event.target.value })} type="number" value={draft.maxParallelAgents} />
+          </label>
+          <label className="agentDefinitionSwitch">
+            <span>Enabled</span>
+            <Switch ariaLabel="Team enabled" checked={draft.enabled} disabled={busy} label={draft.enabled ? "Enabled" : "Disabled"} onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
+          </label>
+          <label className="agentWideField">
+            <span>Members</span>
+            <textarea aria-label="Team members" disabled={busy} onChange={(event) => onChange({ ...draft, membersText: event.target.value })} value={draft.membersText} />
+          </label>
+          <label className="agentWideField">
+            <span>Instructions</span>
+            <textarea aria-label="Team instructions" disabled={busy} onChange={(event) => onChange({ ...draft, instructions: event.target.value })} value={draft.instructions} />
+          </label>
+        </>
+      ) : (
+        <label className="agentWideField">
+          <span>Markdown</span>
+          <textarea aria-label="Team Markdown" disabled={busy} onChange={(event) => onChange({ ...draft, rawMarkdown: event.target.value })} spellCheck={false} value={draft.rawMarkdown} />
+        </label>
+      )}
+      <div className="capabilityFormActions">
+        <ActionButton disabled={busy} icon={<X size={14} />} onClick={onCancel} type="button" variant="ghost">Cancel</ActionButton>
+        <ActionButton disabled={busy || !draft.name.trim()} icon={<Save size={14} />} type="submit" variant="primary">Save</ActionButton>
+      </div>
+    </form>
+  );
+}
+
 function MarkdownDefinitionPreview({
   copyLabel,
   editDisabled,
@@ -978,6 +1337,31 @@ function AgentDefinitionFields({ row }: { row: AgentDefinitionRow }) {
       </dl>
       {row.diagnostics.length > 0 && (
         <section className="skillDiagnostics" aria-label="Agent diagnostics">
+          {row.diagnostics.map((diagnostic) => <span className="skillIssue" key={diagnostic}>{diagnostic}</span>)}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function TeamDefinitionFields({ row }: { row: AgentTeamRow }) {
+  const members = row.members.map(teamMemberSummary).filter(Boolean).join(", ");
+  const detailFields = ([
+    ["Target", targetLabel(row.target)],
+    ["Source", row.sourceLabel],
+    ["State", teamStateLabel(row.state)],
+    ["Path", row.path ?? ""],
+    ["Leader", row.leader],
+    ["Members", members],
+    ["Parallel agents", String(row.maxParallelAgents || "")]
+  ] as Array<[string, string]>).filter((entry): entry is [string, string] => entry[1].trim().length > 0);
+  return (
+    <div className="capabilityStack">
+      <dl className="capabilityKeyValues">
+        {detailFields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+      </dl>
+      {row.diagnostics.length > 0 && (
+        <section className="skillDiagnostics" aria-label="Team diagnostics">
           {row.diagnostics.map((diagnostic) => <span className="skillIssue" key={diagnostic}>{diagnostic}</span>)}
         </section>
       )}
@@ -1536,6 +1920,43 @@ function agentRowsFromArray(values: JsonObject[], state: AgentDefinitionState): 
   }).filter((row) => row.name);
 }
 
+function agentTeamRowsFromData(data: JsonObject | null): AgentTeamRow[] {
+  const teams = objectField(data, "teams");
+  return [
+    ...agentTeamRowsFromArray(arrayObjects(teams.teams), "active"),
+    ...agentTeamRowsFromArray(arrayObjects(teams.shadowedTeams), "shadowed"),
+    ...agentTeamRowsFromArray(arrayObjects(teams.disabledTeams), "disabled")
+  ].filter((row) => row.target === "project" || row.target === "profile");
+}
+
+function agentTeamRowsFromArray(values: JsonObject[], state: AgentDefinitionState): AgentTeamRow[] {
+  return values.map((team, index) => {
+    const target = parseAgentTarget(objectValue(team).target);
+    const name = stringField(team, "name");
+    const source = stringField(team, "source");
+    const sourceLabel = stringField(team, "sourceLabel") || source;
+    const path = optionalString(team.path);
+    const maxParallelAgents = Number(objectValue(team).maxParallelAgents);
+    return {
+      id: `${state}:${target ?? source}:${name}:${path ?? index}`,
+      name,
+      description: stringField(team, "description"),
+      enabled: objectValue(team).enabled !== false,
+      source,
+      sourceLabel: sourceLabel || targetLabel(target),
+      target,
+      mutable: boolField(team, "mutable"),
+      path,
+      leader: stringField(team, "leader"),
+      members: arrayObjects(team.members),
+      maxParallelAgents: Number.isFinite(maxParallelAgents) ? maxParallelAgents : 4,
+      diagnostics: arrayObjects(team.diagnostics).map((diagnostic) => stringField(diagnostic, "message")).filter(Boolean),
+      state,
+      raw: team
+    };
+  }).filter((row) => row.name);
+}
+
 function emptyAgentDraft(): AgentDraft {
   return {
     mode: "form",
@@ -1549,6 +1970,21 @@ function emptyAgentDraft(): AgentDraft {
     toolsText: "",
     mcpServersText: "",
     rawMarkdown: "---\nname: \ndescription: \nenabled: true\nentrypoints: [subagent]\n---\n"
+  };
+}
+
+function emptyTeamDraft(): TeamDraft {
+  return {
+    mode: "form",
+    target: "project",
+    name: "",
+    description: "",
+    enabled: true,
+    leader: "general",
+    membersText: "researcher: general",
+    maxParallelAgents: "4",
+    instructions: "",
+    rawMarkdown: ""
   };
 }
 
@@ -1595,6 +2031,89 @@ function renderAgentDraftMarkdown(draft: AgentDraft): string {
   return lines.join("\n");
 }
 
+function teamDraftFromRead(row: AgentTeamRow, team: JsonObject, instructions: string, rawMarkdown: string): TeamDraft {
+  const maxParallelAgents = Number(objectValue(team).maxParallelAgents || row.maxParallelAgents || 4);
+  return {
+    mode: "form",
+    target: row.target ?? parseAgentTarget(team.target) ?? "project",
+    name: stringField(team, "name") || row.name,
+    description: stringField(team, "description") || row.description,
+    enabled: objectValue(team).enabled !== false,
+    leader: stringField(team, "leader") || row.leader,
+    membersText: teamMembersText(arrayObjects(team.members).length ? arrayObjects(team.members) : row.members),
+    maxParallelAgents: String(Number.isFinite(maxParallelAgents) ? maxParallelAgents : 4),
+    instructions,
+    rawMarkdown
+  };
+}
+
+function renderTeamDraftMarkdown(draft: TeamDraft): string {
+  const members = parseTeamMembersText(draft.membersText);
+  const lines = [
+    "---",
+    `name: ${draft.name.trim()}`,
+    `description: ${draft.description.trim()}`,
+    `enabled: ${draft.enabled ? "true" : "false"}`,
+    `leader: ${draft.leader.trim()}`,
+    `maxParallelAgents: ${Number(draft.maxParallelAgents) || 4}`,
+    "members:",
+    ...members.map((member) => {
+      const values = [`id: ${stringField(member, "id")}`, `agent: ${stringField(member, "agent")}`];
+      const role = stringField(member, "role");
+      const description = stringField(member, "description");
+      const maxTurns = objectValue(member).maxTurns;
+      if (role) values.push(`role: ${role}`);
+      if (description) values.push(`description: ${description}`);
+      if (typeof maxTurns === "number" && Number.isFinite(maxTurns)) values.push(`maxTurns: ${maxTurns}`);
+      return `  - { ${values.join(", ")} }`;
+    }),
+    "---",
+    draft.instructions
+  ];
+  return lines.join("\n");
+}
+
+function parseTeamMembersText(value: string): TeamMemberInput[] {
+  return value.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [head, role = "", description = "", maxTurnsText = ""] = line.split("|").map((part) => part.trim());
+      const safeHead = head ?? "";
+      const [idPart = "", agentPart = ""] = safeHead.includes(":")
+        ? safeHead.split(/:(.*)/s).slice(0, 2)
+        : [safeHead, safeHead];
+      const maxTurns = Number(maxTurnsText);
+      return {
+        id: idPart.trim(),
+        agent: (agentPart || idPart).trim(),
+        role: role || null,
+        description: description || null,
+        maxTurns: Number.isFinite(maxTurns) && maxTurns > 0 ? maxTurns : null
+      };
+    })
+    .filter((member) => stringField(member, "id") && stringField(member, "agent"));
+}
+
+function teamMembersText(members: JsonObject[]): string {
+  return members.map((member) => {
+    const base = `${stringField(member, "id")}: ${stringField(member, "agent")}`;
+    const tail = [
+      stringField(member, "role"),
+      stringField(member, "description"),
+      displayValue(objectValue(member).maxTurns)
+    ].filter(Boolean);
+    return tail.length ? `${base} | ${tail.join(" | ")}` : base;
+  }).join("\n");
+}
+
+function teamMemberSummary(member: JsonObject): string {
+  const id = stringField(member, "id");
+  const agent = stringField(member, "agent");
+  const role = stringField(member, "role");
+  return [id && agent && id !== agent ? `${id}:${agent}` : id || agent, role].filter(Boolean).join(" ");
+}
+
 function parseAgentTarget(value: unknown): BackendConfigTarget | null {
   return value === "project" || value === "profile" ? value : null;
 }
@@ -1615,6 +2134,10 @@ function agentStateLabel(value: AgentDefinitionState): string {
   return "Active";
 }
 
+function teamStateLabel(value: AgentDefinitionState): string {
+  return agentStateLabel(value);
+}
+
 function agentRowMetadata(row: AgentDefinitionRow): string {
   const values = [targetLabel(row.target), row.sourceLabel];
   if (row.state !== "active") values.push(agentStateLabel(row.state));
@@ -1623,8 +2146,22 @@ function agentRowMetadata(row: AgentDefinitionRow): string {
   return values.filter(Boolean).join(" · ");
 }
 
+function teamRowMetadata(row: AgentTeamRow): string {
+  const values = [targetLabel(row.target), row.sourceLabel, `leader ${row.leader || "-"}`, `${row.members.length} members`];
+  if (row.state !== "active") values.push(teamStateLabel(row.state));
+  if (!row.mutable) values.push("Read-only");
+  if (row.diagnostics.length > 0) values.push("Diagnostics");
+  return values.filter(Boolean).join(" · ");
+}
+
 async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: GatewayRequestScope) {
-  if (tab === "agents") return client.request("agent/list", { scope });
+  if (tab === "agents") {
+    const [agents, teams] = await Promise.all([
+      client.request("agent/list", { scope }),
+      client.request("team/list", { scope })
+    ]);
+    return { ...objectValue(agents), teams: objectValue(teams) };
+  }
   if (tab === "skills") return client.request("skill/list", { scope });
   if (tab === "plugins") return client.request("plugin/list", { scope });
   if (tab === "mcp") return client.request("mcp/list", { scope });

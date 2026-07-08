@@ -99,12 +99,29 @@ impl TuiApp {
             if running.is_empty() {
                 sections.push("Running/Completed\nNo child agents for this session.".to_string());
             } else {
+                let control = value.get("control").unwrap_or(&Value::Null);
+                let cap = control
+                    .get("concurrencyCap")
+                    .or_else(|| control.get("concurrency_cap"))
+                    .and_then(Value::as_i64)
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let spawning = if control
+                    .get("spawningPaused")
+                    .or_else(|| control.get("spawning_paused"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    "spawning paused"
+                } else {
+                    "spawning active"
+                };
                 sections.push(format!(
-                    "Running/Completed\n{}",
+                    "Running/Completed ({spawning}, cap {cap})\n{}",
                     running
                         .iter()
                         .map(|agent| format!(
-                            "{}\t{}\t{}",
+                            "{}\t{}\t{}\tteam:{}\tmission:{}\tmember:{}",
                             agent.get("id").and_then(Value::as_str).unwrap_or_default(),
                             agent
                                 .get("agent_name")
@@ -113,7 +130,19 @@ impl TuiApp {
                             agent
                                 .get("status")
                                 .and_then(Value::as_str)
-                                .unwrap_or_default()
+                                .unwrap_or_default(),
+                            agent
+                                .get("team_name")
+                                .and_then(Value::as_str)
+                                .unwrap_or("-"),
+                            agent
+                                .get("mission_run_id")
+                                .and_then(Value::as_str)
+                                .unwrap_or("-"),
+                            agent
+                                .get("team_member_id")
+                                .and_then(Value::as_str)
+                                .unwrap_or("-")
                         ))
                         .collect::<Vec<_>>()
                         .join("\n")

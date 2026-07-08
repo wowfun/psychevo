@@ -69,6 +69,11 @@ pub(crate) mod tests {
             final_answer: Some("mailbox final".to_string()),
             error: None,
             effective_max_spawn_depth: Some(0),
+            team_run_id: None,
+            mission_run_id: None,
+            team_name: None,
+            team_member_id: None,
+            agent_path: None,
         }
     }
 
@@ -129,6 +134,7 @@ pub(crate) mod tests {
             denied_agent_names: BTreeSet::new(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
+            active_team: None,
             external_delegate: None,
         }
     }

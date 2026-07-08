@@ -57,6 +57,7 @@ pub(crate) enum SlashCommand {
     Curator(Option<String>),
     Agents,
     Fork(String),
+    Mission { team: Option<String>, goal: String },
     Compact(Option<String>),
     SkillInvoke { name: String, args: String },
     Upcoming(String),

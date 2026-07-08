@@ -687,4 +687,912 @@ export const gatewayAgentResultSchemas = {
   "title": "AgentDeleteResult",
   "type": "object"
 },
+  TeamListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "TeamDefinitionView": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "leader": {
+          "type": "string"
+        },
+        "maxParallelAgents": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/definitions/TeamMemberView"
+          },
+          "type": "array"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "enabled",
+        "leader",
+        "maxParallelAgents",
+        "members",
+        "mutable",
+        "name",
+        "source",
+        "sourceLabel"
+      ],
+      "type": "object"
+    },
+    "TeamMemberView": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxTurns": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/AgentDiagnosticView"
+      },
+      "type": "array"
+    },
+    "disabledTeams": {
+      "items": {
+        "$ref": "#/definitions/TeamDefinitionView"
+      },
+      "type": "array"
+    },
+    "shadowedTeams": {
+      "items": {
+        "$ref": "#/definitions/TeamDefinitionView"
+      },
+      "type": "array"
+    },
+    "teams": {
+      "items": {
+        "$ref": "#/definitions/TeamDefinitionView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "diagnostics",
+    "disabledTeams",
+    "shadowedTeams",
+    "teams"
+  ],
+  "title": "TeamListResult",
+  "type": "object"
+},
+  TeamReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "TeamDefinitionView": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "leader": {
+          "type": "string"
+        },
+        "maxParallelAgents": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/definitions/TeamMemberView"
+          },
+          "type": "array"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "enabled",
+        "leader",
+        "maxParallelAgents",
+        "members",
+        "mutable",
+        "name",
+        "source",
+        "sourceLabel"
+      ],
+      "type": "object"
+    },
+    "TeamMemberView": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxTurns": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "instructions": {
+      "type": "string"
+    },
+    "rawMarkdown": {
+      "type": "string"
+    },
+    "team": {
+      "$ref": "#/definitions/TeamDefinitionView"
+    }
+  },
+  "required": [
+    "instructions",
+    "rawMarkdown",
+    "team"
+  ],
+  "title": "TeamReadResult",
+  "type": "object"
+},
+  TeamWriteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "TeamDefinitionView": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "leader": {
+          "type": "string"
+        },
+        "maxParallelAgents": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/definitions/TeamMemberView"
+          },
+          "type": "array"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "enabled",
+        "leader",
+        "maxParallelAgents",
+        "members",
+        "mutable",
+        "name",
+        "source",
+        "sourceLabel"
+      ],
+      "type": "object"
+    },
+    "TeamMemberView": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxTurns": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/AgentConfigTarget"
+    },
+    "team": {
+      "$ref": "#/definitions/TeamDefinitionView"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "target",
+    "team",
+    "written"
+  ],
+  "title": "TeamWriteResult",
+  "type": "object"
+},
+  TeamDeleteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "deleted": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/AgentConfigTarget"
+    }
+  },
+  "required": [
+    "deleted",
+    "name",
+    "path",
+    "target"
+  ],
+  "title": "TeamDeleteResult",
+  "type": "object"
+},
+  TeamSetEnabledResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "AgentDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "TeamDefinitionView": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/AgentDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "leader": {
+          "type": "string"
+        },
+        "maxParallelAgents": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/definitions/TeamMemberView"
+          },
+          "type": "array"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceLabel": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentConfigTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "description",
+        "diagnostics",
+        "enabled",
+        "leader",
+        "maxParallelAgents",
+        "members",
+        "mutable",
+        "name",
+        "source",
+        "sourceLabel"
+      ],
+      "type": "object"
+    },
+    "TeamMemberView": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxTurns": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/AgentConfigTarget"
+    },
+    "team": {
+      "$ref": "#/definitions/TeamDefinitionView"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "target",
+    "team",
+    "written"
+  ],
+  "title": "TeamSetEnabledResult",
+  "type": "object"
+},
+  AgentControlResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentRunView": {
+      "properties": {
+        "agentName": {
+          "type": "string"
+        },
+        "agentPath": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background": {
+          "type": "boolean"
+        },
+        "childSessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "edgeStatus": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveMaxSpawnDepth": {
+          "default": null,
+          "format": "uint8",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finalAnswer": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "missionRunId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "taskName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamMemberId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamRunId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentName",
+        "background",
+        "id",
+        "parentSessionId",
+        "role",
+        "startedAtMs",
+        "status",
+        "task"
+      ],
+      "type": "object"
+    },
+    "AgentStatusControlView": {
+      "properties": {
+        "concurrencyCap": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxSpawnDepthCap": {
+          "format": "uint8",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "spawningPaused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "maxSpawnDepthCap",
+        "spawningPaused"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "agent": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AgentRunView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "control": {
+      "$ref": "#/definitions/AgentStatusControlView"
+    }
+  },
+  "required": [
+    "accepted",
+    "control"
+  ],
+  "title": "AgentControlResult",
+  "type": "object"
+},
 } as const;

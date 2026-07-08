@@ -97,11 +97,107 @@ export const gatewayAgentRunSchemas = {
   "title": "AgentStatusParams",
   "type": "object"
 },
+  TeamStatusParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "TeamStatusParams",
+  "type": "object"
+},
   AgentRunView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
     "agentName": {
       "type": "string"
+    },
+    "agentPath": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "background": {
       "type": "boolean"
@@ -154,6 +250,13 @@ export const gatewayAgentRunSchemas = {
     "id": {
       "type": "string"
     },
+    "missionRunId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "outcome": {
       "default": null,
       "type": [
@@ -178,6 +281,27 @@ export const gatewayAgentRunSchemas = {
       "type": "string"
     },
     "taskName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "teamMemberId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "teamName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "teamRunId": {
       "default": null,
       "type": [
         "string",
@@ -226,6 +350,192 @@ export const gatewayAgentRunSchemas = {
   "title": "AgentStatusControlView",
   "type": "object"
 },
+  TeamRunView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TeamMemberView": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxTurns": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "endedAtMs": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "finalSummary": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "leaderAgentName": {
+      "type": "string"
+    },
+    "maxParallelAgents": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "members": {
+      "items": {
+        "$ref": "#/definitions/TeamMemberView"
+      },
+      "type": "array"
+    },
+    "missionRunId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parentSessionId": {
+      "type": "string"
+    },
+    "sourcePath": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "startedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "status": {
+      "type": "string"
+    },
+    "teamName": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "leaderAgentName",
+    "maxParallelAgents",
+    "members",
+    "parentSessionId",
+    "startedAtMs",
+    "status",
+    "teamName"
+  ],
+  "title": "TeamRunView",
+  "type": "object"
+},
+  MissionRunView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "endedAtMs": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "finalSummary": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "goal": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "leadAgentName": {
+      "type": "string"
+    },
+    "parentSessionId": {
+      "type": "string"
+    },
+    "startedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "status": {
+      "type": "string"
+    },
+    "teamName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "teamRunId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "goal",
+    "id",
+    "leadAgentName",
+    "parentSessionId",
+    "startedAtMs",
+    "status"
+  ],
+  "title": "MissionRunView",
+  "type": "object"
+},
   AgentStatusResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -233,6 +543,13 @@ export const gatewayAgentRunSchemas = {
       "properties": {
         "agentName": {
           "type": "string"
+        },
+        "agentPath": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "background": {
           "type": "boolean"
@@ -285,6 +602,13 @@ export const gatewayAgentRunSchemas = {
         "id": {
           "type": "string"
         },
+        "missionRunId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "outcome": {
           "default": null,
           "type": [
@@ -309,6 +633,27 @@ export const gatewayAgentRunSchemas = {
           "type": "string"
         },
         "taskName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamMemberId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamRunId": {
           "default": null,
           "type": [
             "string",
@@ -371,6 +716,390 @@ export const gatewayAgentRunSchemas = {
     "control"
   ],
   "title": "AgentStatusResult",
+  "type": "object"
+},
+  TeamStatusResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentRunView": {
+      "properties": {
+        "agentName": {
+          "type": "string"
+        },
+        "agentPath": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background": {
+          "type": "boolean"
+        },
+        "childSessionId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "edgeStatus": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveMaxSpawnDepth": {
+          "default": null,
+          "format": "uint8",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finalAnswer": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "missionRunId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "taskName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamMemberId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamRunId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentName",
+        "background",
+        "id",
+        "parentSessionId",
+        "role",
+        "startedAtMs",
+        "status",
+        "task"
+      ],
+      "type": "object"
+    },
+    "AgentStatusControlView": {
+      "properties": {
+        "concurrencyCap": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxSpawnDepthCap": {
+          "format": "uint8",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "spawningPaused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "maxSpawnDepthCap",
+        "spawningPaused"
+      ],
+      "type": "object"
+    },
+    "MissionRunView": {
+      "properties": {
+        "endedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finalSummary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goal": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "leadAgentName": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "teamName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamRunId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "goal",
+        "id",
+        "leadAgentName",
+        "parentSessionId",
+        "startedAtMs",
+        "status"
+      ],
+      "type": "object"
+    },
+    "TeamMemberView": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "maxTurns": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "id"
+      ],
+      "type": "object"
+    },
+    "TeamRunView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finalSummary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "leaderAgentName": {
+          "type": "string"
+        },
+        "maxParallelAgents": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/definitions/TeamMemberView"
+          },
+          "type": "array"
+        },
+        "missionRunId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "sourcePath": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "teamName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "leaderAgentName",
+        "maxParallelAgents",
+        "members",
+        "parentSessionId",
+        "startedAtMs",
+        "status",
+        "teamName"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "agents": {
+      "items": {
+        "$ref": "#/definitions/AgentRunView"
+      },
+      "type": "array"
+    },
+    "control": {
+      "$ref": "#/definitions/AgentStatusControlView"
+    },
+    "mission": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/MissionRunView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "team": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TeamRunView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "agents",
+    "control"
+  ],
+  "title": "TeamStatusResult",
   "type": "object"
 },
 } as const;

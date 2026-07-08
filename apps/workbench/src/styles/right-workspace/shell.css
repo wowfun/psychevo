@@ -51,7 +51,8 @@
 .reviewPanel,
 .filesPanel,
 .debugPanel,
-.terminalPanel {
+.terminalPanel,
+.teamPanel {
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -220,7 +221,8 @@
 .reviewPanel > header,
 .filesPanel > header,
 .debugPanel > header,
-.terminalPanel > header {
+.terminalPanel > header,
+.teamPanel > header {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -233,7 +235,8 @@
 .rightWorkspaceHome > header > div,
 .reviewPanel > header > div,
 .filesPanel > header > div,
-.terminalPanel > header > div {
+.terminalPanel > header > div,
+.teamPanel > header > div {
   min-width: 0;
 }
 
@@ -280,7 +283,8 @@
 
 .rightWorkspaceHome h2,
 .reviewPanel h2,
-.terminalPanel h2 {
+.terminalPanel h2,
+.teamPanel h2 {
   overflow: hidden;
   margin: 0;
   color: var(--pevo-ink);
@@ -291,7 +295,8 @@
 
 .rightWorkspaceHome p,
 .reviewPanel p,
-.terminalPanel p {
+.terminalPanel p,
+.teamPanel p {
   margin: 2px 0 0;
   color: var(--pevo-muted);
   font-size: var(--pevo-font-size-small);
@@ -310,4 +315,163 @@
 .rightSectionLabel {
   color: var(--pevo-muted);
   font-size: var(--pevo-font-size-xsmall);
+}
+
+.teamPanel {
+  align-content: start;
+}
+
+.teamPanelBody {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  overflow: auto;
+  padding: 4px;
+}
+
+.teamPanelError,
+.teamPanelEmpty {
+  padding: 8px 2px;
+  color: var(--pevo-muted);
+}
+
+.teamPanelError {
+  color: var(--pevo-danger);
+}
+
+.teamOverview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.teamOverview > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 46%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 44%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.teamOverview span,
+.teamControlStrip > span,
+.teamMemberRow header p,
+.teamAgentRow span,
+.teamMemberEmpty,
+.teamSummary p {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.teamOverview strong,
+.teamAgentRow strong,
+.teamMemberRow h3,
+.teamSummary h3 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamControlStrip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.teamControlStrip > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.teamControlStrip button,
+.teamAgentActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.teamControlStrip button {
+  flex: 0 0 auto;
+  padding: 0 7px;
+}
+
+.teamAgentActions button {
+  width: 28px;
+  padding: 0;
+}
+
+.teamControlStrip button:disabled,
+.teamAgentActions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.teamMemberRows {
+  display: grid;
+  gap: 8px;
+}
+
+.teamMemberRow {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 45%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.teamMemberRow header {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.teamMemberRow header > div,
+.teamAgentRow > div:first-child {
+  min-width: 0;
+}
+
+.teamMemberRow header > span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.teamAgentRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.teamAgentRow > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.teamAgentActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.teamSummary {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
 }

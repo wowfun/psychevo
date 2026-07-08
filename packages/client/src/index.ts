@@ -4,6 +4,8 @@ import {
   ThreadSnapshotSchema,
   type AgentDeleteParams,
   type AgentDeleteResult,
+  type AgentControlParams,
+  type AgentControlResult,
   type AgentListParams,
   type AgentListResult,
   type AgentReadParams,
@@ -14,6 +16,18 @@ import {
   type AgentStatusResult,
   type AgentWriteParams,
   type AgentWriteResult,
+  type TeamDeleteParams,
+  type TeamDeleteResult,
+  type TeamListParams,
+  type TeamListResult,
+  type TeamReadParams,
+  type TeamReadResult,
+  type TeamSetEnabledParams,
+  type TeamSetEnabledResult,
+  type TeamStatusParams,
+  type TeamStatusResult,
+  type TeamWriteParams,
+  type TeamWriteResult,
   type AutomationDeleteResult,
   type AutomationDraftParams,
   type AutomationDraftResult,
@@ -223,6 +237,13 @@ export interface GatewayRequestParams {
   "agent/setEnabled": AgentSetEnabledParams;
   "agent/status": AgentStatusParams;
   "agent/write": AgentWriteParams;
+  "agent/control": AgentControlParams;
+  "team/delete": TeamDeleteParams;
+  "team/list": TeamListParams;
+  "team/read": TeamReadParams;
+  "team/setEnabled": TeamSetEnabledParams;
+  "team/status": TeamStatusParams;
+  "team/write": TeamWriteParams;
   "automation/delete": AutomationIdParams;
   "automation/draft": AutomationDraftParams;
   "automation/list": AutomationListParams;
@@ -342,6 +363,13 @@ export interface GatewayRequestResults {
   "agent/setEnabled": AgentSetEnabledResult;
   "agent/status": AgentStatusResult;
   "agent/write": AgentWriteResult;
+  "agent/control": AgentControlResult;
+  "team/delete": TeamDeleteResult;
+  "team/list": TeamListResult;
+  "team/read": TeamReadResult;
+  "team/setEnabled": TeamSetEnabledResult;
+  "team/status": TeamStatusResult;
+  "team/write": TeamWriteResult;
   "automation/delete": AutomationDeleteResult;
   "automation/draft": AutomationDraftResult;
   "automation/list": AutomationListResult;

@@ -96,6 +96,101 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
     assert!(text.contains("Open"), "{text}");
 }
 
+#[test]
+pub(crate) fn agents_status_text_includes_team_mission_member_and_cap_labels() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    write_tui_agent(
+        &app,
+        "general",
+        "General-purpose subagent for focused coding tasks.",
+    );
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .expect("parent session");
+    let child = store
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .expect("child session");
+    store
+        .upsert_agent_edge(
+            &parent,
+            &child,
+            psychevo_runtime::AgentEdgeStatus::Open,
+            Some(serde_json::json!({
+                "teamRunId": "team-run-1",
+                "missionRunId": "mission-run-1",
+                "teamName": "release",
+                "teamMemberId": "reviewer",
+                "agent": {
+                    "id": "agent-run-1",
+                    "task_name": "review_patch",
+                    "name": "general",
+                    "task": "Review patch"
+                }
+            })),
+        )
+        .expect("agent edge");
+    app.current_session = Some(parent);
+
+    let text = app.agents_status_text();
+
+    assert!(
+        text.contains("Running/Completed (spawning active, cap 4)"),
+        "{text}"
+    );
+    assert!(text.contains("team:release"), "{text}");
+    assert!(text.contains("mission:mission-run-1"), "{text}");
+    assert!(text.contains("member:reviewer"), "{text}");
+}
+
+#[test]
+pub(crate) fn mission_metadata_creates_pending_tui_session_for_first_turn() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    write_tui_agent(
+        &app,
+        "general",
+        "General-purpose subagent for focused coding tasks.",
+    );
+    let teams_dir = app.cwd.join(".psychevo/teams");
+    std::fs::create_dir_all(&teams_dir).expect("teams");
+    std::fs::write(
+        teams_dir.join("release.md"),
+        concat!(
+            "---\n",
+            "name: release\n",
+            "description: Release team\n",
+            "leader: general\n",
+            "members:\n",
+            "  - id: reviewer\n",
+            "    agent: general\n",
+            "    role: review\n",
+            "maxParallelAgents: 2\n",
+            "---\n",
+            "Coordinate the release.\n"
+        ),
+    )
+    .expect("team");
+
+    app.record_mission_metadata(Some("release"), "Ship it")
+        .expect("metadata");
+
+    let parent = app.current_session.clone().expect("pending session");
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let team = store
+        .find_active_agent_team_run(&parent)
+        .expect("team lookup")
+        .expect("team run");
+    let mission = store
+        .find_active_agent_mission_run(&parent)
+        .expect("mission lookup")
+        .expect("mission run");
+    assert_eq!(team.team_name, "release");
+    assert_eq!(team.max_parallel_agents, 2);
+    assert_eq!(mission.goal, "Ship it");
+}
+
 #[tokio::test]
 pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes() {
     let temp = tempdir().expect("temp");

@@ -111,6 +111,37 @@ impl SqliteStore {
                 metadata_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS agent_team_runs (
+                id TEXT PRIMARY KEY,
+                parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                mission_run_id TEXT,
+                team_name TEXT NOT NULL,
+                description TEXT,
+                source_path TEXT,
+                leader_agent_name TEXT NOT NULL,
+                members_json TEXT NOT NULL,
+                max_parallel_agents INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                ended_at_ms INTEGER,
+                final_summary TEXT,
+                metadata_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_mission_runs (
+                id TEXT PRIMARY KEY,
+                parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                team_run_id TEXT REFERENCES agent_team_runs(id) ON DELETE SET NULL,
+                team_name TEXT,
+                goal TEXT NOT NULL,
+                lead_agent_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                ended_at_ms INTEGER,
+                final_summary TEXT,
+                metadata_json TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS session_prompt_prefixes (
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
                 version INTEGER NOT NULL,
@@ -274,6 +305,10 @@ impl SqliteStore {
                 ON context_evidence(session_id, prompt_session_seq, context_seq);
             CREATE INDEX IF NOT EXISTS idx_agent_edges_parent
                 ON agent_edges(parent_session_id, status, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_agent_team_runs_parent
+                ON agent_team_runs(parent_session_id, status, started_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_agent_mission_runs_parent
+                ON agent_mission_runs(parent_session_id, status, started_at_ms);
             CREATE INDEX IF NOT EXISTS idx_session_prompt_prefixes_latest
                 ON session_prompt_prefixes(session_id, version DESC);
             CREATE INDEX IF NOT EXISTS idx_agent_mailbox_parent_pending

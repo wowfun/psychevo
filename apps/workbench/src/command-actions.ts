@@ -106,7 +106,7 @@ type CommandActionsParams = {
   setWorkMode: Dispatch<SetStateAction<string>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   startNewThread(cwd?: string): Promise<void>;
-  submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]): Promise<void>;
+  submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[], displayText?: string | null): Promise<void>;
   submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null): Promise<void>;
   updateMainView(value: MainView): void;
 };
@@ -422,8 +422,13 @@ export function createCommandActions(params: CommandActionsParams) {
       case "queuePrompt": {
         const text = stringField(record.text).trim();
         const displayText = optionalStringField(record.displayText);
+        const threadId = optionalStringField(record.threadId);
         if (text) {
-          await params.submitTurn(text, [], displayText);
+          if (threadId) {
+            await params.submitThreadTurn(threadId, text, [], displayText);
+          } else {
+            await params.submitTurn(text, [], displayText);
+          }
         }
         break;
       }
@@ -431,8 +436,13 @@ export function createCommandActions(params: CommandActionsParams) {
       case "submitPrompt": {
         const text = stringField(record.text).trim();
         const displayText = optionalStringField(record.displayText);
+        const threadId = optionalStringField(record.threadId);
         if (text) {
-          await params.submitTurn(text, [], displayText);
+          if (threadId) {
+            await params.submitThreadTurn(threadId, text, [], displayText);
+          } else {
+            await params.submitTurn(text, [], displayText);
+          }
         }
         break;
       }

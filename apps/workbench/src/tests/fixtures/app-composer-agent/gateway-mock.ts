@@ -87,6 +87,10 @@ const gatewayMock = vi.hoisted(() => {
     agentRecords: [] as Array<Record<string, unknown>>,
     shadowedAgentRecords: [] as Array<Record<string, unknown>>,
     disabledAgentRecords: [] as Array<Record<string, unknown>>,
+    teamRecords: [] as Array<Record<string, unknown>>,
+    shadowedTeamRecords: [] as Array<Record<string, unknown>>,
+    disabledTeamRecords: [] as Array<Record<string, unknown>>,
+    teamStatusResult: null as Record<string, unknown> | null,
     backendRecords: [] as Array<Record<string, unknown>>,
     skillRecords: [] as Array<Record<string, unknown>>,
     channelRecords: [

@@ -117,6 +117,10 @@ impl ToolBinding for SpawnAgentTool {
                     "minimum": 0,
                     "maximum": MAX_AGENT_SPAWN_DEPTH_CAP,
                     "description": "Additional descendant spawn levels this child may create. 0 makes it a leaf; values above the runtime cap are rejected."
+                },
+                "team_member": {
+                    "type": "string",
+                    "description": "Optional team member id. Only valid inside an active team or mission context; when set, it must match the selected agent_type if agent_type is also provided."
                 }
             },
             "required": ["task_name", "message"],

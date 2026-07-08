@@ -2,6 +2,92 @@
 pub(crate) use super::*;
 
 impl TuiApp {
+    pub(crate) fn record_mission_metadata(&mut self, team: Option<&str>, goal: &str) -> Result<()> {
+        let parent_session_id = self.ensure_mission_parent_session()?;
+        let mission_id = uuid::Uuid::now_v7().to_string();
+        let metadata = Some(serde_json::json!({"source": "tui:/mission"}));
+        if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
+            let options = AgentDiscoveryOptions {
+                home: self.home.clone(),
+                cwd: self.cwd.clone(),
+                env: self.env_map.clone(),
+                explicit_inputs: self.current_agent.iter().cloned().collect(),
+                no_agents: self.no_agents,
+            };
+            let agents = discover_agents(&options)?;
+            let teams = discover_agent_teams_with_catalog(&options, &agents)?;
+            let team = resolve_agent_team_definition(&teams, team_name)?;
+            let team_id = uuid::Uuid::now_v7().to_string();
+            let members = serde_json::to_value(&team.members)?;
+            let source_path = team
+                .file_path
+                .as_ref()
+                .map(|path| path.display().to_string());
+            self.state_runtime
+                .store()
+                .create_agent_team_run(AgentTeamRunInput {
+                    id: &team_id,
+                    parent_session_id: &parent_session_id,
+                    mission_run_id: Some(&mission_id),
+                    team_name: &team.name,
+                    description: Some(&team.description),
+                    source_path: source_path.as_deref(),
+                    leader_agent_name: &team.leader,
+                    members,
+                    max_parallel_agents: team.max_parallel_agents,
+                    status: "running",
+                    metadata: metadata.clone(),
+                })?;
+            self.state_runtime
+                .store()
+                .create_agent_mission_run(AgentMissionRunInput {
+                    id: &mission_id,
+                    parent_session_id: &parent_session_id,
+                    team_run_id: Some(&team_id),
+                    team_name: Some(&team.name),
+                    goal,
+                    lead_agent_name: &team.leader,
+                    status: "running",
+                    metadata,
+                })?;
+        } else {
+            let lead_agent_name = self.current_agent.as_deref().unwrap_or("general");
+            self.state_runtime
+                .store()
+                .create_agent_mission_run(AgentMissionRunInput {
+                    id: &mission_id,
+                    parent_session_id: &parent_session_id,
+                    team_run_id: None,
+                    team_name: None,
+                    goal,
+                    lead_agent_name,
+                    status: "running",
+                    metadata,
+                })?;
+        }
+        Ok(())
+    }
+
+    fn ensure_mission_parent_session(&mut self) -> Result<String> {
+        if let Some(session_id) = self.current_session.clone()
+            && self
+                .state_runtime
+                .store()
+                .session_summary(&session_id)?
+                .is_some()
+        {
+            return Ok(session_id);
+        }
+        let session_id = self
+            .state_runtime
+            .store()
+            .create_session_with_metadata(&self.cwd, "tui", "pending", "pending", None)?;
+        self.current_session = Some(session_id.clone());
+        self.current_session_title = None;
+        self.clear_new_session_draft();
+        Ok(session_id)
+    }
+
     pub(crate) async fn submit_shell_command(&mut self, command: String) -> Result<()> {
         if command.trim().is_empty() {
             println!("{}", self.renderer.status(USER_SHELL_HELP));
@@ -459,6 +545,9 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
             .unwrap_or_else(|| "/curator".to_string()),
         SlashCommand::Agents => "/agents".to_string(),
         SlashCommand::Fork(prompt) => format!("/fork {}", prompt.trim()),
+        SlashCommand::Mission { team, goal } => {
+            format!("/mission {}", mission_command_args(team.as_deref(), goal))
+        }
         SlashCommand::Compact(instructions) => instructions
             .as_deref()
             .map(|instructions| format!("/compact {}", instructions.trim()))
@@ -472,6 +561,15 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
         }
         SlashCommand::Upcoming(command) => format!("/{command}"),
     }
+}
+
+pub(crate) fn mission_command_args(team: Option<&str>, goal: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(team) = team.map(str::trim).filter(|team| !team.is_empty()) {
+        parts.push(format!("--team {team}"));
+    }
+    parts.push(goal.trim().to_string());
+    parts.join(" ")
 }
 
 pub(crate) fn skill_prompt_marker(name: &str, args: &str) -> String {

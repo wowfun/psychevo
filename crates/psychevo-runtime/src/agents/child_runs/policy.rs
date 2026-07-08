@@ -41,6 +41,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                     background: child.background,
                     fork_context: child.fork_context,
                     spawn_depth_remaining: child.spawn_depth_remaining,
+                    team_member_id: child.team_member_id.as_deref(),
                     context: Some(&child.context),
                     parent_tool_call_id: child.parent_tool_call_id.as_deref(),
                 })),
@@ -63,6 +64,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 background: child.background,
                 fork_context: child.fork_context,
                 spawn_depth_remaining: child.spawn_depth_remaining,
+                team_member_id: child.team_member_id.as_deref(),
                 context: Some(&child.context),
                 parent_tool_call_id: child.parent_tool_call_id.as_deref(),
             })),
@@ -403,6 +405,10 @@ pub(crate) fn emit_agent_session_start(child: &ChildRun, child_session_id: &str)
         "agent_description": child.agent.description.clone(),
         "agent_type": child.agent.name.clone(),
         "agent_path": agent_path(&child.task_name),
+        "team_run_id": child.context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+        "mission_run_id": child.context.active_team.as_ref().and_then(|team| team.mission_run_id.clone()),
+        "team_name": child.context.active_team.as_ref().map(|team| team.team_name.clone()),
+        "team_member_id": child.team_member_id.clone(),
         "task_name": child.task_name.clone(),
         "message": child.prompt.clone(),
         "task": child.prompt.clone(),
@@ -461,6 +467,9 @@ fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
         "background": false,
         "role": invocation_role_str(AgentInvocationRole::Subagent),
         "backend_ref": event.agent.backend.as_ref().map(|backend| backend.name.clone()),
+        "team_run_id": event.context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+        "mission_run_id": event.context.active_team.as_ref().and_then(|team| team.mission_run_id.clone()),
+        "team_name": event.context.active_team.as_ref().map(|team| team.team_name.clone()),
         "effective_max_spawn_depth": event.spawn_depth_remaining,
     })));
 }
@@ -600,6 +609,7 @@ pub(crate) struct ChildAgentMetadataInput<'a> {
     pub(crate) background: bool,
     pub(crate) fork_context: bool,
     pub(crate) spawn_depth_remaining: u8,
+    pub(crate) team_member_id: Option<&'a str>,
     pub(crate) context: Option<&'a AgentToolContext>,
     pub(crate) parent_tool_call_id: Option<&'a str>,
 }
@@ -656,6 +666,36 @@ pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value 
             .entry("model_metadata".to_string())
             .or_insert_with(|| context.model_metadata.public_json());
     }
+    if let Some(team) = input.context.and_then(|context| context.active_team.as_ref()) {
+        object.insert(
+            "teamRunId".to_string(),
+            Value::String(team.team_run_id.clone()),
+        );
+        object.insert("teamName".to_string(), Value::String(team.team_name.clone()));
+        if let Some(mission_run_id) = &team.mission_run_id {
+            object.insert(
+                "missionRunId".to_string(),
+                Value::String(mission_run_id.clone()),
+            );
+        }
+        object.insert(
+            "team".to_string(),
+            json!({
+                "team_run_id": team.team_run_id,
+                "mission_run_id": team.mission_run_id,
+                "team_name": team.team_name,
+                "mission_goal": team.mission_goal,
+                "leader_agent_name": team.leader_agent_name,
+                "max_parallel_agents": team.max_parallel_agents,
+            }),
+        );
+    }
+    if let Some(team_member_id) = input.team_member_id {
+        object.insert(
+            "teamMemberId".to_string(),
+            Value::String(team_member_id.to_string()),
+        );
+    }
     object.insert(
         "agent".to_string(),
         json!({
@@ -664,6 +704,10 @@ pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value 
             "name": input.agent.name.clone(),
             "agent_type": input.agent.name.clone(),
             "agent_path": agent_path(input.task_name),
+            "team_run_id": input.context.and_then(|context| context.active_team.as_ref()).map(|team| team.team_run_id.clone()),
+            "mission_run_id": input.context.and_then(|context| context.active_team.as_ref()).and_then(|team| team.mission_run_id.clone()),
+            "team_name": input.context.and_then(|context| context.active_team.as_ref()).map(|team| team.team_name.clone()),
+            "team_member_id": input.team_member_id,
             "source": input.agent.source.as_str(),
             "path": input.agent.file_path.clone(),
             "parent_session_id": input.parent_session_id,

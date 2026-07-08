@@ -62,7 +62,7 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       kind,
       title: patch.title ?? rightWorkspaceDefaultTitle(kind),
       threadId: patch.threadId ?? null,
-      parentThreadId: patch.parentThreadId ?? null,
+      parentThreadId: patch.parentThreadId ?? (kind === "team" ? params.currentThreadId : null),
       pendingPrompt: patch.pendingPrompt ?? null,
       path: patch.path ?? null,
       diff: patch.diff ?? null,

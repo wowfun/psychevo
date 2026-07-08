@@ -163,7 +163,7 @@ pub(crate) async fn slash_menu_up_down_wrap_between_first_and_last_rows() {
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
         .await
         .expect("up");
-    assert_eq!(ui.slash_menu_selected, 2);
+    assert_eq!(ui.slash_menu_selected, 3);
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
         .await
@@ -179,6 +179,11 @@ pub(crate) async fn slash_menu_up_down_wrap_between_first_and_last_rows() {
         .await
         .expect("down");
     assert_eq!(ui.slash_menu_selected, 2);
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .expect("down");
+    assert_eq!(ui.slash_menu_selected, 3);
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
         .await

@@ -71,7 +71,9 @@ argument validation. A caller that sends `name`, `prompt`, or any other
 non-schema field receives a tool-argument error and no child thread is created.
 
 The tool also accepts a background flag, optional model override, optional fork
-behavior, optional max-turn override, and optional `max_spawn_depth` override.
+behavior, optional max-turn override, optional `max_spawn_depth` override, and
+an optional `team_member` selector only when an active team context exists as
+defined by [Agent Teams](teams.md).
 `fork_turns` accepts `none`, `all`, or a positive integer string and defaults
 to `all` when fork context is enabled.
 
@@ -231,7 +233,8 @@ TUI must not render hidden notifications as separate rows. Start observations
 are UI-facing local records and are not human prompts.
 Child metadata records the resolved definition name, generated or provided
 `task_name`, parent thread/session id, source/path, role, background/fork
-settings, and effective remaining spawn depth.
+settings, effective remaining spawn depth, and active team/mission identifiers
+when the invocation belongs to a team or mission run.
 
 Existing session records are not migrated. Old verbose tool results and
 mailbox records remain historical development data. New records are compact by
@@ -252,6 +255,9 @@ not enter `psychevo-agent-core`.
 
 - [051 Agents](spec.md) defines reusable agent definitions and selected-agent
   policy.
+- [Agent Teams](teams.md) defines active team context, team members, and team
+  status projection.
+- [Missions](missions.md) defines mission entrypoint and mission-run metadata.
 - [002 Agent Execution](../002-agent-execution/spec.md) defines core
   invocation, turn, message, tool execution, and outcome semantics.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines runtime-owned

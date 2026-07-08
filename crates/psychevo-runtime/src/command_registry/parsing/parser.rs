@@ -425,6 +425,14 @@ pub fn slash_invocation_effect(
             no_args(spec, &invocation.args)?;
             Ok(SlashCommandEffect::Agents)
         }
+        SlashCommandAction::Mission => {
+            let (team, goal) = parse_mission_args(&invocation.args)?;
+            Ok(SlashCommandEffect::Mission {
+                prompt: mission_prompt_marker(&invocation.args)?,
+                team,
+                goal,
+            })
+        }
         SlashCommandAction::Fork => Ok(SlashCommandEffect::Fork(fork_prompt_marker(
             &required_text(spec, &invocation.args)?,
         ))),
@@ -504,6 +512,45 @@ pub fn fork_prompt_marker(prompt: &str) -> String {
         "Use the spawn_agent tool with agent_type=\"general\", fork_context=true, background=true, a lowercase underscore task_name, and this message:\n\n{}",
         prompt.trim()
     )
+}
+
+pub fn mission_prompt_marker(args: &str) -> std::result::Result<String, String> {
+    let (team, goal) = parse_mission_args(args)?;
+    let team_line = team
+        .as_deref()
+        .map(|team| format!("Team template: {team}"))
+        .unwrap_or_else(|| "Team template: none; use the available agent catalog.".to_string());
+    Ok(format!(
+        "Start a multi-agent mission.\n\nGoal:\n{goal}\n\n{team_line}\n\nCoordinate as the lead agent: decompose the goal, spawn child agents for research or implementation, wait for results, run deterministic verification before claiming completion, and summarize the final outcome. Keep the parent transcript compact; inspect child sessions for detail. Respect the active team concurrency cap and spawn-depth cap. Use live providers or external services only when the user explicitly opted in."
+    ))
+}
+
+pub fn parse_mission_args(args: &str) -> std::result::Result<(Option<String>, String), String> {
+    let mut team = None;
+    let mut goal = Vec::new();
+    let mut parts = args.split_whitespace().peekable();
+    while let Some(part) = parts.next() {
+        if part == "--team" || part == "-t" {
+            let value = parts
+                .next()
+                .ok_or_else(|| "usage: /mission [--team <name>] <goal>".to_string())?;
+            team = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("--team=") {
+            if value.trim().is_empty() {
+                return Err("usage: /mission [--team <name>] <goal>".to_string());
+            }
+            team = Some(value.to_string());
+        } else {
+            goal.push(part.to_string());
+            goal.extend(parts.map(str::to_string));
+            break;
+        }
+    }
+    let goal = goal.join(" ").trim().to_string();
+    if goal.is_empty() {
+        return Err("usage: /mission [--team <name>] <goal>".to_string());
+    }
+    Ok((team, goal))
 }
 
 pub(crate) fn normalize_slash_command_name(name: &str) -> Option<&str> {

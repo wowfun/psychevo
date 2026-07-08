@@ -430,6 +430,7 @@ pub(crate) fn reconstructed_tool_declarations(
             denied_agent_names: BTreeSet::new(),
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
+            active_team: None,
             external_delegate: None,
         }),
     });

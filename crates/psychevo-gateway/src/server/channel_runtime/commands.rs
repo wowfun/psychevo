@@ -1,9 +1,13 @@
 use super::paths::channel_cwd;
 use super::*;
+use crate::server::commands::record_gateway_mission_metadata_for_parent;
 
 pub(super) enum ChannelCommandAction {
     Reply(String),
-    SubmitPrompt(String),
+    SubmitPrompt {
+        text: String,
+        thread_id: Option<String>,
+    },
 }
 
 struct ChannelCommandContext<'a> {
@@ -196,10 +200,29 @@ fn channel_command_action_from_effect(
         SlashCommandEffect::PassThroughPrompt(text)
         | SlashCommandEffect::SubmitPrompt(text)
         | SlashCommandEffect::Queue(text)
-        | SlashCommandEffect::Fork(text) => ChannelCommandAction::SubmitPrompt(text),
-        SlashCommandEffect::Compact { instructions } => {
-            ChannelCommandAction::SubmitPrompt(compact_prompt_text(instructions))
+        | SlashCommandEffect::Fork(text) => ChannelCommandAction::SubmitPrompt {
+            text,
+            thread_id: None,
+        },
+        SlashCommandEffect::Mission { prompt, team, goal } => {
+            let thread_id = ensure_channel_mission_thread(context)?;
+            record_gateway_mission_metadata_for_parent(
+                context.state,
+                context.scope,
+                &thread_id,
+                team.as_deref(),
+                &goal,
+                "channel:/mission",
+            )?;
+            ChannelCommandAction::SubmitPrompt {
+                text: prompt,
+                thread_id: Some(thread_id),
+            }
         }
+        SlashCommandEffect::Compact { instructions } => ChannelCommandAction::SubmitPrompt {
+            text: compact_prompt_text(instructions),
+            thread_id: None,
+        },
         SlashCommandEffect::Steer(text) => {
             let message = RuntimeMessage::User {
                 content: vec![UserContentBlock::text(text)],
@@ -276,6 +299,27 @@ fn channel_command_action_from_effect(
     Ok(action)
 }
 
+fn ensure_channel_mission_thread(
+    context: &ChannelCommandContext<'_>,
+) -> psychevo_runtime::Result<String> {
+    if let Some(thread_id) = context
+        .state
+        .inner
+        .gateway
+        .resolve_source_thread(context.source)?
+    {
+        return Ok(thread_id);
+    }
+    let thread_id = context
+        .state
+        .inner
+        .state
+        .store()
+        .create_session_with_metadata(&context.scope.cwd, "channel", "pending", "pending", None)?;
+    bind_source_to_thread(context.state, context.scope, &thread_id)?;
+    Ok(thread_id)
+}
+
 fn channel_command_capabilities() -> Vec<CommandCapability> {
     vec![
         CommandCapability::ActiveTurnControl,
@@ -295,6 +339,7 @@ fn channel_action_visible(action: SlashCommandAction) -> bool {
             | SlashCommandAction::Sandbox
             | SlashCommandAction::Skills
             | SlashCommandAction::Agents
+            | SlashCommandAction::Mission
             | SlashCommandAction::Compact
             | SlashCommandAction::Voice
             | SlashCommandAction::SkillInvoke

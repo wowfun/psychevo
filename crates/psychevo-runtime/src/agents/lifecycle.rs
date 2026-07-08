@@ -237,6 +237,11 @@ pub(crate) async fn send_agent_message_with_context(
         final_answer: None,
         error: None,
         effective_max_spawn_depth: Some(spawn_depth_remaining),
+        team_run_id: base.team_run_id.clone(),
+        mission_run_id: base.mission_run_id.clone(),
+        team_name: base.team_name.clone(),
+        team_member_id: base.team_member_id.clone(),
+        agent_path: base.agent_path.clone(),
     };
     let (control_handle, control_receivers) = ControlHandle::new();
     {
@@ -268,6 +273,7 @@ pub(crate) async fn send_agent_message_with_context(
         spawn_depth_remaining,
         role: base.role,
         background: true,
+        team_member_id: base.team_member_id.clone(),
         parent_tool_call_id: None,
         existing_child_session: Some(edge.child_session_id),
         previous_messages_override: None,
@@ -445,6 +451,34 @@ pub(crate) fn edge_task_name(edge: &AgentEdgeRecord) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+pub(crate) fn edge_team_run_id(edge: &AgentEdgeRecord) -> Option<&str> {
+    edge.metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("teamRunId"))
+        .and_then(Value::as_str)
+}
+
+pub(crate) fn edge_mission_run_id(edge: &AgentEdgeRecord) -> Option<&str> {
+    edge.metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("missionRunId"))
+        .and_then(Value::as_str)
+}
+
+pub(crate) fn edge_team_name(edge: &AgentEdgeRecord) -> Option<&str> {
+    edge.metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("teamName"))
+        .and_then(Value::as_str)
+}
+
+pub(crate) fn edge_team_member_id(edge: &AgentEdgeRecord) -> Option<&str> {
+    edge.metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("teamMemberId"))
+        .and_then(Value::as_str)
+}
+
 pub(crate) fn ambiguous_agent_task_error(target: &str) -> Error {
     Error::Config(format!(
         "multiple agents match task `{target}`; use agent_id"
@@ -499,8 +533,8 @@ pub(crate) fn agent_record_from_edge(store: &SqliteStore, edge: AgentEdgeRecord)
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
-        parent_session_id: edge.parent_session_id,
-        child_session_id: Some(edge.child_session_id),
+        parent_session_id: edge.parent_session_id.clone(),
+        child_session_id: Some(edge.child_session_id.clone()),
         role: agent
             .and_then(|agent| agent.get("role"))
             .and_then(Value::as_str)
@@ -521,6 +555,14 @@ pub(crate) fn agent_record_from_edge(store: &SqliteStore, edge: AgentEdgeRecord)
         final_answer: None,
         error: None,
         effective_max_spawn_depth: Some(effective_max_spawn_depth),
+        team_run_id: edge_team_run_id(&edge).map(str::to_string),
+        mission_run_id: edge_mission_run_id(&edge).map(str::to_string),
+        team_name: edge_team_name(&edge).map(str::to_string),
+        team_member_id: edge_team_member_id(&edge).map(str::to_string),
+        agent_path: agent
+            .and_then(|agent| agent.get("agent_path"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
     }
 }
 

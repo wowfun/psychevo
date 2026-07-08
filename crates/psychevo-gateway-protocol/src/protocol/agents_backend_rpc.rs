@@ -86,6 +86,100 @@ pub struct AgentStatusParams {
     pub all: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamReadParams {
+    pub name: String,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamMemberInput {
+    pub id: String,
+    pub agent: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, rename = "maxTurns")]
+    pub max_turns: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamWriteParams {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    pub leader: String,
+    #[serde(default)]
+    pub members: Vec<TeamMemberInput>,
+    #[serde(default, rename = "maxParallelAgents")]
+    pub max_parallel_agents: Option<u64>,
+    #[serde(default)]
+    pub instructions: String,
+    #[serde(default)]
+    pub raw_markdown: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamDeleteParams {
+    pub name: String,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSetEnabledParams {
+    pub name: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamStatusParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentControlParams {
+    pub action: String,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentListResult {
@@ -141,6 +235,72 @@ pub struct AgentStatusResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TeamListResult {
+    pub teams: Vec<TeamDefinitionView>,
+    pub shadowed_teams: Vec<TeamDefinitionView>,
+    pub disabled_teams: Vec<TeamDefinitionView>,
+    pub diagnostics: Vec<AgentDiagnosticView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamReadResult {
+    pub team: TeamDefinitionView,
+    pub instructions: String,
+    pub raw_markdown: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamWriteResult {
+    pub written: bool,
+    pub name: String,
+    pub path: String,
+    pub target: AgentConfigTarget,
+    pub team: TeamDefinitionView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamDeleteResult {
+    pub deleted: bool,
+    pub name: String,
+    pub path: String,
+    pub target: AgentConfigTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSetEnabledResult {
+    pub written: bool,
+    pub name: String,
+    pub path: String,
+    pub target: AgentConfigTarget,
+    pub team: TeamDefinitionView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamStatusResult {
+    #[serde(default)]
+    pub team: Option<TeamRunView>,
+    #[serde(default)]
+    pub mission: Option<MissionRunView>,
+    pub agents: Vec<AgentRunView>,
+    pub control: AgentStatusControlView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentControlResult {
+    pub accepted: bool,
+    #[serde(default)]
+    pub agent: Option<AgentRunView>,
+    pub control: AgentStatusControlView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentBackendRefView {
     #[serde(rename = "ref")]
     pub name: String,
@@ -180,6 +340,39 @@ pub struct AgentDefinitionView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TeamMemberView {
+    pub id: String,
+    pub agent: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, rename = "maxTurns")]
+    pub max_turns: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamDefinitionView {
+    pub name: String,
+    pub description: String,
+    pub enabled: bool,
+    pub source: String,
+    pub source_label: String,
+    #[serde(default)]
+    pub target: Option<AgentConfigTarget>,
+    pub mutable: bool,
+    #[serde(default)]
+    pub path: Option<String>,
+    pub leader: String,
+    pub members: Vec<TeamMemberView>,
+    #[serde(rename = "maxParallelAgents")]
+    pub max_parallel_agents: u64,
+    pub diagnostics: Vec<AgentDiagnosticView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentRunView {
     pub id: String,
     #[serde(default)]
@@ -205,6 +398,16 @@ pub struct AgentRunView {
     pub error: Option<String>,
     #[serde(default)]
     pub effective_max_spawn_depth: Option<u8>,
+    #[serde(default)]
+    pub team_run_id: Option<String>,
+    #[serde(default)]
+    pub mission_run_id: Option<String>,
+    #[serde(default)]
+    pub team_name: Option<String>,
+    #[serde(default)]
+    pub team_member_id: Option<String>,
+    #[serde(default)]
+    pub agent_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -214,6 +417,49 @@ pub struct AgentStatusControlView {
     pub max_spawn_depth_cap: u8,
     #[serde(default)]
     pub concurrency_cap: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamRunView {
+    pub id: String,
+    pub parent_session_id: String,
+    #[serde(default)]
+    pub mission_run_id: Option<String>,
+    pub team_name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    pub leader_agent_name: String,
+    pub members: Vec<TeamMemberView>,
+    #[serde(rename = "maxParallelAgents")]
+    pub max_parallel_agents: u64,
+    pub status: String,
+    pub started_at_ms: i64,
+    #[serde(default)]
+    pub ended_at_ms: Option<i64>,
+    #[serde(default)]
+    pub final_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionRunView {
+    pub id: String,
+    pub parent_session_id: String,
+    #[serde(default)]
+    pub team_run_id: Option<String>,
+    #[serde(default)]
+    pub team_name: Option<String>,
+    pub goal: String,
+    pub lead_agent_name: String,
+    pub status: String,
+    pub started_at_ms: i64,
+    #[serde(default)]
+    pub ended_at_ms: Option<i64>,
+    #[serde(default)]
+    pub final_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -902,6 +1148,20 @@ pub enum ClientRequest {
     AgentDelete(AgentDeleteParams),
     #[serde(rename = "agent/status")]
     AgentStatus(AgentStatusParams),
+    #[serde(rename = "team/list")]
+    TeamList(TeamListParams),
+    #[serde(rename = "team/read")]
+    TeamRead(TeamReadParams),
+    #[serde(rename = "team/write")]
+    TeamWrite(TeamWriteParams),
+    #[serde(rename = "team/setEnabled")]
+    TeamSetEnabled(TeamSetEnabledParams),
+    #[serde(rename = "team/delete")]
+    TeamDelete(TeamDeleteParams),
+    #[serde(rename = "team/status")]
+    TeamStatus(TeamStatusParams),
+    #[serde(rename = "agent/control")]
+    AgentControl(AgentControlParams),
     #[serde(rename = "backend/list")]
     BackendList(BackendListParams),
     #[serde(rename = "backend/doctor")]

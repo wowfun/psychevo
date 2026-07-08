@@ -329,6 +329,12 @@ impl TuiApp {
                 let text = fork_prompt_marker(&prompt);
                 self.submit_fullscreen_prompt(ui, text, Vec::new())?;
             }
+            SlashCommand::Mission { team, goal } => {
+                self.record_mission_metadata(team.as_deref(), &goal)?;
+                let args = mission_command_args(team.as_deref(), &goal);
+                let text = mission_prompt_marker(&args).map_err(|message| anyhow!(message))?;
+                self.submit_fullscreen_prompt_with_display(ui, text, command_echo, Vec::new())?;
+            }
             SlashCommand::Compact(instructions) => {
                 self.submit_fullscreen_compaction(ui, instructions, command_echo)?;
             }

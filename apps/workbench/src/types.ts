@@ -102,7 +102,7 @@ export type WorkbenchCommand = {
   alternateAction: CommandAlternateAction | null;
 };
 
-export type RightWorkspaceTabKind = "review" | "terminal" | "files" | "debug" | "sideConversation" | "agentSession";
+export type RightWorkspaceTabKind = "review" | "terminal" | "files" | "debug" | "sideConversation" | "agentSession" | "team";
 
 export type RightWorkspaceTab = {
   id: string;
