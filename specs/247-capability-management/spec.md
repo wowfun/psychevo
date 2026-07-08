@@ -51,9 +51,9 @@ user's draft. The active create panel must remain inside the visible
 Capabilities page bounds at desktop and narrow widths, and long forms must be
 reachable by scrolling the page or panel without horizontal overflow.
 
-Settings must not duplicate the full Agents management surface. If a Settings
-entry for Agents remains for discoverability, it routes to `Capabilities >
-Agents`.
+Settings must not duplicate or link to the Agents management surface. Users
+reach agent definitions, teams, and ACP backend configuration from the
+top-level `Capabilities > Agents` view only.
 
 ## Agents
 
@@ -62,7 +62,8 @@ definitions, plus configured ACP backends. It uses agent-owned and
 backend-owned Gateway RPCs directly; it must not introduce a generic capability
 object that hides the owning runtime module.
 
-The tab has an internal segmented view with `Definitions` and `ACP Backends`.
+The tab has an internal segmented view with `Definitions`, `Teams`, and
+`ACP Backends`.
 `Definitions` lists mutable Project/Profile Markdown agents across active,
 shadowed, and disabled states. Rows show name, description, source label,
 enablement, entrypoints, backend reference when present, and compact
@@ -89,6 +90,14 @@ workflow: add/edit/delete, enablement, entrypoint controls, client capability
 controls, MCP server list, and doctor checks. Backend command environment
 values remain write-only; management responses may expose environment variable
 names but never resolved secret values.
+
+When the local Gateway detects known ACP executables in its launch environment,
+it may auto-create Profile ACP backend rows so `Capabilities > Agents > ACP
+Backends` opens with useful localhost options. The supported shortcuts are
+`opencode` as command `opencode` with args `["acp"]`, and `hermes` as command
+`hermes` with args `["acp"]`. Existing effective backend definitions take
+precedence, so auto-creation is additive and never overwrites Profile or Project
+configuration.
 
 ## Skills
 

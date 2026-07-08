@@ -2,6 +2,7 @@ fn discover_gateway_agents(
     state: &WebState,
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<psychevo_runtime::AgentCatalog> {
+    materialize_local_acp_backends(state, scope)?;
     discover_agents(&AgentDiscoveryOptions {
         home: state.inner.home.clone(),
         cwd: scope.cwd.clone(),

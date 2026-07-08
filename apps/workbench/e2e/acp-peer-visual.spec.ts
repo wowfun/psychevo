@@ -19,10 +19,10 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       if (isMobile) {
         await openPanel(page, isMobile, "History");
       }
-      let settings = await openSettingsAgents(page);
-      await settings.getByRole("button", { name: "Add ACP backend" }).click();
+      let agentsPanel = await openCapabilityBackendPanel(page);
+      await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
 
-      const form = settings.getByRole("form", { name: "Profile ACP backend" });
+      const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
       await expect(form).toBeVisible();
       await form.getByLabel("ID").fill("visual-acp");
       await form.getByLabel("Command JSON").fill(JSON.stringify({
@@ -35,10 +35,10 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await form.getByRole("button", { name: "Save" }).click();
       await expect(form).toBeHidden({ timeout: 30_000 });
 
-      settings = await openSettingsAgents(page);
-      await expect(settings.getByRole("switch", { name: "Disable visual-acp" })).toBeVisible();
-      await expect(settings.getByLabel("visual-acp peer entrypoint")).toBeChecked();
-      await expect(settings.getByLabel("visual-acp subagent entrypoint")).toBeChecked();
+      agentsPanel = await openCapabilityBackendPanel(page);
+      await expect(agentsPanel.getByRole("switch", { name: "Disable visual-acp" })).toBeVisible();
+      await expect(agentsPanel.getByLabel("visual-acp peer entrypoint")).toBeChecked();
+      await expect(agentsPanel.getByLabel("visual-acp subagent entrypoint")).toBeChecked();
       await capture(page, testInfo, `02-backend-configured-${projectSuffix(isMobile)}`);
 
       if (isMobile) {
@@ -239,7 +239,7 @@ async function expectVisibleTextGrowth(locator: Locator) {
   }).toBeGreaterThan(initial);
 }
 
-async function openSettingsAgents(page: Page): Promise<Locator> {
+async function openCapabilityBackendPanel(page: Page): Promise<Locator> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       let capabilities = page.getByRole("region", { name: "Capabilities" });

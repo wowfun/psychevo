@@ -273,25 +273,23 @@ catalog so composer slash completion and the `/commands` overlay reflect aliases
 immediately. Web v1 does not register browser-level keyboard shortcuts; shortcut
 rows configure TUI behavior only.
 
-The Settings Agents section is the Workbench app-level ACP client configuration
-surface. It shows configurable Profile-level ACP backend registrations and their
-diagnostics, but not the read-only effective agent catalog or the current
-session's running/background child-agent status. Backend create/edit controls
-open in a scoped Settings create/edit panel rather than a global modal. GUI
-backend writes are Profile-only and update the active `$PSYCHEVO_HOME/config.toml`;
-the form does not expose a target selector. Project-level backend definitions
-may still be read by Gateway and affect runtime behavior, but Workbench does
-not show, edit, or delete them from Settings because they are not configurable
-from this GUI surface. Workbench does not expose inactive profiles in this
-surface.
-Each listed Profile ACP backend exposes its enabled state as a row-level switch
-in Settings > Agents, so users can enable or disable configured backends without
-opening the editor. The row also exposes ordinary checkbox controls for the
-backend's `peer` and `subagent` entrypoints. The backend editor does not
-duplicate the enabled or entrypoint controls.
-The add control opens a generic ACP backend editor; users can configure OpenCode
-or any other ACP-compatible backend by filling the backend id, a single JSON
-command configuration, and capabilities.
+The `Capabilities > Agents > ACP Backends` segment is the Workbench app-level
+ACP client configuration surface. It shows configurable Profile-level ACP
+backend registrations and their diagnostics, but not the current session's
+running/background child-agent status. Backend create/edit controls open in a
+scoped Capabilities panel rather than a global modal. GUI backend writes are
+Profile-only and update the active `$PSYCHEVO_HOME/config.toml`; the form does
+not expose a target selector. Project-level backend definitions may still be
+read by Gateway and affect runtime behavior, but Workbench does not show, edit,
+or delete them from this GUI surface. Workbench does not expose inactive
+profiles in this surface.
+Each listed Profile ACP backend exposes its enabled state as a row-level switch,
+so users can enable or disable configured backends without opening the editor.
+The row also exposes ordinary checkbox controls for the backend's `peer` and
+`subagent` entrypoints. The backend editor does not duplicate the enabled or
+entrypoint controls. The add control opens a generic ACP backend editor; users
+can configure OpenCode or any other ACP-compatible backend by filling the
+backend id, a single JSON command configuration, and capabilities.
 The command JSON input replaces separate Command, Args, and Env fields. New
 backend drafts prefill it with the generic OpenCode ACP template
 `{"command":"opencode","args":["acp"],"env":{}}`, which users can edit for any

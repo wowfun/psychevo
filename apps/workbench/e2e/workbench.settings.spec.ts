@@ -35,7 +35,7 @@ test.describe("pevo Web Workbench", () => {
       await expect(settings.getByRole("searchbox", { name: "Search settings" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "Appearance" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "Debug" })).toBeVisible();
-      await expect(settings.getByRole("button", { name: "Agents" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Agents" })).toHaveCount(0);
       await expect(settings.getByRole("button", { name: "Models" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "Archived sessions" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "General", exact: true })).toHaveCount(0);
@@ -93,17 +93,8 @@ test.describe("pevo Web Workbench", () => {
       await assertNoHorizontalOverflow(page, settings);
       await captureWorkbench(page, testInfo, `settings-debug-${isMobile ? "mobile" : "desktop"}`);
 
-      await settings.getByRole("button", { name: "Agents" }).click();
-      await expect(settings.getByRole("region", { name: "Agents" })).toBeVisible();
-      await expect(settings.getByRole("button", { name: "Add ACP backend" })).toBeVisible();
-      await expect(settings.getByText("translate")).toHaveCount(0);
-      await expect(settings.getByText("Translate user messages")).toHaveCount(0);
-      await expect(settings.getByText("Runs")).toHaveCount(0);
-      await assertNoHorizontalOverflow(page, settings);
-      await captureWorkbench(page, testInfo, `settings-agents-${isMobile ? "mobile" : "desktop"}`);
-
       await settings.getByRole("button", { name: "Models" }).click();
-      const models = settings.getByRole("region", { name: "Models" });
+      const models = settings.getByRole("region", { name: "Models", exact: true });
       await expect(models).toBeVisible();
       await expect(models.getByRole("button", { name: "Default model" })).toBeVisible();
       await expect(models.getByRole("button", { name: "Title generation" })).toBeVisible();
@@ -129,21 +120,21 @@ test.describe("pevo Web Workbench", () => {
       await assertNoHorizontalOverflow(page, settings);
       await expectControlsFitHorizontally(models.locator(".modelAssignmentPanel"));
       await captureWorkbench(page, testInfo, `settings-models-${isMobile ? "mobile" : "desktop"}`);
-      const addProviderButton = models.getByRole("button", { name: "Add provider" });
+      const addProviderButton = models.getByRole("button", { name: "Connect provider" });
       await addProviderButton.click();
-      const addProviderEditor = models.getByRole("group", { name: "Add provider" });
+      const addProviderEditor = models.getByRole("group", { name: "Connect provider" });
       await expect(addProviderEditor).toBeVisible();
-      await expect(addProviderButton).toHaveAttribute("aria-pressed", "true");
+      await expect(addProviderButton).toHaveAttribute("aria-expanded", "true");
       await addProviderButton.click();
       await expect(addProviderEditor).toHaveCount(0);
-      await expect(addProviderButton).toHaveAttribute("aria-pressed", "false");
+      await expect(addProviderButton).toHaveAttribute("aria-expanded", "false");
       const firstEditButton = models.getByRole("button", { name: "Edit" }).first();
       await firstEditButton.click();
       const providerEditor = models.getByRole("group", { name: "Edit OpenCode Zen" });
       await expect(providerEditor.getByLabel("Provider id")).toBeVisible();
       await expect(providerEditor.getByLabel("API key env")).toHaveValue("OPENCODE_ZEN_API_KEY");
       await expect(providerEditor.getByRole("button", { name: "Fetch models" })).toBeVisible();
-      await expect(firstEditButton).toHaveAttribute("aria-pressed", "true");
+      await expect(firstEditButton).toHaveAttribute("aria-expanded", "true");
       await providerEditor.scrollIntoViewIfNeeded();
       await assertNoHorizontalOverflow(page, settings);
       await captureWorkbench(page, testInfo, `settings-models-editor-${isMobile ? "mobile" : "desktop"}`);
@@ -152,48 +143,12 @@ test.describe("pevo Web Workbench", () => {
       await captureWorkbench(page, testInfo, `settings-models-editor-advanced-${isMobile ? "mobile" : "desktop"}`);
       await firstEditButton.click();
       await expect(providerEditor).toHaveCount(0);
-      await expect(firstEditButton).toHaveAttribute("aria-pressed", "false");
+      await expect(firstEditButton).toHaveAttribute("aria-expanded", "false");
 
       await settings.getByRole("button", { name: "Archived sessions" }).click();
       await expect(settings.getByRole("region", { name: "Archived sessions" })).toBeVisible();
       await assertNoHorizontalOverflow(page, settings);
       await captureWorkbench(page, testInfo, `settings-archived-${isMobile ? "mobile" : "desktop"}`);
-
-      await settings.getByRole("button", { name: "Agents" }).click();
-      await settings.getByRole("button", { name: "Add ACP backend" }).click();
-      const form = settings.getByRole("form", { name: "Profile ACP backend" });
-      await expect(form).toBeVisible();
-      await expect(form.getByLabel("Target")).toHaveCount(0);
-      await expect(form.getByLabel("ID")).toHaveValue("");
-      const commandJson = form.getByLabel("Command JSON");
-      await expect(commandJson).toHaveValue(/"command": "opencode"/);
-      expect(JSON.parse(await commandJson.inputValue())).toEqual({
-        command: "opencode",
-        args: ["acp"],
-        env: {}
-      });
-      expect(await commandJson.evaluate((element) => (element as HTMLTextAreaElement).placeholder)).toBe("");
-      await expect(form.getByLabel("Command", { exact: true })).toHaveCount(0);
-      await expect(form.getByLabel("Args")).toHaveCount(0);
-      await expect(form.getByLabel("Env")).toHaveCount(0);
-      await expect(form.getByLabel("Backend workspace")).toHaveValue("");
-      await expect(form.locator("label").filter({ hasText: "Label" }).getByText("Optional")).toBeVisible();
-      await expect(form.locator("label").filter({ hasText: "Description" }).getByText("Optional")).toBeVisible();
-      await expect(form.getByText(/Resolves to /)).toHaveCount(0);
-      await expect(form.getByLabel("Enabled")).toHaveCount(0);
-      await expect(form.getByText("Entrypoints")).toHaveCount(0);
-      await assertNoHorizontalOverflow(page, form);
-      await expectControlsFitHorizontally(form);
-      await captureWorkbench(page, testInfo, `settings-backend-form-${isMobile ? "mobile" : "desktop"}`);
-      await form.getByLabel("ID").fill("playwright-acp");
-      await commandJson.fill(JSON.stringify({ command: "playwright-acp", args: ["acp"], env: {} }, null, 2));
-      await expect(form.getByRole("button", { name: "Save" })).toBeEnabled();
-      await form.getByRole("button", { name: "Save" }).click();
-      await expect(settings.getByRole("switch", { name: "Disable playwright-acp" })).toBeVisible();
-      await expect(settings.getByLabel("playwright-acp peer entrypoint")).toBeChecked();
-      await expect(settings.getByLabel("playwright-acp subagent entrypoint")).toBeChecked();
-      await assertNoHorizontalOverflow(page, settings);
-      await captureWorkbench(page, testInfo, `settings-backend-row-controls-${isMobile ? "mobile" : "desktop"}`);
 
       await settings.getByRole("button", { name: "Back to app" }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
@@ -219,7 +174,7 @@ test.describe("pevo Web Workbench", () => {
       const settings = page.getByRole("region", { name: "Settings", exact: true });
       await settings.getByRole("button", { name: "Channels" }).click();
 
-      const channels = settings.getByRole("region", { name: "Channels" });
+      const channels = settings.getByRole("region", { name: "Channels", exact: true });
       await expect(channels.getByText("Connected Channels")).toBeVisible();
       await expect(channels.getByText("WeChat · wechat · polling")).toBeVisible();
       await expect(channels.getByText("ready")).toBeVisible();
@@ -280,7 +235,8 @@ test.describe("pevo Web Workbench", () => {
       await detail.getByRole("button", { name: "Back to Channels" }).click();
       await expect(detail.getByText("Discard unsaved changes?")).toBeVisible();
       await detail.getByRole("button", { name: "Discard changes" }).click();
-      const listAgain = settings.getByRole("region", { name: "Channels" });
+      const listAgain = settings.getByRole("region", { name: "Channels", exact: true });
+      await listAgain.getByRole("button", { name: "Set up channel" }).click();
       await listAgain.getByRole("tab", { name: "WeChat" }).click();
       await expect(listAgain.getByText("WeChat connected")).toBeVisible();
       await expect(listAgain.getByRole("button", { name: "Reconnect QR" })).toBeVisible();

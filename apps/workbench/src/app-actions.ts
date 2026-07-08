@@ -38,7 +38,7 @@ import {
   optionalStringField,
   parseBackendDoctor
 } from "./data";
-import { backendDraftFromBackend, parseBackendCommandJson } from "./settings-panels";
+import { backendDraftFromBackend, parseBackendCommandJson } from "./capabilities-agents-config";
 import { transcriptSearchText } from "./search";
 import {
   multilineList,

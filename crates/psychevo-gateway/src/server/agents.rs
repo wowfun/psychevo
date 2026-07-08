@@ -986,6 +986,79 @@ pub(super) fn backend_values_for_scope(
         .collect()
 }
 
+pub(super) fn materialize_local_acp_backends(
+    state: &WebState,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<()> {
+    let existing_backends =
+        load_agent_backend_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
+    let config_dir = active_profile_config_dir(state, scope);
+    for shortcut in local_acp_backend_shortcuts() {
+        if existing_backends.contains_key(shortcut.id) {
+            continue;
+        }
+        if resolve_command_path(
+            shortcut.command,
+            &state.inner.inherited_env,
+            &scope.cwd,
+            HostPlatform::current(),
+        )
+        .is_none()
+        {
+            continue;
+        }
+        set_config_value(
+            config_dir.clone(),
+            &format!("agents.backends.{}", shortcut.id),
+            local_acp_backend_config_json(shortcut),
+        )?;
+    }
+    Ok(())
+}
+
+struct LocalAcpBackendShortcut {
+    id: &'static str,
+    label: &'static str,
+    description: &'static str,
+    command: &'static str,
+    args: &'static [&'static str],
+}
+
+fn local_acp_backend_shortcuts() -> &'static [LocalAcpBackendShortcut] {
+    &[
+        LocalAcpBackendShortcut {
+            id: "opencode",
+            label: "OpenCode",
+            description: "OpenCode ACP coding agent.",
+            command: "opencode",
+            args: &["acp"],
+        },
+        LocalAcpBackendShortcut {
+            id: "hermes",
+            label: "Hermes",
+            description: "Hermes ACP coding agent.",
+            command: "hermes",
+            args: &["acp"],
+        },
+    ]
+}
+
+fn local_acp_backend_config_json(shortcut: &LocalAcpBackendShortcut) -> Value {
+    json!({
+        "kind": "acp",
+        "enabled": true,
+        "label": shortcut.label,
+        "description": shortcut.description,
+        "command": shortcut.command,
+        "args": shortcut.args,
+        "env": {},
+        "cwd": "invocation",
+        "entrypoints": ["peer", "subagent"],
+        "client_capabilities": ["fs.read", "fs.write", "terminal"],
+        "mcp_servers": []
+    })
+}
+
 pub(super) fn write_backend_config(
     state: &WebState,
     scope: &ResolvedScope,

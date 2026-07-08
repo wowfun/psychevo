@@ -27,10 +27,10 @@ test.describe("Workbench New/Create visual contract", () => {
       await captureWorkbench(page, testInfo, `new-create-automations-${isMobile ? "mobile" : "desktop"}`);
 
       await openTopLevelView(page, isMobile, "Settings");
-      const settings = page.getByRole("region", { name: "Settings", exact: true });
+      let settings = page.getByRole("region", { name: "Settings", exact: true });
       await expect(settings).toBeVisible();
       await openSettingsSection(settings, "Models");
-      const models = settings.getByRole("region", { name: "Models" });
+      const models = settings.getByRole("region", { name: "Models", exact: true });
       await models.getByRole("button", { name: "Connect provider" }).click();
       await expectPanelInViewport(page, models.getByRole("group", { name: "Connect provider" }), "connect provider panel");
       await captureWorkbench(page, testInfo, `new-create-models-connect-${isMobile ? "mobile" : "desktop"}`);
@@ -38,24 +38,33 @@ test.describe("Workbench New/Create visual contract", () => {
 
       const editProvider = models.locator(".modelProviderRow", { hasText: "OpenCode Zen" }).getByRole("button", { name: "Edit" });
       await editProvider.click();
-      await expectPanelInViewport(page, models.getByRole("group", { name: "Edit OpenCode Zen" }), "edit provider panel");
+      const editProviderPanel = models.getByRole("group", { name: "Edit OpenCode Zen" });
+      await editProviderPanel.scrollIntoViewIfNeeded();
+      await expectPanelInViewport(page, editProviderPanel, "edit provider panel");
       await captureWorkbench(page, testInfo, `new-create-models-edit-${isMobile ? "mobile" : "desktop"}`);
 
-      await openSettingsSection(settings, "Agents");
-      const agents = settings.getByRole("region", { name: "Agents" });
-      await agents.getByRole("button", { name: "Add ACP backend" }).click();
-      await expectPanelInViewport(page, agents.getByRole("group", { name: "Add backend" }), "add backend panel");
-      await captureWorkbench(page, testInfo, `new-create-agents-backend-${isMobile ? "mobile" : "desktop"}`);
+      await openTopLevelView(page, isMobile, "Capabilities");
+      let capabilities = page.getByRole("region", { name: "Capabilities" });
+      await expect(capabilities).toBeVisible();
+      await capabilities.getByRole("tab", { name: "Agents" }).click();
+      await capabilities.getByRole("tab", { name: "ACP Backends" }).click();
+      await capabilities.getByRole("button", { name: "Add ACP backend" }).click();
+      await expectPanelInViewport(page, capabilities.getByRole("group", { name: "Add backend" }), "add backend panel");
+      await captureWorkbench(page, testInfo, `new-create-capabilities-agents-backend-${isMobile ? "mobile" : "desktop"}`);
 
+      await openTopLevelView(page, isMobile, "Settings");
+      settings = page.getByRole("region", { name: "Settings", exact: true });
+      await expect(settings).toBeVisible();
       await openSettingsSection(settings, "Channels");
-      const channels = settings.getByRole("region", { name: "Channels" });
+      const channels = settings.getByRole("region", { name: "Channels", exact: true });
       await channels.getByRole("button", { name: "Set up channel" }).click();
       await expectPanelInViewport(page, channels.getByRole("group", { name: "Set up channel" }), "set up channel panel");
       await captureWorkbench(page, testInfo, `new-create-channels-setup-${isMobile ? "mobile" : "desktop"}`);
 
       await openTopLevelView(page, isMobile, "Capabilities");
-      const capabilities = page.getByRole("region", { name: "Capabilities" });
+      capabilities = page.getByRole("region", { name: "Capabilities" });
       await expect(capabilities).toBeVisible();
+      await capabilities.getByRole("tab", { name: "Skills" }).click();
       await capabilities.getByRole("button", { name: "Install skill" }).click();
       await expectPanelInViewport(page, capabilities.getByRole("group", { name: "Install skill" }), "install skill panel");
       await captureWorkbench(page, testInfo, `new-create-capabilities-skills-${isMobile ? "mobile" : "desktop"}`);
@@ -94,7 +103,7 @@ async function openTopLevelView(page: Page, isMobile: boolean, name: "Automation
 
 async function openSettingsSection(settings: Locator, name: string) {
   await settings.getByRole("button", { name }).click();
-  await expect(settings.getByRole("region", { name })).toBeVisible();
+  await expect(settings.getByRole("region", { name, exact: true })).toBeVisible();
 }
 
 async function openCapabilityPanel(page: Page, capabilities: Locator, tabName: string, actionName: string) {

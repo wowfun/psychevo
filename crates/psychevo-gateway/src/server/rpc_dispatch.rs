@@ -708,6 +708,7 @@ async fn handle_rpc(
         "backend/list" => {
             let params = request.params::<wire::BackendListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            materialize_local_acp_backends(&state, &scope)?;
             let backends = load_agent_backend_configs(
                 &state.inner.home,
                 &scope.cwd,
@@ -720,6 +721,7 @@ async fn handle_rpc(
         "backend/doctor" => {
             let params = request.required_params::<wire::BackendDoctorParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            materialize_local_acp_backends(&state, &scope)?;
             let backends = load_agent_backend_configs(
                 &state.inner.home,
                 &scope.cwd,

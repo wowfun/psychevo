@@ -9,7 +9,7 @@ import { ComposerRuntimeControls } from "./runtime-controls";
 import { ComposerDictationButton, ComposerVoiceOptionSwitches } from "./voice-controls";
 import { RightWorkspace, rightWorkspaceTabLabel } from "./right-workspace";
 import { DEFAULT_RIGHT_WIDTH_PX } from "./storage";
-import { EMPTY_BACKEND_DRAFT, backendDraftFromBackend } from "./settings-panels";
+import { EMPTY_BACKEND_DRAFT, backendDraftFromBackend } from "./capabilities-agents-config";
 
 const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
 
@@ -418,7 +418,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 openCapabilitiesTab("agents");
                 setBackendDraft({ ...EMPTY_BACKEND_DRAFT });
               }}
-              onOpenCapabilitiesAgents={() => openCapabilitiesTab("agents")}
               onOpenSession={(threadId) => void runAction(async () => {
                 const epoch = beginExplicitViewSwitch();
                 await refreshSnapshot(client, threadId, undefined, false, epoch);

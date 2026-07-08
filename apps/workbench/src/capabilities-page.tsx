@@ -3,7 +3,7 @@ import type { GatewayClient } from "@psychevo/client";
 import { ActionButton, CreatePanel, MarkdownText, Switch } from "@psychevo/components";
 import type { GatewayRequestScope, TeamMemberInput } from "@psychevo/protocol";
 import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, X } from "lucide-react";
-import { AgentsConfigPanel } from "./settings-panels/agents";
+import { AgentsConfigPanel } from "./capabilities-agents-config";
 import type { BackendConfigTarget, BackendDraft, CapabilityTab, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
 type JsonObject = Record<string, unknown>;

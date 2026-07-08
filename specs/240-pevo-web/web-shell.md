@@ -43,17 +43,18 @@ request scope's cwd plus the active profile home. Backend writes must name
 an explicit target, `project` or `profile`; project writes update
 `<cwd>/.psychevo/config.toml`, while profile writes update the active
 profile config, normally `$PSYCHEVO_HOME/config.toml` and the explicit
-`PSYCHEVO_CONFIG` file when that environment override is active. Workbench GUI backend forms are embedded in
-Settings > Agents and only submit Profile-level writes or deletes; they do not
-expose the backend target selector. `backend/write` treats blank label and
+`PSYCHEVO_CONFIG` file when that environment override is active. Workbench GUI
+backend forms are embedded in `Capabilities > Agents > ACP Backends` and only
+submit Profile-level writes or deletes; they do not expose the backend target
+selector. `backend/write` treats blank label and
 description as absent optional metadata, while backend views still expose an
 effective label that falls back to the backend id for display. Blank CWD writes
 the internal `invocation` sentinel; ACP peer launch resolves empty or
 `invocation` CWD to the active request scope cwd, relative CWD values under
 that cwd, and absolute values as entered. Workbench exposes backend enabled
 state and `peer`/`subagent` entrypoint selection as row-level controls in
-Settings > Agents and persists them with the same Profile-level backend write
-path. Workbench may present Command, Args, and Env as one JSON editor for
+`Capabilities > Agents > ACP Backends` and persists them with the same
+Profile-level backend write path. Workbench may present Command, Args, and Env as one JSON editor for
 usability, but it still submits the existing `backend/write` `command`, `args`,
 and `env` fields after client-side validation. A single Gateway process never
 reads or writes inactive profiles.
@@ -70,7 +71,7 @@ selections submit that agent name and are persisted to the current session's
 main-agent metadata. Backend-backed agents, including generated ACP backend
 agents, are runnable from the composer only when they support the `peer`
 entrypoint; backend registrations that are disabled or `subagent`-only remain
-configurable/diagnosable in Settings > Agents but must not appear in the
+configurable/diagnosable in `Capabilities > Agents` but must not appear in the
 composer selector or remain selected there. Ordinary non-backend agent
 definitions can remain selectable as current-session agents. Shadowed and
 invalid definitions remain visible only in the Agents panel diagnostics, not in
@@ -484,7 +485,7 @@ optional `alternateAction`) for visible commands. Commands hidden because
 Workbench cannot represent them are omitted from discovery and slash completion;
 GUI `/agents` is one such hidden command because current-session agent selection
 is handled by the composer selector and app-level ACP backend configuration
-lives in Settings > Agents. If a hidden command is typed explicitly,
+lives in `Capabilities > Agents`. If a hidden command is typed explicitly,
 `command/execute` returns `known=true`, `accepted=false`, bounded guidance, and
 optional alternate action. Unknown slash-looking input returns `known=false`
 with a `passThroughPrompt` host action.

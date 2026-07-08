@@ -25,7 +25,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await capture(page, testInfo, "00-transcript");
 
-      const agentsPanel = await openSettingsAgents(page);
+      const agentsPanel = await openCapabilityBackendPanel(page);
       await expect(agentsPanel.getByText("No ACP backends configured.")).toBeVisible();
       await expectElementInsideViewport(page, agentsPanel);
       await capture(page, testInfo, "01-agents-empty");
@@ -127,7 +127,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
-      const agentsPanel = await openSettingsAgents(page);
+      const agentsPanel = await openCapabilityBackendPanel(page);
       await ensureOpenCodeBackend(agentsPanel);
       await page.getByRole("button", { name: "New Session", exact: true }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
@@ -190,7 +190,7 @@ async function openPanel(page: Page, isMobile: boolean, name: "History" | "Statu
   }
 }
 
-async function openSettingsAgents(page: Page): Promise<Locator> {
+async function openCapabilityBackendPanel(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "Capabilities" }).click();
   const capabilities = page.getByRole("region", { name: "Capabilities" });
   await expect(capabilities).toBeVisible();

@@ -3,7 +3,6 @@ import {
   Activity,
   Archive,
   ArrowLeft,
-  Bot,
   BrainCircuit,
   Bug,
   Keyboard,
@@ -15,7 +14,7 @@ import {
 } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, ModelOptionView, SessionSummary } from "@psychevo/protocol";
-import { ActionButton, Switch } from "@psychevo/components";
+import { Switch } from "@psychevo/components";
 import type {
   Appearance,
   SessionBrowserWorkspaceState,
@@ -31,15 +30,12 @@ import { SlashCommandsSettingsPanel } from "./settings-panels/slash";
 import { ArchivedSessionsPanel, UsageSettingsPanel } from "./settings-panels/usage";
 import type { ChannelSettingsControls, ChannelUpdateDraft } from "./settings-panels/types";
 
-export { EMPTY_BACKEND_DRAFT, backendDraftFromBackend, parseBackendCommandJson } from "./settings-panels/agents";
-
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string }> = [
   { id: "appearance", label: "Appearance", description: "Theme" },
   { id: "models", label: "Models", description: "Providers and auxiliary models" },
   { id: "slash", label: "Slash Commands", description: "Aliases and TUI shortcuts" },
   { id: "usage", label: "Usage", description: "Tokens and cost" },
   { id: "debug", label: "Debug", description: "Developer diagnostics" },
-  { id: "agents", label: "Agents", description: "Open Capabilities agents" },
   { id: "channels", label: "Channels", description: "Messaging connections" },
   { id: "archived", label: "Archived sessions", description: "Restore or delete" }
 ];
@@ -66,7 +62,6 @@ export function SettingsPage({
   onLoadChannelSources,
   onModelAssignmentSaved,
   onModelCatalogLoaded,
-  onOpenAgents,
   onPollWechatQrSetup,
   onRestoreArchivedSession,
   onSectionChange,
@@ -100,7 +95,6 @@ export function SettingsPage({
   onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
-  onOpenAgents(): void;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRestoreArchivedSession(threadId: string): void;
   onSectionChange(value: SettingsSection): void;
@@ -205,7 +199,6 @@ export function SettingsPage({
               onLoadChannelSources={onLoadChannelSources}
               onModelAssignmentSaved={onModelAssignmentSaved}
               onModelCatalogLoaded={onModelCatalogLoaded}
-              onOpenAgents={onOpenAgents}
               onPollWechatQrSetup={onPollWechatQrSetup}
               onRestoreArchivedSession={onRestoreArchivedSession}
               onSlashSettingsSaved={onSlashSettingsSaved}
@@ -245,7 +238,6 @@ function SettingsSectionPanel({
   onLoadChannelSources,
   onModelAssignmentSaved,
   onModelCatalogLoaded,
-  onOpenAgents,
   onPollWechatQrSetup,
   onRefreshUsageStats,
   onRestoreArchivedSession,
@@ -277,7 +269,6 @@ function SettingsSectionPanel({
   onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
-  onOpenAgents(): void;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRefreshUsageStats(): void;
   onRestoreArchivedSession(threadId: string): void;
@@ -358,16 +349,6 @@ function SettingsSectionPanel({
           </SettingsOptionRow>
         </div>
       );
-    case "agents":
-      return (
-        <section className="settingsRows" aria-label="Agents">
-          <SettingsOptionRow title="Agent management" description="Create, edit, enable, disable, and delete agents from Capabilities.">
-            <ActionButton disabled={disabled} onClick={onOpenAgents} variant="primary">
-              Open Agents
-            </ActionButton>
-          </SettingsOptionRow>
-        </section>
-      );
     case "channels":
       return (
         <ChannelsSettingsPanel
@@ -425,8 +406,6 @@ function settingsSectionIcon(section: SettingsSection, size: number): ReactNode 
       return <Archive size={size} />;
     case "debug":
       return <Bug size={size} />;
-    case "agents":
-      return <Bot size={size} />;
     case "channels":
       return <MessageCircle size={size} />;
   }

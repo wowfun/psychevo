@@ -176,6 +176,131 @@ command = "cursor-agent"
 }
 
 #[tokio::test]
+async fn backend_list_auto_creates_detected_local_acp_backends() {
+    let bin = tempfile::tempdir().expect("bin tempdir");
+    write_command_shim(&bin.path().join("opencode"));
+    write_command_shim(&bin.path().join("hermes"));
+    let (_temp, state) = web_state_with_env(BTreeMap::from([(
+        "PATH".to_string(),
+        bin.path().display().to_string(),
+    )]));
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let backends = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("1")),
+            method: "backend/list".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("backend/list");
+    let records = backends["backends"].as_array().expect("backends");
+    let opencode = records
+        .iter()
+        .find(|backend| backend["id"] == "opencode")
+        .expect("opencode backend");
+    assert_eq!(opencode["command"], "opencode");
+    assert_eq!(opencode["args"], json!(["acp"]));
+    assert_eq!(opencode["sourceTargets"], json!(["profile"]));
+    assert_eq!(opencode["entrypoints"], json!(["peer", "subagent"]));
+    let hermes = records
+        .iter()
+        .find(|backend| backend["id"] == "hermes")
+        .expect("hermes backend");
+    assert_eq!(hermes["command"], "hermes");
+    assert_eq!(hermes["args"], json!(["acp"]));
+    assert_eq!(hermes["sourceTargets"], json!(["profile"]));
+
+    let config = std::fs::read_to_string(state.inner.home.join("config.toml")).expect("config");
+    assert!(config.contains("[agents.backends.opencode]"));
+    assert!(config.contains("[agents.backends.hermes]"));
+    assert!(config.contains("command = \"opencode\""));
+    assert!(config.contains("command = \"hermes\""));
+
+    let agents = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("2")),
+            method: "agent/list".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("agent/list");
+    let agent_records = agents["agents"].as_array().expect("agents");
+    assert!(agent_records.iter().any(|agent| agent["name"] == "opencode"));
+    assert!(agent_records.iter().any(|agent| agent["name"] == "hermes"));
+}
+
+#[tokio::test]
+async fn backend_list_does_not_auto_create_over_existing_effective_backend() {
+    let bin = tempfile::tempdir().expect("bin tempdir");
+    write_command_shim(&bin.path().join("hermes"));
+    let (_temp, state) = web_state_with_env(BTreeMap::from([(
+        "PATH".to_string(),
+        bin.path().display().to_string(),
+    )]));
+    let project_config = state.inner.cwd.join(".psychevo").join("config.toml");
+    std::fs::create_dir_all(project_config.parent().expect("project config parent"))
+        .expect("project config dir");
+    std::fs::write(
+        &project_config,
+        r#"[agents.backends.hermes]
+kind = "acp"
+label = "Project Hermes"
+command = "custom-hermes"
+args = ["serve-acp"]
+"#,
+    )
+    .expect("project config");
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let backends = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("1")),
+            method: "backend/list".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("backend/list");
+    let hermes = backends["backends"]
+        .as_array()
+        .expect("backends")
+        .iter()
+        .find(|backend| backend["id"] == "hermes")
+        .expect("hermes backend");
+    assert_eq!(hermes["label"], "Project Hermes");
+    assert_eq!(hermes["command"], "custom-hermes");
+    assert_eq!(hermes["args"], json!(["serve-acp"]));
+    assert_eq!(hermes["sourceTargets"], json!(["project"]));
+    assert!(!state.inner.home.join("config.toml").exists());
+}
+
+fn write_command_shim(path: &Path) {
+    std::fs::write(path, "#!/bin/sh\n").expect("command shim");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(path).expect("command shim metadata").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).expect("command shim permissions");
+    }
+}
+
+#[tokio::test]
 async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
     let (_temp, state) = web_state();
     let project_agents = state.inner.cwd.join(".psychevo/agents");

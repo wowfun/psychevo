@@ -210,7 +210,6 @@ export function MainSurface({
   onMainViewChange,
   onCapabilitiesTabChange,
   onOpenAutomationThread,
-  onOpenCapabilitiesAgents,
   onModelAssignmentSaved,
   onModelCatalogLoaded,
   onNewBackend,
@@ -278,7 +277,6 @@ export function MainSurface({
   onMainViewChange(value: MainView): void;
   onCapabilitiesTabChange(value: CapabilityTab): void;
   onOpenAutomationThread(threadId: string): void;
-  onOpenCapabilitiesAgents(): void;
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
   onNewBackend(): void;
@@ -335,7 +333,6 @@ export function MainSurface({
         onDoctorChannels={onDoctorChannels}
         onModelAssignmentSaved={onModelAssignmentSaved}
         onModelCatalogLoaded={onModelCatalogLoaded}
-        onOpenAgents={onOpenCapabilitiesAgents}
         onOpenTranscript={() => onMainViewChange("transcript")}
         onLoadChannelSources={onLoadChannelSources}
         onPollWechatQrSetup={onPollWechatQrSetup}

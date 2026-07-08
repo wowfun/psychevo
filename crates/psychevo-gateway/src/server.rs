@@ -106,10 +106,10 @@ mod workspace;
 use agents::{
     active_profile_config_dir, agent_control_result, agent_list_result, agent_read_result,
     agent_status_result, backend_doctor_value, backend_values_for_scope, delete_agent_definition,
-    delete_backend_config, delete_team_definition, discover_gateway_teams, read_agent_definition,
-    read_team_definition, set_agent_definition_enabled, set_team_definition_enabled,
-    team_list_result, team_read_result, team_status_result, write_agent_definition,
-    write_backend_config, write_team_definition,
+    delete_backend_config, delete_team_definition, discover_gateway_teams,
+    materialize_local_acp_backends, read_agent_definition, read_team_definition,
+    set_agent_definition_enabled, set_team_definition_enabled, team_list_result, team_read_result,
+    team_status_result, write_agent_definition, write_backend_config, write_team_definition,
 };
 use automations::{
     automation_delete_result, automation_draft_result, automation_list_result,

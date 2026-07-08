@@ -16,7 +16,8 @@ execution for Psychevo.
 
 Out of scope:
 
-- network relay, LAN exposure, cloud agent registries, and automatic discovery
+- network relay, LAN exposure, cloud agent registries, and broad automatic
+  discovery beyond the localhost executable shortcuts defined below
 - durable cron or scheduled peer-agent execution
 - broad built-in templates for specific ACP agents beyond explicitly supported
   product shortcuts such as OpenCode
@@ -132,12 +133,13 @@ External ACP `session/request_permission` requests are projected as Gateway
 permission requests. If no interactive approval handler is available, requests
 fail closed and the peer timeline records a diagnostic.
 
-Workbench exposes configured Profile ACP backends in Settings > Agents as an
-app-level peer-agent configuration surface. Users can add, edit, delete, enable,
-disable, choose `peer`/`subagent` entrypoints, and run backend diagnostics for
-Profile-level registrations. Project-level backend definitions can still be
-read by Gateway and affect runtime behavior, but Workbench does not edit them
-from Settings. Backend management is configuration editing; it does not grant
+Workbench exposes configured Profile ACP backends in
+`Capabilities > Agents > ACP Backends` as an app-level peer-agent configuration
+surface. Users can add, edit, delete, enable, disable, choose
+`peer`/`subagent` entrypoints, and run backend diagnostics for Profile-level
+registrations. Project-level backend definitions can still be read by Gateway
+and affect runtime behavior, but Workbench does not edit them from this GUI
+surface. Backend management is configuration editing; it does not grant
 execution permission beyond the existing selected-agent policy and Gateway
 permission flow.
 
@@ -145,6 +147,18 @@ Workbench uses a generic ACP backend add action rather than an OpenCode-specific
 shortcut. The editor represents `command`, `args`, and `env` as one JSON input,
 for example `{ "command": "opencode", "args": ["acp"], "env": {} }`, and writes
 the parsed values to the normal backend registration fields.
+
+Gateway may materialize product-specific localhost shortcuts before returning
+the backend catalog. If the effective launch environment resolves `opencode`
+and no effective `opencode` backend already exists, Gateway writes a Profile ACP
+backend with command `opencode` and args `["acp"]`. If the environment resolves
+`hermes` and no effective `hermes` backend already exists, Gateway writes a
+Profile ACP backend with command `hermes` and args `["acp"]`. Auto-created
+shortcuts use the normal defaults for enablement, entrypoints, client
+capabilities, cwd, diagnostics, generated agent identity, and
+`Capabilities > Agents > ACP Backends` display. Gateway must not overwrite
+existing Profile or Project backend definitions, and it must not create config
+from network discovery or browser-only environment assumptions.
 
 ## Execution Semantics
 

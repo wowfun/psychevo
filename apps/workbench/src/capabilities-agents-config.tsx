@@ -1,7 +1,7 @@
 import { Edit3, PlugZap, Plus, Save, Trash2, Wrench, X } from "lucide-react";
 import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
-import { prettyJson } from "../data";
-import type { BackendCommandJson, BackendDraft, WorkbenchBackend, WorkbenchBackendDoctor } from "../types";
+import { prettyJson } from "./data";
+import type { BackendCommandJson, BackendDraft, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
 const BACKEND_ENTRYPOINTS = ["peer", "subagent"] as const;
 const BACKEND_CLIENT_CAPABILITIES = ["fs.read", "fs.write", "terminal"] as const;

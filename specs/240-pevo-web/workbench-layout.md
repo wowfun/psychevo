@@ -11,9 +11,10 @@ The desktop layout is a three-surface workbench:
   `Pinned`, project-grouped Sessions with expand/collapse and per-project new
   session actions, and a bottom utility rail for Settings. Settings is the
   persistent app-level configuration center whose left navigation lists
-  `Appearance`, `Debug`, and `Agents` directly, with bottom-aligned
-  `Archived sessions` for archived-session management; the Agents section
-  contains embedded Profile-level ACP backend configuration. The ordinary
+  `Appearance`, `Models`, `Slash Commands`, `Usage`, `Debug`, and `Channels`
+  directly, with bottom-aligned `Archived sessions` for archived-session
+  management. Agent definitions, teams, and ACP backend configuration live in
+  `Capabilities > Agents`; Settings does not include an Agents entry. The ordinary
   Workbench left sidebar always lists active sessions and does not become an
   archived-session filter.
   Composer-triggered `/commands` remains a closeable overlay over the transcript.
@@ -182,8 +183,9 @@ list, composer, mobile Workbench panel tabs, and right inspector. It does not
 show a separate top Settings header or top-right close button; its return
 control sits at the top of the Settings left navigation, followed by a settings
 search field, and the current project/cwd path is not repeated there. The
-internal left navigation lists `Appearance`, `Debug`, and `Agents` directly,
-with `Archived sessions` pinned to the bottom.
+internal left navigation lists `Appearance`, `Models`, `Slash Commands`,
+`Usage`, `Debug`, and `Channels` directly, with `Archived sessions` pinned to
+the bottom.
 `Appearance` includes a local appearance control with `dark`, `light`, and
 `warm` choices, `Archived sessions` directly lists archived sessions for
 restore/delete workflows, and `Debug` owns the local Debug switch. The ordinary
@@ -201,25 +203,15 @@ muted, and navigation text so Gateway-rendered status/settings data remains
 readable under all appearances. All three appearances share the same Workbench
 font scale and row density. Settings creation flows use scoped create/edit
 panels inside the selected page instead of bottom-stacked always-visible forms.
-Provider setup uses `Connect provider`; Profile ACP backend setup uses
-`Add backend`; channel setup uses `Set up channel`. Successful saves close the
-panel and refresh the page data, while failures keep the panel open with the
-entered draft and inline error. The opened panel must be placed in the owning
-page's scrollable content column, not below the viewport or outside the visible
-page bounds; long forms scroll within the page/panel while header, close, and
-primary actions remain reachable at desktop and narrow Workbench widths. The `Agents`
-section shows only configurable Profile-level ACP backend registrations and
-diagnostics; it does not list the read-only effective agent catalog or
-Project-level backend definitions because those are not configurable from the
-GUI. Its add control opens a generic ACP backend editor with an
-editable OpenCode ACP command JSON template prefilled for new drafts, rather
-than an OpenCode-specific backend preset. Each listed Profile ACP backend exposes its
-enabled state as a row-level switch in Settings > Agents plus ordinary
-checkboxes for the `peer` and `subagent` entrypoints. The editor does not
-duplicate those row controls. The editor only requires ID and a valid command
-string inside its Command JSON input; Label and Description are optional
-metadata, and default CWD is shown as an empty field with a `Defaults to
-workspace` placeholder instead of the raw `invocation` sentinel.
+Provider setup uses `Connect provider`; channel setup uses `Set up channel`.
+Successful saves close the panel and refresh the page data, while failures keep
+the panel open with the entered draft and inline error. The opened panel must be
+placed in the owning page's scrollable content column, not below the viewport or
+outside the visible page bounds; long forms scroll within the page/panel while
+header, close, and primary actions remain reachable at desktop and narrow
+Workbench widths. Profile ACP backend setup uses `Add backend` inside
+`Capabilities > Agents > ACP Backends`, where each listed Profile ACP backend
+exposes its enabled state and `peer`/`subagent` entrypoint controls.
 Session-scoped Agent,
 Model, Variant, and Permission mode controls remain in the composer/status
 surfaces and are not duplicated in Settings. Enabling Debug adds a right-side

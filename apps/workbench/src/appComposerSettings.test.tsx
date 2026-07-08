@@ -43,7 +43,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(settingsRegion).getByRole("button", { name: "Models" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Slash Commands" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Debug" })).toBeTruthy();
-    expect(within(settingsRegion).getByRole("button", { name: "Agents" })).toBeTruthy();
+    expect(within(settingsRegion).queryByRole("button", { name: "Agents" })).toBeNull();
     expect(within(settingsRegion).getByRole("button", { name: "Channels" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Dark" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Light" })).toBeTruthy();
@@ -367,26 +367,20 @@ describe("Workbench settings and backend controls", () => {
     ))).toBe(true);
   });
 
-  it("routes Settings Agents to Capabilities Agents", async () => {
+  it("does not expose Agent management from Settings", async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
     const settingsRegion = await screen.findByRole("region", { name: "Settings" });
-    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Agents" }));
 
-    expect(within(settingsRegion).getByRole("button", { name: "Agents" }).getAttribute("aria-current")).toBe("page");
-    expect(within(settingsRegion).getByRole("region", { name: "Agents" })).toBeTruthy();
-    expect(within(settingsRegion).getByRole("button", { name: "Open Agents" })).toBeTruthy();
+    expect(within(settingsRegion).queryByRole("button", { name: "Agents" })).toBeNull();
+    expect(within(settingsRegion).queryByRole("region", { name: "Agents" })).toBeNull();
+    expect(within(settingsRegion).queryByRole("button", { name: "Add ACP backend" })).toBeNull();
     expect(within(settingsRegion).queryByText("Profile ACP Backends")).toBeNull();
     expect(within(settingsRegion).queryByText("Translate user messages")).toBeNull();
     expect(within(settingsRegion).queryByRole("combobox", { name: "Agent" })).toBeNull();
     expect(within(settingsRegion).queryByRole("combobox", { name: "Model" })).toBeNull();
     expect(within(settingsRegion).queryByRole("combobox", { name: "Permission mode" })).toBeNull();
-
-    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Open Agents" }));
-    const capabilitiesRegion = await screen.findByRole("region", { name: "Capabilities" });
-    expect(within(capabilitiesRegion).getByRole("tab", { name: "Agents" }).getAttribute("aria-selected")).toBe("true");
-    expect(within(capabilitiesRegion).getByRole("tab", { name: "Definitions" })).toBeTruthy();
   });
 
   it("shows Channels as Settings rows with switches and an independent detail page", async () => {
