@@ -7,6 +7,11 @@
   channel, and TUI flows.
 - Added Workbench team management and mission controls, including Capabilities
   editing, Team workspace actions, and team/mission/member status labels.
+- Moved Workbench agent, team, and ACP backend management under
+  `Capabilities > Agents`, with local ACP backend auto-creation for detected
+  `opencode acp` and `hermes acp` commands.
+- Improved `peval-py serve` Source Manager imports, source-list scrolling, and
+  Leaderboard-to-step details.
 
 ## 2026-07-06
 
