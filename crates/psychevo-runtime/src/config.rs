@@ -39,6 +39,7 @@ pub(crate) struct RunConfig {
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) mcp_servers: Vec<McpServerInput>,
     pub(crate) agent_backends: BTreeMap<String, AgentBackendConfig>,
+    pub(crate) runtime_profiles: BTreeMap<String, RuntimeProfileConfig>,
     pub(crate) channels: ChannelsConfig,
     pub(crate) voice: VoiceConfig,
     pub(crate) image_generation: ImageGenerationConfig,
@@ -53,8 +54,8 @@ pub(crate) use config_types::*;
 pub use config_types::{
     DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, REASONING_EFFORT_VALUES,
     ResolvedImageGenerationConfig, ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig,
-    ResolvedVoiceTtsConfig, load_agent_backend_configs, resolve_default_workspace_cwd,
-    resolve_workspace_root,
+    ResolvedVoiceTtsConfig, RuntimeProfileConfig, RuntimeProfileKind, load_agent_backend_configs,
+    load_runtime_profile_configs, resolve_default_workspace_cwd, resolve_workspace_root,
 };
 #[path = "config/file_env.rs"]
 pub(crate) mod config_file_env;

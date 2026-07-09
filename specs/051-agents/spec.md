@@ -19,6 +19,7 @@ the same definition model.
 - model preference, skill, hook, and MCP-scope contributions
 - compatibility input formats for local agent definitions
 - external peer-agent backend references and generated agent identities
+- generated Runtime Profile agent identities from runtime snapshots
 
 Out of scope:
 
@@ -107,6 +108,14 @@ prompt catalogs must exclude invalid definitions.
 External `--agents` JSON, settings-provided agents, and plugin-provided agents
 are future compatibility targets and are not loaded in the first implementation
 slice.
+
+Runtime Profiles may generate default agent identities from runtime snapshots,
+for example OpenCode native agents or Codex profile presets. Generated runtime
+agents follow normal catalog precedence, are shadowed by same-name Markdown
+definitions, and preserve their `runtimeRef` plus native runtime ids in
+metadata. Markdown definitions may reference runtime-backed generated agents by
+name, but command, args, env, and provider secrets remain Runtime Profile
+configuration, not Markdown frontmatter.
 
 Configured external backends may generate default agent definitions. Generated
 definitions follow normal catalog precedence and are shadowed by Markdown
@@ -320,6 +329,8 @@ permission, resource, context, tool, or registry boundaries.
 - [Peer Agents](peer-agents.md) defines configured external backend references,
   generated agent identities, ACP client behavior, and unified surface
   projection.
+- [052 Agent Runtimes](../052-agent-runtimes/spec.md) defines Runtime Profiles,
+  direct Codex/OpenCode adapters, and runtime-generated identities.
 
 ## Related Topics
 

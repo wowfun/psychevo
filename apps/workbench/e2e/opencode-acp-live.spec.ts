@@ -26,27 +26,35 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await capture(page, testInfo, "00-transcript");
 
       const agentsPanel = await openCapabilityBackendPanel(page);
-      await expect(agentsPanel.getByText("No ACP backends configured.")).toBeVisible();
-      await expectElementInsideViewport(page, agentsPanel);
-      await capture(page, testInfo, "01-agents-empty");
+      const existingOpenCode = agentsPanel.locator(".agentBackendRow").filter({ hasText: "opencode acp" });
+      if ((await existingOpenCode.count()) === 0) {
+        await expect(agentsPanel.getByText("No ACP backends configured.")).toBeVisible();
+        await expectElementInsideViewport(page, agentsPanel);
+        await capture(page, testInfo, "01-agents-empty");
 
-      await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
-      const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
-      await expect(form).toBeVisible();
-      await expect(form.getByLabel("ID")).toHaveValue("");
-      await expect(form.getByLabel("Target")).toHaveCount(0);
-      await form.getByLabel("ID").fill("opencode");
-      await form.getByLabel("Command JSON").fill(JSON.stringify({
-        command: "opencode",
-        args: ["acp"],
-        env: {}
-      }, null, 2));
-      await expectElementInsideViewport(page, form);
-      await expectDialogControlsFit(form);
-      await capture(page, testInfo, "02-opencode-dialog");
+        await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
+        const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
+        await expect(form).toBeVisible();
+        await expect(form.getByLabel("ID")).toHaveValue("");
+        await expect(form.getByLabel("Target")).toHaveCount(0);
+        await form.getByLabel("ID").fill("opencode");
+        await form.getByLabel("Command JSON").fill(JSON.stringify({
+          command: "opencode",
+          args: ["acp"],
+          env: {}
+        }, null, 2));
+        await expectElementInsideViewport(page, form);
+        await expectDialogControlsFit(form);
+        await capture(page, testInfo, "02-opencode-dialog");
 
-      await form.getByRole("button", { name: "Save" }).click();
-      await expect(form).toBeHidden();
+        await form.getByRole("button", { name: "Save" }).click();
+        await expect(form).toBeHidden();
+      } else {
+        await expect(existingOpenCode.first()).toBeVisible();
+        await expectElementInsideViewport(page, agentsPanel);
+        await capture(page, testInfo, "01-agents-existing");
+      }
+      await ensureOpenCodeBackend(agentsPanel);
       const backendRow = agentsPanel.locator(".agentBackendRow").filter({ hasText: "opencode acp" });
       await expect(backendRow.getByText("opencode acp", { exact: true })).toBeVisible();
       await expect(agentsPanel.getByRole("switch", { name: "Disable opencode" })).toBeVisible();
@@ -225,6 +233,10 @@ async function ensureOpenCodeBackend(agentsPanel: Locator) {
   const subagent = agentsPanel.getByLabel("opencode subagent entrypoint");
   if (!(await subagent.isChecked())) {
     await subagent.click();
+  }
+  const peer = agentsPanel.getByLabel("opencode peer entrypoint");
+  if (!(await peer.isChecked())) {
+    await peer.click();
   }
 }
 

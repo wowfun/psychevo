@@ -94,6 +94,12 @@ export const threadSnapshotSchemas = {
             "string",
             "null"
           ]
+        },
+        "runtimeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

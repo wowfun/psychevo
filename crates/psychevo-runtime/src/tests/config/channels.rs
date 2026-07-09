@@ -220,6 +220,7 @@ allow_groups = ["old-group"]
         label: Some(" Ops WeChat ".to_string()),
         enabled: Some(true),
         cwd: Some("".to_string()),
+        runtime_ref: Some("opencode".to_string()),
         model: Some("".to_string()),
         permission_mode: Some("default".to_string()),
         require_mention: Some(false),
@@ -274,6 +275,12 @@ allow_groups = ["old-group"]
         vec!["team", "ops"]
     );
     assert!(connection.get("cwd").is_none());
+    assert_eq!(
+        connection
+            .get("runtime_ref")
+            .and_then(|value| value.as_str()),
+        Some("opencode")
+    );
     assert!(connection.get("model").is_none());
     assert!(connection.get("permission_mode").is_none());
 
@@ -288,6 +295,7 @@ allow_groups = ["old-group"]
         label: None,
         enabled: None,
         cwd: None,
+        runtime_ref: None,
         model: None,
         permission_mode: None,
         require_mention: None,
@@ -312,6 +320,7 @@ allow_groups = ["old-group"]
         label: None,
         enabled: None,
         cwd: None,
+        runtime_ref: None,
         model: None,
         permission_mode: None,
         require_mention: None,

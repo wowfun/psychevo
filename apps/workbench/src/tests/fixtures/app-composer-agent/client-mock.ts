@@ -212,6 +212,26 @@ function upsertMockTeam(team: Record<string, unknown>) {
   }
 }
 
+function findMockRuntimeProfile(id: string | undefined): Record<string, unknown> | null {
+  return gatewayMock.runtimeProfileRecords.find((profile) => profile.id === id) ?? null;
+}
+
+function upsertMockRuntimeProfile(profile: Record<string, unknown>) {
+  gatewayMock.runtimeProfileRecords = [
+    ...gatewayMock.runtimeProfileRecords.filter((item) => item.id !== profile.id),
+    profile
+  ];
+}
+
+function runtimeProfileHealth(status: string, summary: string): Record<string, unknown> {
+  return {
+    status,
+    summary,
+    commandPath: status === "ready" ? "/usr/bin/mock-runtime" : null,
+    checkedAtMs: Date.now()
+  };
+}
+
 function deleteMockAgent(name: string | undefined, target: string | undefined) {
   const keep = (agent: Record<string, unknown>) => !(agent.name === name && (!target || agent.target === target));
   gatewayMock.agentRecords = gatewayMock.agentRecords.filter(keep);
@@ -354,7 +374,7 @@ vi.mock("@psychevo/client", async () => {
           thread: threadId
             ? {
                 id: threadId,
-                backend: { kind: "psychevo" as const, nativeId: threadId },
+                backend: { kind: "psychevo" as const, nativeId: threadId, runtimeRef: "native" },
                 sourceKey: `source-${threadId}`
               }
             : null
@@ -746,6 +766,161 @@ vi.mock("@psychevo/client", async () => {
           }
         };
       }
+      if (method === "runtime/profile/list") {
+        return { profiles: gatewayMock.runtimeProfileRecords };
+      }
+      if (method === "runtime/profile/read") {
+        const record = params as { id?: string };
+        const profile = findMockRuntimeProfile(record.id) ?? gatewayMock.runtimeProfileRecords[0];
+        return { profile, options: null };
+      }
+      if (method === "runtime/profile/write") {
+        const record = params as {
+          id?: string;
+          target?: "project" | "profile";
+          runtime?: string;
+          enabled?: boolean | null;
+          label?: string | null;
+          command?: string | null;
+          args?: string[];
+          env?: Record<string, string>;
+          defaultMode?: string | null;
+          defaultAgent?: string | null;
+          approvalMode?: string | null;
+          sandbox?: string | null;
+          workspaceRoots?: string[];
+        };
+        const id = record.id ?? "runtime";
+        const existing = findMockRuntimeProfile(id);
+        const profile = {
+          id,
+          runtime: record.runtime ?? existing?.runtime ?? "native",
+          enabled: record.enabled ?? existing?.enabled ?? true,
+          label: normalizeNullableString(record.label) ?? String(existing?.label ?? id),
+          generated: false,
+          configured: true,
+          command: normalizeNullableString(record.command) ?? existing?.command ?? null,
+          args: record.args ?? existing?.args ?? [],
+          defaultMode: normalizeNullableString(record.defaultMode) ?? existing?.defaultMode ?? null,
+          defaultAgent: normalizeNullableString(record.defaultAgent) ?? existing?.defaultAgent ?? null,
+          approvalMode: normalizeNullableString(record.approvalMode) ?? existing?.approvalMode ?? null,
+          sandbox: normalizeNullableString(record.sandbox) ?? existing?.sandbox ?? null,
+          workspaceRoots: record.workspaceRoots ?? existing?.workspaceRoots ?? [],
+          envKeys: Object.keys(record.env ?? {}),
+          optionKeys: existing?.optionKeys ?? [],
+          sourceTargets: [record.target ?? "profile"],
+          health: existing?.health ?? runtimeProfileHealth("unchecked", "Not checked"),
+          diagnostics: []
+        };
+        upsertMockRuntimeProfile(profile);
+        return {
+          written: true,
+          changed: true,
+          path: record.target === "project" ? "/tmp/project/.psychevo/config.toml" : "/tmp/profile/config.toml",
+          target: record.target ?? "profile",
+          profile
+        };
+      }
+      if (method === "runtime/profile/setEnabled") {
+        const record = params as { id?: string; target?: "project" | "profile"; enabled?: boolean };
+        const existing = findMockRuntimeProfile(record.id) ?? {
+          id: record.id ?? "runtime",
+          runtime: record.id ?? "native",
+          label: record.id ?? "Runtime",
+          generated: true,
+          configured: false,
+          command: null,
+          args: [],
+          defaultMode: null,
+          defaultAgent: null,
+          approvalMode: null,
+          sandbox: null,
+          workspaceRoots: [],
+          envKeys: [],
+          optionKeys: [],
+          sourceTargets: [],
+          health: runtimeProfileHealth("unchecked", "Not checked"),
+          diagnostics: []
+        };
+        const sourceTargets = Array.isArray(existing.sourceTargets)
+          ? Array.from(new Set([...existing.sourceTargets, record.target ?? "profile"]))
+          : [record.target ?? "profile"];
+        const profile = {
+          ...existing,
+          enabled: record.enabled === true,
+          configured: true,
+          sourceTargets
+        };
+        upsertMockRuntimeProfile(profile);
+        return {
+          written: true,
+          changed: true,
+          path: record.target === "project" ? "/tmp/project/.psychevo/config.toml" : "/tmp/profile/config.toml",
+          target: record.target ?? "profile",
+          profile
+        };
+      }
+      if (method === "runtime/profile/delete") {
+        const record = params as { id?: string; target?: "project" | "profile" };
+        gatewayMock.runtimeProfileRecords = gatewayMock.runtimeProfileRecords.filter((profile) => profile.id !== record.id);
+        return {
+          deleted: true,
+          changed: true,
+          id: record.id ?? "runtime",
+          path: record.target === "project" ? "/tmp/project/.psychevo/config.toml" : "/tmp/profile/config.toml",
+          target: record.target ?? "profile"
+        };
+      }
+      if (method === "runtime/health/check") {
+        const record = params as { runtimeRef?: string };
+        const profile = findMockRuntimeProfile(record.runtimeRef) ?? {
+          id: record.runtimeRef ?? "native",
+          label: record.runtimeRef ?? "Native Runtime"
+        };
+        const updated = {
+          ...profile,
+          health: runtimeProfileHealth("ready", `${profile.label ?? profile.id} is available`)
+        };
+        upsertMockRuntimeProfile(updated);
+        return updated;
+      }
+      if (method === "runtime/snapshot") {
+        return {
+          profiles: gatewayMock.runtimeProfileRecords,
+          agents: [
+            { name: "opencode-build", label: "OpenCode build", runtimeRef: "opencode", nativeId: "build", mode: "build" },
+            { name: "opencode-plan", label: "OpenCode plan", runtimeRef: "opencode", nativeId: "plan", mode: "plan" }
+          ]
+        };
+      }
+      if (method === "runtime/session/list") {
+        const record = params as { runtimeRef?: string | null } | undefined;
+        const runtimeRef = record?.runtimeRef?.trim() || "native";
+        return {
+          runtimeRef,
+          supported: runtimeRef === "native",
+          sessions: runtimeRef === "native"
+            ? gatewayMock.sessionSummaries.map((session) => ({
+                nativeSessionId: session.id,
+                threadId: session.id,
+                title: session.title,
+                archived: false,
+                updatedAtMs: session.updatedAtMs
+              }))
+            : []
+        };
+      }
+      if (method.startsWith("runtime/session/")) {
+        const record = params as { runtimeRef?: string | null; nativeSessionId?: string | null };
+        return {
+          runtimeRef: record.runtimeRef ?? "native",
+          nativeSessionId: record.nativeSessionId ?? "thread-1",
+          supported: record.runtimeRef == null || record.runtimeRef === "native",
+          changed: true,
+          session: null,
+          message: null
+        };
+      }
       if (method === "backend/list") {
         return { backends: gatewayMock.backendRecords };
       }
@@ -858,6 +1033,7 @@ vi.mock("@psychevo/client", async () => {
           model?: string | null;
           permissionMode?: string | null;
           requireMention?: boolean | null;
+          runtimeRef?: string | null;
           credentialEnv?: string | null;
           accountEnv?: string | null;
           baseUrlEnv?: string | null;
@@ -894,6 +1070,7 @@ vi.mock("@psychevo/client", async () => {
             label: normalizeNullableString(record.label) ?? channel.label,
             enabled,
             cwd: normalizeNullableString(record.cwd),
+            runtimeRef: normalizeNullableString(record.runtimeRef),
             model: normalizeNullableString(record.model),
             permissionMode: normalizePermissionMode(record.permissionMode),
             requireMention: record.requireMention ?? channel.requireMention,
@@ -1001,6 +1178,7 @@ vi.mock("@psychevo/client", async () => {
           label: "WeChat",
           transport: "polling",
           cwd: null,
+          runtimeRef: "native",
           model: null,
           permissionMode: null,
           requireMention: true,

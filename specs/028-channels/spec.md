@@ -42,7 +42,7 @@ Out of scope:
 `ChannelConnection` is a profile-local platform connection and default runtime
 policy. It records a stable connection id, channel kind, optional domain,
 transport, label, requested enablement, credential references, allowlists, and
-defaults such as cwd, model, and permission mode.
+defaults such as cwd, Runtime Profile id, model, and permission mode.
 
 `User entrypoint` is the product concept for a place where a user interacts
 with Psychevo. CLI, TUI, Workbench, ACP, and each configured Channel are user
@@ -80,7 +80,8 @@ Channel configuration lives in the active profile config under `[channels]` and
 - `enabled`: requested runtime enablement
 - `label`: user-visible connection name
 - `transport`: `polling`, `webhook`, or `long_connection`
-- `cwd`, `model`, and `permission_mode`: defaults for new channel threads
+- `cwd`, `runtime_ref`, `model`, and `permission_mode`: defaults for new
+  channel threads
 - `require_mention`: group-chat gating
 - credential, account, app, and base URL env names, never secret values
 - direct-user and group/chat allowlists
@@ -159,6 +160,11 @@ entrypoints that can be invoked with `@agent-name <task>` during a normal
 channel turn. Peer runtimes may be shown as secondary diagnostics, but they do
 not replace callable agents unless the channel also has a peer-runtime
 selection flow.
+
+Channels use Runtime Profiles for runtime switching. `/profile` and its
+subcommands select or inspect the source-bound Runtime Profile for future turns
+on the lane. Destructive native runtime session actions remain outside Channel
+commands because Channels cannot consistently provide confirmation UI.
 
 Attachment handling is a shared pipeline. For media kinds with a confirmed
 transfer contract, the adapter downloads platform media, checks size and MIME
@@ -239,6 +245,8 @@ delivery is unavailable, channels fall back to text with bounded diagnostics.
   policy.
 - [057 Profiles](../057-profiles/spec.md) defines profile-local configuration
   and secret storage boundaries.
+- [052 Agent Runtimes](../052-agent-runtimes/spec.md) defines Runtime Profiles
+  and Channel `/profile` commands.
 - [280 Channel UX](../280-channel-ux/spec.md) defines user-facing setup and
   operation.
 - [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md) defines shared voice

@@ -64,6 +64,12 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(agents) = object.get("agents") {
         config.agent_backends = parse_agent_backend_configs(agents)?;
     }
+    if let Some(runtime_profiles) = object
+        .get("runtime_profiles")
+        .or_else(|| object.get("runtimeProfiles"))
+    {
+        config.runtime_profiles = parse_runtime_profile_configs(runtime_profiles)?;
+    }
     if let Some(channels) = object.get("channels") {
         config.channels = parse_channels_config(channels)?;
     }

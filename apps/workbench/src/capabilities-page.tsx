@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { GatewayClient } from "@psychevo/client";
 import { ActionButton, CreatePanel, MarkdownText, Switch } from "@psychevo/components";
 import type { GatewayRequestScope, TeamMemberInput } from "@psychevo/protocol";
-import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, X } from "lucide-react";
+import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, Wrench, X } from "lucide-react";
 import { AgentsConfigPanel } from "./capabilities-agents-config";
 import type { BackendConfigTarget, BackendDraft, CapabilityTab, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
@@ -30,7 +30,7 @@ type PluginInstallDraft = {
 };
 type MutationOptions = { notice?: string; refresh?: boolean };
 type AgentDefinitionState = "active" | "shadowed" | "disabled";
-type AgentsSegment = "definitions" | "teams" | "backends";
+type AgentsSegment = "definitions" | "teams" | "runtimes" | "backends";
 
 type AgentDefinitionRow = {
   id: string;
@@ -80,6 +80,24 @@ type AgentTeamRow = {
   maxParallelAgents: number;
   diagnostics: string[];
   state: AgentDefinitionState;
+  raw: JsonObject;
+};
+
+type RuntimeProfileRow = {
+  id: string;
+  label: string;
+  runtime: string;
+  enabled: boolean;
+  generated: boolean;
+  configured: boolean;
+  command: string;
+  args: string[];
+  defaultMode: string;
+  defaultAgent: string;
+  healthStatus: string;
+  healthSummary: string;
+  sourceTargets: BackendConfigTarget[];
+  diagnostics: string[];
   raw: JsonObject;
 };
 
@@ -561,6 +579,7 @@ function AgentsCapabilityPanel({
 
   const allRows = useMemo(() => agentRowsFromData(data), [data]);
   const allTeamRows = useMemo(() => agentTeamRowsFromData(data), [data]);
+  const runtimeRows = useMemo(() => runtimeProfileRowsFromData(data), [data]);
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return allRows.filter((row) => !needle || `${row.name} ${row.description} ${row.sourceLabel}`.toLowerCase().includes(needle));
@@ -569,8 +588,13 @@ function AgentsCapabilityPanel({
     const needle = query.trim().toLowerCase();
     return allTeamRows.filter((row) => !needle || `${row.name} ${row.description} ${row.sourceLabel} ${row.leader}`.toLowerCase().includes(needle));
   }, [allTeamRows, query]);
+  const filteredRuntimeRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return runtimeRows.filter((row) => !needle || `${row.id} ${row.label} ${row.runtime}`.toLowerCase().includes(needle));
+  }, [runtimeRows, query]);
   const selected = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
   const selectedTeam = teamRows.find((row) => row.id === selectedTeamId) ?? teamRows[0] ?? null;
+  const selectedRuntime = filteredRuntimeRows.find((row) => row.id === selectedId) ?? filteredRuntimeRows[0] ?? null;
   const selectedDetail = selected && detail?.id === selected.id ? detail : null;
   const selectedTeamDetail = selectedTeam && teamDetail?.id === selectedTeam.id ? teamDetail : null;
 
@@ -827,6 +851,9 @@ function AgentsCapabilityPanel({
         <button className={segment === "teams" ? "is-selected" : ""} onClick={() => setSegment("teams")} role="tab" aria-selected={segment === "teams"} type="button">
           Teams
         </button>
+        <button className={segment === "runtimes" ? "is-selected" : ""} onClick={() => setSegment("runtimes")} role="tab" aria-selected={segment === "runtimes"} type="button">
+          Runtime Profiles
+        </button>
         <button className={segment === "backends" ? "is-selected" : ""} onClick={() => setSegment("backends")} role="tab" aria-selected={segment === "backends"} type="button">
           ACP Backends
         </button>
@@ -847,6 +874,19 @@ function AgentsCapabilityPanel({
           onSaveBackendDraft={onSaveBackendDraft}
           onSetBackendEnabled={onSetBackendEnabled}
           onSetBackendEntrypoints={onSetBackendEntrypoints}
+        />
+      ) : segment === "runtimes" ? (
+        <RuntimeProfilesPanel
+          busy={busy}
+          client={client}
+          loading={loading}
+          mutate={mutate}
+          query={query}
+          rows={filteredRuntimeRows}
+          scope={scope}
+          selected={selectedRuntime}
+          onQueryChange={setQuery}
+          onSelect={setSelectedId}
         />
       ) : segment === "teams" ? (
         <>
@@ -1076,6 +1116,137 @@ function AgentsCapabilityPanel({
         </>
       )}
     </div>
+  );
+}
+
+function RuntimeProfilesPanel({
+  busy,
+  client,
+  loading,
+  mutate,
+  query,
+  rows,
+  scope,
+  selected,
+  onQueryChange,
+  onSelect
+}: {
+  busy: boolean;
+  client: GatewayClient;
+  loading: boolean;
+  mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
+  query: string;
+  rows: RuntimeProfileRow[];
+  scope: GatewayRequestScope;
+  selected: RuntimeProfileRow | null;
+  onQueryChange(value: string): void;
+  onSelect(id: string | null): void;
+}) {
+  const [doctor, setDoctor] = useState<JsonObject | null>(null);
+  async function checkRuntime(row: RuntimeProfileRow) {
+    const ok = await mutate(async () => {
+      const result = objectValue(await client.request("runtime/health/check", { runtimeRef: row.id, scope }));
+      setDoctor(result);
+      return result;
+    }, { notice: "Runtime profile checked.", refresh: false });
+    if (ok) onSelect(row.id);
+  }
+  const doctorHealthSummary = selected && doctor && stringField(doctor, "id") === selected.id
+    ? stringField(objectField(doctor, "health"), "summary")
+    : "";
+  return (
+    <>
+      <div className="capabilitiesToolbar agentDefinitionsToolbar">
+        <label>
+          <Search size={15} />
+          <input aria-label="Search Runtime Profiles" onChange={(event) => onQueryChange(event.target.value)} placeholder="Search" value={query} />
+        </label>
+        <span className="capabilityToolbarHint">{rows.length} profiles</span>
+      </div>
+
+      <div className="capabilitiesGrid agentsDefinitionsGrid">
+        <div className="capabilityList" role="list">
+          {loading && <div className="capabilityEmpty">Loading</div>}
+          {!loading && rows.length === 0 && <div className="capabilityEmpty">No runtime profiles</div>}
+          {rows.map((row) => (
+            <div className={row.id === selected?.id ? "capabilityRow capabilityRowWithSwitch agentDefinitionRow is-selected" : "capabilityRow capabilityRowWithSwitch agentDefinitionRow"} key={row.id} role="listitem">
+              <button aria-label={`Runtime Profile ${row.id}`} className="capabilityRowSelect" onClick={() => onSelect(row.id)} type="button">
+                <span className="capabilityRowMain">
+                  <strong>{row.label || row.id}</strong>
+                  <RowDescription fallback={row.healthSummary} value={`${row.runtime} runtime`} />
+                  <span className="skillRowMetadata">{runtimeProfileMetadata(row)}</span>
+                </span>
+                <CapabilityBadges row={{
+                  id: row.id,
+                  name: row.label || row.id,
+                  description: row.runtime,
+                  enabled: row.enabled,
+                  status: row.healthStatus,
+                  badges: [row.generated ? "Generated" : "Configured", row.healthStatus],
+                  raw: row.raw
+                }} />
+              </button>
+              <Switch
+                ariaLabel={row.enabled ? `Disable ${row.id}` : `Enable ${row.id}`}
+                checked={row.enabled}
+                className="capabilityRowSwitch"
+                disabled={busy}
+                label={row.enabled ? "Enabled" : "Disabled"}
+                onCheckedChange={(enabled) => {
+                  void mutate(() => client.request("runtime/profile/setEnabled", {
+                    id: row.id,
+                    target: row.sourceTargets.includes("project") ? "project" : "profile",
+                    enabled,
+                    scope
+                  }), { notice: enabled ? "Runtime profile enabled." : "Runtime profile disabled." });
+                }}
+                showLabel={false}
+                size="compact"
+              />
+            </div>
+          ))}
+        </div>
+
+        <aside className="capabilityDetail agentDefinitionDetail" aria-label="Runtime Profile detail">
+          {selected ? (
+            <>
+              <div className="capabilityDetailHeader">
+                <div>
+                  <h3>{selected.label || selected.id}</h3>
+                  <span>{[selected.runtime, selected.generated ? "Generated" : "Configured", selected.healthStatus].filter(Boolean).join(" · ")}</span>
+                </div>
+                <div className="capabilityDetailHeaderActions">
+                  <button disabled={busy} onClick={() => void checkRuntime(selected)} title="Doctor" type="button">
+                    <Wrench size={14} /> Doctor
+                  </button>
+                </div>
+              </div>
+              <dl className="capabilityKeyValue">
+                <div><dt>Runtime</dt><dd>{selected.runtime}</dd></div>
+                <div><dt>Status</dt><dd>{selected.healthSummary}</dd></div>
+                <div><dt>Command</dt><dd>{selected.command ? [selected.command, ...selected.args].join(" ") : "Built in"}</dd></div>
+                <div><dt>Default mode</dt><dd>{selected.defaultMode || "Runtime default"}</dd></div>
+                <div><dt>Default agent</dt><dd>{selected.defaultAgent || "Runtime default"}</dd></div>
+                <div><dt>Source</dt><dd>{selected.sourceTargets.length > 0 ? selected.sourceTargets.join(", ") : "Generated"}</dd></div>
+              </dl>
+              {selected.diagnostics.length > 0 && (
+                <div className="capabilityBanner is-error">{selected.diagnostics.join(" · ")}</div>
+              )}
+              {doctor && stringField(doctor, "id") === selected.id && (
+                <>
+                  {doctorHealthSummary && doctorHealthSummary !== selected.healthSummary && (
+                    <div className="capabilityBanner">{doctorHealthSummary}</div>
+                  )}
+                  <KeyValueView value={doctor} />
+                </>
+              )}
+            </>
+          ) : (
+            <div className="capabilityEmpty">Select a Runtime Profile</div>
+          )}
+        </aside>
+      </div>
+    </>
   );
 }
 
@@ -1957,6 +2128,30 @@ function agentTeamRowsFromArray(values: JsonObject[], state: AgentDefinitionStat
   }).filter((row) => row.name);
 }
 
+function runtimeProfileRowsFromData(data: JsonObject | null): RuntimeProfileRow[] {
+  const runtimeProfiles = objectField(data, "runtimeProfiles");
+  return arrayObjects(runtimeProfiles.profiles).map((profile) => {
+    const health = objectField(profile, "health");
+    return {
+      id: stringField(profile, "id"),
+      label: stringField(profile, "label"),
+      runtime: stringField(profile, "runtime"),
+      enabled: objectValue(profile).enabled !== false,
+      generated: boolField(profile, "generated"),
+      configured: boolField(profile, "configured"),
+      command: stringField(profile, "command"),
+      args: arrayStrings(profile.args),
+      defaultMode: stringField(profile, "defaultMode"),
+      defaultAgent: stringField(profile, "defaultAgent"),
+      healthStatus: stringField(health, "status") || "unchecked",
+      healthSummary: stringField(health, "summary") || "Not checked",
+      sourceTargets: arrayStrings(profile.sourceTargets).map(agentTargetValue),
+      diagnostics: arrayObjects(profile.diagnostics).map((diagnostic) => stringField(diagnostic, "message")).filter(Boolean),
+      raw: profile
+    };
+  }).filter((row) => row.id);
+}
+
 function emptyAgentDraft(): AgentDraft {
   return {
     mode: "form",
@@ -2154,13 +2349,20 @@ function teamRowMetadata(row: AgentTeamRow): string {
   return values.filter(Boolean).join(" · ");
 }
 
+function runtimeProfileMetadata(row: RuntimeProfileRow): string {
+  const source = row.sourceTargets.length > 0 ? row.sourceTargets.join(" + ") : "generated";
+  const command = row.command ? [row.command, ...row.args].join(" ") : "built in";
+  return [row.runtime, source, row.healthStatus, command].filter(Boolean).join(" · ");
+}
+
 async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: GatewayRequestScope) {
   if (tab === "agents") {
-    const [agents, teams] = await Promise.all([
+    const [agents, teams, runtimeProfiles] = await Promise.all([
       client.request("agent/list", { scope }),
-      client.request("team/list", { scope })
+      client.request("team/list", { scope }),
+      client.request("runtime/profile/list", { scope })
     ]);
-    return { ...objectValue(agents), teams: objectValue(teams) };
+    return { ...objectValue(agents), teams: objectValue(teams), runtimeProfiles: objectValue(runtimeProfiles) };
   }
   if (tab === "skills") return client.request("skill/list", { scope });
   if (tab === "plugins") return client.request("plugin/list", { scope });

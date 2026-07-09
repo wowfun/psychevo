@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-09
+
+- Added Runtime Profiles across config, Gateway/protocol, Workbench, Channels,
+  and session controls; direct non-native turns now fail explicitly until
+  adapter workers are available.
+
 ## 2026-07-08
 
 - Added multi-agent Teams and Missions with Markdown team templates, durable

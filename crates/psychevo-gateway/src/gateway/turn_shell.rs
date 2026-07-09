@@ -146,6 +146,7 @@ impl Gateway {
                 stream: stream.clone(),
             }));
         }
+        let requested_runtime_ref = options.runtime_ref.clone();
         let backend_request = BackendTurnRequest {
             options,
             runtime_source: source_name,
@@ -161,6 +162,7 @@ impl Gateway {
                         result.run,
                         GatewayBackendInfo {
                             kind: BackendKind::PeerAgent,
+                            runtime_ref: requested_runtime_ref.clone(),
                             native_id: Some(result.native_session_id),
                         },
                     )
@@ -170,6 +172,9 @@ impl Gateway {
                     result,
                     GatewayBackendInfo {
                         kind: self.backend.kind(),
+                        runtime_ref: requested_runtime_ref
+                            .clone()
+                            .or_else(|| Some("native".to_string())),
                         native_id: None,
                     },
                 )
@@ -510,6 +515,7 @@ impl Gateway {
             .ok_or_else(|| Error::Message("shell command did not resolve a session".to_string()))?;
         let backend = GatewayBackendInfo {
             kind: BackendKind::Psychevo,
+            runtime_ref: Some("native".to_string()),
             native_id: Some(session_id.clone()),
         };
         if let Some(source) = &bind_source

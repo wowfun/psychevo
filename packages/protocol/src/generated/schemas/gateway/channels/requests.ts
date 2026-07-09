@@ -423,6 +423,13 @@ export const gatewayChannelRequestSchemas = {
         "null"
       ]
     },
+    "runtimeRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "scope": {
       "anyOf": [
         {

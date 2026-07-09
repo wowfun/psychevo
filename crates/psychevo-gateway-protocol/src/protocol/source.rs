@@ -138,6 +138,9 @@ impl BackendKind {
 #[serde(rename_all = "camelCase")]
 pub struct GatewayBackendInfo {
     pub kind: BackendKind,
+    #[serde(default, rename = "runtimeRef", skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub runtime_ref: Option<String>,
     #[serde(default)]
     pub native_id: Option<String>,
 }

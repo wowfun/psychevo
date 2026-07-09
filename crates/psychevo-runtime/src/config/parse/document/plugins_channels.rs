@@ -131,6 +131,7 @@ pub(crate) fn parse_channel_connection(
         label,
         transport,
         cwd: optional_string_field(object, "cwd")?,
+        runtime_ref: optional_string_alias_field(object, "runtime_ref", "runtimeRef")?,
         model: optional_string_field(object, "model")?,
         permission_mode: optional_string_field(object, "permission_mode")?,
         require_mention: optional_bool_field(object, "require_mention")?.unwrap_or(true),

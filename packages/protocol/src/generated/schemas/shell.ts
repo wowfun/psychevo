@@ -137,6 +137,12 @@ export const shellSchemas = {
             "string",
             "null"
           ]
+        },
+        "runtimeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

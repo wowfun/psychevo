@@ -493,6 +493,10 @@ describe("Workbench settings and backend controls", () => {
     expect(within(detailPage).getByText("Remote lanes")).toBeTruthy();
     expect(within(detailPage).getByText("Channel lane")).toBeTruthy();
     expect(within(detailPage).getByText("/tmp/project")).toBeTruthy();
+    expect(within(detailPage).getByRole("option", { name: "OpenCode" })).toBeTruthy();
+    fireEvent.change(within(detailPage).getByRole("combobox", { name: "Channel Runtime Profile" }), {
+      target: { value: "opencode" }
+    });
     fireEvent.change(within(detailPage).getByRole("textbox", { name: "Credential env" }), {
       target: { value: "" }
     });
@@ -506,6 +510,7 @@ describe("Workbench settings and backend controls", () => {
       label: "Release Ops",
       enabled: false,
       cwd: "/tmp/channel-workspace",
+      runtimeRef: "opencode",
       model: "openai/gpt-4o",
       permissionMode: "bypassPermissions",
       requireMention: false,

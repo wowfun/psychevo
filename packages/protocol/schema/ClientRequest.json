@@ -50,6 +50,51 @@
       "$ref": "ClientRequest/runtime-options.json"
     },
     {
+      "$ref": "ClientRequest/runtime-profile-list.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-read.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-write.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-delete.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-snapshot.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-health-check.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-list.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-read.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-resume.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-archive.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-unarchive.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-delete.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-rename.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-rollback.json"
+    },
+    {
       "$ref": "ClientRequest/automation-list.json"
     },
     {

@@ -128,6 +128,7 @@ fn ready_wechat_connection(cwd: Option<String>) -> ChannelRuntimeConnection {
         label: "WeChat".to_string(),
         transport: "polling".to_string(),
         cwd,
+        runtime_ref: None,
         model: None,
         permission_mode: None,
         require_mention: true,
@@ -590,6 +591,103 @@ entrypoints = ["peer"]
 }
 
 #[tokio::test]
+async fn channel_profile_command_switches_bound_runtime_profile() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::write(home.join("config.toml"), "").expect("config");
+    let backend = Arc::new(TestBackend::default());
+    let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let env = BTreeMap::from([
+        (
+            "HOME".to_string(),
+            temp.path().to_string_lossy().to_string(),
+        ),
+        (
+            "PSYCHEVO_HOME".to_string(),
+            state_runtime
+                .db_path()
+                .parent()
+                .unwrap()
+                .display()
+                .to_string(),
+        ),
+    ]);
+    let state = WebState::new(GatewayWebServerConfig::new(
+        Gateway::with_backend(state_runtime, backend),
+        home,
+        cwd,
+        None,
+        env,
+        temp.path().join("static"),
+    ));
+    let adapter = FakeImAdapter::new("wechat");
+    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+        "wechat",
+        Arc::new(adapter.clone()),
+        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+    )]);
+    let runtime = ChannelRuntimeState::new(temp.path());
+    let connection = ready_wechat_connection(None);
+
+    let first_message = wechat_message("hello", "wx-profile-1");
+    let source_key = gateway_source_for_im(&first_message).source_key().0;
+    handle_channel_message(
+        &state,
+        &runtime,
+        &connection,
+        &channel_gateway,
+        first_message,
+    )
+    .await
+    .expect("message handled");
+    let sent = wait_for_sent(&adapter, 1).await;
+    assert_eq!(sent[0].text, "answer 1");
+
+    handle_channel_message(
+        &state,
+        &runtime,
+        &connection,
+        &channel_gateway,
+        wechat_message("/profile use opencode", "wx-profile-2"),
+    )
+    .await
+    .expect("profile use handled");
+    let sent = wait_for_sent(&adapter, 2).await;
+    assert!(sent[1].text.contains("Runtime Profile set to `opencode`"));
+
+    let binding = state
+        .inner
+        .state
+        .store()
+        .gateway_source_binding(&source_key)
+        .expect("binding")
+        .expect("binding exists");
+    assert_eq!(
+        binding
+            .lineage
+            .as_ref()
+            .and_then(|lineage| lineage.get("runtimeRef"))
+            .and_then(Value::as_str),
+        Some("opencode")
+    );
+
+    handle_channel_message(
+        &state,
+        &runtime,
+        &connection,
+        &channel_gateway,
+        wechat_message("/profile status", "wx-profile-3"),
+    )
+    .await
+    .expect("profile status handled");
+    let sent = wait_for_sent(&adapter, 3).await;
+    assert!(sent[2].text.contains("Runtime Profile `opencode`"));
+}
+
+#[tokio::test]
 async fn channel_new_command_clears_binding_for_next_default_cwd() {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
@@ -846,6 +944,7 @@ async fn wechat_session_timeout_blocks_runner_without_retrying() {
         label: "WeChat".to_string(),
         transport: "polling".to_string(),
         cwd: None,
+        runtime_ref: None,
         model: None,
         permission_mode: None,
         require_mention: true,
@@ -908,6 +1007,7 @@ async fn wechat_session_timeout_during_login_grace_reports_pending() {
         label: "WeChat".to_string(),
         transport: "polling".to_string(),
         cwd: None,
+        runtime_ref: None,
         model: None,
         permission_mode: None,
         require_mention: true,

@@ -191,22 +191,143 @@ async fn handle_rpc(
                 })?);
             }
 
-            let mut options = state.run_options(scope.cwd.clone(), params.thread_id.clone());
-            options.runtime_ref = Some(runtime_ref.to_string());
-            options.runtime_session_id = params.runtime_session_id.clone();
-            let peer = crate::resolve_peer_turn(&options)?
-                .ok_or_else(|| Error::Message(format!("unknown ACP runtime: {runtime_ref}")))?;
-            let runtime_options = crate::acp_peer::read_acp_peer_runtime_options(
-                peer,
-                scope.cwd.clone(),
-                params.runtime_session_id.clone(),
-            )
-            .await?;
-            Ok(serde_json::to_value(wire::RuntimeOptionsResult {
-                runtime_ref: runtime_ref.to_string(),
-                runtime_session_id: runtime_options.native_session_id,
-                options: runtime_options.options,
-            })?)
+            let mut peer_resolution_error = None;
+            match resolve_runtime_ref_peer_turn(&state, &scope, runtime_ref) {
+                Ok(Some(peer)) => {
+                    let runtime_options = crate::acp_peer::read_acp_peer_runtime_options(
+                        peer,
+                        scope.cwd.clone(),
+                        params.runtime_session_id.clone(),
+                    )
+                    .await?;
+                    return Ok(serde_json::to_value(wire::RuntimeOptionsResult {
+                        runtime_ref: runtime_ref.to_string(),
+                        runtime_session_id: runtime_options.native_session_id,
+                        options: runtime_options.options,
+                    })?);
+                }
+                Ok(None) => {}
+                Err(error) => peer_resolution_error = Some(error),
+            }
+
+            if let Some(options) = runtime_profile_options(&state, &scope, runtime_ref)? {
+                return Ok(serde_json::to_value(wire::RuntimeOptionsResult {
+                    runtime_ref: runtime_ref.to_string(),
+                    runtime_session_id: params.runtime_session_id.clone(),
+                    options,
+                })?);
+            }
+
+            if let Some(error) = peer_resolution_error {
+                return Err(error);
+            }
+            Err(Error::Message(format!("unknown ACP runtime: {runtime_ref}")))
+        }
+        "runtime/profile/list" => {
+            let params = request.params::<wire::RuntimeProfileListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(runtime_profile_list_result(
+                &state, &scope,
+            )?)?)
+        }
+        "runtime/profile/read" => {
+            let params = request.required_params::<wire::RuntimeProfileReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            runtime_profile_read_result(&state, &scope, params)
+        }
+        "runtime/profile/write" => {
+            let params = request.required_params::<wire::RuntimeProfileWriteParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            write_runtime_profile(&state, &scope, params)
+        }
+        "runtime/profile/delete" => {
+            let params = request.required_params::<wire::RuntimeProfileDeleteParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            delete_runtime_profile(&state, &scope, params)
+        }
+        "runtime/profile/setEnabled" => {
+            let params = request.required_params::<wire::RuntimeProfileSetEnabledParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            set_runtime_profile_enabled(&state, &scope, params)
+        }
+        "runtime/snapshot" => {
+            let params = request.params::<wire::RuntimeSnapshotParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(runtime_snapshot_result(
+                &state, &scope, params,
+            )?)?)
+        }
+        "runtime/health/check" => {
+            let params = request.required_params::<wire::RuntimeHealthCheckParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            runtime_health_check_result(&state, &scope, params)
+        }
+        "runtime/session/list" => {
+            let params = request.params::<wire::RuntimeSessionListParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(runtime_session_list_result(
+                &state, &scope, params,
+            )?)?)
+        }
+        "runtime/session/read" => {
+            let params = request.required_params::<wire::RuntimeSessionParams>()?;
+            if params.runtime_ref == "native" {
+                authorize_thread(&state, &auth, &params.native_session_id)?;
+            }
+            Ok(serde_json::to_value(runtime_session_read_result(&state, params)?)?)
+        }
+        "runtime/session/resume" => {
+            let params = request.required_params::<wire::RuntimeSessionParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if params.runtime_ref == "native" {
+                authorize_thread(&state, &auth, &params.native_session_id)?;
+            }
+            Ok(serde_json::to_value(runtime_session_resume_result(
+                &state, &scope, params,
+            )?)?)
+        }
+        "runtime/session/archive" => {
+            let params = request.required_params::<wire::RuntimeSessionParams>()?;
+            if params.runtime_ref == "native" {
+                authorize_thread(&state, &auth, &params.native_session_id)?;
+                guard_session_mutation(&state, &auth, &params.native_session_id, true)?;
+            }
+            Ok(serde_json::to_value(runtime_session_archive_result(
+                &state, params, true,
+            )?)?)
+        }
+        "runtime/session/unarchive" => {
+            let params = request.required_params::<wire::RuntimeSessionParams>()?;
+            if params.runtime_ref == "native" {
+                authorize_thread(&state, &auth, &params.native_session_id)?;
+                guard_session_mutation(&state, &auth, &params.native_session_id, true)?;
+            }
+            Ok(serde_json::to_value(runtime_session_archive_result(
+                &state, params, false,
+            )?)?)
+        }
+        "runtime/session/delete" => {
+            let params = request.required_params::<wire::RuntimeSessionParams>()?;
+            if params.runtime_ref == "native" {
+                authorize_thread(&state, &auth, &params.native_session_id)?;
+                guard_session_mutation(&state, &auth, &params.native_session_id, false)?;
+            }
+            Ok(serde_json::to_value(runtime_session_delete_result(
+                &state, params,
+            )?)?)
+        }
+        "runtime/session/rename" => {
+            let params = request.required_params::<wire::RuntimeSessionRenameParams>()?;
+            if params.runtime_ref == "native" {
+                authorize_thread(&state, &auth, &params.native_session_id)?;
+            }
+            Ok(serde_json::to_value(runtime_session_rename_result(
+                &state, params,
+            )?)?)
+        }
+        "runtime/session/rollback" => {
+            let params = request.required_params::<wire::RuntimeSessionRollbackParams>()?;
+            Ok(serde_json::to_value(runtime_session_rollback_result(params)?)?)
         }
         "automation/list" => {
             let params = request.params::<wire::AutomationListParams>()?;
@@ -239,6 +360,7 @@ async fn handle_rpc(
         "turn/start" => {
             let params = request.required_params::<wire::TurnStartParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            ensure_turn_runtime_profile_supported(&state, &scope, params.runtime_ref.as_deref())?;
             let input = params.input_parts()?;
             let requested_thread_id = match params.thread_id.clone() {
                 Some(thread_id) => {

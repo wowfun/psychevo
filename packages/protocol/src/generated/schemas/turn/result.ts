@@ -35,6 +35,12 @@ export const turnResultSchemas = {
             "string",
             "null"
           ]
+        },
+        "runtimeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

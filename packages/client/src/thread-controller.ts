@@ -462,7 +462,7 @@ function sourceFromScope(scope: GatewayRequestScope): GatewaySource {
 
 function gatewayThread(threadId: string): GatewayThread {
   return {
-    backend: { kind: "psychevo", nativeId: threadId },
+    backend: { kind: "psychevo", nativeId: threadId, runtimeRef: "native" },
     id: threadId,
     sourceKey: null
   };

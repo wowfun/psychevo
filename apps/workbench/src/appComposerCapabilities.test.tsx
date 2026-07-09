@@ -262,6 +262,45 @@ describe("Workbench capabilities management", () => {
     });
   });
 
+  it("manages Runtime Profiles from Agents capabilities", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "Runtime Profiles" }));
+
+    const opencode = await within(region).findByRole("button", { name: "Runtime Profile opencode" });
+    expect(within(opencode).getByText("OpenCode")).toBeTruthy();
+    expect(within(region).getByRole("button", { name: "Runtime Profile native" })).toBeTruthy();
+
+    fireEvent.click(opencode);
+    const detail = await within(region).findByRole("complementary", { name: "Runtime Profile detail" });
+    expect(within(detail).getByText("opencode serve")).toBeTruthy();
+    expect(within(detail).getAllByText("build")).toHaveLength(2);
+
+    fireEvent.click(within(region).getByRole("switch", { name: "Disable opencode" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/profile/setEnabled",
+        params: expect.objectContaining({
+          id: "opencode",
+          target: "profile",
+          enabled: false
+        })
+      });
+    });
+
+    fireEvent.click(within(detail).getByRole("button", { name: "Doctor" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/health/check",
+        params: expect.objectContaining({ runtimeRef: "opencode" })
+      });
+    });
+    expect((await within(detail).findAllByText("OpenCode is available")).length).toBeGreaterThan(0);
+  });
+
   it("keeps disabled skills visible and can re-enable them", async () => {
     render(<App />);
 

@@ -24,6 +24,7 @@ pub struct ChannelUpdateInput {
     pub label: Option<String>,
     pub enabled: Option<bool>,
     pub cwd: Option<String>,
+    pub runtime_ref: Option<String>,
     pub model: Option<String>,
     pub permission_mode: Option<String>,
     pub require_mention: Option<bool>,
@@ -44,6 +45,7 @@ pub struct ChannelRuntimeConnection {
     pub label: String,
     pub transport: String,
     pub cwd: Option<String>,
+    pub runtime_ref: Option<String>,
     pub model: Option<String>,
     pub permission_mode: Option<String>,
     pub require_mention: bool,
@@ -197,6 +199,7 @@ pub fn channel_runtime_connections(
             label: connection.label.clone(),
             transport: connection.transport.as_str().to_string(),
             cwd: connection.cwd.clone(),
+            runtime_ref: connection.runtime_ref.clone(),
             model: connection.model.clone(),
             permission_mode: connection.permission_mode.clone(),
             require_mention: connection.require_mention,
@@ -271,6 +274,15 @@ pub fn update_channel_connection(input: ChannelUpdateInput) -> Result<Value> {
     }
     if let Some(value) = input.cwd {
         set_optional_string_field(connection, "cwd", "channel cwd", value, false)?;
+    }
+    if let Some(value) = input.runtime_ref {
+        set_optional_string_field(
+            connection,
+            "runtime_ref",
+            "channel runtime profile",
+            value,
+            false,
+        )?;
     }
     if let Some(value) = input.model {
         set_optional_string_field(connection, "model", "channel model", value, false)?;
@@ -721,6 +733,7 @@ fn channel_row(connection: &ChannelConnectionConfig, env: &BTreeMap<String, Stri
         "label": connection.label,
         "transport": connection.transport.as_str(),
         "cwd": connection.cwd,
+        "runtime_ref": connection.runtime_ref,
         "model": connection.model,
         "permission_mode": connection.permission_mode,
         "require_mention": connection.require_mention,

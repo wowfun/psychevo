@@ -246,6 +246,13 @@ export const gatewayChannelConfigSchemas = {
     "runner": {
       "$ref": "#/definitions/ChannelRunnerView"
     },
+    "runtimeRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "runtimeStatus": {
       "type": "string"
     },

@@ -176,6 +176,167 @@ command = "cursor-agent"
 }
 
 #[tokio::test]
+async fn runtime_profile_rpc_lists_generated_profiles_and_writes_overrides() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let profiles = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("runtime-1")),
+            method: "runtime/profile/list".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("runtime/profile/list");
+    let ids = profiles["profiles"]
+        .as_array()
+        .expect("profiles")
+        .iter()
+        .map(|profile| profile["id"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(ids.contains(&"native"));
+    assert!(ids.contains(&"codex"));
+    assert!(ids.contains(&"opencode"));
+    assert_eq!(
+        profiles["profiles"]
+            .as_array()
+            .expect("profiles")
+            .iter()
+            .find(|profile| profile["id"] == "native")
+            .expect("native")["generated"],
+        true
+    );
+
+    let write = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("runtime-2")),
+            method: "runtime/profile/write".to_string(),
+            params: Some(json!({
+                "id": "codex",
+                "target": "profile",
+                "runtime": "codex",
+                "enabled": false,
+                "label": "Codex local",
+                "command": "codex",
+                "args": ["app-server", "--stdio"],
+                "defaultMode": "auto-review"
+            })),
+        },
+    )
+    .await
+    .expect("runtime/profile/write");
+    assert_eq!(write["profile"]["id"], "codex");
+    assert_eq!(write["profile"]["generated"], false);
+    assert_eq!(write["profile"]["enabled"], false);
+    assert_eq!(write["profile"]["defaultMode"], "auto-review");
+
+    let health = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("runtime-3")),
+            method: "runtime/health/check".to_string(),
+            params: Some(json!({ "runtimeRef": "codex" })),
+        },
+    )
+    .await
+    .expect("runtime/health/check");
+    assert_eq!(health["health"]["status"], "disabled");
+    assert!(health["health"]["checkedAtMs"].as_i64().is_some());
+
+    let options = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("runtime-4")),
+            method: "runtime/options".to_string(),
+            params: Some(json!({
+                "scope": default_resolved_scope(&state, &AuthContext::Bearer)
+                    .expect("scope")
+                    .to_wire_scope(),
+                "runtimeRef": "codex"
+            })),
+        },
+    )
+    .await
+    .expect("runtime/options");
+    assert_eq!(options["runtimeRef"], "codex");
+    assert_eq!(options["options"][0]["id"], "mode");
+}
+
+#[tokio::test]
+async fn turn_start_rejects_direct_runtime_profile_without_adapter_worker() {
+    let (_temp, state) = web_state();
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let err = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("runtime-turn")),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "scope": scope.to_wire_scope(),
+                "runtimeRef": "opencode",
+                "input": [{"type": "text", "text": "use direct opencode"}]
+            })),
+        },
+    )
+    .await
+    .expect_err("direct runtime turn should fail before native execution");
+    assert!(
+        err.to_string()
+            .contains("runtime profile `opencode` uses a direct opencode runtime"),
+        "{err}"
+    );
+    assert_eq!(
+        state
+            .inner
+            .gateway
+            .resolve_source_thread(&scope.source)
+            .expect("source binding"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn runtime_profile_guard_prefers_same_named_acp_peer_backend() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        r#"[agents.backends.opencode]
+kind = "acp"
+command = "opencode"
+args = ["acp"]
+entrypoints = ["peer", "subagent"]
+"#,
+    )
+    .expect("config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+
+    ensure_turn_runtime_profile_supported(&state, &scope, Some("opencode"))
+        .expect("ACP peer backend should take precedence over generated direct profile");
+}
+
+#[tokio::test]
 async fn backend_list_auto_creates_detected_local_acp_backends() {
     let bin = tempfile::tempdir().expect("bin tempdir");
     write_command_shim(&bin.path().join("opencode"));

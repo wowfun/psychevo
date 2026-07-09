@@ -16,6 +16,7 @@ import {
   channelDraftSignature,
   channelModelOptions,
   channelPermissionOptions,
+  channelRuntimeProfileOptions,
   channelRunnerTone,
   channelRuntimeDefaultsSummary,
   channelRuntimeSummary,
@@ -28,6 +29,7 @@ import {
   formatRunnerTimestamp,
   modelOptionLabel,
   permissionModeLabel,
+  runtimeProfileOptionLabel,
   sectionDomId,
   type ChannelChoice,
   type ChannelSettingsDraft
@@ -245,6 +247,7 @@ function ChannelSettingsDetail({
   const dirty = draftSignature !== savedSignature;
   const permissionOptions = channelPermissionOptions(controls, channel, draft);
   const modelOptions = channelModelOptions(controls, channel, draft);
+  const runtimeProfileOptions = channelRuntimeProfileOptions(channel, draft);
   const workspaceOptions = channelWorkspaceOptions(sessionBrowserWorkspaces);
   const busy = disabled || saving || deleting;
 
@@ -428,6 +431,20 @@ function ChannelSettingsDetail({
         </ChannelDetailSection>
 
         <ChannelDetailSection title="Runtime settings">
+          <ChannelFormRow label="Runtime Profile" hint="Blank uses this channel's profile default.">
+            <div className="channelControl">
+              <select
+                aria-label="Channel Runtime Profile"
+                disabled={busy}
+                onChange={(event) => updateDraft({ runtimeRef: event.currentTarget.value })}
+                value={draft.runtimeRef}
+              >
+                {runtimeProfileOptions.map((option) => (
+                  <option key={option || "default"} value={option}>{runtimeProfileOptionLabel(option)}</option>
+                ))}
+              </select>
+            </div>
+          </ChannelFormRow>
           <ChannelFormRow label="Permission mode" hint="Controls write and command approval defaults for this channel.">
             <div className="channelSegmentedControl" role="group" aria-label="Permission mode">
               {permissionOptions.map((option) => (

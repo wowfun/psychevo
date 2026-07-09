@@ -163,6 +163,58 @@ args = ["acp"]
 }
 
 #[test]
+pub(crate) fn runtime_profile_configs_merge_profile_and_project_overlay() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let home = home_dir(&temp);
+    let project_dir = options.cwd.join(".psychevo");
+    fs::create_dir_all(&home).expect("home dir");
+    fs::create_dir_all(&project_dir).expect("project dir");
+    write_config(
+        home.join("config.toml"),
+        r#"
+[runtime_profiles.codex]
+runtime = "codex"
+label = "Codex"
+command = "codex"
+args = ["app-server", "--stdio"]
+default_mode = "default"
+"#,
+    )
+    .expect("home config");
+    write_config(
+        project_dir.join("config.toml"),
+        r#"
+[runtime_profiles.codex]
+enabled = false
+default_mode = "auto-review"
+
+[runtime_profiles.opencode]
+runtime = "opencode"
+command = "opencode"
+args = ["serve"]
+default_agent = "build"
+"#,
+    )
+    .expect("project config");
+    let env = BTreeMap::from([(
+        "PSYCHEVO_HOME".to_string(),
+        home.to_string_lossy().to_string(),
+    )]);
+
+    let profiles = load_runtime_profile_configs(&home, &options.cwd, &env).expect("profiles");
+
+    let codex = profiles.get("codex").expect("codex");
+    assert_eq!(codex.runtime, RuntimeProfileKind::Codex);
+    assert!(!codex.enabled);
+    assert_eq!(codex.default_mode.as_deref(), Some("auto-review"));
+    assert_eq!(codex.args, vec!["app-server", "--stdio"]);
+    let opencode = profiles.get("opencode").expect("opencode");
+    assert_eq!(opencode.runtime, RuntimeProfileKind::OpenCode);
+    assert_eq!(opencode.default_agent.as_deref(), Some("build"));
+}
+
+#[test]
 pub(crate) fn psychevo_config_env_is_supported_and_config_dir_is_ignored() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);

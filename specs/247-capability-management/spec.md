@@ -62,8 +62,8 @@ definitions, plus configured ACP backends. It uses agent-owned and
 backend-owned Gateway RPCs directly; it must not introduce a generic capability
 object that hides the owning runtime module.
 
-The tab has an internal segmented view with `Definitions`, `Teams`, and
-`ACP Backends`.
+The tab has an internal segmented view with `Definitions`, `Teams`,
+`Runtime Profiles`, and `ACP Backends`.
 `Definitions` lists mutable Project/Profile Markdown agents across active,
 shadowed, and disabled states. Rows show name, description, source label,
 enablement, entrypoints, backend reference when present, and compact
@@ -90,6 +90,14 @@ workflow: add/edit/delete, enablement, entrypoint controls, client capability
 controls, MCP server list, and doctor checks. Backend command environment
 values remain write-only; management responses may expose environment variable
 names but never resolved secret values.
+
+`Runtime Profiles` carries the user-facing runtime selector management surface
+for native Psychevo, direct Codex, direct OpenCode, and future runtime
+profiles. Rows show generated/configured state, runtime kind, enablement,
+cached health, command diagnostics, Refresh/Doctor actions, and session
+takeover affordances when supported. Editing or enabling a generated Codex or
+OpenCode row writes a real Profile or Project `runtime_profiles.<id>` config
+entry; ordinary list/refresh reads must not spawn real provider processes.
 
 When the local Gateway detects known ACP executables in its launch environment,
 it may auto-create Profile ACP backend rows so `Capabilities > Agents > ACP
@@ -230,6 +238,12 @@ Gateway exposes domain RPCs instead of a capability aggregate:
 - `agent/list`, `agent/read`, `agent/write`, `agent/setEnabled`,
   `agent/delete`, `backend/list`, `backend/doctor`, `backend/write`,
   `backend/delete`
+- `runtime/profile/list`, `runtime/profile/read`, `runtime/profile/write`,
+  `runtime/profile/setEnabled`, `runtime/profile/delete`, `runtime/snapshot`,
+  `runtime/health/check`, `runtime/session/list`, `runtime/session/read`,
+  `runtime/session/resume`, `runtime/session/archive`,
+  `runtime/session/unarchive`, `runtime/session/delete`,
+  `runtime/session/rename`, `runtime/session/rollback`
 - `skill/list`, `skill/read`, `skill/install`, `skill/uninstall`,
   `skill/setEnabled`, `skill/write`
 - `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
@@ -268,6 +282,8 @@ Capabilities screens without text overlap.
 
 - [051 Agents](../051-agents/spec.md) owns agent definition, discovery,
   enablement, and backend-reference semantics.
+- [052 Agent Runtimes](../052-agent-runtimes/spec.md) owns Runtime Profiles,
+  direct runtime snapshots, and native session takeover semantics.
 - [055 Skills](../055-skills/spec.md) owns skill package and lifecycle
   semantics.
 - [056 MCP](../056-mcp/spec.md) owns MCP runtime normalization, auth, and

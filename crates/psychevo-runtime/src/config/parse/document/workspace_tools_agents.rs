@@ -446,3 +446,75 @@ pub(crate) fn parse_agent_backend_client_capabilities(
     }
     Ok(capabilities)
 }
+
+pub(crate) fn parse_runtime_profile_configs(
+    value: &Value,
+) -> Result<BTreeMap<String, RuntimeProfileConfig>> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("runtime_profiles must be an object".to_string()))?;
+    let mut out = BTreeMap::new();
+    for (id, value) in object {
+        if !valid_agent_name(id) {
+            return Err(Error::Config(format!(
+                "runtime_profiles.{id} must be a valid runtime profile id"
+            )));
+        }
+        out.insert(id.clone(), parse_runtime_profile_config(id, value)?);
+    }
+    Ok(out)
+}
+
+pub(crate) fn parse_runtime_profile_config(
+    id: &str,
+    value: &Value,
+) -> Result<RuntimeProfileConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config(format!("runtime_profiles.{id} must be an object")))?;
+    let runtime_raw = optional_string_field(object, "runtime")?.unwrap_or_else(|| {
+        if matches!(id, "native" | "codex" | "opencode") {
+            id.to_string()
+        } else {
+            "acp".to_string()
+        }
+    });
+    let runtime = RuntimeProfileKind::parse(&runtime_raw).ok_or_else(|| {
+        Error::Config(format!(
+            "runtime_profiles.{id}.runtime `{runtime_raw}` must be native, codex, opencode, or acp"
+        ))
+    })?;
+    let enabled = optional_bool_field(object, "enabled")?.unwrap_or(true);
+    let label = optional_string_field(object, "label")?.unwrap_or_else(|| id.to_string());
+    let command = optional_string_field(object, "command")?;
+    let args = string_array_field(object, "args", &format!("runtime_profiles.{id}.args"))?;
+    let env = string_map_field(object, "env", &format!("runtime_profiles.{id}.env"))?;
+    let default_model = optional_string_alias_field(object, "default_model", "defaultModel")?;
+    let default_mode = optional_string_alias_field(object, "default_mode", "defaultMode")?;
+    let default_agent = optional_string_alias_field(object, "default_agent", "defaultAgent")?;
+    let approval_mode = optional_string_alias_field(object, "approval_mode", "approvalMode")?;
+    let sandbox = optional_string_field(object, "sandbox")?;
+    let workspace_roots = object
+        .get("workspace_roots")
+        .or_else(|| object.get("workspaceRoots"))
+        .map(parse_string_array_value)
+        .transpose()?
+        .unwrap_or_default();
+    let options = object.get("options").cloned().unwrap_or(Value::Null);
+    Ok(RuntimeProfileConfig {
+        id: id.to_string(),
+        runtime,
+        enabled,
+        label,
+        command,
+        args,
+        env,
+        default_model,
+        default_mode,
+        default_agent,
+        approval_mode,
+        sandbox,
+        workspace_roots,
+        options,
+    })
+}

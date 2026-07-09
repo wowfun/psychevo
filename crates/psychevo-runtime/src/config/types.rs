@@ -103,6 +103,53 @@ impl Default for WorkspacesConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeProfileKind {
+    Native,
+    Codex,
+    OpenCode,
+    Acp,
+}
+
+impl RuntimeProfileKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Codex => "codex",
+            Self::OpenCode => "opencode",
+            Self::Acp => "acp",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "native" => Some(Self::Native),
+            "codex" => Some(Self::Codex),
+            "opencode" => Some(Self::OpenCode),
+            "acp" => Some(Self::Acp),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeProfileConfig {
+    pub id: String,
+    pub runtime: RuntimeProfileKind,
+    pub enabled: bool,
+    pub label: String,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub default_model: Option<String>,
+    pub default_mode: Option<String>,
+    pub default_agent: Option<String>,
+    pub approval_mode: Option<String>,
+    pub sandbox: Option<String>,
+    pub workspace_roots: Vec<String>,
+    pub options: Value,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ToolSelectionConfig {
     pub(crate) modes: BTreeMap<String, ToolModeConfig>,
@@ -294,6 +341,7 @@ pub(crate) struct ChannelConnectionConfig {
     pub(crate) label: String,
     pub(crate) transport: ChannelTransport,
     pub(crate) cwd: Option<String>,
+    pub(crate) runtime_ref: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) permission_mode: Option<String>,
     pub(crate) require_mention: bool,
@@ -707,6 +755,38 @@ pub fn load_agent_backend_configs(
     value
         .get("agents")
         .map(parse_agent_backend_configs)
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+pub fn load_runtime_profile_configs(
+    home: &Path,
+    cwd: &Path,
+    env_map: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, RuntimeProfileConfig>> {
+    let mut value = json!({});
+    if let Some(config_path) = env_map
+        .get("PSYCHEVO_CONFIG")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| resolve_explicit_path(Path::new(value), env_map))
+        .transpose()?
+    {
+        deep_merge(&mut value, load_toml_config_file(&config_path, true)?);
+    } else {
+        deep_merge(
+            &mut value,
+            load_toml_config_file(&home.join(CONFIG_FILE_NAME), false)?,
+        );
+    }
+    deep_merge(
+        &mut value,
+        load_toml_config_file(&cwd.join(".psychevo").join(CONFIG_FILE_NAME), false)?,
+    );
+    value
+        .get("runtime_profiles")
+        .or_else(|| value.get("runtimeProfiles"))
+        .map(parse_runtime_profile_configs)
         .transpose()
         .map(Option::unwrap_or_default)
 }

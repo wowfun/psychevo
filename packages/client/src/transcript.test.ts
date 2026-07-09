@@ -644,7 +644,8 @@ describe("reconcileThreadSnapshot", () => {
         id: "thread-2",
         backend: {
           kind: "psychevo" as const,
-          nativeId: "thread-2"
+          nativeId: "thread-2",
+          runtimeRef: "native"
         },
         sourceKey: "web:test"
       },
@@ -1189,7 +1190,8 @@ function threadSnapshot(): ThreadSnapshot {
       id: "thread-1",
       backend: {
         kind: "psychevo",
-        nativeId: "thread-1"
+        nativeId: "thread-1",
+        runtimeRef: "native"
       },
       sourceKey: "web:test"
     },

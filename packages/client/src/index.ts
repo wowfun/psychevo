@@ -105,8 +105,27 @@ import {
   type PluginSetTrustParams,
   type PluginUninstallParams,
   type RpcNotification,
+  type RuntimeHealthCheckParams,
   type RuntimeOptionsParams,
   type RuntimeOptionsResult,
+  type RuntimeProfileDeleteParams,
+  type RuntimeProfileDeleteResult,
+  type RuntimeProfileListParams,
+  type RuntimeProfileListResult,
+  type RuntimeProfileReadParams,
+  type RuntimeProfileReadResult,
+  type RuntimeProfileSetEnabledParams,
+  type RuntimeProfileView,
+  type RuntimeProfileWriteParams,
+  type RuntimeProfileWriteResult,
+  type RuntimeSessionListParams,
+  type RuntimeSessionListResult,
+  type RuntimeSessionMutationResult,
+  type RuntimeSessionParams,
+  type RuntimeSessionRenameParams,
+  type RuntimeSessionRollbackParams,
+  type RuntimeSnapshotParams,
+  type RuntimeSnapshotResult,
   type SettingsReadParams,
   type SettingsReadResult,
   type SettingsUpdateParams,
@@ -312,6 +331,21 @@ export interface GatewayRequestParams {
   "mcp/test": McpNameParams;
   "mcp/upsert": McpUpsertParams;
   "runtime/options": RuntimeOptionsParams;
+  "runtime/profile/delete": RuntimeProfileDeleteParams;
+  "runtime/profile/list": RuntimeProfileListParams;
+  "runtime/profile/read": RuntimeProfileReadParams;
+  "runtime/profile/setEnabled": RuntimeProfileSetEnabledParams;
+  "runtime/profile/write": RuntimeProfileWriteParams;
+  "runtime/snapshot": RuntimeSnapshotParams;
+  "runtime/health/check": RuntimeHealthCheckParams;
+  "runtime/session/list": RuntimeSessionListParams;
+  "runtime/session/read": RuntimeSessionParams;
+  "runtime/session/resume": RuntimeSessionParams;
+  "runtime/session/archive": RuntimeSessionParams;
+  "runtime/session/unarchive": RuntimeSessionParams;
+  "runtime/session/delete": RuntimeSessionParams;
+  "runtime/session/rename": RuntimeSessionRenameParams;
+  "runtime/session/rollback": RuntimeSessionRollbackParams;
   "settings/read": SettingsReadParams;
   "settings/update": SettingsUpdateParams;
   "shell/start": ShellStartParams;
@@ -438,6 +472,21 @@ export interface GatewayRequestResults {
   "mcp/test": GatewayJsonResult;
   "mcp/upsert": GatewayJsonResult;
   "runtime/options": RuntimeOptionsResult;
+  "runtime/profile/delete": RuntimeProfileDeleteResult;
+  "runtime/profile/list": RuntimeProfileListResult;
+  "runtime/profile/read": RuntimeProfileReadResult;
+  "runtime/profile/setEnabled": RuntimeProfileWriteResult;
+  "runtime/profile/write": RuntimeProfileWriteResult;
+  "runtime/snapshot": RuntimeSnapshotResult;
+  "runtime/health/check": RuntimeProfileView;
+  "runtime/session/list": RuntimeSessionListResult;
+  "runtime/session/read": RuntimeSessionMutationResult;
+  "runtime/session/resume": RuntimeSessionMutationResult;
+  "runtime/session/archive": RuntimeSessionMutationResult;
+  "runtime/session/unarchive": RuntimeSessionMutationResult;
+  "runtime/session/delete": RuntimeSessionMutationResult;
+  "runtime/session/rename": RuntimeSessionMutationResult;
+  "runtime/session/rollback": RuntimeSessionMutationResult;
   "settings/read": SettingsReadResult;
   "settings/update": SettingsReadResult;
   "shell/start": ShellStartResult;

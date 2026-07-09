@@ -42,28 +42,28 @@ use psychevo_runtime::{
     ModelCatalogProvider, ModelState, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionMode, PluginAdapterMode, PluginInspectOptions, PluginInstallOptions,
     PluginMarketplaceEntry, PluginScope, PluginSourceKind, REASONING_EFFORT_VALUES, RunMode,
-    RunOptions, RunSandboxOverride, SESSION_COMPOSER_MODEL_METADATA_KEY,
-    SESSION_MAIN_AGENT_METADATA_KEY, SIDE_CONVERSATION_METADATA_KEY,
-    SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY, SessionArtifactKind,
-    SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionSummary,
-    SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions, SkillDiscoveryOptions,
-    SkillTarget, StateRuntime, UsageReadOptions, UserContentBlock, UserShellContextOptions,
-    WEB_SIDE_CONVERSATION_SESSION_SOURCE, agent_spawn_paused, agent_status_records,
-    auth_status_value, canonicalize_cwd, clear_mcp_oauth_access_token, config_show_value,
-    configured_models, context_snapshot, create_local_toolset, discover_agent_teams_with_catalog,
-    discover_agents, discover_skills, fetch_and_cache_model_catalog, format_context_total_value,
-    format_context_total_value_parts, image_generation_config_value, install_skill,
-    latest_due_at_ms, list_skill_bundles, list_skills_value_with_options,
-    load_agent_backend_configs, main_agent_default_metadata, main_agent_from_session_metadata,
-    main_agent_metadata, mcp_server_value, mcp_servers_value, mcp_test_server_value,
-    model_catalog_entry_is_free, model_catalog_provider, model_catalog_providers, next_run_at_ms,
-    normalize_provider_id, normalize_reasoning_effort, parse_agent_definition_text,
-    parse_agent_team_definition_text, plugin_doctor_value, plugin_import_inspect_value,
-    plugin_install_value, plugin_list_value, plugin_marketplace_add_value,
-    plugin_marketplace_list_value, plugin_marketplace_remove_value, plugin_set_enabled_value,
-    plugin_set_trust_value, plugin_uninstall_value, plugin_view_value, read_cached_model_catalog,
-    redo_session, remove_config_value, remove_installed_skill, remove_local_toolset,
-    remove_mcp_server, render_session_export, resolve_agent_definition,
+    RunOptions, RunSandboxOverride, RuntimeProfileConfig, RuntimeProfileKind,
+    SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
+    SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
+    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
+    SessionSummary, SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions,
+    SkillDiscoveryOptions, SkillTarget, StateRuntime, UsageReadOptions, UserContentBlock,
+    UserShellContextOptions, WEB_SIDE_CONVERSATION_SESSION_SOURCE, agent_spawn_paused,
+    agent_status_records, auth_status_value, canonicalize_cwd, clear_mcp_oauth_access_token,
+    config_show_value, configured_models, context_snapshot, create_local_toolset,
+    discover_agent_teams_with_catalog, discover_agents, discover_skills,
+    fetch_and_cache_model_catalog, format_context_total_value, format_context_total_value_parts,
+    image_generation_config_value, install_skill, latest_due_at_ms, list_skill_bundles,
+    list_skills_value_with_options, load_agent_backend_configs, load_runtime_profile_configs,
+    main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
+    mcp_server_value, mcp_servers_value, mcp_test_server_value, model_catalog_entry_is_free,
+    model_catalog_provider, model_catalog_providers, next_run_at_ms, normalize_provider_id,
+    normalize_reasoning_effort, parse_agent_definition_text, parse_agent_team_definition_text,
+    plugin_doctor_value, plugin_import_inspect_value, plugin_install_value, plugin_list_value,
+    plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
+    plugin_set_enabled_value, plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
+    read_cached_model_catalog, redo_session, remove_config_value, remove_installed_skill,
+    remove_local_toolset, remove_mcp_server, render_session_export, resolve_agent_definition,
     resolve_agent_team_definition, resolve_executable_path, resolve_voice_asr_config,
     resolve_voice_realtime_config, resolve_voice_tts_config, resume_agent_id,
     save_mcp_oauth_access_token, selected_configured_model, send_agent_message,
@@ -99,6 +99,7 @@ mod channel_runtime;
 mod channels;
 mod commands;
 mod completion;
+mod runtime_profiles;
 mod terminal;
 mod voice;
 mod workspace;
@@ -129,6 +130,14 @@ use commands::{
 #[cfg(test)]
 use completion::active_completion_token;
 use completion::completion_list_value;
+use runtime_profiles::{
+    delete_runtime_profile, ensure_turn_runtime_profile_supported, resolve_runtime_ref_peer_turn,
+    runtime_health_check_result, runtime_profile_list_result, runtime_profile_options,
+    runtime_profile_read_result, runtime_session_archive_result, runtime_session_delete_result,
+    runtime_session_list_result, runtime_session_read_result, runtime_session_rename_result,
+    runtime_session_resume_result, runtime_session_rollback_result, runtime_snapshot_result,
+    set_runtime_profile_enabled, write_runtime_profile,
+};
 use terminal::TerminalManager;
 use voice::{
     RealtimeSessionState, update_voice_policy_for_source, voice_asr_transcribe_value,

@@ -99,6 +99,13 @@ export const clientRequestChannelUpdateSchema = {
             "null"
           ]
         },
+        "runtimeRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "scope": {
           "anyOf": [
             {

@@ -247,7 +247,7 @@ function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
     source: { kind: "web", rawId: "right-thread", lifetime: "persistent", rawIdentity: null, visibleName: null },
     scope: scopeForCwd(""),
     thread: threadId
-      ? { id: threadId, backend: { kind: "psychevo", nativeId: threadId }, sourceKey: null }
+      ? { id: threadId, backend: { kind: "psychevo", nativeId: threadId, runtimeRef: "native" }, sourceKey: null }
       : null,
     entries: [],
     activity: idleActivity(),

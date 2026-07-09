@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "label": {
+      "type": "string"
+    },
+    "mode": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "nativeId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtimeRef": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "label",
+    "name",
+    "runtimeRef"
+  ],
+  "title": "RuntimeSnapshotAgentView",
+  "type": "object"
+}

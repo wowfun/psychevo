@@ -71,7 +71,8 @@ function threadSnapshot(threadId: string): ThreadSnapshot {
       id: threadId,
       backend: {
         kind: "psychevo",
-        nativeId: threadId
+        nativeId: threadId,
+        runtimeRef: "native"
       },
       sourceKey: "web:test"
     }

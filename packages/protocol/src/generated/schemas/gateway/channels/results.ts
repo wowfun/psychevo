@@ -166,6 +166,13 @@ export const gatewayChannelResultSchemas = {
         "runner": {
           "$ref": "#/definitions/ChannelRunnerView"
         },
+        "runtimeRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runtimeStatus": {
           "type": "string"
         },
@@ -424,6 +431,13 @@ export const gatewayChannelResultSchemas = {
         "runner": {
           "$ref": "#/definitions/ChannelRunnerView"
         },
+        "runtimeRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runtimeStatus": {
           "type": "string"
         },
@@ -657,6 +671,13 @@ export const gatewayChannelResultSchemas = {
         },
         "runner": {
           "$ref": "#/definitions/ChannelRunnerView"
+        },
+        "runtimeRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "runtimeStatus": {
           "type": "string"

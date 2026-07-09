@@ -102,6 +102,7 @@ pub(super) fn route_channel_command(
                 format!("No matching Ask request for {request_id}.")
             }
         }
+        "profile" => channel_profile_reply(state, connection, source, args)?,
         "reset" => reset_channel_source_reply(state, source)?,
         "" => return Ok(None),
         _ => {
@@ -378,7 +379,7 @@ fn channel_help_text(
         ));
     }
     lines.push(
-        "Controls: /stop, /reset, /approve <id>, /deny <id>, /answer <id> <text>, /cancel <id>."
+        "Controls: /stop, /reset, /profile, /approve <id>, /deny <id>, /answer <id> <text>, /cancel <id>."
             .to_string(),
     );
     lines.push(channel_status_text(state, runtime, connection, source)?);
@@ -433,8 +434,9 @@ fn channel_status_text(
         .gateway
         .resolve_source_thread(source)?
         .unwrap_or_else(|| "none".to_string());
+    let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
     Ok(format!(
-        "Channel {} is {}{}; config {}; thread {}.",
+        "Channel {} is {}{}; config {}; runtime {}; thread {}.",
         connection.label,
         runner.state,
         runner
@@ -443,8 +445,125 @@ fn channel_status_text(
             .map(|reason| format!(" ({reason})"))
             .unwrap_or_default(),
         connection.config_status,
+        runtime_ref,
         thread
     ))
+}
+
+fn channel_profile_reply(
+    state: &WebState,
+    connection: &ChannelRuntimeConnection,
+    source: &GatewaySource,
+    args: &str,
+) -> psychevo_runtime::Result<String> {
+    let (subcommand, rest) = split_first_arg(args);
+    let scope = channel_resolved_scope(state, connection, source)?;
+    match subcommand {
+        "" | "status" => channel_profile_status_text(state, connection, source, &scope),
+        "list" => channel_profile_list_text(state, &scope),
+        "use" => {
+            let requested = rest.split_whitespace().next().unwrap_or("");
+            if requested.is_empty() {
+                return Ok("Usage: /profile use <id>".to_string());
+            }
+            let profiles = runtime_profile_list_result(state, &scope)?.profiles;
+            let Some(profile) = profiles.iter().find(|profile| profile.id == requested) else {
+                return Ok(format!("Unknown Runtime Profile `{requested}`."));
+            };
+            if !profile.enabled {
+                return Ok(format!("Runtime Profile `{requested}` is disabled."));
+            }
+            match channel_bind_runtime_ref(state, source, requested)? {
+                Some(thread_id) => Ok(format!(
+                    "Runtime Profile set to `{requested}` for this channel thread ({thread_id})."
+                )),
+                None => Ok(
+                    "No channel thread is bound yet. Send a message first or set the channel default in Settings."
+                        .to_string(),
+                ),
+            }
+        }
+        "reset" => {
+            let runtime_ref = connection
+                .runtime_ref
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("native");
+            match channel_bind_runtime_ref(state, source, runtime_ref)? {
+                Some(thread_id) => Ok(format!(
+                    "Runtime Profile reset to `{runtime_ref}` for this channel thread ({thread_id})."
+                )),
+                None => Ok("No channel thread is bound yet.".to_string()),
+            }
+        }
+        "resume" => {
+            let native_session_id = rest.split_whitespace().next().unwrap_or("");
+            if native_session_id.is_empty() {
+                return Ok("Usage: /profile resume <native-session-id>".to_string());
+            }
+            let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
+            let result = runtime_session_resume_result(
+                state,
+                &scope,
+                wire::RuntimeSessionParams {
+                    runtime_ref: runtime_ref.clone(),
+                    native_session_id: native_session_id.to_string(),
+                    scope: Some(scope.to_wire_scope()),
+                },
+            )?;
+            if result.supported && result.changed {
+                Ok(format!(
+                    "Resumed `{native_session_id}` on Runtime Profile `{runtime_ref}`."
+                ))
+            } else {
+                Ok(result.message.unwrap_or_else(|| {
+                    format!("Runtime Profile `{runtime_ref}` cannot resume native sessions here.")
+                }))
+            }
+        }
+        _ => Ok(
+            "Usage: /profile [list|status|use <id>|resume <native-session-id>|reset]".to_string(),
+        ),
+    }
+}
+
+fn channel_profile_status_text(
+    state: &WebState,
+    connection: &ChannelRuntimeConnection,
+    source: &GatewaySource,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<String> {
+    let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
+    let profiles = runtime_profile_list_result(state, scope)?.profiles;
+    let Some(profile) = profiles.iter().find(|profile| profile.id == runtime_ref) else {
+        return Ok(format!(
+            "Runtime Profile `{runtime_ref}` is not configured."
+        ));
+    };
+    Ok(format!(
+        "Runtime Profile `{}`: {} ({}) - {}.",
+        profile.id, profile.label, profile.runtime, profile.health.summary
+    ))
+}
+
+fn channel_profile_list_text(
+    state: &WebState,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<String> {
+    let profiles = runtime_profile_list_result(state, scope)?.profiles;
+    let enabled_count = profiles.iter().filter(|profile| profile.enabled).count();
+    let mut lines = vec!["Runtime Profiles:".to_string()];
+    for profile in profiles.iter().filter(|profile| profile.enabled).take(20) {
+        lines.push(format!(
+            "{} - {} ({}, {})",
+            profile.id, profile.label, profile.runtime, profile.health.status
+        ));
+    }
+    if enabled_count > 20 {
+        lines.push("...and more.".to_string());
+    }
+    Ok(lines.join("\n"))
 }
 
 fn channel_skills_text(

@@ -97,6 +97,7 @@ machinery:
 - allow users
 - allow groups
 - group-mention requirement
+- Runtime Profile
 - model
 - cwd
 - permission mode
@@ -212,6 +213,15 @@ for visibility with copy that they require a peer-runtime entrypoint rather
 than ordinary `@agent` delegation. The command must not behave like the
 Workbench runtime selector.
 
+Channel `/profile` is the runtime selector command for a remote lane. Bare
+`/profile` and `/profile status` show the effective Runtime Profile and cached
+health. `/profile list` lists enabled profiles that are valid for the lane.
+`/profile use <id>` switches future turns on the lane to that profile.
+`/profile resume <native-session-id>` binds the lane to an importable native
+runtime session when the profile supports session takeover. `/profile reset`
+returns the lane to the channel connection default. Archive, rollback, rename,
+and delete are Workbench-only actions.
+
 Attachment UX is native to the messaging platform. Users send images and files
 with the IM client attachment flow; Channels normalize those attachments before
 runtime sees them. When a platform cannot upload or download a media kind, the
@@ -235,6 +245,8 @@ explicit confirmation behavior.
   thread, turn, and interaction semantics.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines command spelling.
 - [240 pevo Web](../240-pevo-web/spec.md) defines Workbench product behavior.
+- [052 Agent Runtimes](../052-agent-runtimes/spec.md) defines Runtime Profiles
+  and native runtime session controls.
 - [065 CI/CD](../065-ci-cd/spec.md) defines repo-local validation and
   live opt-in boundaries.
 

@@ -164,7 +164,7 @@ impl Gateway {
                         thread_id,
                         backend_kind: backend.kind.as_str(),
                         backend_native_id: backend.native_id.as_deref(),
-                        lineage,
+                        lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
                     })?;
             }
         }
@@ -172,4 +172,13 @@ impl Gateway {
         Ok(())
     }
 
+}
+
+fn lineage_with_runtime_ref(mut lineage: Option<Value>, runtime_ref: Option<&str>) -> Option<Value> {
+    let runtime_ref = runtime_ref?;
+    let value = lineage.get_or_insert_with(|| json!({}));
+    if let Some(object) = value.as_object_mut() {
+        object.insert("runtimeRef".to_string(), json!(runtime_ref));
+    }
+    lineage
 }

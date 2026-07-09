@@ -35,6 +35,9 @@ pub struct ChannelUpdateParams {
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: Option<String>,
+    #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub permission_mode: Option<String>,
@@ -170,6 +173,9 @@ pub struct ChannelConfigView {
     pub transport: String,
     #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default)]
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default, rename = "permissionMode")]

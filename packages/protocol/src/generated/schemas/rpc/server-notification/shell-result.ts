@@ -22,6 +22,12 @@ export const serverNotificationShellResultSchema = {
             "string",
             "null"
           ]
+        },
+        "runtimeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

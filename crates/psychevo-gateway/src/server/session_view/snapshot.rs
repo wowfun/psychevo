@@ -7,6 +7,7 @@ fn thread_snapshot(
         id: thread_id.to_string(),
         backend: crate::GatewayBackendInfo {
             kind: crate::BackendKind::Psychevo,
+            runtime_ref: Some("native".to_string()),
             native_id: Some(thread_id.to_string()),
         },
         source_key: Some(scope.source.source_key()),

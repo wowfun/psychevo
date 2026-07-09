@@ -16,6 +16,21 @@ import { clientRequestTurnSteerSchema } from './rpc/client-request/turn-steer';
 import { clientRequestTurnInterruptSchema } from './rpc/client-request/turn-interrupt';
 import { clientRequestTurnTakeoverSchema } from './rpc/client-request/turn-takeover';
 import { clientRequestRuntimeOptionsSchema } from './rpc/client-request/runtime-options';
+import { clientRequestRuntimeProfileListSchema } from './rpc/client-request/runtime-profile-list';
+import { clientRequestRuntimeProfileReadSchema } from './rpc/client-request/runtime-profile-read';
+import { clientRequestRuntimeProfileWriteSchema } from './rpc/client-request/runtime-profile-write';
+import { clientRequestRuntimeProfileDeleteSchema } from './rpc/client-request/runtime-profile-delete';
+import { clientRequestRuntimeProfileSetEnabledSchema } from './rpc/client-request/runtime-profile-set-enabled';
+import { clientRequestRuntimeSnapshotSchema } from './rpc/client-request/runtime-snapshot';
+import { clientRequestRuntimeHealthCheckSchema } from './rpc/client-request/runtime-health-check';
+import { clientRequestRuntimeSessionListSchema } from './rpc/client-request/runtime-session-list';
+import { clientRequestRuntimeSessionReadSchema } from './rpc/client-request/runtime-session-read';
+import { clientRequestRuntimeSessionResumeSchema } from './rpc/client-request/runtime-session-resume';
+import { clientRequestRuntimeSessionArchiveSchema } from './rpc/client-request/runtime-session-archive';
+import { clientRequestRuntimeSessionUnarchiveSchema } from './rpc/client-request/runtime-session-unarchive';
+import { clientRequestRuntimeSessionDeleteSchema } from './rpc/client-request/runtime-session-delete';
+import { clientRequestRuntimeSessionRenameSchema } from './rpc/client-request/runtime-session-rename';
+import { clientRequestRuntimeSessionRollbackSchema } from './rpc/client-request/runtime-session-rollback';
 import { clientRequestAutomationListSchema } from './rpc/client-request/automation-list';
 import { clientRequestAutomationDraftSchema } from './rpc/client-request/automation-draft';
 import { clientRequestAutomationWriteSchema } from './rpc/client-request/automation-write';
@@ -377,6 +392,51 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ClientRequest/runtime-options.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-list.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-read.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-write.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-delete.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-profile-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-snapshot.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-health-check.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-list.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-read.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-resume.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-archive.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-unarchive.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-delete.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-rename.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-rollback.json"
     },
     {
       "$ref": "ClientRequest/automation-list.json"
@@ -769,6 +829,21 @@ export const rpcSchemaRefs = [
   clientRequestTurnInterruptSchema,
   clientRequestTurnTakeoverSchema,
   clientRequestRuntimeOptionsSchema,
+  clientRequestRuntimeProfileListSchema,
+  clientRequestRuntimeProfileReadSchema,
+  clientRequestRuntimeProfileWriteSchema,
+  clientRequestRuntimeProfileDeleteSchema,
+  clientRequestRuntimeProfileSetEnabledSchema,
+  clientRequestRuntimeSnapshotSchema,
+  clientRequestRuntimeHealthCheckSchema,
+  clientRequestRuntimeSessionListSchema,
+  clientRequestRuntimeSessionReadSchema,
+  clientRequestRuntimeSessionResumeSchema,
+  clientRequestRuntimeSessionArchiveSchema,
+  clientRequestRuntimeSessionUnarchiveSchema,
+  clientRequestRuntimeSessionDeleteSchema,
+  clientRequestRuntimeSessionRenameSchema,
+  clientRequestRuntimeSessionRollbackSchema,
   clientRequestAutomationListSchema,
   clientRequestAutomationDraftSchema,
   clientRequestAutomationWriteSchema,

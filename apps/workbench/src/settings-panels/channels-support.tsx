@@ -13,6 +13,7 @@ export type ChannelSettingsDraft = {
   label: string;
   enabled: boolean;
   cwd: string;
+  runtimeRef: string;
   model: string;
   permissionMode: string;
   requireMention: boolean;
@@ -63,6 +64,7 @@ export function channelDraftFromChannel(channel: WorkbenchChannel): ChannelSetti
     label: channel.label ?? "",
     enabled: channel.enabled,
     cwd: channel.cwd ?? "",
+    runtimeRef: channel.runtimeRef ?? "",
     model: channel.model ?? "",
     permissionMode: channel.permissionMode ?? "default",
     requireMention: channel.requireMention,
@@ -77,6 +79,7 @@ export function channelUpdateDraftFromDraft(draft: ChannelSettingsDraft): Channe
     label: draft.label.trim(),
     enabled: draft.enabled,
     cwd: draft.cwd.trim(),
+    runtimeRef: draft.runtimeRef.trim(),
     model: draft.model.trim(),
     permissionMode: draft.permissionMode,
     requireMention: draft.requireMention,
@@ -129,6 +132,20 @@ export function channelModelOptions(
   ]).filter(Boolean);
 }
 
+export function channelRuntimeProfileOptions(
+  channel: WorkbenchChannel,
+  draft: ChannelSettingsDraft
+): string[] {
+  return uniqueStrings([
+    "",
+    "native",
+    "codex",
+    "opencode",
+    channel.runtimeRef ?? "",
+    draft.runtimeRef
+  ]);
+}
+
 export function uniqueStrings(values: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -161,6 +178,21 @@ export function modelOptionLabel(value: string, channel: WorkbenchChannel, contr
     return `${value} (current)`;
   }
   return value;
+}
+
+export function runtimeProfileOptionLabel(value: string): string {
+  switch (value) {
+    case "":
+      return "Profile default";
+    case "native":
+      return "Native";
+    case "codex":
+      return "Codex";
+    case "opencode":
+      return "OpenCode";
+    default:
+      return value;
+  }
 }
 
 type WechatQrSetupState = {
@@ -491,9 +523,10 @@ export function QrPlaceholder() {
 }
 
 export function channelRuntimeDefaultsSummary(draft: ChannelSettingsDraft): string {
+  const runtime = runtimeProfileOptionLabel(draft.runtimeRef || "");
   const model = draft.model.trim() || "profile model";
   const workspace = draft.cwd.trim() ? "custom workspace" : "default workspace";
-  return `${permissionModeLabel(draft.permissionMode)} · ${model} · ${workspace}`;
+  return `${runtime} · ${permissionModeLabel(draft.permissionMode)} · ${model} · ${workspace}`;
 }
 
 export function ChannelHealthItem({
@@ -580,9 +613,10 @@ export function channelDoctorOk(doctor: WorkbenchChannelDoctor): boolean {
 }
 
 export function channelRuntimeSummary(channel: WorkbenchChannel, fallbackCwd: string): string {
+  const runtime = runtimeProfileOptionLabel(channel.runtimeRef ?? "");
   const model = channel.model ?? "default model";
   const cwd = channel.cwd ?? fallbackCwd;
-  return `${model} · ${cwd}`;
+  return `${runtime} · ${model} · ${cwd}`;
 }
 
 export function channelRunnerTone(status: string): "danger" | "muted" | "ok" | "warning" {

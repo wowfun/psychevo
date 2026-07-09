@@ -515,6 +515,7 @@ model = "lmstudio/test-model"
                 &first,
                 &GatewayBackendInfo {
                     kind: BackendKind::Psychevo,
+                    runtime_ref: Some("native".to_string()),
                     native_id: Some(first.clone()),
                 },
                 None,
@@ -534,6 +535,7 @@ model = "lmstudio/test-model"
                 &second,
                 &GatewayBackendInfo {
                     kind: BackendKind::Psychevo,
+                    runtime_ref: Some("native".to_string()),
                     native_id: Some(second.clone()),
                 },
                 None,

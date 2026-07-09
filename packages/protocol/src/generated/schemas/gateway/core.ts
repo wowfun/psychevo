@@ -130,6 +130,12 @@ export const gatewayCoreSchemas = {
             "string",
             "null"
           ]
+        },
+        "runtimeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

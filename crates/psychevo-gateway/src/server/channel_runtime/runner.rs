@@ -172,6 +172,8 @@ async fn run_channel_inbound_turn(
 ) -> psychevo_runtime::Result<()> {
     let cwd = channel_cwd(&state.inner.cwd, &connection);
     let mut options = state.run_options(cwd, thread_id.clone());
+    let runtime_ref = channel_effective_runtime_ref(&state, &connection, &source)?;
+    options.runtime_ref = Some(runtime_ref.clone());
     options.model = connection.model.clone();
     options.permission_mode = connection
         .permission_mode
@@ -205,6 +207,7 @@ async fn run_channel_inbound_turn(
                 "channel": connection.channel,
                 "connectionId": connection.id,
                 "messageId": message.message_id,
+                "runtimeRef": runtime_ref,
             })),
         })
         .await?;

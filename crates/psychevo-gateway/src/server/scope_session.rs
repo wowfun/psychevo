@@ -144,6 +144,7 @@ fn gateway_backend_info_for_thread(
         .session_summary(thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     if summary.source == "peer_agent" {
+        let metadata = store.session_metadata(thread_id)?;
         let native_id = store
             .session_metadata(thread_id)?
             .and_then(|metadata| metadata.get(ACP_PEER_METADATA_KEY).cloned())
@@ -155,14 +156,24 @@ fn gateway_backend_info_for_thread(
             .or_else(|| Some(thread_id.to_string()));
         Ok(GatewayBackendInfo {
             kind: BackendKind::PeerAgent,
+            runtime_ref: metadata_runtime_ref(&metadata),
             native_id,
         })
     } else {
         Ok(GatewayBackendInfo {
             kind: BackendKind::Psychevo,
+            runtime_ref: Some("native".to_string()),
             native_id: Some(thread_id.to_string()),
         })
     }
+}
+
+fn metadata_runtime_ref(metadata: &Option<Value>) -> Option<String> {
+    metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("runtimeRef").or_else(|| metadata.get("runtime_ref")))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
 fn default_resolved_scope(

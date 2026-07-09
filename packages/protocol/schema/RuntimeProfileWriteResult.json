@@ -1,0 +1,202 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "BackendDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RuntimeHealthView": {
+      "properties": {
+        "checkedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "commandPath": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeProfileView": {
+      "properties": {
+        "approvalMode": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "configured": {
+          "default": false,
+          "type": "boolean"
+        },
+        "defaultAgent": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultMode": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultModel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BackendDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "envKeys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "health": {
+          "$ref": "#/definitions/RuntimeHealthView"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "optionKeys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "sandbox": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceTargets": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BackendConfigTarget"
+          },
+          "type": "array"
+        },
+        "workspaceRoots": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "generated",
+        "health",
+        "id",
+        "label",
+        "runtime"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "changed": {
+      "type": "boolean"
+    },
+    "path": {
+      "type": "string"
+    },
+    "profile": {
+      "$ref": "#/definitions/RuntimeProfileView"
+    },
+    "target": {
+      "$ref": "#/definitions/BackendConfigTarget"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changed",
+    "path",
+    "profile",
+    "target",
+    "written"
+  ],
+  "title": "RuntimeProfileWriteResult",
+  "type": "object"
+}

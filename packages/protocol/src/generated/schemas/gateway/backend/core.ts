@@ -22,6 +22,12 @@ export const gatewayBackendCoreSchemas = {
         "string",
         "null"
       ]
+    },
+    "runtimeRef": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

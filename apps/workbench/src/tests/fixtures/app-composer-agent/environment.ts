@@ -89,6 +89,71 @@ function defaultSkillRecords(): Array<Record<string, unknown>> {
   ];
 }
 
+function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
+  return [
+    {
+      id: "native",
+      runtime: "native",
+      enabled: true,
+      label: "Native Runtime",
+      generated: true,
+      configured: false,
+      command: null,
+      args: [],
+      defaultMode: "default",
+      defaultAgent: null,
+      approvalMode: null,
+      sandbox: null,
+      workspaceRoots: [],
+      envKeys: [],
+      optionKeys: [],
+      sourceTargets: [],
+      health: { status: "ready", summary: "Built in runtime", commandPath: null, checkedAtMs: null },
+      diagnostics: []
+    },
+    {
+      id: "codex",
+      runtime: "codex",
+      enabled: true,
+      label: "Codex",
+      generated: true,
+      configured: false,
+      command: "codex",
+      args: ["app-server", "--stdio"],
+      defaultMode: "auto-review",
+      defaultAgent: null,
+      approvalMode: null,
+      sandbox: null,
+      workspaceRoots: [],
+      envKeys: [],
+      optionKeys: ["mode"],
+      sourceTargets: [],
+      health: { status: "warning", summary: "Command not checked", commandPath: null, checkedAtMs: null },
+      diagnostics: []
+    },
+    {
+      id: "opencode",
+      runtime: "opencode",
+      enabled: true,
+      label: "OpenCode",
+      generated: true,
+      configured: false,
+      command: "opencode",
+      args: ["serve"],
+      defaultMode: "build",
+      defaultAgent: "build",
+      approvalMode: null,
+      sandbox: null,
+      workspaceRoots: [],
+      envKeys: [],
+      optionKeys: ["mode", "agent"],
+      sourceTargets: [],
+      health: { status: "warning", summary: "Command not checked", commandPath: null, checkedAtMs: null },
+      diagnostics: []
+    }
+  ];
+}
+
 gatewayMock.skillRecords = defaultSkillRecords();
 
 Object.defineProperty(window, "localStorage", {
@@ -214,6 +279,7 @@ afterEach(() => {
   gatewayMock.disabledTeamRecords = [];
   gatewayMock.teamStatusResult = null;
   gatewayMock.backendRecords = [];
+  gatewayMock.runtimeProfileRecords = defaultRuntimeProfileRecords();
   gatewayMock.skillRecords = defaultSkillRecords();
   gatewayMock.automationRecords = [];
   gatewayMock.channelRecords = [
@@ -225,6 +291,7 @@ afterEach(() => {
       label: "Release Bot",
       transport: "polling",
       cwd: null,
+      runtimeRef: "native",
       model: "xiaomi/xiaomi-token-high",
       permissionMode: null,
       requireMention: true,
@@ -253,6 +320,7 @@ afterEach(() => {
       label: "Ops Lark",
       transport: "long_connection",
       cwd: "/tmp/project",
+      runtimeRef: "opencode",
       model: null,
       permissionMode: "default",
       requireMention: true,
@@ -285,7 +353,7 @@ afterEach(() => {
   gatewayMock.sessionSummaries = [];
   gatewayMock.snapshot.thread = {
     id: "thread-1",
-    backend: { kind: "psychevo" as const, nativeId: "thread-1" },
+    backend: { kind: "psychevo" as const, nativeId: "thread-1", runtimeRef: "native" },
     sourceKey: "source-key"
   };
   gatewayMock.snapshot.pendingActions = [];

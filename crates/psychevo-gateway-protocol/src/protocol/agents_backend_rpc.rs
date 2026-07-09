@@ -524,6 +524,138 @@ pub struct BackendDeleteParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileReadParams {
+    pub id: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileSetEnabledParams {
+    pub id: String,
+    pub target: BackendConfigTarget,
+    pub enabled: bool,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileWriteParams {
+    pub id: String,
+    pub target: BackendConfigTarget,
+    pub runtime: String,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default, rename = "defaultModel")]
+    pub default_model: Option<String>,
+    #[serde(default, rename = "defaultMode")]
+    pub default_mode: Option<String>,
+    #[serde(default, rename = "defaultAgent")]
+    pub default_agent: Option<String>,
+    #[serde(default, rename = "approvalMode")]
+    pub approval_mode: Option<String>,
+    #[serde(default)]
+    pub sandbox: Option<String>,
+    #[serde(default, rename = "workspaceRoots")]
+    pub workspace_roots: Vec<String>,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub options: Option<Value>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileDeleteParams {
+    pub id: String,
+    pub target: BackendConfigTarget,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSnapshotParams {
+    #[serde(default, rename = "runtimeRef")]
+    pub runtime_ref: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeHealthCheckParams {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionListParams {
+    #[serde(default, rename = "runtimeRef")]
+    pub runtime_ref: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionParams {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "nativeSessionId")]
+    pub native_session_id: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionRenameParams {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "nativeSessionId")]
+    pub native_session_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionRollbackParams {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "nativeSessionId")]
+    pub native_session_id: String,
+    #[serde(default, rename = "itemId")]
+    pub item_id: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -984,6 +1116,149 @@ pub struct BackendDeleteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileView {
+    pub id: String,
+    pub runtime: String,
+    pub enabled: bool,
+    pub label: String,
+    pub generated: bool,
+    #[serde(default)]
+    pub configured: bool,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default, rename = "defaultModel")]
+    pub default_model: Option<String>,
+    #[serde(default, rename = "defaultMode")]
+    pub default_mode: Option<String>,
+    #[serde(default, rename = "defaultAgent")]
+    pub default_agent: Option<String>,
+    #[serde(default, rename = "approvalMode")]
+    pub approval_mode: Option<String>,
+    #[serde(default)]
+    pub sandbox: Option<String>,
+    #[serde(default, rename = "workspaceRoots")]
+    pub workspace_roots: Vec<String>,
+    #[serde(default, rename = "envKeys")]
+    pub env_keys: Vec<String>,
+    #[serde(default, rename = "optionKeys")]
+    pub option_keys: Vec<String>,
+    #[serde(default, rename = "sourceTargets")]
+    pub source_targets: Vec<BackendConfigTarget>,
+    pub health: RuntimeHealthView,
+    #[serde(default)]
+    pub diagnostics: Vec<BackendDiagnosticView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeHealthView {
+    pub status: String,
+    pub summary: String,
+    #[serde(default)]
+    pub command_path: Option<String>,
+    #[serde(default)]
+    pub checked_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileListResult {
+    pub profiles: Vec<RuntimeProfileView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileReadResult {
+    pub profile: RuntimeProfileView,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub options: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileWriteResult {
+    pub written: bool,
+    pub changed: bool,
+    pub path: String,
+    pub target: BackendConfigTarget,
+    pub profile: RuntimeProfileView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeProfileDeleteResult {
+    pub deleted: bool,
+    pub changed: bool,
+    pub id: String,
+    pub path: String,
+    pub target: BackendConfigTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSnapshotResult {
+    pub profiles: Vec<RuntimeProfileView>,
+    #[serde(default)]
+    pub agents: Vec<RuntimeSnapshotAgentView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSnapshotAgentView {
+    pub name: String,
+    pub label: String,
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(default, rename = "nativeId")]
+    pub native_id: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionListResult {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    pub supported: bool,
+    pub sessions: Vec<RuntimeSessionView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionView {
+    #[serde(rename = "nativeSessionId")]
+    pub native_session_id: String,
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default, rename = "updatedAtMs")]
+    pub updated_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionMutationResult {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "nativeSessionId")]
+    pub native_session_id: String,
+    pub supported: bool,
+    pub changed: bool,
+    #[serde(default)]
+    pub session: Option<RuntimeSessionView>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ReadyzResult {
     pub ok: bool,
     pub server: String,
@@ -1112,6 +1387,36 @@ pub enum ClientRequest {
     TurnTakeover(TurnTakeoverParams),
     #[serde(rename = "runtime/options")]
     RuntimeOptions(RuntimeOptionsParams),
+    #[serde(rename = "runtime/profile/list")]
+    RuntimeProfileList(RuntimeProfileListParams),
+    #[serde(rename = "runtime/profile/read")]
+    RuntimeProfileRead(RuntimeProfileReadParams),
+    #[serde(rename = "runtime/profile/write")]
+    RuntimeProfileWrite(RuntimeProfileWriteParams),
+    #[serde(rename = "runtime/profile/delete")]
+    RuntimeProfileDelete(RuntimeProfileDeleteParams),
+    #[serde(rename = "runtime/profile/setEnabled")]
+    RuntimeProfileSetEnabled(RuntimeProfileSetEnabledParams),
+    #[serde(rename = "runtime/snapshot")]
+    RuntimeSnapshot(RuntimeSnapshotParams),
+    #[serde(rename = "runtime/health/check")]
+    RuntimeHealthCheck(RuntimeHealthCheckParams),
+    #[serde(rename = "runtime/session/list")]
+    RuntimeSessionList(RuntimeSessionListParams),
+    #[serde(rename = "runtime/session/read")]
+    RuntimeSessionRead(RuntimeSessionParams),
+    #[serde(rename = "runtime/session/resume")]
+    RuntimeSessionResume(RuntimeSessionParams),
+    #[serde(rename = "runtime/session/archive")]
+    RuntimeSessionArchive(RuntimeSessionParams),
+    #[serde(rename = "runtime/session/unarchive")]
+    RuntimeSessionUnarchive(RuntimeSessionParams),
+    #[serde(rename = "runtime/session/delete")]
+    RuntimeSessionDelete(RuntimeSessionParams),
+    #[serde(rename = "runtime/session/rename")]
+    RuntimeSessionRename(RuntimeSessionRenameParams),
+    #[serde(rename = "runtime/session/rollback")]
+    RuntimeSessionRollback(RuntimeSessionRollbackParams),
     #[serde(rename = "automation/list")]
     AutomationList(AutomationListParams),
     #[serde(rename = "automation/draft")]

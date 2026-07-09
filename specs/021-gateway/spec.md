@@ -24,6 +24,8 @@ ACP, Web, Desktop, native Floating, IM adapters, and peer-agent backends.
 - local loopback HTTP/WebSocket facade for product and API clients
 - generic IM source adapter boundary for first-party Gateway integration
 - backend boundary for Psychevo runtime and future peer-agent executors
+- Runtime Profile selection and native runtime identity projection, as defined
+  by [052 Agent Runtimes](../052-agent-runtimes/spec.md)
 
 Out of scope:
 
@@ -54,10 +56,11 @@ treating them as AI providers.
 ## Threads, Turns, And Identity
 
 Gateway exposes a native Thread/Turn model. For Psychevo-native threads,
-`GatewayThread.id` is the runtime session id. Gateway records backend identity
-separately as `backend_kind` and optional `backend_native_id`, so future
-peer-agent backends can keep their native session identifiers without changing
-the public thread id contract.
+`GatewayThread.id` is the runtime session id. For Runtime Profiles backed by
+Codex, OpenCode, ACP, or future runtimes, `GatewayThread.id` remains the public
+Psychevo thread id. Gateway records `runtimeRef`, backend identity, and optional
+`backend_native_id`, so peer/direct runtimes can keep their native session
+identifiers without changing the public thread id contract.
 
 Gateway HTTP session artifact downloads require an authenticated caller. Browser
 surfaces may use the launch-created browser session cookie; Desktop and other

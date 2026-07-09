@@ -155,7 +155,7 @@ impl Gateway {
                         thread_id: &result.session_id,
                         backend_kind: backend.kind.as_str(),
                         backend_native_id: backend.native_id.as_deref(),
-                        lineage,
+                        lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
                     })?;
             }
         }
