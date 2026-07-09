@@ -11,8 +11,7 @@ durable session evidence in local SQLite state.
 
 The project is intentionally local-first: provider credentials stay in explicit
 config or `.env` locations, tool execution is permission-aware, and the CLI,
-TUI, Web UI, ACP bridge, and evaluation tooling share the same runtime
-foundation.
+TUI, Web UI, ACP bridge, and Gateway surfaces share the same runtime foundation.
 
 ## Current Surfaces
 
@@ -29,7 +28,6 @@ foundation.
 | Skills and agents | Filesystem-backed skills, bundles, local agents, generated peer agents, and subagent flows are available from supported surfaces. |
 | Permissions and tools | Runtime tools cover reading, writing, editing, searching, shell execution, web fetch, and MCP-backed tools under permission policy. |
 | Diagnostics | `pevo doctor` checks local config, auth/model selection, Web assets, Gateway state, and required tools without live provider calls unless requested. |
-| Evaluation | `peval` runs local and live evaluation workflows with reusable artifacts, benchmark configs, and HTML views. |
 
 Psychevo does not yet claim product-complete self-evolution, autonomous
 evaluation loops, workflow mining, or long-term memory. The current project is
@@ -55,11 +53,10 @@ sh scripts/install.sh
 See the [Installation Guide](docs/install.md) for prerequisites, diagnostics,
 Windows Git Bash notes, enterprise network guidance, and development commands.
 
-For CLI-only or evaluation-tool installs, use the underlying Cargo commands:
+For CLI-only installs, use the underlying Cargo command:
 
 ```bash
 cargo install --locked --path crates/psychevo-cli --force
-cargo install --locked --path crates/psychevo-eval --force
 ```
 
 For development without installing:
@@ -148,15 +145,13 @@ pevo run -m deepseek/deepseek-chat "inspect the CLI entrypoints"
 | `pevo auth ...` | Inspect credential status, run provider setup, and store provider API keys. |
 | `pevo stats` | Show local token and estimated-cost statistics from SQLite state. |
 | `pevo context --session <id\|latest>` | Inspect local context-window usage for a session. |
-| `peval ...` | Initialize evaluation workspaces, check eval configs, run reusable cells, and view evaluation work. |
 
-Run `pevo <command> --help` or `peval <command> --help` for flags and subcommands.
+Run `pevo <command> --help` for flags and subcommands.
 
 ## Documentation
 
 - [Installation Guide](docs/install.md)
 - [ACP Configuration Guide](docs/acp-configuration.md)
-- [Evaluation Guide](docs/evaluation/README.md)
 - [TUI Troubleshooting](docs/troubleshooting/tui.md)
 - [Contributing Guide](CONTRIBUTING.md)
 
@@ -170,10 +165,8 @@ Run `pevo <command> --help` or `peval <command> --help` for flags and subcommand
 | `psychevo-gateway` | Local Gateway API and WebSocket server used by Web and CLI surfaces. |
 | `psychevo-acp` | ACP server packaging and runtime bridge used by `pevo acp`. |
 | `psychevo-cli` | The `pevo` command-line entrypoint, TUI, managed Web/Gateway commands, setup, and diagnostics. |
-| `psychevo-eval` | The `peval` evaluation CLI, artifact store, benchmark runner, views, and dataset inventory. |
 | `apps/workbench` | The Vite/React Workbench Web UI served by managed `pevo web` flows. |
 | `packages/*` | Shared TypeScript protocol, client, host, component, and asset packages. |
-| `tools/peval-py` | Python helper tooling for evaluation report analysis and serving. |
 
 ## Development
 

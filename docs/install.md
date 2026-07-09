@@ -92,12 +92,11 @@ It copies `apps/workbench/dist` into the install-share directory beside the
 Cargo binary, normally `~/.cargo/share/psychevo/web`.
 
 The install script intentionally does not model CLI-only, offline, prebuilt Web
-asset, alternate source, remote clone, or peval installation modes. Use the
-underlying commands when you need those workflows:
+asset, alternate source, or remote clone installation modes. Use the underlying
+commands when you need those workflows:
 
 ```bash
 cargo install --locked --path crates/psychevo-cli --force
-cargo install --locked --path crates/psychevo-eval --force
 pnpm install --frozen-lockfile
 pnpm --filter @psychevo/workbench build
 ```

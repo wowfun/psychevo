@@ -416,16 +416,13 @@ mod tests {
         for root in selected_roots(&[]) {
             fs::create_dir_all(temp.path.join(root)).expect("create default root");
         }
-        temp.write_lines("tools/peval-py/src/peval_py/state.py", 4);
+        temp.write_lines("tools/doctor-fixture/src/lib.rs", 4);
 
         let roots = selected_roots(&[]);
         let report = inventory(&temp.path, &roots, test_limits()).expect("inventory");
 
         assert_eq!(report.roots.last().map(String::as_str), Some("tools"));
         assert_eq!(report.oversized.len(), 1);
-        assert_eq!(
-            report.oversized[0].path,
-            "tools/peval-py/src/peval_py/state.py"
-        );
+        assert_eq!(report.oversized[0].path, "tools/doctor-fixture/src/lib.rs");
     }
 }

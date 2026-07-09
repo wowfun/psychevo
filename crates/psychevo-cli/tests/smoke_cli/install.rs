@@ -51,7 +51,6 @@ pub(crate) fn install_rejects_removed_options() {
         "--repo-url",
         "--ref",
         "--source",
-        "--with-peval",
         "--no-web",
         "--no-init",
         "--offline",

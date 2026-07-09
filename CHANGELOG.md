@@ -2,6 +2,9 @@
 
 ## 2026-07-09
 
+- Removed the bundled `psychevo-eval`, `peval`, and `peval-py` evaluation
+  surfaces from Psychevo after migrating ownership to the standalone
+  `psycheval` repository.
 - Added Runtime Profiles across config, Gateway/protocol, Workbench, Channels,
   and session controls; direct non-native turns now fail explicitly until
   adapter workers are available.

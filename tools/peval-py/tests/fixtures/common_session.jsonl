@@ -1,5 +1,0 @@
-{"role":"system","content":"follow local policy","timestamp_ms":900}
-{"role":"user","content":"summarize the workspace","timestamp_ms":1000}
-{"role":"assistant","content":"I will list files.","reasoning":"Need evidence.","tool_calls":[{"tool_call_id":"tool-1","function_name":"list","arguments":{"path":"."}}],"timestamp_ms":1200,"usage":{"prompt_tokens":7,"completion_tokens":8}}
-{"role":"tool_result","tool_call_id":"tool-1","tool_name":"list","content":["README.md","Cargo.toml"],"timestamp_ms":1300}
-{"role":"assistant","content":"Workspace has README.md and Cargo.toml.","timestamp_ms":1500}

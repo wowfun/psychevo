@@ -7,7 +7,6 @@ members = [
     "crates/psychevo-gateway",
     "crates/psychevo-acp",
     "crates/psychevo-cli",
-    "crates/psychevo-eval",
     "xtask",
 ]
 resolver = "3"
