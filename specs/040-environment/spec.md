@@ -180,7 +180,9 @@ helpers where possible. This keeps case-insensitive Windows environment lookup,
 managed `PATH` prefixing, `PATH`/`Path` preservation, `PATHEXT` executable
 resolution, output decoding, and Windows process-tree termination consistent
 across model tools, Web terminal sessions, plugins, hooks, language servers, and
-ACP peers.
+ACP peers. Windows process-tree termination targets the child tree when a
+process id is available. PTY backends that cannot report a process id still fall
+back to direct child termination.
 
 Configured executable names that are entered as shell-like product settings,
 such as ACP peer backend commands, must be resolved at the host boundary before

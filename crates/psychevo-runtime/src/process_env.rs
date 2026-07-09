@@ -337,8 +337,8 @@ pub async fn terminate_tokio_child_tree(child: &mut tokio::process::Child) {
 
 pub fn terminate_pty_child_tree(child: &mut dyn portable_pty::Child) {
     #[cfg(windows)]
-    {
-        let _ = kill_windows_process_tree(child.process_id());
+    if let Some(pid) = child.process_id() {
+        let _ = kill_windows_process_tree(pid);
     }
     let _ = child.kill();
 }

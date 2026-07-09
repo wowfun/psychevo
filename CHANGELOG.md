@@ -8,6 +8,9 @@
 - Added Runtime Profiles across config, Gateway/protocol, Workbench, Channels,
   and session controls; direct non-native turns now fail explicitly until
   adapter workers are available.
+- Fixed Windows source installs and native runtime builds around Corepack/pnpm
+  version mismatches, PTY process-tree termination, and Windows-only tool import
+  warnings.
 
 ## 2026-07-08
 

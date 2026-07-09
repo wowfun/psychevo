@@ -98,14 +98,15 @@ version for source installs, not an exact installer gate. If `pnpm` is present
 but differs from the root `packageManager` declaration, the script prints a
 warning and continues; `pnpm install --frozen-lockfile` remains the real
 compatibility gate. The installer runs its pnpm subprocesses with Corepack
-project-version enforcement disabled so a corporate machine with a usable older
-system pnpm does not have to download the recommended pnpm version during
-preflight. If `pnpm` is present but version detection still fails, including a
-failing Corepack shim, the script treats pnpm as unusable and fails before Cargo
-install or Web build steps. The failure must keep the underlying stderr visible
-and point to Corepack/npm registry, proxy, and CA remediation paths. The
-installer must not modify user Corepack, npm, pnpm, registry, proxy, or CA
-configuration.
+project-version enforcement disabled and installer-scoped `pmOnFail=warn` so a
+corporate machine with a usable older or newer system pnpm does not have to
+download the recommended pnpm version during preflight or fail before the
+lockfile/build commands can run. If `pnpm` is present but version detection
+still fails, including a failing Corepack shim, the script treats pnpm as
+unusable and fails before Cargo install or Web build steps. The failure must keep
+the underlying stderr visible and point to Corepack/npm registry, proxy, and CA
+remediation paths. The installer must not modify user Corepack, npm, pnpm,
+registry, proxy, or CA configuration.
 
 When the script reports missing native or Web build prerequisites, it may point
 developers to `cargo xtask doctor deps check --only install` for a complete

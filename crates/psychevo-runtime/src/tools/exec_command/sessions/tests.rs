@@ -119,7 +119,7 @@ mod tests {
             .expect("path")
             .expect("prefixed path")
             .1;
-        let entries = env::split_paths(&path).collect::<Vec<_>>();
+        let entries = std::env::split_paths(&path).collect::<Vec<_>>();
 
         assert_eq!(entries.first(), Some(&tools));
         assert_eq!(entries.get(1), Some(&inherited));

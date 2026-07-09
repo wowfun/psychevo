@@ -62,8 +62,8 @@ For Web UI builds, use Node.js `20.19+`, `22.13+`, or `24+`. The repository
 recommends `pnpm@11.8.0`. If another pnpm version is already installed, the
 installer prints a warning and lets `pnpm install --frozen-lockfile` validate
 the checkout. Installer pnpm subprocesses ignore Corepack project-version
-enforcement so a usable system pnpm does not have to download the recommended
-version during preflight.
+enforcement and use installer-scoped `pmOnFail=warn` so a usable system pnpm
+does not have to download the recommended version or fail during preflight.
 
 The installer does not install Rust, Node.js, pnpm, system package manager
 dependencies, Xcode Command Line Tools, Visual Studio Build Tools, MinGW, proxy
@@ -120,9 +120,10 @@ tools, Node.js, pnpm, Cargo install, Workbench build, asset copy, or profile
 initialization.
 
 The installer asks Corepack to use the system pnpm for its subprocesses instead
-of downloading the repository's recommended pnpm version. If pnpm still invokes
-Corepack and fails with a certificate error, fix the Node/Corepack trust path
-before rerunning the installer. Common options are:
+of downloading the repository's recommended pnpm version, and it treats pnpm
+package-manager version mismatches as warnings for that installer run. If pnpm
+still invokes Corepack and fails with a certificate error, fix the Node/Corepack
+trust path before rerunning the installer. Common options are:
 
 ```bash
 export NODE_EXTRA_CA_CERTS='D:/path/to/company-root-ca.pem'

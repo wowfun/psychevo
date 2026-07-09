@@ -4,8 +4,8 @@ pub(crate) use std::io::{Read, Write};
 pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::process::Stdio;
 pub(crate) use std::sync::{Arc, Condvar, LazyLock, Mutex};
+pub(crate) use std::thread;
 pub(crate) use std::time::{Duration, Instant, SystemTime};
-pub(crate) use std::{env, thread};
 
 pub(crate) use futures::future::BoxFuture;
 pub(crate) use psychevo_agent_core::{ToolAttachment, ToolBinding, ToolExecutionMode, ToolOutput};

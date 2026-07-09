@@ -221,7 +221,7 @@ pub(crate) fn default_shell_for_env(env_map: &BTreeMap<String, String>) -> Resul
     #[cfg(not(windows))]
     {
         let _ = env_map;
-        Ok(env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()))
+        Ok(std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()))
     }
 }
 

@@ -307,7 +307,11 @@ command_version() {
 }
 
 run_pnpm() {
-  COREPACK_ENABLE_PROJECT_SPEC=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm "$@"
+  COREPACK_ENABLE_PROJECT_SPEC=0 \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    COREPACK_ENABLE_STRICT=0 \
+    pnpm_config_pm_on_fail=warn \
+    pnpm "$@"
 }
 
 read_text_file() {

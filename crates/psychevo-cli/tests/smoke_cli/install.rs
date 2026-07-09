@@ -155,7 +155,7 @@ pub(crate) fn install_check_reports_mismatched_pnpm_as_warning() {
     write_fake_command(
         &bin,
         "pnpm",
-        "case \"$1\" in\n  --version) printf '1.0.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+        "if [ \"${pnpm_config_pm_on_fail:-}\" != warn ]; then printf '[ERROR] This project is configured to use 11.8.0 of pnpm. Your current pnpm is v11.10.0\\nCorepack invoked pnpm with this version, and pnpm does not switch versions when running under corepack.\\n' >&2; exit 42; fi\ncase \"$1\" in\n  --version) printf '11.10.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
     );
     let output = Command::new("/bin/sh")
         .arg(install_script_path())
@@ -174,7 +174,7 @@ pub(crate) fn install_check_reports_mismatched_pnpm_as_warning() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("pnpm: warn - found 1.0.0, recommended 11.8.0"),
+        stdout.contains("pnpm: warn - found 11.10.0, recommended 11.8.0"),
         "{stdout}"
     );
 }
@@ -362,7 +362,7 @@ pub(crate) fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
     write_fake_command(
         &bin,
         "pnpm",
-        "if [ \"${COREPACK_ENABLE_PROJECT_SPEC:-}\" != 0 ]; then printf 'corepack attempted project download\\n' >&2; exit 42; fi\nif [ \"${COREPACK_ENABLE_DOWNLOAD_PROMPT:-}\" != 0 ]; then printf 'corepack prompted\\n' >&2; exit 42; fi\ncase \"$1\" in\n  --version) printf '1.0.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  install) printf 'fake pnpm install reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "if [ \"${COREPACK_ENABLE_PROJECT_SPEC:-}\" != 0 ]; then printf 'corepack attempted project download\\n' >&2; exit 42; fi\nif [ \"${COREPACK_ENABLE_DOWNLOAD_PROMPT:-}\" != 0 ]; then printf 'corepack prompted\\n' >&2; exit 42; fi\nif [ \"${COREPACK_ENABLE_STRICT:-}\" != 0 ]; then printf 'corepack strict check remained enabled\\n' >&2; exit 42; fi\nif [ \"${pnpm_config_pm_on_fail:-}\" != warn ]; then printf '[ERROR] This project is configured to use 11.8.0 of pnpm. Your current pnpm is v11.10.0\\nCorepack invoked pnpm with this version, and pnpm does not switch versions when running under corepack.\\n' >&2; exit 42; fi\ncase \"$1\" in\n  --version) printf '11.10.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  install) printf 'fake pnpm install reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
     let output = install_preflight_command(&bin, &home)
         .output()
@@ -371,7 +371,7 @@ pub(crate) fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("warning: pnpm 1.0.0 is installed; pnpm 11.8.0 is recommended"),
+        stderr.contains("warning: pnpm 11.10.0 is installed; pnpm 11.8.0 is recommended"),
         "{stderr}"
     );
     assert!(stderr.contains("fake pnpm install reached"), "{stderr}");
@@ -380,6 +380,14 @@ pub(crate) fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
         "{stderr}"
     );
     assert!(!stderr.contains("corepack prompted"), "{stderr}");
+    assert!(
+        !stderr.contains("corepack strict check remained enabled"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("This project is configured to use 11.8.0 of pnpm"),
+        "{stderr}"
+    );
 }
 
 #[cfg(unix)]
