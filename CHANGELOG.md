@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-07-10
+
+- Added direct Codex and OpenCode Runtime Profiles behind a shared Runtime Host,
+  with immutable Gateway bindings, typed lifecycle and terminal errors, native
+  session management, exact process cleanup, and deterministic failure coverage.
+- Added typed Direct-runtime context, controls, goals, rate limits, compaction,
+  session history, steering, permissions, questions, and read-only child-session
+  projection without leaking native identifiers or unsupported fallback paths.
+- Unified Runtime Profile selection and readiness across Composer, Capabilities,
+  Channels, and Teams, including validated model-dependent controls, explicit
+  Direct/ACP provenance, safe session resume and revision actions, and
+  reconnect-safe history and Attention state.
+- Preserved `pevo run --continue` across Gateway routing by resolving the latest
+  canonical-cwd run session before provisional public-thread creation, even
+  when each CLI invocation has a distinct invocation-scoped source key.
+- Added per-thread Browser and rich HTML previews with normalized local URLs, a
+  single active preview, an inert offline sandbox, explicit revocable trust, and
+  a separately governed built-in Browser plugin.
+- Expanded rendered Mermaid diagrams with occurrence-bound streaming fence
+  handling, fit/original-size modes, working shrink/zoom, reset, an in-place
+  full-size viewer, and source-copy controls for dense diagrams.
+- Split Mermaid's lazy renderer dependencies out of the fallback vendor chunk
+  so Workbench and Desktop production builds no longer emit the large-chunk
+  warning.
+- Added native Gateway context compaction for `/compact` across Workbench and
+  Channels, with backend-authoritative mirror protection, active-turn FIFO
+  queuing, sequence-stable transcript dividers, and live post-turn checkpoint
+  projection for native sessions.
+- Fixed Floating answer clipping, narrow-width preview controls, Windows path
+  containment and symlink handling, and assistant file links across relative,
+  POSIX, Windows, Git Bash, and UNC path spellings.
+
 ## 2026-07-09
 
 - Removed the bundled `psychevo-eval`, `peval`, and `peval-py` evaluation
