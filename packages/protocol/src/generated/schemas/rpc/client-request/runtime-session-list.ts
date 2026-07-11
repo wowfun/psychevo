@@ -68,6 +68,13 @@ export const clientRequestRuntimeSessionListSchema = {
     },
     "RuntimeSessionListParams": {
       "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runtimeRef": {
           "default": null,
           "type": [

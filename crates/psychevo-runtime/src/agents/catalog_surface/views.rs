@@ -182,6 +182,36 @@ pub enum AgentPermissionMode {
     Plan,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentContribution {
+    Instructions,
+    Tools,
+    Mcp,
+    Skills,
+}
+
+impl AgentContribution {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "instructions" => Some(Self::Instructions),
+            "tools" => Some(Self::Tools),
+            "mcp" => Some(Self::Mcp),
+            "skills" => Some(Self::Skills),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Instructions => "instructions",
+            Self::Tools => "tools",
+            Self::Mcp => "mcp",
+            Self::Skills => "skills",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentDefinition {
     pub name: String,
@@ -195,6 +225,7 @@ pub struct AgentDefinition {
     pub model: Option<String>,
     pub tool_policy: AgentToolPolicy,
     pub skills: Vec<String>,
+    pub optional_contributions: BTreeSet<AgentContribution>,
     pub hooks: Option<Value>,
     pub background: Option<bool>,
     pub initial_prompt: Option<String>,
@@ -208,6 +239,10 @@ pub struct AgentDefinition {
 impl AgentDefinition {
     pub fn supports_entrypoint(&self, entrypoint: AgentEntrypoint) -> bool {
         self.entrypoints.contains(&entrypoint)
+    }
+
+    pub fn contribution_is_optional(&self, contribution: AgentContribution) -> bool {
+        self.optional_contributions.contains(&contribution)
     }
 }
 

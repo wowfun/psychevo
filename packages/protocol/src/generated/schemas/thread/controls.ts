@@ -78,6 +78,314 @@ export const threadControlSchemas = {
   "title": "ThreadStartParams",
   "type": "object"
 },
+  ThreadCompactStartParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "instructions": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtimeRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "ThreadCompactStartParams",
+  "type": "object"
+},
+  ThreadCompactionCheckpointView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "checkpointId": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "createdAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "firstKeptSessionSeq": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryProvider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tokensAfter": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "tokensBefore": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "checkpointId",
+    "createdAtMs",
+    "firstKeptSessionSeq",
+    "reason"
+  ],
+  "title": "ThreadCompactionCheckpointView",
+  "type": "object"
+},
+  ThreadCompactStartResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadCompactionCheckpointView": {
+      "properties": {
+        "checkpointId": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "firstKeptSessionSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summaryModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summaryProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokensAfter": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokensBefore": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "checkpointId",
+        "createdAtMs",
+        "firstKeptSessionSeq",
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "checkpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadCompactionCheckpointView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "compacted": {
+      "type": "boolean"
+    },
+    "error": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "message": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "summaryModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryProvider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tokensAfter": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "tokensBefore": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "unavailable": {
+      "default": false,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "accepted",
+    "compacted",
+    "message",
+    "reason"
+  ],
+  "title": "ThreadCompactStartResult",
+  "type": "object"
+},
   ThreadResumeParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {

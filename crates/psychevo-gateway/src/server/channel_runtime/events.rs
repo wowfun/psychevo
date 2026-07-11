@@ -1,3 +1,4 @@
+use super::state::{ChannelInteractionKind, ChannelInteractionTokenInput};
 use super::*;
 
 pub(super) fn channel_reply_thread_id(state: &WebState, source: &GatewaySource) -> String {
@@ -18,7 +19,45 @@ pub(super) fn channel_event_sink(
     fallback_source_key: SourceKey,
 ) -> GatewayEventSink {
     Arc::new(move |event| {
-        let Some(text) = channel_event_reply_text(&event) else {
+        let token = match &event {
+            GatewayEvent::ActionRequested { action }
+                if action.kind == GatewayActionKind::Permission =>
+            {
+                runtime.issue_interaction_token(
+                    &connection_id,
+                    &fallback_source_key,
+                    ChannelInteractionTokenInput {
+                        kind: ChannelInteractionKind::Permission,
+                        action_id: &action.action_id,
+                        thread_id: action.thread_id.as_deref(),
+                        clarify_question_count: 0,
+                        action_expires_at_ms: channel_action_token_expiry(action),
+                    },
+                )
+            }
+            GatewayEvent::ActionRequested { action }
+                if action.kind == GatewayActionKind::Clarify =>
+            {
+                runtime.issue_interaction_token(
+                    &connection_id,
+                    &fallback_source_key,
+                    ChannelInteractionTokenInput {
+                        kind: ChannelInteractionKind::Clarify,
+                        action_id: &action.action_id,
+                        thread_id: action.thread_id.as_deref(),
+                        clarify_question_count: channel_clarify_questions(action).len().max(1),
+                        action_expires_at_ms: channel_action_token_expiry(action),
+                    },
+                )
+            }
+            GatewayEvent::ActionResolved { action_id, .. }
+            | GatewayEvent::ActionCancelled { action_id, .. } => {
+                runtime.revoke_interaction_action(&connection_id, action_id);
+                None
+            }
+            _ => None,
+        };
+        let Some(text) = channel_event_reply_text(&event, token.as_deref()) else {
             return;
         };
         let thread_id = channel_event_thread_id(&event, &fallback_source_key);
@@ -49,11 +88,28 @@ pub(super) fn channel_event_sink(
     })
 }
 
-fn channel_event_reply_text(event: &GatewayEvent) -> Option<String> {
+fn channel_action_token_expiry(action: &PendingActionView) -> Option<i64> {
+    action
+        .payload
+        .get("interactionExpiresAtMs")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            action
+                .payload
+                .get("timeoutSecs")
+                .and_then(Value::as_u64)
+                .filter(|seconds| *seconds > 0)
+                .and_then(|seconds| i64::try_from(seconds).ok())
+                .map(|seconds| gateway_now_ms().saturating_add(seconds.saturating_mul(1_000)))
+        })
+}
+
+fn channel_event_reply_text(event: &GatewayEvent, token: Option<&str>) -> Option<String> {
     match event {
         GatewayEvent::ActionRequested { action }
             if action.kind == GatewayActionKind::Permission =>
         {
+            let token = token?;
             let tool_name = action
                 .payload
                 .get("toolName")
@@ -78,26 +134,56 @@ fn channel_event_reply_text(event: &GatewayEvent) -> Option<String> {
             };
             Some(format!(
                 "Permission required for {tool_name}: {detail}. Reply /approve {} to allow once or /deny {} to deny.",
-                action.action_id, action.action_id
+                token, token
             ))
         }
         GatewayEvent::ActionRequested { action } if action.kind == GatewayActionKind::Clarify => {
-            let raw = action.payload.get("raw").unwrap_or(&action.payload);
-            let question = raw
-                .get("questions")
-                .and_then(Value::as_array)
-                .and_then(|questions| questions.first())
+            let token = token?;
+            let questions = channel_clarify_questions(action);
+            if questions.len() > 1 {
+                return Some(channel_multi_question_guidance(token));
+            }
+            let question = questions
+                .first()
                 .and_then(|question| question.get("question"))
                 .and_then(Value::as_str)
                 .filter(|question| !question.trim().is_empty())
                 .unwrap_or("Please provide more information.");
+            let punctuation = if question
+                .chars()
+                .last()
+                .is_some_and(|character| matches!(character, '.' | '?' | '!'))
+            {
+                ""
+            } else {
+                "."
+            };
             Some(format!(
-                "Psychevo asks: {question}. Reply /answer {} <answer> or /cancel {}.",
-                action.action_id, action.action_id
+                "Psychevo asks: {question}{punctuation} Reply /answer {} <answer> or /cancel {}.",
+                token, token
             ))
+        }
+        GatewayEvent::Warning { kind, .. }
+            if kind == "runtime_interaction_exposure_blocked" =>
+        {
+            Some(
+                "A runtime interaction requires GUI Advanced mode and was declined on this Channel."
+                    .to_string(),
+            )
         }
         _ => None,
     }
+}
+
+fn channel_clarify_questions(action: &PendingActionView) -> &[Value] {
+    action
+        .payload
+        .get("raw")
+        .unwrap_or(&action.payload)
+        .get("questions")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
 }
 
 fn channel_event_thread_id(event: &GatewayEvent, fallback_source_key: &SourceKey) -> String {

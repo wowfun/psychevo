@@ -16,6 +16,7 @@
     "agent",
     "mailbox",
     "status",
+    "compaction",
     "diff",
     "artifact"
   ],

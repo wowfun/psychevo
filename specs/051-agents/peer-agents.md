@@ -197,6 +197,10 @@ the prompt is active. It must not collapse a peer turn through a final-string
 helper that discards intermediate updates. `agent_message_chunk` text updates
 map to incremental assistant text events before the final stop reason, and the
 final persisted assistant message contains the accumulated text.
+When the peer runs as a subagent, every incremental and terminal projection uses
+the pre-created Psychevo child thread id as its live scope. Opening that child in
+TUI or Workbench must show retained pre-open activity and future updates without
+waiting for the delegated turn or its parent turn to finish.
 `agent_thought_chunk` text updates map to Gateway reasoning deltas so Workbench
 and other live surfaces show a running `Thinking` block; the completed
 reasoning text is persisted as an assistant reasoning block for history

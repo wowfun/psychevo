@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "resetsAt": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "usedPercent": {
+      "format": "int32",
+      "type": "integer"
+    },
+    "windowDurationMins": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "usedPercent"
+  ],
+  "title": "RuntimeRateLimitWindowView",
+  "type": "object"
+}

@@ -164,7 +164,7 @@ pub(crate) fn cli_plugin_install_enable_list_and_doctor_json() {
     let enabled: Value = serde_json::from_slice(&enable.stdout).expect("enable json");
     assert_eq!(enabled["enabled"], true);
     let config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
-    assert!(config.contains("[plugins.disk-cleanup]"));
+    assert!(config.contains("[plugins.\"profile:disk-cleanup@"));
     assert!(config.contains("enabled = true"));
 
     let list = plugin_cmd(temp.path(), &psychevo_home, &cwd)
@@ -177,8 +177,14 @@ pub(crate) fn cli_plugin_install_enable_list_and_doctor_json() {
         String::from_utf8_lossy(&list.stderr)
     );
     let listed: Value = serde_json::from_slice(&list.stdout).expect("list json");
-    assert_eq!(listed["count"], 1);
-    assert_eq!(listed["plugins"][0]["enabled"], true);
+    assert_eq!(listed["count"], 2);
+    let disk_cleanup = listed["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["name"] == "disk-cleanup")
+        .expect("disk-cleanup plugin");
+    assert_eq!(disk_cleanup["enabled"], true);
 
     let doctor = plugin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["plugin", "doctor", "disk-cleanup", "--json"])
@@ -236,10 +242,10 @@ pub(crate) fn cli_plugin_local_enable_targets_profile_installed_plugin() {
     assert_eq!(enabled["enabled"], true);
 
     let home_config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
-    assert!(!home_config.contains("[plugins.disk-cleanup]"));
+    assert!(!home_config.contains("[plugins.\"profile:disk-cleanup@"));
     let local_config =
         std::fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("local config");
-    assert!(local_config.contains("[plugins.disk-cleanup]"));
+    assert!(local_config.contains("[plugins.\"profile:disk-cleanup@"));
     assert!(local_config.contains("enabled = true"));
 
     let list = plugin_cmd(temp.path(), &psychevo_home, &cwd)
@@ -252,15 +258,21 @@ pub(crate) fn cli_plugin_local_enable_targets_profile_installed_plugin() {
         String::from_utf8_lossy(&list.stderr)
     );
     let listed: Value = serde_json::from_slice(&list.stdout).expect("list json");
-    assert_eq!(listed["count"], 1);
-    assert_eq!(listed["plugins"][0]["enabled"], true);
+    assert_eq!(listed["count"], 2);
+    let disk_cleanup = listed["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["name"] == "disk-cleanup")
+        .expect("disk-cleanup plugin");
+    assert_eq!(disk_cleanup["enabled"], true);
     assert!(
-        listed["plugins"][0]["manifest_resources"]
+        disk_cleanup["manifest_resources"]
             .as_array()
             .expect("manifest resources")
             .contains(&json!("skills"))
     );
-    assert_eq!(listed["plugins"][0]["psychevo_extensions"][0], "runtime");
+    assert_eq!(disk_cleanup["psychevo_extensions"][0], "runtime");
 }
 
 #[test]

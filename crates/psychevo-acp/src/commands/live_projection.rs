@@ -44,6 +44,8 @@ pub(crate) fn send_gateway_event_update(
         | GatewayEvent::ActionResolved { .. }
         | GatewayEvent::ActionCancelled { .. }
         | GatewayEvent::ActivityChanged { .. }
+        | GatewayEvent::RuntimeStateChanged { .. }
+        | GatewayEvent::RuntimeChildChanged { .. }
         | GatewayEvent::TitleChanged { .. } => {}
     }
 }

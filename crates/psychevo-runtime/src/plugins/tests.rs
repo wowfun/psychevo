@@ -805,7 +805,11 @@ fn selector_conflict_requires_source_qualified_name() {
 
     let ambiguous = plugin_set_enabled_value(&home, &cwd, PluginScope::Global, "cleanup", true)
         .expect_err("ambiguous selector");
-    assert!(ambiguous.to_string().contains("ambiguous; use name@source"));
+    assert!(
+        ambiguous
+            .to_string()
+            .contains("use profile:name@source or project:name@source")
+    );
 
     let value = plugin_set_enabled_value(
         &home,
@@ -836,7 +840,7 @@ fn local_policy_can_target_profile_installed_plugin() {
             }"#,
     );
     fs::create_dir_all(source.join("skills")).expect("skills");
-    install_plugin(
+    let record = install_plugin(
         &home,
         &cwd,
         PluginInstallOptions {
@@ -858,9 +862,83 @@ fn local_policy_can_target_profile_installed_plugin() {
     assert_eq!(value["scope"], "local");
     assert_eq!(value["enabled"], true);
     let local_config = fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("local config");
-    assert!(local_config.contains("[plugins.cleanup]"));
+    assert!(local_config.contains(&format!(
+        "[plugins.\"profile:cleanup@{}\"]",
+        record.source_slug
+    )));
     assert!(local_config.contains("enabled = true"));
     assert!(!home.join("config.toml").exists());
+}
+
+#[test]
+fn scoped_selectors_and_policy_keys_distinguish_duplicate_installations() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+          "name": "cleanup",
+          "version": "1.0.0",
+          "description": "cleanup"
+        }"#,
+    );
+    let profile = install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: None,
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
+            force: false,
+        },
+    )
+    .expect("profile install");
+    let project = install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: None,
+            scope: PluginScope::Local,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
+            force: false,
+        },
+    )
+    .expect("project install");
+    assert_eq!(profile.source_slug, project.source_slug);
+    let unscoped = format!("cleanup@{}", profile.source_slug);
+    let profile_selector = format!("profile:{unscoped}");
+    let project_selector = format!("project:{unscoped}");
+
+    let ambiguous = plugin_set_enabled_value(&home, &cwd, PluginScope::Local, &unscoped, true)
+        .expect_err("unscoped selector is ambiguous across installation scopes");
+    assert!(ambiguous.to_string().contains("ambiguous"));
+
+    plugin_set_enabled_value(&home, &cwd, PluginScope::Global, &profile_selector, false)
+        .expect("disable profile installation");
+    plugin_set_enabled_value(&home, &cwd, PluginScope::Local, &project_selector, true)
+        .expect("enable project installation");
+
+    let profile_config = fs::read_to_string(home.join("config.toml")).expect("profile config");
+    let project_config =
+        fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("project config");
+    assert!(profile_config.contains(&format!("[plugins.\"{profile_selector}\"]")));
+    assert!(project_config.contains(&format!("[plugins.\"{project_selector}\"]")));
+
+    plugin_uninstall_value(&home, &cwd, PluginScope::Local, &project_selector)
+        .expect("uninstall project installation");
+    plugin_set_enabled_value(&home, &cwd, PluginScope::Global, &profile_selector, true)
+        .expect("profile installation remains selectable");
 }
 
 #[test]

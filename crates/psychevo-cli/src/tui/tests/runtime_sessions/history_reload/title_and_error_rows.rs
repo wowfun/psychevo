@@ -50,6 +50,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
             selected_agent: None,
             selected_skills: Vec::new(),
             context_snapshot: None,
+            terminal_error: None,
             events: Vec::new(),
             warnings: Vec::new(),
         })
@@ -109,6 +110,7 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
+        terminal_error: None,
         events: Vec::new(),
         warnings: Vec::new(),
     };
@@ -275,6 +277,7 @@ pub(crate) async fn completed_normal_task_with_tool_failures_does_not_mark_tui_e
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
+        terminal_error: None,
         events: Vec::new(),
         warnings: Vec::new(),
     };
@@ -325,6 +328,7 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
+        terminal_error: None,
         events: Vec::new(),
         warnings: Vec::new(),
     };

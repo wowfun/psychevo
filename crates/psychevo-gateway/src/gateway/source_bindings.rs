@@ -26,22 +26,23 @@ impl Gateway {
                 }
             }
             GatewaySourceLifetime::Persistent => {
-                if let Some(previous) = self.state.store().gateway_source_binding(&source_key.0)? {
+                if let Some(previous) = self.state.store().gateway_source_lane(&source_key.0)?
+                    && let Some(previous_thread_id) = previous.thread_id
+                {
                     self.state
                         .store()
-                        .mark_session_ended_with_reason(&previous.thread_id, "gateway_reset")?;
-                    self.state.store().archive_session(&previous.thread_id)?;
+                        .mark_session_ended_with_reason(&previous_thread_id, "gateway_reset")?;
+                    self.state.store().archive_session(&previous_thread_id)?;
                 }
                 self.state
                     .store()
-                    .upsert_gateway_source_binding(GatewaySourceBindingInput {
+                    .upsert_gateway_source_lane(GatewaySourceLaneInput {
                         source_key: &source_key.0,
                         source_kind: &source.kind,
                         raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
                         visible_name: source.visible_name.as_deref(),
-                        thread_id: new_thread_id,
-                        backend_kind: self.backend.kind().as_str(),
-                        backend_native_id: Some(new_thread_id),
+                        thread_id: Some(new_thread_id),
+                        draft_runtime_ref: None,
                         lineage: Some(json!({"reason": "gateway_reset"})),
                     })?;
             }
@@ -66,8 +67,8 @@ impl Gateway {
                 let previous = self
                     .state
                     .store()
-                    .gateway_source_binding(&source_key.0)?
-                    .map(|binding| binding.thread_id);
+                    .gateway_source_lane(&source_key.0)?
+                    .and_then(|lane| lane.thread_id);
                 self.state
                     .store()
                     .delete_gateway_source_binding(&source_key.0)?;
@@ -156,14 +157,13 @@ impl Gateway {
             GatewaySourceLifetime::Persistent => {
                 self.state
                     .store()
-                    .upsert_gateway_source_binding(GatewaySourceBindingInput {
+                    .upsert_gateway_source_lane(GatewaySourceLaneInput {
                         source_key: &source_key.0,
                         source_kind: &source.kind,
                         raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
                         visible_name: source.visible_name.as_deref(),
-                        thread_id,
-                        backend_kind: backend.kind.as_str(),
-                        backend_native_id: backend.native_id.as_deref(),
+                        thread_id: Some(thread_id),
+                        draft_runtime_ref: None,
                         lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
                     })?;
             }

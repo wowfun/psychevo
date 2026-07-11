@@ -1,3 +1,4 @@
+use serde_json::Value;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -24,4 +25,22 @@ pub enum Error {
     Config(String),
     #[error("{0}")]
     Message(String),
+    #[error("{message}")]
+    Structured { message: String, data: Value },
+}
+
+impl Error {
+    pub fn structured(message: impl Into<String>, data: Value) -> Self {
+        Self::Structured {
+            message: message.into(),
+            data,
+        }
+    }
+
+    pub fn structured_data(&self) -> Option<&Value> {
+        match self {
+            Self::Structured { data, .. } => Some(data),
+            _ => None,
+        }
+    }
 }

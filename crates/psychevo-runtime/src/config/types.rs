@@ -103,7 +103,8 @@ impl Default for WorkspacesConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RuntimeProfileKind {
     Native,
     Codex,
@@ -132,12 +133,32 @@ impl RuntimeProfileKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+pub fn validate_runtime_profile_backend_ref(
+    profile_id: &str,
+    runtime: RuntimeProfileKind,
+    backend_ref: Option<&str>,
+) -> Result<()> {
+    match (
+        runtime,
+        backend_ref.map(str::trim).filter(|value| !value.is_empty()),
+    ) {
+        (RuntimeProfileKind::Acp, None) => Err(Error::Config(format!(
+            "runtime_profiles.{profile_id}.backend_ref is required when runtime is acp"
+        ))),
+        (RuntimeProfileKind::Acp, Some(_)) | (_, None) => Ok(()),
+        (_, Some(_)) => Err(Error::Config(format!(
+            "runtime_profiles.{profile_id}.backend_ref is only allowed when runtime is acp"
+        ))),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeProfileConfig {
     pub id: String,
     pub runtime: RuntimeProfileKind,
     pub enabled: bool,
     pub label: String,
+    pub backend_ref: Option<String>,
     pub command: Option<String>,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
@@ -197,6 +218,11 @@ pub(crate) struct ToolsetContribution {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PluginPolicyConfig {
     pub(crate) plugins: BTreeMap<String, PluginPolicyEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BuiltinPluginPolicyConfig {
+    pub(crate) entries: BTreeMap<String, PluginPolicyEntry>,
 }
 
 #[derive(Debug, Clone, Default)]

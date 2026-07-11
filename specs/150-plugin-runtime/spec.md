@@ -93,8 +93,10 @@ stores the package fingerprint last approved by the user. A mismatched
 fingerprint changes the readiness state to `Needs trust` and prevents adapter
 host execution.
 
-When multiple installed plugins match the same selector, commands require
-`name@source`.
+Installed package identity is scope-qualified as `profile:name@source` or
+`project:name@source`; commands project and accept that canonical selector.
+Bare `name` and unscoped `name@source` remain shorthand only when they resolve
+to one record across both installation scopes.
 
 ## Declaration Loading
 

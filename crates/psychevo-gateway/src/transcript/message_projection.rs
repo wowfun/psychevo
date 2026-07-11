@@ -56,7 +56,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                 || content
                     .iter()
                     .any(|block| matches!(block, AssistantBlock::ToolCall(_)));
-            let blocks = content
+            let mut blocks = content
                 .iter()
                 .enumerate()
                 .filter_map(|(index, content_block)| match content_block {
@@ -157,6 +157,12 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                     _ => None,
                 })
                 .collect::<Vec<_>>();
+            blocks.extend(direct_runtime_observation_blocks(
+                thread_id,
+                summary,
+                *timestamp_ms,
+                content.len() as i64,
+            ));
             Some(entry(
                 thread_id,
                 summary,
@@ -168,6 +174,87 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
         }
         Message::ToolResult { .. } => None,
     }
+}
+
+fn direct_runtime_observation_blocks(
+    thread_id: &str,
+    summary: &TuiMessageSummary,
+    timestamp_ms: i64,
+    content_order: i64,
+) -> Vec<TranscriptBlock> {
+    let Some(metadata) = summary.metadata.as_ref() else {
+        return Vec::new();
+    };
+    let Some(runtime_ref) = metadata.get("runtimeRef").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let mut blocks = Vec::new();
+    if let Some(plan) = metadata
+        .get("runtimePlan")
+        .cloned()
+        .and_then(|value| {
+            serde_json::from_value::<psychevo_runtime_host::RuntimePlanUpdate>(value).ok()
+        })
+        .filter(|plan| {
+            plan.runtime_ref == runtime_ref
+                && plan.thread_id == thread_id
+                && !plan.turn_id.trim().is_empty()
+                && (plan.explanation.as_deref().is_some_and(|value| !value.trim().is_empty())
+                    || !plan.steps.is_empty())
+        })
+    {
+        let body = crate::direct_runtime_plan_body(&plan);
+        blocks.push(block(
+            format!("message:{}:runtime-plan", summary.session_seq),
+            TranscriptBlockKind::Status,
+            TranscriptBlockStatus::Completed,
+            content_order + 10,
+            "runtime.profile",
+            Some("Plan".to_string()),
+            Some(body.clone()),
+            Some(body),
+            Some(json!({
+                "projection": "runtime_plan",
+                "origin": "runtime_profile",
+                "runtimeRef": runtime_ref,
+                "plan": plan,
+            })),
+            timestamp_ms,
+        ));
+    }
+    if let Some(diff) = metadata
+        .get("runtimeDiff")
+        .cloned()
+        .and_then(|value| {
+            serde_json::from_value::<psychevo_runtime_host::RuntimeDiffUpdate>(value).ok()
+        })
+        .filter(|diff| {
+            diff.runtime_ref == runtime_ref
+                && diff.thread_id == thread_id
+                && !diff.turn_id.trim().is_empty()
+                && !diff.diff.trim().is_empty()
+        })
+    {
+        blocks.push(block(
+            format!("message:{}:runtime-diff", summary.session_seq),
+            TranscriptBlockKind::Diff,
+            TranscriptBlockStatus::Completed,
+            content_order + 20,
+            "runtime.profile",
+            Some("Diff".to_string()),
+            Some(diff.diff.clone()),
+            Some(diff.diff),
+            Some(json!({
+                "projection": "runtime_diff",
+                "origin": "runtime_profile",
+                "runtimeRef": runtime_ref,
+                "threadId": diff.thread_id,
+                "turnId": diff.turn_id,
+            })),
+            timestamp_ms,
+        ));
+    }
+    blocks
 }
 
 fn tool_call_title(tool_name: &str, arguments: &Value) -> String {

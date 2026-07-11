@@ -17,6 +17,8 @@ use super::context::GatewayContext;
 const GATEWAY_DIR: &str = "gateway";
 const MANAGED_GATEWAY_DEFAULT_PORT: u16 = 58_080;
 const MANAGED_GATEWAY_FALLBACK_PORTS: u16 = 19;
+const MANAGED_STOP_GRACE_TIMEOUT: Duration = Duration::from_secs(15);
+const MANAGED_STOP_FORCE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub(super) struct ManagedPaths {
@@ -128,7 +130,7 @@ pub(super) async fn ensure_started(
             return Ok(state);
         }
         if pid_alive(state.pid) {
-            let _ = kill_pid(state.pid);
+            stop_pid_bounded(state.pid)?;
         }
     }
     cleanup_state(&ctx.paths)?;
@@ -488,13 +490,37 @@ pub(super) fn stop_managed(paths: &ManagedPaths) -> Result<bool> {
         return Ok(false);
     };
     let stopped = if pid_alive(state.pid) {
-        kill_pid(state.pid)?;
+        stop_pid_bounded(state.pid)?;
         true
     } else {
         false
     };
     cleanup_state(paths)?;
     Ok(stopped)
+}
+
+fn stop_pid_bounded(pid: u32) -> Result<()> {
+    if let Err(error) = kill_pid(pid) {
+        if !pid_alive(pid) {
+            return Ok(());
+        }
+        return Err(error);
+    }
+    if wait_for_pid_exit(pid, MANAGED_STOP_GRACE_TIMEOUT) {
+        return Ok(());
+    }
+    if let Err(error) = force_kill_pid(pid) {
+        if !pid_alive(pid) {
+            return Ok(());
+        }
+        return Err(error);
+    }
+    if wait_for_pid_exit(pid, MANAGED_STOP_FORCE_TIMEOUT) {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "managed gateway pid {pid} did not exit after SIGTERM and forced termination"
+    ))
 }
 
 pub(crate) fn stop_managed_for_home(home: &Path) -> Result<bool> {
@@ -574,10 +600,37 @@ fn kill_pid(pid: u32) -> Result<()> {
     }
 }
 
+#[cfg(unix)]
+pub(super) fn force_kill_pid(pid: u32) -> Result<()> {
+    let process_group = -(pid as libc::pid_t);
+    let result = unsafe { libc::kill(process_group, libc::SIGKILL) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().into())
+    }
+}
+
 #[cfg(not(unix))]
 fn kill_pid(pid: u32) -> Result<()> {
     Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status()?;
     Ok(())
+}
+
+#[cfg(not(unix))]
+pub(super) fn force_kill_pid(pid: u32) -> Result<()> {
+    kill_pid(pid)
+}
+
+fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < timeout {
+        if !pid_alive(pid) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    !pid_alive(pid)
 }

@@ -67,10 +67,8 @@ export const clientRequestRuntimeSessionUnarchiveSchema = {
       "type": "string"
     },
     "RuntimeSessionParams": {
+      "additionalProperties": false,
       "properties": {
-        "nativeSessionId": {
-          "type": "string"
-        },
         "runtimeRef": {
           "type": "string"
         },
@@ -84,11 +82,14 @@ export const clientRequestRuntimeSessionUnarchiveSchema = {
             }
           ],
           "default": null
+        },
+        "sessionHandle": {
+          "type": "string"
         }
       },
       "required": [
-        "nativeSessionId",
-        "runtimeRef"
+        "runtimeRef",
+        "sessionHandle"
       ],
       "type": "object"
     }

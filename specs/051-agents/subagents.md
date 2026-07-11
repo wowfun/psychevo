@@ -196,6 +196,19 @@ Agent status follows a fixed status lattice: `pending_init`, `running`,
 `completed(summary)`, `errored`, `interrupted`, `shutdown`, and `not_found`.
 Timeout is reported separately and is not itself an agent status.
 
+## Runtime-Native Children
+
+Psychevo-managed children and runtime-native children have distinct ownership.
+A native runtime child with stable session identity, parent identity, and a
+durable history seam receives a read-only Gateway child binding immediately.
+Its history is loaded on demand and its permission or question requests enter
+Shared Attention with runtime, parent, and child origin.
+
+Read-only native children never expose send, steer, stop, close_agent, or
+agent/control. Native child activity without stable durable identity remains a
+bounded provider-owned activity row and is not presented as a first-class
+Gateway child.
+
 ## Thread Lineage
 
 Child agent runs use thread lineage to relate a child thread to its parent. When
@@ -218,10 +231,13 @@ second parent Agent block for the same child run.
 While the child run is active, child-thread stream events are emitted with an
 explicit child-thread scope so interactive clients can route them to the child
 transcript when it is active, or summarize them inside the parent Agent row when
-the parent transcript remains active. Clients may retain a bounded live-event
-backlog per child thread so opening a running child can immediately show work
-that started before inspection. The foreground tool row is still the only
-parent-transcript inspection affordance for that invocation.
+the parent transcript remains active. This applies equally to native children
+and foreground children backed by an external ACP backend. Interactive TUI and
+GUI clients must retain a bounded, ordered live-event backlog per child thread,
+including typed Gateway events, so opening a running child immediately replays
+work that started before inspection and then continues with future events. The
+foreground tool row is still the only parent-transcript inspection affordance
+for that invocation.
 The canonical `spawn_agent` argument for selecting a definition is
 `agent_type`. Required-agent mention accounting must use `agent_type`; it must
 not treat `name` as an alias or infer child identity from a task label.

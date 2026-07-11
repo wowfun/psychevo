@@ -67,6 +67,175 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
 }
 
 #[tokio::test]
+async fn cross_turn_runtime_permission_survives_event_recording_and_session_snapshot() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let runtime_state = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let gateway = crate::tests::gateway_with_cross_turn_child_interaction(runtime_state);
+    let state = WebState::new(GatewayWebServerConfig::new(
+        gateway,
+        home.clone(),
+        cwd,
+        None,
+        BTreeMap::from([
+            (
+                "HOME".to_string(),
+                temp.path().to_string_lossy().to_string(),
+            ),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                home.to_string_lossy().to_string(),
+            ),
+        ]),
+        temp.path().join("static"),
+    ));
+    let resolved_scope =
+        default_resolved_scope(&state, &AuthContext::Bearer).expect("resolved scope");
+    let scope = resolved_scope.to_wire_scope();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    let first = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(1)),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "threadId": null,
+                "runtimeRef": "codex",
+                "runtimeOptions": {},
+                "input": [{"type": "text", "text": "observe child"}]
+            })),
+        },
+    )
+    .await
+    .expect("first turn/start");
+    let parent_thread_id = first["threadId"]
+        .as_str()
+        .expect("first public thread")
+        .to_string();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(message) = rx.recv().await {
+            let notification: Value = serde_json::from_str(&message).expect("notification JSON");
+            if notification["method"] == "turn/result" {
+                return;
+            }
+        }
+        panic!("first turn notification channel closed");
+    })
+    .await
+    .expect("first turn/result");
+    let child = state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding_by_native_session("codex", "codex-native-child-cross-turn")
+        .expect("child binding read")
+        .expect("first turn child binding");
+
+    let second = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(2)),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "threadId": parent_thread_id.clone(),
+                "runtimeRef": "codex",
+                "runtimeOptions": {},
+                "input": [{"type": "text", "text": "request child command approval"}]
+            })),
+        },
+    )
+    .await
+    .expect("second turn/start");
+    assert_eq!(second["threadId"], parent_thread_id);
+    let action_event = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(message) = rx.recv().await {
+            let notification: Value = serde_json::from_str(&message).expect("notification JSON");
+            if notification["method"] == "gateway/event"
+                && notification["params"]["type"] == "actionRequested"
+            {
+                return notification["params"].clone();
+            }
+        }
+        panic!("second turn notification channel closed");
+    })
+    .await
+    .expect("runtime ActionRequested");
+    let action_id = action_event["action"]["actionId"]
+        .as_str()
+        .expect("public action id")
+        .to_string();
+
+    let snapshot =
+        thread_snapshot(&state, &resolved_scope, Some(&parent_thread_id)).expect("session snapshot");
+    let actions = snapshot["pendingActions"]
+        .as_array()
+        .expect("pending actions");
+    assert_eq!(actions.len(), 1, "{snapshot:#}");
+    let action = &actions[0];
+    assert_eq!(action["actionId"], action_id);
+    assert_eq!(action["threadId"], parent_thread_id);
+    assert_eq!(
+        action["payload"]["origin"]["parentThreadId"],
+        parent_thread_id
+    );
+    assert_eq!(
+        action["payload"]["origin"]["childThreadId"],
+        child.thread_id
+    );
+    assert_eq!(action["payload"]["allowSession"], true);
+    assert_eq!(action["payload"]["authorizationLifetime"], "codex_session");
+    let public_action = serde_json::to_string(action).expect("public pending action JSON");
+    for native_id in [
+        "codex-native-parent-cross-turn",
+        "codex-native-child-cross-turn",
+        "codex-native-request-cross-turn",
+    ] {
+        assert!(!public_action.contains(native_id), "{public_action}");
+    }
+
+    let response = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(3)),
+            method: "permission/respond".to_string(),
+            params: Some(json!({
+                "requestId": action_id,
+                "threadId": parent_thread_id,
+                "decision": "allowSession"
+            })),
+        },
+    )
+    .await
+    .expect("permission/respond");
+    assert_eq!(response["accepted"], true);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(message) = rx.recv().await {
+            let notification: Value = serde_json::from_str(&message).expect("notification JSON");
+            if notification["method"] == "turn/result" {
+                return;
+            }
+        }
+        panic!("second turn result channel closed");
+    })
+    .await
+    .expect("second turn/result");
+}
+
+#[tokio::test]
 async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
     let (_temp, state) = web_state();
     let store = state.inner.state.store();
@@ -224,6 +393,10 @@ async fn turn_completed_event_removes_pending_permission_panel() {
             outcome: Some("failed".to_string()),
             error: Some(GatewayTurnError {
                 message: "failed".to_string(),
+                code: None,
+                stage: None,
+                retry_class: None,
+                diagnostic_ref: None,
             }),
             started_at_ms: None,
             completed_at_ms: Some(gateway_now_ms()),

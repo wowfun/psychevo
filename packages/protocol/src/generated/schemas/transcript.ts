@@ -29,6 +29,7 @@ export const transcriptSchemas = {
     "agent",
     "mailbox",
     "status",
+    "compaction",
     "diff",
     "artifact"
   ],
@@ -122,6 +123,7 @@ export const transcriptSchemas = {
         "agent",
         "mailbox",
         "status",
+        "compaction",
         "diff",
         "artifact"
       ],
@@ -359,6 +361,7 @@ export const transcriptSchemas = {
         "agent",
         "mailbox",
         "status",
+        "compaction",
         "diff",
         "artifact"
       ],

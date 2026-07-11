@@ -33,8 +33,10 @@ impl Gateway {
         &self,
         claim: DurableGatewayActivityClaim<'_>,
     ) -> psychevo_runtime::Result<DurableGatewayActivity> {
-        let record = self.state.store().claim_gateway_activity(
-            GatewayActivityClaimInput {
+        let record = self
+            .state
+            .store()
+            .claim_gateway_activity(GatewayActivityClaimInput {
                 activity_id: claim.activity_id,
                 thread_id: claim.thread_id,
                 source_key: claim.source_key,
@@ -46,8 +48,7 @@ impl Gateway {
                 queued_turns: claim.queued_turns,
                 superseded_activity_id: None,
                 intent: claim.intent,
-            },
-        )?;
+            })?;
         Ok(DurableGatewayActivity {
             activity_id: record.activity_id,
             owner_id: record.owner_id,
@@ -101,6 +102,7 @@ impl Gateway {
         }
         let gateway = self.clone();
         Some(Arc::new(move |event: GatewayEvent| {
+            let event = gateway.attention_event_with_public_provenance(event, activity.as_ref());
             let accepted_thread_id = activity.as_ref().and_then(|activity| {
                 gateway
                     .persist_gateway_event(activity, &event, default_turn_id.as_deref())
@@ -115,6 +117,99 @@ impl Gateway {
                 event_sink(event);
             }
         }) as GatewayEventSink)
+    }
+
+    fn attention_event_with_public_provenance(
+        &self,
+        event: GatewayEvent,
+        activity: Option<&DurableGatewayActivity>,
+    ) -> GatewayEvent {
+        let (mut action, updated) = match event {
+            GatewayEvent::ActionRequested { action } => (action, false),
+            GatewayEvent::ActionUpdated { action } => (action, true),
+            event => return event,
+        };
+        let activity_record = activity
+            .and_then(|activity| {
+                self.state
+                    .store()
+                    .gateway_activity(&activity.activity_id)
+                    .ok()
+            })
+            .flatten();
+        let activity_thread_id = activity_record
+            .as_ref()
+            .and_then(|record| record.thread_id.clone());
+        let thread_id = action.thread_id.clone().or(activity_thread_id);
+        action.thread_id = action.thread_id.or_else(|| thread_id.clone());
+        if let Some(record) = activity_record {
+            action.activity_id = action.activity_id.or(Some(record.activity_id));
+            action.turn_id = action.turn_id.or(record.turn_id);
+            action.source_key = action.source_key.or(record.source_key);
+            action.owner_id = action.owner_id.or(Some(record.owner_id));
+            action.lease_expires_at_ms = action
+                .lease_expires_at_ms
+                .or(Some(record.lease_expires_at_ms));
+        }
+        let binding = thread_id
+            .as_deref()
+            .and_then(|thread_id| self.state.store().gateway_runtime_binding(thread_id).ok())
+            .flatten();
+        let runtime_ref = binding
+            .as_ref()
+            .and_then(|binding| binding.runtime_ref.clone())
+            .unwrap_or_else(|| "native".to_string());
+        let runtime_kind = binding
+            .as_ref()
+            .and_then(|binding| binding.native_kind.clone())
+            .unwrap_or_else(|| "native".to_string());
+        let profile_label = binding
+            .as_ref()
+            .and_then(|binding| binding.profile_config_json.as_deref())
+            .and_then(|profile| serde_json::from_str::<Value>(profile).ok())
+            .and_then(|profile| {
+                profile
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| {
+                if runtime_ref == "native" {
+                    "Psychevo".to_string()
+                } else {
+                    runtime_ref.clone()
+                }
+            });
+        let parent_thread_id = binding
+            .as_ref()
+            .and_then(|binding| binding.parent_thread_id.clone())
+            .or_else(|| thread_id.clone());
+        let child_thread_id = binding
+            .as_ref()
+            .and_then(|binding| binding.parent_thread_id.as_ref())
+            .and(thread_id);
+        let mut payload = action.payload.as_object().cloned().unwrap_or_default();
+        payload
+            .entry("runtimeRef".to_string())
+            .or_insert_with(|| json!(runtime_ref));
+        payload
+            .entry("runtimeKind".to_string())
+            .or_insert_with(|| json!(runtime_kind));
+        payload
+            .entry("profileLabel".to_string())
+            .or_insert_with(|| json!(profile_label));
+        payload.entry("origin".to_string()).or_insert_with(|| {
+            json!({
+                "parentThreadId": parent_thread_id,
+                "childThreadId": child_thread_id,
+            })
+        });
+        action.payload = Value::Object(payload);
+        if updated {
+            GatewayEvent::ActionUpdated { action }
+        } else {
+            GatewayEvent::ActionRequested { action }
+        }
     }
 
     fn persist_gateway_event(
@@ -155,14 +250,18 @@ impl Gateway {
                 Some(&activity.activity_id),
                 Some(&activity.owner_id),
                 gateway_event_thread_id(event).as_deref(),
-                gateway_event_turn_id(event).or(default_turn_id).or(activity.turn_id.as_deref()),
+                gateway_event_turn_id(event)
+                    .or(default_turn_id)
+                    .or(activity.turn_id.as_deref()),
                 &event_value,
             );
         } else if let Some((event_kind, entry)) = gateway_live_snapshot_entry(event) {
             self.retain_gateway_live_snapshot(
                 activity,
                 event_kind,
-                gateway_event_turn_id(event).or(default_turn_id).or(activity.turn_id.as_deref()),
+                gateway_event_turn_id(event)
+                    .or(default_turn_id)
+                    .or(activity.turn_id.as_deref()),
                 entry,
                 event_value,
             );
@@ -191,19 +290,20 @@ impl Gateway {
                 .live_snapshots
                 .lock()
                 .expect("gateway live snapshot map poisoned");
-            let snapshot = pending
-                .entry(snapshot_key.clone())
-                .or_insert_with(|| PendingGatewayLiveSnapshot {
-                    snapshot_key: snapshot_key.clone(),
-                    activity_id: Some(activity.activity_id.clone()),
-                    owner_id: Some(activity.owner_id.clone()),
-                    thread_id: Some(entry.thread_id.clone()),
-                    turn_id: Some(turn_id.to_string()),
-                    event_kind: event_kind.to_string(),
-                    event: Value::Null,
-                    last_flush_ms: 0,
-                    dirty: false,
-                });
+            let snapshot =
+                pending
+                    .entry(snapshot_key.clone())
+                    .or_insert_with(|| PendingGatewayLiveSnapshot {
+                        snapshot_key: snapshot_key.clone(),
+                        activity_id: Some(activity.activity_id.clone()),
+                        owner_id: Some(activity.owner_id.clone()),
+                        thread_id: Some(entry.thread_id.clone()),
+                        turn_id: Some(turn_id.to_string()),
+                        event_kind: event_kind.to_string(),
+                        event: Value::Null,
+                        last_flush_ms: 0,
+                        dirty: false,
+                    });
             snapshot.activity_id = Some(activity.activity_id.clone());
             snapshot.owner_id = Some(activity.owner_id.clone());
             snapshot.thread_id = Some(entry.thread_id.clone());
@@ -312,13 +412,10 @@ impl Gateway {
             }
             if record.lease_expires_at_ms < now {
                 let superseded_by_activity_id = Uuid::now_v7().to_string();
-                let accepted = self
-                    .state
-                    .store()
-                    .supersede_stale_gateway_activity(
-                        &record.activity_id,
-                        &superseded_by_activity_id,
-                    )?;
+                let accepted = self.state.store().supersede_stale_gateway_activity(
+                    &record.activity_id,
+                    &superseded_by_activity_id,
+                )?;
                 let mut activity = self.activity_for_selector(selector);
                 if accepted {
                     activity.takeover_state = Some("takenOver".to_string());
@@ -605,6 +702,12 @@ fn gateway_event_thread_id(event: &GatewayEvent) -> Option<String> {
         GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
             action.thread_id.clone()
         }
+        GatewayEvent::RuntimeStateChanged { thread_id, .. } => thread_id.clone(),
+        GatewayEvent::RuntimeChildChanged {
+            thread_id,
+            parent_thread_id,
+            ..
+        } => thread_id.clone().or_else(|| Some(parent_thread_id.clone())),
         GatewayEvent::TitleChanged { thread_id, .. } => Some(thread_id.clone()),
         _ => None,
     }
@@ -625,7 +728,10 @@ fn gateway_event_turn_id(event: &GatewayEvent) -> Option<&str> {
     }
 }
 
-fn should_append_gateway_live_event(activity: &DurableGatewayActivity, event: &GatewayEvent) -> bool {
+fn should_append_gateway_live_event(
+    activity: &DurableGatewayActivity,
+    event: &GatewayEvent,
+) -> bool {
     if let GatewayEvent::TurnCompleted {
         committed_entries, ..
     } = event
@@ -645,13 +751,13 @@ fn should_append_gateway_live_event(activity: &DurableGatewayActivity, event: &G
             | GatewayEvent::ActionCancelled { .. }
             | GatewayEvent::Warning { .. }
             | GatewayEvent::ActivityChanged { .. }
+            | GatewayEvent::RuntimeStateChanged { .. }
+            | GatewayEvent::RuntimeChildChanged { .. }
             | GatewayEvent::TitleChanged { .. }
     )
 }
 
-fn gateway_live_snapshot_entry(
-    event: &GatewayEvent,
-) -> Option<(&'static str, &TranscriptEntry)> {
+fn gateway_live_snapshot_entry(event: &GatewayEvent) -> Option<(&'static str, &TranscriptEntry)> {
     match event {
         GatewayEvent::EntryStarted { entry, .. } => Some(("entryStarted", entry)),
         GatewayEvent::EntryUpdated { entry, .. } => Some(("entryUpdated", entry)),

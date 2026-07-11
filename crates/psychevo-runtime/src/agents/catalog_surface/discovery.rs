@@ -81,6 +81,8 @@ pub(crate) struct RawAgentFrontmatter {
     #[serde(rename = "mcpServers")]
     pub(crate) mcp_servers: Option<Value>,
     pub(crate) skills: Option<Value>,
+    #[serde(rename = "optionalContributions", alias = "optional_contributions")]
+    pub(crate) optional_contributions: Option<Value>,
     pub(crate) hooks: Option<Value>,
     pub(crate) background: Option<bool>,
     #[serde(rename = "initialPrompt")]
@@ -296,6 +298,7 @@ pub(crate) fn generated_agent_from_backend(
             ..AgentToolPolicy::default()
         },
         skills: Vec::new(),
+        optional_contributions: BTreeSet::new(),
         hooks: None,
         background: None,
         initial_prompt: None,
@@ -410,6 +413,7 @@ pub fn view_agent_value_with_catalog(
         "permission_mode": agent.tool_policy.permission_mode,
         "mcp_servers": agent.tool_policy.mcp_servers,
         "skills": agent.skills,
+        "optional_contributions": agent.optional_contributions,
         "hooks": agent.hooks,
         "background": agent.background,
         "initial_prompt": agent.initial_prompt,

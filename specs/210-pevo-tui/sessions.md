@@ -51,6 +51,13 @@ status notices to the currently displayed transcript. Returning to a still-live
 session reloads its persisted history and replays only that session's buffered
 live events. `/new` leaves no visible session selected, so later output from a
 previous running session must not appear in the new-session transcript.
+Typed Gateway events for a child thread are retained with the same bounded,
+ordered semantics as raw scoped runtime events, including updates received
+while that child is visible. Opening or reopening the child while its turn is
+running replays the retained events through the ordinary Gateway transcript
+reducer before future child updates continue from the detached parent turn.
+Terminal completion clears the live backlog because persisted history becomes
+authoritative.
 
 When `/new` is entered while the current turn is still running, TUI starts a
 new draft lane for the next prompt instead of queueing it behind or steering

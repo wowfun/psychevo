@@ -32,6 +32,22 @@ impl AgentTeamSource {
 pub struct AgentTeamMember {
     pub id: String,
     pub agent: String,
+    /// Runtime Profile selected independently from the Agent Definition.
+    ///
+    /// `None` keeps the existing Psychevo-managed child execution path. A
+    /// concrete value is an execution identity, not an agent/backend name.
+    #[serde(default)]
+    pub runtime_ref: Option<String>,
+    /// Advanced per-member overrides interpreted by the selected Runtime
+    /// Profile. Values stay strings because the runtime control surface is
+    /// responsible for validating them against its captured snapshot.
+    #[serde(default)]
+    pub runtime_options: BTreeMap<String, String>,
+    /// Effective Runtime Profile revision captured when the Team definition is
+    /// validated or activated. Runtime-backed execution must reject a stale
+    /// value instead of silently adopting a changed Profile.
+    #[serde(default)]
+    pub runtime_profile_revision: Option<u64>,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -327,6 +343,9 @@ fn parse_team_members(
             AgentTeamMember {
                 id: agent.trim().to_string(),
                 agent: agent.trim().to_string(),
+                runtime_ref: None,
+                runtime_options: BTreeMap::new(),
+                runtime_profile_revision: None,
                 role: None,
                 description: None,
                 max_turns: None,
@@ -340,9 +359,52 @@ fn parse_team_members(
                 "team `{team_name}` member id and agent must be non-empty"
             )));
         }
+        let runtime_ref = member
+            .runtime_ref
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if let Some(runtime_ref) = runtime_ref.as_deref()
+            && !valid_team_runtime_ref(runtime_ref)
+        {
+            return Err(Error::Config(format!(
+                "team `{team_name}` member `{}` runtimeRef `{runtime_ref}` must be a Runtime Profile id or generated acp:<backend-id> id",
+                member.id
+            )));
+        }
+        if runtime_ref.is_none() && !member.runtime_options.is_empty() {
+            return Err(Error::Config(format!(
+                "team `{team_name}` member `{}` runtimeOptions require runtimeRef",
+                member.id
+            )));
+        }
+        if runtime_ref.is_none() && member.runtime_profile_revision.is_some() {
+            return Err(Error::Config(format!(
+                "team `{team_name}` member `{}` runtimeProfileRevision requires runtimeRef",
+                member.id
+            )));
+        }
+        let mut runtime_options = BTreeMap::new();
+        for (raw_key, value) in member.runtime_options {
+            let key = raw_key.trim();
+            if key.is_empty() {
+                return Err(Error::Config(format!(
+                    "team `{team_name}` member `{}` runtimeOptions keys must be non-empty",
+                    member.id
+                )));
+            }
+            if runtime_options.insert(key.to_string(), value).is_some() {
+                return Err(Error::Config(format!(
+                    "team `{team_name}` member `{}` runtimeOptions contain duplicate key `{key}` after normalization",
+                    member.id
+                )));
+            }
+        }
         let member = AgentTeamMember {
             id: member.id.trim().to_string(),
             agent: member.agent.trim().to_string(),
+            runtime_ref,
+            runtime_options,
+            runtime_profile_revision: member.runtime_profile_revision,
             role: member
                 .role
                 .map(|value| value.trim().to_string())
@@ -363,6 +425,10 @@ fn parse_team_members(
     }
     let _ = path;
     Ok(members)
+}
+
+fn valid_team_runtime_ref(value: &str) -> bool {
+    valid_agent_name(value) || value.strip_prefix("acp:").is_some_and(valid_agent_name)
 }
 
 fn parse_team_enabled(value: Option<&Value>) -> (bool, Option<String>) {

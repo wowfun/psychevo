@@ -151,7 +151,7 @@ pub(crate) mod tests {
         assert!(!names.contains(&"resume"));
         assert!(!names.contains(&"undo"));
         assert!(!names.contains(&"redo"));
-        assert!(!names.contains(&"compact"));
+        assert!(names.contains(&"compact"));
     }
 
     #[test]

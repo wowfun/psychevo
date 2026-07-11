@@ -57,6 +57,64 @@
     }
 
     #[test]
+    fn terminal_reconciliation_marks_yielded_exec_block_failed_after_turn_failure() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::User {
+                    content: vec![UserContentBlock::text("$x-daily")],
+                    timestamp_ms: 1,
+                },
+            ),
+            summary(
+                2,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_exec",
+                        "exec_command",
+                        json!({"cmd": "python .agents/skills/x-daily/scripts/fetch.py"}),
+                    )],
+                    timestamp_ms: 2,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                3,
+                Message::ToolResult {
+                    tool_call_id: "call_exec".to_string(),
+                    tool_name: "exec_command".to_string(),
+                    content: "{\"session_id\":7,\"exit_code\":null,\"output\":\"\"}".to_string(),
+                    is_error: false,
+                    timestamp_ms: 3,
+                },
+            ),
+        ];
+        let terminal = GatewayTurnTerminalRecord {
+            turn_id: "turn-failed".to_string(),
+            thread_id: "thread-1".to_string(),
+            status: "failed".to_string(),
+            outcome: Some("failed".to_string()),
+            error_message: Some("provider failed".to_string()),
+            started_at_ms: Some(1),
+            completed_at_ms: 4,
+            metadata: Some(json!({
+                "source": "gateway",
+                "firstCommittedSeq": 2
+            })),
+        };
+        let mut entries = project_transcript_entries("thread-1", &summaries);
+        assert_eq!(entries[1].blocks[0].status, TranscriptBlockStatus::Running);
+
+        reconcile_terminal_bounded_running_blocks(&mut entries, &[terminal]);
+
+        assert_eq!(entries[1].status, TranscriptBlockStatus::Failed);
+        assert_eq!(entries[1].blocks[0].status, TranscriptBlockStatus::Failed);
+    }
+
+    #[test]
     fn projector_preserves_assistant_block_order_and_attaches_tool_result() {
         let summaries = vec![
             summary(

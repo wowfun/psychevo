@@ -3,20 +3,20 @@ fn thread_snapshot(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
-    let thread = thread_id.map(|thread_id| GatewayThread {
-        id: thread_id.to_string(),
-        backend: crate::GatewayBackendInfo {
-            kind: crate::BackendKind::Psychevo,
-            runtime_ref: Some("native".to_string()),
-            native_id: Some(thread_id.to_string()),
-        },
-        source_key: Some(scope.source.source_key()),
-    });
+    let thread = thread_id
+        .map(|thread_id| {
+            Ok::<GatewayThread, Error>(GatewayThread {
+                id: thread_id.to_string(),
+                backend: gateway_backend_info_for_thread(state, thread_id)?,
+                source_key: Some(scope.source.source_key()),
+            })
+        })
+        .transpose()?;
     let selector = thread_id
         .map(GatewayThreadSelector::thread_id)
         .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
     let pending_actions = prune_pending_actions(state, &selector, thread_id)?;
-    let activity = state.activity(&scope.source, thread_id);
+    let activity = snapshot_activity(state, &scope.source, thread_id)?;
     let entries = match thread_id {
         Some(thread_id) => {
             let mut entries = state.inner.gateway.thread_transcript(thread_id)?;
@@ -44,6 +44,49 @@ fn thread_snapshot(
         "activity": activity,
         "pendingActions": pending_actions,
     }))
+}
+
+fn snapshot_activity(
+    state: &WebState,
+    source: &GatewaySource,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<GatewayActivity> {
+    let activity = state.activity(source, thread_id);
+    let Some(thread_id) = thread_id else {
+        return Ok(activity);
+    };
+    if activity.running
+        || activity.active_turn_id.is_some()
+        || activity.takeover_state.is_some()
+    {
+        return Ok(activity);
+    }
+
+    let Some(edge) = state.inner.state.store().find_agent_edge(thread_id)? else {
+        return Ok(activity);
+    };
+    if edge.child_session_id != thread_id
+        || edge.status != psychevo_runtime::AgentEdgeStatus::Open
+    {
+        return Ok(activity);
+    }
+
+    let Some(parent_record) = state
+        .inner
+        .state
+        .store()
+        .active_gateway_activity_for_thread(&edge.parent_session_id)?
+    else {
+        return Ok(activity);
+    };
+    if parent_record.lease_expires_at_ms < gateway_now_ms() {
+        return Ok(activity);
+    }
+    let parent_activity = state.activity(source, Some(&edge.parent_session_id));
+    if parent_activity.running {
+        return Ok(parent_activity);
+    }
+    Ok(activity)
 }
 
 fn replay_running_live_transcript_overlay(

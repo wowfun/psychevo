@@ -12,6 +12,7 @@ import json
 import sys
 
 loaded_session = None
+counter_path = sys.argv[0] + ".counter"
 
 def send(value):
     print(json.dumps(value), flush=True)
@@ -32,7 +33,15 @@ for line in sys.stdin:
     if method == "initialize":
         send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
     elif method == "session/new":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-1"}})
+        try:
+            with open(counter_path, "r", encoding="utf-8") as counter_file:
+                counter = int(counter_file.read())
+        except (FileNotFoundError, ValueError):
+            counter = 0
+        counter += 1
+        with open(counter_path, "w", encoding="utf-8") as counter_file:
+            counter_file.write(str(counter))
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-" + str(counter)}})
     elif method == "session/load":
         loaded_session = params.get("sessionId")
         update(loaded_session, {
@@ -103,6 +112,7 @@ Peer instructions.
         let source = GatewaySource::new("web", "peer").persistent();
         let mut first_request = request(&harness, source.clone(), "hello");
         first_request.options.agent = Some("reviewer".to_string());
+        first_request.options.runtime_ref = Some("acp:fake".to_string());
         first_request.options.inherited_env = Some(env.clone());
         let first = harness
             .gateway
@@ -111,7 +121,14 @@ Peer instructions.
             .expect("first peer turn");
 
         assert_eq!(first.thread.backend.kind, BackendKind::PeerAgent);
-        assert_eq!(first.thread.backend.native_id.as_deref(), Some("native-1"));
+        assert!(
+            first
+                .thread
+                .backend
+                .native_id
+                .as_deref()
+                .is_some_and(|handle| handle.starts_with("rts_") && !handle.contains("native-1"))
+        );
         assert_eq!(
             first
                 .result
@@ -130,8 +147,16 @@ Peer instructions.
             .gateway_source_binding(&source.source_key().0)
             .expect("binding lookup")
             .expect("binding");
-        assert_eq!(binding.backend_kind, "peer_agent");
-        assert_eq!(binding.backend_native_id.as_deref(), Some("native-1"));
+        assert_eq!(binding.backend_kind, "unresolved");
+        assert_eq!(binding.backend_native_id, None);
+        let runtime_binding = harness
+            .state
+            .store()
+            .gateway_runtime_binding(&first.result.session_id)
+            .expect("runtime binding lookup")
+            .expect("runtime binding");
+        assert_eq!(runtime_binding.backend_kind.as_deref(), Some("peer_agent"));
+        assert_eq!(runtime_binding.native_session_id.as_deref(), Some("native-1"));
         let metadata = harness
             .state
             .store()
@@ -156,6 +181,7 @@ Peer instructions.
 
         let mut second_request = request(&harness, source.clone(), "again");
         second_request.options.agent = Some("reviewer".to_string());
+        second_request.options.runtime_ref = Some("acp:fake".to_string());
         second_request.options.inherited_env = Some(env.clone());
         let second = harness
             .gateway
@@ -181,6 +207,7 @@ Peer instructions.
         let mut child_request = request(&harness, source, "child prompt");
         child_request.thread_id = Some(child_session.clone());
         child_request.options.agent = Some("reviewer".to_string());
+        child_request.options.runtime_ref = Some("acp:fake".to_string());
         child_request.options.inherited_env = Some(env);
         let child = harness
             .gateway
@@ -358,6 +385,7 @@ tools: [read]
         let source = GatewaySource::new("web", "peer-stream").persistent();
         let mut request = request(&harness, source, "hello");
         request.options.agent = Some("reviewer".to_string());
+        request.options.runtime_ref = Some("acp:fake".to_string());
         request.options.inherited_env = Some(env);
         request.event_sink = Some(Arc::new(move |event| {
             gateway_events_for_sink

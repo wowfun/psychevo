@@ -16,8 +16,21 @@ pub struct RunResult {
     pub selected_agent: Option<SelectedAgent>,
     pub selected_skills: Vec<SelectedSkill>,
     pub context_snapshot: Option<crate::context_usage::ContextSnapshot>,
+    pub terminal_error: Option<RunTerminalError>,
     pub events: Vec<Value>,
     pub warnings: Vec<RunWarning>,
+}
+
+/// Product-safe direct-runtime terminal classification carried through the
+/// ordinary run result without exposing adapter-native terminal metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunTerminalError {
+    pub code: String,
+    pub stage: String,
+    pub retry_class: String,
+    pub message: String,
+    pub diagnostic_ref: String,
 }
 
 #[derive(Debug, Clone)]

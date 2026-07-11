@@ -66,6 +66,13 @@ export const clientRequestAgentWriteSchema = {
         "name": {
           "type": "string"
         },
+        "optionalContributions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "rawMarkdown": {
           "default": null,
           "type": [

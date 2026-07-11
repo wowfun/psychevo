@@ -930,6 +930,7 @@ pub(crate) async fn run_live_internal(
         selected_agent: selected_agent_summary,
         selected_skills,
         context_snapshot,
+        terminal_error: None,
         events,
         warnings,
     })

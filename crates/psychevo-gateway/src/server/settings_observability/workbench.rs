@@ -73,10 +73,15 @@ fn workbench_controls_value(
         .iter()
         .map(|model| model.value.clone())
         .collect();
+    let runtime_ref = thread_id
+        .map(|thread_id| gateway_backend_info_for_thread(state, thread_id))
+        .transpose()?
+        .and_then(|backend| backend.runtime_ref)
+        .unwrap_or_else(|| "native".to_string());
     Ok(wire::WorkbenchControlsView {
         permission_mode: PermissionMode::Default.as_str().to_string(),
         mode: RunMode::Default.as_str().to_string(),
-        runtime_ref: "native".to_string(),
+        runtime_ref,
         agent,
         model,
         model_status,
@@ -159,6 +164,12 @@ fn session_control_agent(
         return Ok(None);
     };
     let metadata = state.inner.state.store().session_metadata(thread_id)?;
+    if let Some(selection) = crate::bound_direct_agent_selection(thread_id, metadata.as_ref())? {
+        return Ok(match selection {
+            crate::BoundDirectAgentSelection::Default => None,
+            crate::BoundDirectAgentSelection::Named(agent) => Some(agent),
+        });
+    }
     Ok(match main_agent_from_session_metadata(metadata.as_ref()) {
         LoadedMainAgent::Agent(agent) => Some(agent),
         LoadedMainAgent::Default | LoadedMainAgent::Missing => None,

@@ -1,4 +1,21 @@
 use super::*;
+use sha2::{Digest, Sha256};
+
+const CHANNEL_INTERACTION_TOKEN_TTL_MS: i64 = 10 * 60 * 1_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ChannelInteractionKind {
+    Permission,
+    Clarify,
+}
+
+pub(super) struct ChannelInteractionTokenInput<'a> {
+    pub kind: ChannelInteractionKind,
+    pub action_id: &'a str,
+    pub thread_id: Option<&'a str>,
+    pub clarify_question_count: usize,
+    pub action_expires_at_ms: Option<i64>,
+}
 
 #[derive(Clone)]
 pub(in crate::server) struct ChannelRuntimeState {
@@ -11,6 +28,24 @@ struct ChannelRuntimeInner {
     records: BTreeMap<String, ChannelRunnerRecord>,
     active: BTreeMap<String, CancellationToken>,
     wechat_login_grace_until_ms: BTreeMap<String, i64>,
+    interaction_tokens: BTreeMap<String, ChannelInteractionToken>,
+}
+
+#[derive(Debug, Clone)]
+struct ChannelInteractionToken {
+    connection_id: String,
+    source_key: String,
+    kind: ChannelInteractionKind,
+    action_id: String,
+    thread_id: Option<String>,
+    clarify_question_count: usize,
+    expires_at_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ChannelInteractionRoute {
+    pub action_id: String,
+    pub thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +99,112 @@ impl ChannelRuntimeState {
         }
     }
 
+    pub(super) fn issue_interaction_token(
+        &self,
+        connection_id: &str,
+        source_key: &SourceKey,
+        input: ChannelInteractionTokenInput<'_>,
+    ) -> Option<String> {
+        let ChannelInteractionTokenInput {
+            kind,
+            action_id,
+            thread_id,
+            clarify_question_count,
+            action_expires_at_ms,
+        } = input;
+        let now_ms = gateway_now_ms();
+        if action_expires_at_ms.is_some_and(|expires_at_ms| expires_at_ms <= now_ms) {
+            return None;
+        }
+        let expires_at_ms = action_expires_at_ms
+            .unwrap_or_else(|| now_ms.saturating_add(CHANNEL_INTERACTION_TOKEN_TTL_MS))
+            .min(now_ms.saturating_add(CHANNEL_INTERACTION_TOKEN_TTL_MS));
+        let mut inner = self.inner.lock().expect("channel runtime state poisoned");
+        inner
+            .interaction_tokens
+            .retain(|_, record| record.expires_at_ms > now_ms);
+        inner.interaction_tokens.retain(|_, record| {
+            record.connection_id != connection_id || record.action_id != action_id
+        });
+        let token = loop {
+            let random = uuid::Uuid::now_v7().simple().to_string();
+            let digest = format!("{:x}", Sha256::digest(random.as_bytes()));
+            let candidate = format!("ia_{}", &digest[..20]);
+            if !inner.interaction_tokens.contains_key(&candidate) {
+                break candidate;
+            }
+        };
+        inner.interaction_tokens.insert(
+            token.clone(),
+            ChannelInteractionToken {
+                connection_id: connection_id.to_string(),
+                source_key: source_key.0.clone(),
+                kind,
+                action_id: action_id.to_string(),
+                thread_id: thread_id.map(str::to_string),
+                clarify_question_count,
+                expires_at_ms,
+            },
+        );
+        Some(token)
+    }
+
+    pub(super) fn take_interaction_token(
+        &self,
+        connection_id: &str,
+        source_key: &SourceKey,
+        kind: ChannelInteractionKind,
+        token: &str,
+    ) -> Option<ChannelInteractionRoute> {
+        let now_ms = gateway_now_ms();
+        let mut inner = self.inner.lock().expect("channel runtime state poisoned");
+        inner
+            .interaction_tokens
+            .retain(|_, record| record.expires_at_ms > now_ms);
+        let record = inner.interaction_tokens.get(token)?;
+        if record.connection_id != connection_id
+            || record.source_key != source_key.0
+            || record.kind != kind
+        {
+            return None;
+        }
+        inner
+            .interaction_tokens
+            .remove(token)
+            .map(|record| ChannelInteractionRoute {
+                action_id: record.action_id,
+                thread_id: record.thread_id,
+            })
+    }
+
+    pub(super) fn clarify_question_count(
+        &self,
+        connection_id: &str,
+        source_key: &SourceKey,
+        token: &str,
+    ) -> Option<usize> {
+        let now_ms = gateway_now_ms();
+        let mut inner = self.inner.lock().expect("channel runtime state poisoned");
+        inner
+            .interaction_tokens
+            .retain(|_, record| record.expires_at_ms > now_ms);
+        let record = inner.interaction_tokens.get(token)?;
+        (record.connection_id == connection_id
+            && record.source_key == source_key.0
+            && record.kind == ChannelInteractionKind::Clarify)
+            .then_some(record.clarify_question_count.max(1))
+    }
+
+    pub(super) fn revoke_interaction_action(&self, connection_id: &str, action_id: &str) {
+        self.inner
+            .lock()
+            .expect("channel runtime state poisoned")
+            .interaction_tokens
+            .retain(|_, record| {
+                record.connection_id != connection_id || record.action_id != action_id
+            });
+    }
+
     pub(super) fn activate(&self, id: &str) -> Option<CancellationToken> {
         let mut inner = self.inner.lock().expect("channel runtime state poisoned");
         if inner.active.contains_key(id) {
@@ -87,6 +228,9 @@ impl ChannelRuntimeState {
                 .into_iter()
                 .filter_map(|id| {
                     inner.wechat_login_grace_until_ms.remove(&id);
+                    inner
+                        .interaction_tokens
+                        .retain(|_, record| record.connection_id != id);
                     inner.active.remove(&id).map(|token| (id, token))
                 })
                 .collect::<Vec<_>>()
@@ -102,12 +246,13 @@ impl ChannelRuntimeState {
     }
 
     pub(super) fn deactivate(&self, id: &str) {
-        let token = self
-            .inner
-            .lock()
-            .expect("channel runtime state poisoned")
-            .active
-            .remove(id);
+        let token = {
+            let mut inner = self.inner.lock().expect("channel runtime state poisoned");
+            inner
+                .interaction_tokens
+                .retain(|_, record| record.connection_id != id);
+            inner.active.remove(id)
+        };
         if let Some(token) = token {
             token.cancel();
         }

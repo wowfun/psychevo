@@ -206,6 +206,56 @@ async fn settings_read_exposes_session_agent() {
 }
 
 #[tokio::test]
+async fn settings_read_exposes_immutable_direct_runtime_agent_after_reconnect() {
+    let (_temp, state) = web_state();
+    let pairing = crate::direct_agent_pairing(
+        Some("reviewer".to_string()),
+        Some("Review carefully".to_string()),
+    );
+    let session = state
+        .inner
+        .state
+        .store()
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "web",
+            "model",
+            "provider",
+            Some(json!({
+                "main_agent": main_agent_metadata(
+                    "stale-agent",
+                    "stale-agent",
+                    psychevo_runtime::AgentSource::Project,
+                    None,
+                ),
+                "runtimeAgentDefinition": {
+                    "agentName": pairing.agent_name,
+                    "instructions": pairing.instructions,
+                    "fingerprint": pairing.fingerprint,
+                }
+            })),
+        )
+        .expect("session");
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let result = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("bound-agent")),
+            method: "settings/read".to_string(),
+            params: Some(json!({ "threadId": session })),
+        },
+    )
+    .await
+    .expect("settings/read");
+
+    assert_eq!(result["controls"]["agent"].as_str(), Some("reviewer"));
+}
+
+#[tokio::test]
 async fn settings_update_persists_session_agent_and_default() {
     let (_temp, state) = web_state();
     write_agent_definition(

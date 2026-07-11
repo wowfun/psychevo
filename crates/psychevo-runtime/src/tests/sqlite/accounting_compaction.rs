@@ -151,6 +151,64 @@ pub(crate) fn session_compaction_checkpoint_respects_revert_boundary() {
 }
 
 #[test]
+pub(crate) fn projection_only_compaction_is_visible_but_never_drives_context() {
+    let temp = tempdir().expect("temp");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let session = store
+        .create_session_with_metadata(temp.path(), "run", "model", "provider", None)
+        .expect("session");
+    store
+        .append_message(&session, &psychevo_agent_core::user_text_message("one"))
+        .expect("message");
+    let context_checkpoint = store
+        .append_session_compaction(SessionCompactionInput {
+            session_id: session.clone(),
+            reason: "manual".to_string(),
+            summary_text: "context summary".to_string(),
+            first_kept_session_seq: 1,
+            created_after_session_seq: 1,
+            tokens_before: Some(100),
+            tokens_after: Some(50),
+            summary_provider: "provider".to_string(),
+            summary_model: "model".to_string(),
+            instructions: None,
+            metadata: None,
+        })
+        .expect("context checkpoint");
+    let projection_checkpoint = store
+        .append_session_compaction(SessionCompactionInput {
+            session_id: session.clone(),
+            reason: "manual".to_string(),
+            summary_text: "Native runtime compacted its context.".to_string(),
+            first_kept_session_seq: 1,
+            created_after_session_seq: 1,
+            tokens_before: Some(100),
+            tokens_after: None,
+            summary_provider: "codex".to_string(),
+            summary_model: "runtime-owned".to_string(),
+            instructions: None,
+            metadata: Some(json!({"projection_only": true})),
+        })
+        .expect("projection checkpoint");
+
+    assert_eq!(
+        store
+            .latest_valid_session_compaction(&session)
+            .expect("context checkpoint")
+            .map(|record| record.id),
+        Some(context_checkpoint.id)
+    );
+    let visible = store
+        .list_valid_session_compactions(&session)
+        .expect("visible checkpoints");
+    assert!(
+        visible
+            .iter()
+            .any(|record| record.id == projection_checkpoint.id)
+    );
+}
+
+#[test]
 pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");

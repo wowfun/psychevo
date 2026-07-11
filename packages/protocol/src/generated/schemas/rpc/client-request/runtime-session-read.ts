@@ -66,10 +66,15 @@ export const clientRequestRuntimeSessionReadSchema = {
       ],
       "type": "string"
     },
-    "RuntimeSessionParams": {
+    "RuntimeSessionReadParams": {
+      "additionalProperties": false,
       "properties": {
-        "nativeSessionId": {
-          "type": "string"
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "runtimeRef": {
           "type": "string"
@@ -84,11 +89,14 @@ export const clientRequestRuntimeSessionReadSchema = {
             }
           ],
           "default": null
+        },
+        "sessionHandle": {
+          "type": "string"
         }
       },
       "required": [
-        "nativeSessionId",
-        "runtimeRef"
+        "runtimeRef",
+        "sessionHandle"
       ],
       "type": "object"
     }
@@ -101,7 +109,7 @@ export const clientRequestRuntimeSessionReadSchema = {
       "type": "string"
     },
     "params": {
-      "$ref": "#/definitions/RuntimeSessionParams"
+      "$ref": "#/definitions/RuntimeSessionReadParams"
     }
   },
   "required": [

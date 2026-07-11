@@ -1,3 +1,19 @@
+    #[test]
+    fn workspace_path_identity_normalizes_verbatim_drive_and_unc_paths() {
+        assert_eq!(
+            workspace::normalized_workspace_path_identity(Path::new(
+                r"\\?\C:\Users\Ada\project\index.html",
+            )),
+            PathBuf::from(r"C:\Users\Ada\project\index.html")
+        );
+        assert_eq!(
+            workspace::normalized_workspace_path_identity(Path::new(
+                r"\\?\UNC\server\share\project\index.html",
+            )),
+            PathBuf::from(r"\\server\share\project\index.html")
+        );
+    }
+
     #[tokio::test]
     async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
         let (_temp, state) = web_state();
@@ -63,13 +79,38 @@
         assert_eq!(read["path"].as_str(), Some("src/main.rs"));
         assert_eq!(read["content"].as_str(), Some("fn main() {}\n"));
 
+        let written = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("3")),
+                method: "workspace/file/write".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "path": "src/main.rs",
+                    "content": "fn main() { println!(\"updated\"); }\n",
+                    "expectedRevision": read["revision"],
+                    "force": false
+                })),
+            },
+        )
+        .await
+        .expect("workspace/file/write existing file");
+        assert_eq!(written["path"].as_str(), Some("src/main.rs"));
+        assert_eq!(
+            std::fs::read_to_string(src.join("main.rs")).expect("updated main"),
+            "fn main() { println!(\"updated\"); }\n"
+        );
+
         let err = handle_rpc(
             state,
             AuthContext::Bearer,
             tx,
             RpcRequest {
                 jsonrpc: wire::JSONRPC_VERSION.to_string(),
-                id: Some(json!("3")),
+                id: Some(json!("4")),
                 method: "workspace/file/read".to_string(),
                 params: Some(json!({
                     "scope": scope,
@@ -80,6 +121,134 @@
         .await
         .expect_err("absolute path should be rejected");
         assert_eq!(err.to_string(), "workspace path must be relative");
+    }
+
+    #[tokio::test]
+    async fn workspace_file_write_creates_a_new_file_in_an_existing_parent() {
+        let (_temp, state) = web_state();
+        std::fs::create_dir_all(state.inner.cwd.join("generated")).expect("generated dir");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let written = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "workspace/file/write".to_string(),
+                params: Some(json!({
+                    "scope": scope.clone(),
+                    "path": "generated/result.html",
+                    "content": "<!doctype html><title>Result</title>\n",
+                    "expectedRevision": "missing",
+                    "force": false
+                })),
+            },
+        )
+        .await
+        .expect("workspace/file/write");
+        assert_eq!(written["path"].as_str(), Some("generated/result.html"));
+
+        let read = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("2")),
+                method: "workspace/file/read".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "path": "generated/result.html"
+                })),
+            },
+        )
+        .await
+        .expect("workspace/file/read");
+        assert_eq!(
+            read["content"].as_str(),
+            Some("<!doctype html><title>Result</title>\n")
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_file_read_and_write_reject_symlink_escapes() {
+        let (temp, state) = web_state();
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&outside).expect("outside dir");
+        std::fs::write(outside.join("secret.txt"), "outside\n").expect("outside file");
+        std::os::unix::fs::symlink(&outside, state.inner.cwd.join("escape"))
+            .expect("workspace symlink");
+        let dangling_target = outside.join("created-through-symlink.txt");
+        std::os::unix::fs::symlink(&dangling_target, state.inner.cwd.join("dangling.txt"))
+            .expect("dangling workspace symlink");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        for (id, method, path) in [
+            ("1", "workspace/file/read", "escape/secret.txt"),
+            ("2", "workspace/file/write", "escape/secret.txt"),
+            ("3", "workspace/file/write", "escape/new.txt"),
+        ] {
+            let params = if method == "workspace/file/read" {
+                json!({
+                    "scope": scope.clone(),
+                    "path": path
+                })
+            } else {
+                json!({
+                    "scope": scope.clone(),
+                    "path": path,
+                    "content": "blocked\n",
+                    "expectedRevision": "missing",
+                    "force": true
+                })
+            };
+            let err = handle_rpc(
+                state.clone(),
+                AuthContext::Bearer,
+                tx.clone(),
+                RpcRequest {
+                    jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                    id: Some(json!(id)),
+                    method: method.to_string(),
+                    params: Some(params),
+                },
+            )
+            .await
+            .expect_err("symlink escape should be rejected");
+            assert_eq!(err.to_string(), "workspace path is outside the workspace");
+        }
+        assert!(!outside.join("new.txt").exists());
+
+        let err = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("4")),
+                method: "workspace/file/write".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "path": "dangling.txt",
+                    "content": "blocked\n",
+                    "expectedRevision": "missing",
+                    "force": true
+                })),
+            },
+        )
+        .await
+        .expect_err("dangling final symlink should be rejected");
+        assert!(!err.to_string().is_empty());
+        assert!(!dangling_target.exists());
     }
 
     #[tokio::test]
@@ -406,13 +575,168 @@
         .await
         .expect("command/execute");
 
-        assert_eq!(result["accepted"], true);
+        if result["accepted"] != true {
+            panic!("unexpected compact result: {result:#}");
+        }
         assert_eq!(result["known"], true);
         assert_eq!(result["presentationKind"], "control");
         assert_eq!(result["feedbackAnchor"], "composer");
         assert_eq!(result["action"]["type"], "queuePrompt");
         assert_eq!(result["action"]["text"], "hello");
         assert_eq!(result["action"]["displayText"], "/queue hello");
+    }
+
+    #[tokio::test]
+    async fn command_execute_compact_returns_native_compaction_action() {
+        let (_temp, state) = web_state();
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
+            .expect("session");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "command/execute".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "command": "/compact keep decisions",
+                    "threadId": session_id
+                })),
+            },
+        )
+        .await
+        .expect("command/execute");
+
+        assert_eq!(result["accepted"], true, "{result:#}");
+        assert_eq!(result["known"], true);
+        assert_eq!(result["action"]["type"], "threadCompactStart");
+        assert_eq!(result["action"]["instructions"], "keep decisions");
+    }
+
+    #[tokio::test]
+    async fn thread_compact_start_returns_structured_noop_without_prompt_turn() {
+        let (_temp, state) = web_state();
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
+            .expect("session");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+            .expect("scope")
+            .to_wire_scope();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            tx,
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!("1")),
+                method: "thread/compact/start".to_string(),
+                params: Some(json!({
+                    "scope": scope,
+                    "threadId": session_id,
+                    "instructions": "keep decisions"
+                })),
+            },
+        )
+        .await
+        .expect("thread/compact/start");
+
+        assert_eq!(result["accepted"], true);
+        assert_eq!(result["threadId"], session_id);
+        assert_eq!(result["compacted"], false);
+        assert_eq!(result["reason"], "manual");
+        assert_eq!(result["message"], "not enough messages to compact");
+        assert!(result["checkpoint"].is_null());
+
+        let mut activity_running_states = Vec::new();
+        while let Ok(message) = rx.try_recv() {
+            let value: serde_json::Value =
+                serde_json::from_str(&message).expect("gateway notification json");
+            if value["method"] == "gateway/event"
+                && value["params"]["type"] == "activityChanged"
+                && value["params"]["threadId"] == session_id
+            {
+                activity_running_states.push(value["params"]["activity"]["running"].clone());
+            }
+        }
+        assert_eq!(
+            activity_running_states,
+            vec![json!(true), json!(false)],
+            "activity notifications should bracket compact execution"
+        );
+    }
+
+    #[tokio::test]
+    async fn thread_transcript_projects_compaction_checkpoint_divider() {
+        let (_temp, state) = web_state();
+        let session_id = state
+            .inner
+            .state
+            .store()
+            .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
+            .expect("session");
+        let store = state.inner.state.store();
+        store
+            .append_message(&session_id, &runtime_user_message("first task", 1))
+            .expect("user message");
+        store
+            .append_message(&session_id, &runtime_assistant_message("done", 2))
+            .expect("assistant message");
+        let record = store
+            .append_session_compaction(psychevo_runtime::SessionCompactionInput {
+                session_id: session_id.clone(),
+                reason: "manual".to_string(),
+                summary_text: "Keep the decision trail.".to_string(),
+                first_kept_session_seq: 2,
+                created_after_session_seq: 2,
+                tokens_before: Some(120),
+                tokens_after: Some(42),
+                summary_provider: "fake".to_string(),
+                summary_model: "fake-model".to_string(),
+                instructions: Some("keep decisions".to_string()),
+                metadata: Some(json!({"test": true})),
+            })
+            .expect("compaction");
+
+        let entries = state
+            .inner
+            .gateway
+            .thread_transcript(&session_id)
+            .expect("transcript");
+        let divider = entries
+            .iter()
+            .find(|entry| entry.id == format!("compaction:{}", record.id))
+            .expect("compaction divider");
+        assert_eq!(divider.role, TranscriptEntryRole::Diagnostic);
+        assert_eq!(divider.blocks[0].kind, TranscriptBlockKind::Compaction);
+        assert_eq!(divider.blocks[0].title.as_deref(), Some("Session compacted"));
+        assert_eq!(
+            divider.blocks[0].detail.as_deref(),
+            Some("Keep the decision trail.")
+        );
+        assert_eq!(
+            divider.blocks[0]
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("checkpoint_id"))
+                .and_then(Value::as_i64),
+            Some(record.id)
+        );
     }
 
     #[tokio::test]

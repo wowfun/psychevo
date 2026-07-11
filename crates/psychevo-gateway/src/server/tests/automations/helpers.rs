@@ -298,6 +298,7 @@ impl crate::GatewayBackend for AutomationFakeBackend {
                 selected_agent: None,
                 selected_skills: Vec::new(),
                 context_snapshot: None,
+                terminal_error: None,
                 events: Vec::new(),
                 warnings: Vec::new(),
             })

@@ -486,6 +486,8 @@ pub(crate) fn parse_runtime_profile_config(
     })?;
     let enabled = optional_bool_field(object, "enabled")?.unwrap_or(true);
     let label = optional_string_field(object, "label")?.unwrap_or_else(|| id.to_string());
+    let backend_ref = optional_string_alias_field(object, "backend_ref", "backendRef")?;
+    validate_runtime_profile_backend_ref(id, runtime, backend_ref.as_deref())?;
     let command = optional_string_field(object, "command")?;
     let args = string_array_field(object, "args", &format!("runtime_profiles.{id}.args"))?;
     let env = string_map_field(object, "env", &format!("runtime_profiles.{id}.env"))?;
@@ -506,6 +508,7 @@ pub(crate) fn parse_runtime_profile_config(
         runtime,
         enabled,
         label,
+        backend_ref,
         command,
         args,
         env,

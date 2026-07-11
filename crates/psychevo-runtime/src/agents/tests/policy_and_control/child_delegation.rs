@@ -979,9 +979,343 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
     let calls = delegate.calls.lock().expect("delegate calls");
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].backend_ref, "opencode");
+    assert_eq!(calls[0].runtime_ref, "acp:opencode");
+    assert_eq!(calls[0].expected_runtime_profile_revision, None);
+    assert_eq!(calls[0].backend_ref.as_deref(), Some("opencode"));
     assert_eq!(calls[0].prompt, "List your tools.");
     assert_eq!(calls[0].child_session_id, child_session);
+}
+
+#[tokio::test]
+pub(crate) async fn team_generated_acp_profile_forwards_runtime_options_and_provenance() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let mut agent = backend_backed_agent("opencode", "opencode");
+    agent.skills = vec!["review-checklist".to_string()];
+    agent
+        .optional_contributions
+        .insert(AgentContribution::Skills);
+    let catalog = AgentCatalog {
+        agents: vec![agent],
+        shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let delegate = Arc::new(FakeExternalAgentDelegate::default());
+    let mut context = test_agent_tool_context(
+        &tmp,
+        Arc::new(FakeProvider::new(Vec::new())),
+        store.clone(),
+        db_path,
+        parent,
+        catalog,
+    );
+    context.active_team = Some(ActiveAgentTeamContext {
+        team_run_id: "team-run".to_string(),
+        mission_run_id: None,
+        team_name: "ship".to_string(),
+        mission_goal: None,
+        leader_agent_name: "general".to_string(),
+        max_parallel_agents: 4,
+        members: vec![AgentTeamMember {
+            id: "reviewer".to_string(),
+            agent: "opencode".to_string(),
+            runtime_ref: Some("acp:opencode".to_string()),
+            runtime_options: BTreeMap::from([
+                ("mode".to_string(), "plan".to_string()),
+                ("model".to_string(), "test-model".to_string()),
+            ]),
+            runtime_profile_revision: Some(17),
+            role: Some("review".to_string()),
+            description: None,
+            max_turns: None,
+        }],
+    });
+    context.external_delegate =
+        Some(delegate.clone() as Arc<dyn crate::types::ExternalAgentDelegate>);
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        context,
+        SpawnAgentArgs {
+            agent_type: None,
+            message: "Review the change.".to_string(),
+            task_name: "review_change".to_string(),
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+            team_member: Some("reviewer".to_string()),
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("delegate spawn");
+
+    assert!(!output.is_error);
+    let calls = delegate.calls.lock().expect("delegate calls");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].runtime_ref, "acp:opencode");
+    assert_eq!(calls[0].expected_runtime_profile_revision, Some(17));
+    assert_eq!(calls[0].backend_ref.as_deref(), Some("opencode"));
+    assert_eq!(calls[0].model.as_deref(), Some("test-model"));
+    assert_eq!(
+        calls[0].runtime_options,
+        BTreeMap::from([
+            ("mode".to_string(), "plan".to_string()),
+            ("model".to_string(), "test-model".to_string()),
+        ])
+    );
+    let child_session = output.json["child_session_id"]
+        .as_str()
+        .expect("child session");
+    let metadata = store
+        .find_agent_edge(child_session)
+        .expect("edge")
+        .expect("edge")
+        .metadata
+        .expect("metadata");
+    assert_eq!(metadata["runtimeRef"], "acp:opencode");
+    assert_eq!(metadata["runtimeOptions"]["mode"], "plan");
+    assert_eq!(metadata["runtimeProfileRevision"], 17);
+    assert_eq!(metadata["agent"]["runtime_ref"], "acp:opencode");
+    assert_eq!(metadata["optionalContributionsOmitted"], json!(["skills"]));
+    assert!(
+        metadata["contributionDiagnostics"][0]
+            .as_str()
+            .is_some_and(|message| message.contains("optional Agent Definition skills"))
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn direct_runtime_team_pairing_forwards_identity_instructions_and_options() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let mut reviewer = built_in_agent("reviewer", "Review agent", "Review carefully.", None);
+    reviewer.model = Some("definition-model".to_string());
+    reviewer.skills = vec!["review-checklist".to_string()];
+    reviewer
+        .optional_contributions
+        .insert(AgentContribution::Skills);
+    let catalog = AgentCatalog {
+        agents: vec![reviewer],
+        ..AgentCatalog::default()
+    };
+    let delegate = Arc::new(FakeExternalAgentDelegate::default());
+    let mut context = test_agent_tool_context(
+        &tmp,
+        Arc::new(FakeProvider::new(Vec::new())),
+        store.clone(),
+        db_path,
+        parent,
+        catalog,
+    );
+    context.active_team = Some(ActiveAgentTeamContext {
+        team_run_id: "team-run".to_string(),
+        mission_run_id: None,
+        team_name: "ship".to_string(),
+        mission_goal: None,
+        leader_agent_name: "general".to_string(),
+        max_parallel_agents: 4,
+        members: vec![AgentTeamMember {
+            id: "reviewer".to_string(),
+            agent: "reviewer".to_string(),
+            runtime_ref: Some("codex".to_string()),
+            runtime_options: BTreeMap::from([
+                ("mode".to_string(), "plan".to_string()),
+                ("feature.fast".to_string(), "true".to_string()),
+            ]),
+            runtime_profile_revision: Some(17),
+            role: None,
+            description: None,
+            max_turns: None,
+        }],
+    });
+    context.external_delegate =
+        Some(delegate.clone() as Arc<dyn crate::types::ExternalAgentDelegate>);
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        context,
+        SpawnAgentArgs {
+            agent_type: None,
+            message: "Review the change.".to_string(),
+            task_name: "review_change".to_string(),
+            background: Some(false),
+            model: Some("turn-model".to_string()),
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+            team_member: Some("reviewer".to_string()),
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("tool output");
+
+    assert!(!output.is_error);
+    let calls = delegate.calls.lock().expect("delegate calls");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].runtime_ref, "codex");
+    assert_eq!(calls[0].expected_runtime_profile_revision, Some(17));
+    assert_eq!(calls[0].backend_ref, None);
+    assert_eq!(calls[0].instructions.as_deref(), Some("Review carefully."));
+    assert_eq!(calls[0].model.as_deref(), Some("turn-model"));
+    assert_eq!(calls[0].runtime_options["mode"], "plan");
+    assert_eq!(calls[0].runtime_options["feature.fast"], "true");
+    let child_session = output.json["child_session_id"]
+        .as_str()
+        .expect("child session");
+    let summary = store
+        .session_summary(child_session)
+        .expect("summary")
+        .expect("child summary");
+    assert_eq!(summary.source, "runtime");
+    assert_eq!(summary.provider, "codex");
+    let metadata = store
+        .find_agent_edge(child_session)
+        .expect("edge")
+        .expect("edge")
+        .metadata
+        .expect("metadata");
+    assert_eq!(metadata["teamRunId"], "team-run");
+    assert_eq!(metadata["teamMemberId"], "reviewer");
+    assert_eq!(metadata["runtimeRef"], "codex");
+    assert_eq!(metadata["runtimeOptions"]["mode"], "plan");
+    assert_eq!(metadata["runtimeProfileRevision"], 17);
+    assert_eq!(metadata["optionalContributionsOmitted"], json!(["skills"]));
+}
+
+#[tokio::test]
+pub(crate) async fn direct_runtime_team_pairing_rejects_required_uninjectable_contributions() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let mut reviewer = built_in_agent("reviewer", "Review agent", "Review carefully.", None);
+    reviewer.skills = vec!["required-review-skill".to_string()];
+    let delegate = Arc::new(FakeExternalAgentDelegate::default());
+    let mut context = test_agent_tool_context(
+        &tmp,
+        Arc::new(FakeProvider::new(Vec::new())),
+        store.clone(),
+        db_path,
+        parent,
+        AgentCatalog {
+            agents: vec![reviewer],
+            ..AgentCatalog::default()
+        },
+    );
+    context.active_team = Some(ActiveAgentTeamContext {
+        team_run_id: "team-run".to_string(),
+        mission_run_id: None,
+        team_name: "ship".to_string(),
+        mission_goal: None,
+        leader_agent_name: "general".to_string(),
+        max_parallel_agents: 4,
+        members: vec![AgentTeamMember {
+            id: "reviewer".to_string(),
+            agent: "reviewer".to_string(),
+            runtime_ref: Some("opencode".to_string()),
+            runtime_options: BTreeMap::new(),
+            runtime_profile_revision: Some(17),
+            role: None,
+            description: None,
+            max_turns: None,
+        }],
+    });
+    context.external_delegate =
+        Some(delegate.clone() as Arc<dyn crate::types::ExternalAgentDelegate>);
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        context,
+        SpawnAgentArgs {
+            agent_type: None,
+            message: "Review the change.".to_string(),
+            task_name: "review_change".to_string(),
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+            team_member: Some("reviewer".to_string()),
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("tool output");
+
+    assert!(output.is_error);
+    assert!(format!("{}", output.json).contains("skills contribution"));
+    assert!(delegate.calls.lock().expect("delegate calls").is_empty());
+    assert!(store.list_agent_edges().expect("edges").is_empty());
+}
+
+#[tokio::test]
+pub(crate) async fn external_pairing_rejects_uninjectable_definition_contributions() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let mut agent = backend_backed_agent("opencode", "opencode");
+    agent.skills = vec!["review-checklist".to_string()];
+    let catalog = AgentCatalog {
+        agents: vec![agent],
+        ..AgentCatalog::default()
+    };
+    let delegate = Arc::new(FakeExternalAgentDelegate::default());
+    let mut context = test_agent_tool_context(
+        &tmp,
+        Arc::new(FakeProvider::new(Vec::new())),
+        store.clone(),
+        db_path,
+        parent,
+        catalog,
+    );
+    context.external_delegate =
+        Some(delegate.clone() as Arc<dyn crate::types::ExternalAgentDelegate>);
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        context,
+        SpawnAgentArgs {
+            agent_type: Some("opencode".to_string()),
+            message: "Review the change.".to_string(),
+            task_name: "review_change".to_string(),
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+            team_member: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("tool output");
+
+    assert!(output.is_error);
+    assert!(format!("{}", output.json).contains("skills contribution"));
+    assert!(delegate.calls.lock().expect("delegate calls").is_empty());
+    assert!(store.list_agent_edges().expect("edges").is_empty());
 }
 
 #[tokio::test]
@@ -1092,16 +1426,12 @@ pub(crate) async fn backend_backed_agent_tool_without_delegate_returns_unavailab
     .expect("tool output");
 
     assert!(output.is_error);
-    assert!(
-        output
-            .model_content
-            .as_deref()
-            .unwrap_or_default()
-            .contains("cannot delegate to peer agents")
-            || output
-                .json
-                .to_string()
-                .contains("cannot delegate to peer agents")
+    assert_eq!(output.model_content, None);
+    assert_eq!(
+        output.json,
+        json!({
+            "error": "agent `opencode` is paired with an external Runtime Profile, but this execution context cannot delegate runtime-backed members"
+        })
     );
     assert!(store.list_agent_edges().expect("edges").is_empty());
 }

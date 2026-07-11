@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "checkpointId": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "createdAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "firstKeptSessionSeq": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryProvider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tokensAfter": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "tokensBefore": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "checkpointId",
+    "createdAtMs",
+    "firstKeptSessionSeq",
+    "reason"
+  ],
+  "title": "ThreadCompactionCheckpointView",
+  "type": "object"
+}

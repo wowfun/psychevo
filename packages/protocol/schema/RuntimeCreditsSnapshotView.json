@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "balance": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hasCredits": {
+      "type": "boolean"
+    },
+    "unlimited": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "hasCredits",
+    "unlimited"
+  ],
+  "title": "RuntimeCreditsSnapshotView",
+  "type": "object"
+}

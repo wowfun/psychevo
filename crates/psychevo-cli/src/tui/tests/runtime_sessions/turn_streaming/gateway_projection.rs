@@ -184,6 +184,7 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
             selected_agent: None,
             selected_skills: Vec::new(),
             context_snapshot: None,
+            terminal_error: None,
             events: Vec::new(),
             warnings: Vec::new(),
         })
@@ -216,6 +217,237 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
             && row.text.contains("mock/mock-model")
             && row.text.contains("2s")
     }));
+}
+
+#[tokio::test]
+pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_without_thread_leaks() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let store = SqliteStore::open(&app.db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .expect("parent session");
+    let child = store
+        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .expect("child session");
+    store
+        .upsert_agent_edge(
+            &parent,
+            &child,
+            psychevo_runtime::AgentEdgeStatus::Open,
+            Some(serde_json::json!({
+                "agent": {
+                    "id": "agent-run-1",
+                    "name": "opencode",
+                    "task": "stream the delegated task"
+                }
+            })),
+        )
+        .expect("agent edge");
+    app.current_session = Some(parent.clone());
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    tx.send(GatewayEvent::EntryUpdated {
+        turn_id: "child-turn".to_string(),
+        entry: gateway_text_entry_for_thread(
+            &child,
+            "child-thinking",
+            TranscriptBlockKind::Reasoning,
+            "child thinking before open",
+        ),
+    })
+    .expect("send child thinking");
+    tx.send(GatewayEvent::EntryUpdated {
+        turn_id: "child-turn".to_string(),
+        entry: gateway_text_entry_for_thread(
+            &child,
+            "child-answer",
+            TranscriptBlockKind::Text,
+            "child answer before open",
+        ),
+    })
+    .expect("send child answer");
+    tx.send(GatewayEvent::EntryUpdated {
+        turn_id: "parent-turn".to_string(),
+        entry: gateway_text_entry_for_thread(
+            &parent,
+            "parent-answer",
+            TranscriptBlockKind::Text,
+            "parent only",
+        ),
+    })
+    .expect("send parent answer");
+    tx.send(GatewayEvent::EntryUpdated {
+        turn_id: "other-turn".to_string(),
+        entry: gateway_text_entry_for_thread(
+            "other-thread",
+            "other-answer",
+            TranscriptBlockKind::Text,
+            "other only",
+        ),
+    })
+    .expect("send other answer");
+
+    let result = psychevo_runtime::RunResult {
+        session_id: parent.clone(),
+        ..finished_run_result(&app)
+    };
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let _ = done_rx.await;
+        Ok(result)
+    });
+    let (control, _) = run_control();
+    ui.running = Some(RunningTurn {
+        session_id: Some(parent.clone()),
+        control,
+        selector: None,
+        turn_id: Some("parent-turn".to_string()),
+        events: RunningTurnEvents::Gateway(rx),
+        task: RunningTask::Agent(task),
+    });
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain while parent is visible");
+    assert!(
+        ui.transcript.iter().any(|row| row.text == "parent only"),
+        "{:?}",
+        ui.transcript
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("child ") && row.text != "other only"),
+        "{:?}",
+        ui.transcript
+    );
+
+    app.open_agent_target_session(&mut ui, &child)
+        .expect("open child session");
+
+    assert_eq!(app.current_session.as_deref(), Some(child.as_str()));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Thinking && row.text == "child thinking before open"
+    }));
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Answer && row.text == "child answer before open"
+    }));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.text != "parent only" && row.text != "other only"),
+        "{:?}",
+        ui.transcript
+    );
+
+    tx.send(GatewayEvent::EntryUpdated {
+        turn_id: "parent-turn".to_string(),
+        entry: gateway_text_entry_for_thread(
+            &parent,
+            "parent-answer-later",
+            TranscriptBlockKind::Text,
+            "parent later",
+        ),
+    })
+    .expect("send later parent answer");
+    tx.send(GatewayEvent::EntryUpdated {
+        turn_id: "other-turn".to_string(),
+        entry: gateway_text_entry_for_thread(
+            "other-thread",
+            "other-answer-later",
+            TranscriptBlockKind::Text,
+            "other later",
+        ),
+    })
+    .expect("send later other answer");
+    tx.send(GatewayEvent::EntryUpdated {
+        turn_id: "child-turn".to_string(),
+        entry: gateway_text_entry_for_thread(
+            &child,
+            "child-answer",
+            TranscriptBlockKind::Text,
+            "child answer after open",
+        ),
+    })
+    .expect("send later child answer");
+
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain while child is visible");
+
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Answer && row.text == "child answer after open"
+    }));
+    assert!(
+        ui.transcript.iter().all(|row| {
+            row.text != "parent only"
+                && row.text != "parent later"
+                && row.text != "other only"
+                && row.text != "other later"
+        }),
+        "{:?}",
+        ui.transcript
+    );
+
+    app.open_session_direct(&mut ui, &parent)
+        .expect("return to parent session");
+    assert!(
+        ui.transcript.iter().any(|row| row.text == "parent later"),
+        "{:?}",
+        ui.transcript
+    );
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("child ") && row.text != "other later"),
+        "{:?}",
+        ui.transcript
+    );
+
+    app.open_agent_target_session(&mut ui, &child)
+        .expect("reopen child session");
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Answer && row.text == "child answer after open"
+    }), "{:?}", ui.transcript);
+    assert!(
+        ui.transcript.iter().all(|row| {
+            row.text != "parent only"
+                && row.text != "parent later"
+                && row.text != "other only"
+                && row.text != "other later"
+        }),
+        "{:?}",
+        ui.transcript
+    );
+
+    app.open_session_direct(&mut ui, &parent)
+        .expect("return to parent before child completion");
+    app.apply_gateway_event(
+        &mut ui,
+        Some(&parent),
+        GatewayEvent::TurnCompleted {
+            thread_id: Some(child.clone()),
+            turn_id: "child-turn".to_string(),
+            turn: GatewayTurn {
+                id: "child-turn".to_string(),
+                thread_id: Some(child.clone()),
+                status: GatewayTurnStatus::Completed,
+                outcome: Some("normal".to_string()),
+                error: None,
+                started_at_ms: None,
+                completed_at_ms: Some(3),
+            },
+            committed_entries: Vec::new(),
+        },
+    );
+    assert!(
+        !ui.session_live_event_backlog.contains_key(&child),
+        "completed child backlog should be cleared: {:?}",
+        ui.session_live_event_backlog.keys().collect::<Vec<_>>()
+    );
+
+    let _ = done_tx.send(());
 }
 
 #[test]
@@ -439,6 +671,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
+        terminal_error: None,
         events: Vec::new(),
         warnings: Vec::new(),
     };
@@ -526,6 +759,24 @@ fn gateway_exec_entry_for_test(
         created_at_ms: 1,
         updated_at_ms: 2,
     }
+}
+
+fn gateway_text_entry_for_thread(
+    thread_id: &str,
+    id: &str,
+    kind: TranscriptBlockKind,
+    text: &str,
+) -> TranscriptEntry {
+    let mut entry = gateway_test_entry(
+        id,
+        kind,
+        TranscriptBlockStatus::Running,
+        None,
+        text,
+    );
+    entry.thread_id = thread_id.to_string();
+    entry.turn_id = Some(format!("{thread_id}-turn"));
+    entry
 }
 
 #[tokio::test]

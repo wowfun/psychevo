@@ -96,6 +96,7 @@ pub(crate) fn finished_run_result(app: &TuiApp) -> psychevo_runtime::RunResult {
         selected_agent: None,
         selected_skills: Vec::new(),
         context_snapshot: None,
+        terminal_error: None,
         events: Vec::new(),
         warnings: Vec::new(),
     }
@@ -245,6 +246,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
             selected_agent: None,
             selected_skills: Vec::new(),
             context_snapshot: None,
+            terminal_error: None,
             events: Vec::new(),
             warnings: Vec::new(),
         })

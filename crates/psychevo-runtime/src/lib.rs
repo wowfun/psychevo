@@ -49,11 +49,11 @@ pub mod workspace_diff;
 pub(crate) mod tests;
 
 pub use agents::{
-    AgentBackendConfig, AgentBackendKind, AgentBackendRef, AgentCatalog, AgentControl,
-    AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions, AgentEntrypoint, AgentInvocationRole,
-    AgentPermissionMode, AgentRun, AgentRunRecord, AgentRunStatus, AgentSource, AgentTeamCatalog,
-    AgentTeamDefinition, AgentTeamMember, AgentTeamSource, AgentToolPolicy,
-    DEFAULT_TEAM_PARALLEL_AGENTS, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP,
+    AgentBackendConfig, AgentBackendKind, AgentBackendRef, AgentCatalog, AgentContribution,
+    AgentControl, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions, AgentEntrypoint,
+    AgentInvocationRole, AgentPermissionMode, AgentRun, AgentRunRecord, AgentRunStatus,
+    AgentSource, AgentTeamCatalog, AgentTeamDefinition, AgentTeamMember, AgentTeamSource,
+    AgentToolPolicy, DEFAULT_TEAM_PARALLEL_AGENTS, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP,
     MAX_TEAM_PARALLEL_AGENTS_CAP, SESSION_MAIN_AGENT_METADATA_KEY, agent_source_display_label,
     agent_spawn_paused, agent_status_records, agent_status_value, close_agent_id,
     discover_agent_teams, discover_agent_teams_with_catalog, discover_agents, list_agents_value,
@@ -94,7 +94,8 @@ pub use config::{
     set_default_model_with_reasoning, set_local_toolset_enabled, set_mcp_server_enabled,
     set_mcp_server_tool_policy, set_provider_api_key, set_provider_model_config,
     setup_channel_connection, toolsets_value, update_channel_connection, upsert_channel_connection,
-    upsert_mcp_server, voice_config_value, write_cached_model_catalog,
+    upsert_mcp_server, validate_runtime_profile_backend_ref, voice_config_value,
+    write_cached_model_catalog,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -196,7 +197,9 @@ pub use store::{
     ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
     GatewayControlCommandRecord, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
-    GatewayLiveSnapshotRecord, GatewaySourceBindingInput, GatewaySourceBindingRecord,
+    GatewayLiveSnapshotRecord, GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership,
+    GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus, GatewaySourceBindingInput,
+    GatewaySourceBindingRecord, GatewaySourceLaneInput, GatewaySourceLaneRecord,
     GatewayTurnTerminalInput, GatewayTurnTerminalRecord, SessionCompactionInput,
     SessionCompactionRecord, SessionMessageRecord, SqliteStore,
 };
@@ -216,8 +219,8 @@ pub use types::{
     PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
     ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
     ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions,
-    RunResult, RunSandboxMode, RunSandboxOverride, RunStreamEvent, RunStreamSink, RunWarning,
-    RuntimeTool, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
+    RunResult, RunSandboxMode, RunSandboxOverride, RunStreamEvent, RunStreamSink, RunTerminalError,
+    RunWarning, RuntimeTool, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
     SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
     SessionUndoResult, SessionUsageOptions, SessionUsageSummary, SmokeControl, StatsOptions,
     TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UsageActivity,

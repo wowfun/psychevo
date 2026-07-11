@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "stability": {
+      "$ref": "#/definitions/RuntimeStabilityView"
+    }
+  },
+  "required": [
+    "enabled",
+    "id",
+    "stability"
+  ],
+  "title": "RuntimeCapabilityView",
+  "type": "object"
+}

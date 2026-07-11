@@ -23,7 +23,7 @@ describe("ThreadSnapshotSchema", () => {
       },
       thread: {
         id: "s1",
-        backend: { kind: "psychevo", nativeId: "s1" },
+        backend: { kind: "psychevo", sessionHandle: "s1" },
         sourceKey: "web:cwd:abc"
       },
       entries: [

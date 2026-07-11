@@ -405,6 +405,201 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
     assert_eq!(entries[0]["blocks"][0]["body"], "Committed **prefix**.");
 }
 
+#[test]
+fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
+    let (_temp, state) = web_state();
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let store = state.inner.state.store();
+    let parent_session_id = store
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "web",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("parent session");
+    let child_session_id = store
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "agent",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("child session");
+    store
+        .upsert_agent_edge(
+            &parent_session_id,
+            &child_session_id,
+            psychevo_runtime::AgentEdgeStatus::Open,
+            None,
+        )
+        .expect("open child edge");
+
+    let turn_id = "turn-parent-running";
+    let activity = store
+        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+            activity_id: turn_id,
+            thread_id: Some(&parent_session_id),
+            source_key: None,
+            turn_id: Some(turn_id),
+            kind: "turn",
+            owner_id: state.inner.gateway.owner_id(),
+            owner_surface: Some("web"),
+            lease_expires_at_ms: gateway_now_ms() + 30_000,
+            queued_turns: 0,
+            superseded_activity_id: None,
+            intent: None,
+        })
+        .expect("claim parent activity");
+    append_assistant_live_text_update(
+        &state,
+        &activity.activity_id,
+        &child_session_id,
+        turn_id,
+        "Streaming child answer.",
+    );
+
+    let child_snapshot =
+        thread_snapshot(&state, &scope, Some(&child_session_id)).expect("child snapshot");
+    assert_eq!(child_snapshot["activity"]["running"], true, "{child_snapshot:#}");
+    assert_eq!(
+        child_snapshot["activity"]["activeTurnId"],
+        turn_id,
+        "{child_snapshot:#}"
+    );
+    let child_entries = child_snapshot["entries"].as_array().expect("child entries");
+    assert_eq!(child_entries.len(), 1, "{child_snapshot:#}");
+    assert_eq!(
+        child_entries[0]["blocks"][0]["body"],
+        "Streaming child answer."
+    );
+
+    let parent_snapshot =
+        thread_snapshot(&state, &scope, Some(&parent_session_id)).expect("parent snapshot");
+    assert_eq!(
+        parent_snapshot["activity"]["running"],
+        true,
+        "{parent_snapshot:#}"
+    );
+    assert_eq!(
+        parent_snapshot["activity"]["activeTurnId"],
+        turn_id,
+        "{parent_snapshot:#}"
+    );
+
+    store
+        .set_agent_edge_status(
+            &child_session_id,
+            psychevo_runtime::AgentEdgeStatus::Closed,
+        )
+        .expect("close child edge");
+    let closed_child_snapshot =
+        thread_snapshot(&state, &scope, Some(&child_session_id)).expect("closed child snapshot");
+    assert_eq!(
+        closed_child_snapshot["activity"]["running"],
+        false,
+        "{closed_child_snapshot:#}"
+    );
+    assert_eq!(
+        closed_child_snapshot["entries"],
+        json!([]),
+        "{closed_child_snapshot:#}"
+    );
+}
+
+#[test]
+fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_activity() {
+    let (_temp, state) = web_state();
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let store = state.inner.state.store();
+    let parent_session_id = store
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "web",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("parent session");
+    let child_session_id = store
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "agent",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("child session");
+    store
+        .upsert_agent_edge(
+            &parent_session_id,
+            &child_session_id,
+            psychevo_runtime::AgentEdgeStatus::Open,
+            None,
+        )
+        .expect("open child edge");
+
+    let turn_id = "turn-parent-stale";
+    let activity = store
+        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+            activity_id: turn_id,
+            thread_id: Some(&parent_session_id),
+            source_key: None,
+            turn_id: Some(turn_id),
+            kind: "turn",
+            owner_id: state.inner.gateway.owner_id(),
+            owner_surface: Some("web"),
+            lease_expires_at_ms: gateway_now_ms() - 1,
+            queued_turns: 0,
+            superseded_activity_id: None,
+            intent: None,
+        })
+        .expect("claim stale parent activity");
+    append_assistant_live_text_update(
+        &state,
+        &activity.activity_id,
+        &child_session_id,
+        turn_id,
+        "Stale child answer.",
+    );
+
+    let stale_child_snapshot =
+        thread_snapshot(&state, &scope, Some(&child_session_id)).expect("stale child snapshot");
+    assert_eq!(
+        stale_child_snapshot["activity"]["running"],
+        false,
+        "{stale_child_snapshot:#}"
+    );
+    assert_eq!(
+        stale_child_snapshot["entries"],
+        json!([]),
+        "{stale_child_snapshot:#}"
+    );
+
+    store
+        .finish_gateway_activity(
+            &activity.activity_id,
+            &activity.owner_id,
+            activity.generation,
+            "completed",
+        )
+        .expect("finish parent activity");
+    let terminal_child_snapshot = thread_snapshot(&state, &scope, Some(&child_session_id))
+        .expect("terminal child snapshot");
+    assert_eq!(
+        terminal_child_snapshot["activity"]["running"],
+        false,
+        "{terminal_child_snapshot:#}"
+    );
+    assert_eq!(
+        terminal_child_snapshot["entries"],
+        json!([]),
+        "{terminal_child_snapshot:#}"
+    );
+}
+
 fn append_exec_live_update(
     state: &WebState,
     activity_id: &str,

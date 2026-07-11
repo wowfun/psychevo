@@ -215,6 +215,46 @@ default_agent = "build"
 }
 
 #[test]
+pub(crate) fn runtime_profile_backend_ref_validation_is_fail_closed() {
+    let profiles = crate::config::parse_runtime_profile_configs(&json!({
+        "cursor-acp": {
+            "runtime": "acp",
+            "backendRef": "cursor"
+        }
+    }))
+    .expect("valid ACP profile");
+    assert_eq!(
+        profiles
+            .get("cursor-acp")
+            .and_then(|profile| profile.backend_ref.as_deref()),
+        Some("cursor")
+    );
+
+    let missing = crate::config::parse_runtime_profile_configs(&json!({
+        "cursor-acp": { "runtime": "acp" }
+    }))
+    .expect_err("ACP backend_ref is required");
+    assert!(
+        missing
+            .to_string()
+            .contains("runtime_profiles.cursor-acp.backend_ref is required")
+    );
+
+    let forbidden = crate::config::parse_runtime_profile_configs(&json!({
+        "codex-local": {
+            "runtime": "codex",
+            "backend_ref": "legacy-codex"
+        }
+    }))
+    .expect_err("direct backend_ref is forbidden");
+    assert!(
+        forbidden
+            .to_string()
+            .contains("runtime_profiles.codex-local.backend_ref is only allowed")
+    );
+}
+
+#[test]
 pub(crate) fn psychevo_config_env_is_supported_and_config_dir_is_ignored() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp);

@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::future::BoxFuture;
 use psychevo_agent_core::{
@@ -125,11 +125,22 @@ pub struct ExternalAgentDelegateRequest {
     pub child_session_id: String,
     pub agent_name: String,
     pub agent_description: String,
-    pub backend_ref: String,
+    /// Public execution identity selected by the Team member. ACP delegates use
+    /// the generated or configured Profile id, never the raw backend id.
+    pub runtime_ref: String,
+    /// ACP implementation identity when the selected Runtime Profile is ACP.
+    /// Direct Runtime Profiles deliberately leave this unset.
+    pub backend_ref: Option<String>,
+    /// Agent Definition instructions for adapters that expose a native
+    /// developer/system-instruction field.
+    pub instructions: Option<String>,
     pub prompt: String,
     pub task_name: String,
     pub model: Option<String>,
     pub runtime_options: BTreeMap<String, String>,
+    /// Runtime Profile revision captured by Team configuration/activation.
+    /// The delegate must reject execution if the effective Profile changed.
+    pub expected_runtime_profile_revision: Option<u64>,
     pub abort: AbortSignal,
 }
 

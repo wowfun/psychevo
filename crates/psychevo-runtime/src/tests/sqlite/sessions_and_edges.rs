@@ -3,7 +3,7 @@ pub(crate) use super::*;
 use crate::store::{PromptPrefixRecord, PromptPrefixSlotRecord};
 
 #[test]
-pub(crate) fn sqlite_schema_v24_rejects_old_state_databases() {
+pub(crate) fn sqlite_schema_v25_rejects_pre_v24_state_databases() {
     for version in 1..=23 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
@@ -29,7 +29,7 @@ pub(crate) fn sqlite_schema_v24_rejects_old_state_databases() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v24_rejects_unknown_state_database() {
+pub(crate) fn sqlite_schema_v25_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -49,7 +49,7 @@ pub(crate) fn sqlite_schema_v24_rejects_unknown_state_database() {
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v24_stores_gateway_coordination_without_runtime_debug() {
+pub(crate) fn sqlite_schema_v26_stores_gateway_coordination_without_runtime_debug() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
@@ -71,7 +71,7 @@ pub(crate) fn sqlite_schema_v24_stores_gateway_coordination_without_runtime_debu
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 24);
+    assert_eq!(user_version, 26);
     assert!(sqlite_columns(&conn, "timeline_items").is_empty());
     assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
     assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());
@@ -86,6 +86,16 @@ pub(crate) fn sqlite_schema_v24_stores_gateway_coordination_without_runtime_debu
         sqlite_columns(&conn, "gateway_source_bindings")
             .iter()
             .any(|name| name == "raw_identity_json")
+    );
+    assert!(
+        sqlite_columns(&conn, "gateway_source_bindings")
+            .iter()
+            .any(|name| name == "draft_runtime_ref")
+    );
+    assert!(
+        sqlite_columns(&conn, "gateway_runtime_bindings")
+            .iter()
+            .any(|name| name == "binding_revision")
     );
     assert!(
         sqlite_columns(&conn, "gateway_turn_terminals")
@@ -107,6 +117,394 @@ pub(crate) fn sqlite_schema_v24_stores_gateway_coordination_without_runtime_debu
             .iter()
             .any(|name| name == "team_run_id")
     );
+}
+
+#[test]
+pub(crate) fn sqlite_schema_v24_migrates_source_evidence_without_guessing_profile_snapshot() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("v24.db");
+    {
+        let conn = Connection::open(&db).expect("db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                parent_session_id TEXT,
+                cwd TEXT NOT NULL,
+                model TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                ended_at_ms INTEGER,
+                end_reason TEXT,
+                archived_at_ms INTEGER,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                title TEXT,
+                metadata_json TEXT
+            );
+            CREATE TABLE gateway_source_bindings (
+                source_key TEXT PRIMARY KEY,
+                source_kind TEXT NOT NULL,
+                raw_identity_json TEXT NOT NULL,
+                visible_name TEXT,
+                thread_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                backend_kind TEXT NOT NULL,
+                backend_native_id TEXT,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                lineage_json TEXT
+            );
+            CREATE INDEX idx_gateway_source_bindings_thread
+                ON gateway_source_bindings(thread_id, updated_at_ms);
+            INSERT INTO sessions (
+                id, source, cwd, model, provider, started_at_ms, updated_at_ms,
+                metadata_json
+            ) VALUES
+                ('thread-native', 'web', '/work', 'model', 'provider', 1, 1, NULL),
+                (
+                    'thread-acp', 'peer_agent', '/work', 'opencode', 'acp:opencode', 2, 2,
+                    '{"peer_agent":{"backendKind":"acp","backendId":"opencode","nativeSessionId":"native-acp"}}'
+                ),
+                ('thread-ambiguous', 'peer_agent', '/work', 'unknown', 'acp:unknown', 3, 3, NULL);
+            INSERT INTO gateway_source_bindings (
+                source_key, source_kind, raw_identity_json, visible_name,
+                thread_id, backend_kind, backend_native_id, created_at_ms,
+                updated_at_ms, lineage_json
+            ) VALUES
+                (
+                    'web:native', 'web', '{}', 'Native', 'thread-native',
+                    'psychevo', 'thread-native', 1, 1, '{"runtimeRef":"native"}'
+                ),
+                (
+                    'web:acp', 'web', '{}', 'ACP', 'thread-acp',
+                    'peer_agent', 'native-acp', 2, 2, '{"runtimeRef":"opencode"}'
+                ),
+                (
+                    'web:ambiguous', 'web', '{}', 'Ambiguous', 'thread-ambiguous',
+                    'peer_agent', 'native-unknown', 3, 3, '{"runtimeRef":"unknown"}'
+                );
+            PRAGMA user_version = 24;
+            "#,
+        )
+        .expect("v24 schema");
+    }
+
+    let store = SqliteStore::open(&db).expect("migrate v24");
+    let native = store
+        .gateway_runtime_binding("thread-native")
+        .expect("native binding")
+        .expect("native binding exists");
+    assert_eq!(native.status, GatewayRuntimeBindingStatus::Unresolved);
+    assert_eq!(native.runtime_ref.as_deref(), Some("native"));
+    assert_eq!(
+        native.unresolved_reason.as_deref(),
+        Some("legacy_v24_profile_snapshot_required")
+    );
+
+    let acp = store
+        .gateway_runtime_binding("thread-acp")
+        .expect("ACP binding")
+        .expect("ACP binding exists");
+    assert_eq!(acp.status, GatewayRuntimeBindingStatus::Unresolved);
+    assert_eq!(acp.runtime_ref.as_deref(), Some("acp:opencode"));
+    assert_eq!(acp.native_kind.as_deref(), Some("acp"));
+    assert_eq!(acp.native_session_id.as_deref(), Some("native-acp"));
+    assert_eq!(
+        acp.unresolved_reason.as_deref(),
+        Some("legacy_v24_profile_snapshot_required")
+    );
+
+    let ambiguous = store
+        .gateway_runtime_binding("thread-ambiguous")
+        .expect("ambiguous binding")
+        .expect("ambiguous binding exists");
+    assert_eq!(ambiguous.status, GatewayRuntimeBindingStatus::Unresolved);
+    assert_eq!(ambiguous.runtime_ref, None);
+    assert_eq!(ambiguous.native_session_id, None);
+    assert_eq!(
+        ambiguous.unresolved_reason.as_deref(),
+        Some("legacy_v24_backend_ambiguous")
+    );
+
+    let lane = store
+        .gateway_source_lane("web:acp")
+        .expect("source lane")
+        .expect("source lane exists");
+    assert_eq!(lane.thread_id.as_deref(), Some("thread-acp"));
+    assert_eq!(lane.draft_runtime_ref, None);
+
+    let conn = Connection::open(&db).expect("db");
+    let user_version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("version");
+    assert_eq!(user_version, 26);
+}
+
+#[test]
+pub(crate) fn sqlite_schema_v25_marks_snapshotless_resolved_bindings_unresolved() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("v25.db");
+    {
+        let conn = Connection::open(&db).expect("db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                parent_session_id TEXT,
+                cwd TEXT NOT NULL,
+                model TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                started_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                ended_at_ms INTEGER,
+                end_reason TEXT,
+                archived_at_ms INTEGER,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                title TEXT,
+                metadata_json TEXT
+            );
+            CREATE TABLE gateway_runtime_bindings (
+                thread_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                resolution_status TEXT NOT NULL CHECK (resolution_status IN ('resolved', 'unresolved')),
+                runtime_ref TEXT,
+                backend_kind TEXT,
+                native_kind TEXT,
+                native_session_id TEXT,
+                cwd TEXT NOT NULL,
+                profile_fingerprint TEXT,
+                profile_revision TEXT,
+                adapter_kind TEXT,
+                adapter_revision TEXT,
+                ownership TEXT NOT NULL CHECK (ownership IN ('read_write', 'read_only')),
+                parent_thread_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+                binding_revision INTEGER NOT NULL CHECK (binding_revision > 0),
+                unresolved_reason TEXT,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                CHECK (
+                    (resolution_status = 'resolved'
+                        AND runtime_ref IS NOT NULL
+                        AND backend_kind IS NOT NULL
+                        AND native_kind IS NOT NULL
+                        AND profile_fingerprint IS NOT NULL
+                        AND profile_revision IS NOT NULL
+                        AND adapter_kind IS NOT NULL
+                        AND adapter_revision IS NOT NULL
+                        AND unresolved_reason IS NULL)
+                    OR
+                    (resolution_status = 'unresolved' AND unresolved_reason IS NOT NULL)
+                )
+            );
+            INSERT INTO sessions (
+                id, source, cwd, model, provider, started_at_ms, updated_at_ms
+            ) VALUES ('thread-codex', 'web', '/work', 'pending', 'codex', 1, 1);
+            INSERT INTO gateway_runtime_bindings (
+                thread_id, resolution_status, runtime_ref, backend_kind,
+                native_kind, native_session_id, cwd, profile_fingerprint,
+                profile_revision, adapter_kind, adapter_revision, ownership,
+                parent_thread_id, binding_revision, unresolved_reason,
+                created_at_ms, updated_at_ms
+            ) VALUES (
+                'thread-codex', 'resolved', 'codex', 'runtime', 'codex',
+                'native-secret', '/work', 'legacy-fingerprint', '1', 'codex',
+                'legacy-adapter', 'read_write', NULL, 1, NULL, 1, 1
+            );
+            PRAGMA user_version = 25;
+            "#,
+        )
+        .expect("v25 schema");
+    }
+
+    let store = SqliteStore::open(&db).expect("migrate v25");
+    let binding = store
+        .gateway_runtime_binding("thread-codex")
+        .expect("binding")
+        .expect("binding exists");
+    assert_eq!(binding.status, GatewayRuntimeBindingStatus::Unresolved);
+    assert_eq!(binding.runtime_ref.as_deref(), Some("codex"));
+    assert_eq!(binding.profile_config_json, None);
+    assert_eq!(
+        binding.unresolved_reason.as_deref(),
+        Some("legacy_v25_profile_snapshot_required")
+    );
+    let conn = Connection::open(&db).expect("db");
+    let user_version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("version");
+    assert_eq!(user_version, 26);
+}
+
+fn gateway_runtime_binding_input<'a>(
+    thread_id: &'a str,
+    cwd: &'a str,
+    runtime_ref: &'a str,
+    native_session_id: Option<&'a str>,
+) -> GatewayRuntimeBindingInput<'a> {
+    GatewayRuntimeBindingInput {
+        thread_id,
+        runtime_ref,
+        backend_kind: "runtime",
+        native_kind: "codex",
+        native_session_id,
+        cwd,
+        profile_fingerprint: "profile-fingerprint",
+        profile_revision: "profile-revision",
+        profile_config_json: "{}",
+        adapter_kind: "codex",
+        adapter_revision: "adapter-revision",
+        ownership: GatewayRuntimeBindingOwnership::ReadWrite,
+        parent_thread_id: None,
+    }
+}
+
+#[test]
+pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_cas() {
+    let temp = tempdir().expect("temp");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let cwd_text = cwd.display().to_string();
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let thread_id = store
+        .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .expect("session");
+
+    let created = store
+        .create_gateway_runtime_binding(gateway_runtime_binding_input(
+            &thread_id, &cwd_text, "codex", None,
+        ))
+        .expect("create binding");
+    assert_eq!(created.binding_revision, 1);
+    assert_eq!(created.native_session_id, None);
+    let same = store
+        .create_gateway_runtime_binding(gateway_runtime_binding_input(
+            &thread_id, &cwd_text, "codex", None,
+        ))
+        .expect("idempotent create");
+    assert_eq!(same, created);
+
+    let conflict = store
+        .create_gateway_runtime_binding(gateway_runtime_binding_input(
+            &thread_id, &cwd_text, "opencode", None,
+        ))
+        .expect_err("immutable runtime identity");
+    assert!(conflict.to_string().contains("bindings are immutable"));
+
+    let attached = store
+        .attach_gateway_runtime_native_session(&thread_id, 1, "native-codex")
+        .expect("attach native session");
+    assert_eq!(attached.binding_revision, 2);
+    assert_eq!(attached.native_session_id.as_deref(), Some("native-codex"));
+    let idempotent_from_pre_attach_revision = store
+        .attach_gateway_runtime_native_session(&thread_id, 1, "native-codex")
+        .expect("same native identity is idempotent across the attach revision");
+    assert_eq!(idempotent_from_pre_attach_revision, attached);
+    let idempotent = store
+        .attach_gateway_runtime_native_session(&thread_id, 2, "native-codex")
+        .expect("idempotent attach");
+    assert_eq!(idempotent.binding_revision, 2);
+    let native_conflict = store
+        .attach_gateway_runtime_native_session(&thread_id, 2, "different-native")
+        .expect_err("different native identity stays immutable");
+    assert!(
+        native_conflict
+            .to_string()
+            .contains("native session identity is immutable")
+    );
+    assert_eq!(
+        store
+            .gateway_runtime_binding_by_native_session("codex", "native-codex")
+            .expect("native lookup")
+            .expect("native binding"),
+        attached
+    );
+}
+
+#[test]
+pub(crate) fn sqlite_runtime_binding_native_identity_is_unique_per_profile() {
+    let temp = tempdir().expect("temp");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let cwd_text = cwd.display().to_string();
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let first = store
+        .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .expect("first session");
+    let second = store
+        .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .expect("second session");
+
+    store
+        .create_gateway_runtime_binding(gateway_runtime_binding_input(
+            &first,
+            &cwd_text,
+            "codex",
+            Some("native-shared"),
+        ))
+        .expect("first binding");
+    let error = store
+        .create_gateway_runtime_binding(gateway_runtime_binding_input(
+            &second,
+            &cwd_text,
+            "codex",
+            Some("native-shared"),
+        ))
+        .expect_err("duplicate native identity");
+    assert!(error.to_string().contains("UNIQUE constraint failed"));
+}
+
+#[test]
+pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
+    let temp = tempdir().expect("temp");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+
+    let draft = store
+        .upsert_gateway_source_lane(GatewaySourceLaneInput {
+            source_key: "im.wechat:user-1",
+            source_kind: "im.wechat",
+            raw_identity: json!({"connectionId": "wechat", "chatId": "user-1"}),
+            visible_name: Some("WeChat user 1"),
+            thread_id: None,
+            draft_runtime_ref: Some("codex"),
+            lineage: None,
+        })
+        .expect("draft lane");
+    assert_eq!(draft.thread_id, None);
+    assert_eq!(draft.draft_runtime_ref.as_deref(), Some("codex"));
+    assert!(
+        store
+            .gateway_source_binding("im.wechat:user-1")
+            .expect("compat binding")
+            .is_none()
+    );
+
+    let thread_id = store
+        .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
+        .expect("session");
+    store
+        .upsert_gateway_source_lane(GatewaySourceLaneInput {
+            source_key: "im.wechat:user-1",
+            source_kind: "im.wechat",
+            raw_identity: json!({"connectionId": "wechat", "chatId": "user-1"}),
+            visible_name: Some("WeChat user 1"),
+            thread_id: Some(&thread_id),
+            draft_runtime_ref: Some("codex"),
+            lineage: None,
+        })
+        .expect("bound lane");
+    assert!(
+        store
+            .clear_gateway_source_lane_thread("im.wechat:user-1")
+            .expect("clear thread")
+    );
+    let cleared = store
+        .gateway_source_lane("im.wechat:user-1")
+        .expect("lane")
+        .expect("lane exists");
+    assert_eq!(cleared.thread_id, None);
+    assert_eq!(cleared.draft_runtime_ref.as_deref(), Some("codex"));
 }
 
 #[test]

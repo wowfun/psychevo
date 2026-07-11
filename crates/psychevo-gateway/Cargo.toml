@@ -17,11 +17,13 @@ psychevo-agent-core = { path = "../psychevo-agent-core" }
 psychevo-ai = { path = "../psychevo-ai" }
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
 psychevo-runtime = { path = "../psychevo-runtime" }
+psychevo-runtime-host = { path = "../psychevo-runtime-host" }
 qrcode.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 toml.workspace = true

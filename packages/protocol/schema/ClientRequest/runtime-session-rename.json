@@ -66,9 +66,6 @@
     },
     "RuntimeSessionRenameParams": {
       "properties": {
-        "nativeSessionId": {
-          "type": "string"
-        },
         "runtimeRef": {
           "type": "string"
         },
@@ -83,13 +80,16 @@
           ],
           "default": null
         },
+        "sessionHandle": {
+          "type": "string"
+        },
         "title": {
           "type": "string"
         }
       },
       "required": [
-        "nativeSessionId",
         "runtimeRef",
+        "sessionHandle",
         "title"
       ],
       "type": "object"

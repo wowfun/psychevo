@@ -428,6 +428,98 @@ export const serverNotificationGatewayEventSchema = {
             "type"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "detail": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "instanceEpoch": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "processEpoch": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "runtimeRef": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "threadId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "runtimeStateChanged"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "processEpoch",
+            "runtimeRef",
+            "state",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "dedupKey": {
+              "type": "string"
+            },
+            "parentThreadId": {
+              "type": "string"
+            },
+            "readOnly": {
+              "type": "boolean"
+            },
+            "runtimeRef": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "threadId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "runtimeChildChanged"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "dedupKey",
+            "parentThreadId",
+            "readOnly",
+            "runtimeRef",
+            "status",
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -502,8 +594,32 @@ export const serverNotificationGatewayEventSchema = {
     },
     "GatewayTurnError": {
       "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message": {
           "type": "string"
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -686,6 +802,7 @@ export const serverNotificationGatewayEventSchema = {
         "agent",
         "mailbox",
         "status",
+        "compaction",
         "diff",
         "artifact"
       ],

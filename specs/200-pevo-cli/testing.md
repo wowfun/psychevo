@@ -159,7 +159,8 @@ come from the focused command and smoke tests below.
   profile-installed plugin selector while writing only current cwd
   `.psychevo/config.toml` policy.
 - `--global` and `--local` are mutually exclusive for plugin write commands.
-- Selector conflicts require `name@source`.
+- Duplicate profile/project package records require scoped canonical selectors;
+  bare `name` and `name@source` remain valid only for a unique match.
 - `pevo plugin marketplace list/add/remove` manages source catalogs separately
   from plugin enablement policy.
 - Plugin worker fixtures can expose a tool through the normal run tool surface

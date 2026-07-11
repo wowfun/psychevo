@@ -156,8 +156,13 @@ tools: [read]
         let source = GatewaySource::new("web", "peer-v2-stream").persistent();
         let mut request = request(&harness, source, "hello");
         request.options.agent = Some("reviewer".to_string());
-        request.options.model = Some("test/second-model".to_string());
-        request.options.reasoning_effort = Some("high".to_string());
+        request.options.runtime_ref = Some("acp:fake".to_string());
+        request.options.model = Some("native/model-must-not-cross".to_string());
+        request.options.reasoning_effort = Some("native-effort-must-not-cross".to_string());
+        request.options.runtime_options = BTreeMap::from([
+            ("model".to_string(), "test/second-model".to_string()),
+            ("effort".to_string(), "high".to_string()),
+        ]);
         request.options.inherited_env = Some(env);
         request.event_sink = Some(Arc::new(move |event| {
             gateway_events_for_sink

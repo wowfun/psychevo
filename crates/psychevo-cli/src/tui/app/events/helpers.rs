@@ -32,12 +32,26 @@ pub(crate) fn stream_event_is_clarify_request(event: &RunStreamEvent) -> bool {
     }
 }
 
+pub(crate) fn tui_live_event_is_clarify_request(event: &TuiLiveEvent) -> bool {
+    match event {
+        TuiLiveEvent::Runtime(event) => stream_event_is_clarify_request(event),
+        TuiLiveEvent::Gateway(event) => matches!(
+            event.as_ref(),
+            GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action }
+                if action.kind == GatewayActionKind::Clarify
+        ),
+    }
+}
+
 pub(crate) fn buffer_session_live_event(
     ui: &mut FullscreenUi<'_>,
     session_id: &str,
-    event: RunStreamEvent,
+    event: impl Into<TuiLiveEvent>,
 ) {
-    if session_live_event_ends_backlog(&event) {
+    let event = event.into();
+    if matches!(&event, TuiLiveEvent::Runtime(event) if session_live_event_ends_backlog(event))
+        || matches!(&event, TuiLiveEvent::Gateway(event) if matches!(event.as_ref(), GatewayEvent::TurnCompleted { .. }))
+    {
         ui.session_live_event_backlog.remove(session_id);
         return;
     }

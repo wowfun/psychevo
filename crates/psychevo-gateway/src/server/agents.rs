@@ -49,7 +49,7 @@ pub(super) fn read_team_definition(
 pub(super) fn write_team_definition(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::TeamWriteParams,
+    mut params: wire::TeamWriteParams,
 ) -> psychevo_runtime::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
@@ -60,6 +60,15 @@ pub(super) fn write_team_definition(
     let target = agent_config_target(params.target);
     let path = team_definition_path(state, scope, target, &params.name)?;
     let agents = discover_gateway_agents(state, scope)?;
+    if params.raw_markdown.is_none() {
+        let members = params
+            .members
+            .iter()
+            .map(team_member_input)
+            .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+        let captured = validate_and_capture_team_runtime_members(state, scope, &agents, &members)?;
+        params.members = captured.iter().map(team_member_wire_input).collect();
+    }
     let text = if let Some(raw_markdown) = params.raw_markdown.as_deref() {
         let team = parse_managed_team_text(raw_markdown, &params.name, &path, target, &agents)?;
         if team.name != params.name {
@@ -79,6 +88,10 @@ pub(super) fn write_team_definition(
             team.name, params.name
         )));
     }
+    // Raw Markdown is validated through the same authoritative seam. Missing
+    // revisions can be captured later at Team activation; explicitly stale
+    // revisions and unsafe pairings are rejected before the file is written.
+    validate_and_capture_team_runtime_members(state, scope, &agents, &team.members)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -111,6 +124,7 @@ pub(super) fn set_team_definition_enabled(
     let text = render_agent_markdown(frontmatter, &body)?;
     let agents = discover_gateway_agents(state, scope)?;
     let team = parse_managed_team_text(&text, &params.name, &path, target, &agents)?;
+    validate_and_capture_team_runtime_members(state, scope, &agents, &team.members)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -207,6 +221,48 @@ fn structured_team_markdown(
         let mut value = serde_yaml::Mapping::new();
         set_mapping_string(&mut value, "id", member.id.trim());
         set_mapping_string(&mut value, "agent", member.agent.trim());
+        if let Some(runtime_ref) = member
+            .runtime_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            set_mapping_string(&mut value, "runtimeRef", runtime_ref);
+        } else if !member.runtime_options.is_empty() {
+            return Err(Error::Message(format!(
+                "team member `{}` runtimeOptions require runtimeRef",
+                member.id
+            )));
+        }
+        if !member.runtime_options.is_empty() {
+            let mut options = serde_yaml::Mapping::new();
+            for (key, option) in &member.runtime_options {
+                let key = key.trim();
+                if key.is_empty() {
+                    return Err(Error::Message(format!(
+                        "team member `{}` runtimeOptions keys must be non-empty",
+                        member.id
+                    )));
+                }
+                set_mapping_string(&mut options, key, option);
+            }
+            value.insert(
+                serde_yaml::Value::String("runtimeOptions".to_string()),
+                serde_yaml::Value::Mapping(options),
+            );
+        }
+        if let Some(revision) = member.runtime_profile_revision.as_deref() {
+            let revision = revision.parse::<u64>().map_err(|_| {
+                Error::Message(format!(
+                    "team member `{}` runtimeProfileRevision must be an unsigned decimal string",
+                    member.id
+                ))
+            })?;
+            value.insert(
+                serde_yaml::Value::String("runtimeProfileRevision".to_string()),
+                serde_yaml::Value::Number(serde_yaml::Number::from(revision)),
+            );
+        }
         if let Some(role) = member
             .role
             .as_deref()
@@ -236,6 +292,48 @@ fn structured_team_markdown(
         serde_yaml::Value::Sequence(members),
     );
     render_agent_markdown(frontmatter, params.instructions.trim())
+}
+
+fn team_member_input(member: &wire::TeamMemberInput) -> psychevo_runtime::Result<AgentTeamMember> {
+    let runtime_profile_revision = member
+        .runtime_profile_revision
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value.parse::<u64>().map_err(|_| {
+                Error::Message(format!(
+                    "team member `{}` runtimeProfileRevision must be an unsigned decimal string",
+                    member.id
+                ))
+            })
+        })
+        .transpose()?;
+    Ok(AgentTeamMember {
+        id: member.id.clone(),
+        agent: member.agent.clone(),
+        runtime_ref: member.runtime_ref.clone(),
+        runtime_options: member.runtime_options.clone(),
+        runtime_profile_revision,
+        role: member.role.clone(),
+        description: member.description.clone(),
+        max_turns: member.max_turns,
+    })
+}
+
+fn team_member_wire_input(member: &AgentTeamMember) -> wire::TeamMemberInput {
+    wire::TeamMemberInput {
+        id: member.id.clone(),
+        agent: member.agent.clone(),
+        runtime_ref: member.runtime_ref.clone(),
+        runtime_options: member.runtime_options.clone(),
+        runtime_profile_revision: member
+            .runtime_profile_revision
+            .map(|value| value.to_string()),
+        role: member.role.clone(),
+        description: member.description.clone(),
+        max_turns: member.max_turns,
+    }
 }
 
 pub(super) fn write_agent_definition(
@@ -406,6 +504,28 @@ fn structured_agent_markdown(
         );
     } else {
         remove_yaml_key(&mut frontmatter, "mcpServers");
+    }
+    let mut optional_contributions = BTreeSet::new();
+    for name in &params.optional_contributions {
+        let contribution = psychevo_runtime::AgentContribution::parse(name).ok_or_else(|| {
+            Error::Message(format!(
+                "optional contribution `{name}` must be instructions, tools, mcp, or skills"
+            ))
+        })?;
+        optional_contributions.insert(contribution.as_str());
+    }
+    if optional_contributions.is_empty() {
+        remove_yaml_key(&mut frontmatter, "optionalContributions");
+    } else {
+        frontmatter.insert(
+            serde_yaml::Value::String("optionalContributions".to_string()),
+            serde_yaml::Value::Sequence(
+                optional_contributions
+                    .into_iter()
+                    .map(|name| serde_yaml::Value::String(name.to_string()))
+                    .collect(),
+            ),
+        );
     }
     render_agent_markdown(frontmatter, params.instructions.trim())
 }
@@ -675,6 +795,23 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
         .as_ref()
         .map(|tools| tools.iter().cloned().collect())
         .unwrap_or_default();
+    let mut contributions = Vec::new();
+    if !agent.instructions.trim().is_empty() {
+        contributions.push(wire::AgentContributionView::Instructions);
+    }
+    if agent.tool_policy.allowed.is_some()
+        || !agent.tool_policy.denied.is_empty()
+        || agent.tool_policy.allowed_agents.is_some()
+        || !agent.tool_policy.denied_agents.is_empty()
+    {
+        contributions.push(wire::AgentContributionView::Tools);
+    }
+    if !agent.tool_policy.mcp_servers.is_empty() {
+        contributions.push(wire::AgentContributionView::Mcp);
+    }
+    if !agent.skills.is_empty() {
+        contributions.push(wire::AgentContributionView::Skills);
+    }
     wire::AgentDefinitionView {
         name: agent.name.clone(),
         description: agent.description.clone(),
@@ -701,6 +838,12 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
             .collect(),
         tools,
         mcp_servers: agent.tool_policy.mcp_servers.iter().cloned().collect(),
+        contributions,
+        optional_contributions: agent
+            .optional_contributions
+            .iter()
+            .map(|contribution| contribution.as_str().to_string())
+            .collect(),
         diagnostics: agent
             .diagnostics
             .iter()
@@ -749,6 +892,11 @@ fn team_member_view(member: &AgentTeamMember) -> wire::TeamMemberView {
     wire::TeamMemberView {
         id: member.id.clone(),
         agent: member.agent.clone(),
+        runtime_ref: member.runtime_ref.clone(),
+        runtime_options: member.runtime_options.clone(),
+        runtime_profile_revision: member
+            .runtime_profile_revision
+            .map(|value| value.to_string()),
         role: member.role.clone(),
         description: member.description.clone(),
         max_turns: member.max_turns,

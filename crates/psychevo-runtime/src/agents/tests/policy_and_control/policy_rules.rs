@@ -157,6 +157,7 @@ pub(crate) fn agent_permission_mode_can_only_narrow_parent_mode() {
         model: None,
         tool_policy: AgentToolPolicy::default(),
         skills: Vec::new(),
+        optional_contributions: BTreeSet::new(),
         hooks: None,
         background: None,
         initial_prompt: None,

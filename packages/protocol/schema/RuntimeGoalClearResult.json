@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "bindingRevision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "cleared": {
+      "type": "boolean"
+    },
+    "runtimeRef": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bindingRevision",
+    "cleared",
+    "runtimeRef"
+  ],
+  "title": "RuntimeGoalClearResult",
+  "type": "object"
+}

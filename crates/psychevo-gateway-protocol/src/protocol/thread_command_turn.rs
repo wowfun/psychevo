@@ -31,6 +31,53 @@ pub struct ThreadStartParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadCompactStartParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub instructions: Option<String>,
+    #[serde(default)]
+    pub runtime_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCompactionCheckpointView {
+    pub checkpoint_id: i64,
+    pub reason: String,
+    pub created_at_ms: i64,
+    pub first_kept_session_seq: i64,
+    pub tokens_before: Option<u64>,
+    pub tokens_after: Option<u64>,
+    pub summary_provider: Option<String>,
+    pub summary_model: Option<String>,
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCompactStartResult {
+    pub accepted: bool,
+    pub thread_id: Option<String>,
+    pub compacted: bool,
+    pub reason: String,
+    pub message: String,
+    #[serde(default)]
+    pub checkpoint: Option<ThreadCompactionCheckpointView>,
+    pub tokens_before: Option<u64>,
+    pub tokens_after: Option<u64>,
+    pub summary_provider: Option<String>,
+    pub summary_model: Option<String>,
+    #[serde(default)]
+    pub unavailable: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadResumeParams {
     #[serde(default)]
     pub thread_id: Option<String>,

@@ -70,7 +70,10 @@ pub(crate) struct PluginListArgs {
 
 #[derive(Debug, Parser)]
 pub(crate) struct PluginViewArgs {
-    #[arg(value_name = "NAME_OR_NAME_AT_SOURCE", help = "Plugin selector")]
+    #[arg(
+        value_name = "SELECTOR",
+        help = "Plugin name or canonical scoped selector"
+    )]
     pub(crate) selector: String,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
@@ -78,10 +81,7 @@ pub(crate) struct PluginViewArgs {
 
 #[derive(Debug, Parser)]
 pub(crate) struct PluginDoctorArgs {
-    #[arg(
-        value_name = "NAME_OR_NAME_AT_SOURCE",
-        help = "Optional plugin selector"
-    )]
+    #[arg(value_name = "SELECTOR", help = "Optional plugin selector")]
     pub(crate) selector: Option<String>,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
@@ -159,7 +159,10 @@ pub(crate) struct PluginInstallArgs {
 
 #[derive(Debug, Parser)]
 pub(crate) struct PluginNameScopeArgs {
-    #[arg(value_name = "NAME_OR_NAME_AT_SOURCE", help = "Plugin selector")]
+    #[arg(
+        value_name = "SELECTOR",
+        help = "Plugin name or canonical scoped selector"
+    )]
     pub(crate) selector: String,
     #[arg(
         short = 'g',

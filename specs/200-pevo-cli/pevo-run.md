@@ -128,6 +128,11 @@ cwd, ordered by latest persisted activity then start time. Viewing or
 opening a session does not affect this ordering. If no matching session exists,
 runtime creates a new session.
 
+Routing `pevo run` through Gateway does not change that selection contract:
+Gateway resolves `--continue` against the canonical cwd and allowed sources
+before it materializes a new public thread. An invocation-scoped CLI source key
+must not force a second session when a matching run session already exists.
+
 Supplying `--session` and `--continue` together is a usage error.
 
 ## Tool Surface

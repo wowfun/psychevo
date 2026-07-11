@@ -17,22 +17,15 @@ pub(in crate::server) fn reconcile(state: WebState) {
 }
 
 async fn reconcile_inner(state: WebState) -> psychevo_runtime::Result<()> {
-    let options = state.run_options(state.inner.cwd.clone(), None);
-    let connections = channel_runtime_connections(&options, &state.inner.cwd)?;
     if !channel_runtime_enabled(&state.inner.inherited_env) {
         state
             .inner
             .channel_runtime
             .reconcile_active(&std::collections::BTreeSet::new());
-        for connection in connections {
-            state
-                .inner
-                .channel_runtime
-                .clear_wechat_login_grace(&connection.id);
-            state.inner.channel_runtime.mark_stopped(&connection.id);
-        }
         return Ok(());
     }
+    let options = state.run_options(state.inner.cwd.clone(), None);
+    let connections = channel_runtime_connections(&options, &state.inner.cwd)?;
     let mut desired = std::collections::BTreeSet::new();
     for connection in &connections {
         if connection.enabled && connection.config_status == "ready" {

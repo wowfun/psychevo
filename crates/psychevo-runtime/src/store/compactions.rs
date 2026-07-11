@@ -57,12 +57,44 @@ impl SqliteStore {
             FROM session_compactions
             WHERE session_id = ?1 AND created_after_session_seq < ?2
             ORDER BY created_at_ms DESC, id DESC
-            LIMIT 1
             "#,
         )?;
-        stmt.query_row(params![session_id, boundary], compaction_from_row)
-            .optional()
-            .map_err(Into::into)
+        let rows = stmt.query_map(params![session_id, boundary], compaction_from_row)?;
+        for row in rows {
+            let record = row?;
+            if !compaction_is_projection_only(&record) {
+                return Ok(Some(record));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn list_valid_session_compactions(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<SessionCompactionRecord>> {
+        let boundary = self
+            .session_revert_state(session_id)?
+            .map(|revert| revert.start_seq)
+            .unwrap_or(i64::MAX);
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, session_id, created_at_ms, reason, summary_text,
+                   first_kept_session_seq, created_after_session_seq,
+                   tokens_before, tokens_after, summary_provider, summary_model,
+                   instructions, metadata_json
+            FROM session_compactions
+            WHERE session_id = ?1 AND created_after_session_seq < ?2
+            ORDER BY created_at_ms ASC, id ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![session_id, boundary], compaction_from_row)?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
     }
 
     pub fn load_message_records(&self, session_id: &str) -> Result<Vec<SessionMessageRecord>> {
@@ -119,7 +151,7 @@ impl SqliteStore {
         })
     }
 
-    pub(crate) fn session_compaction(&self, id: i64) -> Result<Option<SessionCompactionRecord>> {
+    pub fn session_compaction(&self, id: i64) -> Result<Option<SessionCompactionRecord>> {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         conn.query_row(
             r#"
@@ -136,6 +168,15 @@ impl SqliteStore {
         .optional()
         .map_err(Into::into)
     }
+}
+
+fn compaction_is_projection_only(record: &SessionCompactionRecord) -> bool {
+    record
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("projection_only"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 pub(crate) fn compaction_from_row(

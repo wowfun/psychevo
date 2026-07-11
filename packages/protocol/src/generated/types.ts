@@ -12,15 +12,15 @@ export type GatewayRequestScope = { cwd: string, source: GatewaySourceInput, };
 
 export type GatewayThreadSelector = { "type": "threadId", threadId: string, } | { "type": "source", sourceKey: SourceKey, };
 
-export type BackendKind = "psychevo" | "peerAgent";
+export type BackendKind = "psychevo" | "peerAgent" | "runtime";
 
-export type GatewayBackendInfo = { kind: BackendKind, runtimeRef?: string, nativeId: string | null, };
+export type GatewayBackendInfo = { kind: BackendKind, runtimeRef?: string, sessionHandle: string | null, };
 
 export type GatewayThread = { id: string, backend: GatewayBackendInfo, sourceKey: SourceKey | null, };
 
 export type GatewayTurn = { id: string, threadId: string | null, status: GatewayTurnStatus, outcome: string | null, error: GatewayTurnError | null, startedAtMs?: number, completedAtMs?: number, };
 
-export type GatewayTurnError = { message: string, };
+export type GatewayTurnError = { message: string, code: string | null, stage: string | null, retryClass: string | null, diagnosticRef: string | null, };
 
 export type GatewayTurnStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
 
@@ -36,7 +36,7 @@ export type GatewayImageInput = { "kind": "localPath", path: string, } | { "kind
 
 export type GatewaySelectedSkill = { name: string, path: string, };
 
-export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, turn: GatewayTurn, committedEntries: Array<TranscriptEntry>, } | { "type": "entryStarted", turnId: string, entry: TranscriptEntry, } | { "type": "entryUpdated", turnId: string, entry: TranscriptEntry, } | { "type": "entryCompleted", turnId: string, entry: TranscriptEntry, } | { "type": "actionRequested", action: PendingActionView, } | { "type": "actionUpdated", action: PendingActionView, } | { "type": "actionResolved", actionId: string, kind: GatewayActionKind, outcome: GatewayActionOutcome, payload: unknown, } | { "type": "actionCancelled", actionId: string, kind: GatewayActionKind, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, } | { "type": "activityChanged", threadId: string | null, activity: GatewayActivityView, } | { "type": "titleChanged", threadId: string, title: string | null, displayTitle: string | null, };
+export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, turn: GatewayTurn, committedEntries: Array<TranscriptEntry>, } | { "type": "entryStarted", turnId: string, entry: TranscriptEntry, } | { "type": "entryUpdated", turnId: string, entry: TranscriptEntry, } | { "type": "entryCompleted", turnId: string, entry: TranscriptEntry, } | { "type": "actionRequested", action: PendingActionView, } | { "type": "actionUpdated", action: PendingActionView, } | { "type": "actionResolved", actionId: string, kind: GatewayActionKind, outcome: GatewayActionOutcome, payload: unknown, } | { "type": "actionCancelled", actionId: string, kind: GatewayActionKind, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, } | { "type": "activityChanged", threadId: string | null, activity: GatewayActivityView, } | { "type": "titleChanged", threadId: string, title: string | null, displayTitle: string | null, } | { "type": "runtimeStateChanged", runtimeRef: string, threadId: string | null, state: string, detail: string | null, processEpoch: number, instanceEpoch: number | null, } | { "type": "runtimeChildChanged", runtimeRef: string, parentThreadId: string, threadId: string | null, dedupKey: string, status: string, readOnly: boolean, };
 
 export type PermissionDecision = "allowOnce" | "allowSession" | "allowAlways" | "deny";
 
@@ -46,7 +46,7 @@ export type GatewayActionOutcome = "accepted" | "rejected" | "cancelled" | "time
 
 export type TranscriptEntryRole = "user" | "assistant" | "diagnostic";
 
-export type TranscriptBlockKind = "text" | "reasoning" | "toolCall" | "toolResult" | "tool" | "shell" | "file" | "web" | "mcp" | "clarify" | "permission" | "skill" | "agent" | "mailbox" | "status" | "diff" | "artifact";
+export type TranscriptBlockKind = "text" | "reasoning" | "toolCall" | "toolResult" | "tool" | "shell" | "file" | "web" | "mcp" | "clarify" | "permission" | "skill" | "agent" | "mailbox" | "status" | "compaction" | "diff" | "artifact";
 
 export type TranscriptBlockStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "needsInput" | "info";
 
@@ -73,6 +73,12 @@ export type InitializeResult = { server: string, version: string, cwd: string, s
 export type GatewayProfileView = { name: string, home: string, default: boolean, };
 
 export type ThreadStartParams = { scope: GatewayRequestScope, };
+
+export type ThreadCompactStartParams = { scope: GatewayRequestScope | null, threadId: string | null, instructions: string | null, runtimeRef: string | null, };
+
+export type ThreadCompactionCheckpointView = { checkpointId: number, reason: string, createdAtMs: number, firstKeptSessionSeq: number, tokensBefore: number | null, tokensAfter: number | null, summaryProvider: string | null, summaryModel: string | null, summary: string | null, };
+
+export type ThreadCompactStartResult = { accepted: boolean, threadId: string | null, compacted: boolean, reason: string, message: string, checkpoint: ThreadCompactionCheckpointView | null, tokensBefore: number | null, tokensAfter: number | null, summaryProvider: string | null, summaryModel: string | null, unavailable: boolean, error: string | null, };
 
 export type ThreadResumeParams = { threadId: string | null, scope: GatewayRequestScope | null, };
 
@@ -140,7 +146,7 @@ export type AgentReadParams = { name: string, target: AgentConfigTarget | null, 
 
 export type AgentBackendRefInput = { ref: string, };
 
-export type AgentWriteParams = { name: string, description: string, target: AgentConfigTarget | null, enabled: boolean | null, instructions: string, backend: AgentBackendRefInput | null, entrypoints: Array<string>, tools: Array<string>, mcpServers: Array<string>, rawMarkdown: string | null, scope: GatewayRequestScope | null, };
+export type AgentWriteParams = { name: string, description: string, target: AgentConfigTarget | null, enabled: boolean | null, instructions: string, backend: AgentBackendRefInput | null, entrypoints: Array<string>, tools: Array<string>, mcpServers: Array<string>, optionalContributions: Array<string>, rawMarkdown: string | null, scope: GatewayRequestScope | null, };
 
 export type AgentSetEnabledParams = { name: string, enabled: boolean, target: AgentConfigTarget | null, scope: GatewayRequestScope | null, };
 
@@ -152,7 +158,7 @@ export type TeamListParams = { scope: GatewayRequestScope | null, };
 
 export type TeamReadParams = { name: string, target: AgentConfigTarget | null, scope: GatewayRequestScope | null, };
 
-export type TeamMemberInput = { id: string, agent: string, role: string | null, description: string | null, maxTurns: number | null, };
+export type TeamMemberInput = { id: string, agent: string, runtimeRef: string | null, runtimeOptions: { [key in string]?: string }, runtimeProfileRevision: string | null, role: string | null, description: string | null, maxTurns: number | null, };
 
 export type TeamWriteParams = { name: string, description: string, target: AgentConfigTarget | null, enabled: boolean | null, leader: string, members: Array<TeamMemberInput>, maxParallelAgents: number | null, instructions: string, rawMarkdown: string | null, scope: GatewayRequestScope | null, };
 
@@ -168,9 +174,11 @@ export type AgentBackendRefView = { ref: string, };
 
 export type AgentDiagnosticView = { kind: string, message: string, path: string | null, };
 
-export type AgentDefinitionView = { name: string, description: string, enabled: boolean, source: string, sourceLabel: string, generated: boolean, target: AgentConfigTarget | null, mutable: boolean, path: string | null, backend: AgentBackendRefView | null, entrypoints: Array<string>, tools: Array<string>, mcpServers: Array<string>, diagnostics: Array<AgentDiagnosticView>, };
+export type AgentContributionView = "instructions" | "tools" | "mcp" | "skills";
 
-export type TeamMemberView = { id: string, agent: string, role: string | null, description: string | null, maxTurns: number | null, };
+export type AgentDefinitionView = { name: string, description: string, enabled: boolean, source: string, sourceLabel: string, generated: boolean, target: AgentConfigTarget | null, mutable: boolean, path: string | null, backend: AgentBackendRefView | null, entrypoints: Array<string>, tools: Array<string>, mcpServers: Array<string>, contributions: Array<AgentContributionView>, optionalContributions: Array<string>, diagnostics: Array<AgentDiagnosticView>, };
+
+export type TeamMemberView = { id: string, agent: string, runtimeRef: string | null, runtimeOptions: { [key in string]?: string }, runtimeProfileRevision: string | null, role: string | null, description: string | null, maxTurns: number | null, };
 
 export type TeamDefinitionView = { name: string, description: string, enabled: boolean, source: string, sourceLabel: string, target: AgentConfigTarget | null, mutable: boolean, path: string | null, leader: string, members: Array<TeamMemberView>, maxParallelAgents: number, diagnostics: Array<AgentDiagnosticView>, };
 
@@ -224,7 +232,7 @@ export type RuntimeProfileReadParams = { id: string, scope: GatewayRequestScope 
 
 export type RuntimeProfileSetEnabledParams = { id: string, target: BackendConfigTarget, enabled: boolean, scope: GatewayRequestScope | null, };
 
-export type RuntimeProfileWriteParams = { id: string, target: BackendConfigTarget, runtime: string, enabled: boolean | null, label: string | null, command: string | null, args: Array<string>, env: { [key in string]?: string }, defaultModel: string | null, defaultMode: string | null, defaultAgent: string | null, approvalMode: string | null, sandbox: string | null, workspaceRoots: Array<string>, options: unknown | null, scope: GatewayRequestScope | null, };
+export type RuntimeProfileWriteParams = { id: string, target: BackendConfigTarget, runtime: string, enabled: boolean | null, label: string | null, command: string | null, args: Array<string>, env: { [key in string]?: string }, backendRef: string | null, defaultModel: string | null, defaultMode: string | null, defaultAgent: string | null, approvalMode: string | null, sandbox: string | null, workspaceRoots: Array<string>, options: unknown | null, scope: GatewayRequestScope | null, };
 
 export type RuntimeProfileDeleteParams = { id: string, target: BackendConfigTarget, scope: GatewayRequestScope | null, };
 
@@ -232,13 +240,29 @@ export type RuntimeSnapshotParams = { runtimeRef: string | null, scope: GatewayR
 
 export type RuntimeHealthCheckParams = { runtimeRef: string, scope: GatewayRequestScope | null, };
 
-export type RuntimeSessionListParams = { runtimeRef: string | null, scope: GatewayRequestScope | null, };
+export type RuntimeContextReadParams = { threadId: string | null, runtimeRef: string | null, scope: GatewayRequestScope | null, };
 
-export type RuntimeSessionParams = { runtimeRef: string, nativeSessionId: string, scope: GatewayRequestScope | null, };
+export type RuntimeControlSetParams = { runtimeRef: string, controlId: string, value: unknown, expectedCapabilityRevision: string, expectedBindingRevision: number, scope: GatewayRequestScope | null, };
 
-export type RuntimeSessionRenameParams = { runtimeRef: string, nativeSessionId: string, title: string, scope: GatewayRequestScope | null, };
+export type RuntimeAuthActionParams = { runtimeRef: string, action: string, input: unknown | null, scope: GatewayRequestScope | null, };
 
-export type RuntimeSessionRollbackParams = { runtimeRef: string, nativeSessionId: string, itemId: string | null, scope: GatewayRequestScope | null, };
+export type RuntimeGoalReadParams = { threadId: string | null, scope: GatewayRequestScope | null, };
+
+export type RuntimeGoalSetParams = { threadId: string | null, objective: string | null, status: RuntimeGoalStatusView | null, tokenBudget: number | null, clearTokenBudget: boolean, scope: GatewayRequestScope | null, };
+
+export type RuntimeGoalClearParams = { threadId: string | null, scope: GatewayRequestScope | null, };
+
+export type RuntimeAccountRateLimitsReadParams = { runtimeRef: string | null, threadId: string | null, scope: GatewayRequestScope | null, };
+
+export type RuntimeSessionListParams = { runtimeRef: string | null, cursor: string | null, scope: GatewayRequestScope | null, };
+
+export type RuntimeSessionParams = { runtimeRef: string, sessionHandle: string, scope: GatewayRequestScope | null, };
+
+export type RuntimeSessionReadParams = { runtimeRef: string, sessionHandle: string, cursor: string | null, scope: GatewayRequestScope | null, };
+
+export type RuntimeSessionRenameParams = { runtimeRef: string, sessionHandle: string, title: string, scope: GatewayRequestScope | null, };
+
+export type RuntimeSessionRevisionParams = { runtimeRef: string, sessionHandle: string, revisionHandle: string | null, scope: GatewayRequestScope | null, };
 
 export type PluginListParams = { scope: GatewayRequestScope | null, };
 
@@ -316,9 +340,17 @@ export type BackendWriteResult = { written: boolean, changed: boolean, path: str
 
 export type BackendDeleteResult = { deleted: boolean, changed: boolean, id: string, path: string, target: BackendConfigTarget, };
 
-export type RuntimeProfileView = { id: string, runtime: string, enabled: boolean, label: string, generated: boolean, configured: boolean, command: string | null, args: Array<string>, defaultModel: string | null, defaultMode: string | null, defaultAgent: string | null, approvalMode: string | null, sandbox: string | null, workspaceRoots: Array<string>, envKeys: Array<string>, optionKeys: Array<string>, sourceTargets: Array<BackendConfigTarget>, health: RuntimeHealthView, diagnostics: Array<BackendDiagnosticView>, };
+export type RuntimeProfileView = { id: string, runtime: string, enabled: boolean, label: string, generated: boolean, configured: boolean, command: string | null, args: Array<string>, backendRef: string | null, provenance: string, profileRevision: string, capabilityRevision: string, stability: RuntimeStabilityView | null, capabilities: Array<RuntimeCapabilityView>, defaultModel: string | null, defaultMode: string | null, defaultAgent: string | null, approvalMode: string | null, sandbox: string | null, workspaceRoots: Array<string>, envKeys: Array<string>, optionKeys: Array<string>, sourceTargets: Array<BackendConfigTarget>, health: RuntimeHealthView, readinessStages: Array<RuntimeReadinessStageView>, diagnostics: Array<BackendDiagnosticView>, };
 
 export type RuntimeHealthView = { status: string, summary: string, commandPath: string | null, checkedAtMs: number | null, };
+
+export type RuntimeReadinessStatusView = "unchecked" | "ready" | "missing" | "needsAuth" | "unsupported" | "error";
+
+export type RuntimeReadinessStageView = { id: string, status: RuntimeReadinessStatusView, summary: string, observedAtMs: number | null, };
+
+export type RuntimeStabilityView = "stable" | "experimental" | "unavailable";
+
+export type RuntimeCapabilityView = { id: string, enabled: boolean, stability: RuntimeStabilityView, };
 
 export type RuntimeProfileListResult = { profiles: Array<RuntimeProfileView>, };
 
@@ -332,11 +364,61 @@ export type RuntimeSnapshotResult = { profiles: Array<RuntimeProfileView>, agent
 
 export type RuntimeSnapshotAgentView = { name: string, label: string, runtimeRef: string, nativeId: string | null, mode: string | null, };
 
-export type RuntimeSessionListResult = { runtimeRef: string, supported: boolean, sessions: Array<RuntimeSessionView>, };
+export type RuntimeSessionListResult = { runtimeRef: string, supported: boolean, sessions: Array<RuntimeSessionView>, nextCursor: string | null, };
 
-export type RuntimeSessionView = { nativeSessionId: string, threadId: string | null, title: string | null, archived: boolean, updatedAtMs: number | null, };
+export type RuntimeSessionView = { sessionHandle: string, threadId: string | null, title: string | null, archived: boolean, updatedAtMs: number | null, parentThreadId: string | null, status: string | null, dedupKey: string, fidelity: RuntimeHistoryFidelityView, ownership: RuntimeSessionOwnershipView, actions: Array<string>, };
 
-export type RuntimeSessionMutationResult = { runtimeRef: string, nativeSessionId: string, supported: boolean, changed: boolean, session: RuntimeSessionView | null, message: string | null, };
+export type RuntimeSessionRevisionView = { revisionHandle: string, role: string, createdAtMs: number | null, };
+
+export type RuntimeSessionMutationResult = { runtimeRef: string, sessionHandle: string, supported: boolean, changed: boolean, session: RuntimeSessionView | null, message: string | null, revisions: Array<RuntimeSessionRevisionView>, nextCursor: string | null, };
+
+export type RuntimeHistoryFidelityView = "full" | "summary" | "partial";
+
+export type RuntimeSessionOwnershipView = "readWrite" | "readOnly" | "active";
+
+export type RuntimeControlStateView = "runtimeDefault" | "readOnlyCurrent" | "selectable";
+
+export type RuntimeControlChoiceView = { value: unknown, label: string, description: string | null, };
+
+export type RuntimeControlDependencyView = { controlId: string, value: unknown, };
+
+export type RuntimeControlDescriptorView = { id: string, label: string, state: RuntimeControlStateView, currentValue: unknown | null, choices: Array<RuntimeControlChoiceView>, dependsOn: RuntimeControlDependencyView | null, channelSafe: boolean, capabilityRevision: string, };
+
+export type RuntimeBindingView = { threadId: string, runtimeRef: string, backendKind: string, nativeKind: string | null, sessionHandle: string | null, cwd: string, profileFingerprint: string, ownership: RuntimeSessionOwnershipView, bindingRevision: number, };
+
+export type RuntimeContextReadResult = { runtimeRef: string, selectionState: string, profiles: Array<RuntimeProfileView>, binding: RuntimeBindingView | null, controls: Array<RuntimeControlDescriptorView>, stability: RuntimeStabilityView | null, capabilities: Array<RuntimeCapabilityView>, activeSession: RuntimeSessionView | null, children: Array<RuntimeSessionView>, goal: RuntimeGoalView | null, accountRateLimits: RuntimeAccountRateLimitsView | null, };
+
+export type RuntimeControlSetResult = { changed: boolean, observed: boolean, control: RuntimeControlDescriptorView, bindingRevision: number, };
+
+export type RuntimeAuthActionResult = { accepted: boolean, status: string, message: string, output: unknown | null, };
+
+export type RuntimeGoalStatusView = "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "complete";
+
+export type RuntimeGoalView = { objective: string, status: RuntimeGoalStatusView, tokenBudget: number | null, tokensUsed: number, timeUsedSeconds: number, createdAt: number, updatedAt: number, };
+
+export type RuntimeGoalReadResult = { runtimeRef: string, goal: RuntimeGoalView | null, bindingRevision: number, };
+
+export type RuntimeGoalSetResult = { runtimeRef: string, goal: RuntimeGoalView, bindingRevision: number, };
+
+export type RuntimeGoalClearResult = { runtimeRef: string, cleared: boolean, bindingRevision: number, };
+
+export type RuntimeRateLimitReachedTypeView = "rate_limit_reached" | "workspace_owner_credits_depleted" | "workspace_member_credits_depleted" | "workspace_owner_usage_limit_reached" | "workspace_member_usage_limit_reached";
+
+export type RuntimeRateLimitWindowView = { usedPercent: number, windowDurationMins: number | null, resetsAt: number | null, };
+
+export type RuntimeCreditsSnapshotView = { hasCredits: boolean, unlimited: boolean, balance: string | null, };
+
+export type RuntimeSpendControlLimitSnapshotView = { limit: string, used: string, remainingPercent: number, resetsAt: number, };
+
+export type RuntimeRateLimitSnapshotView = { limitId: string | null, limitName: string | null, primary: RuntimeRateLimitWindowView | null, secondary: RuntimeRateLimitWindowView | null, credits: RuntimeCreditsSnapshotView | null, individualLimit: RuntimeSpendControlLimitSnapshotView | null, planType: string | null, rateLimitReachedType: RuntimeRateLimitReachedTypeView | null, };
+
+export type RuntimeAccountRateLimitsView = { rateLimits: RuntimeRateLimitSnapshotView, rateLimitsByLimitId: { [key in string]?: RuntimeRateLimitSnapshotView }, resetCreditsAvailable: number | null, };
+
+export type RuntimeAccountRateLimitsReadResult = { runtimeRef: string, accountRateLimits: RuntimeAccountRateLimitsView, };
+
+export type RuntimeRetryClassView = "never" | "userAction" | "safeRetry" | "reconnect" | "unknownDelivery";
+
+export type RuntimeErrorView = { code: string, stage: string, retryClass: RuntimeRetryClassView, message: string, diagnosticRef: string | null, };
 
 export type ChannelListParams = { scope: GatewayRequestScope | null, };
 
@@ -666,7 +748,7 @@ export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: Json
 
 export type JsonRpcError = { code: number, message: string, data: unknown | null, };
 
-export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/browser", "params": ThreadBrowserParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "turn/takeover", "params": TurnTakeoverParams } | { "method": "runtime/options", "params": RuntimeOptionsParams } | { "method": "runtime/profile/list", "params": RuntimeProfileListParams } | { "method": "runtime/profile/read", "params": RuntimeProfileReadParams } | { "method": "runtime/profile/write", "params": RuntimeProfileWriteParams } | { "method": "runtime/profile/delete", "params": RuntimeProfileDeleteParams } | { "method": "runtime/profile/setEnabled", "params": RuntimeProfileSetEnabledParams } | { "method": "runtime/snapshot", "params": RuntimeSnapshotParams } | { "method": "runtime/health/check", "params": RuntimeHealthCheckParams } | { "method": "runtime/session/list", "params": RuntimeSessionListParams } | { "method": "runtime/session/read", "params": RuntimeSessionParams } | { "method": "runtime/session/resume", "params": RuntimeSessionParams } | { "method": "runtime/session/archive", "params": RuntimeSessionParams } | { "method": "runtime/session/unarchive", "params": RuntimeSessionParams } | { "method": "runtime/session/delete", "params": RuntimeSessionParams } | { "method": "runtime/session/rename", "params": RuntimeSessionRenameParams } | { "method": "runtime/session/rollback", "params": RuntimeSessionRollbackParams } | { "method": "automation/list", "params": AutomationListParams } | { "method": "automation/draft", "params": AutomationDraftParams } | { "method": "automation/write", "params": AutomationWriteParams } | { "method": "automation/pause", "params": AutomationIdParams } | { "method": "automation/resume", "params": AutomationIdParams } | { "method": "automation/delete", "params": AutomationIdParams } | { "method": "automation/run", "params": AutomationRunParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "slash/settings/read", "params": SlashSettingsReadParams } | { "method": "slash/settings/update", "params": SlashSettingsUpdateParams } | { "method": "agent/list", "params": AgentListParams } | { "method": "agent/read", "params": AgentReadParams } | { "method": "agent/write", "params": AgentWriteParams } | { "method": "agent/setEnabled", "params": AgentSetEnabledParams } | { "method": "agent/delete", "params": AgentDeleteParams } | { "method": "agent/status", "params": AgentStatusParams } | { "method": "team/list", "params": TeamListParams } | { "method": "team/read", "params": TeamReadParams } | { "method": "team/write", "params": TeamWriteParams } | { "method": "team/setEnabled", "params": TeamSetEnabledParams } | { "method": "team/delete", "params": TeamDeleteParams } | { "method": "team/status", "params": TeamStatusParams } | { "method": "agent/control", "params": AgentControlParams } | { "method": "backend/list", "params": BackendListParams } | { "method": "backend/doctor", "params": BackendDoctorParams } | { "method": "backend/write", "params": BackendWriteParams } | { "method": "backend/delete", "params": BackendDeleteParams } | { "method": "plugin/list", "params": PluginListParams } | { "method": "plugin/read", "params": PluginReadParams } | { "method": "plugin/doctor", "params": PluginDoctorParams } | { "method": "plugin/import/inspect", "params": PluginInspectParams } | { "method": "plugin/install", "params": PluginInstallParams } | { "method": "plugin/uninstall", "params": PluginUninstallParams } | { "method": "plugin/setEnabled", "params": PluginSetEnabledParams } | { "method": "plugin/setTrust", "params": PluginSetTrustParams } | { "method": "plugin/catalog/list", "params": PluginCatalogListParams } | { "method": "plugin/catalog/add", "params": PluginCatalogAddParams } | { "method": "plugin/catalog/remove", "params": PluginCatalogRemoveParams } | { "method": "skill/list", "params": SkillListParams } | { "method": "skill/read", "params": SkillReadParams } | { "method": "skill/install", "params": SkillInstallParams } | { "method": "skill/uninstall", "params": SkillUninstallParams } | { "method": "skill/setEnabled", "params": SkillSetEnabledParams } | { "method": "skill/write", "params": SkillWriteParams } | { "method": "tool/list", "params": ToolListParams } | { "method": "tool/read", "params": ToolReadParams } | { "method": "tool/setEnabled", "params": ToolSetEnabledParams } | { "method": "tool/create", "params": ToolCreateParams } | { "method": "tool/remove", "params": ToolRemoveParams } | { "method": "mcp/list", "params": McpListParams } | { "method": "mcp/read", "params": McpReadParams } | { "method": "mcp/upsert", "params": McpUpsertParams } | { "method": "mcp/remove", "params": McpNameParams } | { "method": "mcp/setEnabled", "params": McpSetEnabledParams } | { "method": "mcp/setToolPolicy", "params": McpSetToolPolicyParams } | { "method": "mcp/test", "params": McpNameParams } | { "method": "mcp/oauth/start", "params": McpOAuthStartParams } | { "method": "mcp/oauth/status", "params": McpOAuthStatusParams } | { "method": "mcp/oauth/logout", "params": McpNameParams } | { "method": "channel/list", "params": ChannelListParams } | { "method": "channel/show", "params": ChannelIdParams } | { "method": "channel/enable", "params": ChannelEnableParams } | { "method": "channel/update", "params": ChannelUpdateParams } | { "method": "channel/delete", "params": ChannelIdParams } | { "method": "channel/doctor", "params": ChannelDoctorParams } | { "method": "channel/source/list", "params": ChannelIdParams } | { "method": "channel/wechat-qr/start", "params": ChannelWechatQrStartParams } | { "method": "channel/wechat-qr/poll", "params": ChannelWechatQrPollParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "model/settings/read", "params": ModelSettingsReadParams } | { "method": "model/provider/save", "params": ModelProviderSaveParams } | { "method": "model/provider/catalog", "params": ModelProviderCatalogParams } | { "method": "model/state/read", "params": ModelStateReadParams } | { "method": "model/state/set", "params": ModelStateSetParams } | { "method": "model/assignment/set", "params": ModelAssignmentSetParams } | { "method": "voice/asr/transcribe", "params": VoiceAsrTranscribeParams } | { "method": "voice/tts/synthesize", "params": VoiceTtsSynthesizeParams } | { "method": "voice/policy/read", "params": VoicePolicyReadParams } | { "method": "voice/policy/update", "params": VoicePolicyUpdateParams } | { "method": "thread/realtime/start", "params": ThreadRealtimeStartParams } | { "method": "thread/realtime/appendAudio", "params": ThreadRealtimeAppendAudioParams } | { "method": "thread/realtime/appendText", "params": ThreadRealtimeAppendTextParams } | { "method": "thread/realtime/appendSpeech", "params": ThreadRealtimeAppendSpeechParams } | { "method": "thread/realtime/stop", "params": ThreadRealtimeSessionParams } | { "method": "thread/realtime/listVoices", "params": ThreadRealtimeSessionParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/file/write", "params": WorkspaceFileWriteParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "workspace/changes", "params": WorkspaceChangesParams } | { "method": "workspace/change/accept", "params": WorkspaceChangeFileParams } | { "method": "workspace/change/reject", "params": WorkspaceChangeFileParams } | { "method": "context/read", "params": ContextReadParams } | { "method": "observability/read", "params": ObservabilityReadParams } | { "method": "usage/read", "params": UsageReadParams };
+export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/start", "params": ThreadStartParams } | { "method": "thread/compact/start", "params": ThreadCompactStartParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/browser", "params": ThreadBrowserParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "turn/steer", "params": TurnSteerParams } | { "method": "turn/interrupt", "params": TurnInterruptParams } | { "method": "turn/takeover", "params": TurnTakeoverParams } | { "method": "runtime/options", "params": RuntimeOptionsParams } | { "method": "runtime/context/read", "params": RuntimeContextReadParams } | { "method": "runtime/control/set", "params": RuntimeControlSetParams } | { "method": "runtime/auth/action", "params": RuntimeAuthActionParams } | { "method": "runtime/goal/read", "params": RuntimeGoalReadParams } | { "method": "runtime/goal/set", "params": RuntimeGoalSetParams } | { "method": "runtime/goal/clear", "params": RuntimeGoalClearParams } | { "method": "runtime/account/rateLimits/read", "params": RuntimeAccountRateLimitsReadParams } | { "method": "runtime/profile/list", "params": RuntimeProfileListParams } | { "method": "runtime/profile/read", "params": RuntimeProfileReadParams } | { "method": "runtime/profile/write", "params": RuntimeProfileWriteParams } | { "method": "runtime/profile/delete", "params": RuntimeProfileDeleteParams } | { "method": "runtime/profile/setEnabled", "params": RuntimeProfileSetEnabledParams } | { "method": "runtime/snapshot", "params": RuntimeSnapshotParams } | { "method": "runtime/health/check", "params": RuntimeHealthCheckParams } | { "method": "runtime/session/list", "params": RuntimeSessionListParams } | { "method": "runtime/session/read", "params": RuntimeSessionReadParams } | { "method": "runtime/session/attach", "params": RuntimeSessionParams } | { "method": "runtime/session/resume", "params": RuntimeSessionParams } | { "method": "runtime/session/archive", "params": RuntimeSessionParams } | { "method": "runtime/session/unarchive", "params": RuntimeSessionParams } | { "method": "runtime/session/delete", "params": RuntimeSessionParams } | { "method": "runtime/session/rename", "params": RuntimeSessionRenameParams } | { "method": "runtime/session/fork", "params": RuntimeSessionParams } | { "method": "runtime/session/revert", "params": RuntimeSessionRevisionParams } | { "method": "runtime/session/unrevert", "params": RuntimeSessionRevisionParams } | { "method": "automation/list", "params": AutomationListParams } | { "method": "automation/draft", "params": AutomationDraftParams } | { "method": "automation/write", "params": AutomationWriteParams } | { "method": "automation/pause", "params": AutomationIdParams } | { "method": "automation/resume", "params": AutomationIdParams } | { "method": "automation/delete", "params": AutomationIdParams } | { "method": "automation/run", "params": AutomationRunParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "slash/settings/read", "params": SlashSettingsReadParams } | { "method": "slash/settings/update", "params": SlashSettingsUpdateParams } | { "method": "agent/list", "params": AgentListParams } | { "method": "agent/read", "params": AgentReadParams } | { "method": "agent/write", "params": AgentWriteParams } | { "method": "agent/setEnabled", "params": AgentSetEnabledParams } | { "method": "agent/delete", "params": AgentDeleteParams } | { "method": "agent/status", "params": AgentStatusParams } | { "method": "team/list", "params": TeamListParams } | { "method": "team/read", "params": TeamReadParams } | { "method": "team/write", "params": TeamWriteParams } | { "method": "team/setEnabled", "params": TeamSetEnabledParams } | { "method": "team/delete", "params": TeamDeleteParams } | { "method": "team/status", "params": TeamStatusParams } | { "method": "agent/control", "params": AgentControlParams } | { "method": "backend/list", "params": BackendListParams } | { "method": "backend/doctor", "params": BackendDoctorParams } | { "method": "backend/write", "params": BackendWriteParams } | { "method": "backend/delete", "params": BackendDeleteParams } | { "method": "plugin/list", "params": PluginListParams } | { "method": "plugin/read", "params": PluginReadParams } | { "method": "plugin/doctor", "params": PluginDoctorParams } | { "method": "plugin/import/inspect", "params": PluginInspectParams } | { "method": "plugin/install", "params": PluginInstallParams } | { "method": "plugin/uninstall", "params": PluginUninstallParams } | { "method": "plugin/setEnabled", "params": PluginSetEnabledParams } | { "method": "plugin/setTrust", "params": PluginSetTrustParams } | { "method": "plugin/catalog/list", "params": PluginCatalogListParams } | { "method": "plugin/catalog/add", "params": PluginCatalogAddParams } | { "method": "plugin/catalog/remove", "params": PluginCatalogRemoveParams } | { "method": "skill/list", "params": SkillListParams } | { "method": "skill/read", "params": SkillReadParams } | { "method": "skill/install", "params": SkillInstallParams } | { "method": "skill/uninstall", "params": SkillUninstallParams } | { "method": "skill/setEnabled", "params": SkillSetEnabledParams } | { "method": "skill/write", "params": SkillWriteParams } | { "method": "tool/list", "params": ToolListParams } | { "method": "tool/read", "params": ToolReadParams } | { "method": "tool/setEnabled", "params": ToolSetEnabledParams } | { "method": "tool/create", "params": ToolCreateParams } | { "method": "tool/remove", "params": ToolRemoveParams } | { "method": "mcp/list", "params": McpListParams } | { "method": "mcp/read", "params": McpReadParams } | { "method": "mcp/upsert", "params": McpUpsertParams } | { "method": "mcp/remove", "params": McpNameParams } | { "method": "mcp/setEnabled", "params": McpSetEnabledParams } | { "method": "mcp/setToolPolicy", "params": McpSetToolPolicyParams } | { "method": "mcp/test", "params": McpNameParams } | { "method": "mcp/oauth/start", "params": McpOAuthStartParams } | { "method": "mcp/oauth/status", "params": McpOAuthStatusParams } | { "method": "mcp/oauth/logout", "params": McpNameParams } | { "method": "channel/list", "params": ChannelListParams } | { "method": "channel/show", "params": ChannelIdParams } | { "method": "channel/enable", "params": ChannelEnableParams } | { "method": "channel/update", "params": ChannelUpdateParams } | { "method": "channel/delete", "params": ChannelIdParams } | { "method": "channel/doctor", "params": ChannelDoctorParams } | { "method": "channel/source/list", "params": ChannelIdParams } | { "method": "channel/wechat-qr/start", "params": ChannelWechatQrStartParams } | { "method": "channel/wechat-qr/poll", "params": ChannelWechatQrPollParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "permission/respond", "params": PermissionRespondParams } | { "method": "clarify/respond", "params": ClarifyRespondParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "model/settings/read", "params": ModelSettingsReadParams } | { "method": "model/provider/save", "params": ModelProviderSaveParams } | { "method": "model/provider/catalog", "params": ModelProviderCatalogParams } | { "method": "model/state/read", "params": ModelStateReadParams } | { "method": "model/state/set", "params": ModelStateSetParams } | { "method": "model/assignment/set", "params": ModelAssignmentSetParams } | { "method": "voice/asr/transcribe", "params": VoiceAsrTranscribeParams } | { "method": "voice/tts/synthesize", "params": VoiceTtsSynthesizeParams } | { "method": "voice/policy/read", "params": VoicePolicyReadParams } | { "method": "voice/policy/update", "params": VoicePolicyUpdateParams } | { "method": "thread/realtime/start", "params": ThreadRealtimeStartParams } | { "method": "thread/realtime/appendAudio", "params": ThreadRealtimeAppendAudioParams } | { "method": "thread/realtime/appendText", "params": ThreadRealtimeAppendTextParams } | { "method": "thread/realtime/appendSpeech", "params": ThreadRealtimeAppendSpeechParams } | { "method": "thread/realtime/stop", "params": ThreadRealtimeSessionParams } | { "method": "thread/realtime/listVoices", "params": ThreadRealtimeSessionParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/file/write", "params": WorkspaceFileWriteParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "workspace/changes", "params": WorkspaceChangesParams } | { "method": "workspace/change/accept", "params": WorkspaceChangeFileParams } | { "method": "workspace/change/reject", "params": WorkspaceChangeFileParams } | { "method": "context/read", "params": ContextReadParams } | { "method": "observability/read", "params": ObservabilityReadParams } | { "method": "usage/read", "params": UsageReadParams };
 
 export type ServerNotification = { "method": "gateway/event", "params": GatewayEvent } | { "method": "turn/result", "params": TurnResultPayload } | { "method": "turn/error", "params": TurnErrorPayload } | { "method": "shell/result", "params": ShellResultPayload } | { "method": "shell/error", "params": ShellErrorPayload } | { "method": "terminal/output", "params": TerminalOutputPayload } | { "method": "terminal/exited", "params": TerminalExitedPayload } | { "method": "thread/realtime/started", "params": ThreadRealtimeStartedNotification } | { "method": "thread/realtime/sdp", "params": ThreadRealtimeSdpNotification } | { "method": "thread/realtime/itemAdded", "params": ThreadRealtimeItemAddedNotification } | { "method": "thread/realtime/transcript/delta", "params": ThreadRealtimeTranscriptNotification } | { "method": "thread/realtime/transcript/done", "params": ThreadRealtimeTranscriptNotification } | { "method": "thread/realtime/outputAudio/delta", "params": ThreadRealtimeOutputAudioDeltaNotification } | { "method": "thread/realtime/error", "params": ThreadRealtimeErrorNotification } | { "method": "thread/realtime/closed", "params": ThreadRealtimeClosedNotification };
 

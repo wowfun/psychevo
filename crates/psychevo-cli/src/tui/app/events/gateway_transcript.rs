@@ -23,7 +23,15 @@ impl TuiApp {
                     short_session(session_id)
                 ));
             }
+            let session_id = session_id.to_string();
+            buffer_session_live_event(ui, &session_id, event);
             return false;
+        }
+        if let Some(session_id) = event_session
+            && self.current_session.as_deref() == Some(session_id)
+        {
+            let session_id = session_id.to_string();
+            buffer_session_live_event(ui, &session_id, event.clone());
         }
         match event {
             GatewayEvent::TurnStarted {
@@ -196,7 +204,10 @@ impl TuiApp {
             | GatewayEvent::ActionUpdated { .. }
             | GatewayEvent::ActionResolved { .. }
             | GatewayEvent::ActionCancelled { .. } => false,
-            GatewayEvent::ActivityChanged { .. } | GatewayEvent::TitleChanged { .. } => false,
+            GatewayEvent::ActivityChanged { .. }
+            | GatewayEvent::RuntimeStateChanged { .. }
+            | GatewayEvent::RuntimeChildChanged { .. }
+            | GatewayEvent::TitleChanged { .. } => false,
             GatewayEvent::Warning {
                 message,
                 suggestion,

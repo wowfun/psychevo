@@ -295,6 +295,11 @@ async fn handle_rpc_text(
     let result = handle_rpc(state.clone(), auth.clone(), out_tx, request).await;
     Some(match result {
         Ok(value) => rpc_result(id, value),
-        Err(err) => rpc_error(id, -32000, err.to_string()),
+        Err(err) => rpc_error_with_data(
+            id,
+            -32000,
+            err.to_string(),
+            err.structured_data().cloned(),
+        ),
     })
 }

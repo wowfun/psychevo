@@ -19,9 +19,38 @@ pub(crate) fn parse_plugin_policy_config(value: &Value) -> Result<PluginPolicyCo
     Ok(PluginPolicyConfig { plugins: out })
 }
 
+pub(crate) fn parse_builtin_plugin_policy_config(
+    value: &Value,
+) -> Result<BuiltinPluginPolicyConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("builtin_plugins must be an object".to_string()))?;
+    let mut entries = BTreeMap::new();
+    for (name, value) in object {
+        validate_builtin_plugin_policy_name(name)?;
+        let entry = value
+            .as_object()
+            .ok_or_else(|| Error::Config(format!("builtin_plugins.{name} must be an object")))?;
+        let enabled = optional_bool_field(entry, "enabled")?;
+        if entry.contains_key("capabilities") {
+            return Err(Error::Config(format!(
+                "builtin_plugins.{name}.capabilities is not supported; configure fine-grained behavior on the owning runtime surface"
+            )));
+        }
+        entries.insert(name.clone(), PluginPolicyEntry { enabled });
+    }
+    Ok(BuiltinPluginPolicyConfig { entries })
+}
+
 pub(crate) fn validate_plugin_policy_name(name: &str) -> Result<()> {
-    let valid = !name.trim().is_empty()
-        && name
+    let identity = name
+        .strip_prefix("profile:")
+        .or_else(|| name.strip_prefix("project:"))
+        .unwrap_or(name);
+    let valid_scope = !name.contains(':') || identity.len() != name.len();
+    let valid = valid_scope
+        && !identity.trim().is_empty()
+        && identity
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '@'));
     if valid {
@@ -29,6 +58,20 @@ pub(crate) fn validate_plugin_policy_name(name: &str) -> Result<()> {
     } else {
         Err(Error::Config(format!(
             "plugins.{name} must be a valid plugin policy name"
+        )))
+    }
+}
+
+fn validate_builtin_plugin_policy_name(name: &str) -> Result<()> {
+    let valid = !name.trim().is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(Error::Config(format!(
+            "builtin_plugins.{name} must be a valid built-in plugin policy name"
         )))
     }
 }

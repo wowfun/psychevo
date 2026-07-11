@@ -7,7 +7,8 @@ export const serverNotificationShellResultSchema = {
     "BackendKind": {
       "enum": [
         "psychevo",
-        "peerAgent"
+        "peerAgent",
+        "runtime"
       ],
       "type": "string"
     },
@@ -16,14 +17,14 @@ export const serverNotificationShellResultSchema = {
         "kind": {
           "$ref": "#/definitions/BackendKind"
         },
-        "nativeId": {
-          "default": null,
+        "runtimeRef": {
           "type": [
             "string",
             "null"
           ]
         },
-        "runtimeRef": {
+        "sessionHandle": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -187,6 +188,7 @@ export const serverNotificationShellResultSchema = {
         "agent",
         "mailbox",
         "status",
+        "compaction",
         "diff",
         "artifact"
       ],

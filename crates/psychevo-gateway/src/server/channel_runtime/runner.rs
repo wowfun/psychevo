@@ -2,6 +2,7 @@ use super::commands::{ChannelCommandAction, route_channel_command};
 use super::events::{channel_event_sink, channel_reply_thread_id};
 use super::paths::channel_cwd;
 use super::*;
+use futures::future::BoxFuture;
 
 pub(super) async fn run_channel_loop(
     state: WebState,
@@ -114,7 +115,9 @@ pub(super) async fn handle_channel_message(
 ) -> psychevo_runtime::Result<()> {
     let source = gateway_source_for_im(&message);
     let mut requested_thread_id = None;
-    if let Some(action) = route_channel_command(state, runtime, connection, &message, &source)? {
+    if let Some(action) =
+        route_channel_command(state, runtime, connection, &message, &source).await?
+    {
         match action {
             ChannelCommandAction::Reply(reply) => {
                 channel_gateway
@@ -130,6 +133,46 @@ pub(super) async fn handle_channel_message(
             ChannelCommandAction::SubmitPrompt { text, thread_id } => {
                 message.text = text;
                 requested_thread_id = thread_id;
+            }
+            ChannelCommandAction::Compact { instructions } => {
+                let pending = enqueue_channel_compaction(
+                    state,
+                    runtime,
+                    connection,
+                    channel_gateway,
+                    &message,
+                    &source,
+                    instructions,
+                )?;
+                let reply_runtime = runtime.clone();
+                let reply_connection = connection.clone();
+                let reply_gateway = channel_gateway.clone();
+                let reply_identity = message.identity;
+                let fallback_thread_id = channel_reply_thread_id(state, &source);
+                let _handle = tokio::spawn(async move {
+                    let (thread_id, text) = match pending.await {
+                        Ok(result) => {
+                            (result.session_id.clone(), channel_compaction_reply(&result))
+                        }
+                        Err(err) => (
+                            fallback_thread_id,
+                            format!("Context compaction failed: {err}"),
+                        ),
+                    };
+                    if let Err(err) = reply_gateway
+                        .send(ImOutboundMessage {
+                            identity: reply_identity,
+                            thread_id,
+                            text,
+                        })
+                        .await
+                    {
+                        reply_runtime.mark_error(&reply_connection.id, &err);
+                    } else {
+                        reply_runtime.mark_outbound(&reply_connection.id);
+                    }
+                });
+                return Ok(());
             }
         }
     }
@@ -161,6 +204,57 @@ pub(super) async fn handle_channel_message(
     Ok(())
 }
 
+fn enqueue_channel_compaction(
+    state: &WebState,
+    runtime: &ChannelRuntimeState,
+    connection: &ChannelRuntimeConnection,
+    channel_gateway: &ChannelGateway,
+    message: &ImInboundMessage,
+    source: &GatewaySource,
+    instructions: Option<String>,
+) -> psychevo_runtime::Result<
+    BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::CompactionResult>>,
+> {
+    let cwd = channel_cwd(&state.inner.cwd, connection);
+    let mut options = state.run_options(cwd.clone(), None);
+    let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
+    options.model = channel_model_for_runtime(&runtime_ref, connection.model.as_deref());
+    let event_sink = channel_event_sink(
+        runtime.clone(),
+        connection.id.clone(),
+        channel_gateway.clone(),
+        message.identity.clone(),
+        source.source_key(),
+    );
+    state
+        .inner
+        .gateway
+        .enqueue_compact_session(crate::SendCompactRequest {
+            thread_id: None,
+            source: Some(source.clone()),
+            runtime_ref: Some(runtime_ref),
+            cwd,
+            config_path: options.config_path,
+            model: options.model,
+            reasoning_effort: options.reasoning_effort,
+            instructions,
+            force: true,
+            reason: psychevo_runtime::CompactionReason::Manual,
+            inherited_env: options.inherited_env,
+            event_sink: Some(event_sink),
+        })
+}
+
+fn channel_compaction_reply(result: &psychevo_runtime::CompactionResult) -> String {
+    if result.compacted {
+        if let (Some(before), Some(after)) = (result.tokens_before, result.tokens_after) {
+            return format!("Session compacted ({before} -> {after} tokens).");
+        }
+        return "Session compacted.".to_string();
+    }
+    result.message.clone()
+}
+
 async fn run_channel_inbound_turn(
     state: WebState,
     runtime: ChannelRuntimeState,
@@ -174,7 +268,7 @@ async fn run_channel_inbound_turn(
     let mut options = state.run_options(cwd, thread_id.clone());
     let runtime_ref = channel_effective_runtime_ref(&state, &connection, &source)?;
     options.runtime_ref = Some(runtime_ref.clone());
-    options.model = connection.model.clone();
+    options.model = channel_model_for_runtime(&runtime_ref, connection.model.as_deref());
     options.permission_mode = connection
         .permission_mode
         .as_deref()
@@ -231,4 +325,34 @@ async fn run_channel_inbound_turn(
         .await?;
     runtime.mark_outbound(&connection.id);
     Ok(())
+}
+
+fn channel_model_for_runtime(runtime_ref: &str, configured: Option<&str>) -> Option<String> {
+    (runtime_ref == "native")
+        .then(|| {
+            configured
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .flatten()
+}
+
+#[cfg(test)]
+mod runtime_control_safety_tests {
+    use super::channel_model_for_runtime;
+
+    #[test]
+    fn channel_model_override_is_native_only_until_adapter_declares_safe_control() {
+        assert_eq!(
+            channel_model_for_runtime("native", Some("provider/model")),
+            Some("provider/model".to_string())
+        );
+        for runtime_ref in ["codex", "opencode", "acp:review"] {
+            assert_eq!(
+                channel_model_for_runtime(runtime_ref, Some("must-not-leak")),
+                None
+            );
+        }
+    }
 }

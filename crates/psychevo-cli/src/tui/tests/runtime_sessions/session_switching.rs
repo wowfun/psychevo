@@ -188,7 +188,7 @@ pub(crate) async fn fullscreen_new_with_unresolved_running_session_hides_unowned
         .expect("old session backlog");
     assert!(backlog
         .iter()
-        .any(|event| matches!(event, RunStreamEvent::ReasoningDelta { text } if text == "unresolved old session thinking")));
+        .any(|event| matches!(event, TuiLiveEvent::Runtime(RunStreamEvent::ReasoningDelta { text }) if text == "unresolved old session thinking")));
     assert!(
         ui.transcript
             .iter()

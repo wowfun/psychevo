@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeRetryClassView": {
+      "enum": [
+        "never",
+        "userAction",
+        "safeRetry",
+        "reconnect",
+        "unknownDelivery"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "code": {
+      "type": "string"
+    },
+    "diagnosticRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "message": {
+      "type": "string"
+    },
+    "retryClass": {
+      "$ref": "#/definitions/RuntimeRetryClassView"
+    },
+    "stage": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "message",
+    "retryClass",
+    "stage"
+  ],
+  "title": "RuntimeErrorView",
+  "type": "object"
+}

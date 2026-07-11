@@ -64,10 +64,15 @@
       ],
       "type": "string"
     },
-    "RuntimeSessionParams": {
+    "RuntimeSessionReadParams": {
+      "additionalProperties": false,
       "properties": {
-        "nativeSessionId": {
-          "type": "string"
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "runtimeRef": {
           "type": "string"
@@ -82,11 +87,14 @@
             }
           ],
           "default": null
+        },
+        "sessionHandle": {
+          "type": "string"
         }
       },
       "required": [
-        "nativeSessionId",
-        "runtimeRef"
+        "runtimeRef",
+        "sessionHandle"
       ],
       "type": "object"
     }
@@ -99,7 +107,7 @@
       "type": "string"
     },
     "params": {
-      "$ref": "#/definitions/RuntimeSessionParams"
+      "$ref": "#/definitions/RuntimeSessionReadParams"
     }
   },
   "required": [

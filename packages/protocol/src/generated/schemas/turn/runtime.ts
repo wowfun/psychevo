@@ -362,6 +362,13 @@ export const turnRuntimeSchemas = {
       },
       "type": "array"
     },
+    "backendRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "command": {
       "default": null,
       "type": [
@@ -733,7 +740,7 @@ export const turnRuntimeSchemas = {
   "title": "RuntimeHealthCheckParams",
   "type": "object"
 },
-  RuntimeSessionListParams: {
+  RuntimeContextReadParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayRequestScope": {
@@ -817,12 +824,19 @@ export const turnRuntimeSchemas = {
         }
       ],
       "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
-  "title": "RuntimeSessionListParams",
+  "title": "RuntimeContextReadParams",
   "type": "object"
 },
-  RuntimeSessionParams: {
+  RuntimeControlSetParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayRequestScope": {
@@ -889,8 +903,115 @@ export const turnRuntimeSchemas = {
     }
   },
   "properties": {
-    "nativeSessionId": {
+    "controlId": {
       "type": "string"
+    },
+    "expectedBindingRevision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "expectedCapabilityRevision": {
+      "type": "string"
+    },
+    "runtimeRef": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "value": true
+  },
+  "required": [
+    "controlId",
+    "expectedBindingRevision",
+    "expectedCapabilityRevision",
+    "runtimeRef",
+    "value"
+  ],
+  "title": "RuntimeControlSetParams",
+  "type": "object"
+},
+  RuntimeAuthActionParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "input": {
+      "default": null
     },
     "runtimeRef": {
       "type": "string"
@@ -908,10 +1029,707 @@ export const turnRuntimeSchemas = {
     }
   },
   "required": [
-    "nativeSessionId",
+    "action",
     "runtimeRef"
   ],
+  "title": "RuntimeAuthActionParams",
+  "type": "object"
+},
+  RuntimeGoalReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "RuntimeGoalReadParams",
+  "type": "object"
+},
+  RuntimeGoalSetParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    },
+    "RuntimeGoalStatusView": {
+      "enum": [
+        "active",
+        "paused",
+        "blocked",
+        "usage_limited",
+        "budget_limited",
+        "complete"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "clearTokenBudget": {
+      "default": false,
+      "type": "boolean"
+    },
+    "objective": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "status": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeGoalStatusView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tokenBudget": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "RuntimeGoalSetParams",
+  "type": "object"
+},
+  RuntimeGoalClearParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "RuntimeGoalClearParams",
+  "type": "object"
+},
+  RuntimeAccountRateLimitsReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "runtimeRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "threadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "RuntimeAccountRateLimitsReadParams",
+  "type": "object"
+},
+  RuntimeSessionListParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "cursor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtimeRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "RuntimeSessionListParams",
+  "type": "object"
+},
+  RuntimeSessionParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "runtimeRef": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sessionHandle": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtimeRef",
+    "sessionHandle"
+  ],
   "title": "RuntimeSessionParams",
+  "type": "object"
+},
+  RuntimeSessionReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "cursor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtimeRef": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sessionHandle": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtimeRef",
+    "sessionHandle"
+  ],
+  "title": "RuntimeSessionReadParams",
   "type": "object"
 },
   RuntimeSessionRenameParams: {
@@ -981,9 +1799,6 @@ export const turnRuntimeSchemas = {
     }
   },
   "properties": {
-    "nativeSessionId": {
-      "type": "string"
-    },
     "runtimeRef": {
       "type": "string"
     },
@@ -998,20 +1813,24 @@ export const turnRuntimeSchemas = {
       ],
       "default": null
     },
+    "sessionHandle": {
+      "type": "string"
+    },
     "title": {
       "type": "string"
     }
   },
   "required": [
-    "nativeSessionId",
     "runtimeRef",
+    "sessionHandle",
     "title"
   ],
   "title": "RuntimeSessionRenameParams",
   "type": "object"
 },
-  RuntimeSessionRollbackParams: {
+  RuntimeSessionRevisionParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
   "definitions": {
     "GatewayRequestScope": {
       "properties": {
@@ -1077,15 +1896,12 @@ export const turnRuntimeSchemas = {
     }
   },
   "properties": {
-    "itemId": {
+    "revisionHandle": {
       "default": null,
       "type": [
         "string",
         "null"
       ]
-    },
-    "nativeSessionId": {
-      "type": "string"
     },
     "runtimeRef": {
       "type": "string"
@@ -1100,13 +1916,16 @@ export const turnRuntimeSchemas = {
         }
       ],
       "default": null
+    },
+    "sessionHandle": {
+      "type": "string"
     }
   },
   "required": [
-    "nativeSessionId",
-    "runtimeRef"
+    "runtimeRef",
+    "sessionHandle"
   ],
-  "title": "RuntimeSessionRollbackParams",
+  "title": "RuntimeSessionRevisionParams",
   "type": "object"
 },
   RuntimeProfileView: {
@@ -1131,6 +1950,25 @@ export const turnRuntimeSchemas = {
       "required": [
         "kind",
         "message"
+      ],
+      "type": "object"
+    },
+    "RuntimeCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "stability"
       ],
       "type": "object"
     },
@@ -1163,6 +2001,52 @@ export const turnRuntimeSchemas = {
         "summary"
       ],
       "type": "object"
+    },
+    "RuntimeReadinessStageView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeReadinessStatusView"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
+    },
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
     }
   },
   "properties": {
@@ -1179,6 +2063,24 @@ export const turnRuntimeSchemas = {
         "type": "string"
       },
       "type": "array"
+    },
+    "backendRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capabilities": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeCapabilityView"
+      },
+      "type": "array"
+    },
+    "capabilityRevision": {
+      "default": "",
+      "type": "string"
     },
     "command": {
       "default": null,
@@ -1248,6 +2150,21 @@ export const turnRuntimeSchemas = {
       },
       "type": "array"
     },
+    "profileRevision": {
+      "default": "",
+      "type": "string"
+    },
+    "provenance": {
+      "default": "",
+      "type": "string"
+    },
+    "readinessStages": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeReadinessStageView"
+      },
+      "type": "array"
+    },
     "runtime": {
       "type": "string"
     },
@@ -1264,6 +2181,17 @@ export const turnRuntimeSchemas = {
         "$ref": "#/definitions/BackendConfigTarget"
       },
       "type": "array"
+    },
+    "stability": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "workspaceRoots": {
       "default": [],
@@ -1316,6 +2244,102 @@ export const turnRuntimeSchemas = {
   "title": "RuntimeHealthView",
   "type": "object"
 },
+  RuntimeReadinessStatusView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "unchecked",
+    "ready",
+    "missing",
+    "needsAuth",
+    "unsupported",
+    "error"
+  ],
+  "title": "RuntimeReadinessStatusView",
+  "type": "string"
+},
+  RuntimeReadinessStageView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "observedAtMs": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "status": {
+      "$ref": "#/definitions/RuntimeReadinessStatusView"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "status",
+    "summary"
+  ],
+  "title": "RuntimeReadinessStageView",
+  "type": "object"
+},
+  RuntimeStabilityView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "stable",
+    "experimental",
+    "unavailable"
+  ],
+  "title": "RuntimeStabilityView",
+  "type": "string"
+},
+  RuntimeCapabilityView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "stability": {
+      "$ref": "#/definitions/RuntimeStabilityView"
+    }
+  },
+  "required": [
+    "enabled",
+    "id",
+    "stability"
+  ],
+  "title": "RuntimeCapabilityView",
+  "type": "object"
+},
   RuntimeProfileListResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -1338,6 +2362,25 @@ export const turnRuntimeSchemas = {
       "required": [
         "kind",
         "message"
+      ],
+      "type": "object"
+    },
+    "RuntimeCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "stability"
       ],
       "type": "object"
     },
@@ -1386,6 +2429,24 @@ export const turnRuntimeSchemas = {
             "type": "string"
           },
           "type": "array"
+        },
+        "backendRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeCapabilityView"
+          },
+          "type": "array"
+        },
+        "capabilityRevision": {
+          "default": "",
+          "type": "string"
         },
         "command": {
           "default": null,
@@ -1455,6 +2516,21 @@ export const turnRuntimeSchemas = {
           },
           "type": "array"
         },
+        "profileRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "",
+          "type": "string"
+        },
+        "readinessStages": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeReadinessStageView"
+          },
+          "type": "array"
+        },
         "runtime": {
           "type": "string"
         },
@@ -1471,6 +2547,17 @@ export const turnRuntimeSchemas = {
             "$ref": "#/definitions/BackendConfigTarget"
           },
           "type": "array"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeStabilityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "workspaceRoots": {
           "default": [],
@@ -1489,6 +2576,52 @@ export const turnRuntimeSchemas = {
         "runtime"
       ],
       "type": "object"
+    },
+    "RuntimeReadinessStageView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeReadinessStatusView"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
+    },
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
     }
   },
   "properties": {
@@ -1530,6 +2663,25 @@ export const turnRuntimeSchemas = {
       ],
       "type": "object"
     },
+    "RuntimeCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "stability"
+      ],
+      "type": "object"
+    },
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
@@ -1575,6 +2727,24 @@ export const turnRuntimeSchemas = {
             "type": "string"
           },
           "type": "array"
+        },
+        "backendRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeCapabilityView"
+          },
+          "type": "array"
+        },
+        "capabilityRevision": {
+          "default": "",
+          "type": "string"
         },
         "command": {
           "default": null,
@@ -1644,6 +2814,21 @@ export const turnRuntimeSchemas = {
           },
           "type": "array"
         },
+        "profileRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "",
+          "type": "string"
+        },
+        "readinessStages": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeReadinessStageView"
+          },
+          "type": "array"
+        },
         "runtime": {
           "type": "string"
         },
@@ -1660,6 +2845,17 @@ export const turnRuntimeSchemas = {
             "$ref": "#/definitions/BackendConfigTarget"
           },
           "type": "array"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeStabilityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "workspaceRoots": {
           "default": [],
@@ -1678,6 +2874,52 @@ export const turnRuntimeSchemas = {
         "runtime"
       ],
       "type": "object"
+    },
+    "RuntimeReadinessStageView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeReadinessStatusView"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
+    },
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
     }
   },
   "properties": {
@@ -1719,6 +2961,25 @@ export const turnRuntimeSchemas = {
       ],
       "type": "object"
     },
+    "RuntimeCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "stability"
+      ],
+      "type": "object"
+    },
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
@@ -1764,6 +3025,24 @@ export const turnRuntimeSchemas = {
             "type": "string"
           },
           "type": "array"
+        },
+        "backendRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeCapabilityView"
+          },
+          "type": "array"
+        },
+        "capabilityRevision": {
+          "default": "",
+          "type": "string"
         },
         "command": {
           "default": null,
@@ -1833,6 +3112,21 @@ export const turnRuntimeSchemas = {
           },
           "type": "array"
         },
+        "profileRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "",
+          "type": "string"
+        },
+        "readinessStages": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeReadinessStageView"
+          },
+          "type": "array"
+        },
         "runtime": {
           "type": "string"
         },
@@ -1849,6 +3143,17 @@ export const turnRuntimeSchemas = {
             "$ref": "#/definitions/BackendConfigTarget"
           },
           "type": "array"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeStabilityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "workspaceRoots": {
           "default": [],
@@ -1867,6 +3172,52 @@ export const turnRuntimeSchemas = {
         "runtime"
       ],
       "type": "object"
+    },
+    "RuntimeReadinessStageView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeReadinessStatusView"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
+    },
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
     }
   },
   "properties": {
@@ -1959,6 +3310,25 @@ export const turnRuntimeSchemas = {
       ],
       "type": "object"
     },
+    "RuntimeCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "stability"
+      ],
+      "type": "object"
+    },
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
@@ -2004,6 +3374,24 @@ export const turnRuntimeSchemas = {
             "type": "string"
           },
           "type": "array"
+        },
+        "backendRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeCapabilityView"
+          },
+          "type": "array"
+        },
+        "capabilityRevision": {
+          "default": "",
+          "type": "string"
         },
         "command": {
           "default": null,
@@ -2073,6 +3461,21 @@ export const turnRuntimeSchemas = {
           },
           "type": "array"
         },
+        "profileRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "",
+          "type": "string"
+        },
+        "readinessStages": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeReadinessStageView"
+          },
+          "type": "array"
+        },
         "runtime": {
           "type": "string"
         },
@@ -2089,6 +3492,17 @@ export const turnRuntimeSchemas = {
             "$ref": "#/definitions/BackendConfigTarget"
           },
           "type": "array"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeStabilityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "workspaceRoots": {
           "default": [],
@@ -2107,6 +3521,44 @@ export const turnRuntimeSchemas = {
         "runtime"
       ],
       "type": "object"
+    },
+    "RuntimeReadinessStageView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeReadinessStatusView"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
     },
     "RuntimeSnapshotAgentView": {
       "properties": {
@@ -2140,6 +3592,14 @@ export const turnRuntimeSchemas = {
         "runtimeRef"
       ],
       "type": "object"
+    },
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
     }
   },
   "properties": {
@@ -2201,14 +3661,61 @@ export const turnRuntimeSchemas = {
   RuntimeSessionListResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "RuntimeHistoryFidelityView": {
+      "enum": [
+        "full",
+        "summary",
+        "partial"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionOwnershipView": {
+      "enum": [
+        "readWrite",
+        "readOnly",
+        "active"
+      ],
+      "type": "string"
+    },
     "RuntimeSessionView": {
       "properties": {
+        "actions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "archived": {
           "default": false,
           "type": "boolean"
         },
-        "nativeSessionId": {
+        "dedupKey": {
+          "default": "",
           "type": "string"
+        },
+        "fidelity": {
+          "$ref": "#/definitions/RuntimeHistoryFidelityView"
+        },
+        "ownership": {
+          "$ref": "#/definitions/RuntimeSessionOwnershipView"
+        },
+        "parentThreadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionHandle": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "threadId": {
           "default": null,
@@ -2234,12 +3741,21 @@ export const turnRuntimeSchemas = {
         }
       },
       "required": [
-        "nativeSessionId"
+        "fidelity",
+        "ownership",
+        "sessionHandle"
       ],
       "type": "object"
     }
   },
   "properties": {
+    "nextCursor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "runtimeRef": {
       "type": "string"
     },
@@ -2263,13 +3779,62 @@ export const turnRuntimeSchemas = {
 },
   RuntimeSessionView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeHistoryFidelityView": {
+      "enum": [
+        "full",
+        "summary",
+        "partial"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionOwnershipView": {
+      "enum": [
+        "readWrite",
+        "readOnly",
+        "active"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
+    "actions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "archived": {
       "default": false,
       "type": "boolean"
     },
-    "nativeSessionId": {
+    "dedupKey": {
+      "default": "",
       "type": "string"
+    },
+    "fidelity": {
+      "$ref": "#/definitions/RuntimeHistoryFidelityView"
+    },
+    "ownership": {
+      "$ref": "#/definitions/RuntimeSessionOwnershipView"
+    },
+    "parentThreadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionHandle": {
+      "type": "string"
+    },
+    "status": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "threadId": {
       "default": null,
@@ -2295,22 +3860,119 @@ export const turnRuntimeSchemas = {
     }
   },
   "required": [
-    "nativeSessionId"
+    "fidelity",
+    "ownership",
+    "sessionHandle"
   ],
   "title": "RuntimeSessionView",
+  "type": "object"
+},
+  RuntimeSessionRevisionView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "createdAtMs": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "revisionHandle": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "revisionHandle",
+    "role"
+  ],
+  "title": "RuntimeSessionRevisionView",
   "type": "object"
 },
   RuntimeSessionMutationResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "RuntimeHistoryFidelityView": {
+      "enum": [
+        "full",
+        "summary",
+        "partial"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionOwnershipView": {
+      "enum": [
+        "readWrite",
+        "readOnly",
+        "active"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionRevisionView": {
+      "properties": {
+        "createdAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "revisionHandle": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "revisionHandle",
+        "role"
+      ],
+      "type": "object"
+    },
     "RuntimeSessionView": {
       "properties": {
+        "actions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "archived": {
           "default": false,
           "type": "boolean"
         },
-        "nativeSessionId": {
+        "dedupKey": {
+          "default": "",
           "type": "string"
+        },
+        "fidelity": {
+          "$ref": "#/definitions/RuntimeHistoryFidelityView"
+        },
+        "ownership": {
+          "$ref": "#/definitions/RuntimeSessionOwnershipView"
+        },
+        "parentThreadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionHandle": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "threadId": {
           "default": null,
@@ -2336,7 +3998,9 @@ export const turnRuntimeSchemas = {
         }
       },
       "required": [
-        "nativeSessionId"
+        "fidelity",
+        "ownership",
+        "sessionHandle"
       ],
       "type": "object"
     }
@@ -2352,8 +4016,19 @@ export const turnRuntimeSchemas = {
         "null"
       ]
     },
-    "nativeSessionId": {
-      "type": "string"
+    "nextCursor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "revisions": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeSessionRevisionView"
+      },
+      "type": "array"
     },
     "runtimeRef": {
       "type": "string"
@@ -2369,17 +4044,2224 @@ export const turnRuntimeSchemas = {
       ],
       "default": null
     },
+    "sessionHandle": {
+      "type": "string"
+    },
     "supported": {
       "type": "boolean"
     }
   },
   "required": [
     "changed",
-    "nativeSessionId",
     "runtimeRef",
+    "sessionHandle",
     "supported"
   ],
   "title": "RuntimeSessionMutationResult",
+  "type": "object"
+},
+  RuntimeHistoryFidelityView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "full",
+    "summary",
+    "partial"
+  ],
+  "title": "RuntimeHistoryFidelityView",
+  "type": "string"
+},
+  RuntimeSessionOwnershipView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "readWrite",
+    "readOnly",
+    "active"
+  ],
+  "title": "RuntimeSessionOwnershipView",
+  "type": "string"
+},
+  RuntimeControlStateView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "runtimeDefault",
+    "readOnlyCurrent",
+    "selectable"
+  ],
+  "title": "RuntimeControlStateView",
+  "type": "string"
+},
+  RuntimeControlChoiceView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "label": {
+      "type": "string"
+    },
+    "value": true
+  },
+  "required": [
+    "label",
+    "value"
+  ],
+  "title": "RuntimeControlChoiceView",
+  "type": "object"
+},
+  RuntimeControlDependencyView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "controlId": {
+      "type": "string"
+    },
+    "value": true
+  },
+  "required": [
+    "controlId",
+    "value"
+  ],
+  "title": "RuntimeControlDependencyView",
+  "type": "object"
+},
+  RuntimeControlDescriptorView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeControlChoiceView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlDependencyView": {
+      "properties": {
+        "controlId": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "controlId",
+        "value"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlStateView": {
+      "enum": [
+        "runtimeDefault",
+        "readOnlyCurrent",
+        "selectable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "capabilityRevision": {
+      "type": "string"
+    },
+    "channelSafe": {
+      "default": false,
+      "type": "boolean"
+    },
+    "choices": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeControlChoiceView"
+      },
+      "type": "array"
+    },
+    "currentValue": {
+      "default": null
+    },
+    "dependsOn": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeControlDependencyView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/definitions/RuntimeControlStateView"
+    }
+  },
+  "required": [
+    "capabilityRevision",
+    "id",
+    "label",
+    "state"
+  ],
+  "title": "RuntimeControlDescriptorView",
+  "type": "object"
+},
+  RuntimeBindingView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeSessionOwnershipView": {
+      "enum": [
+        "readWrite",
+        "readOnly",
+        "active"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "backendKind": {
+      "type": "string"
+    },
+    "bindingRevision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "nativeKind": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ownership": {
+      "$ref": "#/definitions/RuntimeSessionOwnershipView"
+    },
+    "profileFingerprint": {
+      "type": "string"
+    },
+    "runtimeRef": {
+      "type": "string"
+    },
+    "sessionHandle": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "backendKind",
+    "bindingRevision",
+    "cwd",
+    "ownership",
+    "profileFingerprint",
+    "runtimeRef",
+    "threadId"
+  ],
+  "title": "RuntimeBindingView",
+  "type": "object"
+},
+  RuntimeContextReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "BackendDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RuntimeAccountRateLimitsView": {
+      "properties": {
+        "rateLimits": {
+          "$ref": "#/definitions/RuntimeRateLimitSnapshotView"
+        },
+        "rateLimitsByLimitId": {
+          "additionalProperties": {
+            "$ref": "#/definitions/RuntimeRateLimitSnapshotView"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "resetCreditsAvailable": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "rateLimits"
+      ],
+      "type": "object"
+    },
+    "RuntimeBindingView": {
+      "properties": {
+        "backendKind": {
+          "type": "string"
+        },
+        "bindingRevision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "nativeKind": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownership": {
+          "$ref": "#/definitions/RuntimeSessionOwnershipView"
+        },
+        "profileFingerprint": {
+          "type": "string"
+        },
+        "runtimeRef": {
+          "type": "string"
+        },
+        "sessionHandle": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "backendKind",
+        "bindingRevision",
+        "cwd",
+        "ownership",
+        "profileFingerprint",
+        "runtimeRef",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "RuntimeCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "stability"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlChoiceView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlDependencyView": {
+      "properties": {
+        "controlId": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "controlId",
+        "value"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlDescriptorView": {
+      "properties": {
+        "capabilityRevision": {
+          "type": "string"
+        },
+        "channelSafe": {
+          "default": false,
+          "type": "boolean"
+        },
+        "choices": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeControlChoiceView"
+          },
+          "type": "array"
+        },
+        "currentValue": {
+          "default": null
+        },
+        "dependsOn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeControlDependencyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/RuntimeControlStateView"
+        }
+      },
+      "required": [
+        "capabilityRevision",
+        "id",
+        "label",
+        "state"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlStateView": {
+      "enum": [
+        "runtimeDefault",
+        "readOnlyCurrent",
+        "selectable"
+      ],
+      "type": "string"
+    },
+    "RuntimeCreditsSnapshotView": {
+      "properties": {
+        "balance": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasCredits": {
+          "type": "boolean"
+        },
+        "unlimited": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hasCredits",
+        "unlimited"
+      ],
+      "type": "object"
+    },
+    "RuntimeGoalStatusView": {
+      "enum": [
+        "active",
+        "paused",
+        "blocked",
+        "usage_limited",
+        "budget_limited",
+        "complete"
+      ],
+      "type": "string"
+    },
+    "RuntimeGoalView": {
+      "properties": {
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "objective": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeGoalStatusView"
+        },
+        "timeUsedSeconds": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "tokenBudget": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokensUsed": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "createdAt",
+        "objective",
+        "status",
+        "timeUsedSeconds",
+        "tokensUsed",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "RuntimeHealthView": {
+      "properties": {
+        "checkedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "commandPath": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeHistoryFidelityView": {
+      "enum": [
+        "full",
+        "summary",
+        "partial"
+      ],
+      "type": "string"
+    },
+    "RuntimeProfileView": {
+      "properties": {
+        "approvalMode": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "backendRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeCapabilityView"
+          },
+          "type": "array"
+        },
+        "capabilityRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "command": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "configured": {
+          "default": false,
+          "type": "boolean"
+        },
+        "defaultAgent": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultMode": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultModel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BackendDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "envKeys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "health": {
+          "$ref": "#/definitions/RuntimeHealthView"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "optionKeys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "profileRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "",
+          "type": "string"
+        },
+        "readinessStages": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeReadinessStageView"
+          },
+          "type": "array"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "sandbox": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceTargets": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BackendConfigTarget"
+          },
+          "type": "array"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeStabilityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workspaceRoots": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "generated",
+        "health",
+        "id",
+        "label",
+        "runtime"
+      ],
+      "type": "object"
+    },
+    "RuntimeRateLimitReachedTypeView": {
+      "enum": [
+        "rate_limit_reached",
+        "workspace_owner_credits_depleted",
+        "workspace_member_credits_depleted",
+        "workspace_owner_usage_limit_reached",
+        "workspace_member_usage_limit_reached"
+      ],
+      "type": "string"
+    },
+    "RuntimeRateLimitSnapshotView": {
+      "properties": {
+        "credits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeCreditsSnapshotView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "individualLimit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeSpendControlLimitSnapshotView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limitId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limitName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "planType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "primary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitWindowView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rateLimitReachedType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitReachedTypeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "secondary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitWindowView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeRateLimitWindowView": {
+      "properties": {
+        "resetsAt": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usedPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "windowDurationMins": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "usedPercent"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStageView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeReadinessStatusView"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionOwnershipView": {
+      "enum": [
+        "readWrite",
+        "readOnly",
+        "active"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionView": {
+      "properties": {
+        "actions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "archived": {
+          "default": false,
+          "type": "boolean"
+        },
+        "dedupKey": {
+          "default": "",
+          "type": "string"
+        },
+        "fidelity": {
+          "$ref": "#/definitions/RuntimeHistoryFidelityView"
+        },
+        "ownership": {
+          "$ref": "#/definitions/RuntimeSessionOwnershipView"
+        },
+        "parentThreadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionHandle": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fidelity",
+        "ownership",
+        "sessionHandle"
+      ],
+      "type": "object"
+    },
+    "RuntimeSpendControlLimitSnapshotView": {
+      "properties": {
+        "limit": {
+          "type": "string"
+        },
+        "remainingPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "used": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit",
+        "remainingPercent",
+        "resetsAt",
+        "used"
+      ],
+      "type": "object"
+    },
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "accountRateLimits": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeAccountRateLimitsView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "activeSession": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeSessionView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "binding": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeBindingView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "capabilities": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeCapabilityView"
+      },
+      "type": "array"
+    },
+    "children": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeSessionView"
+      },
+      "type": "array"
+    },
+    "controls": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeControlDescriptorView"
+      },
+      "type": "array"
+    },
+    "goal": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeGoalView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "profiles": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeProfileView"
+      },
+      "type": "array"
+    },
+    "runtimeRef": {
+      "type": "string"
+    },
+    "selectionState": {
+      "type": "string"
+    },
+    "stability": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "runtimeRef",
+    "selectionState"
+  ],
+  "title": "RuntimeContextReadResult",
+  "type": "object"
+},
+  RuntimeControlSetResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeControlChoiceView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlDependencyView": {
+      "properties": {
+        "controlId": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "controlId",
+        "value"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlDescriptorView": {
+      "properties": {
+        "capabilityRevision": {
+          "type": "string"
+        },
+        "channelSafe": {
+          "default": false,
+          "type": "boolean"
+        },
+        "choices": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeControlChoiceView"
+          },
+          "type": "array"
+        },
+        "currentValue": {
+          "default": null
+        },
+        "dependsOn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeControlDependencyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/RuntimeControlStateView"
+        }
+      },
+      "required": [
+        "capabilityRevision",
+        "id",
+        "label",
+        "state"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlStateView": {
+      "enum": [
+        "runtimeDefault",
+        "readOnlyCurrent",
+        "selectable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "bindingRevision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "changed": {
+      "type": "boolean"
+    },
+    "control": {
+      "$ref": "#/definitions/RuntimeControlDescriptorView"
+    },
+    "observed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "bindingRevision",
+    "changed",
+    "control",
+    "observed"
+  ],
+  "title": "RuntimeControlSetResult",
+  "type": "object"
+},
+  RuntimeAuthActionResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "message": {
+      "type": "string"
+    },
+    "output": {
+      "default": null
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "accepted",
+    "message",
+    "status"
+  ],
+  "title": "RuntimeAuthActionResult",
+  "type": "object"
+},
+  RuntimeGoalStatusView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "active",
+    "paused",
+    "blocked",
+    "usage_limited",
+    "budget_limited",
+    "complete"
+  ],
+  "title": "RuntimeGoalStatusView",
+  "type": "string"
+},
+  RuntimeGoalView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeGoalStatusView": {
+      "enum": [
+        "active",
+        "paused",
+        "blocked",
+        "usage_limited",
+        "budget_limited",
+        "complete"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "createdAt": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "objective": {
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/definitions/RuntimeGoalStatusView"
+    },
+    "timeUsedSeconds": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "tokenBudget": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "tokensUsed": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "updatedAt": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "createdAt",
+    "objective",
+    "status",
+    "timeUsedSeconds",
+    "tokensUsed",
+    "updatedAt"
+  ],
+  "title": "RuntimeGoalView",
+  "type": "object"
+},
+  RuntimeGoalReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeGoalStatusView": {
+      "enum": [
+        "active",
+        "paused",
+        "blocked",
+        "usage_limited",
+        "budget_limited",
+        "complete"
+      ],
+      "type": "string"
+    },
+    "RuntimeGoalView": {
+      "properties": {
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "objective": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeGoalStatusView"
+        },
+        "timeUsedSeconds": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "tokenBudget": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokensUsed": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "createdAt",
+        "objective",
+        "status",
+        "timeUsedSeconds",
+        "tokensUsed",
+        "updatedAt"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "bindingRevision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "goal": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeGoalView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "runtimeRef": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bindingRevision",
+    "runtimeRef"
+  ],
+  "title": "RuntimeGoalReadResult",
+  "type": "object"
+},
+  RuntimeGoalSetResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeGoalStatusView": {
+      "enum": [
+        "active",
+        "paused",
+        "blocked",
+        "usage_limited",
+        "budget_limited",
+        "complete"
+      ],
+      "type": "string"
+    },
+    "RuntimeGoalView": {
+      "properties": {
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "objective": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeGoalStatusView"
+        },
+        "timeUsedSeconds": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "tokenBudget": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokensUsed": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "createdAt",
+        "objective",
+        "status",
+        "timeUsedSeconds",
+        "tokensUsed",
+        "updatedAt"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "bindingRevision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "goal": {
+      "$ref": "#/definitions/RuntimeGoalView"
+    },
+    "runtimeRef": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bindingRevision",
+    "goal",
+    "runtimeRef"
+  ],
+  "title": "RuntimeGoalSetResult",
+  "type": "object"
+},
+  RuntimeGoalClearResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "bindingRevision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "cleared": {
+      "type": "boolean"
+    },
+    "runtimeRef": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bindingRevision",
+    "cleared",
+    "runtimeRef"
+  ],
+  "title": "RuntimeGoalClearResult",
+  "type": "object"
+},
+  RuntimeRateLimitReachedTypeView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "rate_limit_reached",
+    "workspace_owner_credits_depleted",
+    "workspace_member_credits_depleted",
+    "workspace_owner_usage_limit_reached",
+    "workspace_member_usage_limit_reached"
+  ],
+  "title": "RuntimeRateLimitReachedTypeView",
+  "type": "string"
+},
+  RuntimeRateLimitWindowView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "resetsAt": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "usedPercent": {
+      "format": "int32",
+      "type": "integer"
+    },
+    "windowDurationMins": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "usedPercent"
+  ],
+  "title": "RuntimeRateLimitWindowView",
+  "type": "object"
+},
+  RuntimeCreditsSnapshotView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "balance": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hasCredits": {
+      "type": "boolean"
+    },
+    "unlimited": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "hasCredits",
+    "unlimited"
+  ],
+  "title": "RuntimeCreditsSnapshotView",
+  "type": "object"
+},
+  RuntimeSpendControlLimitSnapshotView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "limit": {
+      "type": "string"
+    },
+    "remainingPercent": {
+      "format": "int32",
+      "type": "integer"
+    },
+    "resetsAt": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "used": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "limit",
+    "remainingPercent",
+    "resetsAt",
+    "used"
+  ],
+  "title": "RuntimeSpendControlLimitSnapshotView",
+  "type": "object"
+},
+  RuntimeRateLimitSnapshotView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeCreditsSnapshotView": {
+      "properties": {
+        "balance": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasCredits": {
+          "type": "boolean"
+        },
+        "unlimited": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hasCredits",
+        "unlimited"
+      ],
+      "type": "object"
+    },
+    "RuntimeRateLimitReachedTypeView": {
+      "enum": [
+        "rate_limit_reached",
+        "workspace_owner_credits_depleted",
+        "workspace_member_credits_depleted",
+        "workspace_owner_usage_limit_reached",
+        "workspace_member_usage_limit_reached"
+      ],
+      "type": "string"
+    },
+    "RuntimeRateLimitWindowView": {
+      "properties": {
+        "resetsAt": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usedPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "windowDurationMins": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "usedPercent"
+      ],
+      "type": "object"
+    },
+    "RuntimeSpendControlLimitSnapshotView": {
+      "properties": {
+        "limit": {
+          "type": "string"
+        },
+        "remainingPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "used": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit",
+        "remainingPercent",
+        "resetsAt",
+        "used"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "credits": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeCreditsSnapshotView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "individualLimit": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeSpendControlLimitSnapshotView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "limitId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limitName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "planType": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "primary": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeRateLimitWindowView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "rateLimitReachedType": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeRateLimitReachedTypeView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "secondary": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeRateLimitWindowView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "RuntimeRateLimitSnapshotView",
+  "type": "object"
+},
+  RuntimeAccountRateLimitsView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeCreditsSnapshotView": {
+      "properties": {
+        "balance": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasCredits": {
+          "type": "boolean"
+        },
+        "unlimited": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hasCredits",
+        "unlimited"
+      ],
+      "type": "object"
+    },
+    "RuntimeRateLimitReachedTypeView": {
+      "enum": [
+        "rate_limit_reached",
+        "workspace_owner_credits_depleted",
+        "workspace_member_credits_depleted",
+        "workspace_owner_usage_limit_reached",
+        "workspace_member_usage_limit_reached"
+      ],
+      "type": "string"
+    },
+    "RuntimeRateLimitSnapshotView": {
+      "properties": {
+        "credits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeCreditsSnapshotView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "individualLimit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeSpendControlLimitSnapshotView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limitId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limitName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "planType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "primary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitWindowView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rateLimitReachedType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitReachedTypeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "secondary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitWindowView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeRateLimitWindowView": {
+      "properties": {
+        "resetsAt": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usedPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "windowDurationMins": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "usedPercent"
+      ],
+      "type": "object"
+    },
+    "RuntimeSpendControlLimitSnapshotView": {
+      "properties": {
+        "limit": {
+          "type": "string"
+        },
+        "remainingPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "used": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit",
+        "remainingPercent",
+        "resetsAt",
+        "used"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "rateLimits": {
+      "$ref": "#/definitions/RuntimeRateLimitSnapshotView"
+    },
+    "rateLimitsByLimitId": {
+      "additionalProperties": {
+        "$ref": "#/definitions/RuntimeRateLimitSnapshotView"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "resetCreditsAvailable": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "rateLimits"
+  ],
+  "title": "RuntimeAccountRateLimitsView",
+  "type": "object"
+},
+  RuntimeAccountRateLimitsReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeAccountRateLimitsView": {
+      "properties": {
+        "rateLimits": {
+          "$ref": "#/definitions/RuntimeRateLimitSnapshotView"
+        },
+        "rateLimitsByLimitId": {
+          "additionalProperties": {
+            "$ref": "#/definitions/RuntimeRateLimitSnapshotView"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "resetCreditsAvailable": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "rateLimits"
+      ],
+      "type": "object"
+    },
+    "RuntimeCreditsSnapshotView": {
+      "properties": {
+        "balance": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasCredits": {
+          "type": "boolean"
+        },
+        "unlimited": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hasCredits",
+        "unlimited"
+      ],
+      "type": "object"
+    },
+    "RuntimeRateLimitReachedTypeView": {
+      "enum": [
+        "rate_limit_reached",
+        "workspace_owner_credits_depleted",
+        "workspace_member_credits_depleted",
+        "workspace_owner_usage_limit_reached",
+        "workspace_member_usage_limit_reached"
+      ],
+      "type": "string"
+    },
+    "RuntimeRateLimitSnapshotView": {
+      "properties": {
+        "credits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeCreditsSnapshotView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "individualLimit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeSpendControlLimitSnapshotView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limitId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limitName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "planType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "primary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitWindowView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rateLimitReachedType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitReachedTypeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "secondary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitWindowView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeRateLimitWindowView": {
+      "properties": {
+        "resetsAt": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usedPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "windowDurationMins": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "usedPercent"
+      ],
+      "type": "object"
+    },
+    "RuntimeSpendControlLimitSnapshotView": {
+      "properties": {
+        "limit": {
+          "type": "string"
+        },
+        "remainingPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "used": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit",
+        "remainingPercent",
+        "resetsAt",
+        "used"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "accountRateLimits": {
+      "$ref": "#/definitions/RuntimeAccountRateLimitsView"
+    },
+    "runtimeRef": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "accountRateLimits",
+    "runtimeRef"
+  ],
+  "title": "RuntimeAccountRateLimitsReadResult",
+  "type": "object"
+},
+  RuntimeRetryClassView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "never",
+    "userAction",
+    "safeRetry",
+    "reconnect",
+    "unknownDelivery"
+  ],
+  "title": "RuntimeRetryClassView",
+  "type": "string"
+},
+  RuntimeErrorView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeRetryClassView": {
+      "enum": [
+        "never",
+        "userAction",
+        "safeRetry",
+        "reconnect",
+        "unknownDelivery"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "code": {
+      "type": "string"
+    },
+    "diagnosticRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "message": {
+      "type": "string"
+    },
+    "retryClass": {
+      "$ref": "#/definitions/RuntimeRetryClassView"
+    },
+    "stage": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "message",
+    "retryClass",
+    "stage"
+  ],
+  "title": "RuntimeErrorView",
   "type": "object"
 },
   RuntimeOptionsParams: {

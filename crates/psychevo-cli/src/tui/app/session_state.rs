@@ -400,7 +400,7 @@ impl TuiApp {
             return;
         };
         let pending = events.into();
-        self.apply_pending_owned_fullscreen_stream_events(ui, Some(session_id), pending);
+        self.apply_pending_owned_fullscreen_live_events(ui, Some(session_id), pending);
         ui.follow_transcript_if_needed();
     }
 

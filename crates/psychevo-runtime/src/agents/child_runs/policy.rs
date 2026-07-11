@@ -72,14 +72,12 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     }
     let hook_runtime = child_hook_runtime(&child)?;
     if let Some(runtime) = &hook_runtime {
-        let outcome = runtime.run_subagent_start(
-            &json!({
-                "id": child.id.clone(),
-                "agent": child.agent.name.clone(),
-                "child_session_id": child_session.clone(),
-                "parent_session_id": child.context.parent_session_id.clone(),
-            }),
-        );
+        let outcome = runtime.run_subagent_start(&json!({
+            "id": child.id.clone(),
+            "agent": child.agent.name.clone(),
+            "child_session_id": child_session.clone(),
+            "parent_session_id": child.context.parent_session_id.clone(),
+        }));
         if let Some(reason) = outcome.stop_reason {
             update_run_failed(&child.id, &reason);
             let _ = child
@@ -126,8 +124,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         Some(runtime) => permission_runtime.with_hook_runtime(runtime),
         None => permission_runtime,
     };
-    let permission_runtime =
-        permission_runtime.with_sandbox(child.context.sandbox_policy.clone(), sandbox_grants.clone());
+    let permission_runtime = permission_runtime
+        .with_sandbox(child.context.sandbox_policy.clone(), sandbox_grants.clone());
     let mut mcp_manager = crate::mcp::McpConnectionManager::default();
     let mcp_snapshot = mcp_manager
         .snapshot(
@@ -338,14 +336,12 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 .store()
                 .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
             if let Some(runtime) = &hook_runtime {
-                let _ = runtime.run_subagent_stop(
-                    &json!({
-                        "id": child.id.clone(),
-                        "agent": child.agent.name.clone(),
-                        "outcome": "failed",
-                        "error": err.to_string(),
-                    }),
-                );
+                let _ = runtime.run_subagent_stop(&json!({
+                    "id": child.id.clone(),
+                    "agent": child.agent.name.clone(),
+                    "outcome": "failed",
+                    "error": err.to_string(),
+                }));
             }
             return Err(err.into());
         }
@@ -357,14 +353,12 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         .find_map(assistant_text)
         .unwrap_or_default();
     if let Some(runtime) = &hook_runtime {
-        let stop = runtime.run_subagent_stop(
-            &json!({
-                "id": child.id.clone(),
-                "agent": child.agent.name.clone(),
-                "outcome": completion.outcome.as_str(),
-                "final_answer": final_answer.clone(),
-            }),
-        );
+        let stop = runtime.run_subagent_stop(&json!({
+            "id": child.id.clone(),
+            "agent": child.agent.name.clone(),
+            "outcome": completion.outcome.as_str(),
+            "final_answer": final_answer.clone(),
+        }));
         if let Some(reason) = stop.block_reason {
             update_run_failed(&child.id, &reason);
             let _ = child
@@ -443,12 +437,15 @@ struct ExternalAgentSessionStart<'a> {
     tool_call_id: &'a str,
     child_session_id: &'a str,
     spawn_depth_remaining: u8,
+    team_member_id: Option<&'a str>,
+    runtime_ref: Option<&'a str>,
 }
 
 fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
     let Some(stream) = &event.context.stream_events else {
         return;
     };
+    let optional_contributions_omitted = optional_external_agent_contributions(event.agent);
     stream(RunStreamEvent::value(json!({
         "type": "agent_session_start",
         "tool_call_id": event.tool_call_id,
@@ -467,9 +464,12 @@ fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
         "background": false,
         "role": invocation_role_str(AgentInvocationRole::Subagent),
         "backend_ref": event.agent.backend.as_ref().map(|backend| backend.name.clone()),
+        "runtime_ref": event.runtime_ref,
+        "optional_contributions_omitted": optional_contributions_omitted,
         "team_run_id": event.context.active_team.as_ref().map(|team| team.team_run_id.clone()),
         "mission_run_id": event.context.active_team.as_ref().and_then(|team| team.mission_run_id.clone()),
         "team_name": event.context.active_team.as_ref().map(|team| team.team_name.clone()),
+        "team_member_id": event.team_member_id,
         "effective_max_spawn_depth": event.spawn_depth_remaining,
     })));
 }
@@ -666,12 +666,18 @@ pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value 
             .entry("model_metadata".to_string())
             .or_insert_with(|| context.model_metadata.public_json());
     }
-    if let Some(team) = input.context.and_then(|context| context.active_team.as_ref()) {
+    if let Some(team) = input
+        .context
+        .and_then(|context| context.active_team.as_ref())
+    {
         object.insert(
             "teamRunId".to_string(),
             Value::String(team.team_run_id.clone()),
         );
-        object.insert("teamName".to_string(), Value::String(team.team_name.clone()));
+        object.insert(
+            "teamName".to_string(),
+            Value::String(team.team_name.clone()),
+        );
         if let Some(mission_run_id) = &team.mission_run_id {
             object.insert(
                 "missionRunId".to_string(),
@@ -690,10 +696,48 @@ pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value 
             }),
         );
     }
+    let team_member = input.team_member_id.and_then(|member_id| {
+        input
+            .context
+            .and_then(|context| context.active_team.as_ref())
+            .and_then(|team| team.member(member_id))
+    });
     if let Some(team_member_id) = input.team_member_id {
         object.insert(
             "teamMemberId".to_string(),
             Value::String(team_member_id.to_string()),
+        );
+    }
+    if let Some(runtime_ref) = team_member.and_then(|member| member.runtime_ref.as_ref()) {
+        object.insert("runtimeRef".to_string(), Value::String(runtime_ref.clone()));
+    }
+    if let Some(member) = team_member
+        && !member.runtime_options.is_empty()
+    {
+        object.insert("runtimeOptions".to_string(), json!(member.runtime_options));
+    }
+    if let Some(revision) = team_member.and_then(|member| member.runtime_profile_revision) {
+        object.insert("runtimeProfileRevision".to_string(), Value::from(revision));
+    }
+    let optional_contributions_omitted =
+        if external_agent_runtime_ref(input.agent, team_member).is_some() {
+            optional_external_agent_contributions(input.agent)
+        } else {
+            Vec::new()
+        };
+    if !optional_contributions_omitted.is_empty() {
+        object.insert(
+            "optionalContributionsOmitted".to_string(),
+            json!(optional_contributions_omitted),
+        );
+        object.insert(
+            "contributionDiagnostics".to_string(),
+            json!(optional_contributions_omitted
+                .iter()
+                .map(|name| format!(
+                    "optional Agent Definition {name} contribution omitted by external runtime delegate"
+                ))
+                .collect::<Vec<_>>()),
         );
     }
     object.insert(
@@ -708,6 +752,10 @@ pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value 
             "mission_run_id": input.context.and_then(|context| context.active_team.as_ref()).and_then(|team| team.mission_run_id.clone()),
             "team_name": input.context.and_then(|context| context.active_team.as_ref()).map(|team| team.team_name.clone()),
             "team_member_id": input.team_member_id,
+            "runtime_ref": team_member.and_then(|member| member.runtime_ref.clone()),
+            "runtime_options": team_member.map(|member| member.runtime_options.clone()).unwrap_or_default(),
+            "runtime_profile_revision": team_member.and_then(|member| member.runtime_profile_revision),
+            "optional_contributions_omitted": optional_contributions_omitted,
             "source": input.agent.source.as_str(),
             "path": input.agent.file_path.clone(),
             "parent_session_id": input.parent_session_id,

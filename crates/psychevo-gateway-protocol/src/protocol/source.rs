@@ -123,6 +123,7 @@ impl GatewayThreadSelector {
 pub enum BackendKind {
     Psychevo,
     PeerAgent,
+    Runtime,
 }
 
 impl BackendKind {
@@ -130,6 +131,7 @@ impl BackendKind {
         match self {
             Self::Psychevo => "psychevo",
             Self::PeerAgent => "peer_agent",
+            Self::Runtime => "runtime",
         }
     }
 }
@@ -141,7 +143,7 @@ pub struct GatewayBackendInfo {
     #[serde(default, rename = "runtimeRef", skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub runtime_ref: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "sessionHandle")]
     pub native_id: Option<String>,
 }
 
@@ -177,6 +179,14 @@ pub struct GatewayTurn {
 #[serde(rename_all = "camelCase")]
 pub struct GatewayTurnError {
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    #[serde(default, rename = "retryClass", skip_serializing_if = "Option::is_none")]
+    pub retry_class: Option<String>,
+    #[serde(default, rename = "diagnosticRef", skip_serializing_if = "Option::is_none")]
+    pub diagnostic_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

@@ -155,6 +155,7 @@ mod tests {
                 model: None,
                 tool_policy: psychevo_runtime::AgentToolPolicy::default(),
                 skills: Vec::new(),
+                optional_contributions: BTreeSet::new(),
                 hooks: None,
                 background: None,
                 initial_prompt: None,

@@ -181,8 +181,33 @@ platform-specific runtime file semantics.
 
 Permission approvals and Ask requests route through the originating surface.
 When a platform cannot render buttons or cards, the channel degrades to bounded
-text prompts with explicit reply commands. The approval meaning stays the same
-as other user surfaces.
+text prompts with explicit reply commands. Each prompt uses a short-lived,
+one-use, opaque token held in Gateway memory and scoped to the originating
+connection and remote source lane. The reply never contains the underlying
+Gateway action id or a runtime-native id. The approval meaning stays the same
+as other user surfaces, but Channels expose only allow once, deny, answer, and
+cancel; session or durable grants require a richer surface.
+
+## Runtime Profile Lane Semantics
+
+Channel Runtime Profile choices come from cached runtime/context/read. Adapters
+must not hard-code native, Codex, OpenCode, or raw ACP backend ids.
+
+Before the first thread, /profile use stores a lane draft preference. On a bound
+lane, /profile use creates and binds a new public thread while preserving the
+old thread. /profile sessions lists opaque handles for the current Runtime
+Profile, and /profile resume accepts only one of those handles; raw native and
+Gateway session ids are never rendered. An active native session is read-only
+and the Channel directs takeover to Workbench or Fork.
+
+Only controls declared Channel-safe by the selected runtime are rendered.
+Otherwise the response says Uses runtime default. Runtime permission and
+question replies use expiring short tokens and expose allow once, deny, answer,
+or cancel only. Durable allow is not a Channel action.
+
+Outbound runtime delivery contains necessary progress, attention, and final
+summary only. It excludes raw native ids and events, child transcript dumps,
+and Workbench multi-pane state.
 
 ## Outbound Delivery
 

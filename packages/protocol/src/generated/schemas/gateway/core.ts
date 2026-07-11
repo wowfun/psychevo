@@ -115,7 +115,8 @@ export const gatewayCoreSchemas = {
     "BackendKind": {
       "enum": [
         "psychevo",
-        "peerAgent"
+        "peerAgent",
+        "runtime"
       ],
       "type": "string"
     },
@@ -124,14 +125,14 @@ export const gatewayCoreSchemas = {
         "kind": {
           "$ref": "#/definitions/BackendKind"
         },
-        "nativeId": {
-          "default": null,
+        "runtimeRef": {
           "type": [
             "string",
             "null"
           ]
         },
-        "runtimeRef": {
+        "sessionHandle": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -171,8 +172,32 @@ export const gatewayCoreSchemas = {
   "definitions": {
     "GatewayTurnError": {
       "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message": {
           "type": "string"
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

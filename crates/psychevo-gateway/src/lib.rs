@@ -8,22 +8,29 @@ mod transcript;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::BoxFuture;
 use psychevo_runtime::{
-    AbortSignal, AgentDiscoveryOptions, AgentEntrypoint, ApprovalHandler, ClarifyAnswer,
-    ClarifyResponse, ClarifyResult, Error, ExternalAgentDelegate, ExternalAgentDelegateRequest,
-    ExternalAgentDelegateResult, GatewayActivityClaimInput, GatewayActivityRecord,
-    GatewayControlCommandInput, GatewayLiveSnapshotInput, GatewaySourceBindingInput,
-    GatewayTurnTerminalInput, ImageInput, Outcome, PermissionApprovalDecision,
-    PermissionApprovalOutcome, PermissionApprovalRequest, RunControl, RunControlHandle, RunOptions,
-    RunResult, RunStreamEvent, RunStreamSink, StateRuntime, UserShellContextOptions,
+    AbortSignal, AgentContribution, AgentDiscoveryOptions, AgentEntrypoint, ApprovalHandler,
+    ClarifyAnswer, ClarifyResponse, ClarifyResult, Error, ExternalAgentDelegate,
+    ExternalAgentDelegateRequest, ExternalAgentDelegateResult, GatewayActivityClaimInput,
+    GatewayActivityRecord, GatewayControlCommandInput, GatewayLiveSnapshotInput,
+    GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord,
+    GatewayRuntimeBindingStatus, GatewaySourceLaneInput, GatewayTurnTerminalInput, ImageInput,
+    Outcome, PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
+    RunControl, RunControlHandle, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
+    RuntimeProfileConfig, RuntimeProfileKind, StateRuntime, UserShellContextOptions,
     UserShellOptions, UserShellResult, discover_agents, load_agent_backend_configs,
-    resolve_agent_definition, resolve_skills_home, run_control, run_live, run_live_streaming,
-    run_live_streaming_controlled, run_user_shell_command_streaming_controlled,
+    load_runtime_profile_configs, resolve_agent_definition, resolve_skills_home, run_control,
+    run_live, run_live_streaming, run_live_streaming_controlled,
+    run_user_shell_command_streaming_controlled,
+};
+use psychevo_runtime_host::{
+    CodexRuntimeModule, OpenCodeRuntimeModule, RuntimeHost, RuntimeKind, RuntimeSnapshot,
+    SnapshotQuery, SnapshotScope,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -46,6 +53,16 @@ pub type GatewayEventSink = Arc<dyn Fn(GatewayEvent) + Send + Sync>;
 
 pub(crate) const ACP_PEER_METADATA_KEY: &str = "peer_agent";
 
+fn default_runtime_host() -> RuntimeHost {
+    let host = RuntimeHost::new();
+    host.register(RuntimeKind::Codex, Arc::new(CodexRuntimeModule::new()));
+    host.register(
+        RuntimeKind::OpenCode,
+        Arc::new(OpenCodeRuntimeModule::new()),
+    );
+    host
+}
+
 fn gateway_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -57,11 +74,13 @@ include!("gateway/state.rs");
 
 include!("gateway/public_api.rs");
 include!("gateway/source_bindings.rs");
+include!("gateway/agent_pairing.rs");
 include!("gateway/turn_shell.rs");
 include!("gateway/active_queue.rs");
 include!("gateway/durable_activity.rs");
 
 include!("gateway/peer_runtime.rs");
+include!("gateway/runtime_host.rs");
 include!("gateway/activity_permission.rs");
 include!("gateway/backend_delegate.rs");
 include!("gateway/stream_input.rs");
@@ -75,7 +94,9 @@ mod tests {
 
     include!("gateway/tests/support_peer.rs");
     include!("gateway/tests/source_lanes.rs");
+    include!("gateway/tests/compaction.rs");
     include!("gateway/tests/control_runtime.rs");
+    include!("gateway/tests/runtime_host.rs");
     include!("gateway/tests/acp_peer_sessions.rs");
     include!("gateway/tests/acp_peer_streams.rs");
 }

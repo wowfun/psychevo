@@ -7,7 +7,8 @@ export const serverNotificationTurnResultSchema = {
     "BackendKind": {
       "enum": [
         "psychevo",
-        "peerAgent"
+        "peerAgent",
+        "runtime"
       ],
       "type": "string"
     },
@@ -16,14 +17,14 @@ export const serverNotificationTurnResultSchema = {
         "kind": {
           "$ref": "#/definitions/BackendKind"
         },
-        "nativeId": {
-          "default": null,
+        "runtimeRef": {
           "type": [
             "string",
             "null"
           ]
         },
-        "runtimeRef": {
+        "sessionHandle": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -113,8 +114,32 @@ export const serverNotificationTurnResultSchema = {
     },
     "GatewayTurnError": {
       "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message": {
           "type": "string"
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -230,6 +255,7 @@ export const serverNotificationTurnResultSchema = {
         "agent",
         "mailbox",
         "status",
+        "compaction",
         "diff",
         "artifact"
       ],

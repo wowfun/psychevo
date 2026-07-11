@@ -59,8 +59,10 @@ Gateway exposes a native Thread/Turn model. For Psychevo-native threads,
 `GatewayThread.id` is the runtime session id. For Runtime Profiles backed by
 Codex, OpenCode, ACP, or future runtimes, `GatewayThread.id` remains the public
 Psychevo thread id. Gateway records `runtimeRef`, backend identity, and optional
-`backend_native_id`, so peer/direct runtimes can keep their native session
-identifiers without changing the public thread id contract.
+internal native-session identity in the immutable runtime binding. Public
+thread/backend/session projections expose only the Psychevo thread id and an
+opaque Gateway session handle; raw adapter-native ids never cross the product
+contract.
 
 Gateway HTTP session artifact downloads require an authenticated caller. Browser
 surfaces may use the launch-created browser session cookie; Desktop and other
@@ -71,7 +73,10 @@ Source identity is distinct from thread identity. A source describes the
 transport or adapter origin of input, such as CLI run, TUI session, ACP actor,
 Web client, desktop window, or IM chat/thread. Gateway stores a deterministic
 `source_key`, raw source identity, an optional visible label, the bound thread
-id, backend identity, and lineage metadata for reset/rebind operations.
+id, optional draft Runtime Profile, and lineage metadata for reset/rebind
+operations. Backend/native identity belongs only to the thread runtime binding;
+legacy source columns are migration evidence and are cleared on every new lane
+write.
 
 Every source declares a lifetime:
 
@@ -166,6 +171,11 @@ parent thread id. The parent Agent entry may still be updated by parent-owned
 Agent lifecycle/tool events, but scoped child transcript entries remain child
 thread entries so clients can route or retain them without leaking them into
 the parent transcript.
+If an open child edge is executing inside a non-stale parent activity, a
+`thread/read` for that child derives a running child view from the parent turn
+and replays retained live snapshots whose thread id is the child id. The parent
+activity remains bound to the parent thread. Closed edges, terminal parent
+activities, and expired leases must not revive retained child overlays.
 Gateway is the shared display projector for Agent invocation blocks exposed to
 GUI and TUI clients. `spawn_agent` begin/end events, `agent_session_start`,
 committed history, and durable parent/child edges upsert one
@@ -392,10 +402,10 @@ Multiple authenticated local clients may select different `cwd` values on the
 same profile-global session; client connection ids are transport state and do
 not affect source continuity.
 
-Gateway thread ids remain Psychevo-local identifiers. Peer backends store their
-native session id in backend metadata and may expose a display handle such as
-`acp:<backend-id>:<native-session-id>` for imported sessions, debugging, and
-search. Public control APIs continue to use `GatewayThreadSelector`.
+Gateway thread ids remain Psychevo-local identifiers. Runtime bindings store
+native session ids internally. Imported-session UX and public control APIs use
+opaque Gateway session handles or `GatewayThreadSelector`; they never compose a
+display value from the raw native id.
 
 Source keys should avoid exposing raw local paths. A cwd source key uses a
 stable hash of the canonical cwd, while raw identity metadata may retain
@@ -540,6 +550,37 @@ completed entry to a `Reasoning` block with
 kind/body replacement in place by id, not keep both the provisional assistant
 row and the completed preamble row. Non-tool assistant completions remain
 assistant text entries and must never be projected into a Thinking row.
+
+## Runtime Host And Immutable Bindings
+
+Gateway owns public thread identity and crosses the direct-runtime seam through
+the three-method psychevo-runtime-host interface defined by
+[052 Agent Runtimes](../052-agent-runtimes/spec.md). It does not expose an
+adapter command bus or keep adding runtime-specific methods to GatewayBackend.
+
+Before Gateway delivers a first prompt to a non-native runtime, it persists the
+thread binding, including runtimeRef, backend/native kinds, cwd, profile
+fingerprint, the complete effective execution/safety Profile snapshot, adapter
+revision, ownership, and binding revision. The binding is immutable. Source
+lanes may point to a new thread, but they cannot rewrite an existing thread's
+runtime identity.
+
+runtime/context/read is the coherent read interface for Composer and Channels.
+It returns draft or bound selection, cached Profile choices and readiness,
+three-state controls, active native-session context, and revisions. It is
+cache-only and cannot spawn or contact a provider.
+
+Runtime turns preserve the normal Gateway lifecycle and interaction model.
+Every accepted turn receives exactly one terminal. Process exit closes waiters;
+uncertain delivery is not retried; direct failures never fall back to native.
+Runtime errors and interactions carry typed stage, retry, diagnostic, runtime,
+thread, and optional child origin. RuntimeStateChanged and RuntimeChildChanged
+are normalized events; raw JSON-RPC, HTTP, SSE, ids, and secrets remain private.
+
+Stable runtime-native children receive read-only public child bindings and lazy
+history. They are navigable through the same child-thread projection but are not
+controllable through send, steer, stop, or agent/control unless a future
+runtime contract explicitly proves that capability.
 
 ## IM Adapter Boundary
 

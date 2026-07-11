@@ -316,6 +316,13 @@ export const gatewayAgentRequestSchemas = {
     "name": {
       "type": "string"
     },
+    "optionalContributions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "rawMarkdown": {
       "default": null,
       "type": [
@@ -795,6 +802,27 @@ export const gatewayAgentRequestSchemas = {
         "string",
         "null"
       ]
+    },
+    "runtimeOptions": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "runtimeProfileRevision": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtimeRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -901,6 +929,27 @@ export const gatewayAgentRequestSchemas = {
           ]
         },
         "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeOptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "runtimeProfileRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeRef": {
           "default": null,
           "type": [
             "string",

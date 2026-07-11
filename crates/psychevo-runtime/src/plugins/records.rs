@@ -27,52 +27,71 @@ pub(crate) fn select_record<'a>(
             "plugin selector must not be empty".to_string(),
         ));
     }
-    let matches = if let Some((name, source)) = selector.split_once('@') {
-        records
-            .iter()
-            .filter(|record| {
-                record.name == name && (record.source_slug == source || record.source_id == source)
-            })
-            .collect::<Vec<_>>()
-    } else {
-        records
-            .iter()
-            .filter(|record| record.name == selector)
-            .collect::<Vec<_>>()
-    };
+    let matches = records
+        .iter()
+        .filter(|record| {
+            selector == record.name
+                || selector == canonical_record_selector(record)
+                || selector == format!("{}@{}", record.name, record.source_slug)
+                || selector == format!("{}@{}", record.name, record.source_id)
+        })
+        .collect::<Vec<_>>();
     match matches.as_slice() {
         [record] => Ok(record),
         [] => Err(Error::Config(format!("plugin not found: {selector}"))),
         _ => Err(Error::Config(format!(
-            "plugin selector `{selector}` is ambiguous; use name@source"
+            "plugin selector `{selector}` is ambiguous; use profile:name@source or project:name@source"
         ))),
+    }
+}
+
+pub(crate) fn canonical_record_selector(record: &PluginInstallRecord) -> String {
+    format!(
+        "{}:{}@{}",
+        plugin_scope_name(record.scope),
+        record.name,
+        record.source_slug
+    )
+}
+
+pub(crate) fn plugin_scope_name(scope: PluginScope) -> &'static str {
+    match scope {
+        PluginScope::Global => "profile",
+        PluginScope::Local => "project",
     }
 }
 
 pub(crate) fn policy_entry<'a>(
     policy: &'a PluginPolicyConfig,
+    records: &[PluginInstallRecord],
     record: &PluginInstallRecord,
 ) -> Option<&'a PluginPolicyEntry> {
     policy
         .plugins
-        .get(&format!("{}@{}", record.name, record.source_slug))
-        .or_else(|| policy.plugins.get(&record.name))
+        .get(&canonical_record_selector(record))
+        .or_else(|| {
+            let key = format!("{}@{}", record.name, record.source_slug);
+            (records
+                .iter()
+                .filter(|candidate| {
+                    candidate.name == record.name && candidate.source_slug == record.source_slug
+                })
+                .count()
+                == 1)
+                .then(|| policy.plugins.get(&key))
+                .flatten()
+        })
+        .or_else(|| {
+            (records
+                .iter()
+                .filter(|candidate| candidate.name == record.name)
+                .count()
+                == 1)
+                .then(|| policy.plugins.get(&record.name))
+                .flatten()
+        })
 }
 
-pub(crate) fn policy_key_for_selector(
-    records: &[PluginInstallRecord],
-    selector: &str,
-    record: &PluginInstallRecord,
-) -> String {
-    if selector.contains('@')
-        || records
-            .iter()
-            .filter(|candidate| candidate.name == record.name)
-            .count()
-            > 1
-    {
-        format!("{}@{}", record.name, record.source_slug)
-    } else {
-        record.name.clone()
-    }
+pub(crate) fn policy_key_for_record(record: &PluginInstallRecord) -> String {
+    canonical_record_selector(record)
 }

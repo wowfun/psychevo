@@ -25,6 +25,7 @@
         next_run: AtomicUsize,
         wait_first: Mutex<Option<WaitFirst>>,
         request_permission: AtomicBool,
+        context_snapshot: Mutex<Option<psychevo_runtime::ContextSnapshot>>,
     }
 
     #[derive(Clone, Default)]
@@ -62,6 +63,14 @@
 
         fn request_permission(&self) {
             self.inner.request_permission.store(true, Ordering::SeqCst);
+        }
+
+        fn set_context_snapshot(&self, snapshot: psychevo_runtime::ContextSnapshot) {
+            *self
+                .inner
+                .context_snapshot
+                .lock()
+                .expect("fake context snapshot lock poisoned") = Some(snapshot);
         }
     }
 
@@ -150,7 +159,12 @@
                     tool_failures: 0,
                     selected_agent: None,
                     selected_skills: Vec::new(),
-                    context_snapshot: None,
+                    context_snapshot: inner
+                        .context_snapshot
+                        .lock()
+                        .expect("fake context snapshot lock poisoned")
+                        .clone(),
+                    terminal_error: None,
                     events: Vec::new(),
                     warnings: Vec::new(),
                 })
@@ -284,11 +298,14 @@ Delegate.
                 child_session_id: "child".to_string(),
                 agent_name: "opencode".to_string(),
                 agent_description: "Delegate to fake ACP.".to_string(),
-                backend_ref: "fake".to_string(),
+                runtime_ref: "acp:fake".to_string(),
+                backend_ref: Some("fake".to_string()),
+                instructions: Some("Delegate.".to_string()),
                 prompt: "list tools".to_string(),
                 task_name: "opencode-run".to_string(),
                 model: None,
                 runtime_options: BTreeMap::new(),
+                expected_runtime_profile_revision: None,
                 abort: {
                     let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
                     AbortSignal::new(abort_rx)

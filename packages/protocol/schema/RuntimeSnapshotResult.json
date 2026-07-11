@@ -23,6 +23,25 @@
       ],
       "type": "object"
     },
+    "RuntimeCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "stability"
+      ],
+      "type": "object"
+    },
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
@@ -68,6 +87,24 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "backendRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeCapabilityView"
+          },
+          "type": "array"
+        },
+        "capabilityRevision": {
+          "default": "",
+          "type": "string"
         },
         "command": {
           "default": null,
@@ -137,6 +174,21 @@
           },
           "type": "array"
         },
+        "profileRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "",
+          "type": "string"
+        },
+        "readinessStages": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeReadinessStageView"
+          },
+          "type": "array"
+        },
         "runtime": {
           "type": "string"
         },
@@ -153,6 +205,17 @@
             "$ref": "#/definitions/BackendConfigTarget"
           },
           "type": "array"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeStabilityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "workspaceRoots": {
           "default": [],
@@ -171,6 +234,44 @@
         "runtime"
       ],
       "type": "object"
+    },
+    "RuntimeReadinessStageView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeReadinessStatusView"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
     },
     "RuntimeSnapshotAgentView": {
       "properties": {
@@ -204,6 +305,14 @@
         "runtimeRef"
       ],
       "type": "object"
+    },
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
     }
   },
   "properties": {

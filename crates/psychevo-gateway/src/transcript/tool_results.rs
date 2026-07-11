@@ -195,6 +195,12 @@ fn entry_status_for_tool_result(
     }
     if blocks
         .iter()
+        .any(|block| block.status == TranscriptBlockStatus::Cancelled)
+    {
+        return TranscriptBlockStatus::Cancelled;
+    }
+    if blocks
+        .iter()
         .any(|block| block.status == TranscriptBlockStatus::Running)
     {
         return TranscriptBlockStatus::Running;

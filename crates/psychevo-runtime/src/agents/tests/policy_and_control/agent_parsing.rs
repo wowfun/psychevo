@@ -162,6 +162,42 @@ Review the code.
 }
 
 #[test]
+pub(crate) fn parses_explicit_optional_contributions_and_diagnoses_unknown_names() {
+    let agent = parse_agent_definition_text(
+        r#"---
+name: flexible-reviewer
+description: Review with optional runtime contributions
+skills: [review-checklist]
+optionalContributions: [instructions, tools, mcp, skills, unknown]
+---
+Review carefully.
+"#,
+        "flexible-reviewer",
+        None,
+        AgentSource::Explicit,
+    )
+    .expect("agent");
+
+    assert_eq!(
+        agent.optional_contributions,
+        [
+            AgentContribution::Instructions,
+            AgentContribution::Tools,
+            AgentContribution::Mcp,
+            AgentContribution::Skills,
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert!(
+        agent
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("`unknown` is unsupported"))
+    );
+}
+
+#[test]
 pub(crate) fn parses_backend_ref_and_peer_entrypoint_defaults() {
     let tmp = TempDir::new().expect("tmp");
     let path = tmp.path().join("cursor-reviewer.md");

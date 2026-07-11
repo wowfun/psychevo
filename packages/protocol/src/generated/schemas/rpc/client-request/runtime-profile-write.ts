@@ -89,6 +89,13 @@ export const clientRequestRuntimeProfileWriteSchema = {
           },
           "type": "array"
         },
+        "backendRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "command": {
           "default": null,
           "type": [

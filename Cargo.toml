@@ -3,6 +3,7 @@ members = [
     "crates/psychevo-ai",
     "crates/psychevo-agent-core",
     "crates/psychevo-runtime",
+    "crates/psychevo-runtime-host",
     "crates/psychevo-gateway-protocol",
     "crates/psychevo-gateway",
     "crates/psychevo-acp",

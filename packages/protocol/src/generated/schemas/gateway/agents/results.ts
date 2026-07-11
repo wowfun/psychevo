@@ -22,6 +22,15 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "string"
     },
+    "AgentContributionView": {
+      "enum": [
+        "instructions",
+        "tools",
+        "mcp",
+        "skills"
+      ],
+      "type": "string"
+    },
     "AgentDefinitionView": {
       "properties": {
         "backend": {
@@ -34,6 +43,13 @@ export const gatewayAgentResultSchemas = {
             }
           ],
           "default": null
+        },
+        "contributions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/AgentContributionView"
+          },
+          "type": "array"
         },
         "description": {
           "type": "string"
@@ -67,6 +83,13 @@ export const gatewayAgentResultSchemas = {
         },
         "name": {
           "type": "string"
+        },
+        "optionalContributions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "path": {
           "default": null,
@@ -193,6 +216,15 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "string"
     },
+    "AgentContributionView": {
+      "enum": [
+        "instructions",
+        "tools",
+        "mcp",
+        "skills"
+      ],
+      "type": "string"
+    },
     "AgentDefinitionView": {
       "properties": {
         "backend": {
@@ -205,6 +237,13 @@ export const gatewayAgentResultSchemas = {
             }
           ],
           "default": null
+        },
+        "contributions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/AgentContributionView"
+          },
+          "type": "array"
         },
         "description": {
           "type": "string"
@@ -238,6 +277,13 @@ export const gatewayAgentResultSchemas = {
         },
         "name": {
           "type": "string"
+        },
+        "optionalContributions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "path": {
           "default": null,
@@ -348,6 +394,15 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "string"
     },
+    "AgentContributionView": {
+      "enum": [
+        "instructions",
+        "tools",
+        "mcp",
+        "skills"
+      ],
+      "type": "string"
+    },
     "AgentDefinitionView": {
       "properties": {
         "backend": {
@@ -360,6 +415,13 @@ export const gatewayAgentResultSchemas = {
             }
           ],
           "default": null
+        },
+        "contributions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/AgentContributionView"
+          },
+          "type": "array"
         },
         "description": {
           "type": "string"
@@ -393,6 +455,13 @@ export const gatewayAgentResultSchemas = {
         },
         "name": {
           "type": "string"
+        },
+        "optionalContributions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "path": {
           "default": null,
@@ -511,6 +580,15 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "string"
     },
+    "AgentContributionView": {
+      "enum": [
+        "instructions",
+        "tools",
+        "mcp",
+        "skills"
+      ],
+      "type": "string"
+    },
     "AgentDefinitionView": {
       "properties": {
         "backend": {
@@ -523,6 +601,13 @@ export const gatewayAgentResultSchemas = {
             }
           ],
           "default": null
+        },
+        "contributions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/AgentContributionView"
+          },
+          "type": "array"
         },
         "description": {
           "type": "string"
@@ -556,6 +641,13 @@ export const gatewayAgentResultSchemas = {
         },
         "name": {
           "type": "string"
+        },
+        "optionalContributions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "path": {
           "default": null,
@@ -822,6 +914,27 @@ export const gatewayAgentResultSchemas = {
             "string",
             "null"
           ]
+        },
+        "runtimeOptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "runtimeProfileRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1001,6 +1114,27 @@ export const gatewayAgentResultSchemas = {
             "string",
             "null"
           ]
+        },
+        "runtimeOptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "runtimeProfileRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1159,6 +1293,27 @@ export const gatewayAgentResultSchemas = {
           ]
         },
         "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeOptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "runtimeProfileRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeRef": {
           "default": null,
           "type": [
             "string",
@@ -1364,6 +1519,27 @@ export const gatewayAgentResultSchemas = {
           ]
         },
         "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeOptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "runtimeProfileRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeRef": {
           "default": null,
           "type": [
             "string",

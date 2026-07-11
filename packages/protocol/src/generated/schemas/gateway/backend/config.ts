@@ -5,7 +5,8 @@ export const gatewayBackendConfigSchemas = {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "enum": [
     "psychevo",
-    "peerAgent"
+    "peerAgent",
+    "runtime"
   ],
   "title": "BackendKind",
   "type": "string"

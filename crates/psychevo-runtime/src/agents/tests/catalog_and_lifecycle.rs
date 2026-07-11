@@ -139,6 +139,11 @@ members:
     role: review
   - id: verifier
     agent: tester
+    runtimeRef: codex
+    runtimeOptions:
+      model: gpt-5.2-codex
+      mode: plan
+    runtimeProfileRevision: 42
     maxTurns: 2
 ---
 Coordinate the delivery.
@@ -161,10 +166,52 @@ Coordinate the delivery.
     assert_eq!(team.max_parallel_agents, MAX_TEAM_PARALLEL_AGENTS_CAP);
     assert_eq!(team.members.len(), 2);
     assert_eq!(team.members[1].agent, "tester");
+    assert_eq!(team.members[1].runtime_ref.as_deref(), Some("codex"));
+    assert_eq!(team.members[1].runtime_profile_revision, Some(42));
+    assert_eq!(
+        team.members[1].runtime_options,
+        BTreeMap::from([
+            ("mode".to_string(), "plan".to_string()),
+            ("model".to_string(), "gpt-5.2-codex".to_string()),
+        ])
+    );
     assert!(
         team.diagnostics
             .iter()
             .any(|diagnostic| diagnostic.message.contains("exceeds cap"))
+    );
+}
+
+#[test]
+pub(crate) fn agent_team_runtime_options_require_a_runtime_profile() {
+    let agents = AgentCatalog {
+        agents: vec![built_in_agent("general", "General agent", "Help.", None)],
+        ..AgentCatalog::default()
+    };
+    let error = parse_agent_team_definition_text(
+        r#"---
+name: ship
+description: Ship changes
+leader: general
+members:
+  - id: reviewer
+    agent: general
+    runtimeOptions:
+      mode: plan
+---
+Coordinate.
+"#,
+        "ship",
+        None,
+        AgentTeamSource::Project,
+        &agents,
+    )
+    .expect_err("runtime options without a profile must fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("runtimeOptions require runtimeRef")
     );
 }
 

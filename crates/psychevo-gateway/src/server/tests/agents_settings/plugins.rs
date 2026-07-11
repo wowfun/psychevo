@@ -57,8 +57,23 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
     )
     .await
     .expect("plugin/list");
-    assert_eq!(list["count"], 1);
-    assert_eq!(list["plugins"][0]["name"], "display-plugin");
+    assert_eq!(list["count"], 2);
+    assert!(
+        list["plugins"]
+            .as_array()
+            .expect("plugins")
+            .iter()
+            .any(|plugin| {
+                plugin["name"] == "Browser" && plugin["source_id"] == "builtin:browser"
+            })
+    );
+    assert!(
+        list["plugins"]
+            .as_array()
+            .expect("plugins")
+            .iter()
+            .any(|plugin| { plugin["name"] == "display-plugin" })
+    );
 
     let read = handle_rpc(
         state.clone(),
@@ -460,9 +475,326 @@ async fn capability_skill_write_rejects_configured_external_skill() {
 }
 
 #[tokio::test]
-async fn capability_plugin_rpcs_install_toggle_and_uninstall_profile_plugin() {
+async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list");
+    let browser = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["source_id"] == "builtin:browser")
+        .expect("browser plugin");
+    assert_eq!(browser["name"], "Browser");
+    assert_eq!(browser["source_kind"], "built_in");
+    assert_eq!(browser["selector"], "builtin:browser");
+    assert_eq!(browser["scope_name"], "profile");
+    assert_eq!(browser["removable"], false);
+    assert_eq!(browser["package_mutable"], false);
+    assert_eq!(browser["enablement_mutable"], true);
+    assert_eq!(browser["enabled"], true);
+    assert_eq!(browser["status"], "Installed");
+    assert_eq!(
+        browser["contributions"]["annotation"][0],
+        "workspace_comment_context_xml"
+    );
+
+    let read = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({
+            "scope": scope.clone(),
+            "selector": "builtin:browser"
+        }),
+    )
+    .await
+    .expect("plugin/read");
+    assert_eq!(read["manifest"]["interface"]["displayName"], "Browser");
+    assert_eq!(read["plugin"]["status"], "Installed");
+    assert_eq!(read["inspection"]["status"], "Installed");
+
+    let disabled = capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": "builtin:browser",
+            "scopeName": "profile",
+            "enabled": false
+        }),
+    )
+    .await
+    .expect("plugin/setEnabled");
+    assert_eq!(disabled["enabled"], false);
+
+    let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list");
+    let browser = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["source_id"] == "builtin:browser")
+        .expect("browser plugin");
+    assert_eq!(browser["enabled"], false);
+    assert_eq!(browser["status"], "Disabled");
+
+    let read = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({
+            "scope": scope.clone(),
+            "selector": "builtin:browser"
+        }),
+    )
+    .await
+    .expect("plugin/read disabled browser");
+    assert_eq!(read["plugin"]["status"], "Disabled");
+    assert_eq!(read["inspection"]["status"], "Disabled");
+
+    let doctor = capability_rpc(
+        &state,
+        "plugin/doctor",
+        json!({
+            "scope": scope.clone(),
+            "selector": "builtin:browser"
+        }),
+    )
+    .await
+    .expect("plugin/doctor");
+    assert_eq!(doctor["plugins"][0]["plugin"]["name"], "Browser");
+    assert_eq!(doctor["plugins"][0]["plugin"]["status"], "Disabled");
+    assert_eq!(doctor["plugins"][0]["inspection"]["status"], "Disabled");
+    assert_eq!(doctor["plugins"][0]["worker"]["status"], "not_applicable");
+
+    let rejected = capability_rpc(
+        &state,
+        "plugin/uninstall",
+        json!({
+            "scope": scope,
+            "selector": "builtin:browser",
+            "scopeName": "profile"
+        }),
+    )
+    .await
+    .expect_err("built-in Browser is not removable");
+    assert!(
+        rejected
+            .to_string()
+            .contains("built-in plugin `builtin:browser` cannot be uninstalled")
+    );
+}
+
+#[tokio::test]
+async fn capability_plugin_builtin_browser_projects_effective_project_policy_scope() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        "[builtin_plugins.browser]\nenabled = true\n",
+    )
+    .expect("profile config");
+    let project_config_dir = state.inner.cwd.join(".psychevo");
+    std::fs::create_dir_all(&project_config_dir).expect("project config dir");
+    std::fs::write(
+        project_config_dir.join("config.toml"),
+        "[builtin_plugins.browser]\nenabled = false\n",
+    )
+    .expect("project config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list");
+    let browser = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["selector"] == "builtin:browser")
+        .expect("built-in browser");
+    assert_eq!(browser["enabled"], false);
+    assert_eq!(browser["status"], "Disabled");
+    assert_eq!(browser["scope_name"], "project");
+
+    capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": "builtin:browser",
+            "scopeName": browser["scope_name"],
+            "enabled": true
+        }),
+    )
+    .await
+    .expect("enable built-in browser in effective scope");
+
+    let read = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({
+            "scope": scope,
+            "selector": "builtin:browser"
+        }),
+    )
+    .await
+    .expect("plugin/read");
+    assert_eq!(read["plugin"]["enabled"], true);
+    assert_eq!(read["plugin"]["status"], "Installed");
+    assert_eq!(read["plugin"]["scope_name"], "project");
+}
+
+#[tokio::test]
+async fn capability_plugin_builtin_browser_selector_and_policy_do_not_capture_browser_package() {
     let (temp, state) = web_state();
     std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
+    let source = temp.path().join("browser-package");
+    let manifest_dir = source.join(".psychevo-plugin");
+    std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
+    std::fs::write(
+        manifest_dir.join("plugin.json"),
+        r#"{
+          "name": "browser",
+          "version": "1.0.0",
+          "description": "ordinary browser package"
+        }"#,
+    )
+    .expect("manifest");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    capability_rpc(
+        &state,
+        "plugin/install",
+        json!({
+            "scope": scope.clone(),
+            "source": source,
+            "scopeName": "profile"
+        }),
+    )
+    .await
+    .expect("install browser package");
+
+    let package = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({
+            "scope": scope.clone(),
+            "selector": "browser"
+        }),
+    )
+    .await
+    .expect("read ordinary browser package");
+    assert_eq!(package["plugin"]["name"], "browser");
+    assert_eq!(package["plugin"]["source_kind"], "local");
+
+    let legacy_alias = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({
+            "scope": scope.clone(),
+            "selector": "Browser"
+        }),
+    )
+    .await
+    .expect_err("Browser alias must not select the built-in plugin");
+    assert!(legacy_alias.to_string().contains("plugin not found: Browser"));
+
+    capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": "browser",
+            "scopeName": "profile",
+            "enabled": true
+        }),
+    )
+    .await
+    .expect("enable ordinary browser package");
+
+    capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": "builtin:browser",
+            "scopeName": "profile",
+            "enabled": false
+        }),
+    )
+    .await
+    .expect("disable built-in browser");
+
+    let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list");
+    let plugins = list["plugins"].as_array().expect("plugins");
+    let builtin = plugins
+        .iter()
+        .find(|plugin| plugin["source_id"] == "builtin:browser")
+        .expect("built-in browser");
+    let package = plugins
+        .iter()
+        .find(|plugin| plugin["name"] == "browser" && plugin["source_kind"] == "local")
+        .expect("ordinary browser package");
+    assert_eq!(builtin["enabled"], false);
+    assert_eq!(package["enabled"], true);
+
+    let removed = capability_rpc(
+        &state,
+        "plugin/uninstall",
+        json!({
+            "scope": scope.clone(),
+            "selector": "browser",
+            "scopeName": "profile"
+        }),
+    )
+    .await
+    .expect("uninstall ordinary browser package");
+    assert_eq!(removed["plugin"], "browser");
+
+    let builtin = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({
+            "scope": scope.clone(),
+            "selector": "builtin:browser"
+        }),
+    )
+    .await
+    .expect("built-in browser remains after ordinary package uninstall");
+    assert_eq!(builtin["plugin"]["status"], "Disabled");
+
+    let removed_package = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({
+            "scope": scope,
+            "selector": "browser"
+        }),
+    )
+    .await
+    .expect_err("ordinary browser package was removed");
+    assert!(removed_package.to_string().contains("plugin not found: browser"));
+}
+
+#[tokio::test]
+async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
+    let (temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("managed-plugin");
     let manifest_dir = source.join(".psychevo-plugin");
     std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
@@ -489,45 +821,312 @@ async fn capability_plugin_rpcs_install_toggle_and_uninstall_profile_plugin() {
         json!({
             "scope": scope.clone(),
             "source": source,
-            "scopeName": "profile"
+            "scopeName": "project"
         }),
     )
     .await
     .expect("plugin/install");
     assert_eq!(installed["plugin"]["name"], "managed-plugin");
 
-    let disabled = capability_rpc(
+    let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list");
+    let managed = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["name"] == "managed-plugin")
+        .expect("managed plugin");
+    let selector = managed["selector"]
+        .as_str()
+        .expect("canonical selector")
+        .to_string();
+    assert!(selector.starts_with("project:managed-plugin@"), "{selector}");
+    assert_eq!(managed["scope_name"], "project");
+    assert_eq!(managed["enablement_scope_name"], "project");
+    assert_eq!(managed["removable"], true);
+    assert_eq!(managed["package_mutable"], true);
+    assert_eq!(managed["enablement_mutable"], true);
+
+    let read = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({
+            "scope": scope.clone(),
+            "selector": selector.clone()
+        }),
+    )
+    .await
+    .expect("plugin/read");
+    assert_eq!(read["plugin"]["selector"], selector);
+    assert_eq!(read["plugin"]["scope_name"], "project");
+
+    let doctor = capability_rpc(
+        &state,
+        "plugin/doctor",
+        json!({
+            "scope": scope.clone(),
+            "selector": selector.clone()
+        }),
+    )
+    .await
+    .expect("plugin/doctor");
+    assert_eq!(doctor["plugins"][0]["plugin"]["selector"], selector);
+    assert_eq!(doctor["plugins"][0]["plugin"]["scope_name"], "project");
+
+    let enabled = capability_rpc(
         &state,
         "plugin/setEnabled",
         json!({
             "scope": scope.clone(),
-            "selector": "managed-plugin",
-            "scopeName": "profile",
-            "enabled": false
+            "selector": selector.clone(),
+            "scopeName": "project",
+            "enabled": true
         }),
     )
     .await
     .expect("plugin/setEnabled");
-    assert_eq!(disabled["enabled"], false);
+    assert_eq!(enabled["enabled"], true);
 
     let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
         .await
         .expect("plugin/list");
-    assert_eq!(list["plugins"][0]["name"], "managed-plugin");
-    assert_eq!(list["plugins"][0]["enabled"], false);
+    let managed = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["name"] == "managed-plugin")
+        .expect("managed plugin");
+    assert_eq!(managed["enabled"], true);
 
     let removed = capability_rpc(
         &state,
         "plugin/uninstall",
         json!({
             "scope": scope,
-            "selector": "managed-plugin",
-            "scopeName": "profile"
+            "selector": selector,
+            "scopeName": "project"
         }),
     )
     .await
     .expect("plugin/uninstall");
     assert_eq!(removed["success"], true);
+}
+
+#[tokio::test]
+async fn capability_plugin_scoped_selectors_disambiguate_duplicate_installations() {
+    let (temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
+    let source = temp.path().join("dual-scope-plugin");
+    let manifest_dir = source.join(".psychevo-plugin");
+    std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
+    std::fs::write(
+        manifest_dir.join("plugin.json"),
+        r#"{
+          "name": "dual-scope",
+          "version": "1.0.0",
+          "description": "same source in profile and project"
+        }"#,
+    )
+    .expect("manifest");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    for scope_name in ["profile", "project"] {
+        capability_rpc(
+            &state,
+            "plugin/install",
+            json!({
+                "scope": scope.clone(),
+                "source": source.clone(),
+                "scopeName": scope_name
+            }),
+        )
+        .await
+        .unwrap_or_else(|err| panic!("install {scope_name}: {err}"));
+    }
+
+    let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list");
+    let rows = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .filter(|plugin| plugin["name"] == "dual-scope")
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 2);
+    let profile_selector = rows
+        .iter()
+        .find(|plugin| plugin["scope_name"] == "profile")
+        .and_then(|plugin| plugin["selector"].as_str())
+        .expect("profile selector")
+        .to_string();
+    let project_selector = rows
+        .iter()
+        .find(|plugin| plugin["scope_name"] == "project")
+        .and_then(|plugin| plugin["selector"].as_str())
+        .expect("project selector")
+        .to_string();
+    assert!(profile_selector.starts_with("profile:dual-scope@"));
+    assert!(project_selector.starts_with("project:dual-scope@"));
+    assert_ne!(profile_selector, project_selector);
+    assert_eq!(
+        profile_selector.strip_prefix("profile:"),
+        project_selector.strip_prefix("project:")
+    );
+    assert_eq!(rows[0]["enablement_scope_name"], rows[0]["scope_name"]);
+    assert_eq!(rows[1]["enablement_scope_name"], rows[1]["scope_name"]);
+
+    let trust_scope_mismatch = capability_rpc(
+        &state,
+        "plugin/setTrust",
+        json!({
+            "scope": scope.clone(),
+            "selector": profile_selector.clone(),
+            "scopeName": "project",
+            "trusted": true
+        }),
+    )
+    .await
+    .expect_err("package trust scope must match installation scope");
+    assert!(
+        trust_scope_mismatch
+            .to_string()
+            .contains("installed in profile scope, not project scope")
+    );
+
+    let unscoped = profile_selector
+        .strip_prefix("profile:")
+        .expect("profile prefix");
+    let ambiguous = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({ "scope": scope.clone(), "selector": unscoped }),
+    )
+    .await
+    .expect_err("unscoped duplicate selector is ambiguous");
+    assert!(
+        ambiguous
+            .to_string()
+            .contains("use profile:name@source or project:name@source")
+    );
+
+    for (selector, expected_scope) in [
+        (&profile_selector, "profile"),
+        (&project_selector, "project"),
+    ] {
+        let read = capability_rpc(
+            &state,
+            "plugin/read",
+            json!({ "scope": scope.clone(), "selector": selector }),
+        )
+        .await
+        .unwrap_or_else(|err| panic!("read {expected_scope}: {err}"));
+        assert_eq!(read["plugin"]["scope_name"], expected_scope);
+
+        let doctor = capability_rpc(
+            &state,
+            "plugin/doctor",
+            json!({ "scope": scope.clone(), "selector": selector }),
+        )
+        .await
+        .unwrap_or_else(|err| panic!("doctor {expected_scope}: {err}"));
+        assert_eq!(doctor["plugins"][0]["plugin"]["scope_name"], expected_scope);
+    }
+
+    capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": profile_selector,
+            "scopeName": "profile",
+            "enabled": false
+        }),
+    )
+    .await
+    .expect("disable profile installation");
+    capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": project_selector.clone(),
+            "scopeName": "project",
+            "enabled": true
+        }),
+    )
+    .await
+    .expect("enable project installation");
+
+    let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list after enablement");
+    let rows = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .filter(|plugin| plugin["name"] == "dual-scope")
+        .collect::<Vec<_>>();
+    let profile = rows
+        .iter()
+        .find(|plugin| plugin["scope_name"] == "profile")
+        .expect("profile row");
+    let project = rows
+        .iter()
+        .find(|plugin| plugin["scope_name"] == "project")
+        .expect("project row");
+    assert_eq!(profile["enabled"], false);
+    assert_eq!(project["enabled"], true);
+
+    capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": profile_selector.clone(),
+            "scopeName": "project",
+            "enabled": true
+        }),
+    )
+    .await
+    .expect("project policy overrides profile installation");
+    let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list after project override");
+    let profile = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["selector"] == profile_selector)
+        .expect("profile row after project override");
+    assert_eq!(profile["scope_name"], "profile");
+    assert_eq!(profile["enablement_scope_name"], "project");
+    assert_eq!(profile["enabled"], true);
+
+    capability_rpc(
+        &state,
+        "plugin/uninstall",
+        json!({
+            "scope": scope.clone(),
+            "selector": project_selector,
+            "scopeName": "project"
+        }),
+    )
+    .await
+    .expect("uninstall project installation");
+    let remaining = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({ "scope": scope, "selector": profile_selector }),
+    )
+    .await
+    .expect("profile installation remains");
+    assert_eq!(remaining["plugin"]["scope_name"], "profile");
+    assert_eq!(remaining["plugin"]["enablement_scope_name"], "project");
 }
 
 #[tokio::test]

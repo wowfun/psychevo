@@ -85,6 +85,12 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(plugins) = object.get("plugins") {
         config.plugins = parse_plugin_policy_config(plugins)?;
     }
+    if let Some(plugins) = object
+        .get("builtin_plugins")
+        .or_else(|| object.get("builtinPlugins"))
+    {
+        config.builtin_plugins = parse_builtin_plugin_policy_config(plugins)?;
+    }
     Ok(config)
 }
 

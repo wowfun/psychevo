@@ -315,6 +315,7 @@ impl SlashCommandSpec {
                 | SlashCommandAction::Btw
                 | SlashCommandAction::Steer
                 | SlashCommandAction::Queue
+                | SlashCommandAction::Compact
                 | SlashCommandAction::Pending
                 | SlashCommandAction::Voice
         )

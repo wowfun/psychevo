@@ -367,7 +367,10 @@ fn action_view_from_runtime_value(value: &Value, turn_id: &str) -> Option<Pendin
         .or_else(|| Some(turn_id.to_string()));
     Some(match kind {
         GatewayActionKind::Clarify => {
-            let raw = payload.get("raw").cloned().unwrap_or_else(|| payload.clone());
+            let raw = payload
+                .get("raw")
+                .cloned()
+                .unwrap_or_else(|| payload.clone());
             clarify_action(action_id, raw, thread_id, turn_id)
         }
         GatewayActionKind::Permission => PendingActionView {
@@ -485,7 +488,10 @@ fn permission_action(
             "reason": reason,
             "matchedRule": matched_rule,
             "suggestedRule": suggested_rule,
+            "allowSession": true,
             "allowAlways": allow_always,
+            "authorizationLifetime": "psychevo_session",
+            "alwaysAuthorizationLifetime": allow_always.then_some("permanent"),
             "timeoutSecs": timeout_secs,
         }),
         thread_id,
@@ -568,5 +574,9 @@ fn gateway_turn_error_from_runtime_value(
         .filter(|message| !message.is_empty())?;
     Some(GatewayTurnError {
         message: message.to_string(),
+        code: None,
+        stage: None,
+        retry_class: None,
+        diagnostic_ref: None,
     })
 }

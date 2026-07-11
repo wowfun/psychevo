@@ -51,7 +51,11 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
   while writing only current cwd `.psychevo/config.toml` policy.
 - `--global` and `--local` conflict for plugin write commands.
 - Project policy overlays profile policy for package enablement.
-- Selector conflicts require `name@source`.
+- Duplicate profile/project installations of the same package source require
+  the scoped canonical selector; bare `name` and `name@source` work only when
+  unique.
+- Scoped policy keys keep duplicate installations independently configurable,
+  while an unscoped policy key remains effective only for a unique record.
 - Static skill roots, hook sources, and worker tool descriptors are loaded only
   when the plugin package is enabled, then routed through the owning runtime
   module.

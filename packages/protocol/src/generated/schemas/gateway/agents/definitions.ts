@@ -60,6 +60,17 @@ export const gatewayAgentDefinitionSchemas = {
   "title": "AgentDiagnosticView",
   "type": "object"
 },
+  AgentContributionView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "instructions",
+    "tools",
+    "mcp",
+    "skills"
+  ],
+  "title": "AgentContributionView",
+  "type": "string"
+},
   AgentDefinitionView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -78,6 +89,15 @@ export const gatewayAgentDefinitionSchemas = {
       "enum": [
         "project",
         "profile"
+      ],
+      "type": "string"
+    },
+    "AgentContributionView": {
+      "enum": [
+        "instructions",
+        "tools",
+        "mcp",
+        "skills"
       ],
       "type": "string"
     },
@@ -116,6 +136,13 @@ export const gatewayAgentDefinitionSchemas = {
       ],
       "default": null
     },
+    "contributions": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/AgentContributionView"
+      },
+      "type": "array"
+    },
     "description": {
       "type": "string"
     },
@@ -148,6 +175,13 @@ export const gatewayAgentDefinitionSchemas = {
     },
     "name": {
       "type": "string"
+    },
+    "optionalContributions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "path": {
       "default": null,
@@ -227,6 +261,27 @@ export const gatewayAgentDefinitionSchemas = {
         "string",
         "null"
       ]
+    },
+    "runtimeOptions": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "runtimeProfileRevision": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtimeRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -293,6 +348,27 @@ export const gatewayAgentDefinitionSchemas = {
           ]
         },
         "role": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeOptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "runtimeProfileRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeRef": {
           "default": null,
           "type": [
             "string",

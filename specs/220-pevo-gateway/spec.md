@@ -67,6 +67,14 @@ Managed `open`, `start`, and `restart` spawn the `serve` child as an
 independent long-lived process. The child must keep running after the opener
 command exits, so a ready `server.json` cannot immediately become stale because
 the caller's shell, terminal, or test harness closed its process group.
+`stop` sends the managed `serve` child SIGTERM and waits for its bounded
+signal-aware cleanup before reporting success and removing managed state. That
+cleanup performs graceful runtime-host shutdown with forced fallback, so direct
+Codex/OpenCode children cannot survive as orphans. If the managed child still
+does not exit after the complete bounded cleanup window, `stop` forcibly
+terminates that exact managed Unix process group or platform-equivalent process
+tree, then reports an error if it cannot prove the managed pid exited. It never
+uses a name- or command-pattern kill.
 When no `--bind` is provided, managed commands prefer `127.0.0.1:58080` and may
 fall back through `127.0.0.1:58099` when a lower port is already in use. The
 actual bound address is persisted in `server.json` and reported through

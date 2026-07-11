@@ -60,6 +60,66 @@
         wait.release.notify_one();
         first.await.expect("first task").expect("first turn");
     }
+
+    #[test]
+    fn direct_opencode_binding_rejects_public_steer_before_queueing() {
+        let harness = harness(Arc::new(FakeBackend::default()));
+        let thread_id = harness
+            .state
+            .store()
+            .create_session_with_metadata(
+                &harness.cwd,
+                "test",
+                "model",
+                "provider",
+                None,
+            )
+            .expect("session");
+        let cwd = harness.cwd.to_string_lossy().to_string();
+        harness
+            .state
+            .store()
+            .create_gateway_runtime_binding(GatewayRuntimeBindingInput {
+                thread_id: &thread_id,
+                runtime_ref: "opencode",
+                backend_kind: "runtime",
+                native_kind: "opencode",
+                native_session_id: Some("native-session"),
+                cwd: &cwd,
+                profile_fingerprint: "fingerprint",
+                profile_revision: "1",
+                profile_config_json: "{}",
+                adapter_kind: "opencode-direct",
+                adapter_revision: "1",
+                ownership: GatewayRuntimeBindingOwnership::ReadWrite,
+                parent_thread_id: None,
+            })
+            .expect("runtime binding");
+        let (handle, _control) = run_control();
+        harness.gateway.register_active(
+            &thread_key(&thread_id),
+            "turn-1".to_string(),
+            Some(handle),
+            ActiveActivityKind::Turn,
+        );
+
+        let selector = GatewayThreadSelector::thread_id(thread_id);
+        assert!(
+            harness
+                .gateway
+                .steer_turn(
+                    selector.clone(),
+                    Some("turn-1"),
+                    psychevo_agent_core::user_text_message("unsupported steer"),
+                )
+                .is_none()
+        );
+        assert!(!harness.gateway.steer_foreign_turn(
+            selector,
+            Some("turn-1"),
+            psychevo_agent_core::user_text_message("unsupported foreign steer"),
+        ));
+    }
     #[tokio::test]
     async fn interrupt_aborts_active_and_clear_queue_drops_pending_turns() {
         let backend = Arc::new(FakeBackend::default());

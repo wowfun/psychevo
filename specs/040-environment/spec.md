@@ -160,6 +160,16 @@ durable cwd identity, Gateway cwd identity, user-facing cwd displays, and
 model-visible tool metadata. Low-level diagnostics may show a raw verbatim path
 only when diagnosing host filesystem API behavior explicitly requires it.
 
+Filesystem containment checks must compare the workspace root and every
+resolved target or parent directory using the same canonical native identity.
+The implementation must resolve the filesystem path first so symbolic links
+cannot bypass containment, then remove Windows verbatim forms such as
+`\\?\C:\...` and `\\?\UNC\...` from both sides before comparing path
+components. A stored or wire-level `C:\...` workspace root must therefore
+contain the equivalent `std::fs::canonicalize()` result even when Windows
+returns that child as `\\?\C:\...`; normalization must not weaken the rejection
+of traversal, sibling-prefix, or symbolic-link escapes.
+
 Generic POSIX shell tokenization must not be the first parser for unquoted
 Windows drive or UNC paths because backslashes are valid path separators there.
 Drive and UNC detection should run before shell-unescape fallback. Windows

@@ -359,6 +359,305 @@ pub(crate) fn cli_web_lifecycle_aliases_stop_and_restart_managed_server() {
     assert!(!psychevo_home.join("gateway/server.json").exists());
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+pub(crate) fn managed_gateway_stop_sigterm_reaps_direct_runtime_child() {
+    use std::time::{Duration, Instant};
+    use tungstenite::client::IntoClientRequest;
+    use tungstenite::http::HeaderValue;
+    use tungstenite::protocol::Message;
+    use tungstenite::stream::MaybeTlsStream;
+
+    let _guard = long_tool_turn_smoke_guard();
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let cwd = temp.path().join("work");
+    let dist = temp.path().join("dist");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(&dist).expect("dist");
+    std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
+
+    let init = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .arg("init")
+        .output()
+        .expect("pevo init");
+    assert!(
+        init.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let node = Command::new("node")
+        .args(["-p", "process.execPath"])
+        .output()
+        .expect("resolve Node.js for the deterministic OpenCode fixture");
+    assert!(
+        node.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    let node_executable = PathBuf::from(String::from_utf8(node.stdout).expect("node path").trim());
+    let fake_executable = temp.path().join("fake-opencode.mjs");
+    let fake_pid_path = temp.path().join("fake-opencode.pid");
+    std::fs::write(
+        &fake_executable,
+        r#"import fs from "node:fs";
+import http from "node:http";
+
+fs.writeFileSync(process.env.RUNTIME_FAKE_PID, String(process.pid));
+const expectedAuth = "Basic " + Buffer.from(
+  (process.env.OPENCODE_SERVER_USERNAME || "opencode") + ":" +
+  (process.env.OPENCODE_SERVER_PASSWORD || "")
+).toString("base64");
+const server = http.createServer((request, response) => {
+  if (request.headers.authorization !== expectedAuth) {
+    response.writeHead(401);
+    response.end();
+    return;
+  }
+  if (request.method === "GET" && request.url === "/global/health") {
+    const body = JSON.stringify({ healthy: true, version: "1.17.17-fixture" });
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(body)
+    });
+    response.end(body);
+    return;
+  }
+  if (request.method === "GET" && request.url === "/global/event") {
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive"
+    });
+    response.write("data: " + JSON.stringify({
+      payload: { id: "evt-connected", type: "server.connected", properties: {} }
+    }) + "\n\n");
+    return;
+  }
+  response.writeHead(404);
+  response.end();
+});
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  console.log(`opencode server listening on http://127.0.0.1:${address.port}`);
+});
+"#,
+    )
+    .expect("write fake OpenCode server");
+    let config_append = format!(
+        "\n[runtime_profiles.lifecycle]\n\
+         runtime = \"opencode\"\n\
+         label = \"Lifecycle OpenCode\"\n\
+         command = {}\n\
+         args = [{}, \"serve\"]\n\
+         [runtime_profiles.lifecycle.env]\n\
+         RUNTIME_FAKE_PID = {}\n",
+        serde_json::to_string(&node_executable.display().to_string()).expect("command TOML"),
+        serde_json::to_string(&fake_executable.display().to_string()).expect("script TOML"),
+        serde_json::to_string(&fake_pid_path.display().to_string()).expect("pid TOML"),
+    );
+    let config_path = psychevo_home.join("config.toml");
+    let mut config = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&config_path)
+        .expect("open config");
+    config
+        .write_all(config_append.as_bytes())
+        .expect("append runtime profile");
+
+    let start = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .env("PSYCHEVO_WEB_DIST", &dist)
+        .current_dir(&cwd)
+        .args(["gateway", "start", "--bind", "127.0.0.1:0"])
+        .output()
+        .expect("pevo gateway start");
+    assert!(
+        start.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&start.stdout),
+        String::from_utf8_lossy(&start.stderr)
+    );
+    let started: Value = serde_json::from_slice(&start.stdout).expect("gateway start json");
+    let server_pid = started["pid"].as_u64().expect("server pid") as u32;
+    let mut cleanup = ExactPidCleanup::new(server_pid);
+    let base_url = started["baseUrl"].as_str().expect("base URL");
+    let token =
+        std::fs::read_to_string(psychevo_home.join("gateway/token")).expect("managed token");
+    let websocket_url = format!("ws://{}/ws", base_url.trim_start_matches("http://"));
+    let mut request = websocket_url
+        .into_client_request()
+        .expect("websocket request");
+    request.headers_mut().insert(
+        "authorization",
+        HeaderValue::from_str(&format!("Bearer {}", token.trim())).expect("authorization"),
+    );
+    let (mut socket, _) = tungstenite::connect(request).expect("connect managed websocket");
+    if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("websocket read timeout");
+    }
+    socket
+        .send(Message::Text(
+            json!({
+                "jsonrpc": "2.0",
+                "id": "lifecycle-health",
+                "method": "runtime/health/check",
+                "params": {
+                    "runtimeRef": "lifecycle",
+                    "scope": {
+                        "cwd": cwd,
+                        "source": {
+                            "kind": "web",
+                            "rawId": "runtime-lifecycle",
+                            "lifetime": "persistent"
+                        }
+                    }
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .expect("request runtime probe");
+    loop {
+        let message = socket.read().expect("runtime probe response");
+        let Some(text) = message.to_text().ok() else {
+            continue;
+        };
+        let response: Value = serde_json::from_str(text).expect("gateway response JSON");
+        if response["id"] == "lifecycle-health" {
+            assert!(response.get("error").is_none(), "{response}");
+            break;
+        }
+    }
+
+    let started_wait = Instant::now();
+    let child_pid = loop {
+        if let Ok(text) = std::fs::read_to_string(&fake_pid_path)
+            && let Ok(pid) = text.trim().parse::<u32>()
+        {
+            break pid;
+        }
+        assert!(
+            started_wait.elapsed() < Duration::from_secs(5),
+            "fake direct runtime did not record its pid"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    cleanup.add(child_pid);
+    assert_exact_process_command(child_pid, &node_executable, &fake_executable);
+    assert!(
+        linux_process_running(server_pid),
+        "managed server exited early"
+    );
+    assert!(
+        linux_process_running(child_pid),
+        "direct runtime exited early"
+    );
+
+    let stop = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .current_dir(&cwd)
+        .args(["gateway", "stop"])
+        .output()
+        .expect("pevo gateway stop");
+    assert!(
+        stop.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&stop.stdout),
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    let stopped: Value = serde_json::from_slice(&stop.stdout).expect("gateway stop json");
+    assert_eq!(stopped["stopped"], true);
+    assert!(
+        wait_for_linux_process_exit(server_pid, Duration::from_secs(5)),
+        "managed server {server_pid} survived gateway stop"
+    );
+    assert!(
+        wait_for_linux_process_exit(child_pid, Duration::from_secs(5)),
+        "direct runtime {child_pid} survived managed SIGTERM"
+    );
+    assert!(!psychevo_home.join("gateway/server.json").exists());
+    assert!(!psychevo_home.join("gateway/token").exists());
+}
+
+#[cfg(target_os = "linux")]
+struct ExactPidCleanup {
+    pids: Vec<u32>,
+}
+
+#[cfg(target_os = "linux")]
+impl ExactPidCleanup {
+    fn new(pid: u32) -> Self {
+        Self { pids: vec![pid] }
+    }
+
+    fn add(&mut self, pid: u32) {
+        self.pids.push(pid);
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ExactPidCleanup {
+    fn drop(&mut self) {
+        for pid in &self.pids {
+            if linux_process_running(*pid) {
+                unsafe {
+                    libc::kill(*pid as libc::pid_t, libc::SIGKILL);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_running(pid: u32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    stat.split_whitespace().nth(2) != Some("Z")
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_linux_process_exit(pid: u32, timeout: std::time::Duration) -> bool {
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        if !linux_process_running(pid) {
+            return true;
+        }
+        thread::sleep(std::time::Duration::from_millis(20));
+    }
+    !linux_process_running(pid)
+}
+
+#[cfg(target_os = "linux")]
+fn assert_exact_process_command(pid: u32, expected_executable: &Path, expected_arg: &Path) {
+    let actual = std::fs::read_link(format!("/proc/{pid}/exe")).expect("direct runtime exe");
+    let actual = std::fs::canonicalize(actual).expect("canonical direct runtime exe");
+    let expected =
+        std::fs::canonicalize(expected_executable).expect("canonical expected runtime exe");
+    assert_eq!(
+        actual, expected,
+        "refusing to reason about an unrelated pid"
+    );
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).expect("direct runtime cmdline");
+    let arguments = cmdline
+        .split(|byte| *byte == 0)
+        .filter(|argument| !argument.is_empty())
+        .map(|argument| String::from_utf8_lossy(argument).into_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| Path::new(argument) == expected_arg),
+        "refusing to reason about an unrelated command: {arguments:?}"
+    );
+}
+
 #[test]
 pub(crate) fn cli_init_reset_state_stops_managed_gateway_before_recreating_state() {
     let temp = tempdir().expect("temp");
@@ -497,7 +796,7 @@ pub(crate) fn cli_init_creates_home_tree_and_is_idempotent() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 24);
+    assert_eq!(user_version, 26);
 
     std::fs::write(home.join("config.toml"), "custom config").expect("custom config");
     std::fs::write(home.join(".env"), "CUSTOM=1\n").expect("custom env");
@@ -567,5 +866,5 @@ pub(crate) fn cli_init_reset_state_backs_up_existing_sqlite_files() {
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 24);
+    assert_eq!(user_version, 26);
 }

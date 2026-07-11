@@ -110,6 +110,8 @@ impl TurnPrinter {
             | GatewayEvent::ActionResolved { .. }
             | GatewayEvent::ActionCancelled { .. }
             | GatewayEvent::ActivityChanged { .. }
+            | GatewayEvent::RuntimeStateChanged { .. }
+            | GatewayEvent::RuntimeChildChanged { .. }
             | GatewayEvent::TitleChanged { .. } => {}
         }
         out.flush()
@@ -248,6 +250,7 @@ impl TurnPrinter {
                 TranscriptBlockKind::Status => "status",
                 TranscriptBlockKind::Tool | TranscriptBlockKind::ToolCall => "tool",
                 TranscriptBlockKind::ToolResult => "result",
+                TranscriptBlockKind::Compaction => "compaction",
                 TranscriptBlockKind::Text | TranscriptBlockKind::Reasoning => "item",
             });
         match block.status {

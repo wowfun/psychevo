@@ -24,8 +24,57 @@
                 .expect("binding lookup")
                 .is_none()
         );
-        assert_eq!(backend.runs()[1].session, None);
+        assert_eq!(
+            backend.runs()[1].session.as_deref(),
+            Some(second.result.session_id.as_str()),
+            "the immutable public thread is materialized before backend dispatch"
+        );
     }
+
+    #[tokio::test]
+    async fn invocation_source_continue_latest_reuses_matching_public_thread() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+
+        let mut initial = request(
+            &harness,
+            GatewaySource::new("cli", "run-1").invocation(),
+            "first",
+        );
+        initial.options.cwd = harness.cwd.join("..").join("work");
+        let first = harness
+            .gateway
+            .send_turn(initial)
+            .await
+            .expect("first turn");
+        let mut continued = request(
+            &harness,
+            GatewaySource::new("cli", "run-2").invocation(),
+            "second",
+        );
+        continued.options.continue_latest = true;
+        let second = harness
+            .gateway
+            .send_turn(continued)
+            .await
+            .expect("continued turn");
+
+        assert_eq!(second.result.session_id, first.result.session_id);
+        assert_eq!(
+            backend.runs()[1].session.as_deref(),
+            Some(first.result.session_id.as_str())
+        );
+        assert_eq!(
+            harness
+                .state
+                .store()
+                .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
+                .expect("sessions")
+                .len(),
+            1
+        );
+    }
+
     #[tokio::test]
     async fn process_source_reuses_only_within_gateway_instance() {
         let backend = Arc::new(FakeBackend::default());
@@ -91,7 +140,11 @@
             .expect("second turn");
 
         assert_eq!(first.result.session_id, second.result.session_id);
-        assert_eq!(backend.runs()[0].session, None);
+        assert_eq!(
+            backend.runs()[0].session.as_deref(),
+            Some(first.result.session_id.as_str()),
+            "the immutable public thread is materialized before backend dispatch"
+        );
         assert_eq!(
             backend.runs()[1].session.as_deref(),
             Some(first.result.session_id.as_str())
@@ -105,16 +158,21 @@
                 .len(),
             1
         );
-        assert_eq!(
-            harness
-                .state
-                .store()
-                .gateway_source_binding(&source.source_key().0)
-                .expect("binding lookup")
-                .expect("binding")
-                .thread_id,
-            first.result.session_id
-        );
+        let lane = harness
+            .state
+            .store()
+            .gateway_source_lane(&source.source_key().0)
+            .expect("lane lookup")
+            .expect("lane");
+        assert_eq!(lane.thread_id.as_deref(), Some(first.result.session_id.as_str()));
+        let legacy_projection = harness
+            .state
+            .store()
+            .gateway_source_binding(&source.source_key().0)
+            .expect("legacy binding lookup")
+            .expect("legacy binding projection");
+        assert_eq!(legacy_projection.backend_kind, "unresolved");
+        assert_eq!(legacy_projection.backend_native_id, None);
     }
 
     #[tokio::test]

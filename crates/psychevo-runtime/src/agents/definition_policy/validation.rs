@@ -113,6 +113,9 @@ pub(crate) fn agent_from_raw(
     });
     let backend = parse_agent_backend_ref(raw.backend.as_ref())?;
     let entrypoints = parse_agent_entrypoints(raw.entrypoints.as_ref(), backend.is_some())?;
+    let (optional_contributions, optional_contribution_diagnostics) =
+        parse_optional_agent_contributions(raw.optional_contributions.as_ref(), path.clone());
+    diagnostics.extend(optional_contribution_diagnostics);
 
     Ok(AgentDefinition {
         name,
@@ -126,6 +129,7 @@ pub(crate) fn agent_from_raw(
         model,
         tool_policy,
         skills: parse_string_vec(raw.skills.as_ref()),
+        optional_contributions,
         hooks: raw.hooks,
         background: raw.background,
         initial_prompt: raw
@@ -507,6 +511,27 @@ pub(crate) fn parse_string_vec(value: Option<&Value>) -> Vec<String> {
     }
 }
 
+fn parse_optional_agent_contributions(
+    value: Option<&Value>,
+    path: Option<PathBuf>,
+) -> (BTreeSet<AgentContribution>, Vec<AgentDiagnostic>) {
+    let mut contributions = BTreeSet::new();
+    let mut diagnostics = Vec::new();
+    for name in parse_string_vec(value) {
+        if let Some(contribution) = AgentContribution::parse(&name) {
+            contributions.insert(contribution);
+        } else {
+            diagnostics.push(AgentDiagnostic::warning(
+                format!(
+                    "optionalContributions entry `{name}` is unsupported; expected instructions, tools, mcp, or skills"
+                ),
+                path.clone(),
+            ));
+        }
+    }
+    (contributions, diagnostics)
+}
+
 pub(crate) fn normalize_tool_name(raw: String) -> String {
     match raw.trim() {
         "Read" | "read" => "read".to_string(),
@@ -803,6 +828,7 @@ pub(crate) fn built_in_agent(
             mcp_servers: BTreeSet::new(),
         },
         skills: Vec::new(),
+        optional_contributions: BTreeSet::new(),
         hooks: None,
         background: None,
         initial_prompt: None,

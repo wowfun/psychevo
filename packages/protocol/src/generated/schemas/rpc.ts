@@ -2,6 +2,7 @@
 
 import { clientRequestInitializeSchema } from './rpc/client-request/initialize';
 import { clientRequestThreadStartSchema } from './rpc/client-request/thread-start';
+import { clientRequestThreadCompactStartSchema } from './rpc/client-request/thread-compact-start';
 import { clientRequestThreadResumeSchema } from './rpc/client-request/thread-resume';
 import { clientRequestThreadReadSchema } from './rpc/client-request/thread-read';
 import { clientRequestThreadTraceSchema } from './rpc/client-request/thread-trace';
@@ -16,6 +17,13 @@ import { clientRequestTurnSteerSchema } from './rpc/client-request/turn-steer';
 import { clientRequestTurnInterruptSchema } from './rpc/client-request/turn-interrupt';
 import { clientRequestTurnTakeoverSchema } from './rpc/client-request/turn-takeover';
 import { clientRequestRuntimeOptionsSchema } from './rpc/client-request/runtime-options';
+import { clientRequestRuntimeContextReadSchema } from './rpc/client-request/runtime-context-read';
+import { clientRequestRuntimeControlSetSchema } from './rpc/client-request/runtime-control-set';
+import { clientRequestRuntimeAuthActionSchema } from './rpc/client-request/runtime-auth-action';
+import { clientRequestRuntimeGoalReadSchema } from './rpc/client-request/runtime-goal-read';
+import { clientRequestRuntimeGoalSetSchema } from './rpc/client-request/runtime-goal-set';
+import { clientRequestRuntimeGoalClearSchema } from './rpc/client-request/runtime-goal-clear';
+import { clientRequestRuntimeAccountRateLimitsReadSchema } from './rpc/client-request/runtime-account-rate-limits-read';
 import { clientRequestRuntimeProfileListSchema } from './rpc/client-request/runtime-profile-list';
 import { clientRequestRuntimeProfileReadSchema } from './rpc/client-request/runtime-profile-read';
 import { clientRequestRuntimeProfileWriteSchema } from './rpc/client-request/runtime-profile-write';
@@ -25,12 +33,15 @@ import { clientRequestRuntimeSnapshotSchema } from './rpc/client-request/runtime
 import { clientRequestRuntimeHealthCheckSchema } from './rpc/client-request/runtime-health-check';
 import { clientRequestRuntimeSessionListSchema } from './rpc/client-request/runtime-session-list';
 import { clientRequestRuntimeSessionReadSchema } from './rpc/client-request/runtime-session-read';
+import { clientRequestRuntimeSessionAttachSchema } from './rpc/client-request/runtime-session-attach';
 import { clientRequestRuntimeSessionResumeSchema } from './rpc/client-request/runtime-session-resume';
 import { clientRequestRuntimeSessionArchiveSchema } from './rpc/client-request/runtime-session-archive';
 import { clientRequestRuntimeSessionUnarchiveSchema } from './rpc/client-request/runtime-session-unarchive';
 import { clientRequestRuntimeSessionDeleteSchema } from './rpc/client-request/runtime-session-delete';
 import { clientRequestRuntimeSessionRenameSchema } from './rpc/client-request/runtime-session-rename';
-import { clientRequestRuntimeSessionRollbackSchema } from './rpc/client-request/runtime-session-rollback';
+import { clientRequestRuntimeSessionForkSchema } from './rpc/client-request/runtime-session-fork';
+import { clientRequestRuntimeSessionRevertSchema } from './rpc/client-request/runtime-session-revert';
+import { clientRequestRuntimeSessionUnrevertSchema } from './rpc/client-request/runtime-session-unrevert';
 import { clientRequestAutomationListSchema } from './rpc/client-request/automation-list';
 import { clientRequestAutomationDraftSchema } from './rpc/client-request/automation-draft';
 import { clientRequestAutomationWriteSchema } from './rpc/client-request/automation-write';
@@ -352,6 +363,9 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/thread-start.json"
     },
     {
+      "$ref": "ClientRequest/thread-compact-start.json"
+    },
+    {
       "$ref": "ClientRequest/thread-resume.json"
     },
     {
@@ -394,6 +408,27 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/runtime-options.json"
     },
     {
+      "$ref": "ClientRequest/runtime-context-read.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-control-set.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-auth-action.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-goal-read.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-goal-set.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-goal-clear.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-account-rate-limits-read.json"
+    },
+    {
       "$ref": "ClientRequest/runtime-profile-list.json"
     },
     {
@@ -421,6 +456,9 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/runtime-session-read.json"
     },
     {
+      "$ref": "ClientRequest/runtime-session-attach.json"
+    },
+    {
       "$ref": "ClientRequest/runtime-session-resume.json"
     },
     {
@@ -436,7 +474,13 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/runtime-session-rename.json"
     },
     {
-      "$ref": "ClientRequest/runtime-session-rollback.json"
+      "$ref": "ClientRequest/runtime-session-fork.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-revert.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-unrevert.json"
     },
     {
       "$ref": "ClientRequest/automation-list.json"
@@ -815,6 +859,7 @@ export const rpcSchemas = {
 export const rpcSchemaRefs = [
   clientRequestInitializeSchema,
   clientRequestThreadStartSchema,
+  clientRequestThreadCompactStartSchema,
   clientRequestThreadResumeSchema,
   clientRequestThreadReadSchema,
   clientRequestThreadTraceSchema,
@@ -829,6 +874,13 @@ export const rpcSchemaRefs = [
   clientRequestTurnInterruptSchema,
   clientRequestTurnTakeoverSchema,
   clientRequestRuntimeOptionsSchema,
+  clientRequestRuntimeContextReadSchema,
+  clientRequestRuntimeControlSetSchema,
+  clientRequestRuntimeAuthActionSchema,
+  clientRequestRuntimeGoalReadSchema,
+  clientRequestRuntimeGoalSetSchema,
+  clientRequestRuntimeGoalClearSchema,
+  clientRequestRuntimeAccountRateLimitsReadSchema,
   clientRequestRuntimeProfileListSchema,
   clientRequestRuntimeProfileReadSchema,
   clientRequestRuntimeProfileWriteSchema,
@@ -838,12 +890,15 @@ export const rpcSchemaRefs = [
   clientRequestRuntimeHealthCheckSchema,
   clientRequestRuntimeSessionListSchema,
   clientRequestRuntimeSessionReadSchema,
+  clientRequestRuntimeSessionAttachSchema,
   clientRequestRuntimeSessionResumeSchema,
   clientRequestRuntimeSessionArchiveSchema,
   clientRequestRuntimeSessionUnarchiveSchema,
   clientRequestRuntimeSessionDeleteSchema,
   clientRequestRuntimeSessionRenameSchema,
-  clientRequestRuntimeSessionRollbackSchema,
+  clientRequestRuntimeSessionForkSchema,
+  clientRequestRuntimeSessionRevertSchema,
+  clientRequestRuntimeSessionUnrevertSchema,
   clientRequestAutomationListSchema,
   clientRequestAutomationDraftSchema,
   clientRequestAutomationWriteSchema,

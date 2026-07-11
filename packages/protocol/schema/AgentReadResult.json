@@ -19,6 +19,15 @@
       ],
       "type": "string"
     },
+    "AgentContributionView": {
+      "enum": [
+        "instructions",
+        "tools",
+        "mcp",
+        "skills"
+      ],
+      "type": "string"
+    },
     "AgentDefinitionView": {
       "properties": {
         "backend": {
@@ -31,6 +40,13 @@
             }
           ],
           "default": null
+        },
+        "contributions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/AgentContributionView"
+          },
+          "type": "array"
         },
         "description": {
           "type": "string"
@@ -64,6 +80,13 @@
         },
         "name": {
           "type": "string"
+        },
+        "optionalContributions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "path": {
           "default": null,

@@ -119,8 +119,68 @@ impl GatewayLiveProjector {
                 self.project_exec_session_event(turn_id, value)
             }
             Some("acp_peer_plan") => self.project_acp_peer_plan(turn_id, value),
+            Some("runtime_plan") => self.project_direct_runtime_plan(turn_id, value),
+            Some("runtime_diff") => self.project_direct_runtime_diff(turn_id, value),
             _ => None,
         }
+    }
+
+    fn project_direct_runtime_plan(
+        &mut self,
+        turn_id: &str,
+        value: &Value,
+    ) -> Option<GatewayEvent> {
+        let body = value
+            .get("body")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|body| !body.is_empty())
+            .map(ToString::to_string)?;
+        let segment = self.assistant_segment;
+        let block = live_block(
+            format!("live:{turn_id}:assistant:{segment}:runtime-plan"),
+            TranscriptBlockKind::Status,
+            TranscriptBlockStatus::Running,
+            DEFAULT_TEXT_ORDER + 10,
+            Some("Plan".to_string()),
+            Some(body),
+            Some(json!({
+                "projection": "runtime_plan",
+                "origin": "runtime_profile",
+                "plan": value.get("plan").cloned().unwrap_or(Value::Null),
+            })),
+        );
+        self.upsert_block(segment, block);
+        Some(self.emit_entry_event(turn_id, segment, false, false))
+    }
+
+    fn project_direct_runtime_diff(
+        &mut self,
+        turn_id: &str,
+        value: &Value,
+    ) -> Option<GatewayEvent> {
+        let body = value
+            .get("diff")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|body| !body.is_empty())
+            .unwrap_or("No changes.")
+            .to_string();
+        let segment = self.assistant_segment;
+        let block = live_block(
+            format!("live:{turn_id}:assistant:{segment}:runtime-diff"),
+            TranscriptBlockKind::Diff,
+            TranscriptBlockStatus::Running,
+            DEFAULT_TEXT_ORDER + 20,
+            Some("Changes".to_string()),
+            Some(body),
+            Some(json!({
+                "projection": "runtime_diff",
+                "origin": "runtime_profile",
+            })),
+        );
+        self.upsert_block(segment, block);
+        Some(self.emit_entry_event(turn_id, segment, false, false))
     }
 
     fn project_acp_peer_plan(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {

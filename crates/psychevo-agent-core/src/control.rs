@@ -128,7 +128,9 @@ impl ControlReceivers {
         messages
     }
 
-    pub(crate) fn drain_pending_user_messages(&mut self) -> Vec<(PendingInputId, Message)> {
+    /// Atomically consumes pending steer inputs. A consumer owns an input once
+    /// it is returned, so later update or cancel calls for that id fail.
+    pub fn drain_pending_user_messages(&mut self) -> Vec<(PendingInputId, Message)> {
         let Ok(mut state) = self.pending_user_inputs.lock() else {
             return Vec::new();
         };

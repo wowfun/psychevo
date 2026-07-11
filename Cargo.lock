@@ -2792,6 +2792,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "tungstenite 0.28.0",
  "unicode-width",
  "uuid",
 ]
@@ -2811,12 +2812,14 @@ dependencies = [
  "psychevo-ai",
  "psychevo-gateway-protocol",
  "psychevo-runtime",
+ "psychevo-runtime-host",
  "qrcode",
  "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -2871,6 +2874,26 @@ dependencies = [
  "toml",
  "tree-sitter",
  "tree-sitter-bash",
+ "uuid",
+]
+
+[[package]]
+name = "psychevo-runtime-host"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64",
+ "bytes",
+ "futures",
+ "getrandom 0.4.2",
+ "psychevo-runtime",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
  "uuid",
 ]
 

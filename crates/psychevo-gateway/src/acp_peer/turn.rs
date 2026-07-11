@@ -111,6 +111,7 @@ pub(crate) async fn run_acp_peer_turn(
                 }),
                 selected_skills: Vec::new(),
                 context_snapshot: None,
+                terminal_error: None,
                 events: Vec::new(),
                 warnings: Vec::new(),
             };
@@ -222,6 +223,7 @@ pub(crate) async fn run_acp_peer_turn(
         }),
         selected_skills: Vec::new(),
         context_snapshot: None,
+        terminal_error: None,
         events: acp.events,
         warnings: Vec::new(),
     };

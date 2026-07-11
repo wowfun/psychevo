@@ -271,9 +271,10 @@ marketplace catalog management. With no subcommand it shows help. `list`,
 `install`, `uninstall`, `enable`, and `disable` write the active profile scope
 by default. `--local` writes the current cwd `.psychevo` scope. `-g` or
 `--global` writes the active profile scope and conflicts with `--local`.
-`enable` enables the plugin package in the selected scope. When a selector
-matches more than one installed plugin,
-`name@source` is required. `plugin marketplace list/add/remove` manages local
+`enable` enables the plugin package in the selected scope. Canonical installed
+package selectors are `profile:name@source` and `project:name@source`; bare
+`name` and unscoped `name@source` are accepted only when unique across both
+installation scopes. `plugin marketplace list/add/remove` manages local
 and Git source catalogs separately from plugin installation and enablement.
 Plugin package, manifest, store, worker, hook, and declaration behavior
 belongs to [054 Plugins](../054-plugins/spec.md),

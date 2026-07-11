@@ -25,6 +25,7 @@ struct ActiveThreadState {
 enum ActiveActivityKind {
     Turn,
     Shell,
+    Compact,
 }
 
 enum ShellStartState {
@@ -37,6 +38,7 @@ enum ShellStartState {
 enum PendingQueuedActivity {
     Turn(Box<PendingQueuedTurn>),
     Shell(Box<PendingQueuedShell>),
+    Compact(Box<PendingQueuedCompact>),
 }
 
 #[derive(Debug)]
@@ -53,7 +55,23 @@ struct PendingQueuedShell {
     responder: oneshot::Sender<psychevo_runtime::Result<GatewayShellResult>>,
 }
 
+#[derive(Debug)]
+struct PendingQueuedCompact {
+    compact_id: String,
+    request: SendCompactRequest,
+    responder: oneshot::Sender<psychevo_runtime::Result<psychevo_runtime::CompactionResult>>,
+}
+
 type PendingPermissionMap = Arc<Mutex<HashMap<String, PendingPermission>>>;
+
+type PendingRuntimeInteractionMap = Arc<Mutex<HashMap<String, PendingRuntimeInteraction>>>;
+
+#[derive(Clone)]
+struct PendingRuntimeInteraction {
+    interaction: psychevo_runtime_host::RuntimeInteraction,
+    profile: RuntimeProfile,
+    event_sink: Option<GatewayEventSink>,
+}
 
 struct PendingPermission {
     selector_key: Option<String>,
@@ -66,6 +84,7 @@ struct GatewayApprovalHandler {
     pending_permissions: PendingPermissionMap,
     event_sink: GatewayEventSink,
     timeout_secs: u64,
+    session_authorization_lifetime: Option<&'static str>,
 }
 
 impl GatewayApprovalHandler {
@@ -73,12 +92,14 @@ impl GatewayApprovalHandler {
         selector_key: Option<String>,
         pending_permissions: PendingPermissionMap,
         event_sink: GatewayEventSink,
+        session_authorization_lifetime: Option<&'static str>,
     ) -> Self {
         Self {
             selector_key,
             pending_permissions,
             event_sink,
             timeout_secs: 300,
+            session_authorization_lifetime,
         }
     }
 }
@@ -111,6 +132,7 @@ impl ApprovalHandler for GatewayApprovalHandler {
         let pending_permissions = self.pending_permissions.clone();
         let event_sink = self.event_sink.clone();
         let timeout_secs = self.timeout_secs;
+        let session_authorization_lifetime = self.session_authorization_lifetime;
         Box::pin(async move {
             let (responder, receiver) = oneshot::channel();
             {
@@ -125,6 +147,7 @@ impl ApprovalHandler for GatewayApprovalHandler {
                     },
                 );
             }
+            let allow_always = request.allow_always;
             event_sink(GatewayEvent::ActionRequested {
                 action: PendingActionView {
                     action_id: request_id.clone(),
@@ -141,7 +164,10 @@ impl ApprovalHandler for GatewayApprovalHandler {
                         "reason": request.reason,
                         "matchedRule": request.matched_rule,
                         "suggestedRule": request.suggested_rule,
-                        "allowAlways": request.allow_always,
+                        "allowSession": session_authorization_lifetime.is_some(),
+                        "allowAlways": allow_always,
+                        "authorizationLifetime": session_authorization_lifetime,
+                        "alwaysAuthorizationLifetime": allow_always.then_some("permanent"),
                         "timeoutSecs": request.timeout_secs,
                     }),
                     thread_id: None,
@@ -228,6 +254,41 @@ pub struct SendShellRequest {
     pub stream: Option<RunStreamSink>,
     pub event_sink: Option<GatewayEventSink>,
     pub lineage: Option<Value>,
+}
+
+pub struct SendCompactRequest {
+    pub thread_id: Option<String>,
+    pub source: Option<GatewaySource>,
+    pub runtime_ref: Option<String>,
+    pub cwd: PathBuf,
+    pub config_path: Option<PathBuf>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub instructions: Option<String>,
+    pub force: bool,
+    pub reason: psychevo_runtime::CompactionReason,
+    pub inherited_env: Option<BTreeMap<String, String>>,
+    pub event_sink: Option<GatewayEventSink>,
+}
+
+impl fmt::Debug for SendCompactRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SendCompactRequest")
+            .field("thread_id", &self.thread_id)
+            .field("source", &self.source)
+            .field("runtime_ref", &self.runtime_ref)
+            .field("cwd", &self.cwd)
+            .field("config_path", &self.config_path)
+            .field("model", &self.model)
+            .field("reasoning_effort", &self.reasoning_effort)
+            .field("has_instructions", &self.instructions.is_some())
+            .field("force", &self.force)
+            .field("reason", &self.reason)
+            .field("has_inherited_env", &self.inherited_env.is_some())
+            .field("has_event_sink", &self.event_sink.is_some())
+            .finish()
+    }
 }
 
 impl fmt::Debug for SendShellRequest {

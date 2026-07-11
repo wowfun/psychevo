@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeSessionOwnershipView": {
+      "enum": [
+        "readWrite",
+        "readOnly",
+        "active"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "backendKind": {
+      "type": "string"
+    },
+    "bindingRevision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "nativeKind": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ownership": {
+      "$ref": "#/definitions/RuntimeSessionOwnershipView"
+    },
+    "profileFingerprint": {
+      "type": "string"
+    },
+    "runtimeRef": {
+      "type": "string"
+    },
+    "sessionHandle": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "backendKind",
+    "bindingRevision",
+    "cwd",
+    "ownership",
+    "profileFingerprint",
+    "runtimeRef",
+    "threadId"
+  ],
+  "title": "RuntimeBindingView",
+  "type": "object"
+}

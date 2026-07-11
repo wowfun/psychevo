@@ -43,7 +43,7 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) applied_gateway_live_event_seqs: BTreeSet<i64>,
     pub(crate) auxiliary_agent_tasks: Vec<AuxiliaryAgentTask>,
     pub(crate) agent_child_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
-    pub(crate) session_live_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
+    pub(crate) session_live_event_backlog: BTreeMap<String, Vec<TuiLiveEvent>>,
     pub(crate) auxiliary_shell_tasks: Vec<AuxiliaryShellTask>,
     pub(crate) pending_auxiliary_shell_commands: VecDeque<String>,
     pub(crate) approval_rx: Option<mpsc::UnboundedReceiver<TuiApprovalRequest>>,

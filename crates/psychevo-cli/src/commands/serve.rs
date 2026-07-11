@@ -67,8 +67,35 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
             "profileHome": profile_home,
         }))?
     );
-    bound.run().await?;
+    bound
+        .run_with_shutdown_signal(serve_shutdown_signal())
+        .await?;
     Ok(ExitCode::SUCCESS)
+}
+
+async fn ctrl_c_shutdown_signal() {
+    if tokio::signal::ctrl_c().await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+#[cfg(unix)]
+async fn serve_shutdown_signal() {
+    let Ok(mut terminate) =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    else {
+        ctrl_c_shutdown_signal().await;
+        return;
+    };
+    tokio::select! {
+        _ = ctrl_c_shutdown_signal() => {}
+        _ = terminate.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn serve_shutdown_signal() {
+    ctrl_c_shutdown_signal().await;
 }
 
 fn serve_token(

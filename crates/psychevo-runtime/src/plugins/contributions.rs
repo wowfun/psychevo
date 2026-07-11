@@ -120,8 +120,8 @@ fn enabled_plugin_manifests(
         }
     };
     let mut enabled = Vec::new();
-    for record in records {
-        let Some(policy) = policy_entry(policy, &record).cloned() else {
+    for record in &records {
+        let Some(policy) = policy_entry(policy, &records, record).cloned() else {
             continue;
         };
         if !policy.plugin_enabled() {
@@ -138,7 +138,7 @@ fn enabled_plugin_manifests(
             }
         };
         enabled.push(EnabledPluginManifest {
-            record,
+            record: record.clone(),
             manifest,
             policy,
         });

@@ -43,11 +43,8 @@ pub(crate) async fn spawn_subagent(
         ));
     }
     let team_member = resolve_team_member_for_spawn(&context, &args)?;
-    let agent_name = resolve_agent_tool_name(
-        &args,
-        &context.required_agent_names,
-        team_member.as_ref(),
-    )?;
+    let agent_name =
+        resolve_agent_tool_name(&args, &context.required_agent_names, team_member.as_ref())?;
     let agent = context
         .catalog
         .agents
@@ -75,8 +72,9 @@ pub(crate) async fn spawn_subagent(
             agent.name
         )));
     }
-    if agent.backend.is_some() {
-        return spawn_external_subagent(context, args, tool_call_id, abort, agent).await;
+    if external_agent_runtime_ref(&agent, team_member.as_ref()).is_some() {
+        return spawn_external_subagent(context, args, tool_call_id, abort, agent, team_member)
+            .await;
     }
     let id = Uuid::now_v7().to_string();
     let task_name = args.task_name.trim().to_string();
@@ -130,12 +128,18 @@ pub(crate) async fn spawn_subagent(
         final_answer: None,
         error: None,
         effective_max_spawn_depth: Some(spawn_depth_remaining),
-        team_run_id: context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+        team_run_id: context
+            .active_team
+            .as_ref()
+            .map(|team| team.team_run_id.clone()),
         mission_run_id: context
             .active_team
             .as_ref()
             .and_then(|team| team.mission_run_id.clone()),
-        team_name: context.active_team.as_ref().map(|team| team.team_name.clone()),
+        team_name: context
+            .active_team
+            .as_ref()
+            .map(|team| team.team_name.clone()),
         team_member_id: team_member.as_ref().map(|member| member.id.clone()),
         agent_path: Some(agent_path(&task_name)),
     };
@@ -340,44 +344,79 @@ fn spawn_parent_abort_bridge(
     })
 }
 
+fn external_agent_runtime_ref(
+    agent: &AgentDefinition,
+    team_member: Option<&AgentTeamMember>,
+) -> Option<String> {
+    if let Some(runtime_ref) = team_member
+        .and_then(|member| member.runtime_ref.as_deref())
+        .map(str::trim)
+        .filter(|runtime_ref| !runtime_ref.is_empty())
+    {
+        return (runtime_ref != "native").then(|| runtime_ref.to_string());
+    }
+    agent
+        .backend
+        .as_ref()
+        .map(|backend| format!("acp:{}", backend.name))
+}
+
 async fn spawn_external_subagent(
     context: AgentToolContext,
     args: SpawnAgentArgs,
     tool_call_id: String,
     abort: AbortSignal,
     agent: AgentDefinition,
+    team_member: Option<AgentTeamMember>,
 ) -> Result<ToolOutput> {
     if abort.aborted() {
         return Err(Error::Message("parent invocation aborted".to_string()));
     }
     if args.fork_context {
         return Ok(ToolOutput::error(format!(
-            "agent `{}` is backed by an external ACP backend and does not support fork_context; run it as a foreground delegated task",
+            "agent `{}` is paired with an external Runtime Profile and does not support fork_context; run it as a foreground delegated task",
             agent.name
         )));
     }
     if args.background.unwrap_or(false) || agent.background.unwrap_or(false) {
         return Ok(ToolOutput::error(format!(
-            "agent `{}` is backed by an external ACP backend and does not support background delegation yet; run it as a foreground delegated task",
+            "agent `{}` is paired with an external Runtime Profile and does not support background delegation yet; run it as a foreground delegated task",
             agent.name
         )));
     }
     let Some(delegate) = context.external_delegate.clone() else {
         return Ok(ToolOutput::error(format!(
-            "agent `{}` is backed by an external ACP backend, but this execution context cannot delegate to peer agents",
+            "agent `{}` is paired with an external Runtime Profile, but this execution context cannot delegate runtime-backed members",
             agent.name
         )));
     };
-    let Some(backend) = agent.backend.as_ref() else {
+    let Some(runtime_ref) = external_agent_runtime_ref(&agent, team_member.as_ref()) else {
         return Ok(ToolOutput::error(format!(
-            "agent `{}` is missing backend.ref",
+            "agent `{}` does not select an external Runtime Profile",
             agent.name
         )));
     };
+    let backend_ref = agent.backend.as_ref().map(|backend| backend.name.clone());
+    let required_contributions = unsupported_external_agent_contributions(&agent);
+    if !required_contributions.is_empty() {
+        return Ok(ToolOutput::error(format!(
+            "Agent Definition `{}` requires {} contribution(s), but the selected runtime delegate cannot faithfully inject them; pairing refused instead of silently omitting them",
+            agent.name,
+            required_contributions.join(", ")
+        )));
+    }
 
     let id = Uuid::now_v7().to_string();
     let task_name = args.task_name.trim().to_string();
-    let team_member = resolve_team_member_for_spawn(&context, &args)?;
+    let runtime_options = team_member
+        .as_ref()
+        .map(|member| member.runtime_options.clone())
+        .unwrap_or_default();
+    let model = args
+        .model
+        .clone()
+        .or_else(|| runtime_options.get("model").cloned())
+        .or_else(|| agent.model.clone());
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, args.max_spawn_depth);
     let mut metadata = child_agent_metadata(ChildAgentMetadataInput {
         id: &id,
@@ -396,9 +435,13 @@ async fn spawn_external_subagent(
     let child_session = context.state.store().create_child_session_with_metadata(
         &context.parent_session_id,
         &context.cwd,
-        "peer_agent",
-        &agent.name,
-        &format!("acp:{}", backend.name),
+        if runtime_ref.starts_with("acp:") {
+            "peer_agent"
+        } else {
+            "runtime"
+        },
+        model.as_deref().unwrap_or(&agent.name),
+        &runtime_ref,
         Some(metadata.clone()),
     )?;
     attach_child_thread_metadata(&mut metadata, &child_session);
@@ -426,12 +469,18 @@ async fn spawn_external_subagent(
         final_answer: None,
         error: None,
         effective_max_spawn_depth: Some(spawn_depth_remaining),
-        team_run_id: context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+        team_run_id: context
+            .active_team
+            .as_ref()
+            .map(|team| team.team_run_id.clone()),
         mission_run_id: context
             .active_team
             .as_ref()
             .and_then(|team| team.mission_run_id.clone()),
-        team_name: context.active_team.as_ref().map(|team| team.team_name.clone()),
+        team_name: context
+            .active_team
+            .as_ref()
+            .map(|team| team.team_name.clone()),
         team_member_id: team_member.as_ref().map(|member| member.id.clone()),
         agent_path: Some(agent_path(&task_name)),
     };
@@ -454,6 +503,8 @@ async fn spawn_external_subagent(
         tool_call_id: &tool_call_id,
         child_session_id: &child_session,
         spawn_depth_remaining,
+        team_member_id: team_member.as_ref().map(|member| member.id.as_str()),
+        runtime_ref: Some(runtime_ref.as_str()),
     });
 
     let request = ExternalAgentDelegateRequest {
@@ -462,11 +513,17 @@ async fn spawn_external_subagent(
         child_session_id: child_session.clone(),
         agent_name: agent.name.clone(),
         agent_description: agent.description.clone(),
-        backend_ref: backend.name.clone(),
+        runtime_ref,
+        backend_ref,
+        instructions: (!agent.instructions.trim().is_empty())
+            .then(|| agent.instructions.trim().to_string()),
         prompt: args.message.clone(),
         task_name: task_name.clone(),
-        model: args.model.clone(),
-        runtime_options: BTreeMap::new(),
+        model,
+        runtime_options,
+        expected_runtime_profile_revision: team_member
+            .as_ref()
+            .and_then(|member| member.runtime_profile_revision),
         abort,
     };
     let result = delegate.run(request).await;
@@ -506,12 +563,18 @@ async fn spawn_external_subagent(
                         final_answer: None,
                         error: Some(err.to_string()),
                         effective_max_spawn_depth: Some(spawn_depth_remaining),
-                        team_run_id: context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+                        team_run_id: context
+                            .active_team
+                            .as_ref()
+                            .map(|team| team.team_run_id.clone()),
                         mission_run_id: context
                             .active_team
                             .as_ref()
                             .and_then(|team| team.mission_run_id.clone()),
-                        team_name: context.active_team.as_ref().map(|team| team.team_name.clone()),
+                        team_name: context
+                            .active_team
+                            .as_ref()
+                            .map(|team| team.team_name.clone()),
                         team_member_id: team_member.as_ref().map(|member| member.id.clone()),
                         agent_path: Some(agent_path(&task_name)),
                     })
@@ -559,6 +622,42 @@ async fn spawn_external_subagent(
         system_value,
         model_content_string(&model_value),
     ))
+}
+
+fn unsupported_external_agent_contributions(agent: &AgentDefinition) -> Vec<&'static str> {
+    external_agent_contributions_without_injection(agent)
+        .into_iter()
+        .filter(|contribution| !agent.contribution_is_optional(*contribution))
+        .map(AgentContribution::as_str)
+        .collect()
+}
+
+pub(crate) fn optional_external_agent_contributions(agent: &AgentDefinition) -> Vec<&'static str> {
+    external_agent_contributions_without_injection(agent)
+        .into_iter()
+        .filter(|contribution| agent.contribution_is_optional(*contribution))
+        .map(AgentContribution::as_str)
+        .collect()
+}
+
+fn external_agent_contributions_without_injection(
+    agent: &AgentDefinition,
+) -> Vec<AgentContribution> {
+    let mut contributions = Vec::new();
+    if agent.tool_policy.allowed.is_some()
+        || !agent.tool_policy.denied.is_empty()
+        || agent.tool_policy.allowed_agents.is_some()
+        || !agent.tool_policy.denied_agents.is_empty()
+    {
+        contributions.push(AgentContribution::Tools);
+    }
+    if !agent.tool_policy.mcp_servers.is_empty() {
+        contributions.push(AgentContribution::Mcp);
+    }
+    if !agent.skills.is_empty() {
+        contributions.push(AgentContribution::Skills);
+    }
+    contributions
 }
 
 pub(crate) fn resolve_agent_tool_name(
@@ -721,12 +820,18 @@ pub(crate) fn spawn_child_agent_background(
         final_answer: None,
         error: None,
         effective_max_spawn_depth: Some(spawn_depth_remaining),
-        team_run_id: context.active_team.as_ref().map(|team| team.team_run_id.clone()),
+        team_run_id: context
+            .active_team
+            .as_ref()
+            .map(|team| team.team_run_id.clone()),
         mission_run_id: context
             .active_team
             .as_ref()
             .and_then(|team| team.mission_run_id.clone()),
-        team_name: context.active_team.as_ref().map(|team| team.team_name.clone()),
+        team_name: context
+            .active_team
+            .as_ref()
+            .map(|team| team.team_name.clone()),
         team_member_id: None,
         agent_path: Some(agent_path(&task_name)),
     };

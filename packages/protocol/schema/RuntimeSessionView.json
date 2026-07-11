@@ -1,12 +1,61 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeHistoryFidelityView": {
+      "enum": [
+        "full",
+        "summary",
+        "partial"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionOwnershipView": {
+      "enum": [
+        "readWrite",
+        "readOnly",
+        "active"
+      ],
+      "type": "string"
+    }
+  },
   "properties": {
+    "actions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "archived": {
       "default": false,
       "type": "boolean"
     },
-    "nativeSessionId": {
+    "dedupKey": {
+      "default": "",
       "type": "string"
+    },
+    "fidelity": {
+      "$ref": "#/definitions/RuntimeHistoryFidelityView"
+    },
+    "ownership": {
+      "$ref": "#/definitions/RuntimeSessionOwnershipView"
+    },
+    "parentThreadId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionHandle": {
+      "type": "string"
+    },
+    "status": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "threadId": {
       "default": null,
@@ -32,7 +81,9 @@
     }
   },
   "required": [
-    "nativeSessionId"
+    "fidelity",
+    "ownership",
+    "sessionHandle"
   ],
   "title": "RuntimeSessionView",
   "type": "object"

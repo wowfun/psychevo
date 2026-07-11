@@ -1,4 +1,7 @@
 const INTERNAL_SESSION_SOURCES: &[&str] = SIDE_CONVERSATION_SESSION_SOURCES;
+const RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(6);
+const RUNTIME_FORCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(4);
+const SERVER_CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone)]
 pub struct GatewayWebServerConfig {
     pub gateway: Gateway,
@@ -62,6 +65,7 @@ impl GatewayWebServerConfig {
 pub struct BoundGatewayWebServer {
     listener: TcpListener,
     app: Router,
+    gateway: Gateway,
     local_addr: SocketAddr,
     token: String,
 }
@@ -80,8 +84,89 @@ impl BoundGatewayWebServer {
     }
 
     pub async fn run(self) -> psychevo_runtime::Result<()> {
-        axum::serve(self.listener, self.app.into_make_service()).await?;
-        Ok(())
+        let result = axum::serve(self.listener, self.app.into_make_service()).await;
+        let shutdown = shutdown_runtimes_with_deadlines(
+            &self.gateway,
+            RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
+            RUNTIME_FORCE_SHUTDOWN_TIMEOUT,
+        )
+        .await;
+        result?;
+        shutdown
+    }
+
+    pub async fn run_with_shutdown_signal<F>(
+        self,
+        shutdown_signal: F,
+    ) -> psychevo_runtime::Result<()>
+    where
+        F: std::future::Future<Output = ()> + Send,
+    {
+        let Self {
+            listener,
+            app,
+            gateway,
+            ..
+        } = self;
+        let (server_shutdown_tx, server_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let server = std::future::IntoFuture::into_future(
+            axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async move {
+                let _ = server_shutdown_rx.await;
+            }),
+        );
+        tokio::pin!(server);
+        tokio::pin!(shutdown_signal);
+
+        tokio::select! {
+            result = &mut server => {
+                let shutdown = shutdown_runtimes_with_deadlines(
+                    &gateway,
+                    RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
+                    RUNTIME_FORCE_SHUTDOWN_TIMEOUT,
+                ).await;
+                result?;
+                shutdown
+            }
+            _ = &mut shutdown_signal => {
+                let _ = server_shutdown_tx.send(());
+                let shutdown = shutdown_runtimes_with_deadlines(
+                    &gateway,
+                    RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
+                    RUNTIME_FORCE_SHUTDOWN_TIMEOUT,
+                ).await;
+                let drain = tokio::time::timeout(SERVER_CONNECTION_DRAIN_TIMEOUT, &mut server).await;
+                if let Ok(result) = drain {
+                    result?;
+                }
+                shutdown
+            }
+        }
+    }
+}
+
+async fn shutdown_runtimes_with_deadlines(
+    gateway: &Gateway,
+    graceful_timeout: Duration,
+    force_timeout: Duration,
+) -> psychevo_runtime::Result<()> {
+    let graceful = tokio::time::timeout(graceful_timeout, gateway.shutdown_runtimes(false)).await;
+    let graceful_failure = match graceful {
+        Ok(Ok(())) => return Ok(()),
+        Ok(Err(error)) => format!("graceful runtime shutdown failed: {error}"),
+        Err(_) => format!(
+            "graceful runtime shutdown exceeded {} ms",
+            graceful_timeout.as_millis()
+        ),
+    };
+    match tokio::time::timeout(force_timeout, gateway.shutdown_runtimes(true)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(Error::Message(format!(
+            "{graceful_failure}; forced runtime shutdown failed: {error}"
+        ))),
+        Err(_) => Err(Error::Message(format!(
+            "{graceful_failure}; forced runtime shutdown exceeded {} ms",
+            force_timeout.as_millis()
+        ))),
     }
 }
 
@@ -94,6 +179,7 @@ pub async fn bind_gateway_web_server(
     if let Some(path) = &config.managed_state_path {
         write_managed_state(path, local_addr, &config)?;
     }
+    let gateway = config.gateway.clone();
     let state = WebState::new(config);
     let app = Router::new()
         .route("/readyz", get(readyz))
@@ -111,6 +197,7 @@ pub async fn bind_gateway_web_server(
     Ok(BoundGatewayWebServer {
         listener,
         app,
+        gateway,
         local_addr,
         token,
     })
@@ -222,6 +309,37 @@ struct WebState {
     inner: Arc<WebStateInner>,
 }
 
+#[derive(Clone)]
+struct RuntimeSessionCursorEntry {
+    runtime_ref: String,
+    cwd: String,
+    native_session_id: String,
+    native_cursor: String,
+}
+
+#[derive(Clone)]
+struct RuntimeSessionHandleEntry {
+    runtime_ref: String,
+    cwd: String,
+    native_session_id: String,
+}
+
+#[derive(Clone)]
+struct RuntimeSessionListCursorEntry {
+    runtime_ref: String,
+    cwd: String,
+    native_cursor: String,
+}
+
+#[derive(Clone)]
+struct RuntimeSessionRevisionEntry {
+    runtime_ref: String,
+    cwd: String,
+    native_session_id: String,
+    native_page_cursor: Option<String>,
+    native_message_id: String,
+}
+
 struct WebStateInner {
     gateway: Gateway,
     state: StateRuntime,
@@ -241,6 +359,10 @@ struct WebStateInner {
     mcp_oauth_sessions: Mutex<HashMap<String, McpOAuthSession>>,
     voice_policies: Mutex<HashMap<String, wire::VoicePolicyMode>>,
     realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
+    runtime_session_cursors: Mutex<HashMap<String, RuntimeSessionCursorEntry>>,
+    runtime_session_handles: Mutex<HashMap<String, RuntimeSessionHandleEntry>>,
+    runtime_session_list_cursors: Mutex<HashMap<String, RuntimeSessionListCursorEntry>>,
+    runtime_session_revisions: Mutex<HashMap<String, RuntimeSessionRevisionEntry>>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
 }
 
@@ -307,6 +429,10 @@ impl WebState {
                 mcp_oauth_sessions: Mutex::new(HashMap::new()),
                 voice_policies: Mutex::new(HashMap::new()),
                 realtime_sessions: Mutex::new(HashMap::new()),
+                runtime_session_cursors: Mutex::new(HashMap::new()),
+                runtime_session_handles: Mutex::new(HashMap::new()),
+                runtime_session_list_cursors: Mutex::new(HashMap::new()),
+                runtime_session_revisions: Mutex::new(HashMap::new()),
                 channel_runtime,
             }),
         };
@@ -351,6 +477,10 @@ impl WebState {
     }
 
     fn run_options(&self, cwd: PathBuf, thread_id: Option<String>) -> RunOptions {
+        let mut inherited_env = self.inner.inherited_env.clone();
+        inherited_env
+            .entry("PSYCHEVO_HOME".to_string())
+            .or_insert_with(|| self.inner.home.to_string_lossy().into_owned());
         RunOptions {
             state: self.inner.state.clone(),
             cwd: cwd.clone(),
@@ -376,7 +506,7 @@ impl WebState {
             approval_mode: None,
             approval_handler: None,
             clarify_enabled: true,
-            inherited_env: Some(self.inner.inherited_env.clone()),
+            inherited_env: Some(inherited_env),
             agent: None,
             external_agent_delegate: None,
             no_agents: false,
@@ -399,8 +529,7 @@ impl WebState {
 
     fn record_event_with_context(&self, event: &GatewayEvent, context: PendingInteractionContext) {
         match event {
-            GatewayEvent::ActionRequested { action }
-            | GatewayEvent::ActionUpdated { action } => {
+            GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
                 self.inner
                     .pending_actions
                     .lock()
@@ -505,11 +634,7 @@ impl WebState {
             .remove(request_id);
     }
 
-    fn remove_pending_actions_for_completed_turn(
-        &self,
-        thread_id: Option<&str>,
-        turn_id: &str,
-    ) {
+    fn remove_pending_actions_for_completed_turn(&self, thread_id: Option<&str>, turn_id: &str) {
         self.inner
             .pending_actions
             .lock()

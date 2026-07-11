@@ -140,24 +140,79 @@ fn gateway_backend_info_for_thread(
     thread_id: &str,
 ) -> psychevo_runtime::Result<GatewayBackendInfo> {
     let store = state.inner.state.store();
+    if let Some(binding) = store.gateway_runtime_binding(thread_id)? {
+        if binding.status != GatewayRuntimeBindingStatus::Resolved {
+            let message = binding.unresolved_reason.unwrap_or_else(|| {
+                format!("Thread `{thread_id}` has an unresolved runtime binding.")
+            });
+            return Err(Error::structured(
+                message.clone(),
+                json!({
+                    "code": "unresolved_binding",
+                    "stage": "binding",
+                    "retryClass": "user_action",
+                    "message": message,
+                    "diagnosticRef": Value::Null,
+                }),
+            ));
+        }
+        let runtime_ref = binding.runtime_ref.ok_or_else(|| {
+            let message = format!(
+                "Thread `{thread_id}` has no resolved Runtime Profile identity."
+            );
+            Error::structured(
+                message.clone(),
+                json!({
+                    "code": "unresolved_binding",
+                    "stage": "binding",
+                    "retryClass": "user_action",
+                    "message": message,
+                    "diagnosticRef": Value::Null,
+                }),
+            )
+        })?;
+        let kind = match binding.backend_kind.as_deref() {
+            Some("psychevo") => BackendKind::Psychevo,
+            Some("peer_agent") => BackendKind::PeerAgent,
+            Some("runtime") => BackendKind::Runtime,
+            other => {
+                let message = format!(
+                    "Thread `{thread_id}` has unsupported runtime backend kind `{}`.",
+                    other.unwrap_or("missing")
+                );
+                return Err(Error::structured(
+                    message.clone(),
+                    json!({
+                        "code": "unsupported",
+                        "stage": "binding",
+                        "retryClass": "user_action",
+                        "message": message,
+                        "diagnosticRef": Value::Null,
+                    }),
+                ));
+            }
+        };
+        let session_handle = binding.native_session_id.as_deref().map(|native_id| {
+            crate::runtime_session_handle(&runtime_ref, Path::new(&binding.cwd), native_id)
+        });
+        return Ok(GatewayBackendInfo {
+            kind,
+            runtime_ref: Some(runtime_ref),
+            native_id: session_handle,
+        });
+    }
+
+    // Legacy sessions created before immutable runtime bindings remain readable.
+    // New turns always create a runtime binding before invoking a backend.
     let summary = store
         .session_summary(thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     if summary.source == "peer_agent" {
         let metadata = store.session_metadata(thread_id)?;
-        let native_id = store
-            .session_metadata(thread_id)?
-            .and_then(|metadata| metadata.get(ACP_PEER_METADATA_KEY).cloned())
-            .and_then(|peer| {
-                peer.get("nativeSessionId")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-            })
-            .or_else(|| Some(thread_id.to_string()));
         Ok(GatewayBackendInfo {
             kind: BackendKind::PeerAgent,
             runtime_ref: metadata_runtime_ref(&metadata),
-            native_id,
+            native_id: None,
         })
     } else {
         Ok(GatewayBackendInfo {

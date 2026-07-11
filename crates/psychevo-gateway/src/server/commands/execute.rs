@@ -205,7 +205,7 @@ fn command_result_from_effect(
         SlashCommandEffect::Compact { instructions } => Ok(command_action(
             raw,
             action,
-            json!({"type": "submitPrompt", "text": compact_prompt_text(instructions), "displayText": raw}),
+            json!({"type": "threadCompactStart", "instructions": instructions}),
         )),
         SlashCommandEffect::Diff => {
             let diff = workspace_diff_result(scope, None)?;
@@ -296,7 +296,13 @@ pub(crate) fn record_gateway_mission_metadata_for_parent(
         let teams = discover_agent_teams_with_catalog(&options, &agents)?;
         let team = resolve_agent_team_definition(&teams, team_name)?;
         let team_id = Uuid::now_v7().to_string();
-        let members = serde_json::to_value(&team.members)?;
+        let members = validate_and_capture_team_runtime_members(
+            state,
+            scope,
+            &agents,
+            &team.members,
+        )?;
+        let members = serde_json::to_value(&members)?;
         let source_path = team
             .file_path
             .as_ref()
@@ -689,18 +695,6 @@ fn web_desktop_unavailable_message(command: &str, action: SlashCommandAction) ->
         }
         SlashCommandAction::Btw => SIDE_CONVERSATION_NO_SESSION_MESSAGE.to_string(),
         _ => format!("{command} is not available in Web/Desktop."),
-    }
-}
-
-pub(super) fn compact_prompt_text(instructions: Option<String>) -> String {
-    match instructions {
-        Some(instructions) if !instructions.trim().is_empty() => {
-            format!(
-                "Compact this session with these instructions:\n\n{}",
-                instructions.trim()
-            )
-        }
-        _ => "Compact this session.".to_string(),
     }
 }
 

@@ -5,7 +5,8 @@
     "BackendKind": {
       "enum": [
         "psychevo",
-        "peerAgent"
+        "peerAgent",
+        "runtime"
       ],
       "type": "string"
     },
@@ -14,14 +15,14 @@
         "kind": {
           "$ref": "#/definitions/BackendKind"
         },
-        "nativeId": {
-          "default": null,
+        "runtimeRef": {
           "type": [
             "string",
             "null"
           ]
         },
-        "runtimeRef": {
+        "sessionHandle": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -111,8 +112,32 @@
     },
     "GatewayTurnError": {
       "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message": {
           "type": "string"
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -228,6 +253,7 @@
         "agent",
         "mailbox",
         "status",
+        "compaction",
         "diff",
         "artifact"
       ],

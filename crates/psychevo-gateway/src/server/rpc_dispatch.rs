@@ -26,6 +26,7 @@ async fn handle_rpc(
                 "automations": true,
                 "settingsWrite": "structured",
                 "workspaceCreate": true,
+                "contextCompaction": true,
                 "memoryResources": "status_only"
             }
             }))
@@ -37,6 +38,11 @@ async fn handle_rpc(
             let snapshot_scope = detached_draft_scope(&scope, &auth);
             update_browser_session_scope(&state, &auth, &snapshot_scope);
             thread_snapshot(&state, &snapshot_scope, None)
+        }
+        "thread/compact/start" => {
+            let params = request.params::<wire::ThreadCompactStartParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            thread_compact_start_value(&state, &auth, &scope, params, out_tx).await
         }
         "thread/resume" => {
             let params = request.params::<wire::ThreadResumeParams>()?;
@@ -86,9 +92,7 @@ async fn handle_rpc(
             let store = state.inner.state.store();
             let sessions = if params.archived.unwrap_or(false) {
                 match cwd.as_ref() {
-                    Some(cwd) => {
-                        store.list_archived_sessions_for_cwd_with_sources(cwd, &[])?
-                    }
+                    Some(cwd) => store.list_archived_sessions_for_cwd_with_sources(cwd, &[])?,
                     None => store.list_archived_sessions_with_sources(&[])?,
                 }
             } else {
@@ -221,7 +225,73 @@ async fn handle_rpc(
             if let Some(error) = peer_resolution_error {
                 return Err(error);
             }
-            Err(Error::Message(format!("unknown ACP runtime: {runtime_ref}")))
+            Err(Error::Message(format!(
+                "unknown ACP runtime: {runtime_ref}"
+            )))
+        }
+        "runtime/context/read" => {
+            let params = request.params::<wire::RuntimeContextReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            Ok(serde_json::to_value(runtime_context_read_result(
+                &state, &scope, params,
+            )?)?)
+        }
+        "runtime/control/set" => {
+            let params = request.required_params::<wire::RuntimeControlSetParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_control_set_result(&state, &scope, params).await?,
+            )?)
+        }
+        "runtime/auth/action" => {
+            let params = request.required_params::<wire::RuntimeAuthActionParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_auth_action_result(&state, &scope, params).await?,
+            )?)
+        }
+        "runtime/goal/read" => {
+            let params = request.params::<wire::RuntimeGoalReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            Ok(serde_json::to_value(
+                runtime_goal_read_result(&state, &scope, params).await?,
+            )?)
+        }
+        "runtime/goal/set" => {
+            let params = request.required_params::<wire::RuntimeGoalSetParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            Ok(serde_json::to_value(
+                runtime_goal_set_result(&state, &scope, params).await?,
+            )?)
+        }
+        "runtime/goal/clear" => {
+            let params = request.params::<wire::RuntimeGoalClearParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            Ok(serde_json::to_value(
+                runtime_goal_clear_result(&state, &scope, params).await?,
+            )?)
+        }
+        "runtime/account/rateLimits/read" => {
+            let params = request.params::<wire::RuntimeAccountRateLimitsReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id)?;
+            }
+            Ok(serde_json::to_value(
+                runtime_account_rate_limits_read_result(&state, &scope, params).await?,
+            )?)
         }
         "runtime/profile/list" => {
             let params = request.params::<wire::RuntimeProfileListParams>()?;
@@ -253,28 +323,38 @@ async fn handle_rpc(
         "runtime/snapshot" => {
             let params = request.params::<wire::RuntimeSnapshotParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            Ok(serde_json::to_value(runtime_snapshot_result(
-                &state, &scope, params,
-            )?)?)
+            Ok(serde_json::to_value(
+                runtime_snapshot_result(&state, &scope, params).await?,
+            )?)
         }
         "runtime/health/check" => {
             let params = request.required_params::<wire::RuntimeHealthCheckParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            runtime_health_check_result(&state, &scope, params)
+            runtime_health_check_result(&state, &scope, params).await
         }
         "runtime/session/list" => {
             let params = request.params::<wire::RuntimeSessionListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            Ok(serde_json::to_value(runtime_session_list_result(
-                &state, &scope, params,
-            )?)?)
+            Ok(serde_json::to_value(
+                runtime_session_list_result_live(&state, &scope, params).await?,
+            )?)
         }
         "runtime/session/read" => {
-            let params = request.required_params::<wire::RuntimeSessionParams>()?;
+            let params = request.required_params::<wire::RuntimeSessionReadParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             if params.runtime_ref == "native" {
                 authorize_thread(&state, &auth, &params.native_session_id)?;
             }
-            Ok(serde_json::to_value(runtime_session_read_result(&state, params)?)?)
+            Ok(serde_json::to_value(
+                runtime_session_read_result_live(&state, &scope, params).await?,
+            )?)
+        }
+        "runtime/session/attach" => {
+            let params = request.required_params::<wire::RuntimeSessionParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_session_attach_result_live(&state, &scope, params).await?,
+            )?)
         }
         "runtime/session/resume" => {
             let params = request.required_params::<wire::RuntimeSessionParams>()?;
@@ -282,52 +362,152 @@ async fn handle_rpc(
             if params.runtime_ref == "native" {
                 authorize_thread(&state, &auth, &params.native_session_id)?;
             }
-            Ok(serde_json::to_value(runtime_session_resume_result(
-                &state, &scope, params,
-            )?)?)
+            Ok(serde_json::to_value(
+                runtime_session_resume_result_live(&state, &scope, params).await?,
+            )?)
         }
         "runtime/session/archive" => {
             let params = request.required_params::<wire::RuntimeSessionParams>()?;
             if params.runtime_ref == "native" {
                 authorize_thread(&state, &auth, &params.native_session_id)?;
                 guard_session_mutation(&state, &auth, &params.native_session_id, true)?;
+                return Ok(serde_json::to_value(runtime_session_archive_result(
+                    &state, params, true,
+                )?)?);
             }
-            Ok(serde_json::to_value(runtime_session_archive_result(
-                &state, params, true,
-            )?)?)
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_session_direct_action_result(
+                    &state,
+                    &scope,
+                    params.runtime_ref,
+                    params.native_session_id,
+                    psychevo_runtime_host::RuntimeSessionOperation::Archive,
+                    None,
+                )
+                .await?,
+            )?)
         }
         "runtime/session/unarchive" => {
             let params = request.required_params::<wire::RuntimeSessionParams>()?;
             if params.runtime_ref == "native" {
                 authorize_thread(&state, &auth, &params.native_session_id)?;
                 guard_session_mutation(&state, &auth, &params.native_session_id, true)?;
+                return Ok(serde_json::to_value(runtime_session_archive_result(
+                    &state, params, false,
+                )?)?);
             }
-            Ok(serde_json::to_value(runtime_session_archive_result(
-                &state, params, false,
-            )?)?)
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_session_direct_action_result(
+                    &state,
+                    &scope,
+                    params.runtime_ref,
+                    params.native_session_id,
+                    psychevo_runtime_host::RuntimeSessionOperation::Unarchive,
+                    None,
+                )
+                .await?,
+            )?)
         }
         "runtime/session/delete" => {
             let params = request.required_params::<wire::RuntimeSessionParams>()?;
             if params.runtime_ref == "native" {
                 authorize_thread(&state, &auth, &params.native_session_id)?;
                 guard_session_mutation(&state, &auth, &params.native_session_id, false)?;
+                return Ok(serde_json::to_value(runtime_session_delete_result(
+                    &state, params,
+                )?)?);
             }
-            Ok(serde_json::to_value(runtime_session_delete_result(
-                &state, params,
-            )?)?)
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_session_direct_action_result(
+                    &state,
+                    &scope,
+                    params.runtime_ref,
+                    params.native_session_id,
+                    psychevo_runtime_host::RuntimeSessionOperation::Delete,
+                    None,
+                )
+                .await?,
+            )?)
         }
         "runtime/session/rename" => {
             let params = request.required_params::<wire::RuntimeSessionRenameParams>()?;
             if params.runtime_ref == "native" {
                 authorize_thread(&state, &auth, &params.native_session_id)?;
+                return Ok(serde_json::to_value(runtime_session_rename_result(
+                    &state, params,
+                )?)?);
             }
-            Ok(serde_json::to_value(runtime_session_rename_result(
-                &state, params,
-            )?)?)
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_session_direct_action_result(
+                    &state,
+                    &scope,
+                    params.runtime_ref,
+                    params.native_session_id,
+                    psychevo_runtime_host::RuntimeSessionOperation::Rename,
+                    Some(json!({"title": params.title})),
+                )
+                .await?,
+            )?)
         }
-        "runtime/session/rollback" => {
-            let params = request.required_params::<wire::RuntimeSessionRollbackParams>()?;
-            Ok(serde_json::to_value(runtime_session_rollback_result(params)?)?)
+        "runtime/session/fork" => {
+            let params = request.required_params::<wire::RuntimeSessionParams>()?;
+            if params.runtime_ref == "native" {
+                return Ok(serde_json::to_value(runtime_session_unsupported_action(
+                    params, "fork",
+                ))?);
+            }
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_session_direct_action_result(
+                    &state,
+                    &scope,
+                    params.runtime_ref,
+                    params.native_session_id,
+                    psychevo_runtime_host::RuntimeSessionOperation::Fork,
+                    None,
+                )
+                .await?,
+            )?)
+        }
+        "runtime/session/revert" => {
+            let params = request.required_params::<wire::RuntimeSessionRevisionParams>()?;
+            if params.runtime_ref == "native" {
+                return runtime_session_native_revision(&state, &auth, params, true);
+            }
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_session_direct_revision_result(
+                    &state,
+                    &scope,
+                    params.runtime_ref,
+                    params.native_session_id,
+                    psychevo_runtime_host::RuntimeSessionOperation::Revert,
+                    params.revision_handle,
+                )
+                .await?,
+            )?)
+        }
+        "runtime/session/unrevert" => {
+            let params = request.required_params::<wire::RuntimeSessionRevisionParams>()?;
+            if params.runtime_ref == "native" {
+                return runtime_session_native_revision(&state, &auth, params, false);
+            }
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                runtime_session_direct_revision_result(
+                    &state,
+                    &scope,
+                    params.runtime_ref,
+                    params.native_session_id,
+                    psychevo_runtime_host::RuntimeSessionOperation::Unrevert,
+                    params.revision_handle,
+                )
+                .await?,
+            )?)
         }
         "automation/list" => {
             let params = request.params::<wire::AutomationListParams>()?;
@@ -440,8 +620,7 @@ async fn handle_rpc(
                 let _ = event_tx.send(rpc_notification("gateway/event", json!(display_event)));
             });
             let gateway = state.inner.gateway.clone();
-            let bind_source =
-                (!requested_side_conversation_thread).then(|| cwd_source(&scope.cwd));
+            let bind_source = (!requested_side_conversation_thread).then(|| cwd_source(&scope.cwd));
             let response_thread_id = thread_id.clone();
             let requested_thread_id = thread_id.clone();
             tokio::spawn(async move {
@@ -1471,6 +1650,109 @@ async fn handle_rpc(
     }
 }
 
+fn runtime_rpc_error(
+    code: &str,
+    stage: &str,
+    retry_class: wire::RuntimeRetryClassView,
+    message: String,
+    diagnostic_ref: Option<String>,
+) -> Error {
+    let view = wire::RuntimeErrorView {
+        code: code.to_string(),
+        stage: stage.to_string(),
+        retry_class,
+        message: message.clone(),
+        diagnostic_ref,
+    };
+    Error::structured(
+        message,
+        serde_json::to_value(view).expect("runtime error view serializes"),
+    )
+}
+
+fn runtime_session_unsupported_action(
+    params: wire::RuntimeSessionParams,
+    action: &str,
+) -> wire::RuntimeSessionMutationResult {
+    wire::RuntimeSessionMutationResult {
+        runtime_ref: params.runtime_ref,
+        native_session_id: params.native_session_id,
+        supported: false,
+        changed: false,
+        session: None,
+        message: Some(format!(
+            "Runtime session {action} is not supported by this adapter."
+        )),
+        revisions: Vec::new(),
+        next_cursor: None,
+    }
+}
+
+fn runtime_session_native_revision(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::RuntimeSessionRevisionParams,
+    revert: bool,
+) -> psychevo_runtime::Result<Value> {
+    if params.runtime_ref != "native" {
+        return Ok(serde_json::to_value(wire::RuntimeSessionMutationResult {
+            runtime_ref: params.runtime_ref,
+            native_session_id: params.native_session_id,
+            supported: false,
+            changed: false,
+            session: None,
+            message: Some(
+                "This runtime adapter does not expose staged revert through Gateway.".to_string(),
+            ),
+            revisions: Vec::new(),
+            next_cursor: None,
+        })?);
+    }
+    authorize_thread(state, auth, &params.native_session_id)?;
+    guard_session_mutation(state, auth, &params.native_session_id, true)?;
+    if params.revision_handle.is_some() {
+        return Err(runtime_rpc_error(
+            "unsupported",
+            "history",
+            wire::RuntimeRetryClassView::UserAction,
+            "Native staged revert currently targets the latest snapshot only.".to_string(),
+            None,
+        ));
+    }
+    let summary = state
+        .inner
+        .state
+        .store()
+        .session_summary(&params.native_session_id)?
+        .ok_or_else(|| {
+            Error::Message(format!(
+                "runtime session not found: {}",
+                params.native_session_id
+            ))
+        })?;
+    let options = SessionUndoOptions {
+        state: state.inner.state.clone(),
+        cwd: PathBuf::from(summary.cwd),
+        snapshot_root: state.inner.home.join("snapshots"),
+        session_id: params.native_session_id.clone(),
+    };
+    if revert {
+        undo_session(options)?;
+    } else {
+        redo_session(options)?;
+    }
+    let mut result = runtime_session_read_result(
+        state,
+        wire::RuntimeSessionParams {
+            runtime_ref: params.runtime_ref,
+            native_session_id: params.native_session_id,
+            scope: params.scope,
+        },
+    )?;
+    result.changed = true;
+    Ok(serde_json::to_value(result)?)
+}
+
 fn plugin_runtime_options(state: &WebState, cwd: PathBuf) -> RunOptions {
     let mut options = state.run_options(cwd, None);
     let mut inherited_env = options.inherited_env.take().unwrap_or_default();
@@ -1780,11 +2062,18 @@ async fn run_mcp_oauth_callback(
         }
         let Some(code) = pairs.get("code").cloned() else {
             write_oauth_callback_response(&mut stream, false).await?;
-            return Err(Error::Config("OAuth callback did not include code".to_string()));
+            return Err(Error::Config(
+                "OAuth callback did not include code".to_string(),
+            ));
         };
         write_oauth_callback_response(&mut stream, true).await?;
         let token = exchange_mcp_oauth_code(&metadata, &redirect_uri, &code).await?;
-        save_mcp_oauth_access_token(&metadata.profile_home, &metadata.name, &metadata.url, &token)?;
+        save_mcp_oauth_access_token(
+            &metadata.profile_home,
+            &metadata.name,
+            &metadata.url,
+            &token,
+        )?;
         Ok::<(), Error>(())
     }
     .await;
@@ -1883,6 +2172,145 @@ fn url_percent_encode(value: &str) -> String {
         }
     }
     out
+}
+
+async fn thread_compact_start_value(
+    state: &WebState,
+    auth: &AuthContext,
+    scope: &ResolvedScope,
+    params: wire::ThreadCompactStartParams,
+    out_tx: mpsc::UnboundedSender<String>,
+) -> psychevo_runtime::Result<Value> {
+    let runtime_ref = params
+        .runtime_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("native");
+    let requested_thread_id = match params.thread_id.clone() {
+        Some(thread_id) => {
+            authorize_thread(state, auth, &thread_id)?;
+            Some(thread_id)
+        }
+        None => state.inner.gateway.resolve_source_thread(&scope.source)?,
+    };
+    let Some(thread_id) = requested_thread_id else {
+        return Ok(serde_json::to_value(thread_compact_unavailable_result(
+            None,
+            "Open a thread before compacting context.".to_string(),
+        ))?);
+    };
+    let options = state.run_options(scope.cwd.clone(), Some(thread_id.clone()));
+    let event_selector = GatewayThreadSelector::thread_id(&thread_id);
+    let event_thread_id = thread_id.clone();
+    let event_state = state.clone();
+    let event_tx = out_tx.clone();
+    let event_sink: GatewayEventSink = Arc::new(move |event| {
+        let context =
+            event_state.pending_context_for_selector(&event_selector, Some(&event_thread_id));
+        event_state.record_event_with_context(&event, context.clone());
+        let display_event = event_state.event_with_pending_context(event, &context);
+        let _ = event_tx.send(rpc_notification("gateway/event", json!(display_event)));
+    });
+    let result = state
+        .inner
+        .gateway
+        .compact_session(SendCompactRequest {
+            thread_id: Some(thread_id.clone()),
+            source: Some(scope.source.clone()),
+            runtime_ref: Some(runtime_ref.to_string()),
+            cwd: scope.cwd.clone(),
+            config_path: options.config_path,
+            model: options.model,
+            reasoning_effort: options.reasoning_effort,
+            instructions: params
+                .instructions
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            force: true,
+            reason: psychevo_runtime::CompactionReason::Manual,
+            inherited_env: options.inherited_env,
+            event_sink: Some(event_sink),
+        })
+        .await;
+    let response = match result {
+        Ok(result) => thread_compact_result(state, result)?,
+        Err(err) => wire::ThreadCompactStartResult {
+            accepted: false,
+            thread_id: Some(thread_id),
+            compacted: false,
+            reason: "error".to_string(),
+            message: err.to_string(),
+            checkpoint: None,
+            tokens_before: None,
+            tokens_after: None,
+            summary_provider: None,
+            summary_model: None,
+            unavailable: false,
+            error: Some(err.to_string()),
+        },
+    };
+    Ok(serde_json::to_value(response)?)
+}
+
+fn thread_compact_unavailable_result(
+    thread_id: Option<String>,
+    message: String,
+) -> wire::ThreadCompactStartResult {
+    wire::ThreadCompactStartResult {
+        accepted: false,
+        thread_id,
+        compacted: false,
+        reason: "unavailable".to_string(),
+        message,
+        checkpoint: None,
+        tokens_before: None,
+        tokens_after: None,
+        summary_provider: None,
+        summary_model: None,
+        unavailable: true,
+        error: None,
+    }
+}
+
+fn thread_compact_result(
+    state: &WebState,
+    result: psychevo_runtime::CompactionResult,
+) -> psychevo_runtime::Result<wire::ThreadCompactStartResult> {
+    let checkpoint = match result.checkpoint_id {
+        Some(checkpoint_id) => state
+            .inner
+            .state
+            .store()
+            .session_compaction(checkpoint_id)?
+            .map(|record| wire::ThreadCompactionCheckpointView {
+                checkpoint_id: record.id,
+                reason: record.reason,
+                created_at_ms: record.created_at_ms,
+                first_kept_session_seq: record.first_kept_session_seq,
+                tokens_before: record.tokens_before,
+                tokens_after: record.tokens_after,
+                summary_provider: Some(record.summary_provider),
+                summary_model: Some(record.summary_model),
+                summary: Some(record.summary_text),
+            }),
+        None => None,
+    };
+    let unavailable = result.message.to_ascii_lowercase().contains("unavailable");
+    Ok(wire::ThreadCompactStartResult {
+        accepted: true,
+        thread_id: Some(result.session_id),
+        compacted: result.compacted,
+        reason: result.reason,
+        message: result.message,
+        checkpoint,
+        tokens_before: result.tokens_before,
+        tokens_after: result.tokens_after,
+        summary_provider: result.summary_provider,
+        summary_model: result.summary_model,
+        unavailable,
+        error: None,
+    })
 }
 
 include!("rpc_dispatch/model_scope.rs");

@@ -42,8 +42,128 @@ impl Gateway {
                         gateway.finish_activity_and_spawn_next(run_key);
                     });
                 }
+                PendingQueuedActivity::Compact(next) => {
+                    gateway.spawn_compact_activity(run_key, next);
+                }
             }
         }
+    }
+
+    fn spawn_compact_activity(&self, run_key: String, next: Box<PendingQueuedCompact>) {
+        let gateway = self.clone();
+        tokio::spawn(async move {
+            let event_sink = next.request.event_sink.clone();
+            let event_thread_id = gateway.compact_event_thread_id(&next.request);
+            let result = gateway
+                .run_compact_now(&run_key, next.request, next.compact_id)
+                .await;
+            let _ = next.responder.send(result);
+            gateway.finish_activity_and_spawn_next(run_key);
+            gateway.emit_activity_changed_for_thread(event_sink, event_thread_id);
+        });
+    }
+
+    fn compact_event_thread_id(&self, request: &SendCompactRequest) -> Option<String> {
+        request.thread_id.clone().or_else(|| {
+            request
+                .source
+                .as_ref()
+                .and_then(|source| self.lookup_source_thread(source).ok().flatten())
+        })
+    }
+
+    fn non_native_compaction_runtime(
+        &self,
+        request: &SendCompactRequest,
+        thread_id: &str,
+    ) -> psychevo_runtime::Result<Option<String>> {
+        if let Some(binding) = self.state.store().gateway_runtime_binding(thread_id)? {
+            if binding.status == GatewayRuntimeBindingStatus::Resolved {
+                return Ok(binding
+                    .runtime_ref
+                    .filter(|runtime_ref| runtime_ref != "native"));
+            }
+            return Ok(Some(
+                binding
+                    .runtime_ref
+                    .unwrap_or_else(|| "unresolved".to_string()),
+            ));
+        }
+
+        // Only pre-runtime-binding sessions may consult the legacy source-row
+        // evidence below. Current source lanes deliberately clear backend
+        // identity and are never an execution-identity authority.
+        for binding in self
+            .state
+            .store()
+            .gateway_source_bindings_for_thread(thread_id)?
+        {
+            let bound_runtime_ref = binding
+                .lineage
+                .as_ref()
+                .and_then(|lineage| {
+                    lineage
+                        .get("runtimeRef")
+                        .or_else(|| lineage.get("runtime_ref"))
+                })
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|runtime_ref| !runtime_ref.is_empty());
+            if binding.backend_kind != BackendKind::Psychevo.as_str()
+                || bound_runtime_ref.is_some_and(|runtime_ref| runtime_ref != "native")
+            {
+                return Ok(Some(
+                    bound_runtime_ref
+                        .unwrap_or(binding.backend_kind.as_str())
+                        .to_string(),
+                ));
+            }
+        }
+
+        let summary = self
+            .state
+            .store()
+            .session_summary(thread_id)?
+            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+        if summary.source == "peer_agent" {
+            let runtime_ref = self
+                .state
+                .store()
+                .session_metadata(thread_id)?
+                .as_ref()
+                .and_then(|metadata| {
+                    metadata
+                        .get("runtimeRef")
+                        .or_else(|| metadata.get("runtime_ref"))
+                })
+                .and_then(Value::as_str)
+                .unwrap_or("peer_agent")
+                .to_string();
+            return Ok(Some(runtime_ref));
+        }
+
+        Ok(request
+            .runtime_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|runtime_ref| !runtime_ref.is_empty() && *runtime_ref != "native")
+            .map(ToString::to_string))
+    }
+
+    fn emit_activity_changed_for_thread(
+        &self,
+        event_sink: Option<GatewayEventSink>,
+        thread_id: Option<String>,
+    ) {
+        let (Some(event_sink), Some(thread_id)) = (event_sink, thread_id) else {
+            return;
+        };
+        event_sink(GatewayEvent::ActivityChanged {
+            thread_id: Some(thread_id.clone()),
+            activity: gateway_activity_view(
+                &self.activity_for_selector(GatewayThreadSelector::thread_id(&thread_id)),
+            ),
+        });
     }
 
     fn queue_key_for_request(&self, request: &SendTurnRequest) -> psychevo_runtime::Result<String> {
@@ -83,6 +203,22 @@ impl Gateway {
         Ok(format!("shell:{}", Uuid::now_v7()))
     }
 
+    fn queue_key_for_compact_request(
+        &self,
+        request: &SendCompactRequest,
+    ) -> psychevo_runtime::Result<String> {
+        if let Some(thread_id) = &request.thread_id {
+            return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
+        }
+        if let Some(source) = &request.source {
+            if let Some(thread_id) = self.lookup_source_thread(source)? {
+                return Ok(self.primary_queue_key_for_alias(thread_key(&thread_id)));
+            }
+            return Ok(self.primary_queue_key_for_alias(source_key_key(&source.source_key())));
+        }
+        Ok(format!("compact:{}", Uuid::now_v7()))
+    }
+
     fn lookup_source_thread(
         &self,
         source: &GatewaySource,
@@ -98,8 +234,8 @@ impl Gateway {
             GatewaySourceLifetime::Persistent => Ok(self
                 .state
                 .store()
-                .gateway_source_binding(&source.source_key().0)?
-                .map(|binding| binding.thread_id)),
+                .gateway_source_lane(&source.source_key().0)?
+                .and_then(|lane| lane.thread_id)),
         }
     }
 
@@ -147,14 +283,13 @@ impl Gateway {
             GatewaySourceLifetime::Persistent => {
                 self.state
                     .store()
-                    .upsert_gateway_source_binding(GatewaySourceBindingInput {
+                    .upsert_gateway_source_lane(GatewaySourceLaneInput {
                         source_key: &source_key.0,
                         source_kind: &source.kind,
                         raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
                         visible_name: source.visible_name.as_deref(),
-                        thread_id: &result.session_id,
-                        backend_kind: backend.kind.as_str(),
-                        backend_native_id: backend.native_id.as_deref(),
+                        thread_id: Some(&result.session_id),
+                        draft_runtime_ref: None,
                         lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
                     })?;
             }
@@ -177,6 +312,17 @@ impl Gateway {
         state.active_turn_id = Some(turn_id);
         state.control = control;
         state.active_kind = Some(kind);
+    }
+
+    fn mark_active_turn_terminal(&self, turn_id: &str) {
+        let mut active = self.active.lock().expect("gateway active map poisoned");
+        for state in active.values_mut() {
+            if state.active_turn_id.as_deref() == Some(turn_id) {
+                state.control = None;
+                state.active_turn_id = None;
+                state.active_kind = None;
+            }
+        }
     }
 
     fn register_active_thread_alias(&self, key: &str, thread_id: &str) {
@@ -264,12 +410,35 @@ impl Gateway {
                 {
                     keys.push(thread_key(&thread_id));
                 }
-                if let Ok(Some(binding)) = self.state.store().gateway_source_binding(&source_key.0)
+                if let Ok(Some(lane)) = self.state.store().gateway_source_lane(&source_key.0)
+                    && let Some(thread_id) = lane.thread_id
                 {
-                    keys.push(thread_key(&binding.thread_id));
+                    keys.push(thread_key(&thread_id));
                 }
                 keys
             }
         }
+    }
+}
+
+fn unavailable_compaction_result(
+    thread_id: &str,
+    reason: psychevo_runtime::CompactionReason,
+    runtime_ref: &str,
+) -> psychevo_runtime::CompactionResult {
+    psychevo_runtime::CompactionResult {
+        session_id: thread_id.to_string(),
+        compacted: false,
+        reason: reason.as_str().to_string(),
+        message: format!(
+            "Context compaction is unavailable for runtime profile `{runtime_ref}` until its adapter owns native compaction."
+        ),
+        checkpoint_id: None,
+        first_kept_session_seq: None,
+        tokens_before: None,
+        tokens_after: None,
+        summary: None,
+        summary_provider: None,
+        summary_model: None,
     }
 }

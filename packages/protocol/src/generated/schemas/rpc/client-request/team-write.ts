@@ -103,6 +103,27 @@ export const clientRequestTeamWriteSchema = {
             "string",
             "null"
           ]
+        },
+        "runtimeOptions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "runtimeProfileRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

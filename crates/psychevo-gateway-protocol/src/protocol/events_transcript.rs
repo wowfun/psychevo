@@ -85,6 +85,32 @@ pub enum GatewayEvent {
         #[serde(rename = "displayTitle")]
         display_title: Option<String>,
     },
+    RuntimeStateChanged {
+        #[serde(rename = "runtimeRef")]
+        runtime_ref: String,
+        #[serde(default, rename = "threadId")]
+        thread_id: Option<String>,
+        state: String,
+        #[serde(default)]
+        detail: Option<String>,
+        #[serde(rename = "processEpoch")]
+        process_epoch: u64,
+        #[serde(default, rename = "instanceEpoch")]
+        instance_epoch: Option<u64>,
+    },
+    RuntimeChildChanged {
+        #[serde(rename = "runtimeRef")]
+        runtime_ref: String,
+        #[serde(rename = "parentThreadId")]
+        parent_thread_id: String,
+        #[serde(default, rename = "threadId")]
+        thread_id: Option<String>,
+        #[serde(rename = "dedupKey")]
+        native_dedup_key: String,
+        status: String,
+        #[serde(rename = "readOnly")]
+        read_only: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -148,6 +174,7 @@ pub enum TranscriptBlockKind {
     Agent,
     Mailbox,
     Status,
+    Compaction,
     Diff,
     Artifact,
 }

@@ -8,6 +8,9 @@
       "$ref": "ClientRequest/thread-start.json"
     },
     {
+      "$ref": "ClientRequest/thread-compact-start.json"
+    },
+    {
       "$ref": "ClientRequest/thread-resume.json"
     },
     {
@@ -50,6 +53,27 @@
       "$ref": "ClientRequest/runtime-options.json"
     },
     {
+      "$ref": "ClientRequest/runtime-context-read.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-control-set.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-auth-action.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-goal-read.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-goal-set.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-goal-clear.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-account-rate-limits-read.json"
+    },
+    {
       "$ref": "ClientRequest/runtime-profile-list.json"
     },
     {
@@ -77,6 +101,9 @@
       "$ref": "ClientRequest/runtime-session-read.json"
     },
     {
+      "$ref": "ClientRequest/runtime-session-attach.json"
+    },
+    {
       "$ref": "ClientRequest/runtime-session-resume.json"
     },
     {
@@ -92,7 +119,13 @@
       "$ref": "ClientRequest/runtime-session-rename.json"
     },
     {
-      "$ref": "ClientRequest/runtime-session-rollback.json"
+      "$ref": "ClientRequest/runtime-session-fork.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-revert.json"
+    },
+    {
+      "$ref": "ClientRequest/runtime-session-unrevert.json"
     },
     {
       "$ref": "ClientRequest/automation-list.json"

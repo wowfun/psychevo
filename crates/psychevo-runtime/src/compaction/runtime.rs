@@ -102,6 +102,15 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
         ));
     }
 
+    let records = store.load_message_records(&summary.id)?;
+    if records.len() < MIN_SUMMARIZED_MESSAGES + 1 {
+        return Ok(skipped_result(
+            &summary.id,
+            options.reason,
+            "not enough messages to compact",
+        ));
+    }
+
     let run_options = compaction_run_options(&options, &summary.provider, &summary.model, &cwd);
     let loaded = load_run_config(&run_options, &cwd)?;
     let hook_runtime = crate::hooks::hook_runtime_config_from_options(&run_options, &cwd)
@@ -123,14 +132,6 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
     }
     let current = resolve_run_provider(&run_options, &loaded)?;
 
-    let records = store.load_message_records(&summary.id)?;
-    if records.len() < MIN_SUMMARIZED_MESSAGES + 1 {
-        return Ok(skipped_result(
-            &summary.id,
-            options.reason,
-            "not enough messages to compact",
-        ));
-    }
     let previous = store.latest_valid_session_compaction(&summary.id)?;
     let preparation = prepare_compaction(
         &records,

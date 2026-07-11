@@ -29,6 +29,19 @@ default and emits exactly one ready JSON object to stdout after binding. Server
 logs go to stderr. The ready JSON includes non-secret address and endpoint
 metadata; it does not include tokens.
 
+The foreground CLI installs explicit SIGINT/SIGTERM handling. On either signal
+it stops accepting new HTTP/WebSocket work, asks every runtime-host adapter to
+shut down gracefully within a fixed deadline, and falls back to a separately
+bounded forced runtime shutdown when graceful shutdown times out or fails. The
+server process does not exit until this cleanup path and its bounded connection
+drain have settled. This applies equally to direct `pevo serve` and the managed
+`serve` child started by `pevo gateway`.
+
+`BoundGatewayWebServer` keeps signal ownership explicit for library callers.
+Its ordinary `run` method does not install process-global signal handlers; an
+embedding host may retain its own lifecycle policy. The CLI uses the server's
+signal-aware run entrypoint and supplies the OS shutdown future.
+
 Direct `pevo serve` requires an explicit token from `PSYCHEVO_SERVE_TOKEN` or
 `--token-file`. There is no `--token` flag, and query string tokens are not
 accepted. Managed `pevo gateway` may start `pevo serve` with internal flags and

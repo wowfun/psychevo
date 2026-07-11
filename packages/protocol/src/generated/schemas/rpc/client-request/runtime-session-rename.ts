@@ -68,9 +68,6 @@ export const clientRequestRuntimeSessionRenameSchema = {
     },
     "RuntimeSessionRenameParams": {
       "properties": {
-        "nativeSessionId": {
-          "type": "string"
-        },
         "runtimeRef": {
           "type": "string"
         },
@@ -85,13 +82,16 @@ export const clientRequestRuntimeSessionRenameSchema = {
           ],
           "default": null
         },
+        "sessionHandle": {
+          "type": "string"
+        },
         "title": {
           "type": "string"
         }
       },
       "required": [
-        "nativeSessionId",
         "runtimeRef",
+        "sessionHandle",
         "title"
       ],
       "type": "object"

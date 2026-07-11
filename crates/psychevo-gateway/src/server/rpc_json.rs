@@ -44,10 +44,14 @@ fn rpc_result(id: Value, result: Value) -> String {
 }
 
 fn rpc_error(id: Value, code: i64, message: String) -> String {
+    rpc_error_with_data(id, code, message, None)
+}
+
+fn rpc_error_with_data(id: Value, code: i64, message: String, data: Option<Value>) -> String {
     serde_json::to_string(&json!({
         "jsonrpc": wire::JSONRPC_VERSION,
         "id": id,
-        "error": {"code": code, "message": message}
+        "error": {"code": code, "message": message, "data": data}
     }))
     .expect("json rpc error serializes")
 }

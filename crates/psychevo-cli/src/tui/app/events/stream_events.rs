@@ -540,19 +540,6 @@ impl TuiApp {
         had_pending
     }
 
-    pub(crate) fn apply_pending_owned_fullscreen_stream_events(
-        &mut self,
-        ui: &mut FullscreenUi<'_>,
-        owner_session: Option<&str>,
-        pending: VecDeque<RunStreamEvent>,
-    ) -> bool {
-        self.apply_pending_owned_fullscreen_live_events(
-            ui,
-            owner_session,
-            pending.into_iter().map(TuiLiveEvent::Runtime).collect(),
-        )
-    }
-
     pub(crate) fn apply_pending_owned_fullscreen_live_events_with_frames(
         &mut self,
         ui: &mut FullscreenUi<'_>,

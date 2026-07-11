@@ -4,7 +4,8 @@
     "BackendKind": {
       "enum": [
         "psychevo",
-        "peerAgent"
+        "peerAgent",
+        "runtime"
       ],
       "type": "string"
     }
@@ -13,14 +14,14 @@
     "kind": {
       "$ref": "#/definitions/BackendKind"
     },
-    "nativeId": {
-      "default": null,
+    "runtimeRef": {
       "type": [
         "string",
         "null"
       ]
     },
-    "runtimeRef": {
+    "sessionHandle": {
+      "default": null,
       "type": [
         "string",
         "null"

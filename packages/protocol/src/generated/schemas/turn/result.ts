@@ -4,8 +4,32 @@ export const turnResultSchemas = {
   GatewayTurnError: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "diagnosticRef": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "message": {
       "type": "string"
+    },
+    "retryClass": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stage": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -20,7 +44,8 @@ export const turnResultSchemas = {
     "BackendKind": {
       "enum": [
         "psychevo",
-        "peerAgent"
+        "peerAgent",
+        "runtime"
       ],
       "type": "string"
     },
@@ -29,14 +54,14 @@ export const turnResultSchemas = {
         "kind": {
           "$ref": "#/definitions/BackendKind"
         },
-        "nativeId": {
-          "default": null,
+        "runtimeRef": {
           "type": [
             "string",
             "null"
           ]
         },
-        "runtimeRef": {
+        "sessionHandle": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -126,8 +151,32 @@ export const turnResultSchemas = {
     },
     "GatewayTurnError": {
       "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message": {
           "type": "string"
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -243,6 +292,7 @@ export const turnResultSchemas = {
         "agent",
         "mailbox",
         "status",
+        "compaction",
         "diff",
         "artifact"
       ],

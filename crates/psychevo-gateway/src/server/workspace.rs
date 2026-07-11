@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::{
     Error, WorkspaceDiffFile, WorkspaceDiffFileStatus, canonicalize_cwd, collect_workspace_diff,
-    resolve_workspace_root,
+    normalized_native_path, resolve_workspace_root,
 };
 use serde_json::Value;
 
@@ -443,8 +443,9 @@ fn resolve_workspace_relative_path(root: &Path, path: &str) -> psychevo_runtime:
         ));
     }
     let candidate = root.join(&normalized);
-    let canonical = candidate.canonicalize()?;
-    if !canonical.starts_with(root) {
+    let canonical_root = canonical_workspace_path_identity(root)?;
+    let canonical = canonical_workspace_path_identity(&candidate)?;
+    if !canonical.starts_with(&canonical_root) {
         return Err(Error::Message(
             "workspace path is outside the workspace".to_string(),
         ));
@@ -466,19 +467,30 @@ fn resolve_workspace_write_path(root: &Path, path: &str) -> psychevo_runtime::Re
         ));
     }
     let candidate = root.join(&normalized);
-    if candidate.exists() {
-        return resolve_workspace_relative_path(root, &normalized);
+    match candidate.symlink_metadata() {
+        Ok(_) => return resolve_workspace_relative_path(root, &normalized),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err.into()),
     }
     let parent = candidate
         .parent()
         .ok_or_else(|| Error::Message("workspace file parent is unavailable".to_string()))?;
-    let canonical_parent = parent.canonicalize()?;
-    if !canonical_parent.starts_with(root) {
+    let canonical_root = canonical_workspace_path_identity(root)?;
+    let canonical_parent = canonical_workspace_path_identity(parent)?;
+    if !canonical_parent.starts_with(&canonical_root) {
         return Err(Error::Message(
             "workspace path is outside the workspace".to_string(),
         ));
     }
     Ok(candidate)
+}
+
+fn canonical_workspace_path_identity(path: &Path) -> psychevo_runtime::Result<PathBuf> {
+    Ok(normalized_workspace_path_identity(&path.canonicalize()?))
+}
+
+pub(super) fn normalized_workspace_path_identity(path: &Path) -> PathBuf {
+    normalized_native_path(path)
 }
 
 fn normalize_workspace_path(path: &str) -> String {

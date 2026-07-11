@@ -217,7 +217,7 @@ impl TuiApp {
         if ui
             .session_live_event_backlog
             .get(parent)
-            .is_some_and(|events| events.iter().any(stream_event_is_clarify_request))
+            .is_some_and(|events| events.iter().any(tui_live_event_is_clarify_request))
         {
             return Some("side - main needs input - Ctrl+C".to_string());
         }

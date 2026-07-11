@@ -23,8 +23,8 @@ pub(crate) use crate::types::{
     SessionSummary, TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 24;
-pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = SQLITE_SCHEMA_VERSION;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 26;
+pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 24;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -106,9 +106,119 @@ pub struct GatewaySourceBindingRecord {
     pub thread_id: String,
     pub backend_kind: String,
     pub backend_native_id: Option<String>,
+    pub draft_runtime_ref: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub lineage: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewaySourceLaneInput<'a> {
+    pub source_key: &'a str,
+    pub source_kind: &'a str,
+    pub raw_identity: Value,
+    pub visible_name: Option<&'a str>,
+    pub thread_id: Option<&'a str>,
+    pub draft_runtime_ref: Option<&'a str>,
+    pub lineage: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewaySourceLaneRecord {
+    pub source_key: String,
+    pub source_kind: String,
+    pub raw_identity: Value,
+    pub visible_name: Option<String>,
+    pub thread_id: Option<String>,
+    pub draft_runtime_ref: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub lineage: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayRuntimeBindingStatus {
+    Resolved,
+    Unresolved,
+}
+
+impl GatewayRuntimeBindingStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Resolved => "resolved",
+            Self::Unresolved => "unresolved",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "resolved" => Some(Self::Resolved),
+            "unresolved" => Some(Self::Unresolved),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayRuntimeBindingOwnership {
+    ReadWrite,
+    ReadOnly,
+}
+
+impl GatewayRuntimeBindingOwnership {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadWrite => "read_write",
+            Self::ReadOnly => "read_only",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "read_write" => Some(Self::ReadWrite),
+            "read_only" => Some(Self::ReadOnly),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayRuntimeBindingInput<'a> {
+    pub thread_id: &'a str,
+    pub runtime_ref: &'a str,
+    pub backend_kind: &'a str,
+    pub native_kind: &'a str,
+    pub native_session_id: Option<&'a str>,
+    pub cwd: &'a str,
+    pub profile_fingerprint: &'a str,
+    pub profile_revision: &'a str,
+    pub profile_config_json: &'a str,
+    pub adapter_kind: &'a str,
+    pub adapter_revision: &'a str,
+    pub ownership: GatewayRuntimeBindingOwnership,
+    pub parent_thread_id: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayRuntimeBindingRecord {
+    pub thread_id: String,
+    pub status: GatewayRuntimeBindingStatus,
+    pub runtime_ref: Option<String>,
+    pub backend_kind: Option<String>,
+    pub native_kind: Option<String>,
+    pub native_session_id: Option<String>,
+    pub cwd: String,
+    pub profile_fingerprint: Option<String>,
+    pub profile_revision: Option<String>,
+    pub profile_config_json: Option<String>,
+    pub adapter_kind: Option<String>,
+    pub adapter_revision: Option<String>,
+    pub ownership: GatewayRuntimeBindingOwnership,
+    pub parent_thread_id: Option<String>,
+    pub binding_revision: i64,
+    pub unresolved_reason: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -446,6 +556,8 @@ pub(crate) mod store_gateway_activity;
 pub(crate) mod store_gateway_bindings;
 #[path = "store/lifecycle.rs"]
 pub(crate) mod store_lifecycle;
+#[path = "store/runtime_bindings.rs"]
+pub(crate) mod store_runtime_bindings;
 #[allow(unused_imports)]
 use store_lifecycle::*;
 #[path = "store/retry.rs"]

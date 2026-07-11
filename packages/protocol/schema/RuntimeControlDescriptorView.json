@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeControlChoiceView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlDependencyView": {
+      "properties": {
+        "controlId": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "controlId",
+        "value"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlStateView": {
+      "enum": [
+        "runtimeDefault",
+        "readOnlyCurrent",
+        "selectable"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "capabilityRevision": {
+      "type": "string"
+    },
+    "channelSafe": {
+      "default": false,
+      "type": "boolean"
+    },
+    "choices": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/RuntimeControlChoiceView"
+      },
+      "type": "array"
+    },
+    "currentValue": {
+      "default": null
+    },
+    "dependsOn": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeControlDependencyView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/definitions/RuntimeControlStateView"
+    }
+  },
+  "required": [
+    "capabilityRevision",
+    "id",
+    "label",
+    "state"
+  ],
+  "title": "RuntimeControlDescriptorView",
+  "type": "object"
+}

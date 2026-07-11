@@ -1,12 +1,17 @@
 use super::paths::channel_cwd;
+use super::state::ChannelInteractionKind;
 use super::*;
 use crate::server::commands::record_gateway_mission_metadata_for_parent;
+use sha2::{Digest, Sha256};
 
 pub(super) enum ChannelCommandAction {
     Reply(String),
     SubmitPrompt {
         text: String,
         thread_id: Option<String>,
+    },
+    Compact {
+        instructions: Option<String>,
     },
 }
 
@@ -19,7 +24,7 @@ struct ChannelCommandContext<'a> {
     raw: &'a str,
 }
 
-pub(super) fn route_channel_command(
+pub(super) async fn route_channel_command(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     connection: &ChannelRuntimeConnection,
@@ -43,66 +48,75 @@ pub(super) fn route_channel_command(
             }
         }
         "approve" | "allow" => {
-            let request_id = args.split_whitespace().next().unwrap_or("");
-            if request_id.is_empty() {
-                "Usage: /approve <request_id>".to_string()
-            } else if state.inner.gateway.submit_permission(
-                GatewayThreadSelector::source(source.source_key()),
-                request_id,
+            let token = args.split_whitespace().next().unwrap_or("");
+            channel_permission_reply(
+                state,
+                runtime,
+                connection,
+                source,
+                token,
                 PermissionApprovalDecision::allow_once(),
-            ) {
-                format!("Approved request {request_id}.")
-            } else {
-                format!("No matching permission request for {request_id}.")
-            }
+                "approve",
+            )
         }
         "deny" => {
-            let request_id = args.split_whitespace().next().unwrap_or("");
-            if request_id.is_empty() {
-                "Usage: /deny <request_id>".to_string()
-            } else if state.inner.gateway.submit_permission(
-                GatewayThreadSelector::source(source.source_key()),
-                request_id,
+            let token = args.split_whitespace().next().unwrap_or("");
+            channel_permission_reply(
+                state,
+                runtime,
+                connection,
+                source,
+                token,
                 PermissionApprovalDecision::deny(),
-            ) {
-                format!("Denied request {request_id}.")
-            } else {
-                format!("No matching permission request for {request_id}.")
-            }
+                "deny",
+            )
         }
         "answer" => {
-            let (request_id, answer) = split_first_arg(args);
-            if request_id.is_empty() || answer.is_empty() {
-                "Usage: /answer <request_id> <answer>".to_string()
-            } else if state.inner.gateway.submit_clarify(
-                GatewayThreadSelector::source(source.source_key()),
-                request_id,
+            let (token, answer) = split_first_arg(args);
+            if token.is_empty() || answer.is_empty() {
+                "Usage: /answer <token> <answer>".to_string()
+            } else if runtime
+                .clarify_question_count(&connection.id, &source.source_key(), token)
+                .is_some_and(|question_count| question_count > 1)
+            {
+                channel_multi_question_guidance(token)
+            } else if let Some(route) = runtime.take_interaction_token(
+                &connection.id,
+                &source.source_key(),
+                ChannelInteractionKind::Clarify,
+                token,
+            ) && submit_channel_clarify(
+                state,
+                &route,
+                source,
                 ClarifyResult::Answered(ClarifyResponse {
                     answers: vec![ClarifyAnswer {
                         answers: vec![answer.to_string()],
                     }],
                 }),
             ) {
-                format!("Answered request {request_id}.")
+                format!("Answered request {token}.")
             } else {
-                format!("No matching Ask request for {request_id}.")
+                "No matching Ask request token.".to_string()
             }
         }
         "cancel" => {
-            let request_id = args.split_whitespace().next().unwrap_or("");
-            if request_id.is_empty() {
-                "Usage: /cancel <request_id>".to_string()
-            } else if state.inner.gateway.submit_clarify(
-                GatewayThreadSelector::source(source.source_key()),
-                request_id,
-                ClarifyResult::Cancelled,
-            ) {
-                format!("Cancelled request {request_id}.")
+            let token = args.split_whitespace().next().unwrap_or("");
+            if token.is_empty() {
+                "Usage: /cancel <token>".to_string()
+            } else if let Some(route) = runtime.take_interaction_token(
+                &connection.id,
+                &source.source_key(),
+                ChannelInteractionKind::Clarify,
+                token,
+            ) && submit_channel_clarify(state, &route, source, ClarifyResult::Cancelled)
+            {
+                format!("Cancelled request {token}.")
             } else {
-                format!("No matching Ask request for {request_id}.")
+                "No matching Ask request token.".to_string()
             }
         }
-        "profile" => channel_profile_reply(state, connection, source, args)?,
+        "profile" => channel_profile_reply(state, connection, source, args).await?,
         "reset" => reset_channel_source_reply(state, source)?,
         "" => return Ok(None),
         _ => {
@@ -110,6 +124,86 @@ pub(super) fn route_channel_command(
         }
     };
     Ok(Some(ChannelCommandAction::Reply(reply)))
+}
+
+fn channel_permission_reply(
+    state: &WebState,
+    runtime: &ChannelRuntimeState,
+    connection: &ChannelRuntimeConnection,
+    source: &GatewaySource,
+    token: &str,
+    decision: PermissionApprovalDecision,
+    command: &str,
+) -> String {
+    if token.is_empty() {
+        return format!("Usage: /{command} <token>");
+    }
+    let Some(route) = runtime.take_interaction_token(
+        &connection.id,
+        &source.source_key(),
+        ChannelInteractionKind::Permission,
+        token,
+    ) else {
+        return "No matching permission request token.".to_string();
+    };
+    if submit_channel_permission(state, &route, source, decision) {
+        if command == "deny" {
+            format!("Denied request {token}.")
+        } else {
+            format!("Approved request {token}.")
+        }
+    } else {
+        "No matching permission request token.".to_string()
+    }
+}
+
+fn channel_interaction_selector(
+    route: &super::state::ChannelInteractionRoute,
+    source: &GatewaySource,
+) -> GatewayThreadSelector {
+    route
+        .thread_id
+        .clone()
+        .map(GatewayThreadSelector::thread_id)
+        .unwrap_or_else(|| GatewayThreadSelector::source(source.source_key()))
+}
+
+fn submit_channel_permission(
+    state: &WebState,
+    route: &super::state::ChannelInteractionRoute,
+    source: &GatewaySource,
+    decision: PermissionApprovalDecision,
+) -> bool {
+    let primary = channel_interaction_selector(route, source);
+    state
+        .inner
+        .gateway
+        .submit_permission(primary, &route.action_id, decision.clone())
+        || (route.thread_id.is_some()
+            && state.inner.gateway.submit_permission(
+                GatewayThreadSelector::source(source.source_key()),
+                &route.action_id,
+                decision,
+            ))
+}
+
+fn submit_channel_clarify(
+    state: &WebState,
+    route: &super::state::ChannelInteractionRoute,
+    source: &GatewaySource,
+    result: ClarifyResult,
+) -> bool {
+    let primary = channel_interaction_selector(route, source);
+    state
+        .inner
+        .gateway
+        .submit_clarify(primary, &route.action_id, result.clone())
+        || (route.thread_id.is_some()
+            && state.inner.gateway.submit_clarify(
+                GatewayThreadSelector::source(source.source_key()),
+                &route.action_id,
+                result,
+            ))
 }
 
 fn route_shared_channel_command(
@@ -220,10 +314,9 @@ fn channel_command_action_from_effect(
                 thread_id: Some(thread_id),
             }
         }
-        SlashCommandEffect::Compact { instructions } => ChannelCommandAction::SubmitPrompt {
-            text: compact_prompt_text(instructions),
-            thread_id: None,
-        },
+        SlashCommandEffect::Compact { instructions } => {
+            ChannelCommandAction::Compact { instructions }
+        }
         SlashCommandEffect::Steer(text) => {
             let message = RuntimeMessage::User {
                 content: vec![UserContentBlock::text(text)],
@@ -379,7 +472,7 @@ fn channel_help_text(
         ));
     }
     lines.push(
-        "Controls: /stop, /reset, /profile, /approve <id>, /deny <id>, /answer <id> <text>, /cancel <id>."
+        "Controls: /stop, /reset, /profile, /approve <token>, /deny <token>, /answer <token> <text>, /cancel <token>."
             .to_string(),
     );
     lines.push(channel_status_text(state, runtime, connection, source)?);
@@ -450,7 +543,7 @@ fn channel_status_text(
     ))
 }
 
-fn channel_profile_reply(
+async fn channel_profile_reply(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
@@ -475,12 +568,11 @@ fn channel_profile_reply(
             }
             match channel_bind_runtime_ref(state, source, requested)? {
                 Some(thread_id) => Ok(format!(
-                    "Runtime Profile set to `{requested}` for this channel thread ({thread_id})."
+                    "Started a new channel thread ({thread_id}) with Runtime Profile `{requested}`. The previous thread is unchanged."
                 )),
-                None => Ok(
-                    "No channel thread is bound yet. Send a message first or set the channel default in Settings."
-                        .to_string(),
-                ),
+                None => Ok(format!(
+                    "Runtime Profile `{requested}` is saved for the next channel thread."
+                )),
             }
         }
         "reset" => {
@@ -492,29 +584,72 @@ fn channel_profile_reply(
                 .unwrap_or("native");
             match channel_bind_runtime_ref(state, source, runtime_ref)? {
                 Some(thread_id) => Ok(format!(
-                    "Runtime Profile reset to `{runtime_ref}` for this channel thread ({thread_id})."
+                    "Started a new channel thread ({thread_id}) with the default Runtime Profile `{runtime_ref}`. The previous thread is unchanged."
                 )),
-                None => Ok("No channel thread is bound yet.".to_string()),
+                None => Ok(format!(
+                    "Default Runtime Profile `{runtime_ref}` is saved for the next channel thread."
+                )),
             }
         }
+        "sessions" => channel_profile_sessions_text(state, connection, source, &scope).await,
         "resume" => {
-            let native_session_id = rest.split_whitespace().next().unwrap_or("");
-            if native_session_id.is_empty() {
-                return Ok("Usage: /profile resume <native-session-id>".to_string());
+            let short_handle = rest.split_whitespace().next().unwrap_or("");
+            if short_handle.is_empty() {
+                return Ok("Usage: /profile resume <short-handle>".to_string());
             }
             let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
-            let result = runtime_session_resume_result(
+            let sessions = runtime_session_list_result_live(
+                state,
+                &scope,
+                wire::RuntimeSessionListParams {
+                    runtime_ref: Some(runtime_ref.clone()),
+                    cursor: None,
+                    scope: Some(scope.to_wire_scope()),
+                },
+            )
+            .await?;
+            if !sessions.supported {
+                return Ok(format!(
+                    "Runtime Profile `{runtime_ref}` does not expose resumable sessions here."
+                ));
+            }
+            let matches = sessions
+                .sessions
+                .iter()
+                .filter(|session| {
+                    runtime_session_short_handle(&runtime_ref, session) == short_handle
+                })
+                .collect::<Vec<_>>();
+            let [session] = matches.as_slice() else {
+                return Ok(if matches.is_empty() {
+                    format!(
+                        "Unknown session handle `{short_handle}` for Runtime Profile `{runtime_ref}`."
+                    )
+                } else {
+                    format!(
+                        "Session handle `{short_handle}` is ambiguous; open the GUI to choose a session."
+                    )
+                });
+            };
+            if session.ownership == wire::RuntimeSessionOwnershipView::Active {
+                return Ok(format!(
+                    "Session `{short_handle}` is active and cannot be taken over from a Channel. Open it in the GUI or Fork it."
+                ));
+            }
+            let native_session_id = session.native_session_id.clone();
+            let result = runtime_session_resume_result_live(
                 state,
                 &scope,
                 wire::RuntimeSessionParams {
                     runtime_ref: runtime_ref.clone(),
-                    native_session_id: native_session_id.to_string(),
+                    native_session_id,
                     scope: Some(scope.to_wire_scope()),
                 },
-            )?;
+            )
+            .await?;
             if result.supported && result.changed {
                 Ok(format!(
-                    "Resumed `{native_session_id}` on Runtime Profile `{runtime_ref}`."
+                    "Resumed `{short_handle}` on Runtime Profile `{runtime_ref}`."
                 ))
             } else {
                 Ok(result.message.unwrap_or_else(|| {
@@ -523,9 +658,92 @@ fn channel_profile_reply(
             }
         }
         _ => Ok(
-            "Usage: /profile [list|status|use <id>|resume <native-session-id>|reset]".to_string(),
+            "Usage: /profile [list|status|sessions|use <id>|resume <short-handle>|reset]"
+                .to_string(),
         ),
     }
+}
+
+async fn channel_profile_sessions_text(
+    state: &WebState,
+    connection: &ChannelRuntimeConnection,
+    source: &GatewaySource,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<String> {
+    let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
+    let sessions = runtime_session_list_result_live(
+        state,
+        scope,
+        wire::RuntimeSessionListParams {
+            runtime_ref: Some(runtime_ref.clone()),
+            cursor: None,
+            scope: Some(scope.to_wire_scope()),
+        },
+    )
+    .await?;
+    if !sessions.supported {
+        return Ok(format!(
+            "Runtime Profile `{runtime_ref}` does not expose resumable sessions here."
+        ));
+    }
+    if sessions.sessions.is_empty() {
+        return Ok(format!(
+            "No sessions are available for Runtime Profile `{runtime_ref}`."
+        ));
+    }
+    let mut lines = vec![format!("Sessions for Runtime Profile `{runtime_ref}`:")];
+    for session in sessions.sessions.iter().take(20) {
+        let handle = runtime_session_short_handle(&runtime_ref, session);
+        let title = channel_runtime_session_title(session);
+        let ownership = match session.ownership {
+            wire::RuntimeSessionOwnershipView::ReadWrite => "resumable",
+            wire::RuntimeSessionOwnershipView::ReadOnly => "read-only",
+            wire::RuntimeSessionOwnershipView::Active => "active; GUI or Fork only",
+        };
+        let fidelity = match session.fidelity {
+            wire::RuntimeHistoryFidelityView::Full => "full history",
+            wire::RuntimeHistoryFidelityView::Summary => "summary history",
+            wire::RuntimeHistoryFidelityView::Partial => "partial history",
+        };
+        let archived = if session.archived { " · archived" } else { "" };
+        lines.push(format!(
+            "{handle}: {title} · {ownership} · {fidelity}{archived}"
+        ));
+    }
+    if sessions.sessions.len() > 20 || sessions.next_cursor.is_some() {
+        lines.push("More sessions are available in Workbench.".to_string());
+    }
+    lines.push("Resume with /profile resume <short-handle>.".to_string());
+    Ok(lines.join("\n"))
+}
+
+fn channel_runtime_session_title(session: &wire::RuntimeSessionView) -> String {
+    let title = session.title.as_deref().unwrap_or_default().trim();
+    if title.is_empty()
+        || (!session.native_session_id.is_empty() && title.contains(&session.native_session_id))
+        || (!session.native_dedup_key.is_empty() && title.contains(&session.native_dedup_key))
+    {
+        return "Untitled session".to_string();
+    }
+    let single_line = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = single_line.chars();
+    let bounded = chars.by_ref().take(80).collect::<String>();
+    if chars.next().is_some() {
+        format!("{bounded}…")
+    } else {
+        bounded
+    }
+}
+
+fn runtime_session_short_handle(runtime_ref: &str, session: &wire::RuntimeSessionView) -> String {
+    let digest = Sha256::digest(
+        format!(
+            "channel-session\0{runtime_ref}\0{}",
+            session.native_dedup_key
+        )
+        .as_bytes(),
+    );
+    format!("rs_{:x}", digest).chars().take(15).collect()
 }
 
 fn channel_profile_status_text(
@@ -542,7 +760,7 @@ fn channel_profile_status_text(
         ));
     };
     Ok(format!(
-        "Runtime Profile `{}`: {} ({}) - {}.",
+        "Runtime Profile `{}`: {} ({}) - {}. Use /profile sessions to list resumable handles.",
         profile.id, profile.label, profile.runtime, profile.health.summary
     ))
 }
@@ -688,4 +906,52 @@ fn split_first_arg(value: &str) -> (&str, &str) {
     let split_at = value.find(char::is_whitespace).unwrap_or(value.len());
     let (first, rest) = value.split_at(split_at);
     (first, rest.trim())
+}
+
+#[cfg(test)]
+mod runtime_session_handle_tests {
+    use super::*;
+
+    fn session(native_dedup_key: &str) -> wire::RuntimeSessionView {
+        wire::RuntimeSessionView {
+            native_session_id: "raw-native-id".to_string(),
+            thread_id: None,
+            title: None,
+            archived: false,
+            updated_at_ms: None,
+            parent_thread_id: None,
+            status: None,
+            native_dedup_key: native_dedup_key.to_string(),
+            fidelity: wire::RuntimeHistoryFidelityView::Full,
+            ownership: wire::RuntimeSessionOwnershipView::ReadWrite,
+            actions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn channel_session_handle_is_opaque_stable_and_runtime_scoped() {
+        let first = runtime_session_short_handle("codex", &session("native-session-secret"));
+        assert_eq!(
+            first,
+            runtime_session_short_handle("codex", &session("native-session-secret"))
+        );
+        assert_ne!(
+            first,
+            runtime_session_short_handle("opencode", &session("native-session-secret"))
+        );
+        assert!(first.starts_with("rs_"));
+        assert!(!first.contains("native"));
+        assert_eq!(first.len(), 15);
+    }
+
+    #[test]
+    fn channel_session_title_never_echoes_native_identity() {
+        let mut raw = session("native-session-secret");
+        raw.native_session_id = "native-session-secret".to_string();
+        raw.title = Some("native-session-secret".to_string());
+        assert_eq!(channel_runtime_session_title(&raw), "Untitled session");
+
+        raw.title = Some("Review\nthis workspace".to_string());
+        assert_eq!(channel_runtime_session_title(&raw), "Review this workspace");
+    }
 }

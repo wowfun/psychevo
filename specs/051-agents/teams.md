@@ -34,8 +34,11 @@ Supported frontmatter fields are:
 - `enabled`: optional boolean, default `true`.
 - `leader`: required agent definition name.
 - `members`: required non-empty list of member entries. A member entry has
-  `id`, `agent`, optional `role`, optional `description`, and optional
-  `maxTurns`.
+  `id`, `agent`, optional `role`, optional `description`, optional `maxTurns`,
+  optional `runtimeRef`, optional `runtimeOptions`, and an optional
+  `runtimeProfileRevision` captured by management or Team activation. Gateway
+  JSON uses an unsigned decimal string for this u64-derived value; Team
+  Markdown uses the equivalent YAML integer.
 - `maxParallelAgents`: optional integer. Runtime clamps the effective value to
   the implementation cap; the default is `4`.
 
@@ -142,3 +145,27 @@ duplicating every child message in the parent transcript.
 TUI enriches the running agents panel with team, mission, member, and
 concurrency labels. Keyboard controls remain simple: Enter opens, `S` stops,
 and `P` pauses or resumes new spawning.
+
+## Runtime-Backed Members
+
+Each Team member may select a runtimeRef and Advanced runtimeOptions separately
+from its Agent Definition. Profile defaults are inherited. Structured Gateway
+and Workbench writes preserve the execution fields in Team Markdown. Team write
+and activation fail closed for an unknown or disabled Profile, an incompatible
+Agent Definition pairing, an unsupported override, or an explicitly stale
+runtimeProfileRevision. Activation captures a missing revision into the durable
+Team run. Immediately before a member starts, Gateway resolves the current
+Profile again, requires the captured Profile revision, and lets the adapter
+revalidate model, mode, catalog-backed per-turn, and safety values against its
+current capability contract. Codex model overrides and its stable
+`effort`/`personality`/`serviceTier` Advanced options require exact selectable
+choices from the cached `model/list` observation for the effective model.
+Reasoning summary, arbitrary feature keys, and output schemas are not Team
+options because the stable catalog does not enumerate them. Unsupported values
+are never ignored.
+
+The stable bridge is leader-first: a native Psychevo leader may dispatch
+Runtime Profile-backed managed members. Direct Codex/OpenCode leaders do not
+receive Psychevo Team tools. The Team surface groups controllable
+Psychevo-managed members separately from read-only runtime-native activity.
+Only managed members use agent/control.

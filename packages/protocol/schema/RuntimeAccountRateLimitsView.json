@@ -1,0 +1,196 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeCreditsSnapshotView": {
+      "properties": {
+        "balance": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasCredits": {
+          "type": "boolean"
+        },
+        "unlimited": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hasCredits",
+        "unlimited"
+      ],
+      "type": "object"
+    },
+    "RuntimeRateLimitReachedTypeView": {
+      "enum": [
+        "rate_limit_reached",
+        "workspace_owner_credits_depleted",
+        "workspace_member_credits_depleted",
+        "workspace_owner_usage_limit_reached",
+        "workspace_member_usage_limit_reached"
+      ],
+      "type": "string"
+    },
+    "RuntimeRateLimitSnapshotView": {
+      "properties": {
+        "credits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeCreditsSnapshotView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "individualLimit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeSpendControlLimitSnapshotView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limitId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limitName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "planType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "primary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitWindowView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rateLimitReachedType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitReachedTypeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "secondary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeRateLimitWindowView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeRateLimitWindowView": {
+      "properties": {
+        "resetsAt": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usedPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "windowDurationMins": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "usedPercent"
+      ],
+      "type": "object"
+    },
+    "RuntimeSpendControlLimitSnapshotView": {
+      "properties": {
+        "limit": {
+          "type": "string"
+        },
+        "remainingPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "used": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit",
+        "remainingPercent",
+        "resetsAt",
+        "used"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "rateLimits": {
+      "$ref": "#/definitions/RuntimeRateLimitSnapshotView"
+    },
+    "rateLimitsByLimitId": {
+      "additionalProperties": {
+        "$ref": "#/definitions/RuntimeRateLimitSnapshotView"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "resetCreditsAvailable": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "rateLimits"
+  ],
+  "title": "RuntimeAccountRateLimitsView",
+  "type": "object"
+}

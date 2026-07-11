@@ -60,7 +60,7 @@ Agent definition files use Markdown with optional YAML frontmatter followed by
 the agent instruction body. Runtime accepts compatibility fields including
 `name`, `description`, `model`, `tools`, `disallowedTools`, `permission`,
 `permissions`, `permissionMode`, `mcpServers`, `skills`, `hooks`,
-`background`, `initialPrompt`, `maxTurns`, `maxSpawnDepth`,
+`optionalContributions`, `background`, `initialPrompt`, `maxTurns`, `maxSpawnDepth`,
 `projectInstructions`, `effort`, `backend`, `entrypoints`, and `enabled`.
 `backend.ref` references a configured external agent backend when this
 definition delegates execution to a peer agent; command-bearing backend details
@@ -198,6 +198,10 @@ delegate because Gateway owns ACP client sessions and peer observation. If that
 delegate is not available, the `spawn_agent` tool must return a structured
 unavailable result rather than falling back to a native child thread that only
 has the peer's name.
+The Psychevo child thread created before delegation is the canonical live scope
+for the whole peer run. ACP native session ids remain backend metadata; message,
+thought, tool, plan, and turn observations must not be scoped to the parent
+thread or to an ACP native session id.
 Ordinary local Markdown/built-in agents continue to use the existing native
 child-thread path.
 
@@ -306,6 +310,25 @@ MCP tools use canonical MCP tool identifiers. MCP scope may narrow available
 MCP tools but must not bypass runtime capability selection or resource policy.
 For peer-agent backends, the backend's client-capability list is a hard ceiling
 and the selected agent's `tools` policy may only narrow that ceiling.
+
+## Runtime Profile Pairing
+
+Agent Definition and Runtime Profile are independent selections. Instructions,
+tools, MCP servers, and skills are required contributions unless each
+non-essential contribution is explicitly marked optional. Pairing validation
+uses the selected runtime snapshot. A surface must disable a pairing with an
+actionable reason when the adapter cannot faithfully inject a required
+contribution; it must not silently omit it.
+
+Markdown uses `optionalContributions` with values `instructions`, `tools`,
+`mcp`, and `skills`; it defaults to an empty list. Unknown values are
+diagnostics and never make a required contribution optional. When an adapter
+omits an explicitly optional contribution, runtime records the omitted names
+and a precise diagnostic in child provenance.
+
+Runtime Profile-backed generated agents preserve runtimeRef and native agent or
+mode identity, but do not contain command, environment, credentials, or other
+Profile implementation details.
 
 ## Hooks
 

@@ -963,6 +963,11 @@ impl RunControl {
     pub fn abort_signal(&self) -> AbortSignal {
         self.receivers.abort_signal()
     }
+
+    /// Consumes steer inputs that have not yet been accepted by a backend.
+    pub fn drain_pending_user_messages(&mut self) -> Vec<(PendingInputId, Message)> {
+        self.receivers.drain_pending_user_messages()
+    }
 }
 
 pub fn run_control() -> (RunControlHandle, RunControl) {

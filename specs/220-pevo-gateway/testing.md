@@ -25,6 +25,9 @@ Define acceptance expectations and validation scenarios for the managed
   Web Shell URL.
 - Direct visits to the managed base URL without a valid browser session show a
   launch-required diagnostic rather than mounting a broken Workbench.
+- `stop` waits for the managed SIGTERM cleanup path and proves both the managed
+  server pid and an exercised fake direct-runtime child have exited before
+  reporting success.
 
 ## Current Implementation Slice
 
@@ -51,6 +54,12 @@ Manual real-provider validation is not required for this lifecycle topic.
   browser-session cookie.
 - Direct visits to the managed base URL without a valid browser session show a
   launch-required diagnostic rather than mounting a broken Workbench.
+- A real managed `serve` subprocess starts a deterministic direct runtime;
+  `gateway stop` must leave neither process alive and must remove managed state
+  only after the server exits.
+- The final managed-stop fallback targets the exact process group/tree created
+  for the managed server and kills a deterministic child even when both parent
+  and child ignore graceful SIGTERM.
 
 ## Validation Boundaries
 

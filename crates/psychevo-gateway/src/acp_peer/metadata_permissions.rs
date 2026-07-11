@@ -14,10 +14,19 @@ fn ensure_local_session(
         let native = store
             .session_metadata(session_id)?
             .and_then(|metadata| peer_native_session_id(&metadata, &peer.backend.id));
+        let top_level = store
+            .session_summary(session_id)?
+            .is_some_and(|summary| summary.parent_session_id.is_none());
+        let created = native.is_none()
+            && top_level
+            && store.load_messages(session_id)?.is_empty();
         return Ok(LocalPeerSession {
             session_id: session_id.clone(),
             native_session_id: native,
-            created: false,
+            // Gateway materializes the public thread before backend dispatch so the immutable
+            // Runtime binding can be persisted first. An empty top-level shell is still the first
+            // visible ACP turn; managed child titles remain owned by their parent lifecycle.
+            created,
         });
     }
     let session_id = store.create_session_with_metadata(

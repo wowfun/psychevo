@@ -48,6 +48,8 @@ pub struct AgentWriteParams {
     pub tools: Vec<String>,
     #[serde(default, rename = "mcpServers")]
     pub mcp_servers: Vec<String>,
+    #[serde(default, rename = "optionalContributions")]
+    pub optional_contributions: Vec<String>,
     #[serde(default)]
     pub raw_markdown: Option<String>,
     #[serde(default)]
@@ -108,6 +110,12 @@ pub struct TeamReadParams {
 pub struct TeamMemberInput {
     pub id: String,
     pub agent: String,
+    #[serde(default, rename = "runtimeRef")]
+    pub runtime_ref: Option<String>,
+    #[serde(default, rename = "runtimeOptions")]
+    pub runtime_options: BTreeMap<String, String>,
+    #[serde(default, rename = "runtimeProfileRevision")]
+    pub runtime_profile_revision: Option<String>,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -315,6 +323,15 @@ pub struct AgentDiagnosticView {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentContributionView {
+    Instructions,
+    Tools,
+    Mcp,
+    Skills,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentDefinitionView {
@@ -335,6 +352,10 @@ pub struct AgentDefinitionView {
     pub tools: Vec<String>,
     #[serde(rename = "mcpServers")]
     pub mcp_servers: Vec<String>,
+    #[serde(default)]
+    pub contributions: Vec<AgentContributionView>,
+    #[serde(default, rename = "optionalContributions")]
+    pub optional_contributions: Vec<String>,
     pub diagnostics: Vec<AgentDiagnosticView>,
 }
 
@@ -343,6 +364,12 @@ pub struct AgentDefinitionView {
 pub struct TeamMemberView {
     pub id: String,
     pub agent: String,
+    #[serde(default, rename = "runtimeRef")]
+    pub runtime_ref: Option<String>,
+    #[serde(default, rename = "runtimeOptions")]
+    pub runtime_options: BTreeMap<String, String>,
+    #[serde(default, rename = "runtimeProfileRevision")]
+    pub runtime_profile_revision: Option<String>,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -563,6 +590,8 @@ pub struct RuntimeProfileWriteParams {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    #[serde(default, rename = "backendRef")]
+    pub backend_ref: Option<String>,
     #[serde(default, rename = "defaultModel")]
     pub default_model: Option<String>,
     #[serde(default, rename = "defaultMode")]
@@ -615,16 +644,33 @@ pub struct RuntimeSessionListParams {
     #[serde(default, rename = "runtimeRef")]
     pub runtime_ref: Option<String>,
     #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSessionParams {
     #[serde(rename = "runtimeRef")]
     pub runtime_ref: String,
-    #[serde(rename = "nativeSessionId")]
+    #[serde(rename = "sessionHandle")]
     pub native_session_id: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionReadParams {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "sessionHandle")]
+    pub native_session_id: String,
+    #[serde(default)]
+    pub cursor: Option<String>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
@@ -634,7 +680,7 @@ pub struct RuntimeSessionParams {
 pub struct RuntimeSessionRenameParams {
     #[serde(rename = "runtimeRef")]
     pub runtime_ref: String,
-    #[serde(rename = "nativeSessionId")]
+    #[serde(rename = "sessionHandle")]
     pub native_session_id: String,
     pub title: String,
     #[serde(default)]
@@ -642,14 +688,102 @@ pub struct RuntimeSessionRenameParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeSessionRollbackParams {
+pub struct RuntimeSessionRevisionParams {
     #[serde(rename = "runtimeRef")]
     pub runtime_ref: String,
-    #[serde(rename = "nativeSessionId")]
+    #[serde(rename = "sessionHandle")]
     pub native_session_id: String,
-    #[serde(default, rename = "itemId")]
-    pub item_id: Option<String>,
+    #[serde(default, rename = "revisionHandle")]
+    pub revision_handle: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeContextReadParams {
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
+    #[serde(default, rename = "runtimeRef")]
+    pub runtime_ref: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeControlSetParams {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "controlId")]
+    pub control_id: String,
+    #[ts(type = "unknown")]
+    pub value: Value,
+    #[serde(rename = "expectedCapabilityRevision")]
+    pub expected_capability_revision: String,
+    #[serde(rename = "expectedBindingRevision")]
+    pub expected_binding_revision: u64,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAuthActionParams {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    pub action: String,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub input: Option<Value>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeGoalReadParams {
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeGoalSetParams {
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub objective: Option<String>,
+    #[serde(default)]
+    pub status: Option<RuntimeGoalStatusView>,
+    #[serde(default, rename = "tokenBudget")]
+    pub token_budget: Option<i64>,
+    #[serde(default, rename = "clearTokenBudget")]
+    pub clear_token_budget: bool,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeGoalClearParams {
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAccountRateLimitsReadParams {
+    #[serde(default, rename = "runtimeRef")]
+    pub runtime_ref: Option<String>,
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
@@ -1128,6 +1262,18 @@ pub struct RuntimeProfileView {
     pub command: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default, rename = "backendRef")]
+    pub backend_ref: Option<String>,
+    #[serde(default)]
+    pub provenance: String,
+    #[serde(default, rename = "profileRevision")]
+    pub profile_revision: String,
+    #[serde(default, rename = "capabilityRevision")]
+    pub capability_revision: String,
+    #[serde(default)]
+    pub stability: Option<RuntimeStabilityView>,
+    #[serde(default)]
+    pub capabilities: Vec<RuntimeCapabilityView>,
     #[serde(default, rename = "defaultModel")]
     pub default_model: Option<String>,
     #[serde(default, rename = "defaultMode")]
@@ -1147,6 +1293,8 @@ pub struct RuntimeProfileView {
     #[serde(default, rename = "sourceTargets")]
     pub source_targets: Vec<BackendConfigTarget>,
     pub health: RuntimeHealthView,
+    #[serde(default, rename = "readinessStages")]
+    pub readiness_stages: Vec<RuntimeReadinessStageView>,
     #[serde(default)]
     pub diagnostics: Vec<BackendDiagnosticView>,
 }
@@ -1160,6 +1308,43 @@ pub struct RuntimeHealthView {
     pub command_path: Option<String>,
     #[serde(default)]
     pub checked_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeReadinessStatusView {
+    Unchecked,
+    Ready,
+    Missing,
+    NeedsAuth,
+    Unsupported,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeReadinessStageView {
+    pub id: String,
+    pub status: RuntimeReadinessStatusView,
+    pub summary: String,
+    #[serde(default, rename = "observedAtMs")]
+    pub observed_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeStabilityView {
+    Stable,
+    Experimental,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCapabilityView {
+    pub id: String,
+    pub enabled: bool,
+    pub stability: RuntimeStabilityView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1225,12 +1410,40 @@ pub struct RuntimeSessionListResult {
     pub runtime_ref: String,
     pub supported: bool,
     pub sessions: Vec<RuntimeSessionView>,
+    #[serde(default, rename = "nextCursor")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeHistoryFidelityView {
+    Full,
+    Summary,
+    Partial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeSessionOwnershipView {
+    ReadWrite,
+    ReadOnly,
+    Active,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionRevisionView {
+    #[serde(rename = "revisionHandle")]
+    pub revision_handle: String,
+    pub role: String,
+    #[serde(default, rename = "createdAtMs")]
+    pub created_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSessionView {
-    #[serde(rename = "nativeSessionId")]
+    #[serde(rename = "sessionHandle")]
     pub native_session_id: String,
     #[serde(default, rename = "threadId")]
     pub thread_id: Option<String>,
@@ -1240,6 +1453,16 @@ pub struct RuntimeSessionView {
     pub archived: bool,
     #[serde(default, rename = "updatedAtMs")]
     pub updated_at_ms: Option<i64>,
+    #[serde(default, rename = "parentThreadId")]
+    pub parent_thread_id: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, rename = "dedupKey")]
+    pub native_dedup_key: String,
+    pub fidelity: RuntimeHistoryFidelityView,
+    pub ownership: RuntimeSessionOwnershipView,
+    #[serde(default)]
+    pub actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1247,7 +1470,7 @@ pub struct RuntimeSessionView {
 pub struct RuntimeSessionMutationResult {
     #[serde(rename = "runtimeRef")]
     pub runtime_ref: String,
-    #[serde(rename = "nativeSessionId")]
+    #[serde(rename = "sessionHandle")]
     pub native_session_id: String,
     pub supported: bool,
     pub changed: bool,
@@ -1255,6 +1478,289 @@ pub struct RuntimeSessionMutationResult {
     pub session: Option<RuntimeSessionView>,
     #[serde(default)]
     pub message: Option<String>,
+    #[serde(default)]
+    pub revisions: Vec<RuntimeSessionRevisionView>,
+    #[serde(default, rename = "nextCursor")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeControlStateView {
+    RuntimeDefault,
+    ReadOnlyCurrent,
+    Selectable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeControlChoiceView {
+    #[ts(type = "unknown")]
+    pub value: Value,
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeControlDependencyView {
+    #[serde(rename = "controlId")]
+    pub control_id: String,
+    #[ts(type = "unknown")]
+    pub value: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeControlDescriptorView {
+    pub id: String,
+    pub label: String,
+    pub state: RuntimeControlStateView,
+    #[serde(default, rename = "currentValue")]
+    #[ts(type = "unknown | null")]
+    pub current_value: Option<Value>,
+    #[serde(default)]
+    pub choices: Vec<RuntimeControlChoiceView>,
+    #[serde(default, rename = "dependsOn")]
+    pub depends_on: Option<RuntimeControlDependencyView>,
+    #[serde(default, rename = "channelSafe")]
+    pub channel_safe: bool,
+    #[serde(rename = "capabilityRevision")]
+    pub capability_revision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeBindingView {
+    #[serde(rename = "threadId")]
+    pub thread_id: String,
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "backendKind")]
+    pub backend_kind: String,
+    #[serde(default, rename = "nativeKind")]
+    pub native_kind: Option<String>,
+    #[serde(default, rename = "sessionHandle")]
+    pub native_session_id: Option<String>,
+    pub cwd: String,
+    #[serde(rename = "profileFingerprint")]
+    pub profile_fingerprint: String,
+    pub ownership: RuntimeSessionOwnershipView,
+    #[serde(rename = "bindingRevision")]
+    pub binding_revision: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeContextReadResult {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "selectionState")]
+    pub selection_state: String,
+    #[serde(default)]
+    pub profiles: Vec<RuntimeProfileView>,
+    #[serde(default)]
+    pub binding: Option<RuntimeBindingView>,
+    #[serde(default)]
+    pub controls: Vec<RuntimeControlDescriptorView>,
+    #[serde(default)]
+    pub stability: Option<RuntimeStabilityView>,
+    #[serde(default)]
+    pub capabilities: Vec<RuntimeCapabilityView>,
+    #[serde(default, rename = "activeSession")]
+    pub active_session: Option<RuntimeSessionView>,
+    #[serde(default)]
+    pub children: Vec<RuntimeSessionView>,
+    #[serde(default)]
+    pub goal: Option<RuntimeGoalView>,
+    #[serde(default, rename = "accountRateLimits")]
+    pub account_rate_limits: Option<RuntimeAccountRateLimitsView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeControlSetResult {
+    pub changed: bool,
+    pub observed: bool,
+    pub control: RuntimeControlDescriptorView,
+    #[serde(rename = "bindingRevision")]
+    pub binding_revision: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAuthActionResult {
+    pub accepted: bool,
+    pub status: String,
+    pub message: String,
+    #[serde(default)]
+    #[ts(type = "unknown | null")]
+    pub output: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGoalStatusView {
+    Active,
+    Paused,
+    Blocked,
+    UsageLimited,
+    BudgetLimited,
+    Complete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeGoalView {
+    pub objective: String,
+    pub status: RuntimeGoalStatusView,
+    #[serde(default, rename = "tokenBudget")]
+    pub token_budget: Option<i64>,
+    #[serde(rename = "tokensUsed")]
+    pub tokens_used: i64,
+    #[serde(rename = "timeUsedSeconds")]
+    pub time_used_seconds: i64,
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeGoalReadResult {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(default)]
+    pub goal: Option<RuntimeGoalView>,
+    #[serde(rename = "bindingRevision")]
+    pub binding_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeGoalSetResult {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    pub goal: RuntimeGoalView,
+    #[serde(rename = "bindingRevision")]
+    pub binding_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeGoalClearResult {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    pub cleared: bool,
+    #[serde(rename = "bindingRevision")]
+    pub binding_revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeRateLimitReachedTypeView {
+    RateLimitReached,
+    WorkspaceOwnerCreditsDepleted,
+    WorkspaceMemberCreditsDepleted,
+    WorkspaceOwnerUsageLimitReached,
+    WorkspaceMemberUsageLimitReached,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeRateLimitWindowView {
+    #[serde(rename = "usedPercent")]
+    pub used_percent: i32,
+    #[serde(default, rename = "windowDurationMins")]
+    pub window_duration_mins: Option<i64>,
+    #[serde(default, rename = "resetsAt")]
+    pub resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCreditsSnapshotView {
+    #[serde(rename = "hasCredits")]
+    pub has_credits: bool,
+    pub unlimited: bool,
+    #[serde(default)]
+    pub balance: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSpendControlLimitSnapshotView {
+    pub limit: String,
+    pub used: String,
+    #[serde(rename = "remainingPercent")]
+    pub remaining_percent: i32,
+    #[serde(rename = "resetsAt")]
+    pub resets_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeRateLimitSnapshotView {
+    #[serde(default, rename = "limitId")]
+    pub limit_id: Option<String>,
+    #[serde(default, rename = "limitName")]
+    pub limit_name: Option<String>,
+    #[serde(default)]
+    pub primary: Option<RuntimeRateLimitWindowView>,
+    #[serde(default)]
+    pub secondary: Option<RuntimeRateLimitWindowView>,
+    #[serde(default)]
+    pub credits: Option<RuntimeCreditsSnapshotView>,
+    #[serde(default, rename = "individualLimit")]
+    pub individual_limit: Option<RuntimeSpendControlLimitSnapshotView>,
+    #[serde(default, rename = "planType")]
+    pub plan_type: Option<String>,
+    #[serde(default, rename = "rateLimitReachedType")]
+    pub rate_limit_reached_type: Option<RuntimeRateLimitReachedTypeView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAccountRateLimitsView {
+    #[serde(rename = "rateLimits")]
+    pub rate_limits: RuntimeRateLimitSnapshotView,
+    #[serde(default, rename = "rateLimitsByLimitId")]
+    pub rate_limits_by_limit_id: BTreeMap<String, RuntimeRateLimitSnapshotView>,
+    #[serde(default, rename = "resetCreditsAvailable")]
+    pub reset_credits_available: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAccountRateLimitsReadResult {
+    #[serde(rename = "runtimeRef")]
+    pub runtime_ref: String,
+    #[serde(rename = "accountRateLimits")]
+    pub account_rate_limits: RuntimeAccountRateLimitsView,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeRetryClassView {
+    Never,
+    UserAction,
+    SafeRetry,
+    Reconnect,
+    UnknownDelivery,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeErrorView {
+    pub code: String,
+    pub stage: String,
+    #[serde(rename = "retryClass")]
+    pub retry_class: RuntimeRetryClassView,
+    pub message: String,
+    #[serde(default, rename = "diagnosticRef")]
+    pub diagnostic_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1359,6 +1865,8 @@ pub enum ClientRequest {
     Initialize(InitializeParams),
     #[serde(rename = "thread/start")]
     ThreadStart(ThreadStartParams),
+    #[serde(rename = "thread/compact/start")]
+    ThreadCompactStart(ThreadCompactStartParams),
     #[serde(rename = "thread/resume")]
     ThreadResume(ThreadResumeParams),
     #[serde(rename = "thread/read")]
@@ -1387,6 +1895,20 @@ pub enum ClientRequest {
     TurnTakeover(TurnTakeoverParams),
     #[serde(rename = "runtime/options")]
     RuntimeOptions(RuntimeOptionsParams),
+    #[serde(rename = "runtime/context/read")]
+    RuntimeContextRead(RuntimeContextReadParams),
+    #[serde(rename = "runtime/control/set")]
+    RuntimeControlSet(RuntimeControlSetParams),
+    #[serde(rename = "runtime/auth/action")]
+    RuntimeAuthAction(RuntimeAuthActionParams),
+    #[serde(rename = "runtime/goal/read")]
+    RuntimeGoalRead(RuntimeGoalReadParams),
+    #[serde(rename = "runtime/goal/set")]
+    RuntimeGoalSet(RuntimeGoalSetParams),
+    #[serde(rename = "runtime/goal/clear")]
+    RuntimeGoalClear(RuntimeGoalClearParams),
+    #[serde(rename = "runtime/account/rateLimits/read")]
+    RuntimeAccountRateLimitsRead(RuntimeAccountRateLimitsReadParams),
     #[serde(rename = "runtime/profile/list")]
     RuntimeProfileList(RuntimeProfileListParams),
     #[serde(rename = "runtime/profile/read")]
@@ -1404,7 +1926,9 @@ pub enum ClientRequest {
     #[serde(rename = "runtime/session/list")]
     RuntimeSessionList(RuntimeSessionListParams),
     #[serde(rename = "runtime/session/read")]
-    RuntimeSessionRead(RuntimeSessionParams),
+    RuntimeSessionRead(RuntimeSessionReadParams),
+    #[serde(rename = "runtime/session/attach")]
+    RuntimeSessionAttach(RuntimeSessionParams),
     #[serde(rename = "runtime/session/resume")]
     RuntimeSessionResume(RuntimeSessionParams),
     #[serde(rename = "runtime/session/archive")]
@@ -1415,8 +1939,12 @@ pub enum ClientRequest {
     RuntimeSessionDelete(RuntimeSessionParams),
     #[serde(rename = "runtime/session/rename")]
     RuntimeSessionRename(RuntimeSessionRenameParams),
-    #[serde(rename = "runtime/session/rollback")]
-    RuntimeSessionRollback(RuntimeSessionRollbackParams),
+    #[serde(rename = "runtime/session/fork")]
+    RuntimeSessionFork(RuntimeSessionParams),
+    #[serde(rename = "runtime/session/revert")]
+    RuntimeSessionRevert(RuntimeSessionRevisionParams),
+    #[serde(rename = "runtime/session/unrevert")]
+    RuntimeSessionUnrevert(RuntimeSessionRevisionParams),
     #[serde(rename = "automation/list")]
     AutomationList(AutomationListParams),
     #[serde(rename = "automation/draft")]

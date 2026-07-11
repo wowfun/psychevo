@@ -65,6 +65,13 @@
     }
   },
   "properties": {
+    "cursor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "runtimeRef": {
       "default": null,
       "type": [

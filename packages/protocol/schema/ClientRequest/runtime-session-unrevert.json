@@ -1,4 +1,5 @@
 {
+  "$id": "ClientRequest/runtime-session-unrevert.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayRequestScope": {
@@ -62,38 +63,57 @@
         "persistent"
       ],
       "type": "string"
+    },
+    "RuntimeSessionRevisionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "revisionHandle": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeRef": {
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionHandle": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeRef",
+        "sessionHandle"
+      ],
+      "type": "object"
     }
   },
   "properties": {
-    "itemId": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "nativeSessionId": {
-      "type": "string"
-    },
-    "runtimeRef": {
-      "type": "string"
-    },
-    "scope": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/GatewayRequestScope"
-        },
-        {
-          "type": "null"
-        }
+    "method": {
+      "enum": [
+        "runtime/session/unrevert"
       ],
-      "default": null
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/RuntimeSessionRevisionParams"
     }
   },
   "required": [
-    "nativeSessionId",
-    "runtimeRef"
+    "method",
+    "params"
   ],
-  "title": "RuntimeSessionRollbackParams",
+  "title": "ClientRequest runtime/session/unrevert",
   "type": "object"
 }

@@ -44,6 +44,7 @@ pub(crate) struct RunConfig {
     pub(crate) voice: VoiceConfig,
     pub(crate) image_generation: ImageGenerationConfig,
     pub(crate) plugins: PluginPolicyConfig,
+    pub(crate) builtin_plugins: BuiltinPluginPolicyConfig,
 }
 
 // Configuration internals are split by loading, parsing, resolution, and catalog concerns.
@@ -56,6 +57,7 @@ pub use config_types::{
     ResolvedImageGenerationConfig, ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig,
     ResolvedVoiceTtsConfig, RuntimeProfileConfig, RuntimeProfileKind, load_agent_backend_configs,
     load_runtime_profile_configs, resolve_default_workspace_cwd, resolve_workspace_root,
+    validate_runtime_profile_backend_ref,
 };
 #[path = "config/file_env.rs"]
 pub(crate) mod config_file_env;
