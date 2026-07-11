@@ -1,6 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { configDefaults, defineConfig } from "vitest/config";
 
+const CHUNK_SIZE_WARNING_LIMIT_KB = 700;
+
 function packageSegment(packageName: string): string {
   return packageName.replace("/", "+");
 }
@@ -59,6 +61,50 @@ function isValidationVendor(id: string): boolean {
   );
 }
 
+function isMermaidParserVendor(id: string): boolean {
+  return includesNodePackage(normalizedModuleId(id), "@mermaid-js/parser");
+}
+
+function isMermaidLayoutVendor(id: string): boolean {
+  const normalized = normalizedModuleId(id);
+  return (
+    includesNodePackage(normalized, "cytoscape-cose-bilkent") ||
+    includesNodePackage(normalized, "cytoscape-fcose") ||
+    includesNodePackage(normalized, "cose-base") ||
+    includesNodePackage(normalized, "layout-base")
+  );
+}
+
+function isMermaidCytoscapeVendor(id: string): boolean {
+  return includesNodePackage(normalizedModuleId(id), "cytoscape");
+}
+
+function isMermaidMathVendor(id: string): boolean {
+  return includesNodePackage(normalizedModuleId(id), "katex");
+}
+
+function isMermaidRendererVendor(id: string): boolean {
+  const normalized = normalizedModuleId(id);
+  return (
+    includesNodePackage(normalized, "@iconify/utils") ||
+    includesNodePackage(normalized, "@upsetjs/venn.js") ||
+    includesNodePackage(normalized, "dagre-d3-es") ||
+    includesNodePackagePrefix(normalized, "d3-") ||
+    includesNodePackage(normalized, "dayjs") ||
+    includesNodePackage(normalized, "dompurify") ||
+    includesNodePackage(normalized, "es-toolkit") ||
+    includesNodePackage(normalized, "khroma") ||
+    includesNodePackage(normalized, "lodash-es") ||
+    includesNodePackage(normalized, "marked") ||
+    includesNodePackage(normalized, "roughjs") ||
+    includesNodePackage(normalized, "stylis")
+  );
+}
+
+function isMermaidPackageVendor(id: string): boolean {
+  return includesNodePackage(normalizedModuleId(id), "mermaid");
+}
+
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -77,6 +123,31 @@ export default defineConfig({
                   includesNodePackage(normalized, "scheduler")
                 );
               }
+            },
+            {
+              name: "vendor-mermaid-parser",
+              priority: 99,
+              test: isMermaidParserVendor
+            },
+            {
+              name: "vendor-mermaid-layout",
+              priority: 98,
+              test: isMermaidLayoutVendor
+            },
+            {
+              name: "vendor-mermaid-cytoscape",
+              priority: 97,
+              test: isMermaidCytoscapeVendor
+            },
+            {
+              name: "vendor-mermaid-math",
+              priority: 96,
+              test: isMermaidMathVendor
+            },
+            {
+              name: "vendor-mermaid-renderer",
+              priority: 94,
+              test: isMermaidRendererVendor
             },
             {
               name: "vendor-validation",
@@ -106,7 +177,7 @@ export default defineConfig({
             {
               name: "vendor",
               priority: 70,
-              test: (id) => normalizedModuleId(id).includes("/node_modules/")
+              test: (id) => normalizedModuleId(id).includes("/node_modules/") && !isMermaidPackageVendor(id)
             },
             {
               name: (id) => protocolSchemaChunkName(normalizedModuleId(id)),
@@ -141,7 +212,8 @@ export default defineConfig({
         }
       }
     },
-    sourcemap: true
+    sourcemap: true,
+    chunkSizeWarningLimit: CHUNK_SIZE_WARNING_LIMIT_KB
   },
   server: {
     host: "127.0.0.1",

@@ -172,7 +172,7 @@ class VisualGatewayTransport implements GatewayTransport {
               finalAnswer
             },
             thread: {
-              backend: { kind: "psychevo", nativeId: requestedThreadId },
+              backend: { kind: "psychevo", sessionHandle: requestedThreadId },
               id: requestedThreadId,
               sourceKey: null
             },

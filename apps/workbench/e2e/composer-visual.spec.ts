@@ -1,7 +1,8 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { startPevoWeb } from "./harness";
+import { prepareDeterministicRuntime } from "./runtime-live.support";
 import { visualScreenshotRoot } from "./visualArtifacts";
 
 const screenshotDir = visualScreenshotRoot();
@@ -22,6 +23,133 @@ cost = { input = 0, output = 0, cache_read = 0, cache_write = 0, request = 0 }
 `;
 
 test.describe("Workbench composer visual contract", () => {
+  test("locks workspace HTML until an explicit interactive run", async ({ page, isMobile }, testInfo) => {
+    const server = await startPevoWeb({ live: false });
+    const externalRequests: string[] = [];
+    await page.route("https://preview-probe.invalid/**", async (route) => {
+      externalRequests.push(route.request().url());
+      await route.abort("blockedbyclient");
+    });
+    mkdirSync(screenshotDir, { recursive: true });
+    try {
+      writeFileSync(
+        path.join(server.cwd, "hostile-preview.html"),
+        [
+          "<!doctype html>",
+          "<html><head><meta http-equiv=\"refresh\" content=\"0;url=https://preview-probe.invalid/meta-refresh\"></head><body>",
+          "<div id=\"app\">locked</div>",
+          "<img alt=\"remote probe\" src=\"https://preview-probe.invalid/parser-image.png\">",
+          "<script src=\"https://preview-probe.invalid/parser-script.js\"></script>",
+          "<form id=\"probe-form\" action=\"https://preview-probe.invalid/form\" method=\"post\"><input name=\"probe\" value=\"1\"></form>",
+          "<a id=\"probe-navigation\" href=\"https://preview-probe.invalid/navigation\" target=\"_blank\">navigate</a>",
+          "<script>",
+          "document.getElementById('app').textContent = 'script ran';",
+          "void fetch('https://preview-probe.invalid/fetch').catch(() => undefined);",
+          "const dynamicImage = new Image(); dynamicImage.src = 'https://preview-probe.invalid/dynamic-image.png';",
+          "try { document.getElementById('probe-form').requestSubmit(); } catch {}",
+          "try { document.getElementById('probe-navigation').click(); } catch {}",
+          "try { window.open('https://preview-probe.invalid/popup', '_blank'); } catch {}",
+          "location.href = 'https://preview-probe.invalid/self-navigation';",
+          "</script>",
+          "</body></html>"
+        ].join("")
+      );
+      writeFileSync(
+        path.join(server.cwd, "dynamic-preview.html"),
+        [
+          "<!doctype html>",
+          "<html><body>",
+          "<div id=\"app\">pending</div>",
+          "<button id=\"interaction-probe\" type=\"button\">Clicks: <span>0</span></button>",
+          "<script>",
+          "const rows = ['需求分析', 'UI/UX 设计', '部署上线'];",
+          "document.getElementById('app').innerHTML = rows.map((row) => `<p class=\"gantt-row\">${row}</p>`).join('');",
+          "let clicks = 0; document.getElementById('interaction-probe').addEventListener('click', () => { clicks += 1; document.querySelector('#interaction-probe span').textContent = String(clicks); });",
+          "</script>",
+          "</body></html>"
+        ].join("")
+      );
+
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await openStatusPanel(page, isMobile);
+      await page.getByRole("region", { name: "Workspace status" }).getByRole("button", { name: "Files", exact: true }).click();
+      const files = page.getByRole("region", { name: "Workspace files" });
+      await expect(files).toBeVisible();
+      await files.getByRole("treeitem", { name: /hostile-preview\.html/ }).click();
+      const hostileFrame = files.locator(".htmlStaticPreview iframe");
+      await expect(hostileFrame).not.toHaveAttribute("sandbox", /allow-scripts/);
+      await expect(hostileFrame).toHaveAttribute("inert", "");
+      await expect(hostileFrame).toHaveAttribute("tabindex", "-1");
+      await expect(hostileFrame).toHaveCSS("pointer-events", "none");
+      const lockedRunButton = files.getByRole("button", { name: "Run interactive preview" });
+      await lockedRunButton.focus();
+      await page.keyboard.press("Tab");
+      await expect(files.getByLabel("Filter workspace files")).toBeFocused();
+      await expect(hostileFrame).not.toBeFocused();
+      const hostilePreview = files.frameLocator(".htmlStaticPreview iframe");
+      await expect(hostilePreview.locator("#app")).toHaveText("locked");
+      const lockedLinkBox = await hostilePreview.locator("#probe-navigation").boundingBox();
+      expect(lockedLinkBox).not.toBeNull();
+      await page.mouse.click(
+        lockedLinkBox!.x + lockedLinkBox!.width / 2,
+        lockedLinkBox!.y + lockedLinkBox!.height / 2
+      );
+      await page.waitForTimeout(150);
+      expect(externalRequests).toEqual([]);
+
+      await files.getByRole("treeitem", { name: /dynamic-preview\.html/ }).click();
+      await expect(files.getByText("HTML preview")).toBeVisible();
+      const inlineFrame = files.locator(".htmlStaticPreview iframe");
+      await expect(inlineFrame).not.toHaveAttribute("sandbox", /allow-scripts/);
+      await expect(inlineFrame).not.toHaveAttribute("sandbox", /allow-forms/);
+      await expect(inlineFrame).not.toHaveAttribute("sandbox", /allow-popups/);
+      await expect(inlineFrame).not.toHaveAttribute("sandbox", /allow-same-origin/);
+      await expect(page.locator(".htmlStaticPreview iframe")).toHaveCount(1);
+      await expect(files.getByText("Locked · run enables scripts + network")).toBeVisible();
+      const inlinePreview = files.frameLocator(".htmlStaticPreview iframe");
+      await expect(inlinePreview.locator("#app")).toHaveText("pending");
+      await expect(inlinePreview.locator("#app .gantt-row")).toHaveCount(0);
+      await files.getByRole("button", { name: "Run interactive preview" }).click();
+      await expect(inlineFrame).toHaveAttribute("sandbox", /allow-scripts/);
+      await expect(inlineFrame).not.toHaveAttribute("inert", "");
+      await expect(inlineFrame).toHaveCSS("pointer-events", "auto");
+      await expect(files.getByText("Trusted · scripts + network on")).toBeVisible();
+      await expect(inlinePreview.locator("#app .gantt-row")).toHaveCount(3);
+      await expect(inlinePreview.locator("#app")).toContainText("部署上线");
+      await inlinePreview.locator("#interaction-probe").click();
+      await expect(inlinePreview.locator("#interaction-probe span")).toHaveText("1");
+      expect(externalRequests).toEqual([]);
+
+      await files.getByLabel("Open HTML preview for dynamic-preview.html").click();
+      const preview = page.getByRole("region", { name: "Preview" });
+      await expect(preview.getByRole("heading", { name: "dynamic-preview.html" })).toBeVisible();
+      await expect(preview.getByText("HTML preview")).toBeVisible();
+      const previewIframe = preview.locator(".htmlStaticPreview iframe");
+      const previewFrame = preview.frameLocator(".htmlStaticPreview iframe");
+      await expect(page.locator(".htmlStaticPreview iframe")).toHaveCount(1);
+      await expect(inlineFrame).toHaveCount(0);
+      await expect(previewIframe).not.toHaveAttribute("sandbox", /allow-scripts/);
+      await expect(preview.getByText("Locked · run enables scripts + network")).toBeVisible();
+      await expectHtmlPreviewChromeOutsideDocument(preview);
+      await expect(previewFrame.locator("#app")).toHaveText("pending");
+      await expect(previewFrame.locator("#app .gantt-row")).toHaveCount(0);
+      await preview.getByRole("button", { name: "Run interactive preview" }).click();
+      await expect(previewIframe).toHaveAttribute("sandbox", /allow-scripts/);
+      await expectHtmlPreviewChromeOutsideDocument(preview);
+      await expect(previewFrame.locator("#app .gantt-row")).toHaveCount(3);
+      await expect(previewFrame.locator("#app")).toContainText("UI/UX 设计");
+      await previewFrame.locator("#interaction-probe").click();
+      await expect(previewFrame.locator("#interaction-probe span")).toHaveText("1");
+      expect(externalRequests).toEqual([]);
+      await page.screenshot({
+        path: path.join(screenshotDir, `html-preview-scripts-${testInfo.project.name}.png`)
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
   test("renders composer controls, plan chip, and interrupt state without overlap", async ({ page, isMobile }, testInfo) => {
     const server = await startPevoWeb({ configAppend: MANY_MODEL_CONFIG, live: false, model: "opencode-zen/big-pickle" });
     mkdirSync(screenshotDir, { recursive: true });
@@ -41,7 +169,7 @@ test.describe("Workbench composer visual contract", () => {
       await expect(agentControl).toBeVisible();
       await expect(agentControl).toContainText("Default Agent");
       await agentControl.click();
-      const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
+      const agentPopover = page.getByRole("dialog", { name: "Agent Definition" });
       const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
       await expect(agentGroup.getByRole("radio", { name: "Default Agent" })).toHaveAttribute("aria-checked", "true");
       await expect(agentGroup.getByRole("radio", { name: "translate" })).toBeVisible();
@@ -88,8 +216,11 @@ test.describe("Workbench composer visual contract", () => {
       });
       await modelButton.click();
       await expect(page.getByRole("button", { name: "Context usage" })).toBeVisible();
+      await expect(page.getByRole("combobox", { name: "Psychevo mode" })).toHaveCount(0);
       await expect(page.getByRole("tablist", { name: "Turn mode" })).toHaveCount(0);
       await assertComposerGeometry(page, { isMobile, plan: false });
+      const defaultFooterBox = await page.locator(".pevo-composerFooter").boundingBox();
+      expect(defaultFooterBox).not.toBeNull();
       await page.screenshot({
         path: path.join(screenshotDir, `composer-empty-${testInfo.project.name}.png`)
       });
@@ -118,6 +249,9 @@ test.describe("Workbench composer visual contract", () => {
       await expect(page.locator(".pevo-planChip")).toContainText("Plan");
       await page.keyboard.press("Escape");
       await assertComposerGeometry(page, { isMobile, plan: true });
+      const planFooterBox = await page.locator(".pevo-composerFooter").boundingBox();
+      expect(planFooterBox).not.toBeNull();
+      expect(Math.abs(planFooterBox!.height - defaultFooterBox!.height)).toBeLessThanOrEqual(1);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-plan-${testInfo.project.name}.png`)
       });
@@ -142,6 +276,95 @@ test.describe("Workbench composer visual contract", () => {
       await assertComposerGeometry(page, { isMobile, plan: true });
       await page.screenshot({
         path: path.join(screenshotDir, `composer-interrupt-${testInfo.project.name}.png`)
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("renders Runtime Profile selection and immutable provenance without overflow", async ({ page, isMobile }, testInfo) => {
+    mkdirSync(screenshotDir, { recursive: true });
+    const fixture = prepareDeterministicRuntime("codex", screenshotDir);
+    const server = await startPevoWeb({
+      configAppend: fixture.configAppend,
+      live: false,
+      pevoBin: process.env.PEVO_BIN
+    });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await openPanel(page, isMobile, "History");
+      await page.getByRole("button", { name: "New Session" }).click();
+      await openPanel(page, isMobile, "Transcript");
+
+      const agentButton = page.getByRole("button", { name: "Agent", exact: true });
+      const runtimeButton = page.getByRole("button", { name: "Runtime Profile", exact: true });
+      await expect(agentButton).toContainText("Default Agent");
+      await expect(runtimeButton).toBeVisible();
+      await runtimeButton.click();
+      const popover = page.getByRole("dialog", { name: "Runtime Profile selection" });
+      await expect(popover).toBeVisible();
+      await expect(popover.getByRole("radiogroup", { name: "Runtime" }).getByRole("radio", { name: "Codex" })).toBeVisible();
+      await expect(popover.getByText("Direct · Generated").first()).toBeVisible();
+      await expectElementInsideViewport(page, popover);
+      await popover.getByRole("radio", { name: "Codex", exact: true }).click();
+      const prompt = "Bind this visual thread to deterministic Codex.";
+      await page.getByPlaceholder("Ask Psychevo...").fill(prompt);
+      await page.getByRole("button", { name: "Send message" }).click();
+      await expect(page.locator(".pevo-message.is-assistant").filter({ hasText: fixture.expectedAnswer })).toHaveCount(1, { timeout: 60_000 });
+
+      const capsule = page.getByRole("button", { name: "Bound Runtime Profile Codex · Direct" });
+      await expect(capsule).toHaveClass(/runtimeProvenanceCapsule/);
+      await expect(capsule).toContainText("Codex · Direct");
+      await expect(capsule).toHaveAttribute("title", /Runtime bindings are immutable/);
+      await expectTextFits(capsule.locator("span").first());
+      const overflow = await page.locator(".pevo-composer").evaluate((composer) => ({
+        composer: composer.scrollWidth - composer.clientWidth,
+        controls: (() => {
+          const controls = composer.querySelector<HTMLElement>(".composerRuntimeControls");
+          return controls ? controls.scrollWidth - controls.clientWidth : 0;
+        })()
+      }));
+      expect(overflow.composer).toBeLessThanOrEqual(1);
+      expect(overflow.controls).toBeLessThanOrEqual(1);
+      await page.screenshot({
+        path: path.join(screenshotDir, `runtime-profile-provenance-${testInfo.project.name}.png`)
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("keeps incomplete runtime-child history fidelity visible without overflow", async ({ page, isMobile }, testInfo) => {
+    mkdirSync(screenshotDir, { recursive: true });
+    const fixture = prepareDeterministicRuntime("codex", screenshotDir, "child");
+    const server = await startPevoWeb({
+      configAppend: fixture.configAppend,
+      live: false,
+      pevoBin: process.env.PEVO_BIN
+    });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      const runtimeButton = page.getByRole("button", { name: "Runtime Profile", exact: true });
+      await runtimeButton.click();
+      await page.getByRole("dialog", { name: "Runtime Profile selection" }).getByRole("radio", { name: "Codex", exact: true }).click();
+      await page.getByPlaceholder("Ask Psychevo...").fill("Spawn a deterministic runtime child.");
+      await page.getByRole("button", { name: "Send message" }).click();
+      await expect(page.locator(".pevo-message.is-assistant").filter({ hasText: "parent done" })).toHaveCount(1, { timeout: 60_000 });
+
+      const childTab = page.getByRole("button", { name: "Codex child", exact: true });
+      await expect(childTab).toBeVisible({ timeout: 30_000 });
+      await childTab.click();
+      const child = page.getByRole("region", { name: "Codex child" });
+      const notice = child.getByRole("note");
+      await expect(notice).toHaveAttribute("data-history-fidelity", "partial");
+      await expect(notice).toHaveText("Read-only runtime child · Partial history; some messages or detail may be missing.");
+      await expect(child).toContainText("hi");
+      await expectElementInsideViewport(page, notice);
+      expect(await notice.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+      await page.screenshot({
+        path: path.join(screenshotDir, `runtime-child-partial-history-${testInfo.project.name}.png`)
       });
     } finally {
       await server.stop();
@@ -337,6 +560,16 @@ async function selectedOptionText(select: Locator): Promise<string> {
     const control = element as HTMLSelectElement;
     return control.selectedOptions[0]?.textContent?.trim() ?? "";
   });
+}
+
+async function expectHtmlPreviewChromeOutsideDocument(preview: Locator) {
+  const [noticeBox, iframeBox] = await Promise.all([
+    preview.locator(".htmlPreviewNotice").boundingBox(),
+    preview.locator(".htmlStaticPreview iframe").boundingBox()
+  ]);
+  expect(noticeBox).not.toBeNull();
+  expect(iframeBox).not.toBeNull();
+  expect(noticeBox!.y + noticeBox!.height).toBeLessThanOrEqual(iframeBox!.y + 1);
 }
 
 async function expectSelectTextFits(select: Locator) {
@@ -565,4 +798,21 @@ async function openPanel(page: Page, isMobile: boolean, name: "History" | "Statu
   if (isMobile) {
     await page.getByRole("button", { name }).click();
   }
+}
+
+async function openStatusPanel(page: Page, isMobile: boolean) {
+  if (isMobile) {
+    await page.getByRole("button", { name: "Transcript" }).click();
+  }
+  const expandInspector = page.getByRole("button", { name: "Show right inspector" });
+  const collapseInspector = page.getByRole("button", { name: "Collapse right inspector" });
+  if (await collapseInspector.count() === 0) {
+    await expect(expandInspector).toBeVisible();
+    await expandInspector.click();
+    await expect(collapseInspector).toBeVisible();
+  }
+  if (isMobile) {
+    await page.getByRole("button", { name: "Status", exact: true }).click();
+  }
+  await expect(page.getByRole("region", { name: "Workspace status" })).toBeVisible();
 }

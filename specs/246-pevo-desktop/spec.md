@@ -19,7 +19,7 @@ Define Psychevo's native GUI desktop shell for macOS, Windows, and Linux.
 
 Out of scope:
 
-- Web/managed-Web packaging and browser host behavior; this belongs to
+- Web/managed-Web packaging and preview-only browser fallback; this belongs to
   [240 pevo Web](../240-pevo-web/spec.md)
 - Floating capsule product behavior; this belongs to
   [245 pevo Floating](../245-pevo-floating/spec.md)
@@ -216,6 +216,27 @@ renderer may request a session artifact by thread id, kind, and export options,
 but Rust performs the Gateway HTTP request with the managed bearer token and
 returns only file content metadata to the renderer. Desktop must not expose the
 managed bearer token through URLs, renderer state, storage, or logs.
+
+## Managed Browser Host
+
+Desktop owns Psychevo's managed Browser host for the Browser and Rich Preview
+surface defined by [262 Browser and Rich Preview](../262-browser-rich-preview/spec.md).
+The host is a native Browser feature, not a Workbench-owned iframe automation
+layer. Desktop is responsible for Chromium process/session lifecycle,
+workspace-scoped profile storage, CDP connection ownership, page-tab state,
+Browser pane visibility, and Browser host cleanup when a thread ends.
+
+Workbench talks to the Browser host through typed host/Gateway requests and
+notifications. Workbench must not receive native process handles, raw CDP
+connections, or Desktop-managed bearer tokens. If the Browser host is
+unavailable, Desktop returns structured capability failures using the shared
+host reason taxonomy. Non-Desktop hosts return `Desktop required` for Browser
+automation and annotation overlay commands.
+
+Browser profile data is stored under the built-in Browser plugin data root and
+scoped by workspace. Closing the right-workspace Browser pane hides the view
+without deleting the thread-bound Browser session. Ending the thread releases
+the Browser session.
 
 ## Validation
 

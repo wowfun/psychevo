@@ -300,7 +300,7 @@ function turnResult({
       toolFailures: 0
     },
     thread: {
-      backend: { kind: "psychevo", nativeId: threadId, runtimeRef: "native" },
+      backend: { kind: "psychevo", sessionHandle: threadId, runtimeRef: "native" },
       id: threadId,
       sourceKey: null
     },

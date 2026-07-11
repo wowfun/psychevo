@@ -284,6 +284,7 @@
 .pevo-floating-answerPanel .pevo-messageFrame {
   --pevo-messageActionHitArea: 24px;
   --pevo-messageActionHitOffset: -24px;
+  margin-bottom: 0;
 }
 
 .pevo-floating-answerPanel .pevo-emptyThread {

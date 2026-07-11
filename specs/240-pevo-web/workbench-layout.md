@@ -47,7 +47,15 @@ state, cwd, context usage, and changed-file summary, then offers bordered
 icon-and-label rows to open Review, Terminal, Files, and, for non-draft
 sessions, `Side chat` tabs. Rows do not carry right-side explanatory copy. Once
 any tab is open, the tab strip includes a `+` menu for creating more tabs of
-those types. Browser is not exposed in this slice.
+those types. Browser is exposed as a right-workspace peer when the Browser
+plugin is enabled, with one independently identified and stateful Browser pane
+per thread. Switching threads hides the previous thread's Browser tab without
+sharing its URL, and returning restores that thread's navigation state. Web/PWA
+Browser behavior is preview-only: it may render a safe iframe/static preview
+for `http://` and `https://`, but browser-control RPCs and annotation overlay
+injection return `Desktop required` until a Desktop Browser host is available.
+Host/port shorthand defaults public hosts to HTTPS and localhost or loopback
+addresses to HTTP; unsupported explicit schemes are rejected.
 
 Automations is an app-level operational surface for local project automations
 and thread heartbeats defined by
@@ -82,7 +90,15 @@ thread in a right-workspace child tab rather than copying its content into the
 parent transcript. Workbench routes live entry events by
 `TranscriptEntry.threadId`; scoped subagent live entries whose thread id is the
 child session id are ignored by the parent snapshot and accepted by the child
-tab snapshot. Child-thread composers, including Side chat and child-agent
+tab snapshot. Workbench retains an ordered, bounded per-thread event feed rather
+than a single replaceable latest event. Opening a child records a sequence
+barrier before `thread/read`; the authoritative snapshot covers earlier events,
+and events arriving after the barrier are applied in order so snapshot loading,
+React batching, and rapid ACP chunks cannot create gaps. Only the latest
+refresh generation may publish a snapshot or loading/error state, so a delayed
+read from an older client or thread cannot overwrite a newer child view.
+Child-thread composers,
+including Side chat and child-agent
 thread tabs, use the same shared composer shell as the main transcript
 composer. In matching idle/running states, their input frame and full composer
 shell heights stay aligned with the main composer. In desktop split view, the
@@ -101,8 +117,24 @@ tree component with folder expand/collapse and selected row state. Preview and
 tree regions are immersive right-workspace panes with subtle split dividers
 instead of framed card backgrounds. Markdown previews reuse the shared
 `@psychevo/components` Markdown renderer with raw HTML escaped, appearance-adapted code
-blocks, GitHub-like document-start YAML frontmatter tables, and a quiet copy
-action that writes the raw Markdown file source through the host clipboard. Code previews
+blocks, GitHub-like document-start YAML frontmatter tables, complete fenced
+Mermaid rendering, and a quiet copy action that writes the raw Markdown file
+source through the host clipboard. Incomplete fenced Mermaid blocks remain code
+while streaming. Local HTML previews must be read-only and must not use raw
+`file://`; for Gateway-authorized workspace content, Files and Preview default
+to a locked, scriptless, opaque-origin iframe. Workbench injects CSP that blocks
+scripts and automatic network side effects from connections, remote
+subresources, forms, and nested browsing, and the iframe grants no script,
+same-origin, form, or popup
+capabilities. `Run interactive preview` is the only path to a trusted run with
+scripts enabled. That trust applies only to the exact path and content and is
+revoked immediately on either change; selecting or opening a file never grants
+it. Locked iframes are inert, excluded from keyboard focus, and receive no
+pointer events, so disguised links cannot navigate before trust is granted;
+this also disables internal document scrolling until the trusted run restores
+iframe interaction. Files and Preview share a single active HTML execution
+instance: changing between those views suspends the inactive iframe while
+preserving unrelated tab state. Code previews
 use a Workbench-local `highlight.js` core
 integration with app-token colors. The Files header does not repeat the project
 path; the selected file absolute path is shown above the preview. Diff previews

@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { GatewayClient } from "@psychevo/client";
 import { ActionButton, CreatePanel, MarkdownText, Switch } from "@psychevo/components";
-import type { GatewayRequestScope, TeamMemberInput } from "@psychevo/protocol";
+import type {
+  GatewayRequestScope,
+  RuntimeAuthActionResult,
+  RuntimeProfileView,
+  RuntimeSessionListResult,
+  RuntimeSessionMutationResult,
+  RuntimeSessionRevisionView,
+  RuntimeSessionView,
+  TeamMemberInput
+} from "@psychevo/protocol";
 import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, Wrench, X } from "lucide-react";
 import { AgentsConfigPanel } from "./capabilities-agents-config";
+import { formatRuntimeCheckedAt } from "./runtime-context";
 import type { BackendConfigTarget, BackendDraft, CapabilityTab, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
 type JsonObject = Record<string, unknown>;
@@ -29,6 +39,10 @@ type PluginInstallDraft = {
   inspection: JsonObject | null;
 };
 type MutationOptions = { notice?: string; refresh?: boolean };
+type RuntimeSessionHistoryState = {
+  revisions: RuntimeSessionRevisionView[];
+  nextCursor: string | null;
+};
 type AgentDefinitionState = "active" | "shadowed" | "disabled";
 type AgentsSegment = "definitions" | "teams" | "runtimes" | "backends";
 
@@ -92,13 +106,47 @@ type RuntimeProfileRow = {
   configured: boolean;
   command: string;
   args: string[];
+  backendRef: string;
+  provenance: string;
+  profileRevision: string;
+  capabilityRevision: string;
+  defaultModel: string;
   defaultMode: string;
   defaultAgent: string;
+  approvalMode: string;
+  sandbox: string;
+  workspaceRoots: string[];
+  envKeys: string[];
+  optionKeys: string[];
   healthStatus: string;
   healthSummary: string;
+  checkedAtMs: number | null;
+  readinessStages: Array<{ id: string; status: string; summary: string; observedAtMs: number | null }>;
   sourceTargets: BackendConfigTarget[];
   diagnostics: string[];
   raw: JsonObject;
+};
+
+type RuntimeProfileKind = "native" | "codex" | "opencode" | "acp";
+
+type RuntimeProfileDraft = {
+  target: BackendConfigTarget;
+  id: string;
+  runtime: RuntimeProfileKind;
+  enabled: boolean;
+  label: string;
+  command: string;
+  argsText: string;
+  backendRef: string;
+  envText: string;
+  existingEnvKeys: string[];
+  defaultModel: string;
+  defaultMode: string;
+  defaultAgent: string;
+  approvalMode: string;
+  sandbox: string;
+  workspaceRootsText: string;
+  optionsText: string;
 };
 
 type TeamDraft = {
@@ -174,6 +222,7 @@ export function CapabilitiesPage({
   onDoctorBackend,
   onEditBackend,
   onNewBackend,
+  onOpenSession,
   onSaveBackendDraft,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
@@ -195,6 +244,7 @@ export function CapabilitiesPage({
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
   onNewBackend(): void;
+  onOpenSession(threadId: string, readOnly?: boolean): void;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
@@ -390,6 +440,7 @@ export function CapabilitiesPage({
           onDoctorBackend={onDoctorBackend}
           onEditBackend={onEditBackend}
           onNewBackend={onNewBackend}
+          onOpenSession={onOpenSession}
           onSaveBackendDraft={onSaveBackendDraft}
           onSetBackendEnabled={onSetBackendEnabled}
           onSetBackendEntrypoints={onSetBackendEntrypoints}
@@ -456,7 +507,7 @@ export function CapabilitiesPage({
                         ariaLabel={row.enabled ? `Disable ${row.name}` : `Enable ${row.name}`}
                         checked={row.enabled}
                         className="capabilityRowSwitch"
-                        disabled={busy}
+                        disabled={busy || (activeTab === "plugins" && !pluginEnablementMutable(row))}
                         label={row.enabled ? "Enabled" : "Disabled"}
                         onCheckedChange={(enabled) => void mutate(() => setCapabilityEnabled(client, requestScope, activeTab, row, enabled))}
                         showLabel={false}
@@ -536,6 +587,7 @@ function AgentsCapabilityPanel({
   onDoctorBackend,
   onEditBackend,
   onNewBackend,
+  onOpenSession,
   onSaveBackendDraft,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
@@ -558,6 +610,7 @@ function AgentsCapabilityPanel({
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
   onNewBackend(): void;
+  onOpenSession(threadId: string, readOnly?: boolean): void;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
@@ -885,6 +938,7 @@ function AgentsCapabilityPanel({
           rows={filteredRuntimeRows}
           scope={scope}
           selected={selectedRuntime}
+          onOpenSession={onOpenSession}
           onQueryChange={setQuery}
           onSelect={setSelectedId}
         />
@@ -1128,6 +1182,7 @@ function RuntimeProfilesPanel({
   rows,
   scope,
   selected,
+  onOpenSession,
   onQueryChange,
   onSelect
 }: {
@@ -1139,10 +1194,176 @@ function RuntimeProfilesPanel({
   rows: RuntimeProfileRow[];
   scope: GatewayRequestScope;
   selected: RuntimeProfileRow | null;
+  onOpenSession(threadId: string, readOnly?: boolean): void;
   onQueryChange(value: string): void;
   onSelect(id: string | null): void;
 }) {
   const [doctor, setDoctor] = useState<JsonObject | null>(null);
+  const [sessions, setSessions] = useState<RuntimeSessionListResult | null>(null);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionHistory, setSessionHistory] = useState<Record<string, RuntimeSessionHistoryState>>({});
+  const [selectedRevisions, setSelectedRevisions] = useState<Record<string, string>>({});
+  const [authRepair, setAuthRepair] = useState<RuntimeAuthActionResult | null>(null);
+  const [draft, setDraft] = useState<RuntimeProfileDraft | null>(null);
+  const [editing, setEditing] = useState<RuntimeProfileRow | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [editorLoadingId, setEditorLoadingId] = useState<string | null>(null);
+
+  function openCreate() {
+    setEditing(null);
+    setEditorError(null);
+    setDraft(emptyRuntimeProfileDraft());
+  }
+
+  function closeEditor() {
+    setDraft(null);
+    setEditing(null);
+    setEditorError(null);
+  }
+
+  async function openEdit(row: RuntimeProfileRow) {
+    if (!runtimeProfileCanCustomize(row)) return;
+    setEditorError(null);
+    setEditorLoadingId(row.id);
+    try {
+      const result = await client.request("runtime/profile/read", { id: row.id, scope });
+      setEditing(row);
+      setDraft(runtimeProfileDraftFromRead(result.profile, result.options));
+    } catch (error) {
+      setEditorError(errorMessage(error));
+    } finally {
+      setEditorLoadingId(null);
+    }
+  }
+
+  async function saveRuntimeProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!draft) return;
+    const id = draft.id.trim();
+    if (!id) return;
+    if (!editing && rows.some((row) => row.id === id)) {
+      setEditorError(`Runtime Profile ${id} already exists. Select it and use Customize or Edit.`);
+      return;
+    }
+    if (draft.runtime === "acp" && !draft.backendRef.trim()) {
+      setEditorError("ACP Runtime Profiles require an ACP backend ref.");
+      return;
+    }
+    const env = parseRuntimeEnvironment(draft.envText);
+    if (typeof env === "string") {
+      setEditorError(env);
+      return;
+    }
+    const options = parseRuntimeOptions(draft.optionsText);
+    if (typeof options === "string") {
+      setEditorError(options);
+      return;
+    }
+    setEditorError(null);
+    const ok = await mutate(() => client.request("runtime/profile/write", {
+      id,
+      target: draft.target,
+      runtime: draft.runtime,
+      enabled: draft.enabled,
+      label: nullableText(draft.label),
+      command: nullableText(draft.command),
+      args: splitLines(draft.argsText),
+      env,
+      backendRef: draft.runtime === "acp" ? nullableText(draft.backendRef) : null,
+      defaultModel: nullableText(draft.defaultModel),
+      defaultMode: nullableText(draft.defaultMode),
+      defaultAgent: nullableText(draft.defaultAgent),
+      approvalMode: nullableText(draft.approvalMode),
+      sandbox: nullableText(draft.sandbox),
+      workspaceRoots: splitLines(draft.workspaceRootsText),
+      options,
+      scope
+    }), { notice: editing ? "Runtime profile saved." : "Runtime profile created." });
+    if (ok) {
+      closeEditor();
+      onSelect(id);
+    }
+  }
+
+  async function deleteRuntimeProfile(row: RuntimeProfileRow) {
+    const target = runtimeProfileMutableTarget(row);
+    if (!target) return;
+    const source = targetLabel(target);
+    const fallback = runtimeProfileHasFallback(row)
+      ? " The next lower-precedence source or generated profile will remain."
+      : "";
+    if (!confirmAction(`Delete the ${source} configuration for ${row.label || row.id}?${fallback}`)) return;
+    const ok = await mutate(
+      () => client.request("runtime/profile/delete", { id: row.id, target, scope }),
+      { notice: `${source} Runtime Profile configuration deleted.` }
+    );
+    if (ok) {
+      closeEditor();
+      onSelect(null);
+    }
+  }
+
+  async function loadNativeSessions(row: RuntimeProfileRow, cursor: string | null = null) {
+    setSessionsLoading(true);
+    setSessionsError(null);
+    try {
+      const result = await client.request("runtime/session/list", { runtimeRef: row.id, cursor, scope });
+      setSessions((current) => {
+        if (cursor == null || !current || current.runtimeRef !== result.runtimeRef) return result;
+        const merged = new Map(current.sessions.map((session) => [session.sessionHandle, session]));
+        for (const session of result.sessions) merged.set(session.sessionHandle, session);
+        return { ...result, sessions: [...merged.values()] };
+      });
+      if (cursor == null) {
+        setSessionHistory({});
+        setSelectedRevisions({});
+      }
+    } catch (error) {
+      setSessions(null);
+      setSessionsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setDoctor(null);
+    setAuthRepair(null);
+    setSessions(null);
+    setSessionsError(null);
+    setSessionsLoading(false);
+    setSessionHistory({});
+    setSelectedRevisions({});
+  }, [selected?.id, scope.cwd]);
+
+  async function loadSessionHistory(
+    row: RuntimeProfileRow,
+    session: RuntimeSessionView,
+    cursor: string | null
+  ) {
+    const result = await client.request("runtime/session/read", {
+      runtimeRef: row.id,
+      sessionHandle: session.sessionHandle,
+      cursor,
+      scope
+    });
+    setSessionHistory((current) => {
+      const prior = cursor == null ? [] : current[session.sessionHandle]?.revisions ?? [];
+      const revisions = new Map(prior.map((revision) => [revision.revisionHandle, revision]));
+      for (const revision of result.revisions) revisions.set(revision.revisionHandle, revision);
+      return {
+        ...current,
+        [session.sessionHandle]: { revisions: [...revisions.values()], nextCursor: result.nextCursor }
+      };
+    });
+    setSelectedRevisions((current) => {
+      if (current[session.sessionHandle] || result.revisions.length === 0) return current;
+      const latest = result.revisions.at(-1);
+      return latest ? { ...current, [session.sessionHandle]: latest.revisionHandle } : current;
+    });
+  }
+
   async function checkRuntime(row: RuntimeProfileRow) {
     const ok = await mutate(async () => {
       const result = objectValue(await client.request("runtime/health/check", { runtimeRef: row.id, scope }));
@@ -1151,9 +1372,96 @@ function RuntimeProfilesPanel({
     }, { notice: "Runtime profile checked.", refresh: false });
     if (ok) onSelect(row.id);
   }
+
+  async function refreshCatalog(row: RuntimeProfileRow) {
+    await mutate(
+      () => client.request("runtime/snapshot", { runtimeRef: row.id, scope }),
+      { notice: "Runtime catalog refreshed." }
+    );
+    onSelect(row.id);
+  }
+
+  async function repairAuth(row: RuntimeProfileRow) {
+    await runAuthAction(row, "repair", null, "Authentication guidance loaded.");
+  }
+
+  async function runAuthAction(
+    row: RuntimeProfileRow,
+    action: string,
+    input: JsonObject | null,
+    notice: string
+  ) {
+    const ok = await mutate(async () => {
+      const result = runtimeAuthActionResult(await client.request("runtime/auth/action", {
+        runtimeRef: row.id,
+        action,
+        input,
+        scope
+      }));
+      setAuthRepair(result);
+      return result;
+    }, { notice, refresh: false });
+    if (ok) onSelect(row.id);
+  }
+
+  async function mutateSession(row: RuntimeProfileRow, session: RuntimeSessionView, action: string) {
+    const cascadeConfirmation = action === "delete" && row.runtime === "opencode"
+      ? `Delete ${session.title || "this native session"}? Descendant OpenCode sessions will be recursively deleted.`
+      : action === "delete" && row.runtime === "codex"
+        ? `Delete ${session.title || "this native session"}? Descendant Codex sessions will also be deleted.`
+        : action === "delete"
+          ? `Delete ${session.title || "this native session"}?`
+      : action === "archive" && row.runtime === "codex"
+        ? `Archive ${session.title || "this native session"}? Descendant Codex sessions will also be archived.`
+        : null;
+    if (cascadeConfirmation && !window.confirm(cascadeConfirmation)) {
+      return;
+    }
+    let result: unknown;
+    const params = { runtimeRef: row.id, sessionHandle: session.sessionHandle, scope };
+    if (action === "rename") {
+      const title = window.prompt("Rename native session", session.title ?? "");
+      if (!title?.trim()) return;
+      result = await client.request("runtime/session/rename", { ...params, title: title.trim() });
+    } else if (action === "resume") {
+      result = await client.request("runtime/session/resume", params);
+    } else if (action === "attach") {
+      result = await client.request("runtime/session/attach", params);
+    } else if (action === "fork") {
+      result = await client.request("runtime/session/fork", params);
+    } else if (action === "archive") {
+      result = await client.request("runtime/session/archive", params);
+    } else if (action === "unarchive") {
+      result = await client.request("runtime/session/unarchive", params);
+    } else if (action === "delete") {
+      result = await client.request("runtime/session/delete", params);
+    } else if (action === "revert") {
+      const revisionHandle = selectedRevisions[session.sessionHandle];
+      if (!revisionHandle) return;
+      result = await client.request("runtime/session/revert", { ...params, revisionHandle });
+    } else if (action === "unrevert") {
+      result = await client.request("runtime/session/unrevert", { ...params, revisionHandle: null });
+    } else {
+      return;
+    }
+    if (action === "attach") {
+      const threadId = (result as RuntimeSessionMutationResult).session?.threadId;
+      if (!threadId) throw new Error("Gateway did not return the attached public thread.");
+      onOpenSession(threadId, true);
+    } else {
+      await loadNativeSessions(row);
+    }
+    return result;
+  }
   const doctorHealthSummary = selected && doctor && stringField(doctor, "id") === selected.id
     ? stringField(objectField(doctor, "health"), "summary")
     : "";
+  const authOutput = objectValue(authRepair?.output);
+  const authLoginId = stringField(authOutput, "loginId");
+  const authUrl = safeRuntimeAuthUrl(
+    stringField(authOutput, "authUrl") || stringField(authOutput, "verificationUrl")
+  );
+  const authUserCode = stringField(authOutput, "userCode");
   return (
     <>
       <div className="capabilitiesToolbar agentDefinitionsToolbar">
@@ -1162,7 +1470,12 @@ function RuntimeProfilesPanel({
           <input aria-label="Search Runtime Profiles" onChange={(event) => onQueryChange(event.target.value)} placeholder="Search" value={query} />
         </label>
         <span className="capabilityToolbarHint">{rows.length} profiles</span>
+        <ActionButton disabled={busy} icon={<Plus size={14} />} onClick={openCreate} variant="primary">
+          Create profile
+        </ActionButton>
       </div>
+
+      {editorError && <div className="capabilityBanner is-error">{editorError}</div>}
 
       <div className="capabilitiesGrid agentsDefinitionsGrid">
         <div className="capabilityList" role="list">
@@ -1182,7 +1495,7 @@ function RuntimeProfilesPanel({
                   description: row.runtime,
                   enabled: row.enabled,
                   status: row.healthStatus,
-                  badges: [row.generated ? "Generated" : "Configured", row.healthStatus],
+                  badges: [row.provenance, runtimeProfileSource(row), runtimeReadinessLabel(row.healthStatus)],
                   raw: row.raw
                 }} />
               </button>
@@ -1190,12 +1503,12 @@ function RuntimeProfilesPanel({
                 ariaLabel={row.enabled ? `Disable ${row.id}` : `Enable ${row.id}`}
                 checked={row.enabled}
                 className="capabilityRowSwitch"
-                disabled={busy}
+                disabled={busy || !runtimeProfileCanCustomize(row)}
                 label={row.enabled ? "Enabled" : "Disabled"}
                 onCheckedChange={(enabled) => {
                   void mutate(() => client.request("runtime/profile/setEnabled", {
                     id: row.id,
-                    target: row.sourceTargets.includes("project") ? "project" : "profile",
+                    target: runtimeProfileMutableTarget(row) ?? "profile",
                     enabled,
                     scope
                   }), { notice: enabled ? "Runtime profile enabled." : "Runtime profile disabled." });
@@ -1208,29 +1521,126 @@ function RuntimeProfilesPanel({
         </div>
 
         <aside className="capabilityDetail agentDefinitionDetail" aria-label="Runtime Profile detail">
-          {selected ? (
+          {draft ? (
             <>
-              <div className="capabilityDetailHeader">
+              <div className="capabilityDetailHeader runtimeProfileDetailHeader">
+                <div>
+                  <h3>{editing ? (editing.generated ? `Customize ${editing.label || editing.id}` : `Edit ${editing.label || editing.id}`) : "Create Runtime Profile"}</h3>
+                  <span>{editing ? `${runtimeProfileSource(editing)} · ${editing.provenance}` : "Project or Profile configuration"}</span>
+                </div>
+              </div>
+              <RuntimeProfileEditorForm
+                busy={busy}
+                draft={draft}
+                editing={editing}
+                onCancel={closeEditor}
+                onChange={setDraft}
+                onSubmit={saveRuntimeProfile}
+              />
+            </>
+          ) : selected ? (
+            <>
+              <div className="capabilityDetailHeader runtimeProfileDetailHeader">
                 <div>
                   <h3>{selected.label || selected.id}</h3>
-                  <span>{[selected.runtime, selected.generated ? "Generated" : "Configured", selected.healthStatus].filter(Boolean).join(" · ")}</span>
+                  <span>{[selected.provenance, runtimeProfileSource(selected), runtimeReadinessLabel(selected.healthStatus)].filter(Boolean).join(" · ")}</span>
                 </div>
                 <div className="capabilityDetailHeaderActions">
+                  <button
+                    disabled={busy || editorLoadingId === selected.id || !runtimeProfileCanCustomize(selected)}
+                    onClick={() => void openEdit(selected)}
+                    title={runtimeProfileCanCustomize(selected) ? (selected.generated ? "Create a configured override" : "Edit configuration") : "Generated ACP compatibility profiles are managed from ACP Backends"}
+                    type="button"
+                  >
+                    <Edit3 size={14} /> {selected.generated ? "Customize" : "Edit"}
+                  </button>
+                  <button
+                    disabled={busy || !runtimeProfileMutableTarget(selected)}
+                    onClick={() => void deleteRuntimeProfile(selected)}
+                    title={runtimeProfileMutableTarget(selected) ? `Delete ${targetLabel(runtimeProfileMutableTarget(selected))} configuration` : "Generated profiles cannot be deleted"}
+                    type="button"
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                  <button disabled={busy} onClick={() => void refreshCatalog(selected)} title="Refresh Catalog" type="button">
+                    <RefreshCw size={14} /> Refresh Catalog
+                  </button>
                   <button disabled={busy} onClick={() => void checkRuntime(selected)} title="Doctor" type="button">
                     <Wrench size={14} /> Doctor
                   </button>
+                  {(selected.runtime === "codex" || selected.runtime === "opencode") && (
+                    <button disabled={busy} onClick={() => void repairAuth(selected)} title="Authentication repair" type="button">
+                      <LogIn size={14} /> Repair auth
+                    </button>
+                  )}
                 </div>
               </div>
-              <dl className="capabilityKeyValue">
-                <div><dt>Runtime</dt><dd>{selected.runtime}</dd></div>
+              <dl className="capabilityKeyValues">
+                <div><dt>Runtime</dt><dd>{selected.runtime} · {selected.provenance}</dd></div>
                 <div><dt>Status</dt><dd>{selected.healthSummary}</dd></div>
+                <div><dt>Last checked</dt><dd>{formatRuntimeCheckedAt(selected.checkedAtMs)}</dd></div>
                 <div><dt>Command</dt><dd>{selected.command ? [selected.command, ...selected.args].join(" ") : "Built in"}</dd></div>
+                {selected.backendRef && <div><dt>ACP backend</dt><dd>{selected.backendRef}</dd></div>}
+                <div><dt>Default model</dt><dd>{selected.defaultModel || "Runtime default"}</dd></div>
                 <div><dt>Default mode</dt><dd>{selected.defaultMode || "Runtime default"}</dd></div>
                 <div><dt>Default agent</dt><dd>{selected.defaultAgent || "Runtime default"}</dd></div>
-                <div><dt>Source</dt><dd>{selected.sourceTargets.length > 0 ? selected.sourceTargets.join(", ") : "Generated"}</dd></div>
+                <div><dt>Safety</dt><dd>{[selected.approvalMode || "Runtime approval", selected.sandbox || "Runtime sandbox"].join(" · ")}</dd></div>
+                <div><dt>Workspace roots</dt><dd>{selected.workspaceRoots.length > 0 ? selected.workspaceRoots.join(", ") : "Current workspace"}</dd></div>
+                <div><dt>Environment</dt><dd>{selected.envKeys.length > 0 ? selected.envKeys.join(", ") : "No declared keys"}</dd></div>
+                <div><dt>Source</dt><dd>{runtimeProfileSource(selected)}</dd></div>
               </dl>
+              <section aria-label="Runtime readiness" className="runtimeCapabilitySection">
+                <div className="runtimeCapabilitySectionHeader"><h4>Readiness</h4><span>Cached · revision {selected.capabilityRevision}</span></div>
+                {selected.readinessStages.length > 0 ? (
+                  <div className="runtimeReadinessStages">
+                    {selected.readinessStages.map((stage) => (
+                      <div className={`runtimeReadinessStage is-${stage.status}`} key={stage.id}>
+                        <strong>{readinessStageLabel(stage.id)}</strong>
+                        <span>{stage.summary || runtimeReadinessLabel(stage.status)}</span>
+                        <small>{stage.observedAtMs == null ? "Not observed" : formatRuntimeCheckedAt(stage.observedAtMs)}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="capabilityEmpty">No staged readiness observation yet</div>
+                )}
+              </section>
               {selected.diagnostics.length > 0 && (
                 <div className="capabilityBanner is-error">{selected.diagnostics.join(" · ")}</div>
+              )}
+              {authRepair && (
+                <div className="capabilityBanner runtimeAuthBanner">
+                  <span>{authRepair.message}</span>
+                  {authRepair.status === "login_required" && selected.runtime === "codex" && (
+                    <button
+                      disabled={busy}
+                      onClick={() => void runAuthAction(selected, "login", null, "Managed Codex login started.")}
+                      type="button"
+                    >
+                      Start managed login
+                    </button>
+                  )}
+                  {authRepair.status === "login_pending" && (
+                    <div className="runtimeAuthActions">
+                      {authUrl && <a href={authUrl} rel="noreferrer" target="_blank">Open login</a>}
+                      {authUserCode && <code>{authUserCode}</code>}
+                      {authLoginId && (
+                        <button
+                          disabled={busy}
+                          onClick={() => void runAuthAction(
+                            selected,
+                            "cancel",
+                            { loginId: authLoginId },
+                            "Managed Codex login cancelled."
+                          )}
+                          type="button"
+                        >
+                          Cancel login
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
               {doctor && stringField(doctor, "id") === selected.id && (
                 <>
@@ -1240,6 +1650,85 @@ function RuntimeProfilesPanel({
                   <KeyValueView value={doctor} />
                 </>
               )}
+              <section aria-label="Native Sessions" className="runtimeCapabilitySection runtimeSessionsSection">
+                <div className="runtimeCapabilitySectionHeader">
+                  <div><h4>Native Sessions</h4><span>{scope.cwd}</span></div>
+                  <button disabled={busy || sessionsLoading} onClick={() => void loadNativeSessions(selected)} type="button">
+                    {sessions ? "Refresh sessions" : "Load sessions"}
+                  </button>
+                </div>
+                {!sessionsLoading && !sessions && !sessionsError && (
+                  <div className="capabilityEmpty">Load sessions explicitly; selecting a profile never starts its runtime.</div>
+                )}
+                {sessionsLoading && <div className="capabilityEmpty">Loading native sessions</div>}
+                {sessionsError && <div className="capabilityBanner is-error">{sessionsError}</div>}
+                {!sessionsLoading && sessions && !sessions.supported && (
+                  <div className="capabilityEmpty">This Runtime Profile does not expose native session history.</div>
+                )}
+                {!sessionsLoading && sessions?.supported && sessions.sessions.length === 0 && (
+                  <div className="capabilityEmpty">No native sessions in this workspace</div>
+                )}
+                {sessions?.supported && sessions.sessions.map((session) => {
+                  const history = sessionHistory[session.sessionHandle];
+                  return (
+                  <div className="runtimeSessionRow" key={session.dedupKey}>
+                    <div className="runtimeSessionMain">
+                      <strong>{session.title || "Untitled session"}</strong>
+                      <span>{session.archived ? "Archived" : "Active history"} · {runtimeOwnershipLabel(session.ownership)} · {runtimeFidelityLabel(session.fidelity)}</span>
+                      <small>{session.updatedAtMs == null ? "Update time unavailable" : `Updated ${formatRuntimeCheckedAt(session.updatedAtMs)}`}</small>
+                      {session.fidelity !== "full" && <small className="agentSurfaceWarning">History is {session.fidelity}; gaps remain visible.</small>}
+                      {(session.ownership === "active" || session.ownership === "readOnly") && (
+                        <small className="agentSurfaceWarning">This session attaches read-only. Fork it when the runtime supports Fork.</small>
+                      )}
+                      {history && (
+                        <label className="runtimeSessionRevisionPicker">
+                          <span>Revert point</span>
+                          <select
+                            aria-label={`Revert point for ${session.title || "Untitled session"}`}
+                            disabled={busy || history.revisions.length === 0}
+                            onChange={(event) => setSelectedRevisions((current) => ({
+                              ...current,
+                              [session.sessionHandle]: event.target.value
+                            }))}
+                            value={selectedRevisions[session.sessionHandle] ?? ""}
+                          >
+                            {history.revisions.length === 0 && <option value="">No revision points on this page</option>}
+                            {history.revisions.map((revision) => (
+                              <option key={revision.revisionHandle} value={revision.revisionHandle}>
+                                {runtimeRevisionLabel(revision)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                    </div>
+                    <div className="runtimeSessionActions">
+                      {session.ownership === "active" && session.actions.includes("attach") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "attach")} type="button">Attach read-only</button>}
+                      {session.ownership !== "active" && session.actions.includes("resume") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "resume")} type="button">Resume</button>}
+                      {session.actions.includes("fork") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "fork")} type="button">Fork</button>}
+                      {session.actions.includes("rename") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "rename")} type="button">Rename</button>}
+                      {!session.archived && session.actions.includes("archive") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "archive")} type="button">Archive</button>}
+                      {session.archived && session.actions.includes("unarchive") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "unarchive")} type="button">Unarchive</button>}
+                      {selected.runtime === "opencode" && session.actions.includes("revert") && !history && <button disabled={busy} onClick={() => void loadSessionHistory(selected, session, null)} type="button">Load revisions</button>}
+                      {selected.runtime === "opencode" && session.actions.includes("revert") && history && <button disabled={busy || !selectedRevisions[session.sessionHandle]} onClick={() => void mutateSession(selected, session, "revert")} type="button">Revert</button>}
+                      {selected.runtime === "opencode" && session.actions.includes("revert") && history?.nextCursor && <button disabled={busy} onClick={() => void loadSessionHistory(selected, session, history.nextCursor)} type="button">Load earlier</button>}
+                      {selected.runtime !== "codex" && session.actions.includes("unrevert") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "unrevert")} type="button">Unrevert</button>}
+                      {session.actions.includes("delete") && <button className="is-danger" disabled={busy} onClick={() => void mutateSession(selected, session, "delete")} type="button">Delete</button>}
+                    </div>
+                  </div>
+                  );
+                })}
+                {sessions?.supported && sessions.nextCursor && (
+                  <button
+                    className="runtimeSessionsLoadMore"
+                    disabled={busy || sessionsLoading}
+                    onClick={() => void loadNativeSessions(selected, sessions.nextCursor)}
+                    type="button"
+                  >
+                    Load more sessions
+                  </button>
+                )}
+              </section>
             </>
           ) : (
             <div className="capabilityEmpty">Select a Runtime Profile</div>
@@ -1247,6 +1736,121 @@ function RuntimeProfilesPanel({
         </aside>
       </div>
     </>
+  );
+}
+
+function RuntimeProfileEditorForm({
+  busy,
+  draft,
+  editing,
+  onCancel,
+  onChange,
+  onSubmit
+}: {
+  busy: boolean;
+  draft: RuntimeProfileDraft;
+  editing: RuntimeProfileRow | null;
+  onCancel(): void;
+  onChange(draft: RuntimeProfileDraft): void;
+  onSubmit(event: FormEvent<HTMLFormElement>): void;
+}) {
+  const configuredSource = Boolean(editing && editing.sourceTargets.length > 0);
+  const generatedIdentity = Boolean(editing && runtimeProfileHasReservedIdentity(editing));
+  return (
+    <form aria-label="Runtime Profile" className="capabilityForm agentDefinitionForm runtimeProfileForm" onSubmit={onSubmit}>
+      <label>
+        <span>Target</span>
+        <select aria-label="Runtime Profile target" disabled={busy || configuredSource} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
+          <option value="project">Project</option>
+          <option value="profile">Profile</option>
+        </select>
+        {configuredSource && <small className="runtimeProfileFieldHint">Source is fixed for this configuration.</small>}
+      </label>
+      <label>
+        <span>Profile id</span>
+        <input
+          aria-label="Runtime Profile id"
+          disabled={busy || Boolean(editing)}
+          onChange={(event) => onChange({ ...draft, id: event.target.value })}
+          pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+          placeholder="review-codex"
+          title="Use lowercase letters, numbers, and single hyphens"
+          value={draft.id}
+        />
+      </label>
+      <label>
+        <span>Runtime</span>
+        <select aria-label="Runtime Profile runtime" disabled={busy || generatedIdentity} onChange={(event) => onChange({ ...draft, runtime: runtimeProfileKind(event.target.value) })} value={draft.runtime}>
+          {(editing || draft.runtime === "native") && <option value="native">Native</option>}
+          <option value="codex">Codex · Direct</option>
+          <option value="opencode">OpenCode · Direct</option>
+          <option value="acp">ACP compatibility</option>
+        </select>
+      </label>
+      <label>
+        <span>Label</span>
+        <input aria-label="Runtime Profile label" disabled={busy} onChange={(event) => onChange({ ...draft, label: event.target.value })} placeholder="Review Codex" value={draft.label} />
+      </label>
+      <label className="agentDefinitionSwitch">
+        <span>Enabled</span>
+        <Switch ariaLabel="Runtime Profile enabled" checked={draft.enabled} disabled={busy} label={draft.enabled ? "Enabled" : "Disabled"} onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
+      </label>
+      {draft.runtime === "acp" && (
+        <label>
+          <span>ACP backend ref</span>
+          <input aria-label="Runtime Profile ACP backend ref" disabled={busy} onChange={(event) => onChange({ ...draft, backendRef: event.target.value })} placeholder="cursor" required value={draft.backendRef} />
+        </label>
+      )}
+      <label>
+        <span>Command</span>
+        <input aria-label="Runtime Profile command" disabled={busy} onChange={(event) => onChange({ ...draft, command: event.target.value })} placeholder="Use runtime default" value={draft.command} />
+      </label>
+      <label className="agentWideField runtimeProfileCompactTextArea">
+        <span>Arguments</span>
+        <textarea aria-label="Runtime Profile arguments" disabled={busy} onChange={(event) => onChange({ ...draft, argsText: event.target.value })} placeholder={"One argument per line\n--stdio"} spellCheck={false} value={draft.argsText} />
+      </label>
+      <label>
+        <span>Default model</span>
+        <input aria-label="Runtime Profile default model" disabled={busy} onChange={(event) => onChange({ ...draft, defaultModel: event.target.value })} placeholder="Runtime default" value={draft.defaultModel} />
+      </label>
+      <label>
+        <span>Default mode</span>
+        <input aria-label="Runtime Profile default mode" disabled={busy} onChange={(event) => onChange({ ...draft, defaultMode: event.target.value })} placeholder="Runtime default" value={draft.defaultMode} />
+      </label>
+      <label>
+        <span>Default agent</span>
+        <input aria-label="Runtime Profile default agent" disabled={busy} onChange={(event) => onChange({ ...draft, defaultAgent: event.target.value })} placeholder="Runtime default" value={draft.defaultAgent} />
+      </label>
+      <label>
+        <span>Approval mode</span>
+        <input aria-label="Runtime Profile approval mode" disabled={busy} onChange={(event) => onChange({ ...draft, approvalMode: event.target.value })} placeholder="Runtime default" value={draft.approvalMode} />
+      </label>
+      <label>
+        <span>Sandbox</span>
+        <input aria-label="Runtime Profile sandbox" disabled={busy} onChange={(event) => onChange({ ...draft, sandbox: event.target.value })} placeholder="Runtime default" value={draft.sandbox} />
+      </label>
+      <label className="agentWideField runtimeProfileCompactTextArea">
+        <span>Workspace roots</span>
+        <textarea aria-label="Runtime Profile workspace roots" disabled={busy} onChange={(event) => onChange({ ...draft, workspaceRootsText: event.target.value })} placeholder="One absolute path per line" spellCheck={false} value={draft.workspaceRootsText} />
+      </label>
+      <label className="agentWideField runtimeProfileCompactTextArea">
+        <span>Environment</span>
+        <textarea aria-label="Runtime Profile environment" disabled={busy} onChange={(event) => onChange({ ...draft, envText: event.target.value })} placeholder="KEY=value, one per line" spellCheck={false} value={draft.envText} />
+        {draft.existingEnvKeys.length > 0 && (
+          <small className="runtimeProfileFieldHint">Stored values for {draft.existingEnvKeys.join(", ")} are hidden. Leave blank to keep them; enter the complete replacement set to change them.</small>
+        )}
+      </label>
+      <label className="agentWideField runtimeProfileOptionsField">
+        <span>Advanced options (JSON)</span>
+        <textarea aria-label="Runtime Profile options" disabled={busy} onChange={(event) => onChange({ ...draft, optionsText: event.target.value })} placeholder="{}" spellCheck={false} value={draft.optionsText} />
+      </label>
+      <div className="capabilityFormActions">
+        <ActionButton disabled={busy} icon={<X size={14} />} onClick={onCancel} type="button" variant="ghost">Cancel</ActionButton>
+        <ActionButton disabled={busy || !draft.id.trim() || (draft.runtime === "acp" && !draft.backendRef.trim())} icon={<Save size={14} />} type="submit" variant="primary">
+          {editing ? "Save changes" : "Create profile"}
+        </ActionButton>
+      </div>
+    </form>
   );
 }
 
@@ -1386,6 +1990,7 @@ function TeamDefinitionEditorForm({
           <label className="agentWideField">
             <span>Members</span>
             <textarea aria-label="Team members" disabled={busy} onChange={(event) => onChange({ ...draft, membersText: event.target.value })} value={draft.membersText} />
+            <small>One member per line. Add named fields such as runtime=codex, option.mode=auto-review, role=review.</small>
           </label>
           <label className="agentWideField">
             <span>Instructions</span>
@@ -1897,19 +2502,25 @@ function CapabilityActions({
   if (tab === "plugins") {
     const trust = objectField(row.raw, "trust");
     const needsTrust = boolField(trust, "required") && stringField(trust, "status") !== "trusted";
+    const selector = pluginSelector(row);
+    const scopeName = pluginMutationScope(row);
+    const packageMutable = pluginPackageMutable(row);
+    const removable = pluginRemovable(row);
     return (
       <div className="capabilityActionGrid">
-        <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/doctor", { selector: row.id, scope }))} type="button">
+        <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/doctor", { selector, scope }))} type="button">
           <Play size={14} /> Doctor
         </button>
-        {needsTrust && (
-          <button disabled={busy} onClick={() => confirmAction(`Trust plugin ${row.name} for its current package fingerprint?`) && void mutate(() => client.request("plugin/setTrust", { selector: row.id, trusted: true, scope }))} type="button">
+        {needsTrust && packageMutable && (
+          <button disabled={busy} onClick={() => confirmAction(`Trust plugin ${row.name} for its current package fingerprint?`) && void mutate(() => client.request("plugin/setTrust", { selector, scopeName, trusted: true, scope }))} type="button">
             <LogIn size={14} /> Trust
           </button>
         )}
-        <button disabled={busy} onClick={() => confirmAction(`Uninstall plugin ${row.name}?`) && void mutate(() => client.request("plugin/uninstall", { selector: row.id, scope }))} type="button">
-          <Trash2 size={14} /> Uninstall
-        </button>
+        {packageMutable && removable && (
+          <button disabled={busy} onClick={() => confirmAction(`Uninstall plugin ${row.name}?`) && void mutate(() => client.request("plugin/uninstall", { selector, scopeName, scope }))} type="button">
+            <Trash2 size={14} /> Uninstall
+          </button>
+        )}
       </div>
     );
   }
@@ -2141,15 +2752,143 @@ function runtimeProfileRowsFromData(data: JsonObject | null): RuntimeProfileRow[
       configured: boolField(profile, "configured"),
       command: stringField(profile, "command"),
       args: arrayStrings(profile.args),
+      backendRef: stringField(profile, "backendRef"),
+      provenance: stringField(profile, "provenance") || runtimeProvenanceForKind(stringField(profile, "runtime")),
+      profileRevision: decimalRevisionField(profile, "profileRevision"),
+      capabilityRevision: decimalRevisionField(profile, "capabilityRevision"),
+      defaultModel: stringField(profile, "defaultModel"),
       defaultMode: stringField(profile, "defaultMode"),
       defaultAgent: stringField(profile, "defaultAgent"),
+      approvalMode: stringField(profile, "approvalMode"),
+      sandbox: stringField(profile, "sandbox"),
+      workspaceRoots: arrayStrings(profile.workspaceRoots),
+      envKeys: arrayStrings(profile.envKeys),
+      optionKeys: arrayStrings(profile.optionKeys),
       healthStatus: stringField(health, "status") || "unchecked",
       healthSummary: stringField(health, "summary") || "Not checked",
+      checkedAtMs: nullableNumberField(health, "checkedAtMs"),
+      readinessStages: arrayObjects(profile.readinessStages).map((stage) => ({
+        id: stringField(stage, "id"),
+        status: stringField(stage, "status") || "unchecked",
+        summary: stringField(stage, "summary"),
+        observedAtMs: nullableNumberField(stage, "observedAtMs")
+      })).filter((stage) => stage.id),
       sourceTargets: arrayStrings(profile.sourceTargets).map(agentTargetValue),
       diagnostics: arrayObjects(profile.diagnostics).map((diagnostic) => stringField(diagnostic, "message")).filter(Boolean),
       raw: profile
     };
   }).filter((row) => row.id);
+}
+
+function emptyRuntimeProfileDraft(): RuntimeProfileDraft {
+  return {
+    target: "project",
+    id: "",
+    runtime: "codex",
+    enabled: true,
+    label: "",
+    command: "",
+    argsText: "",
+    backendRef: "",
+    envText: "",
+    existingEnvKeys: [],
+    defaultModel: "",
+    defaultMode: "",
+    defaultAgent: "",
+    approvalMode: "",
+    sandbox: "",
+    workspaceRootsText: "",
+    optionsText: ""
+  };
+}
+
+function runtimeProfileDraftFromRead(profile: RuntimeProfileView, options: unknown | null): RuntimeProfileDraft {
+  return {
+    target: runtimeProfileMutableTargetFromSources(profile.sourceTargets) ?? "profile",
+    id: profile.id,
+    runtime: runtimeProfileKind(profile.runtime),
+    enabled: profile.enabled,
+    label: profile.label,
+    command: profile.command ?? "",
+    argsText: profile.args.join("\n"),
+    backendRef: profile.backendRef ?? "",
+    envText: "",
+    existingEnvKeys: profile.envKeys,
+    defaultModel: profile.defaultModel ?? "",
+    defaultMode: profile.defaultMode ?? "",
+    defaultAgent: profile.defaultAgent ?? "",
+    approvalMode: profile.approvalMode ?? "",
+    sandbox: profile.sandbox ?? "",
+    workspaceRootsText: profile.workspaceRoots.join("\n"),
+    optionsText: options == null ? "" : JSON.stringify(options, null, 2)
+  };
+}
+
+function runtimeProfileKind(value: string): RuntimeProfileKind {
+  if (value === "codex" || value === "opencode" || value === "acp") return value;
+  return "native";
+}
+
+function runtimeProfileMutableTarget(row: RuntimeProfileRow): BackendConfigTarget | null {
+  return runtimeProfileMutableTargetFromSources(row.sourceTargets);
+}
+
+function runtimeProfileMutableTargetFromSources(sourceTargets: BackendConfigTarget[]): BackendConfigTarget | null {
+  if (sourceTargets.includes("project")) return "project";
+  if (sourceTargets.includes("profile")) return "profile";
+  return null;
+}
+
+function runtimeProfileCanCustomize(row: RuntimeProfileRow): boolean {
+  if (runtimeProfileMutableTarget(row)) return true;
+  return row.generated && runtimeProfileHasReservedIdentity(row);
+}
+
+function runtimeProfileHasReservedIdentity(row: RuntimeProfileRow): boolean {
+  return row.id === "native" || row.id === "codex" || row.id === "opencode";
+}
+
+function runtimeProfileHasFallback(row: RuntimeProfileRow): boolean {
+  return row.sourceTargets.length > 1 || runtimeProfileHasReservedIdentity(row);
+}
+
+function parseRuntimeEnvironment(value: string): Record<string, string> | string {
+  const env: Record<string, string> = {};
+  const lines = value.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (!line.trim()) continue;
+    const separator = line.indexOf("=");
+    if (separator <= 0) return `Environment line ${index + 1} must use KEY=value.`;
+    const key = line.slice(0, separator).trim();
+    if (!key) return `Environment line ${index + 1} requires a key.`;
+    if (Object.prototype.hasOwnProperty.call(env, key)) return `Environment key ${key} is duplicated.`;
+    env[key] = line.slice(separator + 1);
+  }
+  return env;
+}
+
+function parseRuntimeOptions(value: string): JsonObject | null | string {
+  const source = value.trim();
+  if (!source) return null;
+  try {
+    const parsed: unknown = JSON.parse(source);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return "Advanced options must be a JSON object.";
+    }
+    return parsed as JsonObject;
+  } catch {
+    return "Advanced options must be valid JSON.";
+  }
+}
+
+function splitLines(value: string): string[] {
+  return value.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function nullableText(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed || null;
 }
 
 function emptyAgentDraft(): AgentDraft {
@@ -2252,16 +2991,7 @@ function renderTeamDraftMarkdown(draft: TeamDraft): string {
     `leader: ${draft.leader.trim()}`,
     `maxParallelAgents: ${Number(draft.maxParallelAgents) || 4}`,
     "members:",
-    ...members.map((member) => {
-      const values = [`id: ${stringField(member, "id")}`, `agent: ${stringField(member, "agent")}`];
-      const role = stringField(member, "role");
-      const description = stringField(member, "description");
-      const maxTurns = objectValue(member).maxTurns;
-      if (role) values.push(`role: ${role}`);
-      if (description) values.push(`description: ${description}`);
-      if (typeof maxTurns === "number" && Number.isFinite(maxTurns)) values.push(`maxTurns: ${maxTurns}`);
-      return `  - { ${values.join(", ")} }`;
-    }),
+    ...members.flatMap(renderTeamMemberMarkdown),
     "---",
     draft.instructions
   ];
@@ -2273,18 +3003,54 @@ function parseTeamMembersText(value: string): TeamMemberInput[] {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [head, role = "", description = "", maxTurnsText = ""] = line.split("|").map((part) => part.trim());
+      const [head, ...fields] = line.split("|").map((part) => part.trim());
       const safeHead = head ?? "";
       const [idPart = "", agentPart = ""] = safeHead.includes(":")
         ? safeHead.split(/:(.*)/s).slice(0, 2)
         : [safeHead, safeHead];
-      const maxTurns = Number(maxTurnsText);
+      let role = "";
+      let description = "";
+      let maxTurns: number | null = null;
+      let runtimeRef: string | null = null;
+      let runtimeProfileRevision: string | null = null;
+      const runtimeOptions: Record<string, string> = {};
+      const legacyFields: string[] = [];
+      for (const field of fields) {
+        const separator = field.indexOf("=");
+        if (separator < 0) {
+          legacyFields.push(field);
+          continue;
+        }
+        const key = field.slice(0, separator).trim();
+        const fieldValue = field.slice(separator + 1).trim();
+        if (key === "role") role = fieldValue;
+        else if (key === "description") description = fieldValue;
+        else if (key === "maxTurns") {
+          const parsed = Number(fieldValue);
+          maxTurns = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+        } else if (key === "runtime") runtimeRef = fieldValue || null;
+        else if (key === "revision") {
+          runtimeProfileRevision = /^\d+$/.test(fieldValue) && fieldValue !== "0" ? fieldValue : null;
+        } else if (key.startsWith("option.") && key.length > "option.".length && fieldValue) {
+          runtimeOptions[key.slice("option.".length)] = fieldValue;
+        }
+      }
+      // Keep the pre-runtime positional syntax readable for existing drafts.
+      if (legacyFields.length > 0) role ||= legacyFields[0] ?? "";
+      if (legacyFields.length > 1) description ||= legacyFields[1] ?? "";
+      if (legacyFields.length > 2 && maxTurns == null) {
+        const parsed = Number(legacyFields[2]);
+        maxTurns = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      }
       return {
         id: idPart.trim(),
         agent: (agentPart || idPart).trim(),
+        runtimeRef,
+        runtimeOptions,
+        runtimeProfileRevision,
         role: role || null,
         description: description || null,
-        maxTurns: Number.isFinite(maxTurns) && maxTurns > 0 ? maxTurns : null
+        maxTurns
       };
     })
     .filter((member) => stringField(member, "id") && stringField(member, "agent"));
@@ -2293,13 +3059,41 @@ function parseTeamMembersText(value: string): TeamMemberInput[] {
 function teamMembersText(members: JsonObject[]): string {
   return members.map((member) => {
     const base = `${stringField(member, "id")}: ${stringField(member, "agent")}`;
+    const runtimeOptions = objectField(member, "runtimeOptions");
     const tail = [
-      stringField(member, "role"),
-      stringField(member, "description"),
-      displayValue(objectValue(member).maxTurns)
+      namedTeamMemberField("role", stringField(member, "role")),
+      namedTeamMemberField("description", stringField(member, "description")),
+      namedTeamMemberField("maxTurns", displayValue(objectValue(member).maxTurns)),
+      namedTeamMemberField("runtime", stringField(member, "runtimeRef")),
+      namedTeamMemberField("revision", displayValue(objectValue(member).runtimeProfileRevision)),
+      ...Object.keys(runtimeOptions).sort().map((key) => namedTeamMemberField(`option.${key}`, stringField(runtimeOptions, key)))
     ].filter(Boolean);
     return tail.length ? `${base} | ${tail.join(" | ")}` : base;
   }).join("\n");
+}
+
+function namedTeamMemberField(name: string, value: string): string {
+  return value ? `${name}=${value}` : "";
+}
+
+function renderTeamMemberMarkdown(member: TeamMemberInput): string[] {
+  const lines = [
+    `  - id: ${JSON.stringify(member.id)}`,
+    `    agent: ${JSON.stringify(member.agent)}`
+  ];
+  if (member.runtimeRef) lines.push(`    runtimeRef: ${JSON.stringify(member.runtimeRef)}`);
+  if (member.runtimeProfileRevision) lines.push(`    runtimeProfileRevision: ${member.runtimeProfileRevision}`);
+  const options = member.runtimeOptions ?? {};
+  if (Object.keys(options).length > 0) {
+    lines.push("    runtimeOptions:");
+    for (const key of Object.keys(options).sort()) {
+      lines.push(`      ${JSON.stringify(key)}: ${JSON.stringify(options[key])}`);
+    }
+  }
+  if (member.role) lines.push(`    role: ${JSON.stringify(member.role)}`);
+  if (member.description) lines.push(`    description: ${JSON.stringify(member.description)}`);
+  if (member.maxTurns) lines.push(`    maxTurns: ${member.maxTurns}`);
+  return lines;
 }
 
 function teamMemberSummary(member: JsonObject): string {
@@ -2350,9 +3144,50 @@ function teamRowMetadata(row: AgentTeamRow): string {
 }
 
 function runtimeProfileMetadata(row: RuntimeProfileRow): string {
-  const source = row.sourceTargets.length > 0 ? row.sourceTargets.join(" + ") : "generated";
   const command = row.command ? [row.command, ...row.args].join(" ") : "built in";
-  return [row.runtime, source, row.healthStatus, command].filter(Boolean).join(" · ");
+  return [row.provenance, runtimeProfileSource(row), runtimeReadinessLabel(row.healthStatus), formatRuntimeCheckedAt(row.checkedAtMs), command].filter(Boolean).join(" · ");
+}
+
+function runtimeProfileSource(row: RuntimeProfileRow): string {
+  return row.sourceTargets.length > 0
+    ? row.sourceTargets.map(targetLabel).join(" + ")
+    : row.generated ? "Generated" : "Configured";
+}
+
+function runtimeProvenanceForKind(runtime: string): string {
+  if (runtime === "acp") return "ACP";
+  if (runtime === "native") return "Native";
+  return "Direct";
+}
+
+function runtimeReadinessLabel(status: string): string {
+  if (status === "needsAuth") return "Needs auth";
+  if (status === "ready") return "Ready";
+  if (status === "missing") return "Missing";
+  if (status === "unsupported") return "Unsupported";
+  if (status === "error") return "Error";
+  return "Unchecked";
+}
+
+function readinessStageLabel(id: string): string {
+  return id.split(/[-_]/g).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ");
+}
+
+function runtimeOwnershipLabel(ownership: RuntimeSessionView["ownership"]): string {
+  if (ownership === "readWrite") return "Read-write";
+  if (ownership === "active") return "Runtime active";
+  return "Read-only";
+}
+
+function runtimeFidelityLabel(fidelity: RuntimeSessionView["fidelity"]): string {
+  if (fidelity === "full") return "Full history";
+  if (fidelity === "summary") return "Summary history";
+  return "Partial history";
+}
+
+function runtimeRevisionLabel(revision: RuntimeSessionRevisionView): string {
+  const role = revision.role === "user" ? "User message" : "History point";
+  return revision.createdAtMs == null ? `${role} · time unavailable` : `${role} · ${formatRuntimeCheckedAt(revision.createdAtMs)}`;
 }
 
 async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: GatewayRequestScope) {
@@ -2373,7 +3208,12 @@ async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: Gate
 async function setCapabilityEnabled(client: GatewayClient | null, scope: GatewayRequestScope | null, tab: CapabilityTab, row: CapabilityRow, enabled: boolean) {
   if (!client || !scope) return;
   if (tab === "skills") return client.request("skill/setEnabled", { name: row.name, enabled, scope });
-  if (tab === "plugins") return client.request("plugin/setEnabled", { selector: row.id, enabled, scope });
+  if (tab === "plugins") return client.request("plugin/setEnabled", {
+    selector: pluginSelector(row),
+    scopeName: pluginEnablementScope(row),
+    enabled,
+    scope
+  });
   if (tab === "mcp") return client.request("mcp/setEnabled", { name: row.name, enabled, scope });
 }
 
@@ -2523,12 +3363,16 @@ function rowsForTab(tab: CapabilityTab, data: JsonObject | null): CapabilityRow[
   }
   if (tab === "plugins") {
     return arrayObjects(data.plugins).map((plugin) => ({
-      id: stringField(plugin, "source_id") || stringField(plugin, "name"),
+      id: stringField(plugin, "selector") || stringField(plugin, "source_id") || stringField(plugin, "name"),
       name: stringField(plugin, "name"),
       description: stringField(plugin, "description"),
       enabled: boolField(plugin, "enabled"),
       status: stringField(plugin, "status") || stringField(plugin, "readiness") || "Installed",
-      badges: [stringField(plugin, "manifest_kind"), stringField(plugin, "source_kind"), stringField(plugin, "source")].filter(Boolean),
+      badges: [
+        targetLabel(parseAgentTarget(stringField(plugin, "scope_name"))),
+        stringField(plugin, "manifest_kind"),
+        stringField(plugin, "source_kind")
+      ].filter(Boolean),
       raw: plugin
     }));
   }
@@ -2569,6 +3413,39 @@ function modeEnabled(row: JsonObject, mode: "default" | "plan"): boolean {
 
 function toolsetModeMutable(row: CapabilityRow): boolean {
   const value = objectValue(row.raw).mode_mutable;
+  return typeof value === "boolean" ? value : true;
+}
+
+function pluginSelector(row: CapabilityRow): string {
+  return stringField(row.raw, "selector") || row.id;
+}
+
+function pluginMutationScope(row: CapabilityRow): "profile" | "project" {
+  const projected = stringField(row.raw, "scope_name");
+  if (projected === "project") return "project";
+  if (projected === "profile") return "profile";
+  return stringField(row.raw, "scope") === "local" ? "project" : "profile";
+}
+
+function pluginEnablementScope(row: CapabilityRow): "profile" | "project" {
+  const projected = stringField(row.raw, "enablement_scope_name");
+  if (projected === "project") return "project";
+  if (projected === "profile") return "profile";
+  return pluginMutationScope(row);
+}
+
+function pluginEnablementMutable(row: CapabilityRow): boolean {
+  const value = objectValue(row.raw).enablement_mutable;
+  return typeof value === "boolean" ? value : true;
+}
+
+function pluginPackageMutable(row: CapabilityRow): boolean {
+  const value = objectValue(row.raw).package_mutable;
+  return typeof value === "boolean" ? value : true;
+}
+
+function pluginRemovable(row: CapabilityRow): boolean {
+  const value = objectValue(row.raw).removable;
   return typeof value === "boolean" ? value : true;
 }
 
@@ -2637,6 +3514,26 @@ function objectValue(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
 }
 
+function runtimeAuthActionResult(value: unknown): RuntimeAuthActionResult {
+  const result = objectValue(value);
+  return {
+    accepted: boolField(result, "accepted"),
+    status: stringField(result, "status"),
+    message: stringField(result, "message") || "The runtime returned no authentication guidance.",
+    output: result.output ?? null
+  };
+}
+
+function safeRuntimeAuthUrl(value: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function objectField(value: unknown, key: string): JsonObject {
   const object = objectValue(value);
   return objectValue(object[key]);
@@ -2661,6 +3558,26 @@ function optionalString(value: unknown): string | null {
 
 function boolField(value: unknown, key: string): boolean {
   return objectValue(value)[key] === true;
+}
+
+function numberField(value: unknown, key: string): number {
+  const entry = objectValue(value)[key];
+  return typeof entry === "number" && Number.isFinite(entry) ? entry : 0;
+}
+
+function decimalRevisionField(value: unknown, key: string): string {
+  const entry = objectValue(value)[key];
+  if (typeof entry !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(entry)) return "0";
+  try {
+    return BigInt(entry) <= 18_446_744_073_709_551_615n ? entry : "0";
+  } catch {
+    return "0";
+  }
+}
+
+function nullableNumberField(value: unknown, key: string): number | null {
+  const entry = objectValue(value)[key];
+  return typeof entry === "number" && Number.isFinite(entry) ? entry : null;
 }
 
 function displayValue(value: unknown): string {
@@ -2704,7 +3621,7 @@ function CapabilityBadges({ row }: { row: CapabilityRow }) {
   if (row.badges.length === 0) return null;
   return (
     <span className="capabilityRowMeta">
-      {row.badges.slice(0, 2).map((badge) => <span className="capabilityChip" key={badge}>{badge}</span>)}
+      {row.badges.slice(0, 2).map((badge, index) => <span className="capabilityChip" key={`${index}:${badge}`}>{badge}</span>)}
     </span>
   );
 }

@@ -203,6 +203,11 @@ Floating must not render a separate Floating-only `Working` transcript row;
 running feedback comes from shared Transcript activity state and the capsule's
 existing interrupt control.
 
+The expanded answer transcript must keep the newest rendered message inside its
+scroll viewport. Compact message-action hit areas must remain available without
+removing message height from scroll geometry or clipping that message's first
+or last line when the transcript follows the newest entry.
+
 On first submit, Floating must accept the live `turnStarted` event that
 establishes the active turn even when the accepted `threadId` has not returned
 to the renderer yet or the event's `threadId` is `null`. Once that event is
@@ -249,7 +254,9 @@ Default validation is deterministic and local:
   response are adopted, render streaming transcript content before final
   `turn/result`, and are not overwritten by late thread binding
 - deterministic Desktop visual tests for toolbar, expanded answer, running,
-  parked, and capture-error states with screenshot artifacts
+  parked, and capture-error states with screenshot artifacts; the expanded and
+  error states assert that the newest rendered assistant message remains fully
+  contained by the transcript viewport
 - provider-backed Desktop Floating live records click, turn-start, first
   assistant Transcript DOM, and final-token timings so first-response
   regressions are visible even when the provider eventually returns a valid

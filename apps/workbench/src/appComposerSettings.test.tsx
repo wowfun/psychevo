@@ -9,6 +9,7 @@ import {
   gatewayMock,
   observabilityResult,
   openAgentRuntimePopover,
+  openRuntimeProfilePopover,
   selectMainAgent,
   selectRuntime,
   sessionSummary,
@@ -497,6 +498,10 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.change(within(detailPage).getByRole("combobox", { name: "Channel Runtime Profile" }), {
       target: { value: "opencode" }
     });
+    expect(within(detailPage).queryByRole("combobox", { name: "Channel model" })).toBeNull();
+    expect(within(detailPage).queryByRole("group", { name: "Permission mode" })).toBeNull();
+    expect(within(detailPage).getByLabelText("Runtime Profile safety policy").textContent).toContain("OpenCode");
+    expect(within(detailPage).getByText("Uses runtime default")).toBeTruthy();
     fireEvent.change(within(detailPage).getByRole("textbox", { name: "Credential env" }), {
       target: { value: "" }
     });
@@ -511,8 +516,8 @@ describe("Workbench settings and backend controls", () => {
       enabled: false,
       cwd: "/tmp/channel-workspace",
       runtimeRef: "opencode",
-      model: "openai/gpt-4o",
-      permissionMode: "bypassPermissions",
+      model: "",
+      permissionMode: "default",
       requireMention: false,
       credentialEnv: "",
       allowUsers: ["alice", "bob"],
@@ -980,7 +985,7 @@ describe("Workbench settings and backend controls", () => {
     });
   });
 
-  it("keeps ACP peer backends in Runtime instead of the composer Agent selector", async () => {
+  it("keeps ACP backend management separate from Composer Runtime Profiles", async () => {
     gatewayMock.agentRecords = [
       agentRecord("opencode", ["subagent"], "opencode"),
       agentRecord("cursor", ["peer", "subagent"], "cursor"),
@@ -1029,13 +1034,16 @@ describe("Workbench settings and backend controls", () => {
     expect(within(agentGroup).queryByRole("radio", { name: "cursor" })).toBeNull();
     expect(within(agentGroup).queryByRole("radio", { name: "opencode" })).toBeNull();
 
-    const runtimeGroup = within(popover).getByRole("radiogroup", { name: "Runtime" });
+    const runtimePopover = await openRuntimeProfilePopover();
+    const runtimeGroup = within(runtimePopover).getByRole("radiogroup", { name: "Runtime" });
     expect(within(runtimeGroup).getByRole("radio", { name: "Native Runtime" })).toBeTruthy();
-    expect(within(runtimeGroup).getByRole("radio", { name: "Cursor" })).toBeTruthy();
-    expect(within(runtimeGroup).queryByRole("radio", { name: "OpenCode" })).toBeNull();
+    expect(within(runtimeGroup).getByRole("radio", { name: "OpenCode" })).toBeTruthy();
+    expect(within(runtimeGroup).queryByRole("radio", { name: "Cursor (ACP)" })).toBeNull();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "runtime/context/read")).toBe(true);
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "backend/list")).toBe(true);
   });
 
-  it("clears a selected ACP runtime when its peer entrypoint is disabled", async () => {
+  it("does not derive Composer Runtime Profiles from ACP peer entrypoints", async () => {
     gatewayMock.agentRecords = [agentRecord("opencode", ["peer", "subagent"], "opencode")];
     gatewayMock.backendRecords = [
       {
@@ -1059,7 +1067,7 @@ describe("Workbench settings and backend controls", () => {
     render(<App />);
 
     await selectRuntime("opencode");
-    const popover = await openAgentRuntimePopover();
+    const popover = await openRuntimeProfilePopover();
     const runtimeGroup = within(popover).getByRole("radiogroup", { name: "Runtime" });
     await waitFor(() => expect(within(runtimeGroup).getByRole("radio", { name: "OpenCode" }).getAttribute("aria-checked")).toBe("true"));
 
@@ -1082,10 +1090,10 @@ describe("Workbench settings and backend controls", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "New Session" }));
-    const nextPopover = await openAgentRuntimePopover();
+    const nextPopover = await openRuntimeProfilePopover();
     const nextRuntimeGroup = within(nextPopover).getByRole("radiogroup", { name: "Runtime" });
-    await waitFor(() => expect(within(nextRuntimeGroup).getByRole("radio", { name: "Native Runtime" }).getAttribute("aria-checked")).toBe("true"));
-    expect(within(nextRuntimeGroup).queryByRole("radio", { name: "OpenCode" })).toBeNull();
+    expect(within(nextRuntimeGroup).getByRole("radio", { name: "OpenCode" })).toBeTruthy();
+    expect(within(nextRuntimeGroup).queryByRole("radio", { name: "OpenCode (ACP)" })).toBeNull();
   });
 
   it("creates a Profile ACP backend from Capabilities Agents", async () => {
@@ -1156,6 +1164,53 @@ describe("Workbench settings and backend controls", () => {
           cwd: "invocation",
           entrypoints: ["peer", "subagent"],
           clientCapabilities: ["fs.read", "fs.write", "terminal"]
+        })
+      });
+    });
+  });
+
+  it("distinguishes an ACP backend from a same-label Runtime Profile without changing its edit value", async () => {
+    gatewayMock.backendRecords = [
+      {
+        id: "opencode",
+        kind: "acp",
+        enabled: true,
+        label: "OpenCode",
+        description: null,
+        command: "opencode",
+        args: ["acp"],
+        cwd: "invocation",
+        entrypoints: ["peer", "subagent"],
+        clientCapabilities: ["fs.read", "fs.write", "terminal"],
+        mcpServers: [],
+        envKeys: [],
+        sourceTargets: ["profile"],
+        diagnostics: []
+      }
+    ];
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const capabilitiesRegion = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(capabilitiesRegion).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(capabilitiesRegion).findByRole("tab", { name: "Runtime Profiles" }));
+    const runtimeProfile = await within(capabilitiesRegion).findByRole("button", { name: "Runtime Profile opencode" });
+    expect(within(runtimeProfile).getByText("OpenCode")).toBeTruthy();
+
+    fireEvent.click(within(capabilitiesRegion).getByRole("tab", { name: "ACP Backends" }));
+    const agentsPanel = await within(capabilitiesRegion).findByRole("region", { name: "Agents" });
+    expect(within(agentsPanel).getByText("OpenCode (ACP)")).toBeTruthy();
+    fireEvent.click(within(agentsPanel).getByRole("button", { name: "Edit opencode" }));
+    const form = await within(agentsPanel).findByRole("form", { name: "Profile ACP backend" });
+    expect((within(form).getByLabelText("Label") as HTMLInputElement).value).toBe("OpenCode");
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "backend/write",
+        params: expect.objectContaining({
+          id: "opencode",
+          label: "OpenCode"
         })
       });
     });

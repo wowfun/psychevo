@@ -100,6 +100,11 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       configured: false,
       command: null,
       args: [],
+      backendRef: null,
+      provenance: "Native",
+      profileRevision: "1",
+      capabilityRevision: "1",
+      defaultModel: null,
       defaultMode: "default",
       defaultAgent: null,
       approvalMode: null,
@@ -109,6 +114,7 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       optionKeys: [],
       sourceTargets: [],
       health: { status: "ready", summary: "Built in runtime", commandPath: null, checkedAtMs: null },
+      readinessStages: [{ id: "configuration", status: "ready", summary: "Built in", observedAtMs: null }],
       diagnostics: []
     },
     {
@@ -120,6 +126,11 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       configured: false,
       command: "codex",
       args: ["app-server", "--stdio"],
+      backendRef: null,
+      provenance: "Direct",
+      profileRevision: "2",
+      capabilityRevision: "2",
+      defaultModel: null,
       defaultMode: "auto-review",
       defaultAgent: null,
       approvalMode: null,
@@ -129,6 +140,7 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       optionKeys: ["mode"],
       sourceTargets: [],
       health: { status: "warning", summary: "Command not checked", commandPath: null, checkedAtMs: null },
+      readinessStages: [{ id: "executable", status: "unchecked", summary: "Not checked", observedAtMs: null }],
       diagnostics: []
     },
     {
@@ -140,6 +152,11 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       configured: false,
       command: "opencode",
       args: ["serve"],
+      backendRef: null,
+      provenance: "Direct",
+      profileRevision: "3",
+      capabilityRevision: "3",
+      defaultModel: null,
       defaultMode: "build",
       defaultAgent: "build",
       approvalMode: null,
@@ -149,6 +166,7 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       optionKeys: ["mode", "agent"],
       sourceTargets: [],
       health: { status: "warning", summary: "Command not checked", commandPath: null, checkedAtMs: null },
+      readinessStages: [{ id: "executable", status: "unchecked", summary: "Not checked", observedAtMs: null }],
       diagnostics: []
     }
   ];
@@ -177,6 +195,7 @@ Object.defineProperty(window, "localStorage", {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  gatewayMock.scope.cwd = "/tmp/project";
   gatewayMock.commandExecute = (command: string) => ({
     accepted: false,
     command,
@@ -184,6 +203,7 @@ afterEach(() => {
     action: { type: "passThroughPrompt", text: command }
   });
   gatewayMock.completionResult = { items: [], replacement: null };
+  gatewayMock.turnSteer = () => ({ accepted: true });
   gatewayMock.commandList = [];
   gatewayMock.slashSettings = {
     scope: "global",
@@ -279,6 +299,8 @@ afterEach(() => {
   gatewayMock.disabledTeamRecords = [];
   gatewayMock.teamStatusResult = null;
   gatewayMock.backendRecords = [];
+  gatewayMock.runtimeContextRead = null;
+  gatewayMock.runtimeSessionRequest = null;
   gatewayMock.runtimeProfileRecords = defaultRuntimeProfileRecords();
   gatewayMock.skillRecords = defaultSkillRecords();
   gatewayMock.automationRecords = [];
@@ -353,7 +375,7 @@ afterEach(() => {
   gatewayMock.sessionSummaries = [];
   gatewayMock.snapshot.thread = {
     id: "thread-1",
-    backend: { kind: "psychevo" as const, nativeId: "thread-1", runtimeRef: "native" },
+    backend: { kind: "psychevo" as const, sessionHandle: "thread-1", runtimeRef: "native" },
     sourceKey: "source-key"
   };
   gatewayMock.snapshot.pendingActions = [];

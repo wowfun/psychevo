@@ -4,6 +4,7 @@ import type {
   CommandFeedback,
   CommandTrigger,
   WorkbenchAgent,
+  AgentContribution,
   WorkbenchBackend,
   WorkbenchBackendDoctor,
   WorkbenchCommand,
@@ -28,11 +29,19 @@ export function parseAgentList(value: unknown): WorkbenchAgent[] {
           entrypoints: stringArray(item.entrypoints),
           tools: stringArray(item.tools),
           mcpServers: stringArray(item.mcpServers),
+          contributions: agentContributions(item.contributions),
+          optionalContributions: agentContributions(item.optionalContributions),
           diagnostics: parseDiagnostics(item.diagnostics),
           backend: asOptionalRecord(item.backend) as { ref?: string } | null
         };
       }).filter((agent) => agent.name)
     : [];
+}
+
+function agentContributions(value: unknown): AgentContribution[] {
+  return stringArray(value).filter((item): item is AgentContribution => (
+    item === "instructions" || item === "tools" || item === "mcp" || item === "skills"
+  ));
 }
 
 export function parseBackendList(value: unknown): WorkbenchBackend[] {
@@ -58,6 +67,18 @@ export function parseBackendList(value: unknown): WorkbenchBackend[] {
         };
       }).filter((backend) => backend.id)
     : [];
+}
+
+export function backendDisplayLabel(
+  backend: Pick<WorkbenchBackend, "id" | "kind" | "label">
+): string {
+  const effectiveLabel = backend.label?.trim() || backend.id;
+  if (backend.kind !== "acp") {
+    return effectiveLabel;
+  }
+  const baseLabel = effectiveLabel.replace(/\s*\(ACP\)\s*$/i, "").trim()
+    || backend.id.replace(/\s*\(ACP\)\s*$/i, "").trim();
+  return `${baseLabel} (ACP)`;
 }
 
 export function parseBackendDoctor(value: unknown): WorkbenchBackendDoctor {

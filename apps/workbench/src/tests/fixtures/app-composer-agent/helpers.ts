@@ -68,6 +68,8 @@ export function agentRecord(
     entrypoints,
     tools: [],
     mcpServers: [],
+    contributions: ["instructions"],
+    optionalContributions: [],
     diagnostics: []
   };
 }
@@ -200,12 +202,19 @@ export function workspaceDiffAction() {
 }
 
 export async function openAgentRuntimePopover() {
-  const existing = screen.queryByRole("dialog", { name: "Agent and runtime" });
+  const existing = screen.queryByRole("dialog", { name: "Agent Definition" });
   if (existing) {
     return existing;
   }
   fireEvent.click(await screen.findByRole("button", { name: "Agent" }));
-  return await screen.findByRole("dialog", { name: "Agent and runtime" });
+  return await screen.findByRole("dialog", { name: "Agent Definition" });
+}
+
+export async function openRuntimeProfilePopover() {
+  const existing = screen.queryByRole("dialog", { name: "Runtime Profile selection" });
+  if (existing) return existing;
+  fireEvent.click(await screen.findByRole("button", { name: "Runtime Profile" }));
+  return await screen.findByRole("dialog", { name: "Runtime Profile selection" });
 }
 
 export async function selectMainAgent(value: string) {
@@ -216,7 +225,7 @@ export async function selectMainAgent(value: string) {
 }
 
 export async function selectRuntime(value: string) {
-  const popover = await openAgentRuntimePopover();
+  const popover = await openRuntimeProfilePopover();
   const label = value === "native"
     ? "Native Runtime"
     : value === "opencode"

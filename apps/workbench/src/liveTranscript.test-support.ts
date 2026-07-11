@@ -23,7 +23,7 @@ export function snapshot(): ThreadSnapshot {
       id: "thread-1",
       backend: {
         kind: "psychevo",
-        nativeId: "thread-1",
+        sessionHandle: "thread-1",
         runtimeRef: "native"
       },
       sourceKey: "source-1"

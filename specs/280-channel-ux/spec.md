@@ -216,11 +216,17 @@ Workbench runtime selector.
 Channel `/profile` is the runtime selector command for a remote lane. Bare
 `/profile` and `/profile status` show the effective Runtime Profile and cached
 health. `/profile list` lists enabled profiles that are valid for the lane.
-`/profile use <id>` switches future turns on the lane to that profile.
-`/profile resume <native-session-id>` binds the lane to an importable native
-runtime session when the profile supports session takeover. `/profile reset`
-returns the lane to the channel connection default. Archive, rollback, rename,
-and delete are Workbench-only actions.
+`/profile use <id>` stores a draft preference before the first thread. On a
+bound lane it starts and binds a new public thread while preserving the old
+thread. `/profile resume <short-handle>` never renders or accepts a raw native
+id; an active session is read-only and directs the user to Workbench or Fork.
+`/profile reset` returns the lane to the channel connection default. Archive,
+revert, rename, and delete are Workbench-only actions.
+
+Model and mode controls appear only when the runtime marks them Channel-safe;
+otherwise the command says Uses runtime default. Permission and question
+fallbacks use expiring short tokens and allow only allow once, deny, answer, or
+cancel. They never expose durable allow.
 
 Attachment UX is native to the messaging platform. Users send images and files
 with the IM client attachment flow; Channels normalize those attachments before

@@ -361,6 +361,30 @@ export function createCommandActions(params: CommandActionsParams) {
         await params.startNewThread();
         break;
       }
+      case "threadCompactStart": {
+        const threadId = params.snapshot.thread?.id ?? null;
+        const result = await params.client?.request("thread/compact/start", {
+          scope: commandScope(),
+          threadId,
+          instructions: optionalStringField(record.instructions),
+          runtimeRef: params.selectedRuntimeRef
+        });
+        const compact = asRecord(result);
+        const compactThreadId = optionalStringField(compact.threadId) ?? threadId;
+        const feedback = {
+          accepted: compact.accepted === true && compact.error == null,
+          command: "/compact",
+          message: optionalStringField(compact.message) ?? "Context compaction did not return a result.",
+          feedbackAnchor: "composer"
+        } satisfies NonNullable<CommandFeedback>;
+        params.setCommandFeedback(feedback);
+        if (compactThreadId) {
+          await params.refreshSnapshot(params.client, compactThreadId, undefined, true, params.viewEpochRef.current);
+        }
+        await params.refreshHistory();
+        params.setMobilePanel("transcript");
+        break;
+      }
       case "sideConversationStart": {
         const threadId = optionalStringField(record.threadId);
         if (!threadId) {
@@ -449,13 +473,23 @@ export function createCommandActions(params: CommandActionsParams) {
       case "steerPrompt": {
         const text = stringField(record.text).trim();
         if (text && params.activity.activeTurnId) {
-          params.setSnapshot((current) => appendOptimisticPrompt(current, text));
-          await params.client?.request("turn/steer", {
+          const result = await params.client?.request("turn/steer", {
             expectedTurnId: params.activity.activeTurnId,
             threadId: params.snapshot.thread?.id ?? null,
             text
           });
-          await params.refreshHistory();
+          if (result?.accepted) {
+            params.setSnapshot((current) => appendOptimisticPrompt(current, text));
+            await params.refreshHistory();
+          } else {
+            params.setCommandFeedback({
+              accepted: false,
+              command: "/steer",
+              message: "The selected Runtime Profile does not support steering this turn.",
+              feedbackAnchor: "composer"
+            });
+            params.setMobilePanel("transcript");
+          }
         } else if (text) {
           params.setCommandFeedback({
             accepted: false,

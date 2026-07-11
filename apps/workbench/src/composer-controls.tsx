@@ -33,6 +33,7 @@ export function ComposerRequests({
             <strong>{permissionTitle(permission)}</strong>
             {permissionTimeoutSecs(permission) ? <span>{permissionTimeoutSecs(permission)}s</span> : null}
           </div>
+          <AttentionProvenance request={permission} />
           <p>{permissionSummary(permission)}</p>
           {permissionReason(permission) && permissionSummary(permission) !== permissionReason(permission) ? (
             <p>{permissionReason(permission)}</p>
@@ -48,10 +49,12 @@ export function ComposerRequests({
               <Check size={14} />
               <span>Once</span>
             </button>
-            <button onClick={() => onPermission(permission, "allowSession")} type="button">
-              <ShieldCheck size={14} />
-              <span>Session</span>
-            </button>
+            {permissionAllowSession(permission) ? (
+              <button onClick={() => onPermission(permission, "allowSession")} type="button">
+                <ShieldCheck size={14} />
+                <span>Session</span>
+              </button>
+            ) : null}
             {permissionAllowAlways(permission) ? (
               <button onClick={() => onPermission(permission, "allowAlways")} type="button">
                 <ShieldPlus size={14} />
@@ -88,13 +91,15 @@ function ClarifyComposerRequest({
     setFallbackAnswer("");
   }, [questions, request.actionId]);
 
-  const resolvedAnswers = questions.map((question, index) => {
-    const answer = answers[index] ?? defaultClarifyAnswer(question);
-    return answer.kind === "other" ? answer.custom.trim() : answer.value;
-  });
+  const resolvedAnswers = questions.map((question, index) => resolvedClarifyAnswer(
+    answers[index] ?? defaultClarifyAnswer(question)
+  ));
   const canSubmit = questions.length === 0
     ? fallbackAnswer.trim().length > 0
-    : resolvedAnswers.every((answer) => answer.trim().length > 0);
+    : resolvedAnswers.every((answer, index) => {
+        const state = answers[index] ?? defaultClarifyAnswer(questions[index]!);
+        return answer.length > 0 && (!state.customSelected || state.custom.trim().length > 0);
+      });
 
   function submitClarify() {
     if (!canSubmit) {
@@ -105,7 +110,7 @@ function ClarifyComposerRequest({
       setFallbackAnswer("");
       return;
     }
-    onSubmit(request, resolvedAnswers.map((answer) => [answer]), false);
+    onSubmit(request, resolvedAnswers, false);
   }
 
   return (
@@ -114,6 +119,7 @@ function ClarifyComposerRequest({
         <strong>Clarify</strong>
         {request.turnId ? <span>{request.turnId}</span> : null}
       </div>
+      <AttentionProvenance request={request} />
       {questions.length === 0 ? (
         <input
           value={fallbackAnswer}
@@ -132,24 +138,27 @@ function ClarifyComposerRequest({
             return (
               <fieldset className="composerClarifyQuestion" key={`${request.actionId}:${questionIndex}`}>
                 <legend>{question.question}</legend>
-                {[...question.options, OTHER_OPTION].map((option) => {
+                {[
+                  ...question.options,
+                  ...(question.custom && question.options.length > 0 ? [OTHER_OPTION] : [])
+                ].map((option, optionIndex) => {
                   const isOther = option.label === OTHER_OPTION.label;
                   const checked = isOther
-                    ? answer.kind === "other"
-                    : answer.kind === "option" && answer.value === option.label;
+                    ? answer.customSelected
+                    : answer.selected.includes(option.label);
                   return (
-                    <label className="composerClarifyOption" key={option.label}>
+                    <label className="composerClarifyOption" key={`${option.label}:${optionIndex}`}>
                       <input
                         checked={checked}
                         name={`${request.actionId}:${questionIndex}`}
-                        type="radio"
+                        type={question.multiple ? "checkbox" : "radio"}
                         onChange={() => {
-                          setAnswers((current) => replaceClarifyAnswer(
+                          setAnswers((current) => toggleClarifyAnswer(
                             current,
                             questionIndex,
+                            question,
+                            option.label,
                             isOther
-                              ? { kind: "other", value: OTHER_OPTION.label, custom: "" }
-                              : { kind: "option", value: option.label, custom: "" }
                           ));
                         }}
                       />
@@ -160,8 +169,10 @@ function ClarifyComposerRequest({
                     </label>
                   );
                 })}
-                {answer.kind === "other" ? (
+                {answer.customSelected ? (
                   <input
+                    aria-label={`${question.question} custom answer`}
+                    type={question.secret ? "password" : "text"}
                     value={answer.custom}
                     onChange={(event) => {
                       setAnswers((current) => replaceClarifyAnswer(current, questionIndex, {
@@ -190,13 +201,19 @@ type ClarifyOption = {
 };
 
 type ClarifyQuestion = {
+  header: string;
   question: string;
   options: ClarifyOption[];
+  multiple: boolean;
+  custom: boolean;
+  secret: boolean;
 };
 
-type ClarifyAnswerState =
-  | { kind: "option"; value: string; custom: string }
-  | { kind: "other"; value: string; custom: string };
+type ClarifyAnswerState = {
+  selected: string[];
+  customSelected: boolean;
+  custom: string;
+};
 
 const OTHER_OPTION: ClarifyOption = {
   label: "Other",
@@ -206,11 +223,11 @@ const OTHER_OPTION: ClarifyOption = {
 function parseClarifyQuestions(raw: unknown): ClarifyQuestion[] {
   const record = asRecord(raw);
   const questions = Array.isArray(record.questions) ? record.questions : [];
-  return questions.slice(0, 3).flatMap((value): ClarifyQuestion[] => {
+  return questions.flatMap((value): ClarifyQuestion[] => {
     const question = asRecord(value);
     const text = typeof question.question === "string" ? question.question.trim() : "";
     const options = Array.isArray(question.options)
-      ? question.options.slice(0, 3).flatMap((option): ClarifyOption[] => {
+      ? question.options.flatMap((option): ClarifyOption[] => {
           const optionRecord = asRecord(option);
           const label = typeof optionRecord.label === "string" ? optionRecord.label.trim() : "";
           if (!label) {
@@ -222,10 +239,17 @@ function parseClarifyQuestions(raw: unknown): ClarifyQuestion[] {
           }];
         })
       : [];
-    if (!text || options.length < 2) {
+    if (!text) {
       return [];
     }
-    return [{ question: text, options }];
+    return [{
+      header: typeof question.header === "string" ? question.header.trim() : "",
+      question: text,
+      options,
+      multiple: question.multiple === true,
+      custom: typeof question.custom === "boolean" ? question.custom : true,
+      secret: question.secret === true
+    }];
   });
 }
 
@@ -235,10 +259,48 @@ function initialClarifyAnswers(questions: ClarifyQuestion[]): ClarifyAnswerState
 
 function defaultClarifyAnswer(question: ClarifyQuestion): ClarifyAnswerState {
   return {
-    kind: "option",
-    value: question.options[0]?.label ?? "",
+    selected: question.multiple ? [] : question.options[0] ? [question.options[0].label] : [],
+    customSelected: question.custom && question.options.length === 0,
     custom: ""
   };
+}
+
+function resolvedClarifyAnswer(answer: ClarifyAnswerState): string[] {
+  const custom = answer.custom.trim();
+  return [
+    ...answer.selected,
+    ...(answer.customSelected && custom ? [custom] : [])
+  ];
+}
+
+function toggleClarifyAnswer(
+  answers: ClarifyAnswerState[],
+  index: number,
+  question: ClarifyQuestion,
+  label: string,
+  custom: boolean
+): ClarifyAnswerState[] {
+  const current = answers[index] ?? defaultClarifyAnswer(question);
+  if (!question.multiple) {
+    return replaceClarifyAnswer(answers, index, {
+      selected: custom ? [] : [label],
+      customSelected: custom,
+      custom: custom ? current.custom : ""
+    });
+  }
+  if (custom) {
+    return replaceClarifyAnswer(answers, index, {
+      ...current,
+      customSelected: !current.customSelected,
+      custom: current.customSelected ? "" : current.custom
+    });
+  }
+  return replaceClarifyAnswer(answers, index, {
+    ...current,
+    selected: current.selected.includes(label)
+      ? current.selected.filter((value) => value !== label)
+      : [...current.selected, label]
+  });
 }
 
 function replaceClarifyAnswer(
@@ -273,6 +335,62 @@ function actionPayloadBool(action: PendingActionView, key: string): boolean {
   return actionPayload(action)[key] === true;
 }
 
+function actionPayloadRecord(action: PendingActionView, key: string): Record<string, unknown> {
+  return asRecord(actionPayload(action)[key]);
+}
+
+function AttentionProvenance({ request }: { request: PendingActionView }) {
+  const runtimeRef = actionPayloadString(request, "runtimeRef");
+  const runtimeKind = runtimeKindLabel(actionPayloadString(request, "runtimeKind"));
+  const profileLabel = actionPayloadString(request, "profileLabel");
+  const origin = actionPayloadRecord(request, "origin");
+  const parentThreadId = typeof origin.parentThreadId === "string" ? origin.parentThreadId : "";
+  const childThreadId = typeof origin.childThreadId === "string" ? origin.childThreadId : "";
+  const sessionLifetime = actionPayloadString(request, "authorizationLifetime");
+  const alwaysLifetime = actionPayloadString(request, "alwaysAuthorizationLifetime");
+  const hasProvenance = Boolean(runtimeRef || runtimeKind || profileLabel || parentThreadId || childThreadId);
+  if (!hasProvenance && request.kind !== "permission") {
+    return null;
+  }
+  return (
+    <div className="composerRequestAttention" aria-label="Shared Attention context">
+      {runtimeRef || runtimeKind || profileLabel ? (
+        <span>{`${runtimeKind || "Runtime"} · ${profileLabel || runtimeRef}${runtimeRef ? ` (${runtimeRef})` : ""}`}</span>
+      ) : null}
+      {childThreadId ? (
+        <span>{`Child ${childThreadId}${parentThreadId ? ` · Parent ${parentThreadId}` : ""}`}</span>
+      ) : parentThreadId ? <span>{`Parent ${parentThreadId}`}</span> : null}
+      {request.kind === "permission" ? <span>Once · this request only</span> : null}
+      {request.kind === "permission" && permissionAllowSession(request) ? (
+        <span>{`Session · ${authorizationLifetimeLabel(sessionLifetime)}`}</span>
+      ) : null}
+      {request.kind === "permission" && permissionAllowAlways(request) ? (
+        <span>{`Always · ${authorizationLifetimeLabel(alwaysLifetime)}`}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function runtimeKindLabel(value: string): string {
+  switch (value.trim().toLowerCase()) {
+    case "codex": return "Codex";
+    case "opencode": return "OpenCode";
+    case "native": return "Psychevo";
+    case "acp": return "ACP";
+    default: return value.trim();
+  }
+}
+
+function authorizationLifetimeLabel(value: string): string {
+  switch (value) {
+    case "codex_session": return "current Codex session";
+    case "psychevo_session": return "current Psychevo session";
+    case "until_runtime_instance_restarts": return "until the runtime instance restarts";
+    case "permanent": return "permanent";
+    default: return value ? value.replaceAll("_", " ") : "adapter-declared scope";
+  }
+}
+
 function permissionTitle(permission: PendingActionView): string {
   return permission.title ?? (actionPayloadString(permission, "toolName") || "permission");
 }
@@ -294,7 +412,13 @@ function permissionSuggestedRule(permission: PendingActionView): string {
 }
 
 function permissionAllowAlways(permission: PendingActionView): boolean {
-  return actionPayloadBool(permission, "allowAlways");
+  return actionPayloadBool(permission, "allowAlways")
+    && actionPayloadString(permission, "alwaysAuthorizationLifetime") === "permanent";
+}
+
+function permissionAllowSession(permission: PendingActionView): boolean {
+  return actionPayloadBool(permission, "allowSession")
+    && Boolean(actionPayloadString(permission, "authorizationLifetime"));
 }
 
 function permissionTimeoutSecs(permission: PendingActionView): number {
@@ -311,6 +435,7 @@ export function ComposerSubmitControls({
   controls,
   usage,
   model,
+  showNativeModelControls = true,
   variant,
   onModelChange,
   onModelSelectionChange,
@@ -320,6 +445,7 @@ export function ComposerSubmitControls({
   controls: SettingsReadResult["controls"];
   usage: SessionUsageSummaryView | null;
   model: string | null;
+  showNativeModelControls?: boolean;
   variant: string;
   onModelChange(value: string | null): void;
   onModelSelectionChange?(model: string | null, variant: string): void;
@@ -354,17 +480,19 @@ export function ComposerSubmitControls({
 
   return (
     <div className="composerSubmitControls" aria-label="Composer submit controls">
-      <ModelReasoningSelector
-        emptyLabel={emptyModelOptionLabel(controls)}
-        model={model}
-        options={modelOptionsForControls(controls, model)}
-        recentModels={controls?.recentModels ?? []}
-        variant={variant}
-        variantOptions={controls?.variantOptions ?? []}
-        onModelChange={onModelChange}
-        onSelectionChange={onModelSelectionChange}
-        onVariantChange={onVariantChange}
-      />
+      {showNativeModelControls && (
+        <ModelReasoningSelector
+          emptyLabel={emptyModelOptionLabel(controls)}
+          model={model}
+          options={modelOptionsForControls(controls, model)}
+          recentModels={controls?.recentModels ?? []}
+          variant={variant}
+          variantOptions={controls?.variantOptions ?? []}
+          onModelChange={onModelChange}
+          onSelectionChange={onModelSelectionChange}
+          onVariantChange={onVariantChange}
+        />
+      )}
       <div className="composerStatusContext" ref={contextPopoverRef}>
         <button
           aria-label="Context usage"
@@ -407,6 +535,7 @@ export function ComposerStatusLine({
   controls,
   path,
   permissionMode,
+  runtimeSafetyLabel,
   profile,
   onBranchClick,
   onPathClick,
@@ -416,6 +545,7 @@ export function ComposerStatusLine({
   controls: SettingsReadResult["controls"];
   path: string;
   permissionMode: string;
+  runtimeSafetyLabel?: string | null;
   profile: InitializeResult["profile"] | null;
   onBranchClick(): void;
   onPathClick(): void;
@@ -424,7 +554,13 @@ export function ComposerStatusLine({
   const profileLabel = profile && !profile.default ? profile.name : null;
   return (
     <div className="composerStatusLine" aria-label="Composer status">
-      <StatusSelect label="Permission mode" value={permissionMode} values={controls?.permissionModeOptions ?? ["default"]} onChange={onPermissionModeChange} />
+      {runtimeSafetyLabel ? (
+        <span className="profileStatusPill" aria-label="Runtime Profile safety policy" title={runtimeSafetyLabel}>
+          <span>{runtimeSafetyLabel}</span>
+        </span>
+      ) : (
+        <StatusSelect label="Permission mode" value={permissionMode} values={controls?.permissionModeOptions ?? ["default"]} onChange={onPermissionModeChange} />
+      )}
       {profileLabel ? (
         <span className="profileStatusPill" title={profile?.home || profileLabel}>
           <Pin size={12} />

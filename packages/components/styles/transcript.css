@@ -146,6 +146,42 @@
   font-size: 0.92em;
 }
 
+.pevo-workspaceFileLink {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  max-width: 100%;
+  padding: 0;
+  color: var(--pevo-accent);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-xs);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.pevo-workspaceFileLink svg {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.pevo-workspaceFileLink span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pevo-workspaceFileLink:hover span {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pevo-workspaceFileLink:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
 .pevo-markdown pre {
   max-width: 100%;
   overflow: auto;
@@ -160,6 +196,285 @@
   padding: 0;
   color: inherit;
   background: transparent;
+}
+
+.pevo-mermaidBlock {
+  display: grid;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0.85em 0;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 18%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.pevo-mermaidBlock figcaption {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px 4px 10px;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  text-transform: uppercase;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+}
+
+.pevo-mermaidBlock figcaption > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-mermaidToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pevo-mermaidMode {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 30%);
+  border-radius: var(--pevo-radius-xs);
+}
+
+.pevo-mermaidToolbar button {
+  display: grid;
+  height: 24px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 30%);
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.pevo-mermaidToolbar > button {
+  width: 24px;
+  padding: 0;
+}
+
+.pevo-mermaidMode button {
+  min-width: 34px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  line-height: 1;
+}
+
+.pevo-mermaidMode button + button {
+  border-left: 1px solid color-mix(in oklch, var(--pevo-border), transparent 30%);
+}
+
+.pevo-mermaidToolbar button:hover,
+.pevo-mermaidToolbar button:focus-visible,
+.pevo-mermaidToolbar button[aria-pressed="true"] {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-mermaidToolbar button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+.pevo-mermaidToolbar button:disabled {
+  cursor: default;
+  opacity: 0.46;
+}
+
+.pevo-mermaidZoomValue {
+  min-width: 38px;
+  color: var(--pevo-muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 24px;
+  text-align: center;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.pevo-mermaidCanvas {
+  display: grid;
+  box-sizing: border-box;
+  min-height: 220px;
+  max-height: 620px;
+  overflow: auto;
+  align-items: start;
+  justify-items: center;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in oklch, var(--pevo-border), transparent 45%) 1px, transparent 0)
+    0 0 / 20px 20px;
+}
+
+.pevo-mermaidCanvas > span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+}
+
+.pevo-mermaidViewport {
+  display: grid;
+  box-sizing: border-box;
+  align-items: start;
+  justify-items: center;
+}
+
+.pevo-mermaidSvg {
+  max-width: 100%;
+  min-width: 0;
+  transform-origin: top left;
+}
+
+.pevo-mermaidSvg svg {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
+}
+
+.pevo-mermaidCanvas.is-fit .pevo-mermaidSvg {
+  width: 100%;
+}
+
+.pevo-mermaidCanvas.is-actual {
+  align-items: start;
+  justify-items: start;
+}
+
+.pevo-mermaidCanvas.is-actual .pevo-mermaidViewport {
+  min-width: 0;
+  justify-items: start;
+}
+
+.pevo-mermaidCanvas.is-actual .pevo-mermaidSvg {
+  max-width: none;
+}
+
+.pevo-mermaidError {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  align-self: stretch;
+  justify-self: stretch;
+  padding: 10px;
+  color: var(--pevo-danger);
+}
+
+.pevo-mermaidError strong,
+.pevo-mermaidError span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pevo-mermaidError pre {
+  margin: 0;
+  color: var(--pevo-markdown-code-ink, var(--pevo-code-ink));
+  background: var(--pevo-markdown-code-bg, var(--pevo-code-bg));
+}
+
+.pevo-mermaidOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: color-mix(in oklch, var(--pevo-bg), black 28%);
+}
+
+.pevo-mermaidOverlayPanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1400px, 96vw);
+  height: min(960px, 92vh);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: 0 18px 48px color-mix(in oklch, black, transparent 72%);
+}
+
+.pevo-mermaidOverlayPanel header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
+}
+
+.pevo-mermaidOverlayPanel strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pevo-mermaidOverlayPanel header button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 30%);
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+}
+
+.pevo-mermaidOverlayPanel header button:hover,
+.pevo-mermaidOverlayPanel header button:focus-visible {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+}
+
+.pevo-mermaidOverlayPanel header button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
+  outline-offset: 2px;
+}
+
+.pevo-mermaidOverlay .pevo-mermaidCanvas {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+}
+
+@media (max-width: 640px) {
+  .pevo-mermaidBlock figcaption {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .pevo-mermaidToolbar {
+    justify-content: flex-start;
+  }
+
+  .pevo-mermaidOverlay {
+    padding: 10px;
+  }
+
+  .pevo-mermaidOverlayPanel {
+    width: min(100%, 96vw);
+    height: min(100%, 94vh);
+  }
 }
 
 .pevo-markdown table {

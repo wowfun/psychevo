@@ -1,6 +1,6 @@
 import { Edit3, PlugZap, Plus, Save, Trash2, Wrench, X } from "lucide-react";
 import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
-import { prettyJson } from "./data";
+import { backendDisplayLabel, prettyJson } from "./data";
 import type { BackendCommandJson, BackendDraft, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
 const BACKEND_ENTRYPOINTS = ["peer", "subagent"] as const;
@@ -77,7 +77,7 @@ export function AgentsConfigPanel({
           return (
             <div className="agentSurfaceRow agentBackendRow" key={backend.id}>
 	              <div>
-	                <strong>{backend.label || backend.id}</strong>
+	                <strong>{backendDisplayLabel(backend)}</strong>
 	                <span>{backend.command ? [backend.command, ...backend.args].join(" ") : backend.description || backend.kind}</span>
 	                {backend.diagnostics.length > 0 && (
 	                  <small className="agentSurfaceWarning">{backend.diagnostics.map((diagnostic) => diagnostic.message).join(" · ")}</small>

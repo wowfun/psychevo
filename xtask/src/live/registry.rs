@@ -24,6 +24,10 @@ pub(crate) enum LiveCheckAction {
         package: &'static str,
         test: &'static str,
     },
+    DeterministicPlaywright {
+        spec: &'static str,
+        grep: &'static str,
+    },
     Playwright {
         spec: &'static str,
         grep: &'static str,
@@ -198,6 +202,60 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
             needs_skill_cwd: false,
         },
     },
+    LiveCheck {
+        id: "runtime-codex-gui-smoke",
+        description: "Run direct Codex GUI smoke validation with a deterministic stdio fake",
+        suites: &["runtimes"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "runs direct Codex through the GUI with a deterministic fake @live",
+        },
+    },
+    LiveCheck {
+        id: "runtime-opencode-gui-smoke",
+        description: "Run direct OpenCode GUI smoke validation with a deterministic HTTP/SSE fake",
+        suites: &["runtimes"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "runs direct OpenCode through the GUI with a deterministic fake @live",
+        },
+    },
+    LiveCheck {
+        id: "runtime-codex-steer-smoke",
+        description: "Steer a direct Codex turn through Gateway with a deterministic stdio fake",
+        suites: &["runtimes"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "steers an active direct Codex turn through the public control path @live",
+        },
+    },
+    LiveCheck {
+        id: "runtime-ready-milestone-smoke",
+        description: "Prove the dual Codex/OpenCode Stable readiness milestone with deterministic fakes",
+        suites: &["runtimes"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "proves the dual direct runtime Ready milestone with deterministic fakes @live",
+        },
+    },
+    LiveCheck {
+        id: "runtime-codex-channel-smoke",
+        description: "Run a Channel-origin direct Codex turn with a deterministic stdio fake",
+        suites: &["runtimes"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "routes a Channel-origin turn through direct Codex with a deterministic fake @live",
+        },
+    },
+    LiveCheck {
+        id: "runtime-opencode-channel-smoke",
+        description: "Run a Channel-origin direct OpenCode turn with a deterministic HTTP/SSE fake",
+        suites: &["runtimes"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "routes a Channel-origin turn through direct OpenCode with a deterministic fake @live",
+        },
+    },
 ];
 
 pub(crate) const LIVE_SUITES: &[LiveSuite] = &[
@@ -228,6 +286,10 @@ pub(crate) const LIVE_SUITES: &[LiveSuite] = &[
     LiveSuite {
         id: "automation",
         description: "Gateway and Workbench automation live checks",
+    },
+    LiveSuite {
+        id: "runtimes",
+        description: "Deterministic direct Codex and OpenCode GUI/Channel checks",
     },
     LiveSuite {
         id: "all",
@@ -347,6 +409,13 @@ pub(crate) fn command_for_plan(check: &LiveCheck) -> Vec<String> {
             "--ignored".to_string(),
             "--exact".to_string(),
         ],
+        LiveCheckAction::DeterministicPlaywright { spec, grep } => vec![
+            "xtask-internal".to_string(),
+            "playwright-deterministic".to_string(),
+            spec.to_string(),
+            "--grep".to_string(),
+            grep.to_string(),
+        ],
         LiveCheckAction::Playwright { spec, grep, .. } => vec![
             "xtask-internal".to_string(),
             "playwright-live".to_string(),
@@ -456,6 +525,47 @@ mod tests {
                 "opencode-acp-gui-live",
                 "opencode-acp-delegate-live",
             ]
+        );
+    }
+
+    #[test]
+    fn runtimes_suite_covers_gui_channel_control_and_dual_readiness() {
+        let checks = select_checks(&LiveSelection {
+            checks: Vec::new(),
+            suites: vec!["runtimes".to_string()],
+            all: false,
+            providers: Vec::new(),
+        })
+        .expect("checks");
+        assert_eq!(
+            checks.iter().map(|check| check.id).collect::<Vec<_>>(),
+            vec![
+                "runtime-codex-gui-smoke",
+                "runtime-opencode-gui-smoke",
+                "runtime-codex-steer-smoke",
+                "runtime-ready-milestone-smoke",
+                "runtime-codex-channel-smoke",
+                "runtime-opencode-channel-smoke",
+            ]
+        );
+        assert!(checks.iter().all(|check| matches!(
+            check.action,
+            LiveCheckAction::DeterministicPlaywright { .. }
+        )));
+    }
+
+    #[test]
+    fn deterministic_runtime_plan_does_not_claim_a_real_runtime_command() {
+        let check = check_by_id("runtime-opencode-gui-smoke").expect("runtime check");
+        let command = command_for_plan(check);
+        assert_eq!(
+            command[0..2],
+            ["xtask-internal", "playwright-deterministic"]
+        );
+        assert!(
+            !command
+                .iter()
+                .any(|part| part == "opencode" || part == "codex")
         );
     }
 

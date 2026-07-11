@@ -316,7 +316,7 @@ fn plan_output(
     artifact_root: Option<&Path>,
 ) -> Result<LivePlanOutput> {
     let checks = select_checks(selection)?;
-    let providers = resolve_providers(&selection.providers)?;
+    let providers = providers_for_checks(&checks, &selection.providers)?;
     Ok(LivePlanOutput {
         default_suite: DEFAULT_SUITE,
         environment: LiveEnvironmentPlanOutput { mode: env_mode },
@@ -352,7 +352,7 @@ fn execute_live(
     .with_context(|| format!("write {}", artifact_root.join("live-plan.json").display()))?;
 
     let checks = select_checks(selection)?;
-    let providers = resolve_providers(&selection.providers)?;
+    let providers = providers_for_checks(&checks, &selection.providers)?;
     let mut outputs = Vec::new();
     for check in checks {
         println!("live {} ...", check.id);
@@ -413,6 +413,31 @@ fn execute_live(
     Ok(run)
 }
 
+fn providers_for_checks(
+    checks: &[&LiveCheck],
+    provider_args: &[String],
+) -> Result<Vec<LiveProvider>> {
+    if checks.iter().any(|check| check_requires_provider(check)) {
+        resolve_providers(provider_args)
+    } else {
+        if !provider_args.is_empty() {
+            let _ = resolve_providers(provider_args)?;
+        }
+        Ok(Vec::new())
+    }
+}
+
+fn check_requires_provider(check: &LiveCheck) -> bool {
+    match check.action {
+        LiveCheckAction::DesktopNativeSmoke { provider_required } => provider_required,
+        LiveCheckAction::ProviderSmoke
+        | LiveCheckAction::PevoDoctorLive
+        | LiveCheckAction::CargoIgnoredTest { .. }
+        | LiveCheckAction::Playwright { .. } => true,
+        LiveCheckAction::DeterministicPlaywright { .. } => false,
+    }
+}
+
 fn run_check(
     root: &Path,
     artifact_root: &Path,
@@ -442,6 +467,18 @@ fn run_check(
         LiveCheckAction::CargoIgnoredTest { package, test } => {
             run_cargo_ignored_live_check(root, check_dir, providers, env_mode, package, test, log)
         }
+        LiveCheckAction::DeterministicPlaywright { spec, grep } => {
+            run_deterministic_playwright_check(
+                root,
+                artifact_root,
+                check_dir,
+                check,
+                env_mode,
+                spec,
+                grep,
+                log,
+            )
+        }
         LiveCheckAction::Playwright {
             spec,
             grep,
@@ -461,6 +498,121 @@ fn run_check(
             log,
         ),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_deterministic_playwright_check(
+    root: &Path,
+    artifact_root: &Path,
+    check_dir: &Path,
+    check: &'static LiveCheck,
+    _env_mode: LiveEnvMode,
+    spec: &'static str,
+    grep: &'static str,
+    log: Arc<Mutex<fs::File>>,
+) -> Result<CheckResult> {
+    if !command_exists("pnpm") {
+        return blocked(
+            log,
+            "missing pnpm; run: cargo xtask doctor deps install --only playwright".to_string(),
+        );
+    }
+    let spec_path = root.join(spec);
+    if !spec_path.is_file() {
+        return failed_result(
+            log,
+            format!(
+                "deterministic runtime Playwright spec is missing: {}",
+                spec_path.display()
+            ),
+            None,
+        );
+    }
+
+    let home = check_dir.join("home");
+    let cwd = check_dir.join("cwd");
+    let config_path = home.join("config.toml");
+    let db_path = check_dir.join("state.db");
+    fs::create_dir_all(&home).with_context(|| format!("create {}", home.display()))?;
+    fs::create_dir_all(&cwd).with_context(|| format!("create {}", cwd.display()))?;
+    fs::write(&config_path, "model = \"lmstudio/noop\"\n")
+        .with_context(|| format!("write {}", config_path.display()))?;
+    if db_path.is_file() {
+        fs::remove_file(&db_path).with_context(|| format!("remove {}", db_path.display()))?;
+    }
+    let environment = LiveEnvironmentPathsOutput {
+        mode: LiveEnvMode::Isolated,
+        home_path: home.display().to_string(),
+        config_path: config_path.display().to_string(),
+        db_path: db_path.display().to_string(),
+    };
+
+    let pevo_bin = match ensure_pevo_built(root, Arc::clone(&log))? {
+        Ok(path) => path,
+        Err(mut result) => {
+            result.environment = Some(environment);
+            return Ok(result);
+        }
+    };
+    let context_path = check_dir.join("xtask-live-context.json");
+    let context = PlaywrightLiveContext {
+        check_id: check.id,
+        provider: "deterministic-fake",
+        model: "runtime-owned",
+        env_mode: LiveEnvMode::Isolated,
+        config_path: config_path.display().to_string(),
+        home: home.display().to_string(),
+        db_path: db_path.display().to_string(),
+        pevo_bin: pevo_bin.display().to_string(),
+        cwd: Some(cwd.display().to_string()),
+        artifact_root: check_dir.display().to_string(),
+        timeout_ms: playwright_timeout_ms(check.id),
+        interval_ms: 100,
+        prompt: None,
+    };
+    fs::write(&context_path, serde_json::to_vec_pretty(&context)?)
+        .with_context(|| format!("write {}", context_path.display()))?;
+
+    let mut build = ProcessCommand::new("pnpm");
+    build
+        .args(["--filter", "@psychevo/workbench", "build"])
+        .current_dir(root)
+        .env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path);
+    let build_outcome = run_logged_process(
+        "workbench deterministic runtime build",
+        &mut build,
+        Arc::clone(&log),
+    )?;
+    if !build_outcome.passed {
+        return check_result_from_outcome(
+            build_outcome,
+            "Workbench build failed",
+            Some(environment),
+        );
+    }
+
+    let mut test = ProcessCommand::new("pnpm");
+    test.args([
+        "exec",
+        "playwright",
+        "test",
+        spec,
+        "--grep",
+        grep,
+        "--project",
+        "chromium-desktop",
+    ])
+    .current_dir(root)
+    .env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path)
+    .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
+    .env("PSYCHEVO_RUNTIME_LIVE_FAKE", "1")
+    .env_remove("NO_COLOR");
+    let outcome = run_logged_process(check.id, &mut test, log)?;
+    check_result_from_outcome(
+        outcome,
+        &format!("deterministic runtime Playwright check {} failed", check.id),
+        Some(environment),
+    )
 }
 
 fn run_desktop_native_smoke_check(
@@ -1379,6 +1531,26 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn runtime_suite_plan_uses_only_deterministic_fakes_and_no_provider() {
+        let plan = plan_output(
+            &LiveSelection {
+                checks: Vec::new(),
+                suites: vec!["runtimes".to_string()],
+                all: false,
+                providers: Vec::new(),
+            },
+            LiveEnvMode::Shared,
+            None,
+        )
+        .expect("plan");
+        assert!(plan.providers.is_empty());
+        assert!(!plan.checks.is_empty());
+        assert!(plan.checks.iter().all(|check| {
+            check.command.get(1).map(String::as_str) == Some("playwright-deterministic")
+        }));
     }
 
     #[test]

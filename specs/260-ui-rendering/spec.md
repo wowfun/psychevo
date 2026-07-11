@@ -14,6 +14,8 @@ status, activity, and observability UI.
   rows, assistant answers, status rows, and turn metadata
 - evidence title language, folding/expansion expectations, activity indicators,
   elapsed labels, and display-only artifact rendering boundaries
+- shared Markdown rendering invariants, including frontmatter, raw-HTML
+  escaping, and complete fenced Mermaid diagrams
 - shared status and observability presentation rules for context, usage, cache,
   cost, and running work
 - reusable rendering expectations that both TUI and Web/Workbench must preserve
@@ -60,6 +62,22 @@ available title width before applying renderer-specific truncation.
 Display-only command output and observational artifacts, including `/diff`,
 command feedback, previews, and debug panels, must not become model-visible
 history, exports, usage/cost accounting, or ordinary transcript projection.
+
+Shared Markdown rendering must keep raw HTML escaped. Document-start YAML
+frontmatter renders as structured preview metadata. Complete fenced `mermaid`
+code blocks may render as diagrams through a lazy-loaded browser renderer.
+Incomplete Mermaid fences, including streaming assistant output before the
+closing fence arrives, remain ordinary code blocks. Fence completeness is owned
+by the concrete Markdown AST occurrence, not by deduplicated source text: a
+later incomplete fence must remain code even when an earlier completed fence has
+identical content. Mermaid parse/render errors are inline display errors that
+preserve the raw source for copy and must not prevent neighboring Markdown from
+rendering. Rendered Mermaid blocks expose viewer controls for source copy,
+fit-width/original-size modes, zoom in/out, view reset, and an expanded same-page
+diagram viewer so dense diagrams remain inspectable without changing the
+model-visible transcript content. Fit-mode zoom changes the rendered diagram
+size in both directions; zoom values below 100 percent must visibly shrink the
+diagram instead of being overridden by a minimum-width rule.
 
 ## Activity And Observability
 

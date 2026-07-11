@@ -325,7 +325,7 @@ class TestGatewayTransport implements GatewayTransport {
             committedEntries: [transcriptEntry("assistant", `assistant:${turnId}`, this.finalAnswer, turnId, completedAtMs)],
             result: { finalAnswer: this.finalAnswer },
             thread: {
-              backend: { kind: "psychevo", nativeId: "thread-floating" },
+              backend: { kind: "psychevo", sessionHandle: "thread-floating" },
               id: "thread-floating",
               sourceKey: null
             },

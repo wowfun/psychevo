@@ -12,6 +12,7 @@ import type {
   AutomationDraftView,
   AutomationWriteParams,
   GatewayRequestScope,
+  RuntimeProfileView,
   SessionSummary,
   SettingsReadResult
 } from "@psychevo/protocol";
@@ -231,6 +232,7 @@ export function MainSurface({
   onSettingsSectionChange,
   onStartWechatQrSetup,
   onUpdateChannel,
+  runtimeProfiles,
   settingsSection,
   sessionBrowserWorkspaces,
   usageStats,
@@ -280,7 +282,7 @@ export function MainSurface({
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
   onNewBackend(): void;
-  onOpenSession(threadId: string): void;
+  onOpenSession(threadId: string, readOnly?: boolean): void;
   onPauseAutomation(id: string): Promise<void>;
   onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
@@ -298,6 +300,7 @@ export function MainSurface({
   onSettingsSectionChange(value: SettingsSection): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
   onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
+  runtimeProfiles: RuntimeProfileView[];
   settingsSection: SettingsSection;
   sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   usageStats: WorkbenchUsageStats | null;
@@ -343,6 +346,7 @@ export function MainSurface({
         onSlashSettingsSaved={onSlashSettingsSaved}
         onStartWechatQrSetup={onStartWechatQrSetup}
         onUpdateChannel={onUpdateChannel}
+        runtimeProfiles={runtimeProfiles}
         sessionBrowserWorkspaces={sessionBrowserWorkspaces}
         cwd={cwd}
       />
@@ -390,6 +394,7 @@ export function MainSurface({
         onDoctorBackend={onDoctorBackend}
         onEditBackend={onEditBackend}
         onNewBackend={onNewBackend}
+        onOpenSession={onOpenSession}
         onSaveBackendDraft={onSaveBackendDraft}
         onSetBackendEnabled={onSetBackendEnabled}
         onSetBackendEntrypoints={onSetBackendEntrypoints}

@@ -73,6 +73,13 @@ the Markdown preview action stack and delete lives in the detail header.
 Built-in, generated, Claude-compatible, and plugin-provided agents are not
 directly edited here; generated ACP agents are controlled by their backend.
 
+The structured Teams editor round-trips each member's Agent Definition,
+Runtime Profile, Advanced runtime options, and captured Profile revision. It
+must not collapse a runtime-backed member into an Agent-only row when an
+existing Team is opened and saved. Gateway remains authoritative for Profile,
+pairing, revision, and override validation; rejected saves keep the draft and
+show the actionable error.
+
 Creating an agent defaults to the current Project target and allows switching
 to Profile. Create and edit are both in the right-side detail panel rather than
 an overlay create/edit panel. Editing an existing agent keeps name and target
@@ -89,7 +96,12 @@ Markdown renderer used for `SKILL.md`.
 workflow: add/edit/delete, enablement, entrypoint controls, client capability
 controls, MCP server list, and doctor checks. Backend command environment
 values remain write-only; management responses may expose environment variable
-names but never resolved secret values.
+names but never resolved secret values. Backend rows and compatible runtime
+choices append one explicit `(ACP)` marker to the effective display label; the
+editor continues to show and write the unsuffixed configured label. Visual
+fixtures that capture a populated
+multi-line Command JSON field must show the value from its first line rather
+than inheriting an internal textarea scroll position from test input.
 
 `Runtime Profiles` carries the user-facing runtime selector management surface
 for native Psychevo, direct Codex, direct OpenCode, and future runtime
@@ -169,6 +181,57 @@ scope, adapter mode, trust state, target lanes, projected contributions,
 unsupported lanes, stage diagnostics, readiness, and whether changes affect the
 current session or the next run.
 
+The built-in Browser plugin appears in the Plugins tab without requiring an
+installed package record. It is enabled by default unless profile/project plugin
+policy explicitly disables it. Its row uses the same enablement switch as other
+plugins, reports `Built-in` source identity, and shows Browser pane,
+Desktop-host, annotation, and toolset contributions. Toggling it writes plugin
+policy for the built-in Browser plugin; it must not create or mutate a package
+under the user plugin store.
+
+Plugin list, read, and doctor projections expose a canonical `selector`,
+`scope_name`, `enablement_scope_name`, `removable`, `package_mutable`, and
+`enablement_mutable` for each row. Installed package selectors use `profile:name@source` or
+`project:name@source`, where the prefix identifies the package installation
+scope and `source` is the installed record's stable source slug. This selector
+is unique even when the same package source is installed in both scopes and is
+the row identity used by Workbench. Workbench shows the installation scope on
+ordinary plugin rows so otherwise identical profile/project records remain
+distinguishable. Bare `name` and unscoped `name@source`
+inputs are accepted only when they resolve to exactly one installed record
+across profile and project; ambiguity errors direct callers to the scoped
+canonical selector.
+
+Ordinary plugin policy keys use the same scoped canonical identity so merged
+profile/project configuration can represent both installations independently.
+Existing unscoped `name` and `name@source` policy keys remain effective when
+they identify exactly one installed record; they do not apply when that
+identity is duplicated across scopes. New policy writes always use the scoped
+canonical key.
+For enablement writes, the selector identifies the installed package while
+`enablement_scope_name` and `scopeName` identify the effective policy layer to
+update; this preserves an explicit project policy targeting a profile-installed
+package. `scope_name` remains the installation layer used by package actions
+such as trust and uninstall. Uninstall requires that package mutation scope to
+match the selected package's installation scope. Config
+validation accepts `:` only as the `profile:` or `project:` canonical prefix,
+not as an arbitrary package-policy character.
+
+The built-in Browser selector remains exactly `builtin:browser`; bare `browser`
+and `Browser` selectors continue to address an ordinary installed package when
+unique. Browser enablement policy lives under the separate
+`builtin_plugins.browser` profile/project configuration namespace, never under
+`plugins.browser`. Its projected mutation scope is `project` when the project
+config explicitly overrides Browser enablement and `profile` otherwise, so a UI
+toggle always updates the policy layer that determines the displayed state.
+
+The built-in Browser row is not removable or package-mutable, but its
+enablement remains writable. Workbench hides package mutation actions such as
+Uninstall when `package_mutable` or `removable` is false, and Gateway rejects a
+direct uninstall request for `builtin:browser`. Disabled Browser policy is
+reported consistently as `Disabled` by plugin list, read, and doctor; enabled
+policy is reported as `Installed`.
+
 Plugin row and detail states use the fixed status vocabulary `Available`,
 `Installed`, `Disabled`, `Needs trust`, `Needs setup`, `Failed`, and
 `Unsupported target`. Status text must describe the next useful action rather
@@ -231,6 +294,13 @@ instead of a persistent form in the Tools tab.
 Toolsets remain selection metadata only. They do not become model-visible
 tools, and they do not own execution bindings.
 
+Browser toolset contribution rows may appear only when the Browser executor
+surface is implemented for the current host/runtime. Until then, the Tools tab
+may describe the Browser plugin contribution from plugin metadata, but it must
+not expose model-visible `browser_*` tools that cannot execute Desktop Browser
+semantics. The existing `web` toolset remains read-only URL fetch capability and
+is distinct from Browser automation.
+
 ## Gateway Interfaces
 
 Gateway exposes domain RPCs instead of a capability aggregate:
@@ -241,9 +311,11 @@ Gateway exposes domain RPCs instead of a capability aggregate:
 - `runtime/profile/list`, `runtime/profile/read`, `runtime/profile/write`,
   `runtime/profile/setEnabled`, `runtime/profile/delete`, `runtime/snapshot`,
   `runtime/health/check`, `runtime/session/list`, `runtime/session/read`,
-  `runtime/session/resume`, `runtime/session/archive`,
+  `runtime/session/attach`, `runtime/session/resume`, `runtime/session/archive`,
   `runtime/session/unarchive`, `runtime/session/delete`,
-  `runtime/session/rename`, `runtime/session/rollback`
+  `runtime/session/rename`, capability-gated `runtime/session/fork`,
+  `runtime/session/revert`, `runtime/session/unrevert`,
+  `runtime/context/read`, `runtime/control/set`, and `runtime/auth/*`
 - `skill/list`, `skill/read`, `skill/install`, `skill/uninstall`,
   `skill/setEnabled`, `skill/write`
 - `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
@@ -258,6 +330,42 @@ Gateway exposes domain RPCs instead of a capability aggregate:
 All responses are secret-free. RPCs that accept secret-bearing environment
 variable names may echo the variable name but never the resolved secret value.
 
+## Runtime Profiles And Native Sessions
+
+The Runtime Profiles subsection uses structured fields and shows Direct or ACP
+provenance, configuration source, cached readiness, last checked, Refresh
+Catalog, bounded Doctor, auth repair, and Native Sessions. Ordinary browsing and
+selectors do not launch a CLI.
+
+Native Sessions are grouped by Profile and cwd and show active/archive state,
+history fidelity, ownership, update time, and only capability-backed actions.
+Active sessions attach read-only unless the adapter proves idle takeover.
+Persisted runtime-native children may show the optional short public status
+projected into their Psychevo child thread; the panel never derives one from a
+native event or raw adapter payload. History gaps and recursive archive/delete
+effects remain visible.
+
+For a Direct Active root that advertises Gateway `attach`, Native Sessions shows
+one explicit `Attach read-only` action. Success creates or reuses its immutable
+read-only public thread, imports lazy history, and navigates Workbench to that
+thread. Resume remains unavailable for Active ownership.
+
+For a direct OpenCode session that declares staged revert, Workbench explicitly
+reads history and renders only Gateway-owned opaque revision handles with safe
+role/time labels. Revert requires selecting one of those returned revision
+points; Unrevert is shown only when declared and carries no revision selector.
+Raw native message ids are neither rendered nor accepted by the public RPC.
+Direct Codex sessions do not show these actions because no stable native
+revert/unrevert operation exists.
+When native history is paginated, Workbench advances only with the opaque
+`nextCursor` returned by `runtime/session/read`; it never fabricates a cursor or
+assumes that the first page is complete.
+Native Sessions list pagination follows the same rule and appends pages by
+opaque `sessionHandle`; adapter list cursors never enter Workbench state.
+If Gateway reports an expired opaque cursor or revision handle after restart or
+bounded-cache eviction, the error directs the user to reload Native Sessions or
+session history; Workbench never substitutes or submits a native identifier.
+
 ## Validation
 
 Default validation uses deterministic local harnesses and fake providers.
@@ -266,7 +374,8 @@ references, per-tool policy, inline token rejection, auth precedence, and fake
 keyring save/load/delete behavior.
 
 Gateway tests cover agent definition and backend writes, skill read/write,
-plugin, toolset, and MCP write methods, force confirmation paths, secret-free
+plugin canonical selectors and mutation scopes, protected built-in plugin
+actions, toolset and MCP write methods, force confirmation paths, secret-free
 responses, and MCP OAuth start/status/logout against a fake local OAuth server
 and fake keyring.
 
@@ -274,9 +383,11 @@ Workbench tests cover top-level navigation, tab search, detail panels, force
 confirmations, agent detail-panel create/edit, Markdown preview copy/edit
 actions, skill `SKILL.md` editing, delete/uninstall header placement, agent
 enablement, backend management, plugin import inspection, trust flow,
-unsupported target rendering, MCP per-tool policy, OAuth polling states, and
-next-run effect messaging. Visual validation must include desktop and mobile
-Capabilities screens without text overlap.
+unsupported target rendering, plugin action hints and mutation scopes, MCP
+per-tool policy, OAuth polling states, and next-run effect messaging. Visual
+validation must include desktop and mobile Capabilities screens without text
+overlap. ACP backend form captures assert that populated multi-line controls are
+at their initial scroll origin before the screenshot is written.
 
 ## Related Topics
 

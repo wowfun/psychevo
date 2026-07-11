@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, MessageSquare, RefreshCw } from "lucide-react";
-import { Composer, TranscriptPanel, type TranscriptAgentSession } from "@psychevo/components";
+import { Composer, TranscriptPanel, type TranscriptAgentSession, type WorkspaceFileLinkContext } from "@psychevo/components";
 import {
   appendOptimisticPrompt,
   applyLiveTranscriptEvent,
@@ -11,18 +11,24 @@ import type { GatewayClient } from "@psychevo/client";
 import type {
   CompletionListResult,
   GatewayMention,
-  GatewayEvent,
   GatewayRequestScope,
+  RuntimeHistoryFidelityView,
   ThreadSnapshot
 } from "@psychevo/protocol";
-import type { GatewayEventFeed } from "../types";
+import {
+  gatewayEventsForThread,
+  type GatewayEventFeedItem,
+  type GatewayThreadEventFeed
+} from "../gateway-event-feed";
+import { parseRuntimeContext, runtimeSessionHistoryFidelity } from "../runtime-context";
 import { idleActivity, normalizeSnapshot } from "../session-utils";
 
 type ThreadPanelProps = {
   client: GatewayClient | null;
   disabled: boolean;
+  gatewayEventFeed: GatewayThreadEventFeed;
   kind: "sideConversation" | "agentSession";
-  latestGatewayEvent: GatewayEventFeed | null;
+  historyFidelity?: RuntimeHistoryFidelityView | null;
   parentThreadId?: string | null;
   pendingPrompt?: string | null;
   promptSubmitBlockReason?: string | undefined;
@@ -34,13 +40,15 @@ type ThreadPanelProps = {
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
   onPendingPromptConsumed?: (() => void) | undefined;
   onSubmitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]): Promise<void>;
+  workspaceFileLinks?: WorkspaceFileLinkContext | undefined;
 };
 
 export function ThreadPanel({
   client,
   disabled,
+  gatewayEventFeed,
   kind,
-  latestGatewayEvent,
+  historyFidelity: registeredHistoryFidelity = null,
   parentThreadId,
   pendingPrompt,
   promptSubmitBlockReason,
@@ -51,74 +59,139 @@ export function ThreadPanel({
   onCopyText,
   onOpenAgentSession,
   onPendingPromptConsumed,
-  onSubmitThreadTurn
+  onSubmitThreadTurn,
+  workspaceFileLinks
 }: ThreadPanelProps) {
   const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pendingEventsRef = useRef<GatewayEventFeed[]>([]);
+  const [observedHistoryFidelity, setObservedHistoryFidelity] = useState<RuntimeHistoryFidelityView | null>(
+    registeredHistoryFidelity
+  );
+  const [access, setAccess] = useState<"checking" | "readOnly" | "readWrite">(
+    kind === "sideConversation" ? "readWrite" : "checking"
+  );
+  const [steerAvailable, setSteerAvailable] = useState(kind === "sideConversation");
+  const gatewayEventFeedRef = useRef(gatewayEventFeed);
+  const lastAppliedGatewayEventSeqRef = useRef(gatewayEventFeed.latestSeq);
+  const refreshGenerationRef = useRef(0);
   const consumedPendingPromptRef = useRef<string | null>(null);
+  gatewayEventFeedRef.current = gatewayEventFeed;
   const snapshotMatchesThread = (snapshot?.thread?.id ?? null) === threadId;
   const visibleSnapshot = snapshotMatchesThread ? snapshot : null;
   const activity = normalizeSnapshot(visibleSnapshot ?? emptyThreadSnapshot(threadId)).activity;
   const entries = visibleSnapshot?.entries ?? [];
   const running = activity.running;
+  const writable = kind === "sideConversation" || access === "readWrite";
+  const readOnly = kind === "agentSession" && access === "readOnly";
   const icon = kind === "agentSession" ? <Bot size={16} /> : <MessageSquare size={16} />;
   const threadLabel = useMemo(() => threadId ?? "unavailable", [threadId]);
 
   async function refresh() {
+    const refreshGeneration = ++refreshGenerationRef.current;
+    const barrierSeq = gatewayEventFeedRef.current.latestSeq;
+    lastAppliedGatewayEventSeqRef.current = barrierSeq;
     if (!client || !threadId) {
       setSnapshot(null);
+      setObservedHistoryFidelity(registeredHistoryFidelity);
+      setSteerAvailable(kind === "sideConversation");
+      setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
+    setAccess(kind === "sideConversation" ? "readWrite" : "checking");
+    setSteerAvailable(kind === "sideConversation");
     try {
-      setSnapshot(normalizeSnapshot(parseThreadSnapshot(await client.request("thread/read", { threadId }))));
+      let nextAccess: "readOnly" | "readWrite" = "readWrite";
+      let accessError: string | null = null;
+      let nextHistoryFidelity = registeredHistoryFidelity;
+      let nextSteerAvailable = kind === "sideConversation";
+      if (kind === "agentSession") {
+        try {
+          const context = parseRuntimeContext(await client.request("runtime/context/read", {
+            threadId,
+            runtimeRef: null,
+            scope
+          }));
+          const binding = context.binding?.threadId === threadId ? context.binding : null;
+          nextSteerAvailable = Boolean(binding) && (
+            binding?.nativeKind === "native"
+            || binding?.nativeKind === "acp"
+            || context.capabilities.some(
+              (capability) => capability.id === "turn.steer" && capability.enabled
+            )
+          );
+          nextAccess = binding?.ownership === "readWrite"
+            ? "readWrite"
+            : "readOnly";
+          const activeSession = context.activeSession;
+          if (activeSession && binding && activeSession.sessionHandle === binding.sessionHandle) {
+            nextHistoryFidelity = activeSession.fidelity;
+          }
+          if (binding?.ownership === "readOnly" && binding.sessionHandle) {
+            try {
+              const history = await client.request("runtime/session/read", {
+                runtimeRef: binding.runtimeRef,
+                sessionHandle: binding.sessionHandle,
+                scope
+              });
+              nextHistoryFidelity = runtimeSessionHistoryFidelity(history) ?? nextHistoryFidelity;
+            } catch (historyError) {
+              accessError = historyError instanceof Error ? historyError.message : String(historyError);
+            }
+          }
+        } catch (contextError) {
+          nextAccess = "readOnly";
+          accessError = contextError instanceof Error ? contextError.message : String(contextError);
+        }
+      }
+      let next = normalizeSnapshot(parseThreadSnapshot(await client.request("thread/read", { threadId })));
+      if (refreshGenerationRef.current !== refreshGeneration) {
+        return;
+      }
+      const pending = gatewayEventsForThread(gatewayEventFeedRef.current, threadId)
+        .filter((record) => record.seq > barrierSeq);
+      next = applyGatewayFeed(next, pending);
+      lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? barrierSeq;
+      setSnapshot(next);
+      setAccess(nextAccess);
+      setSteerAvailable(nextSteerAvailable);
+      setObservedHistoryFidelity(nextHistoryFidelity);
+      setError(accessError);
     } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
+      if (refreshGenerationRef.current === refreshGeneration) {
+        setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
+      }
     } finally {
-      setLoading(false);
+      if (refreshGenerationRef.current === refreshGeneration) {
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
     void refresh();
-    pendingEventsRef.current = [];
     consumedPendingPromptRef.current = null;
-  }, [client, threadId]);
+    return () => {
+      refreshGenerationRef.current += 1;
+    };
+  }, [client, kind, registeredHistoryFidelity, threadId]);
 
   useEffect(() => {
-    if (!latestGatewayEvent || !eventMatchesThread(latestGatewayEvent.event, threadId)) {
+    const pending = gatewayEventsForThread(gatewayEventFeed, threadId)
+      .filter((record) => record.seq > lastAppliedGatewayEventSeqRef.current);
+    if (pending.length === 0) {
       return;
     }
     setSnapshot((current) => {
-      if (!current) {
-        appendPendingGatewayEvent(pendingEventsRef.current, latestGatewayEvent);
+      if (!current || (current.thread?.id ?? null) !== threadId) {
         return current;
       }
-      return normalizeSnapshot(applyLiveTranscriptEvent(current, latestGatewayEvent.event));
+      lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? lastAppliedGatewayEventSeqRef.current;
+      return applyGatewayFeed(current, pending);
     });
-  }, [latestGatewayEvent?.seq, threadId]);
-
-  useEffect(() => {
-    if (!snapshot || pendingEventsRef.current.length === 0) {
-      return;
-    }
-    const pending = pendingEventsRef.current;
-    pendingEventsRef.current = [];
-    let next = snapshot;
-    for (const feed of pending) {
-      if (!eventMatchesThread(feed.event, threadId)) {
-        appendPendingGatewayEvent(pendingEventsRef.current, feed);
-        continue;
-      }
-      next = normalizeSnapshot(applyLiveTranscriptEvent(next, feed.event));
-    }
-    if (next !== snapshot) {
-      setSnapshot(next);
-    }
-  }, [snapshot?.thread?.id, threadId]);
+  }, [gatewayEventFeed.latestSeq, threadId]);
 
   useEffect(() => {
     const prompt = pendingPrompt?.trim();
@@ -127,6 +200,10 @@ export function ThreadPanel({
     }
     consumedPendingPromptRef.current = prompt;
     onPendingPromptConsumed?.();
+    if (!writable) {
+      setError("This runtime child is read-only.");
+      return;
+    }
     if (promptSubmitDisabled) {
       setError(promptSubmitBlockReason ?? "Select a provider/model before starting a conversation.");
       return;
@@ -135,10 +212,10 @@ export function ThreadPanel({
     void onSubmitThreadTurn(threadId, prompt, []).catch((submitError) => {
       setError(submitError instanceof Error ? submitError.message : String(submitError));
     });
-  }, [onPendingPromptConsumed, onSubmitThreadTurn, pendingPrompt, promptSubmitBlockReason, promptSubmitDisabled, snapshot?.thread?.id, threadId]);
+  }, [onPendingPromptConsumed, onSubmitThreadTurn, pendingPrompt, promptSubmitBlockReason, promptSubmitDisabled, snapshot?.thread?.id, threadId, writable]);
 
   async function submit(text: string, mentions: GatewayMention[]) {
-    if (!threadId || !text.trim()) {
+    if (!writable || !threadId || !text.trim()) {
       return;
     }
     if (promptSubmitDisabled) {
@@ -154,23 +231,27 @@ export function ThreadPanel({
   }
 
   async function steer(text: string) {
-    if (!client || !threadId || !activity.activeTurnId || !text.trim()) {
+    if (!writable || !steerAvailable || !client || !threadId || !activity.activeTurnId || !text.trim()) {
       return;
     }
-    setSnapshot((current) => current ? normalizeSnapshot(appendOptimisticPrompt(current, text.trim())) : current);
     try {
-      await client.request("turn/steer", {
+      const result = await client.request("turn/steer", {
         expectedTurnId: activity.activeTurnId,
         threadId,
         text
       });
+      if (!result.accepted) {
+        setError("The selected Runtime Profile does not support steering this turn.");
+        return;
+      }
+      setSnapshot((current) => current ? normalizeSnapshot(appendOptimisticPrompt(current, text.trim())) : current);
     } catch (steerError) {
       setError(steerError instanceof Error ? steerError.message : String(steerError));
     }
   }
 
   async function interrupt() {
-    if (!client || !threadId) {
+    if (!writable || !client || !threadId) {
       return;
     }
     try {
@@ -213,8 +294,20 @@ export function ThreadPanel({
           <RefreshCw size={15} />
         </button>
       </header>
-      {parentThreadId && <p className="threadPanelParent" title={parentThreadId}>Parent {parentThreadId}</p>}
-      {error && <p className="threadPanelError">{error}</p>}
+      <div className="threadPanelNotices">
+        {parentThreadId && <p className="threadPanelParent" title={parentThreadId}>Parent {parentThreadId}</p>}
+        {readOnly && (
+          <p
+            className="threadPanelRuntimeNotice"
+            data-history-fidelity={observedHistoryFidelity ?? "unknown"}
+            role="note"
+          >
+            Read-only runtime child
+            {observedHistoryFidelity && ` · ${runtimeHistoryFidelityNotice(observedHistoryFidelity)}`}
+          </p>
+        )}
+        {error && <p className="threadPanelError">{error}</p>}
+      </div>
       <div className="threadPanelTranscript">
         <TranscriptPanel
           activity={activity}
@@ -222,24 +315,34 @@ export function ThreadPanel({
           onCopyText={onCopyText}
           onOpenAgentSession={onOpenAgentSession}
           threadId={threadId}
+          {...(workspaceFileLinks ? { workspaceFileLinks } : {})}
         />
       </div>
-      <div className="threadPanelComposerDock">
-        <Composer
-          completionProvider={completionProvider}
-          disabled={disabled || !threadId}
-          mode="default"
-          promptSubmitBlockReason={promptSubmitBlockReason}
-          promptSubmitDisabled={promptSubmitDisabled}
-          running={running}
-          runningStartedAtMs={activity.startedAtMs ?? null}
-          onInterrupt={() => void interrupt()}
-          onSteer={(text) => void steer(text)}
-          onSubmit={(text, mentions) => void submit(text, mentions)}
-        />
-      </div>
+      {writable && (
+        <div className="threadPanelComposerDock">
+          <Composer
+            completionProvider={completionProvider}
+            disabled={disabled || !threadId}
+            mode="default"
+            promptSubmitBlockReason={promptSubmitBlockReason}
+            promptSubmitDisabled={promptSubmitDisabled}
+            running={running}
+            runningStartedAtMs={activity.startedAtMs ?? null}
+            steerAvailable={steerAvailable}
+            onInterrupt={() => void interrupt()}
+            onSteer={(text) => void steer(text)}
+            onSubmit={(text, mentions) => void submit(text, mentions)}
+          />
+        </div>
+      )}
     </section>
   );
+}
+
+function runtimeHistoryFidelityNotice(fidelity: RuntimeHistoryFidelityView): string {
+  if (fidelity === "full") return "Full history";
+  if (fidelity === "summary") return "Summary history; only a condensed record is available.";
+  return "Partial history; some messages or detail may be missing.";
 }
 
 function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
@@ -247,7 +350,7 @@ function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
     source: { kind: "web", rawId: "right-thread", lifetime: "persistent", rawIdentity: null, visibleName: null },
     scope: scopeForCwd(""),
     thread: threadId
-      ? { id: threadId, backend: { kind: "psychevo", nativeId: threadId, runtimeRef: "native" }, sourceKey: null }
+      ? { id: threadId, backend: { kind: "psychevo", sessionHandle: threadId, runtimeRef: "native" }, sourceKey: null }
       : null,
     entries: [],
     activity: idleActivity(),
@@ -255,40 +358,12 @@ function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
   };
 }
 
-function appendPendingGatewayEvent(pending: GatewayEventFeed[], feed: GatewayEventFeed) {
-  if (pending.some((candidate) => candidate.seq === feed.seq)) {
-    return;
-  }
-  pending.push(feed);
-}
-
-function eventMatchesThread(event: GatewayEvent, threadId: string | null): boolean {
-  const eventThreadId = eventThreadIdForEvent(event);
-  if (!threadId) {
-    return eventThreadId === null;
-  }
-  return eventThreadId === threadId;
-}
-
-function eventThreadIdForEvent(event: GatewayEvent): string | null {
-  switch (event.type) {
-    case "turnStarted":
-    case "turnQueued":
-      return event.threadId || null;
-    case "turnCompleted":
-      return event.threadId ||
-        event.turn.threadId ||
-        event.committedEntries.find((entry) => entry.threadId)?.threadId ||
-        null;
-    case "entryStarted":
-    case "entryUpdated":
-    case "entryCompleted":
-      return event.entry.threadId || null;
-    case "activityChanged":
-      return event.threadId || null;
-    case "titleChanged":
-      return event.threadId || null;
-    default:
-      return null;
-  }
+function applyGatewayFeed(
+  snapshot: ThreadSnapshot,
+  records: GatewayEventFeedItem[]
+): ThreadSnapshot {
+  return records.reduce(
+    (current, record) => normalizeSnapshot(applyLiveTranscriptEvent(current, record.event)),
+    snapshot
+  );
 }

@@ -26,7 +26,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await capture(page, testInfo, "00-transcript");
 
       const agentsPanel = await openCapabilityBackendPanel(page);
-      const existingOpenCode = agentsPanel.locator(".agentBackendRow").filter({ hasText: "opencode acp" });
+      const existingOpenCode = agentsPanel.locator(".agentBackendRow").filter({ hasText: /opencode \(ACP\)/i });
       if ((await existingOpenCode.count()) === 0) {
         await expect(agentsPanel.getByText("No ACP backends configured.")).toBeVisible();
         await expectElementInsideViewport(page, agentsPanel);
@@ -55,8 +55,8 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
         await capture(page, testInfo, "01-agents-existing");
       }
       await ensureOpenCodeBackend(agentsPanel);
-      const backendRow = agentsPanel.locator(".agentBackendRow").filter({ hasText: "opencode acp" });
-      await expect(backendRow.getByText("opencode acp", { exact: true })).toBeVisible();
+      const backendRow = agentsPanel.locator(".agentBackendRow").filter({ hasText: /opencode \(ACP\)/i });
+      await expect(backendRow.getByText(/^opencode \(ACP\)$/i)).toBeVisible();
       await expect(agentsPanel.getByRole("switch", { name: "Disable opencode" })).toBeVisible();
       await expect(agentsPanel.getByLabel("opencode peer entrypoint")).toBeChecked();
       await expect(agentsPanel.getByLabel("opencode subagent entrypoint")).toBeChecked();
@@ -70,20 +70,18 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await page.getByRole("button", { name: "New Session", exact: true }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await page.getByRole("button", { name: "Agent", exact: true }).click();
-      const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
+      const agentPopover = page.getByRole("dialog", { name: "Agent Definition" });
       const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
-      await expect(agentGroup.getByRole("radio", { name: "opencode" })).toBeHidden();
-      const runtimeGroup = agentPopover.getByRole("radiogroup", { name: "Runtime" });
-      const opencodeRuntime = runtimeGroup.getByRole("radio", { name: "opencode" });
+      await expect(agentGroup.getByRole("radio", { name: /^opencode$/i })).toBeHidden();
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
+      await page.getByRole("button", { name: "Runtime Profile", exact: true }).click();
+      const runtimePopover = page.getByRole("dialog", { name: "Runtime Profile selection" });
+      const runtimeGroup = runtimePopover.getByRole("radiogroup", { name: "Runtime" });
+      const opencodeRuntime = runtimeGroup.getByRole("radio", { name: /^opencode \(ACP\)$/i });
       await expect(opencodeRuntime).toBeVisible();
       await opencodeRuntime.click();
-      await expect(opencodeRuntime).toHaveAttribute("aria-checked", "true");
-      await expect(page.getByText("Loading modes")).toBeHidden({ timeout: 60_000 });
-      const modeSelect = page.getByRole("combobox", { name: "opencode mode" });
-      if (await modeSelect.count() > 0) {
-        await expect(modeSelect).toBeVisible();
-        await expectSelectTextFits(modeSelect);
-      }
+      await expect(page.getByRole("button", { name: "Runtime Profile" })).toContainText("opencode (ACP)");
+      await expect(page.getByLabel("Runtime control state")).toHaveText("Runtime default");
       await capture(page, testInfo, "05-opencode-selected");
 
       await page.getByPlaceholder("Ask Psychevo...").fill(
@@ -141,10 +139,12 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
 
       await page.getByRole("button", { name: "Agent", exact: true }).click();
-      const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
-      await expect(
-        agentPopover.getByRole("radiogroup", { name: "Runtime" }).getByRole("radio", { name: "Native Runtime" })
-      ).toHaveAttribute("aria-checked", "true");
+      const agentPopover = page.getByRole("dialog", { name: "Agent Definition" });
+      await expect(agentPopover.getByRole("radio", { name: "Default Agent" })).toHaveAttribute("aria-checked", "true");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Runtime Profile", exact: true }).click();
+      const runtimePopover = page.getByRole("dialog", { name: "Runtime Profile selection" });
+      await expect(runtimePopover.getByRole("radio", { name: "Native" })).toHaveAttribute("aria-checked", "true");
       await page.keyboard.press("Escape");
 
       const textarea = page.getByPlaceholder("Ask Psychevo...");
@@ -153,16 +153,35 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(opencodeMention).toBeVisible({ timeout: 30_000 });
       await opencodeMention.click();
       await expect(textarea).toHaveValue("@opencode ");
-      await textarea.fill("@opencode 你有哪些工具？请最后单独输出 OPENCODE_ACP_DELEGATE_LIVE_OK。不要修改文件。");
+      await textarea.fill(
+        "@opencode 请完成一个只读说明任务：先单独输出 ACP_STREAM_START，再用中文写 12 个编号段落说明你有哪些工具以及 ACP streaming 如何工作，每段至少两句完整句子。最后单独输出 OPENCODE_ACP_DELEGATE_LIVE_OK，不要提前输出该标记。不要修改文件。"
+      );
       await page.getByRole("button", { name: "Send message" }).click();
 
-      const assistantMessage = page.locator(".pevo-message.is-assistant").last();
-      await expect(assistantMessage).toBeVisible({ timeout: 300_000 });
-      await expect(assistantMessage).toContainText(/OPENCODE_ACP_DELEGATE_LIVE_OK/, { timeout: 420_000 });
+      const mainTranscript = page.getByRole("region", { name: "Transcript" }).first();
+      const parentCompletion = mainTranscript
+        .locator(".pevo-message.is-assistant")
+        .filter({ hasText: /OPENCODE_ACP_DELEGATE_LIVE_OK/ });
+      const openAgentSession = mainTranscript.getByRole("button", { name: /Open .*agent session/i }).first();
+      await expect(openAgentSession).toBeVisible({ timeout: 240_000 });
+      await expect(parentCompletion).toHaveCount(0);
+      await openAgentSession.click();
+
+      const childPanel = page.locator(".threadPanel");
+      await expect(childPanel).toBeVisible({ timeout: 30_000 });
+      await expect(childPanel).toContainText(/Parent/);
+      await expect(parentCompletion).toHaveCount(0);
+      const childAssistant = childPanel.locator(".pevo-message.is-assistant").last();
+      await expectChildTextGrowthBeforeParentCompletion(childAssistant, parentCompletion, 300_000);
+      await expect(parentCompletion).toHaveCount(0);
+      await capture(page, testInfo, "08-delegate-streaming");
+
+      await expect(childAssistant).toContainText(/OPENCODE_ACP_DELEGATE_LIVE_OK/, { timeout: 420_000 });
+      await expect(parentCompletion).toContainText(/OPENCODE_ACP_DELEGATE_LIVE_OK/, { timeout: 420_000 });
       await expectProviderSession(server.dbPath, "acp:opencode");
       await assertNoWorkbenchRenderError(page);
       await assertTranscriptRowsFit(page);
-      await capture(page, testInfo, "08-delegate-response");
+      await capture(page, testInfo, "09-delegate-response");
     } finally {
       await server.stop();
     }
@@ -210,7 +229,7 @@ async function openCapabilityBackendPanel(page: Page): Promise<Locator> {
 }
 
 async function ensureOpenCodeBackend(agentsPanel: Locator) {
-  const existing = agentsPanel.locator(".agentBackendRow").filter({ hasText: "opencode acp" });
+  const existing = agentsPanel.locator(".agentBackendRow").filter({ hasText: /opencode \(ACP\)/i });
   if (await existing.count() === 0) {
     await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
     const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
@@ -224,7 +243,7 @@ async function ensureOpenCodeBackend(agentsPanel: Locator) {
     await form.getByRole("button", { name: "Save" }).click();
     await expect(form).toBeHidden();
   }
-  const backendRow = agentsPanel.locator(".agentBackendRow").filter({ hasText: "opencode acp" });
+  const backendRow = agentsPanel.locator(".agentBackendRow").filter({ hasText: /opencode \(ACP\)/i });
   await expect(backendRow).toBeVisible();
   const enabled = agentsPanel.getByRole("switch", { name: /opencode/ });
   if (!(await enabled.isChecked())) {
@@ -263,6 +282,34 @@ async function expectTextGrowthOrCompletion(
     return completion.test(text) || text.length > initial;
   }, {
     intervals: [150, 250, 500, 750, 1000],
+    timeout
+  }).toBe(true);
+}
+
+async function expectChildTextGrowthBeforeParentCompletion(
+  childAssistant: Locator,
+  parentCompletion: Locator,
+  timeout: number
+) {
+  let firstText: string | null = null;
+  await expect.poll(async () => {
+    if (await parentCompletion.count() > 0) {
+      throw new Error("parent completed before child streaming text growth was observed");
+    }
+    if (await childAssistant.count() === 0) {
+      return false;
+    }
+    const text = ((await childAssistant.textContent().catch(() => null)) ?? "").trim();
+    if (!text) {
+      return false;
+    }
+    if (firstText === null) {
+      firstText = text;
+      return false;
+    }
+    return text.length > firstText.length && await parentCompletion.count() === 0;
+  }, {
+    intervals: [100, 150, 250, 500, 750, 1000],
     timeout
   }).toBe(true);
 }

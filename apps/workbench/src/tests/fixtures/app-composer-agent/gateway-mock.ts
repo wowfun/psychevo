@@ -23,11 +23,11 @@ const gatewayMock = vi.hoisted(() => {
     scope,
     thread: {
       id: "thread-1",
-      backend: { kind: "psychevo" as const, nativeId: "thread-1", runtimeRef: "native" },
+      backend: { kind: "psychevo" as const, sessionHandle: "thread-1", runtimeRef: "native" },
       sourceKey: "source-key"
     },
     entries: [],
-    activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+    activity: { running: false, activeTurnId: null as string | null, queuedTurns: 0 },
     pendingActions: [] as Array<Record<string, unknown>>
   };
   function mergeMockModelOptions(
@@ -60,6 +60,7 @@ const gatewayMock = vi.hoisted(() => {
     }),
     completionResult: { items: [], replacement: null } as Record<string, unknown>,
     commandList: [] as Array<Record<string, unknown>>,
+    compactStart: null as null | ((params: unknown) => unknown | Promise<unknown>),
     slashSettings: {
       scope: "global",
       cwd: scope.cwd,
@@ -75,6 +76,7 @@ const gatewayMock = vi.hoisted(() => {
     wechatQrPoll: null as null | ((params: unknown) => unknown | Promise<unknown>),
     permissionRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     clarifyRespond: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
+    turnSteer: (() => ({ accepted: true })) as (params: unknown) => unknown | Promise<unknown>,
     clipboardWriteLog: [] as string[],
     openDownloadLog: [] as string[],
     optimisticLog: [] as string[],
@@ -92,6 +94,8 @@ const gatewayMock = vi.hoisted(() => {
     disabledTeamRecords: [] as Array<Record<string, unknown>>,
     teamStatusResult: null as Record<string, unknown> | null,
     backendRecords: [] as Array<Record<string, unknown>>,
+    runtimeContextRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    runtimeSessionRequest: null as null | ((method: string, params: unknown) => unknown | Promise<unknown>),
     runtimeProfileRecords: [
       {
         id: "native",
@@ -102,6 +106,11 @@ const gatewayMock = vi.hoisted(() => {
         configured: false,
         command: null,
         args: [],
+        backendRef: null,
+        provenance: "Native",
+        profileRevision: "1",
+        capabilityRevision: "1",
+        defaultModel: null,
         defaultMode: "default",
         defaultAgent: null,
         approvalMode: null,
@@ -111,6 +120,7 @@ const gatewayMock = vi.hoisted(() => {
         optionKeys: [],
         sourceTargets: [],
         health: { status: "ready", summary: "Built in runtime", commandPath: null, checkedAtMs: null },
+        readinessStages: [{ id: "configuration", status: "ready", summary: "Built in", observedAtMs: null }],
         diagnostics: []
       },
       {
@@ -122,6 +132,11 @@ const gatewayMock = vi.hoisted(() => {
         configured: false,
         command: "codex",
         args: ["app-server", "--stdio"],
+        backendRef: null,
+        provenance: "Direct",
+        profileRevision: "2",
+        capabilityRevision: "2",
+        defaultModel: null,
         defaultMode: "auto-review",
         defaultAgent: null,
         approvalMode: null,
@@ -131,6 +146,7 @@ const gatewayMock = vi.hoisted(() => {
         optionKeys: ["mode"],
         sourceTargets: [],
         health: { status: "warning", summary: "Command not checked", commandPath: null, checkedAtMs: null },
+        readinessStages: [{ id: "executable", status: "unchecked", summary: "Not checked", observedAtMs: null }],
         diagnostics: []
       },
       {
@@ -142,6 +158,11 @@ const gatewayMock = vi.hoisted(() => {
         configured: false,
         command: "opencode",
         args: ["serve"],
+        backendRef: null,
+        provenance: "Direct",
+        profileRevision: "3",
+        capabilityRevision: "3",
+        defaultModel: null,
         defaultMode: "build",
         defaultAgent: "build",
         approvalMode: null,
@@ -151,6 +172,7 @@ const gatewayMock = vi.hoisted(() => {
         optionKeys: ["mode", "agent"],
         sourceTargets: [],
         health: { status: "warning", summary: "Command not checked", commandPath: null, checkedAtMs: null },
+        readinessStages: [{ id: "executable", status: "unchecked", summary: "Not checked", observedAtMs: null }],
         diagnostics: []
       }
     ] as Array<Record<string, unknown>>,

@@ -126,6 +126,16 @@
   box-shadow: 0 10px 28px color-mix(in oklch, black, transparent 70%);
 }
 
+.runtimeProfilePopover {
+  right: 0;
+  left: auto;
+  width: min(300px, calc(100vw - 24px));
+}
+
+.agentDefinitionPopover {
+  width: min(260px, calc(100vw - 24px));
+}
+
 .agentRuntimeGroup {
   display: grid;
   gap: 3px;
@@ -140,6 +150,11 @@
 
 .agentRuntimeGroupLabel {
   padding: 0 3px;
+}
+
+.agentRuntimeHint.is-warning {
+  padding: 4px 3px 2px;
+  color: var(--pevo-warning);
 }
 
 .agentRuntimeRows {
@@ -163,11 +178,37 @@
   cursor: pointer;
 }
 
+.runtimeProfilePopover .agentRuntimeRow {
+  min-height: 40px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
 .agentRuntimeRow span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agentRuntimeRow .agentRuntimeRowCopy {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.agentRuntimeRowCopy > span,
+.agentRuntimeRowCopy > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentRuntimeRowCopy > small {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 400;
 }
 
 .agentRuntimeRow:hover:not(:disabled),
@@ -190,6 +231,55 @@
 .agentRuntimeDivider {
   height: 1px;
   background: var(--pevo-border);
+}
+
+.runtimeProvenanceCapsule {
+  border-color: var(--pevo-border-strong);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-accent) 5%);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.runtimeProvenanceCapsule:hover:not(:disabled),
+.runtimeProvenanceCapsule:focus-visible {
+  border-color: color-mix(in oklch, var(--pevo-border-strong), var(--pevo-accent) 22%);
+}
+
+.runtimeProfileManageButton {
+  min-height: 28px;
+  padding: 0 7px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--pevo-border);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.runtimeProfileManageButton:hover,
+.runtimeProfileManageButton:focus-visible {
+  color: var(--pevo-ink);
+}
+
+.runtimeControlState {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  max-width: 190px;
+  padding: 0 8px;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeControlState.is-readonly {
+  color: var(--pevo-ink);
 }
 
 .composerRuntimeControls .statusSelect select {

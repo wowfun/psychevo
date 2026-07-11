@@ -13,7 +13,7 @@ import {
   Sun
 } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
-import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, ModelOptionView, SessionSummary } from "@psychevo/protocol";
+import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, ModelOptionView, RuntimeProfileView, SessionSummary } from "@psychevo/protocol";
 import { Switch } from "@psychevo/components";
 import type {
   Appearance,
@@ -70,6 +70,7 @@ export function SettingsPage({
   onSetChannelEnabled,
   onStartWechatQrSetup,
   onUpdateChannel,
+  runtimeProfiles,
   sessionBrowserWorkspaces,
   cwd
 }: {
@@ -103,6 +104,7 @@ export function SettingsPage({
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
   onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
+  runtimeProfiles: RuntimeProfileView[];
   sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   cwd: string;
 }) {
@@ -206,6 +208,7 @@ export function SettingsPage({
               onSetChannelEnabled={onSetChannelEnabled}
               onStartWechatQrSetup={onStartWechatQrSetup}
               onUpdateChannel={onUpdateChannel}
+              runtimeProfiles={runtimeProfiles}
               sessionBrowserWorkspaces={sessionBrowserWorkspaces}
               cwd={cwd}
             />
@@ -245,6 +248,7 @@ function SettingsSectionPanel({
   onSlashSettingsSaved,
   onStartWechatQrSetup,
   onUpdateChannel,
+  runtimeProfiles,
   sessionBrowserWorkspaces,
   cwd
 }: {
@@ -276,6 +280,7 @@ function SettingsSectionPanel({
   onSlashSettingsSaved(): Promise<void>;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
   onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
+  runtimeProfiles: RuntimeProfileView[];
   sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   cwd: string;
 }) {
@@ -364,6 +369,7 @@ function SettingsSectionPanel({
           onSetChannelEnabled={onSetChannelEnabled}
           onStartWechatQrSetup={onStartWechatQrSetup}
           onUpdateChannel={onUpdateChannel}
+          runtimeProfiles={runtimeProfiles}
           sessionBrowserWorkspaces={sessionBrowserWorkspaces}
           cwd={cwd}
         />

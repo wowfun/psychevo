@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
-import { Bot, Bug, FolderTree, GitPullRequest, Home, MessageSquare, Plus, RefreshCw, TerminalSquare, Users, X } from "lucide-react";
-import { DismissibleDetails, type TranscriptAgentSession } from "@psychevo/components";
+import { Bot, Bug, FileText, FolderTree, GitPullRequest, Globe2, Home, MessageSquare, Plus, RefreshCw, TerminalSquare, Users, X } from "lucide-react";
+import { DismissibleDetails, type TranscriptAgentSession, type WorkspaceFileLinkContext } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
 import type {
   ContextReadResult,
@@ -13,9 +13,12 @@ import type {
   WorkspaceFileEntry,
   WorkspaceFileWriteResult
 } from "@psychevo/protocol";
-import type { Appearance, DebugEvent, GatewayEventFeed, RightWorkspaceTab, RightWorkspaceTabKind, TerminalNotificationEvent, TraceState } from "./types";
+import type { GatewayThreadEventFeed } from "./gateway-event-feed";
+import type { Appearance, DebugEvent, RightWorkspaceBrowserState, RightWorkspacePreview, RightWorkspaceTab, RightWorkspaceTabKind, TerminalNotificationEvent, TraceState } from "./types";
+import { BrowserPanel } from "./right-workspace/browser";
 import { DebugPanel } from "./right-workspace/debug";
 import { FilesPanel } from "./right-workspace/files";
+import { PreviewPanel } from "./right-workspace/preview";
 import { ReviewPanel } from "./right-workspace/review";
 import { TeamPanel } from "./right-workspace/team";
 import { ThreadPanel } from "./right-workspace/thread";
@@ -35,6 +38,7 @@ export function RightWorkspace({
   debugEnabled,
   debugEvents,
   files,
+  hostKind,
   latestGatewayEvent,
   root,
   scope,
@@ -48,6 +52,7 @@ export function RightWorkspace({
   cwd,
   workspaceChanges,
   workspaceDiff,
+  workspaceFileLinks,
   onActivate,
   onAcceptChange,
   onChangedFile,
@@ -56,7 +61,10 @@ export function RightWorkspace({
   onDirtyTabChange,
   onOpenFile,
   onOpenAgentSession,
+  onOpenExternal,
+  onBrowserStateChange,
   onOpenKind,
+  onOpenPreview,
   onConsumePendingPrompt,
   onRejectChange,
   onRefresh,
@@ -75,7 +83,8 @@ export function RightWorkspace({
   debugEnabled: boolean;
   debugEvents: DebugEvent[];
   files: WorkspaceFileEntry[];
-  latestGatewayEvent: GatewayEventFeed | null;
+  hostKind: string;
+  latestGatewayEvent: GatewayThreadEventFeed;
   root: string;
   scope: GatewayRequestScope | null;
   sessionId: string | null;
@@ -90,6 +99,7 @@ export function RightWorkspace({
   cwd: string;
   workspaceChanges: WorkspaceChangesResult | null;
   workspaceDiff: WorkspaceDiffResult | null;
+  workspaceFileLinks?: WorkspaceFileLinkContext | undefined;
   onActivate(tabId: string): void;
   onAcceptChange(turnId: string, path: string): void;
   onChangedFile(path: string): void;
@@ -98,7 +108,10 @@ export function RightWorkspace({
   onDirtyTabChange(tabId: string, dirty: boolean): void;
   onOpenFile(path: string): void;
   onOpenAgentSession(session: TranscriptAgentSession): void;
+  onOpenExternal(url: string): void | Promise<void>;
+  onBrowserStateChange(tabId: string, state: RightWorkspaceBrowserState): void;
   onOpenKind(kind: RightWorkspaceTabKind): void;
+  onOpenPreview(preview: RightWorkspacePreview): void;
   onConsumePendingPrompt(tabId: string): void;
   onRejectChange(turnId: string, path: string): void;
   onRefresh(): void;
@@ -166,8 +179,31 @@ export function RightWorkspace({
                 onCompare={onChangedFile}
                 onCopyText={onCopyText}
                 onDirtyChange={onDirtyTabChange}
+                htmlExecutionActive={tab.id === activeTab?.id}
                 onOpen={onOpenFile}
+                onOpenHtmlPreview={(path, content) => onOpenPreview({
+                  content,
+                  kind: "html",
+                  path,
+                  title: path.split(/[\\/]/).pop() || "HTML preview"
+                })}
                 onSave={onSaveFile}
+              />
+            )}
+            {tab.kind === "preview" && tab.preview && (
+              <PreviewPanel
+                htmlExecutionActive={tab.id === activeTab?.id}
+                onCopyText={onCopyText}
+                preview={tab.preview}
+              />
+            )}
+            {tab.kind === "browser" && (
+              <BrowserPanel
+                hostKind={hostKind}
+                sessionId={sessionId}
+                onOpenExternal={onOpenExternal}
+                onStateChange={(state) => onBrowserStateChange(tab.id, state)}
+                state={tab.browser ?? EMPTY_BROWSER_STATE}
               />
             )}
             {tab.kind === "terminal" && (
@@ -191,6 +227,7 @@ export function RightWorkspace({
                 client={client}
                 disabled={status !== "connected"}
                 latestGatewayEvent={latestGatewayEvent}
+                nativeActivities={runtimeActivitiesForThread(tabs, tab.parentThreadId ?? sessionId)}
                 scope={scope}
                 threadId={tab.parentThreadId ?? sessionId}
                 onOpenAgentSession={onOpenAgentSession}
@@ -200,9 +237,10 @@ export function RightWorkspace({
               <ThreadPanel
                 client={client}
                 disabled={status !== "connected"}
+                gatewayEventFeed={latestGatewayEvent}
                 kind={tab.kind}
-                latestGatewayEvent={latestGatewayEvent}
                 parentThreadId={tab.parentThreadId ?? sessionId}
+                historyFidelity={tab.historyFidelity ?? null}
                 pendingPrompt={tab.pendingPrompt ?? null}
                 promptSubmitBlockReason={promptSubmitBlockReason}
                 promptSubmitDisabled={promptSubmitDisabled}
@@ -213,6 +251,7 @@ export function RightWorkspace({
                 onOpenAgentSession={onOpenAgentSession}
                 onPendingPromptConsumed={() => onConsumePendingPrompt(tab.id)}
                 onSubmitThreadTurn={onSubmitThreadTurn}
+                workspaceFileLinks={workspaceFileLinks}
               />
             )}
           </div>
@@ -222,7 +261,37 @@ export function RightWorkspace({
   );
 }
 
+function runtimeActivitiesForThread(
+  tabs: RightWorkspaceTab[],
+  rootThreadId: string | null
+): RightWorkspaceTab[] {
+  if (!rootThreadId) return [];
+  const reachable = new Set([rootThreadId]);
+  const activities: RightWorkspaceTab[] = [];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const tab of tabs) {
+      if (
+        tab.id.startsWith("runtime-child:")
+        && tab.threadId
+        && tab.parentThreadId
+        && reachable.has(tab.parentThreadId)
+        && !reachable.has(tab.threadId)
+      ) {
+        reachable.add(tab.threadId);
+        activities.push(tab);
+        changed = true;
+      }
+    }
+  }
+  return activities;
+}
+
 export function rightWorkspaceTabVisibleForSession(tab: RightWorkspaceTab, sessionId: string | null): boolean {
+  if (tab.kind === "browser") {
+    return Boolean(sessionId) && tab.threadId === sessionId;
+  }
   if (tab.kind !== "sideConversation" && tab.kind !== "agentSession" && tab.kind !== "team") {
     return true;
   }
@@ -252,6 +321,7 @@ function RightWorkspaceTabs({
     { icon: <FolderTree size={14} />, kind: "files", label: "Files" }
   ];
   if (sessionId) {
+    menuItems.push({ icon: <Globe2 size={14} />, kind: "browser", label: "Browser" });
     menuItems.push({ icon: <MessageSquare size={14} />, kind: "sideConversation", label: "Side chat" });
     menuItems.push({ icon: <Users size={14} />, kind: "team", label: "Team" });
   }
@@ -353,6 +423,12 @@ function RightWorkspaceHome({
           <span>Files</span>
         </button>
         {sessionId && (
+          <button onClick={() => onOpenKind("browser")} type="button">
+            <Globe2 size={16} />
+            <span>Browser</span>
+          </button>
+        )}
+        {sessionId && (
           <button onClick={() => onOpenKind("sideConversation")} type="button">
             <MessageSquare size={16} />
             <span>Side chat</span>
@@ -404,6 +480,10 @@ export function rightWorkspaceTabLabel(kind: RightWorkspaceTabKind): string {
       return "Agent";
     case "team":
       return "Team";
+    case "browser":
+      return "Browser";
+    case "preview":
+      return "Preview";
     case "review":
     default:
       return "Review";
@@ -424,8 +504,18 @@ function rightWorkspaceTabIcon(kind: RightWorkspaceTabKind): ReactNode {
       return <Bot size={14} />;
     case "team":
       return <Users size={14} />;
+    case "browser":
+      return <Globe2 size={14} />;
+    case "preview":
+      return <FileText size={14} />;
     case "review":
     default:
       return <GitPullRequest size={14} />;
   }
 }
+
+const EMPTY_BROWSER_STATE: RightWorkspaceBrowserState = {
+  address: "",
+  currentUrl: null,
+  reloadKey: 0
+};

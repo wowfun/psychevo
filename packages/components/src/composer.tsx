@@ -11,6 +11,7 @@ export interface ComposerProps {
   draftPatch?: ComposerDraftPatch | undefined;
   leftControls?: ReactNode;
   mode?: string;
+  modeControlVisible?: boolean;
   planModeAvailable?: boolean;
   preActionControls?: ReactNode;
   promptSubmitBlockReason?: string | undefined;
@@ -19,6 +20,7 @@ export interface ComposerProps {
   rightControls?: ReactNode;
   running: boolean;
   runningStartedAtMs?: number | null;
+  steerAvailable?: boolean;
   onCommand?(command: string): void;
   onAttach?(): void;
   onAttachFiles?(files: File[]): void | Promise<void>;
@@ -52,6 +54,7 @@ export function Composer({
   draftPatch,
   leftControls,
   mode = "default",
+  modeControlVisible = true,
   planModeAvailable = true,
   preActionControls,
   promptSubmitBlockReason,
@@ -60,6 +63,7 @@ export function Composer({
   rightControls,
   running,
   runningStartedAtMs,
+  steerAvailable = true,
   onAttach,
   onAttachFiles,
   onCommand,
@@ -95,7 +99,7 @@ export function Composer({
     && trimmed.startsWith("/")
     && !trimmed.includes("\n")
     && Boolean(onCommand);
-  const showTurnModeControls = running && !shellMode && Boolean(trimmed);
+  const showTurnModeControls = running && steerAvailable && !shellMode && Boolean(trimmed);
   const effectiveRunningStartedAtMs = isPositiveTimestamp(runningStartedAtMs)
     ? Number(runningStartedAtMs)
     : observedRunningStartedAtMs;
@@ -195,7 +199,7 @@ export function Composer({
       updateMentions([]);
       return;
     }
-    if (running && turnMode === "steer" && attachmentItems.length === 0) {
+    if (running && steerAvailable && turnMode === "steer" && attachmentItems.length === 0) {
       onSteer(trimmed);
     } else if (promptSubmitDisabled) {
       return;
@@ -510,22 +514,24 @@ export function Composer({
                 >
                   Add images and files
                 </button>
-                <Switch
-                  checked={planMode}
-                  className="pevo-modeSwitchRow"
-                  disabled={!planModeAvailable}
-                  label="Plan mode"
-                  onCheckedChange={(checked) => {
-                    onModeChange?.(checked ? "plan" : "default");
-                  }}
-                  size="compact"
-                />
+                {modeControlVisible && (
+                  <Switch
+                    checked={planMode}
+                    className="pevo-modeSwitchRow"
+                    disabled={!planModeAvailable}
+                    label="Plan mode"
+                    onCheckedChange={(checked) => {
+                      onModeChange?.(checked ? "plan" : "default");
+                    }}
+                    size="compact"
+                  />
+                )}
                 {addMenuOptions}
               </div>
             )}
           </div>
           {leftControls}
-          {planMode && (
+          {modeControlVisible && planMode && (
             <div className="pevo-planChip" tabIndex={0}>
               <span>Plan</span>
               <button

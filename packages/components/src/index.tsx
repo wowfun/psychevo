@@ -9,6 +9,7 @@ export { HistoryPanel } from "./history";
 export type { HistoryBrowserWorkspace, HistoryDraftSession, HistoryPanelProps } from "./history";
 export { MarkdownText } from "./markdown";
 export type { MarkdownTextProps } from "./markdown";
+export type { WorkspaceFileLinkContext } from "./workspaceFileLinks";
 export { ActionButton, CreatePanel, FormField, Switch } from "./primitives";
 export type { ActionButtonProps, CreatePanelProps, FormFieldProps, SwitchProps } from "./primitives";
 export { StatusPanel } from "./status";

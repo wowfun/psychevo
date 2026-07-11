@@ -73,7 +73,7 @@ function runningSnapshot(): ThreadSnapshot {
       visibleName: null
     },
     thread: {
-      backend: { kind: "psychevo", nativeId: "thread-shared", runtimeRef: "native" },
+      backend: { kind: "psychevo", sessionHandle: "thread-shared", runtimeRef: "native" },
       id: "thread-shared",
       sourceKey: null
     }

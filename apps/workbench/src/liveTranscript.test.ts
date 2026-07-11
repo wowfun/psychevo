@@ -184,7 +184,13 @@ describe("applyLiveTranscriptEvent", () => {
         ...completedTurn("turn-1", "thread-1"),
         status: "failed",
         outcome: "failed",
-        error: { message: "model service failed" }
+        error: {
+          message: "model service failed",
+          code: null,
+          stage: null,
+          retryClass: null,
+          diagnosticRef: null
+        }
       },
       committedEntries: []
     });

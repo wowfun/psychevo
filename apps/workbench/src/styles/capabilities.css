@@ -127,6 +127,7 @@
 
 .agentsCapability {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 10px;
   min-width: 0;
@@ -189,9 +190,17 @@
   font-weight: 700;
 }
 
+.agentDefinitionForm label > small {
+  color: var(--pevo-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 .agentDefinitionForm input,
 .agentDefinitionForm select,
 .agentDefinitionForm textarea {
+  box-sizing: border-box;
   width: 100%;
 }
 
@@ -259,6 +268,22 @@
   color: var(--pevo-danger);
   background: color-mix(in oklch, var(--pevo-danger), transparent 88%);
   border-color: color-mix(in oklch, var(--pevo-danger), transparent 62%);
+}
+
+.runtimeAuthBanner,
+.runtimeAuthActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.runtimeAuthBanner > span {
+  flex: 1 1 240px;
+}
+
+.runtimeAuthActions code {
+  user-select: all;
 }
 
 .pluginInspection {
@@ -698,6 +723,233 @@
   align-items: center;
 }
 
+.runtimeProfileDetailHeader {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.runtimeProfileDetailHeader > .capabilityDetailHeaderActions {
+  flex: 1 1 280px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.runtimeProfileForm {
+  align-content: start;
+}
+
+.runtimeProfileForm .runtimeProfileCompactTextArea textarea {
+  min-height: 68px;
+}
+
+.runtimeProfileForm .runtimeProfileOptionsField textarea {
+  min-height: 112px;
+  font-family: var(--pevo-mono);
+}
+
+.runtimeProfileFieldHint {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.runtimeCapabilitySection {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+}
+
+.runtimeCapabilitySectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runtimeCapabilitySectionHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runtimeCapabilitySectionHeader > button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 4px 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.runtimeCapabilitySectionHeader > button:hover:not(:disabled) {
+  color: var(--pevo-ink);
+  border-color: var(--pevo-accent);
+}
+
+.runtimeCapabilitySectionHeader h4 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+}
+
+.runtimeCapabilitySectionHeader span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeReadinessStages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.runtimeReadinessStage {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-inline-start-width: 3px;
+  border-radius: var(--pevo-radius-sm);
+}
+
+.runtimeReadinessStage.is-ready {
+  border-inline-start-color: var(--pevo-success);
+}
+
+.runtimeReadinessStage.is-missing,
+.runtimeReadinessStage.is-needsAuth,
+.runtimeReadinessStage.is-unsupported {
+  border-inline-start-color: var(--pevo-warning);
+}
+
+.runtimeReadinessStage.is-error {
+  border-inline-start-color: var(--pevo-danger);
+}
+
+.runtimeReadinessStage > strong,
+.runtimeReadinessStage > span,
+.runtimeReadinessStage > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeReadinessStage > strong {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+}
+
+.runtimeReadinessStage > span,
+.runtimeReadinessStage > small {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.runtimeSessionsSection {
+  padding-bottom: 2px;
+}
+
+.runtimeSessionsLoadMore {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.runtimeSessionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.runtimeSessionMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runtimeSessionMain > strong,
+.runtimeSessionMain > span,
+.runtimeSessionMain > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeSessionRevisionPicker {
+  display: grid;
+  gap: 3px;
+  max-width: 320px;
+  margin-top: 5px;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.runtimeSessionRevisionPicker select {
+  min-width: 0;
+  min-height: 28px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+}
+
+.runtimeSessionMain > span,
+.runtimeSessionMain > small {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.runtimeSessionActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 220px;
+}
+
+.runtimeSessionActions button {
+  min-height: 26px;
+  padding: 0 7px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  font-size: var(--pevo-font-size-xsmall);
+  cursor: pointer;
+}
+
+.runtimeSessionActions button.is-danger {
+  color: var(--pevo-danger);
+}
+
 .capabilityEmpty {
   display: grid;
   min-height: 54px;
@@ -731,6 +983,17 @@
     padding-inline: 4px;
   }
 
+  .agentCapabilitySegments {
+    box-sizing: border-box;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .agentCapabilitySegments button {
+    flex: 0 0 auto;
+  }
+
   .capabilitiesGrid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -752,5 +1015,18 @@
   .capabilityForm select,
   .capabilityInlineFields input {
     width: 100%;
+  }
+
+  .runtimeProfileDetailHeader > .capabilityDetailHeaderActions {
+    justify-content: flex-start;
+  }
+
+  .runtimeSessionRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .runtimeSessionActions {
+    justify-content: flex-start;
+    max-width: 100%;
   }
 }

@@ -71,6 +71,85 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:1:user"]);
   });
 
+  it("replaces an accepted optimistic prompt when completion arrives without a start event", () => {
+    const accepted = {
+      ...threadSnapshot(),
+      activity: {
+        running: false,
+        activeTurnId: null,
+        queuedTurns: 0
+      }
+    };
+    const optimistic = appendOptimisticPrompt(accepted, "hello", 10);
+    const next = applyLiveTranscriptEvent(optimistic, {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-direct",
+      turn: completedTurn("turn-direct", "thread-1"),
+      committedEntries: [
+        entry({
+          id: "message:1:user",
+          threadId: "thread-1",
+          turnId: "turn-direct",
+          messageSeq: 1,
+          role: "user",
+          source: "runtime.message",
+          blocks: [block({ id: "message:1:user:text", body: "hello" })]
+        })
+      ]
+    });
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:1:user"]);
+  });
+
+  it("replaces one matching detached optimistic prompt on failed completion", () => {
+    const accepted = {
+      ...threadSnapshot(),
+      activity: {
+        running: false,
+        activeTurnId: null,
+        queuedTurns: 0
+      }
+    };
+    const once = appendOptimisticPrompt(accepted, "hello", 10);
+    const optimistic = appendOptimisticPrompt(once, "hello", 11);
+    const next = applyLiveTranscriptEvent(optimistic, {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-direct",
+      turn: {
+        ...completedTurn("turn-direct", "thread-1"),
+        status: "failed",
+        outcome: "failed",
+        error: {
+          message: "direct runtime failed",
+          code: null,
+          stage: null,
+          retryClass: null,
+          diagnosticRef: null
+        }
+      },
+      committedEntries: [
+        entry({
+          id: "message:1:user",
+          threadId: "thread-1",
+          turnId: "turn-direct",
+          messageSeq: 1,
+          role: "user",
+          source: "runtime.message",
+          blocks: [block({ id: "message:1:user:text", body: "hello" })]
+        })
+      ]
+    });
+
+    const users = next.entries.filter((candidate) => candidate.role === "user");
+    expect(users).toHaveLength(2);
+    expect(users.filter((candidate) => candidate.id === "message:1:user")).toHaveLength(1);
+    expect(users.filter((candidate) => candidate.source === "client.optimistic")).toHaveLength(1);
+    expect(users.find((candidate) => candidate.source === "client.optimistic")?.createdAtMs).toBe(10);
+    expect(next.entries.some((candidate) => candidate.id === "turn:turn-direct:terminal")).toBe(true);
+  });
+
   it("settles a failed terminal turn and keeps the diagnostic visible", () => {
     const current = {
       ...threadSnapshot(),
@@ -95,7 +174,13 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
         ...completedTurn("turn-1", "thread-1"),
         status: "failed",
         outcome: "failed",
-        error: { message: "model service failed" },
+        error: {
+          message: "model service failed",
+          code: null,
+          stage: null,
+          retryClass: null,
+          diagnosticRef: null
+        },
         completedAtMs: 20
       },
       committedEntries: []
@@ -188,7 +273,7 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
         id: "child-thread",
         backend: {
           kind: "psychevo" as const,
-          nativeId: "child-thread"
+          sessionHandle: "child-thread"
         },
         sourceKey: "web:test"
       },
@@ -644,7 +729,7 @@ describe("reconcileThreadSnapshot", () => {
         id: "thread-2",
         backend: {
           kind: "psychevo" as const,
-          nativeId: "thread-2",
+          sessionHandle: "thread-2",
           runtimeRef: "native"
         },
         sourceKey: "web:test"
@@ -1190,7 +1275,7 @@ function threadSnapshot(): ThreadSnapshot {
       id: "thread-1",
       backend: {
         kind: "psychevo",
-        nativeId: "thread-1",
+        sessionHandle: "thread-1",
         runtimeRef: "native"
       },
       sourceKey: "web:test"

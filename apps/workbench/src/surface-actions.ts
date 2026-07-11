@@ -274,13 +274,13 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       nextClient.request("workspace/changes", { scope }),
       threadId ? nextClient.request("observability/read", { scope, threadId }) : Promise.resolve(null)
     ]);
-    if (!shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
+    if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
       return;
     }
     params.setWorkspaceFiles(WorkspaceFilesResultSchema.parse(files));
     params.setWorkspaceDiff(WorkspaceDiffResultSchema.parse(diff));
     params.setWorkspaceChanges(WorkspaceChangesResultSchema.parse(changes));
-    if (nextObservability) {
+    if (nextObservability && shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
       applyObservability(nextObservability);
     }
   }
@@ -308,10 +308,15 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     expectedEpoch: number | null,
     threadId: string | null
   ): boolean {
+    return shouldApplyAsyncWorkspaceResult(scope, expectedEpoch) &&
+      (params.selectedThreadIdRef.current ?? null) === threadId;
+  }
+
+  function shouldApplyAsyncWorkspaceResult(
+    scope: GatewayRequestScope,
+    expectedEpoch: number | null
+  ): boolean {
     if (expectedEpoch != null && expectedEpoch !== params.viewEpochRef.current) {
-      return false;
-    }
-    if ((params.selectedThreadIdRef.current ?? null) !== threadId) {
       return false;
     }
     const currentScope = params.scopeRef.current ?? params.activeScope ?? params.initScope ?? null;

@@ -45,6 +45,7 @@
 
 .threadPanelTitle p,
 .threadPanelParent,
+.threadPanelRuntimeNotice,
 .threadPanelError {
   overflow: hidden;
   margin: 2px 0 0;
@@ -55,8 +56,34 @@
   white-space: nowrap;
 }
 
+.threadPanelNotices {
+  min-width: 0;
+}
+
+.threadPanelNotices:empty {
+  display: none;
+}
+
 .threadPanelParent {
   padding: 0 4px 6px;
+}
+
+.threadPanelRuntimeNotice {
+  margin: 0 4px 6px;
+  padding: 6px 8px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 54%);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.threadPanelRuntimeNotice[data-history-fidelity="summary"],
+.threadPanelRuntimeNotice[data-history-fidelity="partial"] {
+  color: var(--pevo-caution);
+  border-color: color-mix(in oklch, var(--pevo-caution), var(--pevo-border) 68%);
 }
 
 .threadPanelError {

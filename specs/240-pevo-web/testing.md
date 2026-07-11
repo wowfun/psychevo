@@ -59,7 +59,12 @@ required. They must not print tokens or secrets.
   draft sessions, and keeps history switching from stealing background turns.
 - Composer submit, permission, clarify, command feedback, runtime controls,
   settings, files, review, terminal, status, downloads, and debug panels remain
-  functional after reconnect.
+  functional after reconnect. Shared Attention fixtures assert Runtime Profile
+  provenance, public parent/child origin, exact authorization lifetime, and the
+  absence of undeclared Session or Always actions.
+- Runtime-child transcript fixtures cover reconnect tab registration and lazy
+  history reads for Full, Summary, and Partial fidelity. Visual assertions keep
+  the compact Summary/Partial gap notice legible without horizontal overflow.
 - Automations tests cover natural-language draft creation, empty state
   templates, manual creation, template creation, project automation rows, thread
   heartbeat rows, enable/disable, run-now, delete, and open-thread behavior.

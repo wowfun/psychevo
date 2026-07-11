@@ -17,6 +17,7 @@ export interface PevoWebServer {
 
 export async function startPevoWeb({
   configAppend,
+  channelRuntime,
   configPath: explicitConfigPath,
   dbPath: explicitDbPath,
   envFile,
@@ -27,6 +28,7 @@ export async function startPevoWeb({
   cwd
 }: {
   configAppend?: string;
+  channelRuntime?: boolean;
   configPath?: string;
   dbPath?: string;
   envFile?: string;
@@ -74,9 +76,10 @@ export async function startPevoWeb({
     pevoBin,
     staticDir,
     cwd: resolvedCwd,
-    home
+    home,
+    channelRuntime
   });
-  const env = gatewayEnv(resolvedConfigPath, dbPath, home, live);
+  const env = gatewayEnv(resolvedConfigPath, dbPath, home, live, channelRuntime);
   const url = modelUrl(
     await waitForServerUrl(child),
     live ? model : undefined
@@ -137,6 +140,7 @@ function spawnPevoWeb(options: {
   configPath: string;
   dbPath: string;
   home: string;
+  channelRuntime?: boolean;
   live: boolean;
   pevoBin?: string;
   staticDir: string;
@@ -167,7 +171,7 @@ function spawnPevoWeb(options: {
 
   return spawn(command, args, {
     cwd: repoRoot,
-    env: gatewayEnv(options.configPath, options.dbPath, options.home, options.live),
+    env: gatewayEnv(options.configPath, options.dbPath, options.home, options.live, options.channelRuntime),
     stdio: ["ignore", "pipe", "pipe"]
   });
 }
@@ -205,13 +209,21 @@ function waitForServerUrl(child: ChildProcessWithoutNullStreams): Promise<string
   });
 }
 
-function gatewayEnv(configPath: string, dbPath: string, home: string, live: boolean): NodeJS.ProcessEnv {
+function gatewayEnv(
+  configPath: string,
+  dbPath: string,
+  home: string,
+  live: boolean,
+  channelRuntime?: boolean
+): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PSYCHEVO_CONFIG: configPath,
     PSYCHEVO_DB: dbPath,
     PSYCHEVO_HOME: home,
-    PSYCHEVO_CHANNEL_RUNTIME: process.env.PSYCHEVO_CHANNEL_RUNTIME ?? (live ? "on" : "off")
+    PSYCHEVO_CHANNEL_RUNTIME: channelRuntime == null
+      ? process.env.PSYCHEVO_CHANNEL_RUNTIME ?? (live ? "on" : "off")
+      : channelRuntime ? "on" : "off"
   };
 }
 

@@ -418,6 +418,64 @@ describe("Workbench command routing", () => {
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 
+  it("routes /compact through native thread compaction without submitting a turn", async () => {
+    gatewayMock.commandList = [
+      commandItem("compact", "control", "composer")
+    ];
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "control",
+      feedbackAnchor: "composer",
+      action: { type: "threadCompactStart", instructions: "keep decisions" }
+    });
+    gatewayMock.compactStart = (params: unknown) => ({
+      accepted: true,
+      threadId: (params as { threadId?: string | null }).threadId,
+      compacted: true,
+      reason: "manual",
+      message: "context compacted",
+      checkpoint: {
+        checkpointId: 7,
+        reason: "manual",
+        createdAtMs: 1_798_650_000_000,
+        firstKeptSessionSeq: 3,
+        tokensBefore: 120,
+        tokensAfter: 42,
+        summaryProvider: "fake",
+        summaryModel: "fake-model",
+        summary: "summary"
+      },
+      tokensBefore: 120,
+      tokensAfter: 42,
+      summaryProvider: "fake",
+      summaryModel: "fake-model",
+      unavailable: false,
+      error: null
+    });
+
+    render(<App />);
+    await resumeSession();
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/compact keep decisions" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/compact/start",
+        params: expect.objectContaining({
+          threadId: "thread-1",
+          instructions: "keep decisions",
+          runtimeRef: "native"
+        })
+      });
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+    expect(await screen.findByText("context compacted")).toBeTruthy();
+  });
+
   it("routes commands clicked inside the overlay without submitting transcript turns", async () => {
     gatewayMock.commandList = [
       commandItem("status", "inspect", "status")
@@ -620,6 +678,32 @@ describe("Workbench command routing", () => {
     expect(screen.queryByRole("region", { name: "Commands overlay" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Commands" })).toBeNull();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("reports an active steer rejected by the selected Runtime Profile", async () => {
+    gatewayMock.snapshot.activity = { running: true, activeTurnId: "turn-1", queuedTurns: 0 };
+    gatewayMock.turnSteer = () => ({ accepted: false });
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "control",
+      feedbackAnchor: "composer",
+      action: { type: "steerPrompt", text: "hello" }
+    });
+
+    render(<App />);
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    await screen.findByRole("button", { name: "Interrupt active turn" });
+    fireEvent.change(textarea, { target: { value: "/steer hello" } });
+    fireEvent.submit(textarea.closest("form") as HTMLFormElement);
+
+    expect(await screen.findByText("The selected Runtime Profile does not support steering this turn.")).toBeTruthy();
+    expect(gatewayMock.requestLog).toContainEqual({
+      method: "turn/steer",
+      params: { expectedTurnId: "turn-1", threadId: null, text: "hello" }
+    });
   });
 
   it("clears transient slash feedback after switching sessions", async () => {

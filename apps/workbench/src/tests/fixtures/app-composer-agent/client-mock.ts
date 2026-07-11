@@ -6,6 +6,11 @@ function normalizeNullableString(value: string | null | undefined): string | nul
   return normalized ? normalized : null;
 }
 
+function incrementRevision(value: unknown): string {
+  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(value)) return "1";
+  return (BigInt(value) + 1n).toString();
+}
+
 function normalizePermissionMode(value: string | null | undefined): string | null {
   const normalized = normalizeNullableString(value);
   return normalized && normalized !== "default" ? normalized : null;
@@ -58,6 +63,7 @@ function managedAgentRecord(input: {
   entrypoints?: string[];
   tools?: string[];
   mcpServers?: string[];
+  optionalContributions?: string[];
   rawMarkdown?: string;
 }): Record<string, unknown> {
   const target = input.target ?? "project";
@@ -69,6 +75,13 @@ function managedAgentRecord(input: {
     : `/tmp/profile/agents/${name}.md`;
   const entrypoints = input.entrypoints ?? ["subagent"];
   const instructions = input.instructions ?? "";
+  const tools = input.tools ?? [];
+  const mcpServers = input.mcpServers ?? [];
+  const contributions = [
+    ...(instructions.trim() ? ["instructions"] : []),
+    ...(tools.length > 0 ? ["tools"] : []),
+    ...(mcpServers.length > 0 ? ["mcp"] : [])
+  ];
   return {
     name,
     description,
@@ -81,8 +94,10 @@ function managedAgentRecord(input: {
     path,
     backend: input.backend ?? null,
     entrypoints,
-    tools: input.tools ?? [],
-    mcpServers: input.mcpServers ?? [],
+    tools,
+    mcpServers,
+    contributions,
+    optionalContributions: input.optionalContributions ?? [],
     diagnostics: [],
     instructions,
     rawMarkdown: input.rawMarkdown ?? renderMockAgentMarkdown(name, description, enabled, entrypoints, instructions)
@@ -374,7 +389,7 @@ vi.mock("@psychevo/client", async () => {
           thread: threadId
             ? {
                 id: threadId,
-                backend: { kind: "psychevo" as const, nativeId: threadId, runtimeRef: "native" },
+                backend: { kind: "psychevo" as const, sessionHandle: threadId, runtimeRef: "native" },
                 sourceKey: `source-${threadId}`
               }
             : null
@@ -406,7 +421,27 @@ vi.mock("@psychevo/client", async () => {
           ...gatewayMock.snapshot,
           thread: null,
           entries: [],
-          activity: { running: false, activeTurnId: null, queuedTurns: 0 }
+          activity: { ...gatewayMock.snapshot.activity }
+        };
+      }
+      if (method === "thread/compact/start") {
+        if (gatewayMock.compactStart) {
+          return gatewayMock.compactStart(params);
+        }
+        const record = params as { threadId?: string | null } | undefined;
+        return {
+          accepted: true,
+          threadId: record?.threadId ?? gatewayMock.snapshot.thread?.id ?? null,
+          compacted: false,
+          reason: "manual",
+          message: "not enough messages to compact",
+          checkpoint: null,
+          tokensBefore: null,
+          tokensAfter: null,
+          summaryProvider: null,
+          summaryModel: null,
+          unavailable: false,
+          error: null
         };
       }
       if (method === "settings/read") {
@@ -610,6 +645,7 @@ vi.mock("@psychevo/client", async () => {
           entrypoints?: string[];
           tools?: string[];
           mcpServers?: string[];
+          optionalContributions?: string[];
           rawMarkdown?: string | null;
         };
         if (record.rawMarkdown?.includes("invalid-frontmatter")) {
@@ -625,6 +661,7 @@ vi.mock("@psychevo/client", async () => {
           entrypoints: record.entrypoints ?? [],
           tools: record.tools ?? [],
           mcpServers: record.mcpServers ?? [],
+          optionalContributions: record.optionalContributions ?? [],
           ...(record.rawMarkdown ? { rawMarkdown: record.rawMarkdown } : {})
         });
         upsertMockAgent(agent);
@@ -766,6 +803,93 @@ vi.mock("@psychevo/client", async () => {
           }
         };
       }
+      if (method === "runtime/context/read") {
+        if (gatewayMock.runtimeContextRead) {
+          return gatewayMock.runtimeContextRead(params);
+        }
+        const native = findMockRuntimeProfile("native") ?? gatewayMock.runtimeProfileRecords[0];
+        const capabilityRevision = typeof native?.capabilityRevision === "string" ? native.capabilityRevision : "1";
+        return {
+          runtimeRef: "native",
+          selectionState: "default",
+          profiles: gatewayMock.runtimeProfileRecords,
+          binding: null,
+          controls: [
+            {
+              id: "mode",
+              label: "Mode",
+              state: "selectable",
+              currentValue: "default",
+              choices: [
+                { value: "default", label: "Default", description: "Use the Runtime Profile default" },
+                { value: "plan", label: "Plan", description: "Plan before editing" }
+              ],
+              channelSafe: true,
+              capabilityRevision
+            }
+          ],
+          activeSession: null
+        };
+      }
+      if (method === "runtime/control/set") {
+        const record = params as {
+          controlId?: string;
+          value?: unknown;
+          expectedBindingRevision?: number;
+          expectedCapabilityRevision?: string;
+        };
+        return {
+          changed: false,
+          observed: true,
+          bindingRevision: record.expectedBindingRevision ?? 1,
+          control: {
+            id: record.controlId ?? "mode",
+            label: record.controlId === "model" ? "Model" : "Mode",
+            state: "readOnlyCurrent",
+            currentValue: record.value ?? null,
+            choices: [],
+            channelSafe: true,
+            capabilityRevision: record.expectedCapabilityRevision ?? "1"
+          }
+        };
+      }
+      if (method === "runtime/auth/action") {
+        const record = params as { runtimeRef?: string; action?: string; input?: { loginId?: string } | null };
+        if (record.runtimeRef === "codex" && record.action === "repair") {
+          return {
+            accepted: true,
+            status: "login_required",
+            message: "Codex requires managed account login.",
+            output: null
+          };
+        }
+        if (record.runtimeRef === "codex" && record.action === "login") {
+          return {
+            accepted: true,
+            status: "login_pending",
+            message: "Codex started a managed login flow.",
+            output: {
+              authUrl: "https://auth.example.test/codex",
+              loginId: "login-fixture",
+              userCode: "CODE-123"
+            }
+          };
+        }
+        if (record.runtimeRef === "codex" && record.action === "cancel") {
+          return {
+            accepted: true,
+            status: "login_cancelled",
+            message: `Cancelled ${record.input?.loginId ?? "login"}.`,
+            output: null
+          };
+        }
+        return {
+          accepted: false,
+          status: "cli_required",
+          message: "Run `opencode auth login`, then Doctor again.",
+          output: null
+        };
+      }
       if (method === "runtime/profile/list") {
         return { profiles: gatewayMock.runtimeProfileRecords };
       }
@@ -783,7 +907,9 @@ vi.mock("@psychevo/client", async () => {
           label?: string | null;
           command?: string | null;
           args?: string[];
+          backendRef?: string | null;
           env?: Record<string, string>;
+          defaultModel?: string | null;
           defaultMode?: string | null;
           defaultAgent?: string | null;
           approvalMode?: string | null;
@@ -801,15 +927,23 @@ vi.mock("@psychevo/client", async () => {
           configured: true,
           command: normalizeNullableString(record.command) ?? existing?.command ?? null,
           args: record.args ?? existing?.args ?? [],
+          backendRef: normalizeNullableString(record.backendRef) ?? existing?.backendRef ?? null,
+          provenance: (record.runtime ?? existing?.runtime) === "acp" ? "ACP" : (record.runtime ?? existing?.runtime) === "native" ? "Native" : "Direct",
+          profileRevision: incrementRevision(existing?.profileRevision),
+          capabilityRevision: incrementRevision(existing?.capabilityRevision),
+          defaultModel: normalizeNullableString(record.defaultModel) ?? existing?.defaultModel ?? null,
           defaultMode: normalizeNullableString(record.defaultMode) ?? existing?.defaultMode ?? null,
           defaultAgent: normalizeNullableString(record.defaultAgent) ?? existing?.defaultAgent ?? null,
           approvalMode: normalizeNullableString(record.approvalMode) ?? existing?.approvalMode ?? null,
           sandbox: normalizeNullableString(record.sandbox) ?? existing?.sandbox ?? null,
           workspaceRoots: record.workspaceRoots ?? existing?.workspaceRoots ?? [],
-          envKeys: Object.keys(record.env ?? {}),
+          envKeys: Object.keys(record.env ?? {}).length > 0
+            ? Object.keys(record.env ?? {})
+            : existing?.envKeys ?? [],
           optionKeys: existing?.optionKeys ?? [],
           sourceTargets: [record.target ?? "profile"],
           health: existing?.health ?? runtimeProfileHealth("unchecked", "Not checked"),
+          readinessStages: existing?.readinessStages ?? [],
           diagnostics: []
         };
         upsertMockRuntimeProfile(profile);
@@ -831,6 +965,11 @@ vi.mock("@psychevo/client", async () => {
           configured: false,
           command: null,
           args: [],
+          backendRef: null,
+          provenance: "Direct",
+          profileRevision: "1",
+          capabilityRevision: "1",
+          defaultModel: null,
           defaultMode: null,
           defaultAgent: null,
           approvalMode: null,
@@ -840,6 +979,7 @@ vi.mock("@psychevo/client", async () => {
           optionKeys: [],
           sourceTargets: [],
           health: runtimeProfileHealth("unchecked", "Not checked"),
+          readinessStages: [],
           diagnostics: []
         };
         const sourceTargets = Array.isArray(existing.sourceTargets)
@@ -893,6 +1033,9 @@ vi.mock("@psychevo/client", async () => {
           ]
         };
       }
+      if (method.startsWith("runtime/session/") && gatewayMock.runtimeSessionRequest) {
+        return await gatewayMock.runtimeSessionRequest(method, params);
+      }
       if (method === "runtime/session/list") {
         const record = params as { runtimeRef?: string | null } | undefined;
         const runtimeRef = record?.runtimeRef?.trim() || "native";
@@ -901,20 +1044,26 @@ vi.mock("@psychevo/client", async () => {
           supported: runtimeRef === "native",
           sessions: runtimeRef === "native"
             ? gatewayMock.sessionSummaries.map((session) => ({
-                nativeSessionId: session.id,
+                sessionHandle: session.id,
                 threadId: session.id,
                 title: session.title,
                 archived: false,
-                updatedAtMs: session.updatedAtMs
+                updatedAtMs: session.updatedAtMs,
+                parentThreadId: null,
+                dedupKey: session.id,
+                fidelity: "full",
+                ownership: "readWrite",
+                actions: ["resume", "rename", "archive", "delete", "fork"]
               }))
-            : []
+            : [],
+          nextCursor: null
         };
       }
       if (method.startsWith("runtime/session/")) {
-        const record = params as { runtimeRef?: string | null; nativeSessionId?: string | null };
+        const record = params as { runtimeRef?: string | null; sessionHandle?: string | null };
         return {
           runtimeRef: record.runtimeRef ?? "native",
-          nativeSessionId: record.nativeSessionId ?? "thread-1",
+          sessionHandle: record.sessionHandle ?? "thread-1",
           supported: record.runtimeRef == null || record.runtimeRef === "native",
           changed: true,
           session: null,
@@ -1265,7 +1414,41 @@ vi.mock("@psychevo/client", async () => {
         return {
           plugins: [
             {
+              name: "Browser",
+              selector: "builtin:browser",
+              scope_name: "profile",
+              enablement_scope_name: "profile",
+              removable: false,
+              package_mutable: false,
+              enablement_mutable: true,
+              description: "Right-workspace Browser pane and XML-only browser annotation context.",
+              source_id: "builtin:browser",
+              source: "built_in",
+              source_kind: "built_in",
+              scope: "built_in",
+              manifest_kind: "built_in",
+              enabled: true,
+              status: "Installed",
+              readiness: "Installed",
+              adapter_mode: "built_in",
+              package_fingerprint: "builtin-browser",
+              trust: { required: false, status: "not_required", fingerprint: "builtin-browser" },
+              contributions: {
+                right_workspace: ["browser", "preview"],
+                desktop: ["managed_browser_host"],
+                annotation: ["workspace_comment_context_xml"],
+                toolsets: []
+              },
+              diagnostics: []
+            },
+            {
               name: "writer-kit",
+              selector: "profile:writer-kit@local-plugins-writer-kit",
+              scope_name: "profile",
+              enablement_scope_name: "project",
+              removable: true,
+              package_mutable: true,
+              enablement_mutable: true,
               description: "Writing helper plugin",
               source_id: "local:/plugins/writer-kit",
               source: "writer-kit",
@@ -1279,9 +1462,53 @@ vi.mock("@psychevo/client", async () => {
               package_fingerprint: "abc123",
               trust: { required: false, status: "not_required", fingerprint: "abc123" },
               diagnostics: []
+            },
+            {
+              name: "dual-scope",
+              selector: "profile:dual-scope@shared-source",
+              scope_name: "profile",
+              enablement_scope_name: "profile",
+              removable: true,
+              package_mutable: true,
+              enablement_mutable: true,
+              description: "Same package source installed twice",
+              source_id: "local:/plugins/dual-scope",
+              source: "shared-source",
+              source_kind: "local",
+              scope: "global",
+              manifest_kind: "psychevo",
+              enabled: true,
+              status: "Installed",
+              readiness: "Installed",
+              adapter_mode: "manifest_only",
+              package_fingerprint: "dual-profile",
+              trust: { required: false, status: "not_required", fingerprint: "dual-profile" },
+              diagnostics: []
+            },
+            {
+              name: "dual-scope",
+              selector: "project:dual-scope@shared-source",
+              scope_name: "project",
+              enablement_scope_name: "project",
+              removable: true,
+              package_mutable: true,
+              enablement_mutable: true,
+              description: "Same package source installed twice",
+              source_id: "local:/plugins/dual-scope",
+              source: "shared-source",
+              source_kind: "local",
+              scope: "local",
+              manifest_kind: "psychevo",
+              enabled: false,
+              status: "Disabled",
+              readiness: "Disabled",
+              adapter_mode: "manifest_only",
+              package_fingerprint: "dual-project",
+              trust: { required: false, status: "not_required", fingerprint: "dual-project" },
+              diagnostics: []
             }
           ],
-          count: 1
+          count: 4
         };
       }
       if (method === "plugin/import/inspect") {
@@ -1727,6 +1954,9 @@ vi.mock("@psychevo/client", async () => {
           ? params as { threadId?: string | null }
           : {};
         return { accepted: true, threadId: record.threadId ?? "thread-1" };
+      }
+      if (method === "turn/steer") {
+        return gatewayMock.turnSteer(params);
       }
       if (method === "permission/respond") {
         return gatewayMock.permissionRespond(params);

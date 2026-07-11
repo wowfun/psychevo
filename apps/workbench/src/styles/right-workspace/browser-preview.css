@@ -1,0 +1,219 @@
+.previewPanel,
+.browserPanel {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.previewMarkdown {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 0 16px;
+}
+
+.previewMarkdown .pevo-markdown {
+  max-width: 76ch;
+}
+
+.htmlStaticPreview {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--pevo-bg);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.htmlStaticPreview iframe {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  background: white;
+  border: 0;
+}
+
+.htmlStaticPreview.is-locked iframe {
+  pointer-events: none;
+  user-select: none;
+}
+
+.htmlPreviewNotice,
+.browserModeBadge {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 8%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 20%);
+  border-radius: var(--pevo-radius-xs);
+  font-size: var(--pevo-font-size-xsmall);
+  box-shadow: var(--pevo-shadow-popover);
+}
+
+.htmlPreviewNotice {
+  position: static;
+  flex-wrap: wrap;
+}
+
+.htmlPreviewNotice small {
+  color: var(--pevo-faint);
+}
+
+.htmlPreviewNotice button {
+  min-height: 20px;
+  padding: 0 7px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 24%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
+  border-radius: var(--pevo-radius-xs);
+  cursor: pointer;
+  font: inherit;
+}
+
+.htmlPreviewNotice button:hover,
+.htmlPreviewNotice button:focus-visible {
+  background: var(--pevo-panel);
+}
+
+.browserToolbar {
+  display: grid;
+  grid-template-columns: 28px 28px 28px minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 4px 0 6px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 55%);
+}
+
+.browserToolbar button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 30%);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.browserToolbar button:hover:not(:disabled),
+.browserToolbar button:focus-visible {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 35%);
+}
+
+.browserToolbar button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.browserToolbar form,
+.browserEmpty form {
+  min-width: 0;
+}
+
+.browserToolbar input,
+.browserEmpty input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 58%);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 28%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.browserCanvas {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--pevo-bg);
+  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 42%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.browserCanvas iframe,
+.browserNativeHost {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  background: white;
+  border: 0;
+}
+
+.browserNativeHost,
+.browserEmpty {
+  display: grid;
+  place-items: center;
+}
+
+.browserEmpty {
+  align-content: center;
+  gap: 10px;
+  padding: 22px;
+  color: var(--pevo-muted);
+  text-align: center;
+}
+
+.browserEmpty h2 {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-chrome);
+}
+
+.browserEmpty form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: min(360px, 100%);
+  gap: 6px;
+}
+
+.browserEmpty button {
+  min-height: 28px;
+  padding: 0 10px;
+  color: var(--pevo-bg);
+  background: var(--pevo-accent);
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.browserEmpty small {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--pevo-faint);
+  font-size: var(--pevo-font-size-xsmall);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browserError {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  max-width: calc(100% - 20px);
+  padding: 7px 9px;
+  color: var(--pevo-danger);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 8%);
+  border: 1px solid color-mix(in oklch, var(--pevo-danger), transparent 45%);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: var(--pevo-shadow-popover);
+}
+
+.browserModeBadge {
+  right: 8px;
+  bottom: 8px;
+}

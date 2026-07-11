@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ArrowLeft, MessageCircle, Play, Plus, Save, Settings2, Trash2, Wrench, X } from "lucide-react";
 import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
-import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult } from "@psychevo/protocol";
+import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, RuntimeProfileView } from "@psychevo/protocol";
 import type { SessionBrowserWorkspaceState, WorkbenchChannel, WorkbenchChannelDoctor, WorkbenchChannelSource } from "../types";
 import type { ChannelSettingsControls, ChannelUpdateDraft } from "./types";
 import {
@@ -14,9 +14,12 @@ import {
   channelDoctorOk,
   channelDraftFromChannel,
   channelDraftSignature,
+  channelModelControlAvailable,
   channelModelOptions,
+  channelNativePermissionControlAvailable,
   channelPermissionOptions,
   channelRuntimeProfileOptions,
+  channelRuntimeSafetyLabel,
   channelRunnerTone,
   channelRuntimeDefaultsSummary,
   channelRuntimeSummary,
@@ -48,6 +51,7 @@ export function ChannelsSettingsPanel({
   onSetChannelEnabled,
   onStartWechatQrSetup,
   onUpdateChannel,
+  runtimeProfiles,
   sessionBrowserWorkspaces,
   cwd
 }: {
@@ -63,6 +67,7 @@ export function ChannelsSettingsPanel({
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
   onUpdateChannel(channel: WorkbenchChannel, draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
+  runtimeProfiles: RuntimeProfileView[];
   sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   cwd: string;
 }) {
@@ -91,6 +96,7 @@ export function ChannelsSettingsPanel({
         onLoadSources={() => onLoadChannelSources(selectedChannel)}
         onUpdate={(draft) => onUpdateChannel(selectedChannel, draft)}
         rootRef={panelRef}
+        runtimeProfiles={runtimeProfiles}
         sessionBrowserWorkspaces={sessionBrowserWorkspaces}
         cwd={cwd}
       />
@@ -205,6 +211,7 @@ function ChannelSettingsDetail({
   onLoadSources,
   onUpdate,
   rootRef,
+  runtimeProfiles,
   sessionBrowserWorkspaces,
   cwd
 }: {
@@ -217,6 +224,7 @@ function ChannelSettingsDetail({
   onLoadSources(): Promise<WorkbenchChannelSource[]>;
   onUpdate(draft: ChannelUpdateDraft): Promise<WorkbenchChannel>;
   rootRef: RefObject<HTMLElement | null>;
+  runtimeProfiles: RuntimeProfileView[];
   sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
   cwd: string;
 }) {
@@ -247,7 +255,9 @@ function ChannelSettingsDetail({
   const dirty = draftSignature !== savedSignature;
   const permissionOptions = channelPermissionOptions(controls, channel, draft);
   const modelOptions = channelModelOptions(controls, channel, draft);
-  const runtimeProfileOptions = channelRuntimeProfileOptions(channel, draft);
+  const runtimeProfileOptions = channelRuntimeProfileOptions(channel, draft, runtimeProfiles);
+  const modelControlAvailable = channelModelControlAvailable(draft.runtimeRef, runtimeProfiles);
+  const nativePermissionControlAvailable = channelNativePermissionControlAvailable(draft.runtimeRef, runtimeProfiles);
   const workspaceOptions = channelWorkspaceOptions(sessionBrowserWorkspaces);
   const busy = disabled || saving || deleting;
 
@@ -436,45 +446,68 @@ function ChannelSettingsDetail({
               <select
                 aria-label="Channel Runtime Profile"
                 disabled={busy}
-                onChange={(event) => updateDraft({ runtimeRef: event.currentTarget.value })}
+                onChange={(event) => {
+                  const runtimeRef = event.currentTarget.value;
+                  updateDraft({
+                    runtimeRef,
+                    model: channelModelControlAvailable(runtimeRef, runtimeProfiles) ? draft.model : "",
+                    permissionMode: channelNativePermissionControlAvailable(runtimeRef, runtimeProfiles)
+                      ? draft.permissionMode
+                      : "default"
+                  });
+                }}
                 value={draft.runtimeRef}
               >
                 {runtimeProfileOptions.map((option) => (
-                  <option key={option || "default"} value={option}>{runtimeProfileOptionLabel(option)}</option>
+                  <option key={option || "default"} value={option}>{runtimeProfileOptionLabel(option, runtimeProfiles)}</option>
                 ))}
               </select>
             </div>
           </ChannelFormRow>
-          <ChannelFormRow label="Permission mode" hint="Controls write and command approval defaults for this channel.">
-            <div className="channelSegmentedControl" role="group" aria-label="Permission mode">
-              {permissionOptions.map((option) => (
-                <button
-                  className={draft.permissionMode === option ? "is-selected" : ""}
+          {nativePermissionControlAvailable ? (
+            <ChannelFormRow label="Permission mode" hint="Controls write and command approval defaults for native execution.">
+              <div className="channelSegmentedControl" role="group" aria-label="Permission mode">
+                {permissionOptions.map((option) => (
+                  <button
+                    className={draft.permissionMode === option ? "is-selected" : ""}
+                    disabled={busy}
+                    key={option}
+                    onClick={() => updateDraft({ permissionMode: option })}
+                    type="button"
+                  >
+                    {permissionModeLabel(option)}
+                  </button>
+                ))}
+              </div>
+            </ChannelFormRow>
+          ) : (
+            <ChannelFormRow label="Safety policy" hint="Direct execution uses the immutable Runtime Profile policy.">
+              <span className="channelFieldHint" aria-label="Runtime Profile safety policy">
+                {channelRuntimeSafetyLabel(draft.runtimeRef, runtimeProfiles)}
+              </span>
+            </ChannelFormRow>
+          )}
+          {modelControlAvailable ? (
+            <ChannelFormRow label="Model" hint="Blank uses the profile default model.">
+              <div className="channelControl">
+                <select
+                  aria-label="Channel model"
                   disabled={busy}
-                  key={option}
-                  onClick={() => updateDraft({ permissionMode: option })}
-                  type="button"
+                  onChange={(event) => updateDraft({ model: event.currentTarget.value })}
+                  value={draft.model}
                 >
-                  {permissionModeLabel(option)}
-                </button>
-              ))}
-            </div>
-          </ChannelFormRow>
-          <ChannelFormRow label="Model" hint="Blank uses the profile default model.">
-            <div className="channelControl">
-              <select
-                aria-label="Channel model"
-                disabled={busy}
-                onChange={(event) => updateDraft({ model: event.currentTarget.value })}
-                value={draft.model}
-              >
-                <option value="">Profile default</option>
-                {modelOptions.map((option) => (
-                  <option key={option} value={option}>{modelOptionLabel(option, channel, controls)}</option>
-                ))}
-              </select>
-            </div>
-          </ChannelFormRow>
+                  <option value="">Profile default</option>
+                  {modelOptions.map((option) => (
+                    <option key={option} value={option}>{modelOptionLabel(option, channel, controls)}</option>
+                  ))}
+                </select>
+              </div>
+            </ChannelFormRow>
+          ) : (
+            <ChannelFormRow label="Model" hint="This Runtime Profile does not declare a Channel-safe model control.">
+              <span className="channelFieldHint">Uses runtime default</span>
+            </ChannelFormRow>
+          )}
           <ChannelFormRow label="Workspace" hint="Changing workspace starts a fresh channel thread on the next message. Current running work is not interrupted.">
             <div className="channelControl channelWorkspaceControl">
               <select

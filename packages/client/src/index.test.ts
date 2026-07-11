@@ -102,7 +102,7 @@ describe("parseThreadSnapshot", () => {
       },
       thread: {
         id: "thread-1",
-        backend: { kind: "psychevo", nativeId: "thread-1", runtimeRef: "native" },
+        backend: { kind: "psychevo", sessionHandle: "thread-1", runtimeRef: "native" },
         sourceKey: "web:cwd:abc"
       },
       entries: [

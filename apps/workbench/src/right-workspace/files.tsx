@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, ChevronRight, Edit3, FileText, FolderTree, Save, Search, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, Edit3, ExternalLink, FileText, FolderTree, Save, Search, X } from "lucide-react";
 import { MarkdownText } from "@psychevo/components";
 import type { WorkspaceFileEntry, WorkspaceFileReadResult, WorkspaceFileWriteResult } from "@psychevo/protocol";
 import { highlightToHtml, languageForPath } from "../highlight";
 import type { WorkspaceFileTreeItem } from "../types";
+import { HtmlStaticPreview } from "./preview";
 import { WorkspaceFileTree, absoluteWorkspacePath } from "./tree";
 
 export function FilesPanel({
@@ -18,6 +19,8 @@ export function FilesPanel({
   onCopyText,
   onDirtyChange,
   onOpen,
+  onOpenHtmlPreview,
+  htmlExecutionActive,
   onSave
 }: {
   files: WorkspaceFileEntry[];
@@ -31,6 +34,8 @@ export function FilesPanel({
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onDirtyChange(tabId: string, dirty: boolean): void;
   onOpen(path: string): void;
+  onOpenHtmlPreview(path: string, content: string): void;
+  htmlExecutionActive: boolean;
   onSave(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
 }) {
   const treeItems = useMemo(() => workspaceFileTreeItems(files), [files]);
@@ -180,20 +185,32 @@ export function FilesPanel({
             {preview?.truncated && <b>truncated</b>}
             {dirty && <b>unsaved</b>}
             {previewContent !== null && !editing && (
-              <button
-                aria-label={`Edit ${previewPath}`}
-                disabled={!editable}
-                onClick={() => {
-                  setDraft(previewContent);
-                  setBaseRevision(preview?.revision ?? null);
-                  setEditing(true);
-                  requestAnimationFrame(() => textareaRef.current?.focus());
-                }}
-                title={editable ? "Edit" : preview?.editableReason ?? "This file cannot be edited"}
-                type="button"
-              >
-                <Edit3 size={13} />
-              </button>
+              <>
+                {isHtmlFile(previewPath) && (
+                  <button
+                    aria-label={`Open HTML preview for ${previewPath}`}
+                    onClick={() => onOpenHtmlPreview(previewPath, previewContent)}
+                    title="Open HTML preview"
+                    type="button"
+                  >
+                    <ExternalLink size={13} />
+                  </button>
+                )}
+                <button
+                  aria-label={`Edit ${previewPath}`}
+                  disabled={!editable}
+                  onClick={() => {
+                    setDraft(previewContent);
+                    setBaseRevision(preview?.revision ?? null);
+                    setEditing(true);
+                    requestAnimationFrame(() => textareaRef.current?.focus());
+                  }}
+                  title={editable ? "Edit" : preview?.editableReason ?? "This file cannot be edited"}
+                  type="button"
+                >
+                  <Edit3 size={13} />
+                </button>
+              </>
             )}
           </div>
           {previewContent !== null ? (
@@ -302,6 +319,13 @@ export function FilesPanel({
                   text={previewContent}
                 />
               </div>
+            ) : isHtmlFile(previewPath) ? (
+              <HtmlStaticPreview
+                active={htmlExecutionActive}
+                content={previewContent}
+                documentId={previewPath}
+                title={previewPath}
+              />
             ) : (
               <HighlightedCodePreview content={previewContent} path={previewPath} />
             )
@@ -362,6 +386,11 @@ function workspaceFileTreeItems(files: WorkspaceFileEntry[]): WorkspaceFileTreeI
 function isMarkdownFile(path: string): boolean {
   const extension = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase();
   return extension === "md" || extension === "markdown";
+}
+
+function isHtmlFile(path: string): boolean {
+  const extension = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase();
+  return extension === "html" || extension === "htm";
 }
 
 export function isUnsupportedPreviewFile(path: string): boolean {

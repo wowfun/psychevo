@@ -25,12 +25,16 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
       await expect(form).toBeVisible();
       await form.getByLabel("ID").fill("visual-acp");
-      await form.getByLabel("Command JSON").fill(JSON.stringify({
+      const commandJson = form.getByLabel("Command JSON");
+      await commandJson.fill(JSON.stringify({
         command: "python3",
         args: [script],
         env: {}
       }, null, 2));
       await expect(form.getByRole("button", { name: "Save" })).toBeEnabled();
+      await commandJson.blur();
+      await commandJson.evaluate((element) => { element.scrollTop = 0; });
+      expect(await commandJson.evaluate((element) => element.scrollTop)).toBe(0);
       await capture(page, testInfo, `01-backend-form-${projectSuffix(isMobile)}`);
       await form.getByRole("button", { name: "Save" }).click();
       await expect(form).toBeHidden({ timeout: 30_000 });
@@ -48,16 +52,16 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openPanel(page, isMobile, "Transcript");
       await page.getByRole("button", { name: "Agent", exact: true }).click();
-      const agentPopover = page.getByRole("dialog", { name: "Agent and runtime" });
+      const agentPopover = page.getByRole("dialog", { name: "Agent Definition" });
       const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
       await expect(agentGroup.getByRole("radio", { name: "visual-acp" })).toBeHidden();
-      const runtimeGroup = agentPopover.getByRole("radiogroup", { name: "Runtime" });
-      await expect(runtimeGroup.getByRole("radio", { name: "visual-acp" })).toBeVisible();
-      await runtimeGroup.getByRole("radio", { name: "visual-acp" }).click();
-      const modeSelect = page.getByRole("combobox", { name: "visual-acp mode" });
-      await expect(modeSelect).toBeVisible();
-      await expect(modeSelect).toContainText("Review");
-      await modeSelect.selectOption({ label: "Review" });
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
+      await page.getByRole("button", { name: "Runtime Profile", exact: true }).click();
+      const runtimePopover = page.getByRole("dialog", { name: "Runtime Profile selection" });
+      const runtimeGroup = runtimePopover.getByRole("radiogroup", { name: "Runtime" });
+      await expect(runtimeGroup.getByRole("radio", { name: "visual-acp (ACP)" })).toBeVisible();
+      await runtimeGroup.getByRole("radio", { name: "visual-acp (ACP)" }).click();
+      await expect(page.getByLabel("Runtime control state")).toHaveText("Runtime default");
 
       await page.getByPlaceholder("Ask Psychevo...").fill("Exercise the ACP standard event stream.");
       await page.getByRole("button", { name: "Send message" }).click();
@@ -68,7 +72,7 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await expect(assistantMessage).toContainText("streaming hello");
       await expectVisibleTextGrowth(assistantMessage);
       await expect(assistantMessage).toContainText("model=lmstudio/noop");
-      await expect(assistantMessage).toContainText("mode=review");
+      await expect(assistantMessage).toContainText("mode=build");
       await expect(page.locator(".pevo-evidence").filter({ hasText: "Run visual tool" })).toBeVisible();
       await expect(page.locator(".pevo-evidence").filter({ hasText: "Plan" })).toContainText("Patch ACP bridge");
       await assertNoHorizontalOverflow(page, page.getByRole("region", { name: "Transcript" }));
@@ -116,7 +120,7 @@ import json
 import sys
 import time
 
-model_value = "unset"
+model_value = "lmstudio/noop"
 mode_value = "build"
 
 def send(value):
@@ -134,7 +138,7 @@ def config_options():
         "name": "Model",
         "category": "model",
         "type": "select",
-        "currentValue": model_value if model_value != "unset" else "lmstudio/noop",
+        "currentValue": model_value,
         "options": [
             {"value": "lmstudio/noop", "name": "Noop"}
         ]

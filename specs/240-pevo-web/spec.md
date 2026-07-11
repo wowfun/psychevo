@@ -126,6 +126,13 @@ warning threshold. The build must not silence this warning by raising the
 threshold when a maintainable chunk split is available. Workspace package
 chunks must use explicit boundaries so client runtime chunks do not absorb
 generated protocol schema modules or their validation vendor dependencies.
+Lazy-loaded rich-renderer dependencies, including Mermaid and its parser,
+layout, math, and diagram-rendering packages, must stay in named async vendor
+groups instead of being absorbed into a monolithic fallback `vendor` chunk.
+If an upstream lazy dependency ships a single generated ESM module that cannot
+be split by maintainable package or feature boundaries, the warning limit may
+be raised narrowly to the smallest stable value that admits that module after
+all other large chunks have been split.
 
 Native Desktop reuses Workbench through the host/runtime interface, but native
 packaging, Tauri bridge behavior, and Desktop window lifecycle belong to
@@ -179,6 +186,23 @@ Workbench resource creation uses shared component primitives for action
 buttons, form fields, and create/edit panel shells so `New`, `Add`, `Install`,
 `Connect`, and `Set up` flows stay visually and behaviorally consistent across
 Sessions, Workspace, Automations, Settings, and Capabilities.
+
+## Runtime Provenance And Attention
+
+Composer reads runtime/context/read and independently selects Agent Definition
+and Runtime Profile before the first turn. After binding, the selector becomes
+an immutable provenance capsule, such as Codex · Direct. Its only switch action
+starts a new thread; it never mutates the current thread.
+
+The capsule is the only new runtime visual signature. It uses existing
+Workbench type, spacing, and semantic status colours rather than runtime brand
+colours. Runtime controls render as Runtime default, read-only current, or
+selectable. Shared Attention carries runtime/profile and parent/child origin and
+states the exact authorization lifetime.
+
+The leader-first panel visually separates controllable Psychevo-managed members
+from read-only runtime-native activity. A read-only native child tab omits
+composer and control affordances and loads history lazily.
 
 ## Visual Direction
 

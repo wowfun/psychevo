@@ -88,6 +88,20 @@
   opacity: 0.6;
 }
 
+.composerRequestAttention {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+  line-height: 1.35;
+}
+
+.composerRequestAttention span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .composerClarifyQuestions {
   display: grid;
   gap: 8px;

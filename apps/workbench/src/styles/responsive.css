@@ -167,6 +167,18 @@
     max-width: min(190px, calc(100vw - 112px));
   }
 
+  .agentRuntimeSelector:first-child .agentRuntimeButton {
+    max-width: 132px;
+  }
+
+  .runtimeProfileSelector .agentRuntimeButton {
+    max-width: min(174px, calc(100vw - 154px));
+  }
+
+  .runtimeControlState {
+    max-width: min(170px, calc(100vw - 32px));
+  }
+
   .composerRuntimeControls .statusSelect select {
     width: 96px;
   }

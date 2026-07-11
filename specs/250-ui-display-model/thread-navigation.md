@@ -147,9 +147,10 @@ on any live transcript entry emitted for child work. A parent transcript must
 not render child `Thinking`, tool, text, diagnostic, or terminal entries as
 ordinary parent entries. When the subagent thread is opened, the same scoped
 events are routed to the child transcript using ordinary transcript projection.
-If a surface retained child live-event backlog before the child was opened,
-opening the child replays that backlog through the same reconciliation rules as
-normal live transcript events.
+Interactive surfaces retain a bounded, ordered child live-event backlog before
+the child is opened. Opening the child replays that backlog through the same
+reconciliation rules as normal live transcript events and then continues with
+future scoped updates.
 Failed and interrupted child-thread turns use the shared turn lifecycle
 projection; parent Agent blocks may summarize child status, but the child
 thread transcript remains the full child-session inspection surface.

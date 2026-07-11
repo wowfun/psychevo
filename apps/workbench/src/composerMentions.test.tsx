@@ -807,6 +807,28 @@ describe("Composer completion mentions", () => {
     expect(screen.queryByRole("tablist", { name: "Turn mode" })).toBeNull();
   });
 
+  it("queues running-turn input when steer is not an observed runtime capability", () => {
+    const onSteer = vi.fn();
+    const onSubmit = vi.fn();
+    render(
+      <Composer
+        running
+        steerAvailable={false}
+        onInterrupt={vi.fn()}
+        onSteer={onSteer}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "next queued turn" } });
+
+    expect(screen.queryByRole("tablist", { name: "Turn mode" })).toBeNull();
+    fireEvent.submit(textarea.closest("form") as HTMLFormElement);
+    expect(onSteer).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith("next queued turn", []);
+  });
+
   it("grows the textarea with multiline input and clamps at the maximum height", () => {
     render(
       <Composer

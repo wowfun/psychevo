@@ -6,6 +6,7 @@ import type {
   ChannelSourceBindingView,
   GatewayEvent,
   GatewayInputPart,
+  RuntimeHistoryFidelityView,
   SessionUsageSummaryView,
   TerminalExitedPayload,
   TerminalOutputPayload,
@@ -17,6 +18,8 @@ import type {
 } from "@psychevo/protocol";
 
 export type ContextUsageCategory = ContextReadResult["categories"][number];
+
+export type AgentContribution = "instructions" | "tools" | "mcp" | "skills";
 
 export type WorkbenchAgent = {
   name: string;
@@ -31,6 +34,8 @@ export type WorkbenchAgent = {
   entrypoints: string[];
   tools: string[];
   mcpServers: string[];
+  contributions: AgentContribution[];
+  optionalContributions: AgentContribution[];
   diagnostics: WorkbenchDiagnostic[];
   backend?: { ref?: string } | null;
 };
@@ -102,7 +107,29 @@ export type WorkbenchCommand = {
   alternateAction: CommandAlternateAction | null;
 };
 
-export type RightWorkspaceTabKind = "review" | "terminal" | "files" | "debug" | "sideConversation" | "agentSession" | "team";
+export type RightWorkspacePreview = {
+  content: string;
+  kind: "html" | "markdown";
+  path?: string | null;
+  title: string;
+};
+
+export type RightWorkspaceBrowserState = {
+  address: string;
+  currentUrl: string | null;
+  reloadKey: number;
+};
+
+export type RightWorkspaceTabKind =
+  | "review"
+  | "terminal"
+  | "files"
+  | "debug"
+  | "sideConversation"
+  | "agentSession"
+  | "team"
+  | "browser"
+  | "preview";
 
 export type RightWorkspaceTab = {
   id: string;
@@ -110,10 +137,16 @@ export type RightWorkspaceTab = {
   title: string;
   threadId?: string | null;
   parentThreadId?: string | null;
+  runtimeRef?: string | null;
+  runtimeStatus?: string | null;
+  runtimeReadOnly?: boolean;
+  historyFidelity?: RuntimeHistoryFidelityView | null;
   pendingPrompt?: string | null;
   path?: string | null;
   diff?: WorkspaceDiffResult | null;
   file?: WorkspaceFileReadResult | null;
+  browser?: RightWorkspaceBrowserState;
+  preview?: RightWorkspacePreview | null;
   message?: string | null;
 };
 

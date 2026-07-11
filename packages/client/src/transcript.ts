@@ -353,6 +353,7 @@ function mergeCommittedEntries(
     enrichCommittedAgentTargetsFromLive(entry, snapshot.entries, turnId)
   );
   let entries = snapshot.entries.filter((entry) => !isLiveOverlayForTurn(entry, turnId));
+  entries = removeDetachedOptimisticPrompt(entries, enrichedCommittedEntries);
   for (const entry of enrichedCommittedEntries) {
     if (isHiddenTranscriptEntry(entry)) {
       continue;
@@ -362,15 +363,51 @@ function mergeCommittedEntries(
   return sortTranscriptEntries(entries);
 }
 
+function removeDetachedOptimisticPrompt(
+  entries: TranscriptEntry[],
+  committedEntries: TranscriptEntry[]
+): TranscriptEntry[] {
+  const remaining = [...entries];
+  for (const committed of committedEntries) {
+    if (committed.role !== "user" || committed.messageSeq === null) {
+      continue;
+    }
+    const text = normalizedEntryText(committed);
+    if (!text) {
+      continue;
+    }
+    let matched = -1;
+    for (let index = remaining.length - 1; index >= 0; index -= 1) {
+      const candidate = remaining[index];
+      if (
+        candidate?.source === OPTIMISTIC_SOURCE &&
+        candidate.role === "user" &&
+        candidate.messageSeq === null &&
+        !candidate.turnId &&
+        (!candidate.threadId || candidate.threadId === committed.threadId) &&
+        normalizedEntryText(candidate) === text
+      ) {
+        matched = index;
+        break;
+      }
+    }
+    if (matched >= 0) {
+      remaining.splice(matched, 1);
+    }
+  }
+  return remaining;
+}
+
 function mergeTerminalCommittedEntries(
   snapshot: ThreadSnapshot,
   turnId: string,
   committedEntries: TranscriptEntry[]
 ): TranscriptEntry[] {
-  let entries = [...snapshot.entries];
-  for (const entry of committedEntries.map((candidate) =>
+  const enrichedCommittedEntries = committedEntries.map((candidate) =>
     enrichCommittedAgentTargetsFromLive(candidate, snapshot.entries, turnId)
-  )) {
+  );
+  let entries = removeDetachedOptimisticPrompt(snapshot.entries, enrichedCommittedEntries);
+  for (const entry of enrichedCommittedEntries) {
     if (isHiddenTranscriptEntry(entry)) {
       continue;
     }

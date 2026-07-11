@@ -84,6 +84,55 @@ test.describe("Workbench New/Create visual contract", () => {
       await server.stop();
     }
   });
+
+  test("keeps runtime-backed Team identity visible and reachable", async ({ page, isMobile }, testInfo) => {
+    await page.setViewportSize(isMobile ? { width: 390, height: 900 } : { width: 1440, height: 960 });
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await openTopLevelView(page, isMobile, "Capabilities");
+      const capabilities = page.getByRole("region", { name: "Capabilities" });
+      await capabilities.getByRole("tab", { name: "Agents" }).click();
+      await capabilities.getByRole("tab", { name: "Teams" }).click();
+      await capabilities.getByRole("button", { name: "Create team" }).click();
+
+      const teamDetail = capabilities.getByRole("complementary", { name: "Team definition detail" });
+      const teamForm = teamDetail.getByRole("form", { name: "Team definition" });
+      await teamForm.getByLabel("Team name").fill("runtime-review");
+      await teamForm.getByLabel("Team description").fill("Review with a captured direct runtime profile");
+      await teamForm.getByLabel("Team leader").fill("general");
+      const members = teamForm.getByLabel("Team members");
+      await members.fill("reviewer: general | role=review | runtime=codex | option.mode=auto-review");
+      await expect(members).toHaveValue(/runtime=codex/);
+      await members.evaluate((element) => {
+        const textarea = element as HTMLTextAreaElement;
+        textarea.setSelectionRange(0, 0);
+        textarea.scrollLeft = 0;
+        textarea.scrollTop = 0;
+      });
+      await scrollCapabilityDetailTo(members);
+
+      await expectPanelInViewport(page, teamDetail, "runtime-backed Team editor");
+      await assertNoHorizontalOverflow(page, teamForm);
+      await expect(teamForm.locator("small")).toContainText("runtime=codex");
+      await captureWorkbench(page, testInfo, `new-create-capabilities-team-runtime-${isMobile ? "mobile" : "desktop"}`);
+
+      const save = teamForm.getByRole("button", { name: "Save" });
+      await scrollCapabilityDetailTo(save);
+      await expect(save).toBeVisible();
+      await save.click();
+      const savedTeam = capabilities.getByRole("button", { name: "Team runtime-review" });
+      await expect(savedTeam).toBeVisible();
+      await savedTeam.click();
+      await capabilities.getByRole("button", { name: "Edit runtime-review Markdown" }).click();
+      const persistedMembers = capabilities.getByRole("form", { name: "Team definition" }).getByLabel("Team members");
+      await expect(persistedMembers).toHaveValue(/runtime=codex/);
+      await expect(persistedMembers).toHaveValue(/option\.mode=auto-review/);
+    } finally {
+      await server.stop();
+    }
+  });
 });
 
 async function openTopLevelView(page: Page, isMobile: boolean, name: "Automations" | "Capabilities" | "Settings") {
@@ -110,6 +159,14 @@ async function openCapabilityPanel(page: Page, capabilities: Locator, tabName: s
   await capabilities.getByRole("tab", { name: tabName }).click();
   await expect(page).toHaveURL(/./);
   await capabilities.getByRole("button", { name: actionName }).click();
+}
+
+async function scrollCapabilityDetailTo(target: Locator) {
+  await target.evaluate((element) => {
+    const detail = element.closest<HTMLElement>(".capabilityDetail");
+    if (!detail) return;
+    detail.scrollTo({ left: 0, top: Math.max(0, (element as HTMLElement).offsetTop - 24) });
+  });
 }
 
 async function expectPanelInViewport(page: Page, panel: Locator, label: string) {

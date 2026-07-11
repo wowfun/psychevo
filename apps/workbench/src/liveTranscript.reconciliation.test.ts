@@ -341,7 +341,7 @@ describe("applyLiveTranscriptEvent", () => {
 
     expect(started.thread).toEqual({
       id: "thread-2",
-      backend: { kind: "psychevo", nativeId: "thread-2", runtimeRef: "native" },
+      backend: { kind: "psychevo", sessionHandle: "thread-2", runtimeRef: "native" },
       sourceKey: "web:test"
     });
     expect(started.activity.activeTurnId).toBe("turn-2");

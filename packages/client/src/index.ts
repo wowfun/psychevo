@@ -106,6 +106,20 @@ import {
   type PluginUninstallParams,
   type RpcNotification,
   type RuntimeHealthCheckParams,
+  type RuntimeAuthActionParams,
+  type RuntimeAuthActionResult,
+  type RuntimeAccountRateLimitsReadParams,
+  type RuntimeAccountRateLimitsReadResult,
+  type RuntimeContextReadParams,
+  type RuntimeContextReadResult,
+  type RuntimeControlSetParams,
+  type RuntimeControlSetResult,
+  type RuntimeGoalClearParams,
+  type RuntimeGoalClearResult,
+  type RuntimeGoalReadParams,
+  type RuntimeGoalReadResult,
+  type RuntimeGoalSetParams,
+  type RuntimeGoalSetResult,
   type RuntimeOptionsParams,
   type RuntimeOptionsResult,
   type RuntimeProfileDeleteParams,
@@ -122,8 +136,9 @@ import {
   type RuntimeSessionListResult,
   type RuntimeSessionMutationResult,
   type RuntimeSessionParams,
+  type RuntimeSessionReadParams,
   type RuntimeSessionRenameParams,
-  type RuntimeSessionRollbackParams,
+  type RuntimeSessionRevisionParams,
   type RuntimeSnapshotParams,
   type RuntimeSnapshotResult,
   type SettingsReadParams,
@@ -163,6 +178,8 @@ import {
   type ToolSetEnabledParams,
   type ThreadBrowserParams,
   type ThreadBrowserResult,
+  type ThreadCompactStartParams,
+  type ThreadCompactStartResult,
   type ThreadDeleteResult,
   type ThreadIdParams,
   type ThreadListParams,
@@ -331,6 +348,13 @@ export interface GatewayRequestParams {
   "mcp/test": McpNameParams;
   "mcp/upsert": McpUpsertParams;
   "runtime/options": RuntimeOptionsParams;
+  "runtime/context/read": RuntimeContextReadParams;
+  "runtime/control/set": RuntimeControlSetParams;
+  "runtime/auth/action": RuntimeAuthActionParams;
+  "runtime/goal/read": RuntimeGoalReadParams;
+  "runtime/goal/set": RuntimeGoalSetParams;
+  "runtime/goal/clear": RuntimeGoalClearParams;
+  "runtime/account/rateLimits/read": RuntimeAccountRateLimitsReadParams;
   "runtime/profile/delete": RuntimeProfileDeleteParams;
   "runtime/profile/list": RuntimeProfileListParams;
   "runtime/profile/read": RuntimeProfileReadParams;
@@ -339,13 +363,16 @@ export interface GatewayRequestParams {
   "runtime/snapshot": RuntimeSnapshotParams;
   "runtime/health/check": RuntimeHealthCheckParams;
   "runtime/session/list": RuntimeSessionListParams;
-  "runtime/session/read": RuntimeSessionParams;
+  "runtime/session/read": RuntimeSessionReadParams;
+  "runtime/session/attach": RuntimeSessionParams;
   "runtime/session/resume": RuntimeSessionParams;
   "runtime/session/archive": RuntimeSessionParams;
   "runtime/session/unarchive": RuntimeSessionParams;
   "runtime/session/delete": RuntimeSessionParams;
   "runtime/session/rename": RuntimeSessionRenameParams;
-  "runtime/session/rollback": RuntimeSessionRollbackParams;
+  "runtime/session/fork": RuntimeSessionParams;
+  "runtime/session/revert": RuntimeSessionRevisionParams;
+  "runtime/session/unrevert": RuntimeSessionRevisionParams;
   "settings/read": SettingsReadParams;
   "settings/update": SettingsUpdateParams;
   "shell/start": ShellStartParams;
@@ -358,6 +385,7 @@ export interface GatewayRequestParams {
   "terminal/write": TerminalWriteParams;
   "thread/archive": ThreadIdParams;
   "thread/browser": ThreadBrowserParams;
+  "thread/compact/start": ThreadCompactStartParams;
   "thread/delete": ThreadIdParams;
   "thread/list": ThreadListParams;
   "thread/read": ThreadReadParams;
@@ -472,6 +500,13 @@ export interface GatewayRequestResults {
   "mcp/test": GatewayJsonResult;
   "mcp/upsert": GatewayJsonResult;
   "runtime/options": RuntimeOptionsResult;
+  "runtime/context/read": RuntimeContextReadResult;
+  "runtime/control/set": RuntimeControlSetResult;
+  "runtime/auth/action": RuntimeAuthActionResult;
+  "runtime/goal/read": RuntimeGoalReadResult;
+  "runtime/goal/set": RuntimeGoalSetResult;
+  "runtime/goal/clear": RuntimeGoalClearResult;
+  "runtime/account/rateLimits/read": RuntimeAccountRateLimitsReadResult;
   "runtime/profile/delete": RuntimeProfileDeleteResult;
   "runtime/profile/list": RuntimeProfileListResult;
   "runtime/profile/read": RuntimeProfileReadResult;
@@ -481,12 +516,15 @@ export interface GatewayRequestResults {
   "runtime/health/check": RuntimeProfileView;
   "runtime/session/list": RuntimeSessionListResult;
   "runtime/session/read": RuntimeSessionMutationResult;
+  "runtime/session/attach": RuntimeSessionMutationResult;
   "runtime/session/resume": RuntimeSessionMutationResult;
   "runtime/session/archive": RuntimeSessionMutationResult;
   "runtime/session/unarchive": RuntimeSessionMutationResult;
   "runtime/session/delete": RuntimeSessionMutationResult;
   "runtime/session/rename": RuntimeSessionMutationResult;
-  "runtime/session/rollback": RuntimeSessionMutationResult;
+  "runtime/session/fork": RuntimeSessionMutationResult;
+  "runtime/session/revert": RuntimeSessionMutationResult;
+  "runtime/session/unrevert": RuntimeSessionMutationResult;
   "settings/read": SettingsReadResult;
   "settings/update": SettingsReadResult;
   "shell/start": ShellStartResult;
@@ -499,6 +537,7 @@ export interface GatewayRequestResults {
   "terminal/write": TerminalMutationResult;
   "thread/archive": ThreadMutationResult;
   "thread/browser": ThreadBrowserResult;
+  "thread/compact/start": ThreadCompactStartResult;
   "thread/delete": ThreadDeleteResult;
   "thread/list": ThreadListResult;
   "thread/read": ThreadSnapshot;

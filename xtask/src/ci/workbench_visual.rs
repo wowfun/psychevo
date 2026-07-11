@@ -13,6 +13,26 @@ const PLAYWRIGHT_INSTALL_HINT: &str = "cargo xtask doctor deps install --only pl
 const WORKBENCH_VISUAL_SPECS: &[&str] = &[
     "apps/workbench/e2e/composer-visual.spec.ts",
     "apps/workbench/e2e/acp-peer-visual.spec.ts",
+    "apps/workbench/e2e/new-create-visual.spec.ts",
+    "apps/workbench/e2e/runtime-profile-visual.spec.ts",
+];
+const REQUIRED_RUNTIME_PROFILE_PROOFS: &[&str] = &[
+    "runtime-profile-provenance-chromium-desktop.png",
+    "runtime-profile-provenance-chromium-mobile.png",
+    "runtime-child-partial-history-chromium-desktop.png",
+    "runtime-child-partial-history-chromium-mobile.png",
+    "runtime-profile-detail-chromium-desktop.png",
+    "runtime-profile-detail-chromium-mobile.png",
+    "runtime-profile-editor-chromium-desktop.png",
+    "runtime-profile-editor-chromium-mobile.png",
+    "runtime-native-sessions-chromium-desktop.png",
+    "runtime-native-sessions-chromium-mobile.png",
+    "runtime-shared-attention-chromium-desktop.png",
+    "runtime-shared-attention-chromium-mobile.png",
+    "runtime-opencode-timeline-chromium-desktop.png",
+    "runtime-opencode-timeline-chromium-mobile.png",
+    "runtime-opencode-revert-chromium-desktop.png",
+    "runtime-opencode-revert-chromium-mobile.png",
 ];
 
 pub(crate) fn run_workbench_visual(
@@ -103,8 +123,31 @@ pub(crate) fn run_workbench_visual(
         ]);
     apply_workbench_visual_env(&mut test, root, artifact_root, &screenshot_root);
     test.env_remove("NO_COLOR");
-    let outcome = run_logged_process("workbench visual playwright", &mut test, log)?;
+    let outcome = run_logged_process("workbench visual playwright", &mut test, Arc::clone(&log))?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    if outcome.passed {
+        let missing = REQUIRED_RUNTIME_PROFILE_PROOFS
+            .iter()
+            .filter(|name| !screenshot_root.join(name).is_file())
+            .copied()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            for name in &missing {
+                write_mirrored_line(
+                    &log,
+                    &format!(
+                        "missing targeted Runtime Profile visual proof: {}",
+                        screenshot_root.join(name).display()
+                    ),
+                )?;
+            }
+            return Ok(ProcessOutcome {
+                passed: false,
+                exit_code: outcome.exit_code,
+                mirrored_diagnostics: mirrored_diagnostics + missing.len(),
+            });
+        }
+    }
     Ok(ProcessOutcome {
         passed: outcome.passed,
         exit_code: outcome.exit_code,

@@ -174,6 +174,74 @@ describe("Workbench session status observability", () => {
     expect(within(home).queryByText("8.0k/200.0k (4.0%)")).toBeNull();
   });
 
+  it("applies workspace inventory refreshes from completed child turns", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("parent-thread", "Parent session")];
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.cwd,
+      entries: [],
+      truncated: false
+    };
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Parent session"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "parent-thread" })
+      });
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "workspace/files")).toBe(true);
+    });
+    fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+    expect(within(files).queryByRole("treeitem", { name: /result\.html/u })).toBeNull();
+
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.cwd,
+      entries: [
+        { path: "generated", name: "generated", kind: "directory", depth: 0 },
+        { path: "generated/result.html", name: "result.html", kind: "file", depth: 1 }
+      ],
+      truncated: false
+    };
+    const workspaceRequestCount = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "workspace/files"
+    )).length;
+
+    await act(async () => {
+      for (const subscriber of gatewayMock.subscribers) {
+        subscriber({
+          method: "gateway/event",
+          params: {
+            type: "turnCompleted",
+            threadId: "child-thread",
+            turnId: "child-turn",
+            turn: {
+              id: "child-turn",
+              threadId: "child-thread",
+              status: "completed",
+              outcome: "normal",
+              error: null,
+              startedAtMs: 1,
+              completedAtMs: 2
+            },
+            committedEntries: []
+          }
+        });
+      }
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => (
+        entry.method === "workspace/files"
+      )).length).toBeGreaterThan(workspaceRequestCount);
+    });
+    expect(await within(files).findByRole("treeitem", { name: /result\.html/u })).toBeTruthy();
+  });
+
   it("opens the composer context usage popover without revealing Status", async () => {
     render(<App />);
 

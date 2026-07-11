@@ -3,11 +3,13 @@ import { ExternalLink, Play, RefreshCw, Send, Square, Users } from "lucide-react
 import type { GatewayClient } from "@psychevo/client";
 import type { TranscriptAgentSession } from "@psychevo/components";
 import type { AgentRunView, GatewayRequestScope, TeamMemberView, TeamStatusResult } from "@psychevo/protocol";
+import type { RightWorkspaceTab } from "../types";
 
 type TeamPanelProps = {
   client: GatewayClient | null;
   disabled: boolean;
   latestGatewayEvent: unknown;
+  nativeActivities: RightWorkspaceTab[];
   scope: GatewayRequestScope | null;
   threadId: string | null;
   onOpenAgentSession(session: TranscriptAgentSession): void;
@@ -17,6 +19,7 @@ export function TeamPanel({
   client,
   disabled,
   latestGatewayEvent,
+  nativeActivities,
   scope,
   threadId,
   onOpenAgentSession
@@ -86,18 +89,19 @@ export function TeamPanel({
       <div className="teamPanelBody">
         {error && <p className="teamPanelError" role="alert">{error}</p>}
         {!threadId && <p className="teamPanelEmpty">Start or resume a session to view team status.</p>}
-        {threadId && !loading && !team && !mission && agents.length === 0 && (
+        {threadId && !loading && !team && !mission && agents.length === 0 && nativeActivities.length === 0 && (
           <p className="teamPanelEmpty">No team or mission is active for this session.</p>
         )}
-        {(team || mission || agents.length > 0) && (
+        {(team || mission || agents.length > 0 || nativeActivities.length > 0) && (
           <>
             <div className="teamOverview" aria-label="Team overview">
               <TeamMetric label="Mission" value={mission?.status ?? "-"} />
               <TeamMetric label="Team" value={team?.teamName ?? mission?.teamName ?? "-"} />
-              <TeamMetric label="Children" value={String(agents.length)} />
+              <TeamMetric label="Managed" value={String(agents.length)} />
+              <TeamMetric label="Native" value={String(nativeActivities.length)} />
               <TeamMetric label="Cap" value={capLabel(team?.maxParallelAgents, controls?.concurrencyCap)} />
             </div>
-            <div className="teamControlStrip" aria-label="Team controls">
+            {(team || mission || agents.length > 0) && <div className="teamControlStrip" aria-label="Team controls">
               <span>{controls?.spawningPaused ? "Spawning paused" : "Spawning active"}</span>
               <button
                 disabled={!canControl || controlBusy !== null || controls?.spawningPaused === true}
@@ -115,15 +119,22 @@ export function TeamPanel({
                 <Play size={13} />
                 <span>Resume spawning</span>
               </button>
-            </div>
-            <div className="teamMemberRows" aria-label="Team members">
+            </div>}
+            {(team || mission || agents.length > 0) && <div className="teamMemberRows" aria-label="Psychevo-managed members">
+              <h3 className="teamTrackHeading">Psychevo-managed members</h3>
               {memberRows(team?.members ?? [], groupedAgents).map((row) => (
                 <section className="teamMemberRow" key={row.id} aria-label={`Member ${row.id}`}>
                   <header>
                     <Users size={15} />
                     <div>
                       <h3>{row.id}</h3>
-                      <p>{[row.member?.agent, row.member?.role, row.member?.description].filter(Boolean).join(" · ") || "Unassigned"}</p>
+                      <p>{[
+                        "Psychevo-managed",
+                        row.member?.agent,
+                        row.member?.runtimeRef ? `via ${runtimeRefLabel(row.member.runtimeRef)}` : "via Native",
+                        row.member?.role,
+                        row.member?.description
+                      ].filter(Boolean).join(" · ")}</p>
                     </div>
                     <span>{row.agents.length}</span>
                   </header>
@@ -155,7 +166,56 @@ export function TeamPanel({
                   )}
                 </section>
               ))}
-            </div>
+            </div>}
+            {nativeActivities.length > 0 && (
+              <div className="teamMemberRows" aria-label="Runtime-native activity">
+                <h3 className="teamTrackHeading">Runtime-native activity</h3>
+                {nativeActivities.map((activity) => (
+                  <section className="teamMemberRow" key={activity.id} aria-label={`Native activity ${activity.title}`}>
+                    <header>
+                      <Users size={15} />
+                      <div>
+                        <h3>{activity.title}</h3>
+                        <p>{[
+                          runtimeRefLabel(activity.runtimeRef ?? "runtime"),
+                          "Runtime-native",
+                          activity.runtimeStatus || "observed",
+                          activity.runtimeReadOnly === false ? "Controlled upstream" : "Read-only"
+                        ].join(" · ")}</p>
+                      </div>
+                      <span>{activity.runtimeStatus || "observed"}</span>
+                    </header>
+                    <div className="teamAgentRow">
+                      <div>
+                        <strong>Native child activity</strong>
+                        <span>Owned by {runtimeRefLabel(activity.runtimeRef ?? "runtime")}; projected into a public read-only thread.</span>
+                      </div>
+                      <div className="teamAgentActions">
+                        <button
+                          aria-label={`Open ${activity.title}`}
+                          disabled={!activity.threadId}
+                          onClick={() => {
+                            if (!activity.threadId) return;
+                            onOpenAgentSession({
+                              agentName: runtimeRefLabel(activity.runtimeRef ?? "runtime"),
+                              childSessionId: activity.threadId,
+                              parentSessionId: activity.parentThreadId ?? threadId ?? "",
+                              task: "Runtime-native activity",
+                              taskName: activity.title,
+                              title: activity.title
+                            });
+                          }}
+                          title="Open runtime-native child"
+                          type="button"
+                        >
+                          <ExternalLink size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
             {(mission?.finalSummary || team?.finalSummary) && (
               <section className="teamSummary" aria-label="Mission summary">
                 <h3>Summary</h3>
@@ -167,6 +227,13 @@ export function TeamPanel({
       </div>
     </section>
   );
+}
+
+function runtimeRefLabel(runtimeRef: string): string {
+  if (runtimeRef === "opencode") return "OpenCode";
+  if (runtimeRef === "codex") return "Codex";
+  if (runtimeRef === "native") return "Native";
+  return runtimeRef;
 }
 
 function TeamMetric({ label, value }: { label: string; value: string }) {

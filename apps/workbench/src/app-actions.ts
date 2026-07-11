@@ -25,6 +25,7 @@ import {
   type GatewayRequestScope,
   type ObservabilityReadResult,
   type RuntimeOptionsResult,
+  type RuntimeControlDescriptorView,
   type SettingsReadResult,
   type ThreadSnapshot,
   type WorkspaceChangesResult,
@@ -67,6 +68,7 @@ import {
   fileBasename,
   isUnsupportedPreviewFile
 } from "./right-workspace";
+import { runtimeControlSelections, runtimeOptionsWithModeFallback } from "./runtime-context";
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
@@ -99,7 +101,10 @@ type AppActionsParams = {
   modelTurnBlockReason: string;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
   permissionMode: string;
+  agentPairingError: string | null;
   runtimeAcceptsAgentPersona: boolean;
+  runtimeControls: RuntimeControlDescriptorView[];
+  runtimeControlValues: Record<string, unknown>;
   runtimeOptionsError: string | null;
   runtimeSessionId: string | null;
   selectedAgentName: string;
@@ -239,6 +244,15 @@ export function createAppActions(params: AppActionsParams) {
       });
       return;
     }
+    if (params.agentPairingError) {
+      params.setCommandFeedback({
+        accepted: false,
+        command: "agent",
+        message: params.agentPairingError,
+        feedbackAnchor: "composer"
+      });
+      return;
+    }
     if (params.selectedRuntimeRef !== "native" && params.runtimeOptionsError) {
       params.setCommandFeedback({
         accepted: false,
@@ -251,9 +265,12 @@ export function createAppActions(params: AppActionsParams) {
     const optimisticText = displayText?.trim()
       || text.trim()
       || params.attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
-    const runtimeOptions = params.selectedRuntimeRef !== "native" && params.selectedPeerRuntimeMode
-      ? { mode: params.selectedPeerRuntimeMode }
-      : {};
+    const runtimeOptions = params.selectedRuntimeRef === "native"
+      ? {}
+      : runtimeOptionsWithModeFallback(
+        runtimeControlSelections(params.runtimeControls, params.runtimeControlValues),
+        params.selectedPeerRuntimeMode
+      );
     params.pendingDetachedShellRef.current = null;
     params.clearCommandTransientUi();
     const requestedThreadId = params.snapshot.thread?.id ?? null;
@@ -261,11 +278,13 @@ export function createAppActions(params: AppActionsParams) {
     params.setSnapshot(prepared.snapshot);
     const result = await params.client?.request("turn/start", threadTurnStartParams({
       controls: {
-        agentName: params.runtimeAcceptsAgentPersona ? params.selectedAgentName || null : null,
+        agentName: params.selectedAgentName || null,
         mode: params.selectedRuntimeRef === "native" ? params.workMode : null,
-        model: params.selectedModel,
-        permissionMode: params.permissionMode,
-        reasoningEffort: params.selectedVariant === "none" ? null : params.selectedVariant,
+        model: params.selectedRuntimeRef === "native" ? params.selectedModel : null,
+        permissionMode: params.selectedRuntimeRef === "native" ? params.permissionMode : null,
+        reasoningEffort: params.selectedRuntimeRef === "native" && params.selectedVariant !== "none"
+          ? params.selectedVariant
+          : null,
         runtimeOptions,
         runtimeRef: params.selectedRuntimeRef,
         runtimeSessionId: params.runtimeSessionId

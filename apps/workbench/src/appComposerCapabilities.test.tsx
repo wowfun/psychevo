@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { agentRecord, gatewayMock } from "./appComposerAgent.fixture";
+import { agentRecord, gatewayMock, sessionSummary } from "./appComposerAgent.fixture";
 import { App } from "./App";
 
 describe("Workbench capabilities management", () => {
@@ -38,6 +38,7 @@ describe("Workbench capabilities management", () => {
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "plugin/list")).toBe(true);
     });
+    expect(await within(region).findByRole("button", { name: /Browser/i })).toBeTruthy();
     expect(await within(region).findByRole("button", { name: /writer-kit/i })).toBeTruthy();
 
     fireEvent.click(within(region).getByRole("tab", { name: "MCP" }));
@@ -187,7 +188,14 @@ describe("Workbench capabilities management", () => {
         mutable: true,
         path: "/tmp/project/.psychevo/teams/release.md",
         leader: "general",
-        members: [{ id: "researcher", agent: "general", role: "research" }],
+        members: [{
+          id: "researcher",
+          agent: "general",
+          role: "research",
+          runtimeRef: "codex",
+          runtimeOptions: { mode: "auto-review", effort: "high" },
+          runtimeProfileRevision: "18446744073709551614"
+        }],
         maxParallelAgents: 4,
         diagnostics: [],
         instructions: "Ship carefully.",
@@ -222,6 +230,27 @@ describe("Workbench capabilities management", () => {
 
     expect(await within(region).findByRole("button", { name: "Team release" })).toBeTruthy();
     expect(within(region).getByRole("button", { name: "Team disabled-team" })).toBeTruthy();
+    fireEvent.click(await within(region).findByRole("button", { name: "Edit release Markdown" }));
+    const editForm = await within(region).findByRole("form", { name: "Team definition" });
+    expect((within(editForm).getByLabelText("Team members") as HTMLTextAreaElement).value).toBe(
+      "researcher: general | role=research | runtime=codex | revision=18446744073709551614 | option.effort=high | option.mode=auto-review"
+    );
+    fireEvent.click(within(editForm).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "team/write",
+        params: expect.objectContaining({
+          name: "release",
+          members: [expect.objectContaining({
+            id: "researcher",
+            agent: "general",
+            runtimeRef: "codex",
+            runtimeOptions: { effort: "high", mode: "auto-review" },
+            runtimeProfileRevision: "18446744073709551614"
+          })]
+        })
+      });
+    });
     fireEvent.click(within(region).getByRole("switch", { name: "Enable disabled-team" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -263,6 +292,22 @@ describe("Workbench capabilities management", () => {
   });
 
   it("manages Runtime Profiles from Agents capabilities", async () => {
+    gatewayMock.runtimeProfileRecords = gatewayMock.runtimeProfileRecords.map((profile) => profile.id === "opencode" ? {
+      ...profile,
+      backendRef: null,
+      provenance: "Direct",
+      profileRevision: "11",
+      capabilityRevision: "12",
+      defaultModel: "openai/gpt-5",
+      approvalMode: "on-request",
+      workspaceRoots: ["/tmp/project"],
+      envKeys: ["OPENCODE_CONFIG"],
+      health: { status: "needsAuth", summary: "Authentication required", commandPath: "/usr/bin/opencode", checkedAtMs: 1_700_000_000_000 },
+      readinessStages: [
+        { id: "executable", status: "ready", summary: "opencode found", observedAtMs: 1_700_000_000_000 },
+        { id: "authentication", status: "needsAuth", summary: "Run opencode auth login", observedAtMs: 1_700_000_000_000 }
+      ]
+    } : profile);
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
@@ -278,6 +323,47 @@ describe("Workbench capabilities management", () => {
     const detail = await within(region).findByRole("complementary", { name: "Runtime Profile detail" });
     expect(within(detail).getByText("opencode serve")).toBeTruthy();
     expect(within(detail).getAllByText("build")).toHaveLength(2);
+    expect(within(detail).getByText("Direct · Generated · Needs auth")).toBeTruthy();
+    expect(within(detail).getByText("Run opencode auth login")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "runtime/session/list")).toBe(false);
+    fireEvent.click(within(detail).getByRole("button", { name: "Load sessions" }));
+    expect(await within(detail).findByText("This Runtime Profile does not expose native session history.")).toBeTruthy();
+
+    fireEvent.click(within(detail).getByRole("button", { name: "Refresh Catalog" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/snapshot",
+        params: expect.objectContaining({ runtimeRef: "opencode" })
+      });
+    });
+    fireEvent.click(within(detail).getByRole("button", { name: "Repair auth" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/auth/action",
+        params: expect.objectContaining({ runtimeRef: "opencode", action: "repair" })
+      });
+    });
+    expect((await within(detail).findAllByText(/opencode auth login/)).length).toBeGreaterThan(1);
+
+    fireEvent.click(within(region).getByRole("button", { name: "Runtime Profile codex" }));
+    fireEvent.click(within(detail).getByRole("button", { name: "Repair auth" }));
+    const startLogin = await within(detail).findByRole("button", { name: "Start managed login" });
+    fireEvent.click(startLogin);
+    const loginLink = await within(detail).findByRole("link", { name: "Open login" });
+    expect(loginLink.getAttribute("href")).toBe("https://auth.example.test/codex");
+    expect(within(detail).getByText("CODE-123")).toBeTruthy();
+    fireEvent.click(within(detail).getByRole("button", { name: "Cancel login" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/auth/action",
+        params: expect.objectContaining({
+          runtimeRef: "codex",
+          action: "cancel",
+          input: { loginId: "login-fixture" }
+        })
+      });
+    });
+    fireEvent.click(opencode);
 
     fireEvent.click(within(region).getByRole("switch", { name: "Disable opencode" }));
     await waitFor(() => {
@@ -299,6 +385,420 @@ describe("Workbench capabilities management", () => {
       });
     });
     expect((await within(detail).findAllByText("OpenCode is available")).length).toBeGreaterThan(0);
+  });
+
+  it("creates, edits, and deletes structured Runtime Profile configurations", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const codex = gatewayMock.runtimeProfileRecords.find((profile) => profile.id === "codex");
+    if (!codex) throw new Error("expected Codex Runtime Profile fixture");
+    gatewayMock.runtimeProfileRecords = [
+      ...gatewayMock.runtimeProfileRecords,
+      {
+        ...codex,
+        id: "review-codex",
+        label: "Review Codex",
+        generated: false,
+        configured: true,
+        sourceTargets: ["project"],
+        envKeys: ["CODEX_HOME"]
+      },
+      {
+        ...codex,
+        id: "acp:cursor",
+        label: "Cursor (ACP)",
+        runtime: "acp",
+        backendRef: "cursor",
+        provenance: "ACP",
+        generated: true,
+        configured: false,
+        sourceTargets: []
+      }
+    ];
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "Runtime Profiles" }));
+
+    fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile acp:cursor" }));
+    let detail = await within(region).findByRole("complementary", { name: "Runtime Profile detail" });
+    expect((within(detail).getByRole("button", { name: "Customize" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(detail).getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(within(region).getByRole("button", { name: "Create profile" }));
+    let form = within(detail).getByRole("form", { name: "Runtime Profile" });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile target"), { target: { value: "profile" } });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile id"), { target: { value: "cursor-review" } });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile runtime"), { target: { value: "acp" } });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile label"), { target: { value: "Cursor Review" } });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile ACP backend ref"), { target: { value: "cursor" } });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile arguments"), { target: { value: "--stdio\n--verbose" } });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile environment"), { target: { value: "CURSOR_TRACE=1" } });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile workspace roots"), { target: { value: "/tmp/project\n/tmp/shared" } });
+    fireEvent.change(within(form).getByLabelText("Runtime Profile options"), { target: { value: "{\"trace\":true}" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create profile" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/profile/write",
+        params: expect.objectContaining({
+          id: "cursor-review",
+          target: "profile",
+          runtime: "acp",
+          label: "Cursor Review",
+          backendRef: "cursor",
+          args: ["--stdio", "--verbose"],
+          env: { CURSOR_TRACE: "1" },
+          workspaceRoots: ["/tmp/project", "/tmp/shared"],
+          options: { trace: true }
+        })
+      });
+    });
+
+    fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile review-codex" }));
+    detail = within(region).getByRole("complementary", { name: "Runtime Profile detail" });
+    fireEvent.click(within(detail).getByRole("button", { name: "Edit" }));
+    form = await within(detail).findByRole("form", { name: "Runtime Profile" });
+    expect((within(form).getByLabelText("Runtime Profile target") as HTMLSelectElement).disabled).toBe(true);
+    expect((within(form).getByLabelText("Runtime Profile id") as HTMLInputElement).disabled).toBe(true);
+    expect(within(form).getByText(/Stored values for CODEX_HOME are hidden/)).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("Runtime Profile label"), { target: { value: "Review Codex Updated" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/profile/write",
+        params: expect.objectContaining({
+          id: "review-codex",
+          target: "project",
+          runtime: "codex",
+          label: "Review Codex Updated",
+          env: {}
+        })
+      });
+    });
+
+    await waitFor(() => expect(within(region).getAllByText("Review Codex Updated").length).toBeGreaterThan(0));
+    fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile review-codex" }));
+    detail = within(region).getByRole("complementary", { name: "Runtime Profile detail" });
+    fireEvent.click(within(detail).getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/profile/delete",
+        params: expect.objectContaining({ id: "review-codex", target: "project" })
+      });
+    });
+    expect(confirm).toHaveBeenCalledWith("Delete the Project configuration for Review Codex Updated?");
+    confirm.mockRestore();
+  });
+
+  it("shows native session ownership, fidelity, and capability actions by Profile and cwd", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("native-session-1", "Native review")];
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "Runtime Profiles" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile native" }));
+
+    const sessions = await within(region).findByRole("region", { name: "Native Sessions" });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "runtime/session/list")).toBe(false);
+    fireEvent.click(within(sessions).getByRole("button", { name: "Load sessions" }));
+    expect(await within(sessions).findByText("Native review")).toBeTruthy();
+    expect(within(sessions).getByText(/Read-write · Full history/)).toBeTruthy();
+    expect(within(sessions).getByText("/tmp/project")).toBeTruthy();
+    fireEvent.click(within(sessions).getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/session/resume",
+        params: expect.objectContaining({
+          runtimeRef: "native",
+          sessionHandle: "native-session-1"
+        })
+      });
+    });
+  });
+
+  it("offers a server-advertised Resume action for an OpenCode read-only root", async () => {
+    const session = {
+      sessionHandle: "rts_opencode_read_only",
+      threadId: null,
+      title: "Transferable OpenCode root",
+      archived: false,
+      updatedAtMs: 1_700_000_000_000,
+      parentThreadId: null,
+      dedupKey: "rtd_opencode_read_only",
+      fidelity: "partial",
+      ownership: "readOnly",
+      actions: ["read", "resume", "fork"]
+    };
+    gatewayMock.runtimeSessionRequest = (method) => method === "runtime/session/list"
+      ? {
+          runtimeRef: "opencode",
+          supported: true,
+          sessions: [session],
+          nextCursor: null
+        }
+      : {
+          runtimeRef: "opencode",
+          sessionHandle: session.sessionHandle,
+          supported: true,
+          changed: true,
+          session: { ...session, ownership: "readWrite", actions: ["read", "fork"] },
+          message: null,
+          revisions: [],
+          nextCursor: null
+        };
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "Runtime Profiles" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile opencode" }));
+    const sessions = await within(region).findByRole("region", { name: "Native Sessions" });
+    fireEvent.click(within(sessions).getByRole("button", { name: "Load sessions" }));
+    expect(await within(sessions).findByText("Transferable OpenCode root")).toBeTruthy();
+    fireEvent.click(within(sessions).getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/session/resume",
+        params: expect.objectContaining({
+          runtimeRef: "opencode",
+          sessionHandle: "rts_opencode_read_only"
+        })
+      });
+    });
+  });
+
+  it("attaches an active direct session read-only and opens its public thread", async () => {
+    const activeSession = {
+      sessionHandle: "rts_active_direct",
+      threadId: null,
+      title: "Active Codex review",
+      archived: false,
+      updatedAtMs: 1_700_000_000_000,
+      parentThreadId: null,
+      dedupKey: "rtd_active_direct",
+      fidelity: "partial",
+      ownership: "active",
+      actions: ["read", "attach", "fork"]
+    };
+    gatewayMock.runtimeSessionRequest = (method) => method === "runtime/session/list"
+      ? {
+          runtimeRef: "codex",
+          supported: true,
+          sessions: [activeSession],
+          nextCursor: null
+        }
+      : {
+          runtimeRef: "codex",
+          sessionHandle: activeSession.sessionHandle,
+          supported: true,
+          changed: true,
+          session: {
+            ...activeSession,
+            threadId: "attached-public-thread",
+            ownership: "readOnly",
+            actions: ["read", "fork"]
+          },
+          message: "Attached read-only.",
+          revisions: [],
+          nextCursor: null
+        };
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "Runtime Profiles" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile codex" }));
+    const sessions = await within(region).findByRole("region", { name: "Native Sessions" });
+    fireEvent.click(within(sessions).getByRole("button", { name: "Load sessions" }));
+    expect(await within(sessions).findByText("Active Codex review")).toBeTruthy();
+    expect(within(sessions).queryByRole("button", { name: "Resume" })).toBeNull();
+    fireEvent.click(within(sessions).getByRole("button", { name: "Attach read-only" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/session/attach",
+        params: expect.objectContaining({
+          runtimeRef: "codex",
+          sessionHandle: "rts_active_direct"
+        })
+      });
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/read",
+        params: { threadId: "attached-public-thread" }
+      });
+    });
+    expect(gatewayMock.requestLog.some((entry) => (
+      entry.method === "runtime/session/resume"
+      || (entry.method === "thread/resume"
+        && (entry.params as { threadId?: string } | undefined)?.threadId === "attached-public-thread")
+    ))).toBe(false);
+  });
+
+  it("loads opaque OpenCode revision pages and invokes capability-gated revert actions", async () => {
+    const session = {
+      sessionHandle: "rts_opencode_session",
+      threadId: null,
+      title: "OpenCode review",
+      archived: false,
+      updatedAtMs: 1_700_000_000_000,
+      parentThreadId: null,
+      dedupKey: "rtd_opencode_session",
+      fidelity: "partial",
+      ownership: "readWrite",
+      actions: ["read", "revert", "unrevert"]
+    };
+    const earlierSession = {
+      ...session,
+      sessionHandle: "rts_opencode_earlier",
+      title: "Earlier OpenCode review",
+      dedupKey: "rtd_opencode_earlier",
+      actions: ["read"]
+    };
+    gatewayMock.runtimeSessionRequest = (method, params) => {
+      if (method === "runtime/session/list") {
+        const cursor = (params as { cursor?: string | null }).cursor ?? null;
+        return {
+          runtimeRef: "opencode",
+          supported: true,
+          sessions: cursor == null ? [session] : [earlierSession],
+          nextCursor: cursor == null ? "rtl_sessions_2" : null
+        };
+      }
+      if (method === "runtime/session/read") {
+        const cursor = (params as { cursor?: string | null }).cursor ?? null;
+        return {
+          runtimeRef: "opencode",
+          sessionHandle: session.sessionHandle,
+          supported: true,
+          changed: false,
+          session,
+          message: null,
+          revisions: cursor == null
+            ? [{ revisionHandle: "rtr_recent", role: "user", createdAtMs: 1_700_000_000_000 }]
+            : [{ revisionHandle: "rtr_earlier", role: "user", createdAtMs: 1_600_000_000_000 }],
+          nextCursor: cursor == null ? "rtc_earlier" : null
+        };
+      }
+      return {
+        runtimeRef: "opencode",
+        sessionHandle: session.sessionHandle,
+        supported: true,
+        changed: true,
+        session,
+        message: null,
+        revisions: [],
+        nextCursor: null
+      };
+    };
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "Runtime Profiles" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile opencode" }));
+    const sessions = await within(region).findByRole("region", { name: "Native Sessions" });
+    fireEvent.click(within(sessions).getByRole("button", { name: "Load sessions" }));
+    expect(await within(sessions).findByText("OpenCode review")).toBeTruthy();
+    expect(within(sessions).queryByRole("button", { name: "Revert" })).toBeNull();
+    fireEvent.click(within(sessions).getByRole("button", { name: "Load more sessions" }));
+    expect(await within(sessions).findByText("Earlier OpenCode review")).toBeTruthy();
+    expect(gatewayMock.requestLog).toContainEqual({
+      method: "runtime/session/list",
+      params: expect.objectContaining({ cursor: "rtl_sessions_2" })
+    });
+
+    fireEvent.click(within(sessions).getByRole("button", { name: "Load revisions" }));
+    const picker = await within(sessions).findByRole("combobox", { name: "Revert point for OpenCode review" });
+    expect(picker.getAttribute("value") ?? (picker as HTMLSelectElement).value).toBe("rtr_recent");
+    expect(within(sessions).getByRole("button", { name: "Revert" })).toBeTruthy();
+    fireEvent.click(within(sessions).getByRole("button", { name: "Load earlier" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/session/read",
+        params: expect.objectContaining({ cursor: "rtc_earlier", sessionHandle: "rts_opencode_session" })
+      });
+    });
+    fireEvent.change(picker, { target: { value: "rtr_earlier" } });
+    fireEvent.click(within(sessions).getByRole("button", { name: "Revert" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/session/revert",
+        params: expect.objectContaining({
+          runtimeRef: "opencode",
+          sessionHandle: "rts_opencode_session",
+          revisionHandle: "rtr_earlier"
+        })
+      });
+    });
+    fireEvent.click(within(sessions).getByRole("button", { name: "Unrevert" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/session/unrevert",
+        params: expect.objectContaining({
+          sessionHandle: "rts_opencode_session",
+          revisionHandle: null
+        })
+      });
+    });
+    const publicRequests = JSON.stringify(gatewayMock.requestLog);
+    expect(publicRequests).not.toContain("messageID");
+    expect(publicRequests).not.toContain("itemId");
+  });
+
+  it("keeps Codex revision actions unavailable and confirms archive descendant cascade", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    gatewayMock.runtimeSessionRequest = () => ({
+      runtimeRef: "codex",
+      supported: true,
+      sessions: [{
+        sessionHandle: "rts_codex",
+        threadId: null,
+        title: "Codex history",
+        archived: false,
+        updatedAtMs: null,
+        parentThreadId: null,
+        dedupKey: "rtd_codex",
+        fidelity: "partial",
+        ownership: "readWrite",
+        actions: ["read", "archive", "delete", "revert", "unrevert"]
+      }],
+      nextCursor: null
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "Runtime Profiles" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile codex" }));
+    const sessions = await within(region).findByRole("region", { name: "Native Sessions" });
+    fireEvent.click(within(sessions).getByRole("button", { name: "Load sessions" }));
+    expect(await within(sessions).findByText("Codex history")).toBeTruthy();
+    expect(within(sessions).queryByRole("button", { name: "Load revisions" })).toBeNull();
+    expect(within(sessions).queryByRole("button", { name: "Revert" })).toBeNull();
+    expect(within(sessions).queryByRole("button", { name: "Unrevert" })).toBeNull();
+    fireEvent.click(within(sessions).getByRole("button", { name: "Archive" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "runtime/session/archive",
+        params: expect.objectContaining({ runtimeRef: "codex", sessionHandle: "rts_codex" })
+      });
+    });
+    expect(confirm).toHaveBeenCalledWith(
+      "Archive Codex history? Descendant Codex sessions will also be archived."
+    );
+    confirm.mockRestore();
   });
 
   it("keeps disabled skills visible and can re-enable them", async () => {
@@ -331,13 +831,33 @@ describe("Workbench capabilities management", () => {
     });
   });
 
-  it("toggles plugin and MCP enablement from row switches", async () => {
+  it("uses plugin action hints, canonical selectors, and mutation scopes", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
     const region = await screen.findByRole("region", { name: "Capabilities" });
 
     fireEvent.click(within(region).getByRole("tab", { name: "Plugins" }));
+    const browserRow = await within(region).findByRole("button", { name: "Plugin Browser" });
+    fireEvent.click(browserRow);
+    expect(within(region).queryByRole("button", { name: "Uninstall" })).toBeNull();
+    const browserSwitch = await within(region).findByRole("switch", { name: "Disable Browser" });
+    expect(browserSwitch.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(browserSwitch);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/setEnabled",
+        params: expect.objectContaining({
+          selector: "builtin:browser",
+          scopeName: "profile",
+          enabled: false
+        })
+      });
+    });
+
+    fireEvent.click(within(region).getByRole("button", { name: "Plugin writer-kit" }));
+    const uninstall = within(region).getByRole("button", { name: "Uninstall" });
     const pluginSwitch = await within(region).findByRole("switch", { name: "Disable writer-kit" });
     expect(pluginSwitch.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(pluginSwitch);
@@ -345,8 +865,63 @@ describe("Workbench capabilities management", () => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "plugin/setEnabled",
         params: expect.objectContaining({
-          selector: "local:/plugins/writer-kit",
+          selector: "profile:writer-kit@local-plugins-writer-kit",
+          scopeName: "project",
           enabled: false
+        })
+      });
+    });
+    fireEvent.click(uninstall);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/uninstall",
+        params: expect.objectContaining({
+          selector: "profile:writer-kit@local-plugins-writer-kit",
+          scopeName: "profile"
+        })
+      });
+    });
+
+    const duplicateRows = within(region).getAllByRole("button", { name: "Plugin dual-scope" });
+    expect(duplicateRows).toHaveLength(2);
+    const [profileRow, projectRow] = duplicateRows;
+    if (!profileRow || !projectRow) throw new Error("expected profile and project plugin rows");
+    const profileItem = profileRow.closest<HTMLElement>('[role="listitem"]');
+    const projectItem = projectRow.closest<HTMLElement>('[role="listitem"]');
+    if (!profileItem || !projectItem) throw new Error("expected plugin list items");
+    expect(within(profileItem).getByText("Profile")).toBeTruthy();
+    expect(within(projectItem).getByText("Project")).toBeTruthy();
+
+    fireEvent.click(profileRow);
+    expect(profileItem.className).toContain("is-selected");
+    expect(projectItem.className).not.toContain("is-selected");
+    fireEvent.click(projectRow);
+    expect(projectItem.className).toContain("is-selected");
+    expect(profileItem.className).not.toContain("is-selected");
+
+    const profileSwitch = within(profileItem).getByRole("switch", { name: "Disable dual-scope" });
+    await waitFor(() => expect((profileSwitch as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(profileSwitch);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/setEnabled",
+        params: expect.objectContaining({
+          selector: "profile:dual-scope@shared-source",
+          scopeName: "profile",
+          enabled: false
+        })
+      });
+    });
+    const projectSwitch = within(projectItem).getByRole("switch", { name: "Enable dual-scope" });
+    await waitFor(() => expect((projectSwitch as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(projectSwitch);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/setEnabled",
+        params: expect.objectContaining({
+          selector: "project:dual-scope@shared-source",
+          scopeName: "project",
+          enabled: true
         })
       });
     });
@@ -364,6 +939,7 @@ describe("Workbench capabilities management", () => {
         })
       });
     });
+    confirm.mockRestore();
   });
 
   it("keeps coding-core tools read-only while web remains mode-configurable", async () => {

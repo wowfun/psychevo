@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { repoRoot } from "./harness";
 import { visualScreenshotRoot } from "./visualArtifacts";
 
@@ -30,9 +30,10 @@ test.describe("Desktop Floating visual contract", () => {
 	      await expect(assistantTranscript).toContainText("keep context visible");
 	      await capture(page, testInfo, "02-running");
 
-	      await expect(assistantTranscript).toContainText("avoid stealing focus", { timeout: 5_000 });
-	      await expect(page.getByRole("button", { name: "Open in main window" })).toBeVisible();
+      await expect(assistantTranscript).toContainText("avoid stealing focus", { timeout: 5_000 });
+      await expect(page.getByRole("button", { name: "Open in main window" })).toBeVisible();
       await assertNoHorizontalOverflow(page, capsule);
+      await assertFullyContained(assistantTranscript, page.locator(".pevo-threadItems"));
       await capture(page, testInfo, "03-expanded-answer");
 
       await askAction.click();
@@ -46,6 +47,7 @@ test.describe("Desktop Floating visual contract", () => {
 	      await page.getByRole("button", { name: "Capture region" }).click();
 	      await expect(page.getByRole("alert")).toContainText("unavailable");
 	      await assertNoHorizontalOverflow(page, capsule);
+	      await assertFullyContained(assistantTranscript.last(), page.locator(".pevo-threadItems"));
 	      await capture(page, testInfo, "06-capture-error");
 
 	      await page.locator('button[title="Close"]').click();
@@ -122,4 +124,12 @@ async function assertNoHorizontalOverflow(page: Page, locator = page.locator("bo
     return Math.ceil(root.scrollWidth) - Math.ceil(root.clientWidth);
   });
   expect(overflow).toBeLessThanOrEqual(1);
+}
+
+async function assertFullyContained(content: Locator, viewport: Locator) {
+  const [contentBox, viewportBox] = await Promise.all([content.boundingBox(), viewport.boundingBox()]);
+  expect(contentBox).not.toBeNull();
+  expect(viewportBox).not.toBeNull();
+  expect(contentBox!.y).toBeGreaterThanOrEqual(viewportBox!.y - 1);
+  expect(contentBox!.y + contentBox!.height).toBeLessThanOrEqual(viewportBox!.y + viewportBox!.height + 1);
 }

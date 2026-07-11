@@ -10,6 +10,7 @@ import { MarkdownText } from "./markdown";
 import { asRecord, stringValue } from "./shared";
 import { evidenceDisplay, type EvidenceDisplay } from "./toolEvidence";
 import { ToolDetail } from "./transcript/tool-detail";
+import type { WorkspaceFileLinkContext } from "./workspaceFileLinks";
 
 export type TranscriptAgentSession = {
   agentName?: string | null;
@@ -27,6 +28,7 @@ export interface TranscriptPanelProps {
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
   onReadAloudText?: ((text: string) => void | Promise<void>) | undefined;
   threadId?: string | null;
+  workspaceFileLinks?: WorkspaceFileLinkContext;
 }
 
 type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
@@ -43,7 +45,7 @@ type TranscriptScrollMemory = {
   top: number;
 };
 
-export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSession, onReadAloudText, threadId }: TranscriptPanelProps) {
+export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSession, onReadAloudText, threadId, workspaceFileLinks }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -132,6 +134,7 @@ export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSess
               onCopyText={onCopyText}
               onOpenAgentSession={onOpenAgentSession}
               onReadAloudText={onReadAloudText}
+              workspaceFileLinks={workspaceFileLinks}
             />
           ))
         )}
@@ -316,13 +319,15 @@ function TranscriptEntryView({
   entry,
   onCopyText,
   onOpenAgentSession,
-  onReadAloudText
+  onReadAloudText,
+  workspaceFileLinks
 }: {
   activityTick: number;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
   onOpenAgentSession: OpenAgentSessionHandler;
   onReadAloudText: ReadAloudTextHandler;
+  workspaceFileLinks: WorkspaceFileLinkContext | undefined;
 }) {
   return (
     <>
@@ -335,6 +340,7 @@ function TranscriptEntryView({
           onCopyText={onCopyText}
           onOpenAgentSession={onOpenAgentSession}
           onReadAloudText={onReadAloudText}
+          workspaceFileLinks={workspaceFileLinks}
         />
       ))}
     </>
@@ -347,7 +353,8 @@ function TranscriptBlockView({
   entry,
   onCopyText,
   onOpenAgentSession,
-  onReadAloudText
+  onReadAloudText,
+  workspaceFileLinks
 }: {
   activityTick: number;
   block: TranscriptBlock;
@@ -355,6 +362,7 @@ function TranscriptBlockView({
   onCopyText: CopyTextHandler;
   onOpenAgentSession: OpenAgentSessionHandler;
   onReadAloudText: ReadAloudTextHandler;
+  workspaceFileLinks: WorkspaceFileLinkContext | undefined;
 }) {
   const text = transcriptBlockText(block);
   const display = evidenceDisplay(block, text);
@@ -401,7 +409,11 @@ function TranscriptBlockView({
           className={`pevo-message is-assistant ${block.status === "running" ? "is-streaming" : ""}`}
           {...transcriptBlockDataAttributes(entry, block)}
         >
-          <MarkdownText streaming={block.status === "running"} text={text} />
+          <MarkdownText
+            streaming={block.status === "running"}
+            text={text}
+            {...(workspaceFileLinks ? { workspaceFileLinks } : {})}
+          />
         </article>
         {(onCopyText || onReadAloudText) && (
           <MessageMeta

@@ -9,8 +9,8 @@ import type {
   ThreadSnapshot
 } from "@psychevo/protocol";
 import { applyTurnCompletionQueueBarrier } from "./liveTranscript";
+import { appendGatewayEventFeed, type GatewayThreadEventFeed } from "./gateway-event-feed";
 import { normalizeSnapshot } from "./session-utils";
-import type { GatewayEventFeed } from "./types";
 
 export const LIVE_EVENT_REFRESH_SETTLE_MS = 650;
 
@@ -26,7 +26,7 @@ type RefreshSnapshot = (
 type GatewayLiveEventsParams = {
   refreshSnapshot: RefreshSnapshot;
   selectedThreadIdRef: MutableRefObject<string | null>;
-  setLatestGatewayEvent: Dispatch<SetStateAction<GatewayEventFeed | null>>;
+  setLatestGatewayEvent: Dispatch<SetStateAction<GatewayThreadEventFeed>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
   viewEpochRef: MutableRefObject<number>;
 };
@@ -47,7 +47,6 @@ export function applyWorkbenchGatewayEventSnapshot(
 export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
   const gatewayEventQueueRef = useRef<GatewayEvent[]>([]);
   const gatewayEventRafRef = useRef<number | null>(null);
-  const gatewayEventSeqRef = useRef(0);
 
   function scheduleGatewayEventFlush() {
     if (gatewayEventRafRef.current !== null) {
@@ -70,11 +69,7 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
   }
 
   function publishGatewayEvent(event: GatewayEvent) {
-    gatewayEventSeqRef.current += 1;
-    params.setLatestGatewayEvent({
-      event,
-      seq: gatewayEventSeqRef.current
-    });
+    params.setLatestGatewayEvent((current) => appendGatewayEventFeed(current, event));
   }
 
   function applyGatewayEvent(event: GatewayEvent) {

@@ -207,6 +207,11 @@ displayed after the combined Agent control only for peer modes outside that
 base pair. For OpenCode ACP, peer-provided ACP `mode` values such as `build` or
 `review` are displayed as OpenCode runtime modes, not Psychevo agents; `plan`
 is handled by the shared Plan affordance instead of a duplicate selector.
+Workbench likewise projects the native Runtime Context `mode` descriptor only
+through this shared Plan affordance; it must not render a second native
+`default`/`plan` selector whose value submission ignores. On narrow surfaces,
+the Plan chip remains beside the Agent selector and enabling Plan must not add
+an otherwise empty control row.
 Runtime options are scoped to the current draft/session and must not be stored
 in Settings. The controls stay compact, list-like, keyboard accessible, and
 responsive; visual validation must cover desktop and a narrow mobile width with

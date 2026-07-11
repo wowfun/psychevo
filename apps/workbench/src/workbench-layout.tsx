@@ -1,6 +1,6 @@
 import { type CSSProperties } from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
-import { ActionButton, Composer, HistoryPanel, TranscriptPanel } from "@psychevo/components";
+import { ActionButton, Composer, HistoryPanel, TranscriptPanel, type WorkspaceFileLinkContext } from "@psychevo/components";
 import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
 import { WorkspaceCreateDialog, LeftUtilityRail, MainSurface, PinnedPanel } from "./app-shell";
 import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
@@ -10,6 +10,8 @@ import { ComposerDictationButton, ComposerVoiceOptionSwitches } from "./voice-co
 import { RightWorkspace, rightWorkspaceTabLabel } from "./right-workspace";
 import { DEFAULT_RIGHT_WIDTH_PX } from "./storage";
 import { EMPTY_BACKEND_DRAFT, backendDraftFromBackend } from "./capabilities-agents-config";
+import { confirmedSteerTurnId } from "./gateway-event-feed";
+import type { RightWorkspaceTab } from "./types";
 
 const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
 
@@ -33,6 +35,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     beginExplicitViewSwitch,
     beginRightResize,
     capabilitiesTab,
+    changeRuntimeControl,
+    changeRuntimeProfile,
     changeAgentSelection,
     clearRightWorkspaceTabPendingPrompt,
     channelDoctor,
@@ -58,7 +62,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
     endpoint,
     error,
     executeCommand,
-    extraRuntimeModeValues,
     fallbackCwd,
     handleAttachment,
     handleAttachmentFiles,
@@ -74,6 +77,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     mobilePanel,
     modelReady,
     modelTurnBlockReason,
+    nativeRuntimeSelected,
     openDiffPreview,
     openCapabilitiesTab,
     openAgentSessionTab,
@@ -108,16 +112,16 @@ export function WorkbenchLayout(props: Record<string, any>) {
     runCommandAlternateAction,
     running,
     runtimeAcceptsAgentPersona,
-    runtimeBackends,
-    runtimeModeOption,
-    runtimeModeUnavailable,
+    runtimeContext,
+    runtimeControlValues,
+    runtimeOptionsLoading,
     runtimeOptionsError,
+    runtimeProfiles,
     saveBackendDraft,
     saveAutomation,
     saveFileFromEditor,
     selectedAgentName,
     selectedModel,
-    selectedRuntimeMode,
     selectedRuntimeRef,
     selectedVariant,
     sessionBrowserWorkspaces,
@@ -139,14 +143,10 @@ export function WorkbenchLayout(props: Record<string, any>) {
     setRightCollapsed,
     setRightTabs,
     setRightWidthPx,
-    setRuntimeOptionsError,
-    setRuntimeOptionsResult,
-    setRuntimeSessionId,
     setCommandFeedback,
     setSelectedModel,
     setSelectedModelSelection,
     setSelectedRuntimeMode,
-    setSelectedRuntimeRef,
     setSelectedVariant,
     setSettingsSection,
     setSnapshot,
@@ -186,6 +186,33 @@ export function WorkbenchLayout(props: Record<string, any>) {
     onVoiceDictationToggle,
     onVoiceRealtimeToggle
   } = props;
+
+  const workspaceFileLinks: WorkspaceFileLinkContext | undefined = workspaceFiles
+    ? {
+        entries: workspaceFiles.entries,
+        onOpen: (path) => runAction(async () => openFilePreview(path)),
+        root: workspaceFiles.root
+      }
+    : undefined;
+  const selectedRuntimeProfile = (runtimeProfiles ?? []).find((profile: any) => profile.id === selectedRuntimeRef) ?? null;
+  const runtimeSafetyLabel = nativeRuntimeSelected
+    ? null
+    : [
+        "Profile safety",
+        selectedRuntimeProfile?.approvalMode || "runtime approval",
+        selectedRuntimeProfile?.sandbox || "runtime sandbox"
+      ].join(" · ");
+  const steerTurnId = confirmedSteerTurnId(
+    latestGatewayEvent,
+    snapshot.thread?.id ?? null,
+    activity.activeTurnId
+  );
+  const steerAvailable = Boolean(steerTurnId) && (
+    nativeRuntimeSelected || selectedRuntimeProfile?.runtime === "acp" || (
+      runtimeContext?.runtimeRef === selectedRuntimeRef
+      && runtimeContext.capabilities.some((capability: any) => capability.id === "turn.steer" && capability.enabled)
+    )
+  );
 
   return (
     <main className="appShell" data-main-view={mainView}>
@@ -377,6 +404,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               debugEnabled={debugEnabled}
               disabled={disabled}
               mainView={mainView}
+              runtimeProfiles={runtimeProfiles}
               scope={activeScope ?? init?.scope ?? null}
               sessions={sessions}
               settingsSection={settingsSection}
@@ -418,9 +446,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 openCapabilitiesTab("agents");
                 setBackendDraft({ ...EMPTY_BACKEND_DRAFT });
               }}
-              onOpenSession={(threadId) => void runAction(async () => {
+              onOpenSession={(threadId, readOnly = false) => void runAction(async () => {
                 const epoch = beginExplicitViewSwitch();
-                await refreshSnapshot(client, threadId, undefined, false, epoch);
+                await refreshSnapshot(client, threadId, undefined, readOnly, epoch, readOnly);
                 updateMainView("transcript");
                 setMobilePanel("transcript");
               })}
@@ -441,6 +469,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   onOpenAgentSession={openAgentSessionTab}
                   threadId={snapshot.thread?.id ?? null}
                   onReadAloudText={onReadAloudText}
+                  {...(workspaceFileLinks ? { workspaceFileLinks } : {})}
                 />
               )}
             />
@@ -486,30 +515,19 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 <>
                   <ComposerRuntimeControls
                     agents={runnableAgents}
-                    runtimeBackends={runtimeBackends}
+                    profiles={runtimeProfiles}
+                    binding={runtimeContext?.binding ?? null}
+                    controls={runtimeContext?.runtimeRef === selectedRuntimeRef ? runtimeContext.controls : []}
+                    controlValues={runtimeControlValues}
                     disabled={disabled}
                     agentValue={selectedAgentName}
                     runtimeValue={selectedRuntimeRef}
-                    runtimeModeValue={selectedRuntimeMode}
-                    runtimeModeOption={runtimeModeOption}
-                    runtimeModeValues={extraRuntimeModeValues}
-                    runtimeModeError={runtimeOptionsError}
-                    runtimeModeUnavailable={Boolean(runtimeModeUnavailable)}
-                    agentPersonaEnabled={runtimeAcceptsAgentPersona}
+                    contextError={runtimeOptionsError}
+                    contextLoading={runtimeOptionsLoading}
                     onAgentChange={(value) => void runAction(async () => changeAgentSelection(value))}
-                    onRuntimeChange={(value) => {
-                      setSelectedRuntimeRef(value);
-                      setRuntimeSessionId(null);
-                      setRuntimeOptionsResult(null);
-                      setRuntimeOptionsError(null);
-                      setSelectedRuntimeMode("");
-                    }}
-                    onRuntimeModeChange={(value) => {
-                      setSelectedRuntimeMode(value);
-                      if (value) {
-                        setWorkMode("default");
-                      }
-                    }}
+                    onRuntimeChange={(value) => void runAction(async () => changeRuntimeProfile(value))}
+                    onControlChange={(control, value) => void runAction(async () => changeRuntimeControl(control, value))}
+                    onManageRuntimes={() => openCapabilitiesTab("agents")}
                   />
                 </>
               )}
@@ -522,8 +540,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   onToggleRealtime={onVoiceRealtimeToggle}
                 />
               )}
-              mode={workMode}
-              planModeAvailable={planModeAvailable}
+              mode={nativeRuntimeSelected ? workMode : "default"}
+              modeControlVisible={nativeRuntimeSelected}
+              planModeAvailable={nativeRuntimeSelected && planModeAvailable}
               preActionControls={(
                 <ComposerDictationButton
                   disabled={disabled}
@@ -539,6 +558,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   controls={controls}
                   usage={sessionUsage}
                   model={selectedModel}
+                  showNativeModelControls={nativeRuntimeSelected}
                   variant={selectedVariant}
                   onModelChange={setSelectedModel}
                   onModelSelectionChange={setSelectedModelSelection}
@@ -594,6 +614,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               ) : null}
               running={running}
               runningStartedAtMs={activity.startedAtMs ?? null}
+              steerAvailable={steerAvailable}
               onAttach={() => void runAction(async () => handleAttachment())}
               onAttachFiles={(files) => void runAction(async () => handleAttachmentFiles(files))}
               onCommand={(command) => void runAction(async () => executeCommand(command, "composer"))}
@@ -611,17 +632,26 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onRemoveAttachment={(id) => setAttachments((current: any[]) => current.filter((attachment) => attachment.id !== id))}
               onShell={(command) => void runAction(async () => startShell(command))}
               onSteer={(text) => void runAction(async () => {
-                if (!activity.activeTurnId) {
+                if (!steerTurnId) {
                   return;
                 }
                 clearCommandTransientUi();
-                setSnapshot((current: any) => appendOptimisticPrompt(current, text));
-                await client?.request("turn/steer", {
-                  expectedTurnId: activity.activeTurnId,
+                const result = await client?.request("turn/steer", {
+                  expectedTurnId: steerTurnId,
                   threadId: snapshot.thread?.id ?? null,
                   text
                 });
-                await refreshHistory();
+                if (result?.accepted) {
+                  setSnapshot((current: any) => appendOptimisticPrompt(current, text));
+                  await refreshHistory();
+                } else {
+                  setCommandFeedback?.({
+                    accepted: false,
+                    command: "/steer",
+                    message: "The selected Runtime Profile does not support steering this turn.",
+                    feedbackAnchor: "composer"
+                  });
+                }
               })}
               onSubmit={(text, mentions) => void runAction(async () => submitTurn(text, mentions))}
             />
@@ -630,6 +660,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               controls={controls}
               path={settings?.project?.displayPath ?? settings?.cwd ?? ""}
               permissionMode={permissionMode}
+              runtimeSafetyLabel={runtimeSafetyLabel}
               profile={init?.profile ?? null}
               onBranchClick={() => {
                 void runAction(async () => openDiffPreview(null));
@@ -663,6 +694,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               debugEnabled={debugEnabled}
               debugEvents={debugEvents}
               files={workspaceFiles?.entries ?? []}
+              hostKind={host?.platform?.kind ?? "browser"}
               latestGatewayEvent={latestGatewayEvent}
               root={workspaceFiles?.root ?? settings?.cwd ?? ""}
               scope={activeScope ?? init?.scope ?? null}
@@ -678,6 +710,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               cwd={settings?.project?.displayPath ?? settings?.cwd ?? ""}
               workspaceChanges={workspaceChanges}
               workspaceDiff={workspaceDiff}
+              workspaceFileLinks={workspaceFileLinks}
               onActivate={setActiveRightTabId}
               onAcceptChange={(turnId, path) => void runAction(async () => acceptWorkspaceChange(turnId, path))}
               onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
@@ -688,13 +721,25 @@ export function WorkbenchLayout(props: Record<string, any>) {
               }}
               onOpenFile={(path) => void runAction(async () => openFilePreview(path))}
               onOpenAgentSession={openAgentSessionTab}
+              onBrowserStateChange={(tabId, browser) => {
+                setRightTabs((current: RightWorkspaceTab[]) => current.map((tab) => (
+                  tab.id === tabId ? { ...tab, browser } : tab
+                )));
+              }}
+              onOpenExternal={(url) => void runAction(async () => {
+                const result = await host?.open.openExternal(url);
+                if (!result?.ok) {
+                  props.setError(result?.message ?? "Open externally is not supported by this host.");
+                }
+              })}
               onOpenKind={(kind) => {
                 if (kind === "sideConversation") {
                   void runAction(async () => executeCommand("/btw", "commandsPanel"));
                   return;
                 }
-                openRightWorkspaceTab(kind, {}, true);
+                openRightWorkspaceTab(kind, {}, kind !== "browser");
               }}
+              onOpenPreview={(preview) => openRightWorkspaceTab("preview", { preview, title: preview.title }, true)}
               onRejectChange={(turnId, path) => void runAction(async () => rejectWorkspaceChange(turnId, path))}
               onConsumePendingPrompt={clearRightWorkspaceTabPendingPrompt}
               onRefresh={() => void runAction(async () => {

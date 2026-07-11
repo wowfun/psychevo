@@ -239,6 +239,39 @@ describe("component fallback rendering", () => {
     expect(html).not.toContain("empty-prompt");
   });
 
+  it("renders compaction checkpoint dividers with collapsed summary detail", () => {
+    render(
+      <TranscriptPanel
+        entries={[
+          transcriptEntry({
+            id: "compaction:7",
+            messageSeq: null,
+            role: "diagnostic",
+            source: "runtime.compaction",
+            blocks: [
+              transcriptBlock({
+                id: "compaction:7:block",
+                kind: "compaction",
+                source: "runtime.compaction",
+                title: "Session compacted",
+                preview: "manual | 120 -> 42 tokens | keeps from #3",
+                detail: "Keep the decision trail.",
+                metadata: { projection: "compaction", checkpoint_id: 7 }
+              })
+            ]
+          })
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Session compacted")).toBeTruthy();
+    expect(screen.getByText("manual | 120 -> 42 tokens | keeps from #3")).toBeTruthy();
+    expect(screen.queryByText("Keep the decision trail.")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Session compacted/ }));
+    expect(screen.getByText("Keep the decision trail.")).toBeTruthy();
+  });
+
   it("renders transcript blocks by message and block order even when input is shuffled", () => {
     const html = renderToStaticMarkup(
       <TranscriptPanel

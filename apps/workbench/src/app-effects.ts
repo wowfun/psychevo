@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, type MutableRefObject } from "react";
 import {
   applyTurnResultToThreadSnapshot,
   parseThreadSnapshot,
-  scopeForCwd,
   type GatewayClient
 } from "@psychevo/client";
 import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
@@ -15,18 +14,13 @@ import {
   type GatewayEvent,
   type GatewayRequestScope,
   type InitializeResult,
-  type RuntimeOptionsResult,
+  type RuntimeConfigOptionView,
   type SessionSummary,
   type SettingsReadResult,
   type ThreadSnapshot
 } from "@psychevo/protocol";
 import { asRecord, commandFeedbackAutoDismissable, optionalStringField } from "./data";
-import {
-  agentOptionValue,
-  isRuntimeModeOption,
-  projectRuntimeModeOption,
-  type RuntimeModeProjection
-} from "./runtime-controls";
+import { agentOptionValue, type RuntimeModeProjection } from "./runtime-controls";
 import {
   normalizeSnapshot,
   startupDraftScope
@@ -47,7 +41,6 @@ import type {
   TerminalNotificationEvent,
   TraceState,
   WorkbenchAgent,
-  WorkbenchBackend,
   WorkbenchPrefs
 } from "./types";
 import {
@@ -105,14 +98,11 @@ type AppEffectsParams = {
   rightTabs: RightWorkspaceTab[];
   rightWidthPx: number;
   runnableAgents: WorkbenchAgent[];
-  runtimeBackends: WorkbenchBackend[];
-  runtimeModeOption: RuntimeOptionsResult["options"][number] | null;
+  runtimeModeOption: RuntimeConfigOptionView | null;
   runtimeModeProjection: RuntimeModeProjection;
-  runtimeSessionId: string | null;
   selectedAgentName: string;
   selectedRuntimeRef: string;
   settingsSection: string;
-  settingsCwd: string | undefined;
   fallbackCwd: string;
   showSessionChrome: boolean;
   skipNextPinnedPersistRef: MutableRefObject<boolean>;
@@ -145,14 +135,9 @@ type AppEffectsParams = {
   setInit(value: InitializeResult | null): void;
   setMobilePanel(value: "history" | "transcript" | "status"): void;
   setPinnedSessionIds(value: string[]): void;
+  setRightCollapsed(value: boolean): void;
   setRightTabs(updater: (current: RightWorkspaceTab[]) => RightWorkspaceTab[]): void;
-  setRuntimeOptionsError(value: string | null): void;
-  setRuntimeOptionsLoading(value: boolean): void;
-  setRuntimeOptionsResult(value: RuntimeOptionsResult | null): void;
-  setRuntimeSessionId(value: string | null): void;
   setSelectedAgentName(value: string): void;
-  setSelectedRuntimeMode(value: string | ((current: string) => string)): void;
-  setSelectedRuntimeRef(value: string): void;
   setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)): void;
   setStatus(value: string): void;
   setTerminalEvents(updater: (current: TerminalNotificationEvent[]) => TerminalNotificationEvent[]): void;
@@ -170,72 +155,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       params.setSelectedAgentName("");
     }
   }, [params.runnableAgents, params.selectedAgentName]);
-
-  useEffect(() => {
-    if (params.selectedRuntimeRef === "native") {
-      params.setRuntimeSessionId(null);
-      params.setRuntimeOptionsResult(null);
-      params.setRuntimeOptionsLoading(false);
-      params.setRuntimeOptionsError(null);
-      params.setSelectedRuntimeMode("");
-      return;
-    }
-    if (!params.runtimeBackends.some((backend) => backend.id === params.selectedRuntimeRef)) {
-      params.setSelectedRuntimeRef("native");
-    }
-  }, [params.runtimeBackends, params.selectedRuntimeRef]);
-
-  useEffect(() => {
-    if (!params.client || params.selectedRuntimeRef === "native") {
-      return;
-    }
-    const scope = params.activeScope
-      ?? params.initScope
-      ?? scopeForCwd(params.settingsCwd ?? params.fallbackCwd);
-    let cancelled = false;
-    params.setRuntimeOptionsLoading(true);
-    params.setRuntimeOptionsError(null);
-    void params.client.request("runtime/options", {
-      runtimeRef: params.selectedRuntimeRef,
-      runtimeSessionId: params.runtimeSessionId,
-      scope,
-      threadId: params.snapshot.thread?.id ?? null
-    }).then((result) => {
-      if (cancelled) {
-        return;
-      }
-      params.setRuntimeOptionsResult(result);
-      params.setRuntimeSessionId(result.runtimeSessionId ?? null);
-      const modeOption = result.options.find(isRuntimeModeOption);
-      if (!modeOption) {
-        params.setSelectedRuntimeMode("");
-        return;
-      }
-      const projected = projectRuntimeModeOption(modeOption);
-      const values = projected.extraValues.map((option) => option.value);
-      params.setSelectedRuntimeMode((current) => (
-        current && values.includes(current)
-          ? current
-          : projected.supportsPlan
-            ? ""
-            : projected.defaultValue
-      ));
-    }).catch((error) => {
-      if (cancelled) {
-        return;
-      }
-      params.setRuntimeOptionsResult(null);
-      params.setSelectedRuntimeMode("");
-      params.setRuntimeOptionsError(error instanceof Error ? error.message : String(error));
-    }).finally(() => {
-      if (!cancelled) {
-        params.setRuntimeOptionsLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [params.activeScope, params.client, params.initScope, params.runtimeSessionId, params.selectedRuntimeRef, params.settingsCwd, params.snapshot.thread?.id]);
 
   useEffect(() => {
     if (params.selectedRuntimeRef !== "native" && params.runtimeModeOption && !params.runtimeModeProjection.supportsPlan && params.workMode === "plan") {
@@ -399,6 +318,11 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           }
           if (event.type === "activityChanged" || event.type === "titleChanged") {
             void params.refreshHistory(runtimeClient);
+          }
+          if (event.type === "runtimeChildChanged" && event.threadId) {
+            params.setRightTabs((current) => registerRuntimeChildTab(current, event));
+            params.setRightCollapsed(false);
+            params.setMobilePanel("status");
           }
           if (event.type === "turnCompleted" && (event.threadId || event.turn.threadId)) {
             const threadId = event.threadId ?? event.turn.threadId;
@@ -604,4 +528,44 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       void params.refreshAgentSurface(params.client, params.activeScope);
     }
   }, [params.client, params.activeScope, params.currentThreadId, params.snapshot.activity.running]);
+}
+
+function registerRuntimeChildTab(
+  current: RightWorkspaceTab[],
+  event: Extract<GatewayEvent, { type: "runtimeChildChanged" }>
+): RightWorkspaceTab[] {
+  if (!event.threadId) {
+    return current;
+  }
+  const existing = current.find((tab) => (
+    tab.kind === "agentSession" && tab.threadId === event.threadId
+  ));
+  const next: RightWorkspaceTab = {
+    id: existing?.id ?? `runtime-child:${encodeURIComponent(event.threadId)}`,
+    kind: "agentSession",
+    title: `${runtimeRefLabel(event.runtimeRef)} child`,
+    threadId: event.threadId,
+    parentThreadId: event.parentThreadId,
+    runtimeRef: event.runtimeRef,
+    runtimeStatus: event.status,
+    runtimeReadOnly: event.readOnly,
+    historyFidelity: existing?.historyFidelity ?? null,
+    pendingPrompt: null,
+    path: null,
+    diff: null,
+    file: null,
+    preview: null,
+    message: null
+  };
+  if (!existing) {
+    return [...current, next];
+  }
+  return current.map((tab) => tab.id === existing.id ? { ...tab, ...next } : tab);
+}
+
+function runtimeRefLabel(runtimeRef: string): string {
+  if (runtimeRef === "opencode") return "OpenCode";
+  if (runtimeRef === "codex") return "Codex";
+  if (runtimeRef === "native") return "Native";
+  return runtimeRef;
 }

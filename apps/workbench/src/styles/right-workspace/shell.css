@@ -52,7 +52,9 @@
 .filesPanel,
 .debugPanel,
 .terminalPanel,
-.teamPanel {
+.teamPanel,
+.browserPanel,
+.previewPanel {
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -64,7 +66,8 @@
 
 .rightWorkspaceHome,
 .reviewPanel,
-.filesPanel {
+.filesPanel,
+.previewPanel {
   align-content: start;
 }
 
@@ -222,7 +225,8 @@
 .filesPanel > header,
 .debugPanel > header,
 .terminalPanel > header,
-.teamPanel > header {
+.teamPanel > header,
+.previewPanel > header {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -236,7 +240,8 @@
 .reviewPanel > header > div,
 .filesPanel > header > div,
 .terminalPanel > header > div,
-.teamPanel > header > div {
+.teamPanel > header > div,
+.previewPanel > header > div {
   min-width: 0;
 }
 
@@ -284,7 +289,8 @@
 .rightWorkspaceHome h2,
 .reviewPanel h2,
 .terminalPanel h2,
-.teamPanel h2 {
+.teamPanel h2,
+.previewPanel h2 {
   overflow: hidden;
   margin: 0;
   color: var(--pevo-ink);
@@ -296,7 +302,8 @@
 .rightWorkspaceHome p,
 .reviewPanel p,
 .terminalPanel p,
-.teamPanel p {
+.teamPanel p,
+.previewPanel p {
   margin: 2px 0 0;
   color: var(--pevo-muted);
   font-size: var(--pevo-font-size-small);
@@ -422,6 +429,15 @@
 .teamMemberRows {
   display: grid;
   gap: 8px;
+}
+
+.teamTrackHeading {
+  margin: 2px 0 0;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .teamMemberRow {

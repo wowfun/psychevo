@@ -51,9 +51,13 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       return;
     }
     const reusable = kind === "review" || kind === "files" || kind === "debug";
-    const threadReusable = kind === "agentSession" && patch.threadId;
+    const ownedThreadId = kind === "browser" ? (patch.threadId ?? params.currentThreadId) : patch.threadId;
+    if (kind === "browser" && !ownedThreadId) {
+      return;
+    }
+    const threadReusable = (kind === "agentSession" || kind === "browser") && ownedThreadId;
     const existingThreadTab = threadReusable
-      ? params.rightTabs.find((tab) => tab.kind === kind && tab.threadId === patch.threadId)
+      ? params.rightTabs.find((tab) => tab.kind === kind && tab.threadId === ownedThreadId)
       : null;
     const nextId = existingThreadTab?.id
       ?? (reusable && !forceNew ? params.rightTabs.find((tab) => tab.kind === kind)?.id ?? createRightTabId(kind) : createRightTabId(kind));
@@ -61,12 +65,13 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       id: nextId,
       kind,
       title: patch.title ?? rightWorkspaceDefaultTitle(kind),
-      threadId: patch.threadId ?? null,
+      threadId: ownedThreadId ?? null,
       parentThreadId: patch.parentThreadId ?? (kind === "team" ? params.currentThreadId : null),
       pendingPrompt: patch.pendingPrompt ?? null,
       path: patch.path ?? null,
       diff: patch.diff ?? null,
       file: patch.file ?? null,
+      preview: patch.preview ?? null,
       message: patch.message ?? null
     };
     params.setRightTabs((current) => {

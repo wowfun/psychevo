@@ -230,7 +230,7 @@ export function threadForTurn(snapshot: ThreadSnapshot, threadId: string | null)
     id: threadId,
     backend: {
       kind: "psychevo",
-      nativeId: threadId,
+      sessionHandle: threadId,
       runtimeRef: "native"
     },
     sourceKey: sourceKeyForSnapshot(snapshot)

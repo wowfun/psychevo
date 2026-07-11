@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Activity, MessageCircle, PlugZap, RotateCcw, Wrench } from "lucide-react";
-import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult } from "@psychevo/protocol";
+import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, RuntimeProfileView } from "@psychevo/protocol";
 import type { SessionBrowserWorkspaceState, WorkbenchChannel, WorkbenchChannelDoctor } from "../types";
 import type { ChannelSettingsControls, ChannelUpdateDraft } from "./types";
 
@@ -134,16 +134,48 @@ export function channelModelOptions(
 
 export function channelRuntimeProfileOptions(
   channel: WorkbenchChannel,
-  draft: ChannelSettingsDraft
+  draft: ChannelSettingsDraft,
+  profiles: RuntimeProfileView[]
 ): string[] {
-  return uniqueStrings([
-    "",
-    "native",
-    "codex",
-    "opencode",
+  return ["", ...uniqueStrings([
+    ...profiles.filter((profile) => profile.enabled).map((profile) => profile.id),
     channel.runtimeRef ?? "",
     draft.runtimeRef
-  ]);
+  ])];
+}
+
+export function channelModelControlAvailable(
+  runtimeRef: string,
+  profiles: RuntimeProfileView[]
+): boolean {
+  const selected = profiles.find((profile) => profile.id === runtimeRef.trim());
+  return selected?.runtime === "native";
+}
+
+export function channelNativePermissionControlAvailable(
+  runtimeRef: string,
+  profiles: RuntimeProfileView[]
+): boolean {
+  const normalized = runtimeRef.trim();
+  if (!normalized || normalized === "native") {
+    return true;
+  }
+  return profiles.find((profile) => profile.id === normalized)?.runtime === "native";
+}
+
+export function channelRuntimeSafetyLabel(
+  runtimeRef: string,
+  profiles: RuntimeProfileView[]
+): string {
+  const selected = profiles.find((profile) => profile.id === runtimeRef.trim());
+  if (!selected || selected.runtime === "native") {
+    return "Native permission mode";
+  }
+  return [
+    selected.label || selected.id,
+    selected.approvalMode || "runtime approval",
+    selected.sandbox || "runtime sandbox"
+  ].join(" · ");
 }
 
 export function uniqueStrings(values: string[]): string[] {
@@ -180,7 +212,11 @@ export function modelOptionLabel(value: string, channel: WorkbenchChannel, contr
   return value;
 }
 
-export function runtimeProfileOptionLabel(value: string): string {
+export function runtimeProfileOptionLabel(value: string, profiles: RuntimeProfileView[] = []): string {
+  const profile = profiles.find((candidate) => candidate.id === value);
+  if (profile) {
+    return profile.label || profile.id;
+  }
   switch (value) {
     case "":
       return "Profile default";
