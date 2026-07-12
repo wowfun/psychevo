@@ -6,6 +6,8 @@ import {
   Download,
   FolderPlus,
   History,
+  Inbox,
+  GitFork,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -32,6 +34,8 @@ export interface HistoryPanelProps {
   onArchive(sessionId: string): void;
   onDelete(sessionId: string): void;
   onExport(sessionId: string): void;
+  onFork?(sessionId: string): void;
+  onImportSessions?(): void;
   onNew(): void;
   onCreateWorkspace?(): void;
   onLoadOlderSessions?(cwd: string): void;
@@ -141,6 +145,20 @@ export function HistoryPanel(props: HistoryPanelProps) {
               New Workspace
             </ActionButton>
           )}
+          {props.onImportSessions && !props.archived && (
+            <ActionButton
+              ariaLabel="Import Agent session"
+              disabled={props.disabled}
+              icon={<Inbox size={17} />}
+              iconOnly
+              onClick={props.onImportSessions}
+              size="compact"
+              tooltip="Import Agent session"
+              variant="ghost"
+            >
+              Import Agent session
+            </ActionButton>
+          )}
           <IconButton title={hasCollapsedProjects ? "Expand all workspaces" : "Collapse all workspaces"} onClick={toggleAllProjects} disabled={groupedSessions.length === 0}>
             {hasCollapsedProjects ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
           </IconButton>
@@ -202,6 +220,8 @@ export function HistoryPanel(props: HistoryPanelProps) {
                   const title = session.displayTitle?.trim() || session.title?.trim() || shortId(session.id);
                   const editing = editingId === session.id;
                   const pinned = pinnedSessionIds.has(session.id);
+                  const forkAction = session.lifecycle?.actions.find((action) => action.id === "fork");
+                  const deleteAction = session.lifecycle?.actions.find((action) => action.id === "delete");
                   return (
                     <article className={`pevo-sessionRow ${active ? "is-active" : ""} ${running ? "is-running" : ""}`} key={session.id}>
                       {editing ? (
@@ -310,6 +330,21 @@ export function HistoryPanel(props: HistoryPanelProps) {
                                   <Share2 size={15} aria-hidden />
                                   <span>Share</span>
                                 </button>
+                                {forkAction?.enabled && props.onFork ? (
+                                  <button
+                                    role="menuitem"
+                                    title="Fork session"
+                                    onClick={() => {
+                                      close();
+                                      props.onFork?.(session.id);
+                                    }}
+                                    disabled={props.disabled || running}
+                                    type="button"
+                                  >
+                                    <GitFork size={15} aria-hidden />
+                                    <span>Fork</span>
+                                  </button>
+                                ) : null}
                                 {props.archived ? (
                                   <button
                                     role="menuitem"
@@ -342,12 +377,14 @@ export function HistoryPanel(props: HistoryPanelProps) {
                                 <button
                                   className="is-danger"
                                   role="menuitem"
-                                  title="Delete"
+                                  title={deleteAction?.enabled === false
+                                    ? deleteAction.unavailableReason ?? "Delete unavailable"
+                                    : "Delete"}
                                   onClick={() => {
                                     close();
                                     props.onDelete(session.id);
                                   }}
-                                  disabled={props.disabled || active || running}
+                                  disabled={props.disabled || active || running || deleteAction?.enabled === false}
                                   type="button"
                                 >
                                   <Trash2 size={15} aria-hidden />

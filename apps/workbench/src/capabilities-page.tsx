@@ -3,16 +3,11 @@ import type { GatewayClient } from "@psychevo/client";
 import { ActionButton, CreatePanel, MarkdownText, Switch } from "@psychevo/components";
 import type {
   GatewayRequestScope,
-  RuntimeAuthActionResult,
   RuntimeProfileView,
-  RuntimeSessionListResult,
-  RuntimeSessionMutationResult,
-  RuntimeSessionRevisionView,
-  RuntimeSessionView,
   TeamMemberInput
 } from "@psychevo/protocol";
 import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, Wrench, X } from "lucide-react";
-import { AgentsConfigPanel } from "./capabilities-agents-config";
+import { AgentsConfigPanel, type ManagedBackendAction } from "./capabilities-agents-config";
 import { formatRuntimeCheckedAt } from "./runtime-context";
 import type { BackendConfigTarget, BackendDraft, CapabilityTab, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
@@ -39,10 +34,6 @@ type PluginInstallDraft = {
   inspection: JsonObject | null;
 };
 type MutationOptions = { notice?: string; refresh?: boolean };
-type RuntimeSessionHistoryState = {
-  revisions: RuntimeSessionRevisionView[];
-  nextCursor: string | null;
-};
 type AgentDefinitionState = "active" | "shadowed" | "disabled";
 type AgentsSegment = "definitions" | "teams" | "runtimes" | "backends";
 
@@ -104,8 +95,6 @@ type RuntimeProfileRow = {
   enabled: boolean;
   generated: boolean;
   configured: boolean;
-  command: string;
-  args: string[];
   backendRef: string;
   provenance: string;
   profileRevision: string;
@@ -116,8 +105,6 @@ type RuntimeProfileRow = {
   approvalMode: string;
   sandbox: string;
   workspaceRoots: string[];
-  envKeys: string[];
-  optionKeys: string[];
   healthStatus: string;
   healthSummary: string;
   checkedAtMs: number | null;
@@ -127,7 +114,7 @@ type RuntimeProfileRow = {
   raw: JsonObject;
 };
 
-type RuntimeProfileKind = "native" | "codex" | "opencode" | "acp";
+type RuntimeProfileKind = "native" | "acp";
 
 type RuntimeProfileDraft = {
   target: BackendConfigTarget;
@@ -135,11 +122,7 @@ type RuntimeProfileDraft = {
   runtime: RuntimeProfileKind;
   enabled: boolean;
   label: string;
-  command: string;
-  argsText: string;
   backendRef: string;
-  envText: string;
-  existingEnvKeys: string[];
   defaultModel: string;
   defaultMode: string;
   defaultAgent: string;
@@ -222,7 +205,6 @@ export function CapabilitiesPage({
   onDoctorBackend,
   onEditBackend,
   onNewBackend,
-  onOpenSession,
   onSaveBackendDraft,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
@@ -439,8 +421,15 @@ export function CapabilitiesPage({
           onDeleteBackend={onDeleteBackend}
           onDoctorBackend={onDoctorBackend}
           onEditBackend={onEditBackend}
+          onManageBackend={(backend, action) => {
+            if (!client || !requestScope) return;
+            void mutate(async () => {
+              const result = await manageAcpBackend(client, requestScope, backend.id, action);
+              await onAgentSurfaceChanged?.();
+              return result;
+            }, { notice: `Managed ACP backend ${action} completed.` });
+          }}
           onNewBackend={onNewBackend}
-          onOpenSession={onOpenSession}
           onSaveBackendDraft={onSaveBackendDraft}
           onSetBackendEnabled={onSetBackendEnabled}
           onSetBackendEntrypoints={onSetBackendEntrypoints}
@@ -586,8 +575,8 @@ function AgentsCapabilityPanel({
   onDeleteBackend,
   onDoctorBackend,
   onEditBackend,
+  onManageBackend,
   onNewBackend,
-  onOpenSession,
   onSaveBackendDraft,
   onSetBackendEnabled,
   onSetBackendEntrypoints,
@@ -609,8 +598,8 @@ function AgentsCapabilityPanel({
   onDeleteBackend(backend: WorkbenchBackend): void;
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
+  onManageBackend(backend: WorkbenchBackend, action: ManagedBackendAction): void;
   onNewBackend(): void;
-  onOpenSession(threadId: string, readOnly?: boolean): void;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
@@ -923,6 +912,7 @@ function AgentsCapabilityPanel({
           onDeleteBackend={onDeleteBackend}
           onDoctorBackend={onDoctorBackend}
           onEditBackend={onEditBackend}
+          onManageBackend={onManageBackend}
           onNewBackend={onNewBackend}
           onSaveBackendDraft={onSaveBackendDraft}
           onSetBackendEnabled={onSetBackendEnabled}
@@ -930,6 +920,8 @@ function AgentsCapabilityPanel({
         />
       ) : segment === "runtimes" ? (
         <RuntimeProfilesPanel
+          backendDoctor={backendDoctor}
+          backends={backends}
           busy={busy}
           client={client}
           loading={loading}
@@ -938,7 +930,7 @@ function AgentsCapabilityPanel({
           rows={filteredRuntimeRows}
           scope={scope}
           selected={selectedRuntime}
-          onOpenSession={onOpenSession}
+          onDoctorBackend={onDoctorBackend}
           onQueryChange={setQuery}
           onSelect={setSelectedId}
         />
@@ -1174,6 +1166,8 @@ function AgentsCapabilityPanel({
 }
 
 function RuntimeProfilesPanel({
+  backendDoctor,
+  backends,
   busy,
   client,
   loading,
@@ -1182,10 +1176,12 @@ function RuntimeProfilesPanel({
   rows,
   scope,
   selected,
-  onOpenSession,
+  onDoctorBackend,
   onQueryChange,
   onSelect
 }: {
+  backendDoctor: Record<string, WorkbenchBackendDoctor>;
+  backends: WorkbenchBackend[];
   busy: boolean;
   client: GatewayClient;
   loading: boolean;
@@ -1194,17 +1190,10 @@ function RuntimeProfilesPanel({
   rows: RuntimeProfileRow[];
   scope: GatewayRequestScope;
   selected: RuntimeProfileRow | null;
-  onOpenSession(threadId: string, readOnly?: boolean): void;
+  onDoctorBackend(backend: WorkbenchBackend): void;
   onQueryChange(value: string): void;
   onSelect(id: string | null): void;
 }) {
-  const [doctor, setDoctor] = useState<JsonObject | null>(null);
-  const [sessions, setSessions] = useState<RuntimeSessionListResult | null>(null);
-  const [sessionsError, setSessionsError] = useState<string | null>(null);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [sessionHistory, setSessionHistory] = useState<Record<string, RuntimeSessionHistoryState>>({});
-  const [selectedRevisions, setSelectedRevisions] = useState<Record<string, string>>({});
-  const [authRepair, setAuthRepair] = useState<RuntimeAuthActionResult | null>(null);
   const [draft, setDraft] = useState<RuntimeProfileDraft | null>(null);
   const [editing, setEditing] = useState<RuntimeProfileRow | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
@@ -1250,11 +1239,6 @@ function RuntimeProfilesPanel({
       setEditorError("ACP Runtime Profiles require an ACP backend ref.");
       return;
     }
-    const env = parseRuntimeEnvironment(draft.envText);
-    if (typeof env === "string") {
-      setEditorError(env);
-      return;
-    }
     const options = parseRuntimeOptions(draft.optionsText);
     if (typeof options === "string") {
       setEditorError(options);
@@ -1267,9 +1251,6 @@ function RuntimeProfilesPanel({
       runtime: draft.runtime,
       enabled: draft.enabled,
       label: nullableText(draft.label),
-      command: nullableText(draft.command),
-      args: splitLines(draft.argsText),
-      env,
       backendRef: draft.runtime === "acp" ? nullableText(draft.backendRef) : null,
       defaultModel: nullableText(draft.defaultModel),
       defaultMode: nullableText(draft.defaultMode),
@@ -1304,164 +1285,10 @@ function RuntimeProfilesPanel({
     }
   }
 
-  async function loadNativeSessions(row: RuntimeProfileRow, cursor: string | null = null) {
-    setSessionsLoading(true);
-    setSessionsError(null);
-    try {
-      const result = await client.request("runtime/session/list", { runtimeRef: row.id, cursor, scope });
-      setSessions((current) => {
-        if (cursor == null || !current || current.runtimeRef !== result.runtimeRef) return result;
-        const merged = new Map(current.sessions.map((session) => [session.sessionHandle, session]));
-        for (const session of result.sessions) merged.set(session.sessionHandle, session);
-        return { ...result, sessions: [...merged.values()] };
-      });
-      if (cursor == null) {
-        setSessionHistory({});
-        setSelectedRevisions({});
-      }
-    } catch (error) {
-      setSessions(null);
-      setSessionsError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSessionsLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    setDoctor(null);
-    setAuthRepair(null);
-    setSessions(null);
-    setSessionsError(null);
-    setSessionsLoading(false);
-    setSessionHistory({});
-    setSelectedRevisions({});
-  }, [selected?.id, scope.cwd]);
-
-  async function loadSessionHistory(
-    row: RuntimeProfileRow,
-    session: RuntimeSessionView,
-    cursor: string | null
-  ) {
-    const result = await client.request("runtime/session/read", {
-      runtimeRef: row.id,
-      sessionHandle: session.sessionHandle,
-      cursor,
-      scope
-    });
-    setSessionHistory((current) => {
-      const prior = cursor == null ? [] : current[session.sessionHandle]?.revisions ?? [];
-      const revisions = new Map(prior.map((revision) => [revision.revisionHandle, revision]));
-      for (const revision of result.revisions) revisions.set(revision.revisionHandle, revision);
-      return {
-        ...current,
-        [session.sessionHandle]: { revisions: [...revisions.values()], nextCursor: result.nextCursor }
-      };
-    });
-    setSelectedRevisions((current) => {
-      if (current[session.sessionHandle] || result.revisions.length === 0) return current;
-      const latest = result.revisions.at(-1);
-      return latest ? { ...current, [session.sessionHandle]: latest.revisionHandle } : current;
-    });
-  }
-
-  async function checkRuntime(row: RuntimeProfileRow) {
-    const ok = await mutate(async () => {
-      const result = objectValue(await client.request("runtime/health/check", { runtimeRef: row.id, scope }));
-      setDoctor(result);
-      return result;
-    }, { notice: "Runtime profile checked.", refresh: false });
-    if (ok) onSelect(row.id);
-  }
-
-  async function refreshCatalog(row: RuntimeProfileRow) {
-    await mutate(
-      () => client.request("runtime/snapshot", { runtimeRef: row.id, scope }),
-      { notice: "Runtime catalog refreshed." }
-    );
-    onSelect(row.id);
-  }
-
-  async function repairAuth(row: RuntimeProfileRow) {
-    await runAuthAction(row, "repair", null, "Authentication guidance loaded.");
-  }
-
-  async function runAuthAction(
-    row: RuntimeProfileRow,
-    action: string,
-    input: JsonObject | null,
-    notice: string
-  ) {
-    const ok = await mutate(async () => {
-      const result = runtimeAuthActionResult(await client.request("runtime/auth/action", {
-        runtimeRef: row.id,
-        action,
-        input,
-        scope
-      }));
-      setAuthRepair(result);
-      return result;
-    }, { notice, refresh: false });
-    if (ok) onSelect(row.id);
-  }
-
-  async function mutateSession(row: RuntimeProfileRow, session: RuntimeSessionView, action: string) {
-    const cascadeConfirmation = action === "delete" && row.runtime === "opencode"
-      ? `Delete ${session.title || "this native session"}? Descendant OpenCode sessions will be recursively deleted.`
-      : action === "delete" && row.runtime === "codex"
-        ? `Delete ${session.title || "this native session"}? Descendant Codex sessions will also be deleted.`
-        : action === "delete"
-          ? `Delete ${session.title || "this native session"}?`
-      : action === "archive" && row.runtime === "codex"
-        ? `Archive ${session.title || "this native session"}? Descendant Codex sessions will also be archived.`
-        : null;
-    if (cascadeConfirmation && !window.confirm(cascadeConfirmation)) {
-      return;
-    }
-    let result: unknown;
-    const params = { runtimeRef: row.id, sessionHandle: session.sessionHandle, scope };
-    if (action === "rename") {
-      const title = window.prompt("Rename native session", session.title ?? "");
-      if (!title?.trim()) return;
-      result = await client.request("runtime/session/rename", { ...params, title: title.trim() });
-    } else if (action === "resume") {
-      result = await client.request("runtime/session/resume", params);
-    } else if (action === "attach") {
-      result = await client.request("runtime/session/attach", params);
-    } else if (action === "fork") {
-      result = await client.request("runtime/session/fork", params);
-    } else if (action === "archive") {
-      result = await client.request("runtime/session/archive", params);
-    } else if (action === "unarchive") {
-      result = await client.request("runtime/session/unarchive", params);
-    } else if (action === "delete") {
-      result = await client.request("runtime/session/delete", params);
-    } else if (action === "revert") {
-      const revisionHandle = selectedRevisions[session.sessionHandle];
-      if (!revisionHandle) return;
-      result = await client.request("runtime/session/revert", { ...params, revisionHandle });
-    } else if (action === "unrevert") {
-      result = await client.request("runtime/session/unrevert", { ...params, revisionHandle: null });
-    } else {
-      return;
-    }
-    if (action === "attach") {
-      const threadId = (result as RuntimeSessionMutationResult).session?.threadId;
-      if (!threadId) throw new Error("Gateway did not return the attached public thread.");
-      onOpenSession(threadId, true);
-    } else {
-      await loadNativeSessions(row);
-    }
-    return result;
-  }
-  const doctorHealthSummary = selected && doctor && stringField(doctor, "id") === selected.id
-    ? stringField(objectField(doctor, "health"), "summary")
-    : "";
-  const authOutput = objectValue(authRepair?.output);
-  const authLoginId = stringField(authOutput, "loginId");
-  const authUrl = safeRuntimeAuthUrl(
-    stringField(authOutput, "authUrl") || stringField(authOutput, "verificationUrl")
-  );
-  const authUserCode = stringField(authOutput, "userCode");
+  const selectedBackend = selected?.backendRef
+    ? backends.find((backend) => backend.id === selected.backendRef) ?? null
+    : null;
+  const selectedBackendDoctor = selectedBackend ? backendDoctor[selectedBackend.id] ?? null : null;
   return (
     <>
       <div className="capabilitiesToolbar agentDefinitionsToolbar">
@@ -1562,15 +1389,14 @@ function RuntimeProfilesPanel({
                   >
                     <Trash2 size={14} /> Delete
                   </button>
-                  <button disabled={busy} onClick={() => void refreshCatalog(selected)} title="Refresh Catalog" type="button">
-                    <RefreshCw size={14} /> Refresh Catalog
-                  </button>
-                  <button disabled={busy} onClick={() => void checkRuntime(selected)} title="Doctor" type="button">
-                    <Wrench size={14} /> Doctor
-                  </button>
-                  {(selected.runtime === "codex" || selected.runtime === "opencode") && (
-                    <button disabled={busy} onClick={() => void repairAuth(selected)} title="Authentication repair" type="button">
-                      <LogIn size={14} /> Repair auth
+                  {selected.runtime === "acp" && (
+                    <button
+                      disabled={busy || !selectedBackend}
+                      onClick={() => selectedBackend && onDoctorBackend(selectedBackend)}
+                      title={selectedBackend ? `Doctor ACP backend ${selectedBackend.id}` : `ACP backend ${selected.backendRef || "is not configured"}`}
+                      type="button"
+                    >
+                      <Wrench size={14} /> Doctor backend
                     </button>
                   )}
                 </div>
@@ -1579,14 +1405,12 @@ function RuntimeProfilesPanel({
                 <div><dt>Runtime</dt><dd>{selected.runtime} · {selected.provenance}</dd></div>
                 <div><dt>Status</dt><dd>{selected.healthSummary}</dd></div>
                 <div><dt>Last checked</dt><dd>{formatRuntimeCheckedAt(selected.checkedAtMs)}</dd></div>
-                <div><dt>Command</dt><dd>{selected.command ? [selected.command, ...selected.args].join(" ") : "Built in"}</dd></div>
                 {selected.backendRef && <div><dt>ACP backend</dt><dd>{selected.backendRef}</dd></div>}
                 <div><dt>Default model</dt><dd>{selected.defaultModel || "Runtime default"}</dd></div>
                 <div><dt>Default mode</dt><dd>{selected.defaultMode || "Runtime default"}</dd></div>
                 <div><dt>Default agent</dt><dd>{selected.defaultAgent || "Runtime default"}</dd></div>
                 <div><dt>Safety</dt><dd>{[selected.approvalMode || "Runtime approval", selected.sandbox || "Runtime sandbox"].join(" · ")}</dd></div>
                 <div><dt>Workspace roots</dt><dd>{selected.workspaceRoots.length > 0 ? selected.workspaceRoots.join(", ") : "Current workspace"}</dd></div>
-                <div><dt>Environment</dt><dd>{selected.envKeys.length > 0 ? selected.envKeys.join(", ") : "No declared keys"}</dd></div>
                 <div><dt>Source</dt><dd>{runtimeProfileSource(selected)}</dd></div>
               </dl>
               <section aria-label="Runtime readiness" className="runtimeCapabilitySection">
@@ -1608,127 +1432,26 @@ function RuntimeProfilesPanel({
               {selected.diagnostics.length > 0 && (
                 <div className="capabilityBanner is-error">{selected.diagnostics.join(" · ")}</div>
               )}
-              {authRepair && (
-                <div className="capabilityBanner runtimeAuthBanner">
-                  <span>{authRepair.message}</span>
-                  {authRepair.status === "login_required" && selected.runtime === "codex" && (
-                    <button
-                      disabled={busy}
-                      onClick={() => void runAuthAction(selected, "login", null, "Managed Codex login started.")}
-                      type="button"
-                    >
-                      Start managed login
-                    </button>
-                  )}
-                  {authRepair.status === "login_pending" && (
-                    <div className="runtimeAuthActions">
-                      {authUrl && <a href={authUrl} rel="noreferrer" target="_blank">Open login</a>}
-                      {authUserCode && <code>{authUserCode}</code>}
-                      {authLoginId && (
-                        <button
-                          disabled={busy}
-                          onClick={() => void runAuthAction(
-                            selected,
-                            "cancel",
-                            { loginId: authLoginId },
-                            "Managed Codex login cancelled."
-                          )}
-                          type="button"
-                        >
-                          Cancel login
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
+              {selected.runtime === "acp" && selected.backendRef && !selectedBackend && (
+                <div className="capabilityBanner is-error">ACP backend {selected.backendRef} is not present in the backend catalog.</div>
               )}
-              {doctor && stringField(doctor, "id") === selected.id && (
-                <>
-                  {doctorHealthSummary && doctorHealthSummary !== selected.healthSummary && (
-                    <div className="capabilityBanner">{doctorHealthSummary}</div>
-                  )}
-                  <KeyValueView value={doctor} />
-                </>
-              )}
-              <section aria-label="Native Sessions" className="runtimeCapabilitySection runtimeSessionsSection">
-                <div className="runtimeCapabilitySectionHeader">
-                  <div><h4>Native Sessions</h4><span>{scope.cwd}</span></div>
-                  <button disabled={busy || sessionsLoading} onClick={() => void loadNativeSessions(selected)} type="button">
-                    {sessions ? "Refresh sessions" : "Load sessions"}
-                  </button>
-                </div>
-                {!sessionsLoading && !sessions && !sessionsError && (
-                  <div className="capabilityEmpty">Load sessions explicitly; selecting a profile never starts its runtime.</div>
-                )}
-                {sessionsLoading && <div className="capabilityEmpty">Loading native sessions</div>}
-                {sessionsError && <div className="capabilityBanner is-error">{sessionsError}</div>}
-                {!sessionsLoading && sessions && !sessions.supported && (
-                  <div className="capabilityEmpty">This Runtime Profile does not expose native session history.</div>
-                )}
-                {!sessionsLoading && sessions?.supported && sessions.sessions.length === 0 && (
-                  <div className="capabilityEmpty">No native sessions in this workspace</div>
-                )}
-                {sessions?.supported && sessions.sessions.map((session) => {
-                  const history = sessionHistory[session.sessionHandle];
-                  return (
-                  <div className="runtimeSessionRow" key={session.dedupKey}>
-                    <div className="runtimeSessionMain">
-                      <strong>{session.title || "Untitled session"}</strong>
-                      <span>{session.archived ? "Archived" : "Active history"} · {runtimeOwnershipLabel(session.ownership)} · {runtimeFidelityLabel(session.fidelity)}</span>
-                      <small>{session.updatedAtMs == null ? "Update time unavailable" : `Updated ${formatRuntimeCheckedAt(session.updatedAtMs)}`}</small>
-                      {session.fidelity !== "full" && <small className="agentSurfaceWarning">History is {session.fidelity}; gaps remain visible.</small>}
-                      {(session.ownership === "active" || session.ownership === "readOnly") && (
-                        <small className="agentSurfaceWarning">This session attaches read-only. Fork it when the runtime supports Fork.</small>
-                      )}
-                      {history && (
-                        <label className="runtimeSessionRevisionPicker">
-                          <span>Revert point</span>
-                          <select
-                            aria-label={`Revert point for ${session.title || "Untitled session"}`}
-                            disabled={busy || history.revisions.length === 0}
-                            onChange={(event) => setSelectedRevisions((current) => ({
-                              ...current,
-                              [session.sessionHandle]: event.target.value
-                            }))}
-                            value={selectedRevisions[session.sessionHandle] ?? ""}
-                          >
-                            {history.revisions.length === 0 && <option value="">No revision points on this page</option>}
-                            {history.revisions.map((revision) => (
-                              <option key={revision.revisionHandle} value={revision.revisionHandle}>
-                                {runtimeRevisionLabel(revision)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                    </div>
-                    <div className="runtimeSessionActions">
-                      {session.ownership === "active" && session.actions.includes("attach") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "attach")} type="button">Attach read-only</button>}
-                      {session.ownership !== "active" && session.actions.includes("resume") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "resume")} type="button">Resume</button>}
-                      {session.actions.includes("fork") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "fork")} type="button">Fork</button>}
-                      {session.actions.includes("rename") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "rename")} type="button">Rename</button>}
-                      {!session.archived && session.actions.includes("archive") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "archive")} type="button">Archive</button>}
-                      {session.archived && session.actions.includes("unarchive") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "unarchive")} type="button">Unarchive</button>}
-                      {selected.runtime === "opencode" && session.actions.includes("revert") && !history && <button disabled={busy} onClick={() => void loadSessionHistory(selected, session, null)} type="button">Load revisions</button>}
-                      {selected.runtime === "opencode" && session.actions.includes("revert") && history && <button disabled={busy || !selectedRevisions[session.sessionHandle]} onClick={() => void mutateSession(selected, session, "revert")} type="button">Revert</button>}
-                      {selected.runtime === "opencode" && session.actions.includes("revert") && history?.nextCursor && <button disabled={busy} onClick={() => void loadSessionHistory(selected, session, history.nextCursor)} type="button">Load earlier</button>}
-                      {selected.runtime !== "codex" && session.actions.includes("unrevert") && <button disabled={busy} onClick={() => void mutateSession(selected, session, "unrevert")} type="button">Unrevert</button>}
-                      {session.actions.includes("delete") && <button className="is-danger" disabled={busy} onClick={() => void mutateSession(selected, session, "delete")} type="button">Delete</button>}
-                    </div>
+              {selectedBackendDoctor && (
+                <section aria-label="ACP backend doctor" className="runtimeCapabilitySection">
+                  <div className="runtimeCapabilitySectionHeader">
+                    <h4>Backend Doctor</h4>
+                    <span>{selectedBackendDoctor.ok ? "Ready" : "Needs attention"}</span>
                   </div>
-                  );
-                })}
-                {sessions?.supported && sessions.nextCursor && (
-                  <button
-                    className="runtimeSessionsLoadMore"
-                    disabled={busy || sessionsLoading}
-                    onClick={() => void loadNativeSessions(selected, sessions.nextCursor)}
-                    type="button"
-                  >
-                    Load more sessions
-                  </button>
-                )}
-              </section>
+                  <div className="runtimeReadinessStages">
+                    {selectedBackendDoctor.checks.map((check) => (
+                      <div className={`runtimeReadinessStage is-${check.ok ? "ready" : "error"}`} key={check.name}>
+                        <strong>{check.name}</strong>
+                        <span>{check.message}</span>
+                        <small>{check.path || "No path"}</small>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
             </>
           ) : (
             <div className="capabilityEmpty">Select a Runtime Profile</div>
@@ -1782,9 +1505,7 @@ function RuntimeProfileEditorForm({
         <span>Runtime</span>
         <select aria-label="Runtime Profile runtime" disabled={busy || generatedIdentity} onChange={(event) => onChange({ ...draft, runtime: runtimeProfileKind(event.target.value) })} value={draft.runtime}>
           {(editing || draft.runtime === "native") && <option value="native">Native</option>}
-          <option value="codex">Codex · Direct</option>
-          <option value="opencode">OpenCode · Direct</option>
-          <option value="acp">ACP compatibility</option>
+          <option value="acp">ACP</option>
         </select>
       </label>
       <label>
@@ -1801,14 +1522,6 @@ function RuntimeProfileEditorForm({
           <input aria-label="Runtime Profile ACP backend ref" disabled={busy} onChange={(event) => onChange({ ...draft, backendRef: event.target.value })} placeholder="cursor" required value={draft.backendRef} />
         </label>
       )}
-      <label>
-        <span>Command</span>
-        <input aria-label="Runtime Profile command" disabled={busy} onChange={(event) => onChange({ ...draft, command: event.target.value })} placeholder="Use runtime default" value={draft.command} />
-      </label>
-      <label className="agentWideField runtimeProfileCompactTextArea">
-        <span>Arguments</span>
-        <textarea aria-label="Runtime Profile arguments" disabled={busy} onChange={(event) => onChange({ ...draft, argsText: event.target.value })} placeholder={"One argument per line\n--stdio"} spellCheck={false} value={draft.argsText} />
-      </label>
       <label>
         <span>Default model</span>
         <input aria-label="Runtime Profile default model" disabled={busy} onChange={(event) => onChange({ ...draft, defaultModel: event.target.value })} placeholder="Runtime default" value={draft.defaultModel} />
@@ -1832,13 +1545,6 @@ function RuntimeProfileEditorForm({
       <label className="agentWideField runtimeProfileCompactTextArea">
         <span>Workspace roots</span>
         <textarea aria-label="Runtime Profile workspace roots" disabled={busy} onChange={(event) => onChange({ ...draft, workspaceRootsText: event.target.value })} placeholder="One absolute path per line" spellCheck={false} value={draft.workspaceRootsText} />
-      </label>
-      <label className="agentWideField runtimeProfileCompactTextArea">
-        <span>Environment</span>
-        <textarea aria-label="Runtime Profile environment" disabled={busy} onChange={(event) => onChange({ ...draft, envText: event.target.value })} placeholder="KEY=value, one per line" spellCheck={false} value={draft.envText} />
-        {draft.existingEnvKeys.length > 0 && (
-          <small className="runtimeProfileFieldHint">Stored values for {draft.existingEnvKeys.join(", ")} are hidden. Leave blank to keep them; enter the complete replacement set to change them.</small>
-        )}
       </label>
       <label className="agentWideField runtimeProfileOptionsField">
         <span>Advanced options (JSON)</span>
@@ -2750,8 +2456,6 @@ function runtimeProfileRowsFromData(data: JsonObject | null): RuntimeProfileRow[
       enabled: objectValue(profile).enabled !== false,
       generated: boolField(profile, "generated"),
       configured: boolField(profile, "configured"),
-      command: stringField(profile, "command"),
-      args: arrayStrings(profile.args),
       backendRef: stringField(profile, "backendRef"),
       provenance: stringField(profile, "provenance") || runtimeProvenanceForKind(stringField(profile, "runtime")),
       profileRevision: decimalRevisionField(profile, "profileRevision"),
@@ -2762,8 +2466,6 @@ function runtimeProfileRowsFromData(data: JsonObject | null): RuntimeProfileRow[
       approvalMode: stringField(profile, "approvalMode"),
       sandbox: stringField(profile, "sandbox"),
       workspaceRoots: arrayStrings(profile.workspaceRoots),
-      envKeys: arrayStrings(profile.envKeys),
-      optionKeys: arrayStrings(profile.optionKeys),
       healthStatus: stringField(health, "status") || "unchecked",
       healthSummary: stringField(health, "summary") || "Not checked",
       checkedAtMs: nullableNumberField(health, "checkedAtMs"),
@@ -2784,14 +2486,10 @@ function emptyRuntimeProfileDraft(): RuntimeProfileDraft {
   return {
     target: "project",
     id: "",
-    runtime: "codex",
+    runtime: "acp",
     enabled: true,
     label: "",
-    command: "",
-    argsText: "",
     backendRef: "",
-    envText: "",
-    existingEnvKeys: [],
     defaultModel: "",
     defaultMode: "",
     defaultAgent: "",
@@ -2809,11 +2507,7 @@ function runtimeProfileDraftFromRead(profile: RuntimeProfileView, options: unkno
     runtime: runtimeProfileKind(profile.runtime),
     enabled: profile.enabled,
     label: profile.label,
-    command: profile.command ?? "",
-    argsText: profile.args.join("\n"),
     backendRef: profile.backendRef ?? "",
-    envText: "",
-    existingEnvKeys: profile.envKeys,
     defaultModel: profile.defaultModel ?? "",
     defaultMode: profile.defaultMode ?? "",
     defaultAgent: profile.defaultAgent ?? "",
@@ -2825,8 +2519,8 @@ function runtimeProfileDraftFromRead(profile: RuntimeProfileView, options: unkno
 }
 
 function runtimeProfileKind(value: string): RuntimeProfileKind {
-  if (value === "codex" || value === "opencode" || value === "acp") return value;
-  return "native";
+  if (value === "native" || value === "acp") return value;
+  throw new Error(`Unsupported Runtime Profile kind: ${value}`);
 }
 
 function runtimeProfileMutableTarget(row: RuntimeProfileRow): BackendConfigTarget | null {
@@ -2840,6 +2534,7 @@ function runtimeProfileMutableTargetFromSources(sourceTargets: BackendConfigTarg
 }
 
 function runtimeProfileCanCustomize(row: RuntimeProfileRow): boolean {
+  if (row.runtime !== "native" && row.runtime !== "acp") return false;
   if (runtimeProfileMutableTarget(row)) return true;
   return row.generated && runtimeProfileHasReservedIdentity(row);
 }
@@ -2850,22 +2545,6 @@ function runtimeProfileHasReservedIdentity(row: RuntimeProfileRow): boolean {
 
 function runtimeProfileHasFallback(row: RuntimeProfileRow): boolean {
   return row.sourceTargets.length > 1 || runtimeProfileHasReservedIdentity(row);
-}
-
-function parseRuntimeEnvironment(value: string): Record<string, string> | string {
-  const env: Record<string, string> = {};
-  const lines = value.split(/\r?\n/);
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    if (!line.trim()) continue;
-    const separator = line.indexOf("=");
-    if (separator <= 0) return `Environment line ${index + 1} must use KEY=value.`;
-    const key = line.slice(0, separator).trim();
-    if (!key) return `Environment line ${index + 1} requires a key.`;
-    if (Object.prototype.hasOwnProperty.call(env, key)) return `Environment key ${key} is duplicated.`;
-    env[key] = line.slice(separator + 1);
-  }
-  return env;
 }
 
 function parseRuntimeOptions(value: string): JsonObject | null | string {
@@ -3144,8 +2823,8 @@ function teamRowMetadata(row: AgentTeamRow): string {
 }
 
 function runtimeProfileMetadata(row: RuntimeProfileRow): string {
-  const command = row.command ? [row.command, ...row.args].join(" ") : "built in";
-  return [row.provenance, runtimeProfileSource(row), runtimeReadinessLabel(row.healthStatus), formatRuntimeCheckedAt(row.checkedAtMs), command].filter(Boolean).join(" · ");
+  const backend = row.backendRef ? `backend ${row.backendRef}` : "";
+  return [row.provenance, runtimeProfileSource(row), runtimeReadinessLabel(row.healthStatus), formatRuntimeCheckedAt(row.checkedAtMs), backend].filter(Boolean).join(" · ");
 }
 
 function runtimeProfileSource(row: RuntimeProfileRow): string {
@@ -3157,7 +2836,7 @@ function runtimeProfileSource(row: RuntimeProfileRow): string {
 function runtimeProvenanceForKind(runtime: string): string {
   if (runtime === "acp") return "ACP";
   if (runtime === "native") return "Native";
-  return "Direct";
+  return "Unsupported";
 }
 
 function runtimeReadinessLabel(status: string): string {
@@ -3173,23 +2852,6 @@ function readinessStageLabel(id: string): string {
   return id.split(/[-_]/g).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ");
 }
 
-function runtimeOwnershipLabel(ownership: RuntimeSessionView["ownership"]): string {
-  if (ownership === "readWrite") return "Read-write";
-  if (ownership === "active") return "Runtime active";
-  return "Read-only";
-}
-
-function runtimeFidelityLabel(fidelity: RuntimeSessionView["fidelity"]): string {
-  if (fidelity === "full") return "Full history";
-  if (fidelity === "summary") return "Summary history";
-  return "Partial history";
-}
-
-function runtimeRevisionLabel(revision: RuntimeSessionRevisionView): string {
-  const role = revision.role === "user" ? "User message" : "History point";
-  return revision.createdAtMs == null ? `${role} · time unavailable` : `${role} · ${formatRuntimeCheckedAt(revision.createdAtMs)}`;
-}
-
 async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: GatewayRequestScope) {
   if (tab === "agents") {
     const [agents, teams, runtimeProfiles] = await Promise.all([
@@ -3203,6 +2865,18 @@ async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: Gate
   if (tab === "plugins") return client.request("plugin/list", { scope });
   if (tab === "mcp") return client.request("mcp/list", { scope });
   return client.request("tool/list", { scope });
+}
+
+function manageAcpBackend(
+  client: GatewayClient,
+  scope: GatewayRequestScope,
+  id: string,
+  action: ManagedBackendAction
+) {
+  const params = { id, scope };
+  if (action === "install") return client.request("backend/install", params);
+  if (action === "repair") return client.request("backend/repair", params);
+  return client.request("backend/upgrade", params);
 }
 
 async function setCapabilityEnabled(client: GatewayClient | null, scope: GatewayRequestScope | null, tab: CapabilityTab, row: CapabilityRow, enabled: boolean) {
@@ -3512,26 +3186,6 @@ function KeyValueView({ value }: { value: JsonObject }) {
 
 function objectValue(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
-}
-
-function runtimeAuthActionResult(value: unknown): RuntimeAuthActionResult {
-  const result = objectValue(value);
-  return {
-    accepted: boolField(result, "accepted"),
-    status: stringField(result, "status"),
-    message: stringField(result, "message") || "The runtime returned no authentication guidance.",
-    output: result.output ?? null
-  };
-}
-
-function safeRuntimeAuthUrl(value: string): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
 }
 
 function objectField(value: unknown, key: string): JsonObject {

@@ -25,6 +25,7 @@ export async function startPevoWeb({
   live,
   model,
   pevoBin,
+  processEnv,
   cwd
 }: {
   configAppend?: string;
@@ -36,6 +37,7 @@ export async function startPevoWeb({
   live: boolean;
   model?: string;
   pevoBin?: string;
+  processEnv?: NodeJS.ProcessEnv;
   cwd?: string;
 }): Promise<PevoWebServer> {
   if (!existsSync(staticDir)) {
@@ -56,7 +58,8 @@ export async function startPevoWeb({
   }
   const resolvedConfigPath = configPath;
   if (!live) {
-    const configText = `model = "${model ?? "lmstudio/noop"}"\n${configAppend ?? ""}`;
+    const requestedConfig = configAppend ?? "";
+    const configText = `model = "${model ?? "lmstudio/noop"}"\n${requestedConfig}${deterministicLocalAcpIsolation(requestedConfig)}`;
     mkdirSync(home, { recursive: true });
     writeFileSync(resolvedConfigPath, configText);
     writeFileSync(path.join(home, "config.toml"), configText);
@@ -77,9 +80,10 @@ export async function startPevoWeb({
     staticDir,
     cwd: resolvedCwd,
     home,
-    channelRuntime
+    channelRuntime,
+    processEnv
   });
-  const env = gatewayEnv(resolvedConfigPath, dbPath, home, live, channelRuntime);
+  const env = gatewayEnv(resolvedConfigPath, dbPath, home, live, channelRuntime, processEnv);
   const url = modelUrl(
     await waitForServerUrl(child),
     live ? model : undefined
@@ -96,6 +100,28 @@ export async function startPevoWeb({
       rmSync(root, { force: true, recursive: true });
     }
   };
+}
+
+function deterministicLocalAcpIsolation(configText: string): string {
+  const shortcuts = [
+    { id: "opencode", label: "OpenCode", command: "opencode" },
+    { id: "hermes", label: "Hermes", command: "hermes" }
+  ];
+  return shortcuts.flatMap(({ id, label, command }) => {
+    const declared = new RegExp(`\\[agents\\.backends\\.(?:${id}|"${id}")\\]`).test(configText);
+    if (declared) return [];
+    return [
+      "",
+      `[agents.backends.${id}]`,
+      'kind = "acp"',
+      "enabled = false",
+      `label = ${JSON.stringify(label)}`,
+      'description = "Disabled by the deterministic Workbench harness."',
+      `command = ${JSON.stringify(command)}`,
+      'args = ["acp"]',
+      'entrypoints = ["peer", "subagent"]'
+    ];
+  }).join("\n") + "\n";
 }
 
 function writeWorkbenchFixtures(cwd: string) {
@@ -143,6 +169,7 @@ function spawnPevoWeb(options: {
   channelRuntime?: boolean;
   live: boolean;
   pevoBin?: string;
+  processEnv?: NodeJS.ProcessEnv;
   staticDir: string;
   cwd: string;
 }): ChildProcessWithoutNullStreams {
@@ -171,7 +198,14 @@ function spawnPevoWeb(options: {
 
   return spawn(command, args, {
     cwd: repoRoot,
-    env: gatewayEnv(options.configPath, options.dbPath, options.home, options.live, options.channelRuntime),
+    env: gatewayEnv(
+      options.configPath,
+      options.dbPath,
+      options.home,
+      options.live,
+      options.channelRuntime,
+      options.processEnv
+    ),
     stdio: ["ignore", "pipe", "pipe"]
   });
 }
@@ -214,10 +248,12 @@ function gatewayEnv(
   dbPath: string,
   home: string,
   live: boolean,
-  channelRuntime?: boolean
+  channelRuntime?: boolean,
+  processEnv?: NodeJS.ProcessEnv
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    ...processEnv,
     PSYCHEVO_CONFIG: configPath,
     PSYCHEVO_DB: dbPath,
     PSYCHEVO_HOME: home,

@@ -216,19 +216,13 @@ describe("Workbench settings and backend controls", () => {
     });
 
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
-    const modelButton = await screen.findByRole("button", { name: "Model" });
+    const modelSelect = await screen.findByRole("button", { name: "Model" });
     await waitFor(() => {
-      expect(modelButton.textContent).toContain("mimo-v2.5-free Default");
+      expect(modelSelect.getAttribute("title")).toBe("opencode-zen/mimo-v2.5-free / Default");
     });
-    fireEvent.click(modelButton);
-    const modelPopover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    const freeComposerRow = within(modelPopover).getByRole("radio", { name: /mimo-v2\.5-free/ });
-    expect(freeComposerRow.getAttribute("data-model-value")).toBe("opencode-zen/mimo-v2.5-free");
-    expect(freeComposerRow.getAttribute("data-model-free")).toBe("true");
-    expect(freeComposerRow.querySelector(".modelReasoningFreeBadge")?.textContent).toBe("Free");
-    expect(modelProviderHeadings(modelPopover)).toContain("OpenCode Zen");
-    expect(freeComposerRow.getAttribute("title")).toBeNull();
-    fireEvent.keyDown(modelPopover, { key: "Escape" });
+    const composerPicker = await openComposerModelPicker();
+    expect(within(composerPicker).getByRole("radio", { name: /mimo-v2\.5-free/ })).toBeTruthy();
+    fireEvent.keyDown(composerPicker, { key: "Escape" });
 
     const textarea = screen.getByPlaceholderText("Ask Psychevo...");
     fireEvent.change(textarea, { target: { value: "use the saved default" } });
@@ -238,8 +232,8 @@ describe("Workbench settings and backend controls", () => {
         method: "turn/start",
         params: expect.objectContaining({
           input: [{ type: "text", text: "use the saved default" }],
-          model: "opencode-zen/mimo-v2.5-free",
-          reasoningEffort: null
+          target: { agentRef: null, runtimeProfileRef: "native" },
+          turnOverrides: {}
         })
       });
     });
@@ -255,9 +249,9 @@ describe("Workbench settings and backend controls", () => {
 
     render(<App />);
 
-    const initialModelButton = await screen.findByRole("button", { name: "Model" });
+    const initialModelSelect = await screen.findByRole("button", { name: "Model" });
     await waitFor(() => {
-      expect(initialModelButton.textContent).toContain("xiaomi-token-high Default");
+      expect(initialModelSelect.getAttribute("title")).toBe("xiaomi/xiaomi-token-high / Default");
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
@@ -287,9 +281,9 @@ describe("Workbench settings and backend controls", () => {
     });
 
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
-    const modelButton = await screen.findByRole("button", { name: "Model" });
+    const modelSelect = await screen.findByRole("button", { name: "Model" });
     await waitFor(() => {
-      expect(modelButton.textContent).toContain("xiaomi-token-high Default");
+      expect(modelSelect.getAttribute("title")).toBe("xiaomi/xiaomi-token-high / Default");
     });
 
     const textarea = screen.getByPlaceholderText("Ask Psychevo...");
@@ -300,7 +294,8 @@ describe("Workbench settings and backend controls", () => {
         method: "turn/start",
         params: expect.objectContaining({
           input: [{ type: "text", text: "keep scoped model" }],
-          model: "xiaomi/xiaomi-token-high"
+          target: { agentRef: null, runtimeProfileRef: "native" },
+          turnOverrides: {}
         })
       });
     });
@@ -320,9 +315,9 @@ describe("Workbench settings and backend controls", () => {
 
     render(<App />);
 
-    const composerModelButton = await screen.findByRole("button", { name: "Model" });
+    const composerModelSelect = await screen.findByRole("button", { name: "Model" });
     await waitFor(() => {
-      expect(composerModelButton.textContent).toContain("xiaomi-token-high Default");
+      expect(composerModelSelect.getAttribute("title")).toBe("xiaomi/xiaomi-token-high / Default");
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
@@ -339,9 +334,9 @@ describe("Workbench settings and backend controls", () => {
     expect(defaultButton.getAttribute("title")).toBe("opencode-zen/big-pickle / High");
 
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Back to app" }));
-    const currentComposerModelButton = await screen.findByRole("button", { name: "Model" });
+    const currentComposerModelSelect = await screen.findByRole("button", { name: "Model" });
     await waitFor(() => {
-      expect(currentComposerModelButton.textContent).toContain("xiaomi-token-high Default");
+      expect(currentComposerModelSelect.getAttribute("title")).toBe("xiaomi/xiaomi-token-high / Default");
     });
   });
 
@@ -448,7 +443,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(detailPage).queryByRole("button", { name: "Test release" })).toBeNull();
     expect(within(detailPage).queryByRole("button", { name: "Cancel" })).toBeNull();
     expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(within(detailPage).getByRole("option", { name: "custom/current-model (current)" })).toBeTruthy();
+    expect(await within(detailPage).findByRole("option", { name: "custom/current-model (current, unavailable)" })).toBeTruthy();
     const workspacePreset = within(detailPage).getByRole("combobox", { name: "Channel workspace preset" });
     expect(workspacePreset).toBeTruthy();
     expect(within(workspacePreset).getByRole("option", { name: "Profile default" })).toBeTruthy();
@@ -486,7 +481,9 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.change(within(detailPage).getByRole("textbox", { name: "Channel workspace" }), {
       target: { value: "/tmp/channel-workspace" }
     });
-    fireEvent.click(within(detailPage).getByRole("button", { name: "Bypass permissions" }));
+    const bypassPermissions = await within(detailPage).findByRole("button", { name: "Bypass permissions" }) as HTMLButtonElement;
+    await waitFor(() => expect(bypassPermissions.disabled).toBe(false));
+    fireEvent.click(bypassPermissions);
     fireEvent.click(within(detailPage).getByText("Advanced diagnostics"));
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "channel/source/list")).toBe(true);
@@ -494,14 +491,35 @@ describe("Workbench settings and backend controls", () => {
     expect(within(detailPage).getByText("Remote lanes")).toBeTruthy();
     expect(within(detailPage).getByText("Channel lane")).toBeTruthy();
     expect(within(detailPage).getByText("/tmp/project")).toBeTruthy();
-    expect(within(detailPage).getByRole("option", { name: "OpenCode" })).toBeTruthy();
+    expect(within(detailPage).getByRole("option", { name: "OpenCode (ACP)" })).toBeTruthy();
     fireEvent.change(within(detailPage).getByRole("combobox", { name: "Channel Runtime Profile" }), {
       target: { value: "opencode" }
     });
-    expect(within(detailPage).queryByRole("combobox", { name: "Channel model" })).toBeNull();
+    const acpModel = await within(detailPage).findByRole("combobox", { name: "Channel model" }) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(within(acpModel).getByRole("option", { name: "openai/gpt-fixture" })).toBeTruthy();
+      expect(acpModel.disabled).toBe(false);
+    });
+    expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/context/read",
+      params: expect.objectContaining({
+        threadId: null,
+        target: { agentRef: "opencode", runtimeProfileRef: "opencode" },
+        scope: expect.objectContaining({
+          source: expect.objectContaining({
+            rawId: "channel-settings:release",
+            lifetime: "invocation"
+          })
+        })
+      })
+    });
+    expect(within(acpModel).getByRole("option", { name: "openai/gpt-4o (current, unavailable)" })).toBeTruthy();
+    fireEvent.change(acpModel, { target: { value: "openai/gpt-fixture" } });
     expect(within(detailPage).queryByRole("group", { name: "Permission mode" })).toBeNull();
     expect(within(detailPage).getByLabelText("Runtime Profile safety policy").textContent).toContain("OpenCode");
-    expect(within(detailPage).getByText("Uses runtime default")).toBeTruthy();
+    expect(within(detailPage).queryByText("Uses runtime default")).toBeNull();
+    expect(within(detailPage).getByText(/Permission mode bypassPermissions is not an authoritative choice/)).toBeTruthy();
+    fireEvent.click(within(detailPage).getByRole("button", { name: "Use profile safety policy" }));
     fireEvent.change(within(detailPage).getByRole("textbox", { name: "Credential env" }), {
       target: { value: "" }
     });
@@ -516,7 +534,7 @@ describe("Workbench settings and backend controls", () => {
       enabled: false,
       cwd: "/tmp/channel-workspace",
       runtimeRef: "opencode",
-      model: "",
+      model: "openai/gpt-fixture",
       permissionMode: "default",
       requireMention: false,
       credentialEnv: "",
@@ -583,6 +601,23 @@ describe("Workbench settings and backend controls", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("fails closed when an ACP model descriptor is not certified for Channels", async () => {
+    gatewayMock.acpChannelModelSafe = false;
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Channels" }));
+    const channelsPanel = await within(settingsRegion).findByRole("region", { name: "Channels" });
+    fireEvent.click(within(channelsPanel).getByRole("button", { name: "Settings ops-lark" }));
+
+    const detailPage = await within(settingsRegion).findByRole("region", { name: "Channel settings" });
+    expect(await within(detailPage).findByText("Model is not certified for Channels.")).toBeTruthy();
+    expect(within(detailPage).queryByRole("combobox", { name: "Channel model" })).toBeNull();
+    expect(within(detailPage).getByText("Model control unavailable")).toBeTruthy();
+    expect(within(detailPage).queryByText("Uses runtime default")).toBeNull();
   });
 
   it("keeps internal WeChat env names out of the default detail save surface", async () => {
@@ -678,6 +713,9 @@ describe("Workbench settings and backend controls", () => {
 
     fireEvent.change(workspacePreset, { target: { value: "/tmp/recent-ops" } });
     expect(workspaceInput.value).toBe("/tmp/recent-ops");
+    await waitFor(() => {
+      expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(within(detailPage).getAllByRole("button", { name: "Save" })[0]!);
     await waitFor(() => {
       expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").length).toBe(1);
@@ -693,6 +731,9 @@ describe("Workbench settings and backend controls", () => {
     });
     fireEvent.change(workspacePreset, { target: { value: "" } });
     expect(workspaceInput.value).toBe("");
+    await waitFor(() => {
+      expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(within(detailPage).getAllByRole("button", { name: "Save" })[0]!);
     await waitFor(() => {
       expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").length).toBe(2);
@@ -708,6 +749,9 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.change(workspaceInput, { target: { value: "/tmp/manual-channel" } });
     expect(workspacePreset.value).toBe("__manual__");
     expect(within(detailPage).getByRole("option", { name: "Manual path" })).toBeTruthy();
+    await waitFor(() => {
+      expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(within(detailPage).getAllByRole("button", { name: "Save" })[0]!);
     await waitFor(() => {
       expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").length).toBe(3);
@@ -852,106 +896,85 @@ describe("Workbench settings and backend controls", () => {
     });
   });
 
-  it("renders model and reasoning in one grouped selector", async () => {
+  it("renders model and reasoning from the canonical Thread control descriptors", async () => {
     render(<App />);
 
-    const modelButton = await screen.findByRole("button", { name: "Model" });
-    expect(modelButton.textContent).toContain("xiaomi-token-high Default");
-    expect(modelButton.textContent).not.toContain("xiaomi/xiaomi-token-high");
-    expect(modelButton.getAttribute("title")).toBe("xiaomi/xiaomi-token-high / Default");
-    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "Variant" })).toBeNull();
-    expect(screen.queryByRole("option", { name: "Select model" })).toBeNull();
-
-    fireEvent.click(modelButton);
-    const popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    const filter = within(popover).getByRole("searchbox", { name: "Model filter" });
-    expect(filter).toBeTruthy();
-    const modelGroup = within(popover).getByRole("radiogroup", { name: "Model" });
-    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).getAttribute("aria-checked")).toBe("true");
-    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).getAttribute("data-model-value")).toBe("xiaomi/xiaomi-token-high");
-    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).getAttribute("title")).toBeNull();
-    expect(within(modelGroup).queryByText(/xiaomi\/xiaomi-token-high/)).toBeNull();
-    expect((popover as HTMLElement).style.getPropertyValue("--pevo-model-picker-popover-width")).toBe("25ch");
-    expect(modelProviderHeadings(modelGroup)).toEqual(["Xiaomi", "OpenAI", "Xiaomi"]);
-    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).querySelector("small")).toBeNull();
-    expect(within(modelGroup).getByRole("radio", { name: /xiaomi-token-high/ }).querySelector(".modelReasoningFreeBadge")).toBeNull();
-    fireEvent.change(filter, { target: { value: "gpt" } });
-    expect(within(modelGroup).queryByRole("radio", { name: /xiaomi-token-high/ })).toBeNull();
-    expect(within(modelGroup).getByRole("radio", { name: /gpt-4o/ })).toBeTruthy();
-    expect((popover as HTMLElement).style.getPropertyValue("--pevo-model-picker-popover-width")).toBe("24ch");
-    expect(modelProviderHeadings(modelGroup)).toEqual(["OpenAI"]);
-    fireEvent.change(filter, { target: { value: "" } });
-    const reasoningGroup = within(popover).getByRole("radiogroup", { name: "Reasoning" });
-    expect(within(reasoningGroup).getByRole("radio", { name: /Default/ }).getAttribute("aria-checked")).toBe("true");
-    expect(within(reasoningGroup).getByRole("radio", { name: "High" })).toBeTruthy();
-    expect(within(reasoningGroup).queryByText("Explicit reasoning effort")).toBeNull();
-    expect(screen.queryByText("medium")).toBeNull();
-  });
-
-  it("groups adjacent visible model providers after recent ordering", async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Model" }));
-    let popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    fireEvent.click(within(popover).getByRole("radio", { name: /gpt-4o/ }));
-    fireEvent.click(within(popover).getByRole("radio", { name: /xiaomi-token-high/ }));
-
-    popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    const modelGroup = within(popover).getByRole("radiogroup", { name: "Model" });
-    expect(modelProviderHeadings(modelGroup)).toEqual(["Xiaomi", "OpenAI", "Xiaomi"]);
-    expect(Array.from(modelGroup.querySelectorAll(".modelReasoningRow")).map((row) => row.getAttribute("data-model-value"))).toEqual([
-      "xiaomi/xiaomi-token-high",
-      "openai/gpt-4o",
-      "xiaomi/xiaomi-token-low"
+    const model = await screen.findByRole("button", { name: "Model" });
+    expect(model.getAttribute("title")).toBe("xiaomi/xiaomi-token-high / Default");
+    fireEvent.click(model);
+    const picker = await screen.findByRole("dialog", { name: "Model and reasoning" });
+    expect(within(picker).getByRole("radiogroup", { name: "Model" }).querySelectorAll('[role="radio"]')).toHaveLength(3);
+    expect(within(within(picker).getByRole("radiogroup", { name: "Model" })).getAllByRole("radio").map((option) => option.textContent)).toEqual([
+      "xiaomi-token-high",
+      "gpt-4o",
+      "xiaomi-token-low"
+    ]);
+    const reasoning = within(picker).getByRole("radiogroup", { name: "Reasoning" });
+    expect(within(reasoning).getByRole("radio", { name: "Default" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(reasoning).getAllByRole("radio").map((option) => option.textContent)).toEqual([
+      "Default",
+      "Low",
+      "Medium",
+      "High"
     ]);
   });
 
-  it("persists composer model choices to shared model state", async () => {
+  it("preserves the Adapter-projected model choice order", async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Model" }));
-    let popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    fireEvent.click(within(popover).getByRole("radio", { name: /gpt-4o/ }));
+    const picker = await openComposerModelPicker();
+    const models = within(picker).getByRole("radiogroup", { name: "Model" });
+    expect(within(models).getAllByRole("radio").map((option) => option.textContent)).toEqual([
+      "xiaomi-token-high",
+      "gpt-4o",
+      "xiaomi-token-low"
+    ]);
+  });
+
+  it("routes composer model choices through Thread control receipts", async () => {
+    render(<App />);
+
+    let picker = await openComposerModelPicker();
+    fireEvent.click(within(picker).getByRole("radio", { name: "gpt-4o" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
-        method: "model/state/set",
+        method: "thread/control/set",
         params: expect.objectContaining({
-          cwd: "/tmp/project",
-          model: "openai/gpt-4o",
-          reasoningEffort: null
+          controlId: "model",
+          value: "openai/gpt-4o"
         })
       });
     });
 
-    fireEvent.click(within(popover).getByRole("radio", { name: /xiaomi-token-low/ }));
-    popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    fireEvent.click(within(popover).getByRole("radio", { name: "Medium" }));
+    picker = await openComposerModelPicker();
+    fireEvent.click(within(picker).getByRole("radio", { name: "xiaomi-token-low" }));
+    await waitFor(() => expect(within(picker).queryByRole("radio", { name: "Medium" })).toBeTruthy());
+    fireEvent.click(within(picker).getByRole("radio", { name: "Medium" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
-        method: "model/state/set",
+        method: "thread/control/set",
         params: expect.objectContaining({
-          cwd: "/tmp/project",
-          model: "xiaomi/xiaomi-token-low",
-          reasoningEffort: "medium"
+          controlId: "reasoning",
+          value: "medium"
         })
       });
     });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "model/state/set")).toBe(false);
   });
 
   it("adapts reasoning options when switching models", async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Model" }));
-    let popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    fireEvent.click(within(popover).getByRole("radio", { name: /High/ }));
-    expect((within(popover).getByRole("radio", { name: /High/ })).getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(within(popover).getByRole("radio", { name: /gpt-4o/ }));
+    const picker = await openComposerModelPicker();
+    fireEvent.click(within(picker).getByRole("radio", { name: "High" }));
+    await waitFor(() => expect(within(picker).getByRole("radio", { name: "High" }).getAttribute("aria-checked")).toBe("true"));
+    fireEvent.click(within(picker).getByRole("radio", { name: "gpt-4o" }));
 
-    popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    const reasoningGroup = within(popover).getByRole("radiogroup", { name: "Reasoning" });
-    expect(within(reasoningGroup).getByRole("radio", { name: /Default/ }).getAttribute("aria-checked")).toBe("true");
-    expect(within(reasoningGroup).queryByRole("radio", { name: /High/ })).toBeNull();
+    await waitFor(() => {
+      const reasoning = within(picker).getByRole("radiogroup", { name: "Reasoning" });
+      expect(within(reasoning).getByRole("radio", { name: "Default" }).getAttribute("aria-checked")).toBe("true");
+      expect(within(reasoning).queryByRole("radio", { name: "High" })).toBeNull();
+    });
   });
 
   it("blocks prompt turns until a concrete provider-qualified model is selected", async () => {
@@ -960,7 +983,8 @@ describe("Workbench settings and backend controls", () => {
 
     render(<App />);
 
-    expect((await screen.findAllByText("Select model")).length).toBeGreaterThan(0);
+    const model = await screen.findByRole("button", { name: "Model" });
+    expect(model.textContent).toBe("Select model");
     const textarea = screen.getByPlaceholderText("Ask Psychevo...");
     fireEvent.change(textarea, { target: { value: "hello" } });
     const sendButton = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
@@ -968,10 +992,11 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Model" }));
-    const popover = await screen.findByRole("dialog", { name: "Model and reasoning" });
-    fireEvent.click(within(popover).getByRole("radio", { name: /gpt-4o/ }));
-    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(false);
+    const picker = await openComposerModelPicker();
+    fireEvent.click(within(picker).getByRole("radio", { name: "gpt-4o" }));
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => {
@@ -979,7 +1004,8 @@ describe("Workbench settings and backend controls", () => {
         method: "turn/start",
         params: expect.objectContaining({
           input: [{ type: "text", text: "hello" }],
-          model: "openai/gpt-4o"
+          target: { agentRef: null, runtimeProfileRef: "native" },
+          turnOverrides: {}
         })
       });
     });
@@ -1029,17 +1055,12 @@ describe("Workbench settings and backend controls", () => {
     render(<App />);
 
     const popover = await openAgentRuntimePopover();
-    const agentGroup = within(popover).getByRole("radiogroup", { name: "Main agent" });
-    expect(within(agentGroup).getByRole("radio", { name: "Default Agent" })).toBeTruthy();
-    expect(within(agentGroup).queryByRole("radio", { name: "cursor" })).toBeNull();
-    expect(within(agentGroup).queryByRole("radio", { name: "opencode" })).toBeNull();
-
-    const runtimePopover = await openRuntimeProfilePopover();
-    const runtimeGroup = within(runtimePopover).getByRole("radiogroup", { name: "Runtime" });
-    expect(within(runtimeGroup).getByRole("radio", { name: "Native Runtime" })).toBeTruthy();
-    expect(within(runtimeGroup).getByRole("radio", { name: "OpenCode" })).toBeTruthy();
-    expect(within(runtimeGroup).queryByRole("radio", { name: "Cursor (ACP)" })).toBeNull();
-    expect(gatewayMock.requestLog.some((entry) => entry.method === "runtime/context/read")).toBe(true);
+    const targets = within(popover).getByRole("radiogroup", { name: "Agent target" });
+    expect(within(targets).getByRole("radio", { name: "Default Agent · Psychevo (Native)" })).toBeTruthy();
+    expect(within(targets).getByRole("radio", { name: "translate · Psychevo (Native)" })).toBeTruthy();
+    expect(within(targets).queryByRole("radio", { name: /cursor/i })).toBeNull();
+    expect(within(targets).queryByRole("radio", { name: /opencode/i })).toBeNull();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/context/read")).toBe(true);
     expect(gatewayMock.requestLog.some((entry) => entry.method === "backend/list")).toBe(true);
   });
 
@@ -1068,8 +1089,19 @@ describe("Workbench settings and backend controls", () => {
 
     await selectRuntime("opencode");
     const popover = await openRuntimeProfilePopover();
-    const runtimeGroup = within(popover).getByRole("radiogroup", { name: "Runtime" });
-    await waitFor(() => expect(within(runtimeGroup).getByRole("radio", { name: "OpenCode" }).getAttribute("aria-checked")).toBe("true"));
+    const targets = within(popover).getByRole("radiogroup", { name: "Agent target" });
+    await waitFor(() => expect(within(targets).getByRole("radio", { name: "opencode · OpenCode (ACP)" }).getAttribute("aria-checked")).toBe("true"));
+    expect(screen.getByRole("button", { name: "Agent target" }).textContent).toContain("opencode");
+    expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/draft/prepare",
+      params: expect.objectContaining({ targetId: "target:opencode:opencode" })
+    });
+    const mode = screen.getByRole("combobox", { name: "Session Mode" }) as HTMLSelectElement;
+    expect(mode.options[mode.selectedIndex]?.textContent).toBe("build");
+    expect(Array.from(mode.options).map((option) => option.textContent)).toEqual(["build", "plan"]);
+    const modelPicker = await openComposerModelPicker();
+    expect(within(modelPicker).getByRole("radiogroup", { name: "Model" }).querySelectorAll('[role="radio"]')).toHaveLength(2);
+    fireEvent.keyDown(modelPicker, { key: "Escape" });
 
     gatewayMock.agentRecords = [agentRecord("opencode", ["subagent"], "opencode")];
     fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
@@ -1091,9 +1123,8 @@ describe("Workbench settings and backend controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "New Session" }));
     const nextPopover = await openRuntimeProfilePopover();
-    const nextRuntimeGroup = within(nextPopover).getByRole("radiogroup", { name: "Runtime" });
-    expect(within(nextRuntimeGroup).getByRole("radio", { name: "OpenCode" })).toBeTruthy();
-    expect(within(nextRuntimeGroup).queryByRole("radio", { name: "OpenCode (ACP)" })).toBeNull();
+    const nextTargets = within(nextPopover).getByRole("radiogroup", { name: "Agent target" });
+    expect(within(nextTargets).queryByRole("radio", { name: /OpenCode \(ACP\)/ })).toBeNull();
   });
 
   it("creates a Profile ACP backend from Capabilities Agents", async () => {
@@ -1196,7 +1227,7 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.click(within(capabilitiesRegion).getByRole("tab", { name: "Agents" }));
     fireEvent.click(await within(capabilitiesRegion).findByRole("tab", { name: "Runtime Profiles" }));
     const runtimeProfile = await within(capabilitiesRegion).findByRole("button", { name: "Runtime Profile opencode" });
-    expect(within(runtimeProfile).getByText("OpenCode")).toBeTruthy();
+    expect(within(runtimeProfile).getByText("OpenCode (ACP)")).toBeTruthy();
 
     fireEvent.click(within(capabilitiesRegion).getByRole("tab", { name: "ACP Backends" }));
     const agentsPanel = await within(capabilitiesRegion).findByRole("region", { name: "Agents" });
@@ -1278,4 +1309,11 @@ function modelProviderHeadings(root: Element): string[] {
   return Array.from(root.querySelectorAll(".modelReasoningProviderHeading"))
     .map((heading) => heading.textContent?.trim() ?? "")
     .filter(Boolean);
+}
+
+async function openComposerModelPicker(): Promise<HTMLElement> {
+  const existing = screen.queryByRole("dialog", { name: "Model and reasoning" });
+  if (existing) return existing;
+  fireEvent.click(await screen.findByRole("button", { name: "Model" }));
+  return screen.findByRole("dialog", { name: "Model and reasoning" });
 }

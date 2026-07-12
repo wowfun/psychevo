@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Bot, MessageSquare, RefreshCw } from "lucide-react";
 import { Composer, TranscriptPanel, type TranscriptAgentSession, type WorkspaceFileLinkContext } from "@psychevo/components";
 import {
   appendOptimisticPrompt,
-  applyLiveTranscriptEvent,
   parseThreadSnapshot,
-  scopeForCwd
+  scopeForCwd,
+  ThreadController
 } from "@psychevo/client";
 import type { GatewayClient } from "@psychevo/client";
 import type {
   CompletionListResult,
   GatewayMention,
   GatewayRequestScope,
-  RuntimeHistoryFidelityView,
+  ThreadActionDescriptorView,
+  ThreadHistoryFidelityView,
   ThreadSnapshot
 } from "@psychevo/protocol";
 import {
@@ -20,15 +21,19 @@ import {
   type GatewayEventFeedItem,
   type GatewayThreadEventFeed
 } from "../gateway-event-feed";
-import { parseRuntimeContext, runtimeSessionHistoryFidelity } from "../runtime-context";
+import { parseThreadContext } from "../runtime-context";
 import { idleActivity, normalizeSnapshot } from "../session-utils";
+import {
+  hydrateThreadSnapshotHistory,
+  threadApplicationTarget
+} from "../thread-application";
 
 type ThreadPanelProps = {
   client: GatewayClient | null;
   disabled: boolean;
   gatewayEventFeed: GatewayThreadEventFeed;
   kind: "sideConversation" | "agentSession";
-  historyFidelity?: RuntimeHistoryFidelityView | null;
+  historyFidelity?: ThreadHistoryFidelityView | null;
   parentThreadId?: string | null;
   pendingPrompt?: string | null;
   promptSubmitBlockReason?: string | undefined;
@@ -39,7 +44,6 @@ type ThreadPanelProps = {
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
   onPendingPromptConsumed?: (() => void) | undefined;
-  onSubmitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]): Promise<void>;
   workspaceFileLinks?: WorkspaceFileLinkContext | undefined;
 };
 
@@ -59,18 +63,27 @@ export function ThreadPanel({
   onCopyText,
   onOpenAgentSession,
   onPendingPromptConsumed,
-  onSubmitThreadTurn,
   workspaceFileLinks
 }: ThreadPanelProps) {
-  const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null);
+  const controller = useMemo(() => new ThreadController(null), [threadId]);
+  const snapshotStore = useMemo(() => ({
+    getSnapshot: () => controller.snapshot(),
+    subscribe: (listener: () => void) => controller.subscribe(listener)
+  }), [controller]);
+  const snapshot = useSyncExternalStore(
+    snapshotStore.subscribe,
+    snapshotStore.getSnapshot,
+    snapshotStore.getSnapshot
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [observedHistoryFidelity, setObservedHistoryFidelity] = useState<RuntimeHistoryFidelityView | null>(
+  const [observedHistoryFidelity, setObservedHistoryFidelity] = useState<ThreadHistoryFidelityView | null>(
     registeredHistoryFidelity
   );
   const [access, setAccess] = useState<"checking" | "readOnly" | "readWrite">(
     kind === "sideConversation" ? "readWrite" : "checking"
   );
+  const [threadActions, setThreadActions] = useState<ThreadActionDescriptorView[]>([]);
   const [steerAvailable, setSteerAvailable] = useState(kind === "sideConversation");
   const gatewayEventFeedRef = useRef(gatewayEventFeed);
   const lastAppliedGatewayEventSeqRef = useRef(gatewayEventFeed.latestSeq);
@@ -89,73 +102,68 @@ export function ThreadPanel({
 
   async function refresh() {
     const refreshGeneration = ++refreshGenerationRef.current;
+    let refreshAfterTerminal = false;
     const barrierSeq = gatewayEventFeedRef.current.latestSeq;
     lastAppliedGatewayEventSeqRef.current = barrierSeq;
     if (!client || !threadId) {
-      setSnapshot(null);
+      controller.reset(null);
+      controller.setContext(null);
       setObservedHistoryFidelity(registeredHistoryFidelity);
-      setSteerAvailable(kind === "sideConversation");
+      setThreadActions([]);
+      setSteerAvailable(false);
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
     setAccess(kind === "sideConversation" ? "readWrite" : "checking");
-    setSteerAvailable(kind === "sideConversation");
+    setThreadActions([]);
+    setSteerAvailable(false);
     try {
       let nextAccess: "readOnly" | "readWrite" = "readWrite";
       let accessError: string | null = null;
       let nextHistoryFidelity = registeredHistoryFidelity;
-      let nextSteerAvailable = kind === "sideConversation";
-      if (kind === "agentSession") {
-        try {
-          const context = parseRuntimeContext(await client.request("runtime/context/read", {
-            threadId,
-            runtimeRef: null,
-            scope
-          }));
-          const binding = context.binding?.threadId === threadId ? context.binding : null;
-          nextSteerAvailable = Boolean(binding) && (
-            binding?.nativeKind === "native"
-            || binding?.nativeKind === "acp"
-            || context.capabilities.some(
-              (capability) => capability.id === "turn.steer" && capability.enabled
-            )
-          );
+      let nextActions: ThreadActionDescriptorView[] = [];
+      let nextSteerAvailable = false;
+      let nextContext: ReturnType<typeof parseThreadContext> | null = null;
+      const bootstrap = parseThreadSnapshot(await client.request("thread/read", { threadId }));
+      const next = normalizeSnapshot(await hydrateThreadSnapshotHistory(client, bootstrap));
+      const threadScope = scope ?? next.scope;
+      try {
+        nextContext = parseThreadContext(await client.request("thread/context/read", {
+          threadId,
+          target: null,
+          scope: threadScope
+        }));
+        const binding = nextContext.binding?.threadId === threadId ? nextContext.binding : null;
+        nextActions = nextContext.actions;
+        nextSteerAvailable = nextContext.actions.some(
+          (action) => action.id === "steer" && action.enabled
+        );
+        if (kind === "agentSession") {
           nextAccess = binding?.ownership === "readWrite"
             ? "readWrite"
             : "readOnly";
-          const activeSession = context.activeSession;
-          if (activeSession && binding && activeSession.sessionHandle === binding.sessionHandle) {
-            nextHistoryFidelity = activeSession.fidelity;
-          }
-          if (binding?.ownership === "readOnly" && binding.sessionHandle) {
-            try {
-              const history = await client.request("runtime/session/read", {
-                runtimeRef: binding.runtimeRef,
-                sessionHandle: binding.sessionHandle,
-                scope
-              });
-              nextHistoryFidelity = runtimeSessionHistoryFidelity(history) ?? nextHistoryFidelity;
-            } catch (historyError) {
-              accessError = historyError instanceof Error ? historyError.message : String(historyError);
-            }
-          }
-        } catch (contextError) {
-          nextAccess = "readOnly";
-          accessError = contextError instanceof Error ? contextError.message : String(contextError);
         }
+        nextHistoryFidelity = nextContext.history.fidelity;
+      } catch (contextError) {
+        if (kind === "agentSession") {
+          nextAccess = "readOnly";
+        }
+        accessError = contextError instanceof Error ? contextError.message : String(contextError);
       }
-      let next = normalizeSnapshot(parseThreadSnapshot(await client.request("thread/read", { threadId })));
       if (refreshGenerationRef.current !== refreshGeneration) {
         return;
       }
       const pending = gatewayEventsForThread(gatewayEventFeedRef.current, threadId)
         .filter((record) => record.seq > barrierSeq);
-      next = applyGatewayFeed(next, pending);
+      controller.reset(next);
+      controller.setContext(nextContext);
+      refreshAfterTerminal = applyGatewayFeed(controller, pending);
+      nextHistoryFidelity = controller.snapshot()?.history.fidelity ?? nextHistoryFidelity;
       lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? barrierSeq;
-      setSnapshot(next);
       setAccess(nextAccess);
+      setThreadActions(nextActions);
       setSteerAvailable(nextSteerAvailable);
       setObservedHistoryFidelity(nextHistoryFidelity);
       setError(accessError);
@@ -167,6 +175,9 @@ export function ThreadPanel({
       if (refreshGenerationRef.current === refreshGeneration) {
         setLoading(false);
       }
+      if (refreshAfterTerminal && refreshGenerationRef.current === refreshGeneration) {
+        void refresh();
+      }
     }
   }
 
@@ -176,7 +187,7 @@ export function ThreadPanel({
     return () => {
       refreshGenerationRef.current += 1;
     };
-  }, [client, kind, registeredHistoryFidelity, threadId]);
+  }, [client, kind, registeredHistoryFidelity, scope, threadId]);
 
   useEffect(() => {
     const pending = gatewayEventsForThread(gatewayEventFeed, threadId)
@@ -184,14 +195,15 @@ export function ThreadPanel({
     if (pending.length === 0) {
       return;
     }
-    setSnapshot((current) => {
-      if (!current || (current.thread?.id ?? null) !== threadId) {
-        return current;
-      }
-      lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? lastAppliedGatewayEventSeqRef.current;
-      return applyGatewayFeed(current, pending);
-    });
-  }, [gatewayEventFeed.latestSeq, threadId]);
+    if ((controller.snapshot()?.thread?.id ?? null) !== threadId) {
+      return;
+    }
+    const refreshAfterTerminal = applyGatewayFeed(controller, pending);
+    lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? lastAppliedGatewayEventSeqRef.current;
+    if (refreshAfterTerminal) {
+      void refresh();
+    }
+  }, [controller, gatewayEventFeed.latestSeq, threadId]);
 
   useEffect(() => {
     const prompt = pendingPrompt?.trim();
@@ -208,11 +220,8 @@ export function ThreadPanel({
       setError(promptSubmitBlockReason ?? "Select a provider/model before starting a conversation.");
       return;
     }
-    setSnapshot((current) => current ? normalizeSnapshot(appendOptimisticPrompt(current, prompt)) : current);
-    void onSubmitThreadTurn(threadId, prompt, []).catch((submitError) => {
-      setError(submitError instanceof Error ? submitError.message : String(submitError));
-    });
-  }, [onPendingPromptConsumed, onSubmitThreadTurn, pendingPrompt, promptSubmitBlockReason, promptSubmitDisabled, snapshot?.thread?.id, threadId, writable]);
+    void submit(prompt, []);
+  }, [onPendingPromptConsumed, pendingPrompt, promptSubmitBlockReason, promptSubmitDisabled, snapshot?.thread?.id, threadId, writable]);
 
   async function submit(text: string, mentions: GatewayMention[]) {
     if (!writable || !threadId || !text.trim()) {
@@ -222,40 +231,72 @@ export function ThreadPanel({
       setError(promptSubmitBlockReason ?? "Select a provider/model before starting a conversation.");
       return;
     }
-    setSnapshot((current) => current ? normalizeSnapshot(appendOptimisticPrompt(current, text.trim())) : current);
+    if (!client || !snapshot) {
+      return;
+    }
+    const context = controller.context();
+    if (!context) {
+      setError("Thread Context is required before starting a turn.");
+      return;
+    }
+    const input = [{ type: "text" as const, text: text.trim() }];
+    const controls = controller.turnControls(context.targetId, {});
+    const admission = controller.admitTurn({ controls, input, mentions });
+    if (!admission.allowed) {
+      setError(admission.reason ?? "This Agent target cannot start a turn.");
+      return;
+    }
+    const plan = controller.beginTurn({
+      controls,
+      input,
+      mentions,
+      optimisticText: text.trim(),
+      scope: snapshot.scope,
+      threadId
+    });
     try {
-      await onSubmitThreadTurn(threadId, text, mentions);
+      const result = await client.request("turn/start", plan.params);
+      controller.acceptTurnStart(result, plan.prepared);
     } catch (submitError) {
+      controller.rejectTurnStart(plan.prepared);
       setError(submitError instanceof Error ? submitError.message : String(submitError));
     }
   }
 
   async function steer(text: string) {
-    if (!writable || !steerAvailable || !client || !threadId || !activity.activeTurnId || !text.trim()) {
+    const target = threadApplicationTarget(scope ?? snapshot?.scope, threadId);
+    if (!writable || !steerAvailable || !client || !target || !activity.activeTurnId || !text.trim()) {
       return;
     }
     try {
-      const result = await client.request("turn/steer", {
-        expectedTurnId: activity.activeTurnId,
-        threadId,
-        text
+      const result = await client.request("thread/action/run", {
+        ...target,
+        action: { kind: "steer", expectedTurnId: activity.activeTurnId, text }
       });
-      if (!result.accepted) {
+      if (result.kind !== "steer" || !result.accepted) {
         setError("The selected Runtime Profile does not support steering this turn.");
         return;
       }
-      setSnapshot((current) => current ? normalizeSnapshot(appendOptimisticPrompt(current, text.trim())) : current);
+      const current = controller.snapshot();
+      if (current) {
+        controller.reset(normalizeSnapshot(appendOptimisticPrompt(current, text.trim())));
+      }
     } catch (steerError) {
       setError(steerError instanceof Error ? steerError.message : String(steerError));
     }
   }
 
   async function interrupt() {
-    if (!writable || !client || !threadId) {
+    const target = threadApplicationTarget(scope ?? snapshot?.scope, threadId);
+    const interruptAvailable = threadActions.some((action) => action.id === "interrupt" && action.enabled);
+    if (!writable || !client || !target || !interruptAvailable) {
       return;
     }
     try {
-      await client.request("turn/interrupt", { threadId });
+      await client.request("thread/action/run", {
+        ...target,
+        action: { kind: "interrupt" }
+      });
       await refresh();
     } catch (interruptError) {
       setError(interruptError instanceof Error ? interruptError.message : String(interruptError));
@@ -339,9 +380,10 @@ export function ThreadPanel({
   );
 }
 
-function runtimeHistoryFidelityNotice(fidelity: RuntimeHistoryFidelityView): string {
+function runtimeHistoryFidelityNotice(fidelity: ThreadHistoryFidelityView): string {
   if (fidelity === "full") return "Full history";
   if (fidelity === "summary") return "Summary history; only a condensed record is available.";
+  if (fidelity === "unavailable") return "History unavailable; earlier messages could not be restored.";
   return "Partial history; some messages or detail may be missing.";
 }
 
@@ -349,9 +391,8 @@ function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
   return {
     source: { kind: "web", rawId: "right-thread", lifetime: "persistent", rawIdentity: null, visibleName: null },
     scope: scopeForCwd(""),
-    thread: threadId
-      ? { id: threadId, backend: { kind: "psychevo", sessionHandle: threadId, runtimeRef: "native" }, sourceKey: null }
-      : null,
+    thread: null,
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries: [],
     activity: idleActivity(),
     pendingActions: []
@@ -359,11 +400,13 @@ function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
 }
 
 function applyGatewayFeed(
-  snapshot: ThreadSnapshot,
+  controller: ThreadController,
   records: GatewayEventFeedItem[]
-): ThreadSnapshot {
-  return records.reduce(
-    (current, record) => normalizeSnapshot(applyLiveTranscriptEvent(current, record.event)),
-    snapshot
-  );
+): boolean {
+  let terminalObserved = false;
+  for (const record of records) {
+    controller.applyGatewayEvent(record.event);
+    terminalObserved ||= record.event.type === "turnCompleted";
+  }
+  return terminalObserved;
 }

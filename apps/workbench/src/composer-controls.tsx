@@ -6,9 +6,10 @@ import type {
   PendingActionView,
   PermissionDecision,
   SessionUsageSummaryView,
-  SettingsReadResult
+  SettingsReadResult,
+  ThreadControlDescriptorView
 } from "@psychevo/protocol";
-import { ModelReasoningSelector, modelOptionsForControls } from "./model-picker";
+import { ModelReasoningSelector, modelOptionsForThreadControl } from "./model-picker";
 import { SessionUsageGrid, normalizedPercent } from "./right-workspace";
 
 export function ComposerRequests({
@@ -82,7 +83,10 @@ function ClarifyComposerRequest({
   request: PendingActionView;
   onSubmit(request: PendingActionView, answers: string[][] | null, cancel: boolean): void;
 }) {
-  const questions = useMemo(() => parseClarifyQuestions(clarifyRawPayload(request)), [request.payload]);
+  const questions = useMemo(
+    () => parseClarifyQuestions(clarifyRawPayload(request)),
+    [request.actionId]
+  );
   const [answers, setAnswers] = useState<ClarifyAnswerState[]>(() => initialClarifyAnswers(questions));
   const [fallbackAnswer, setFallbackAnswer] = useState("");
 
@@ -372,22 +376,20 @@ function AttentionProvenance({ request }: { request: PendingActionView }) {
 }
 
 function runtimeKindLabel(value: string): string {
-  switch (value.trim().toLowerCase()) {
-    case "codex": return "Codex";
-    case "opencode": return "OpenCode";
-    case "native": return "Psychevo";
-    case "acp": return "ACP";
-    default: return value.trim();
-  }
+  const normalized = value.trim();
+  return normalized.toLowerCase() === "acp" ? "ACP" : normalized;
 }
 
 function authorizationLifetimeLabel(value: string): string {
   switch (value) {
-    case "codex_session": return "current Codex session";
-    case "psychevo_session": return "current Psychevo session";
     case "until_runtime_instance_restarts": return "until the runtime instance restarts";
     case "permanent": return "permanent";
-    default: return value ? value.replaceAll("_", " ") : "adapter-declared scope";
+    default:
+      return value.endsWith("_session")
+        ? "current Agent session"
+        : value
+          ? value.replaceAll("_", " ")
+          : "adapter-declared scope";
   }
 }
 
@@ -434,26 +436,47 @@ export function ComposerSubmitControls({
   context,
   controls,
   usage,
-  model,
-  showNativeModelControls = true,
-  variant,
-  onModelChange,
-  onModelSelectionChange,
-  onVariantChange
+  controlValues,
+  disabled,
+  modelControl,
+  reasoningControl,
+  onControlChange
 }: {
   context: ContextReadResult | null;
   controls: SettingsReadResult["controls"];
   usage: SessionUsageSummaryView | null;
-  model: string | null;
-  showNativeModelControls?: boolean;
-  variant: string;
-  onModelChange(value: string | null): void;
-  onModelSelectionChange?(model: string | null, variant: string): void;
-  onVariantChange(value: string): void;
+  controlValues: Record<string, unknown>;
+  disabled: boolean;
+  modelControl: ThreadControlDescriptorView | null;
+  reasoningControl: ThreadControlDescriptorView | null;
+  onControlChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
   const contextPercent = normalizedPercent(context?.percent);
+  const contextHasLimit = context?.available === true && context.contextLimit != null;
+  const contextSummaryValue = context?.available
+    ? contextHasLimit
+      ? `${Math.round(contextPercent)}%`
+      : compactTokenCount(context.usedTokens)
+    : "—";
   const [contextOpen, setContextOpen] = useState(false);
   const contextPopoverRef = useRef<HTMLDivElement | null>(null);
+  const model = controlStringValue(modelControl, controlValues);
+  const explicitReasoning = controlStringValue(reasoningControl, controlValues);
+  const reasoning = explicitReasoning ?? "none";
+  const reasoningSelectable = reasoningControl?.enabled === true
+    && reasoningControl.mutability === "selectable"
+    && reasoningControl.choices.some((choice) => typeof choice.value === "string");
+  const reasoningPresentation = reasoningSelectable
+    ? "selectable"
+    : explicitReasoning
+      ? "readOnly"
+      : "hidden";
+  const reasoningValues = reasoningControl?.choices.flatMap((choice): string[] => (
+    typeof choice.value === "string" ? [choice.value] : []
+  )) ?? [];
+  const richModelControl = modelControl?.mutability === "selectable"
+    && modelControl.enabled
+    && modelControl.choices.some((choice) => typeof choice.value === "string");
 
   useEffect(() => {
     if (!contextOpen) {
@@ -480,18 +503,42 @@ export function ComposerSubmitControls({
 
   return (
     <div className="composerSubmitControls" aria-label="Composer submit controls">
-      {showNativeModelControls && (
+      {richModelControl && modelControl && (
         <ModelReasoningSelector
+          disabled={disabled || !modelControl.enabled}
           emptyLabel={emptyModelOptionLabel(controls)}
           model={model}
-          options={modelOptionsForControls(controls, model)}
+          options={modelOptionsForThreadControl(modelControl, controls, model)}
           recentModels={controls?.recentModels ?? []}
-          variant={variant}
-          variantOptions={controls?.variantOptions ?? []}
-          onModelChange={onModelChange}
-          onSelectionChange={onModelSelectionChange}
-          onVariantChange={onVariantChange}
+          reasoningPresentation={reasoningPresentation}
+          reasoningValues={reasoningValues}
+          showChevron={false}
+          variant={reasoning}
+          onModelChange={(value) => {
+            if (value != null) onControlChange(modelControl, value);
+          }}
+          onSelectionChange={(value, nextReasoning) => {
+            if (value != null && value !== model) {
+              onControlChange(modelControl, value);
+              return;
+            }
+            if (reasoningSelectable && reasoningControl && nextReasoning !== reasoning) {
+              onControlChange(reasoningControl, nextReasoning);
+            }
+          }}
+          onVariantChange={(value) => {
+            if (reasoningSelectable && reasoningControl) onControlChange(reasoningControl, value);
+          }}
         />
+      )}
+      {modelControl && !richModelControl && (
+        <span
+          aria-label={`Model: ${model ?? (modelControl.enabled ? "selection required" : "unavailable")} (${modelControl.enabled ? "read-only" : "unavailable"})`}
+          className={`runtimeControlState is-readonly ${model == null ? "is-unavailable" : ""}`}
+          title={modelControl.unavailableReason ?? "Model is not selectable for this Agent target."}
+        >
+          {model ?? (modelControl.enabled ? "Select model" : "Model unavailable")}
+        </span>
       )}
       <div className="composerStatusContext" ref={contextPopoverRef}>
         <button
@@ -504,13 +551,19 @@ export function ComposerSubmitControls({
           title={context?.label ?? "No active context"}
           type="button"
         >
-          <span style={{ "--pevo-context-percent": `${contextPercent}%` } as CSSProperties} />
+          <span
+            className={contextHasLimit ? undefined : "is-limitUnavailable"}
+            style={{ "--pevo-context-percent": `${contextPercent}%` } as CSSProperties}
+          />
         </button>
         {contextOpen && (
           <div className="composerContextPopover" role="dialog" aria-label="Context usage">
             <div className="composerContextSummary">
-              <span style={{ "--pevo-context-percent": `${contextPercent}%` } as CSSProperties}>
-                {context?.available ? `${Math.round(contextPercent)}%` : "0%"}
+              <span
+                className={contextHasLimit ? undefined : "is-limitUnavailable"}
+                style={{ "--pevo-context-percent": `${contextPercent}%` } as CSSProperties}
+              >
+                {contextSummaryValue}
               </span>
               <div>
                 <strong>{context?.label ?? "No active context"}</strong>
@@ -520,8 +573,11 @@ export function ComposerSubmitControls({
             {usage?.available && (
               <SessionUsageGrid compact usage={usage} />
             )}
+            {context?.available && context.contextLimit == null && (
+              <p>{context.usedTokens.toLocaleString()} tokens · Limit unavailable</p>
+            )}
             {!context?.available && (
-              <p>No session context is active.</p>
+              <p>Context unavailable.</p>
             )}
           </div>
         )}
@@ -530,26 +586,41 @@ export function ComposerSubmitControls({
   );
 }
 
+function controlStringValue(
+  control: ThreadControlDescriptorView | null,
+  values: Record<string, unknown>
+): string | null {
+  if (!control) return null;
+  const value = Object.prototype.hasOwnProperty.call(values, control.id)
+    ? values[control.id]
+    : control.effectiveValue;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function compactTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  if (value < 1_000) return Math.round(value).toLocaleString();
+  const compact = new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: 1
+  }).format(value);
+  return compact.toLowerCase();
+}
+
 export function ComposerStatusLine({
   branch,
-  controls,
   path,
-  permissionMode,
   runtimeSafetyLabel,
   profile,
   onBranchClick,
-  onPathClick,
-  onPermissionModeChange
+  onPathClick
 }: {
   branch: string | null;
-  controls: SettingsReadResult["controls"];
   path: string;
-  permissionMode: string;
   runtimeSafetyLabel?: string | null;
   profile: InitializeResult["profile"] | null;
   onBranchClick(): void;
   onPathClick(): void;
-  onPermissionModeChange(value: string): void;
 }) {
   const profileLabel = profile && !profile.default ? profile.name : null;
   return (
@@ -558,9 +629,7 @@ export function ComposerStatusLine({
         <span className="profileStatusPill" aria-label="Runtime Profile safety policy" title={runtimeSafetyLabel}>
           <span>{runtimeSafetyLabel}</span>
         </span>
-      ) : (
-        <StatusSelect label="Permission mode" value={permissionMode} values={controls?.permissionModeOptions ?? ["default"]} onChange={onPermissionModeChange} />
-      )}
+      ) : null}
       {profileLabel ? (
         <span className="profileStatusPill" title={profile?.home || profileLabel}>
           <Pin size={12} />
@@ -579,6 +648,7 @@ export function ComposerStatusLine({
 }
 
 export function StatusSelect({
+  disabled = false,
   label,
   optionLabels,
   renderDisplayValue,
@@ -586,6 +656,7 @@ export function StatusSelect({
   values,
   onChange
 }: {
+  disabled?: boolean;
   label: string;
   optionLabels?: Record<string, string>;
   renderDisplayValue?(value: string): string;
@@ -598,12 +669,13 @@ export function StatusSelect({
   return (
     <label
       className={`statusSelect ${displayValue ? "has-displayValue" : ""}`}
+      data-disabled={disabled ? "true" : undefined}
       data-status={label.toLowerCase().replace(/\s+/g, "-")}
       style={valueWidth ? { "--pevo-status-select-value-width": valueWidth } as CSSProperties : undefined}
       title={label}
     >
       {displayValue && <span aria-hidden="true" className="statusSelectDisplay">{displayValue}</span>}
-      <select aria-label={label} title={value || label} value={value} onChange={(event) => onChange(event.target.value)}>
+      <select disabled={disabled} aria-label={label} title={value || label} value={value} onChange={(event) => onChange(event.target.value)}>
         {values.map((option) => (
           <option key={option || "default"} value={option}>{optionLabels?.[option] ?? defaultStatusSelectValue(label, option)}</option>
         ))}

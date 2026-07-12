@@ -36,21 +36,24 @@ export function sortTranscriptEntries(entries: TranscriptEntry[]): TranscriptEnt
         }
         return left.messageSeq !== null ? -1 : 1;
       }
-      const leftLiveOrder = liveOrder(left);
-      const rightLiveOrder = liveOrder(right);
-      if (leftLiveOrder !== null && rightLiveOrder !== null && leftLiveOrder !== rightLiveOrder) {
-        return leftLiveOrder - rightLiveOrder;
-      }
-      if (leftLiveOrder !== null && rightLiveOrder === null) {
-        return -1;
-      }
-      if (leftLiveOrder === null && rightLiveOrder !== null) {
-        return 1;
-      }
-      const leftStreamSeq = streamSeq(left);
-      const rightStreamSeq = streamSeq(right);
-      if (leftStreamSeq !== null && rightStreamSeq !== null && leftStreamSeq !== rightStreamSeq) {
-        return leftStreamSeq - rightStreamSeq;
+      const sameTurn = Boolean(left.turnId) && left.turnId === right.turnId;
+      if (sameTurn) {
+        const leftLiveOrder = liveOrder(left);
+        const rightLiveOrder = liveOrder(right);
+        if (leftLiveOrder !== null && rightLiveOrder !== null && leftLiveOrder !== rightLiveOrder) {
+          return leftLiveOrder - rightLiveOrder;
+        }
+        if (leftLiveOrder !== null && rightLiveOrder === null) {
+          return -1;
+        }
+        if (leftLiveOrder === null && rightLiveOrder !== null) {
+          return 1;
+        }
+        const leftStreamSeq = streamSeq(left);
+        const rightStreamSeq = streamSeq(right);
+        if (leftStreamSeq !== null && rightStreamSeq !== null && leftStreamSeq !== rightStreamSeq) {
+          return leftStreamSeq - rightStreamSeq;
+        }
       }
       if (left.createdAtMs !== right.createdAtMs) {
         return left.createdAtMs - right.createdAtMs;
@@ -229,7 +232,7 @@ export function threadForTurn(snapshot: ThreadSnapshot, threadId: string | null)
   return {
     id: threadId,
     backend: {
-      kind: "psychevo",
+      kind: "native",
       sessionHandle: threadId,
       runtimeRef: "native"
     },

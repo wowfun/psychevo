@@ -90,7 +90,7 @@ export function observabilityResult(threadId: string | null, peer = false): Reco
     context: {
       available: hasThread,
       label: hasThread ? (peer ? "8.0k/200.0k (4.0%)" : "200/1.0k (20.0%)") : "No active session",
-      status: hasThread ? (peer ? "reported by ACP peer" : "provider_usage") : "unavailable",
+      status: hasThread ? "exact" : "unavailable",
       usedTokens: hasThread ? (peer ? 8_000 : 200) : 0,
       contextLimit: hasThread ? (peer ? 200_000 : 1000) : null,
       percent: hasThread ? (peer ? 4 : 20) : null,
@@ -202,19 +202,19 @@ export function workspaceDiffAction() {
 }
 
 export async function openAgentRuntimePopover() {
-  const existing = screen.queryByRole("dialog", { name: "Agent Definition" });
+  const existing = screen.queryByRole("dialog", { name: "Agent target" });
   if (existing) {
     return existing;
   }
-  fireEvent.click(await screen.findByRole("button", { name: "Agent" }));
-  return await screen.findByRole("dialog", { name: "Agent Definition" });
+  fireEvent.click(await screen.findByRole("button", { name: "Agent target" }));
+  return await screen.findByRole("dialog", { name: "Agent target" });
 }
 
 export async function openRuntimeProfilePopover() {
-  const existing = screen.queryByRole("dialog", { name: "Runtime Profile selection" });
+  const existing = screen.queryByRole("dialog", { name: "Agent target" });
   if (existing) return existing;
-  fireEvent.click(await screen.findByRole("button", { name: "Runtime Profile" }));
-  return await screen.findByRole("dialog", { name: "Runtime Profile selection" });
+  fireEvent.click(await screen.findByRole("button", { name: "Agent target" }));
+  return await screen.findByRole("dialog", { name: "Agent target" });
 }
 
 export async function selectMainAgent(value: string) {
@@ -227,10 +227,16 @@ export async function selectMainAgent(value: string) {
 export async function selectRuntime(value: string) {
   const popover = await openRuntimeProfilePopover();
   const label = value === "native"
-    ? "Native Runtime"
+    ? "Psychevo (Native)"
     : value === "opencode"
-      ? "OpenCode"
-      : value;
-  fireEvent.click(within(popover).getByRole("radio", { name: label }));
+      ? "OpenCode (ACP)"
+      : value === "codex" || value === "Codex"
+        ? "Codex (ACP)"
+        : value;
+  const target = within(popover).getAllByRole("radio").find((radio) => (
+    radio.getAttribute("aria-label")?.endsWith(` · ${label}`)
+  ));
+  if (!target) throw new Error(`expected an Agent target for Runtime Profile ${label}`);
+  fireEvent.click(target);
   return popover;
 }

@@ -858,98 +858,6 @@
   font-size: var(--pevo-font-size-xsmall);
 }
 
-.runtimeSessionsSection {
-  padding-bottom: 2px;
-}
-
-.runtimeSessionsLoadMore {
-  justify-self: start;
-  min-height: 28px;
-  padding: 0 8px;
-  color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-  font: inherit;
-  font-size: var(--pevo-font-size-xsmall);
-}
-
-.runtimeSessionRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 10px;
-  min-width: 0;
-  padding: 8px;
-  background: var(--pevo-panel-muted);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-}
-
-.runtimeSessionMain {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.runtimeSessionMain > strong,
-.runtimeSessionMain > span,
-.runtimeSessionMain > small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.runtimeSessionRevisionPicker {
-  display: grid;
-  gap: 3px;
-  max-width: 320px;
-  margin-top: 5px;
-  color: var(--pevo-muted);
-  font-size: var(--pevo-font-size-xsmall);
-}
-
-.runtimeSessionRevisionPicker select {
-  min-width: 0;
-  min-height: 28px;
-  color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-  font: inherit;
-}
-
-.runtimeSessionMain > span,
-.runtimeSessionMain > small {
-  color: var(--pevo-muted);
-  font-size: var(--pevo-font-size-xsmall);
-}
-
-.runtimeSessionActions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
-  max-width: 220px;
-}
-
-.runtimeSessionActions button {
-  min-height: 26px;
-  padding: 0 7px;
-  color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-  font: inherit;
-  font-size: var(--pevo-font-size-xsmall);
-  cursor: pointer;
-}
-
-.runtimeSessionActions button.is-danger {
-  color: var(--pevo-danger);
-}
-
 .capabilityEmpty {
   display: grid;
   min-height: 54px;
@@ -1021,12 +929,4 @@
     justify-content: flex-start;
   }
 
-  .runtimeSessionRow {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .runtimeSessionActions {
-    justify-content: flex-start;
-    max-width: 100%;
-  }
 }

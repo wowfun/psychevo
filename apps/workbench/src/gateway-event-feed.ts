@@ -93,8 +93,6 @@ export function gatewayEventThreadId(event: GatewayEvent): string | null {
     case "activityChanged":
     case "titleChanged":
       return event.threadId || null;
-    case "runtimeChildChanged":
-      return event.threadId || null;
     case "actionRequested":
     case "actionUpdated":
       return event.action.threadId || null;

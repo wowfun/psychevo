@@ -58,6 +58,7 @@ export function normalizeActivity(activity: Partial<ThreadSnapshot["activity"]> 
 export function normalizeSnapshot(snapshot: ThreadSnapshot): ThreadSnapshot {
   return {
     ...snapshot,
+    history: snapshot.history,
     entries: Array.isArray(snapshot.entries) ? snapshot.entries : [],
     activity: normalizeActivity(snapshot.activity),
     pendingActions: Array.isArray(snapshot.pendingActions) ? snapshot.pendingActions : []

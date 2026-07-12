@@ -5,13 +5,18 @@ import type {
   GatewayRequestScope,
   GatewaySource,
   GatewayThread,
+  ThreadContextReadResult,
+  ThreadControlDescriptorView,
+  ThreadControlSetParams,
+  ThreadControlSetResult,
   ThreadSnapshot,
   TranscriptEntry,
   TurnErrorPayload,
   TurnResultPayload,
   TurnStartParams,
   TurnStartResult,
-  WorkbenchControlsView
+  RunnableTargetInput,
+  RunnableTargetView
 } from "@psychevo/protocol";
 import {
   appendOptimisticPrompt,
@@ -19,24 +24,23 @@ import {
 } from "./transcript";
 
 export interface ThreadTurnPreparation {
+  previousSnapshot: ThreadSnapshot;
   requestedThreadId: string | null;
   snapshot: ThreadSnapshot;
 }
 
 export interface ThreadTurnAcceptance {
   threadId: string;
+  thread: GatewayThread;
   snapshot: ThreadSnapshot;
 }
 
 export interface ThreadTurnControls {
-  agentName?: string | null;
-  mode?: string | null;
-  model?: string | null;
-  permissionMode?: string | null;
-  reasoningEffort?: string | null;
-  runtimeOptions?: Record<string, string>;
-  runtimeRef?: string | null;
-  runtimeSessionId?: string | null;
+  targetId: string;
+  omitTarget?: boolean;
+  turnOverrides?: Record<string, unknown>;
+  expectedContextRevision?: string | null;
+  expectedControlRevision?: string | null;
 }
 
 export interface ThreadTurnStartInput {
@@ -45,7 +49,6 @@ export interface ThreadTurnStartInput {
   mentions?: GatewayMention[];
   optimisticText: string;
   scope: GatewayRequestScope;
-  text?: string | null;
   threadId?: string | null;
 }
 
@@ -53,6 +56,11 @@ export interface ThreadTurnStartPlan {
   params: TurnStartParams;
   prepared: ThreadTurnPreparation;
   snapshot: ThreadSnapshot;
+}
+
+export interface ThreadTurnAdmission {
+  allowed: boolean;
+  reason: string | null;
 }
 
 export interface ThreadGatewayEventApplication {
@@ -73,11 +81,16 @@ export interface ThreadTurnErrorApplication {
   message: string;
 }
 
-export class ThreadTranscriptController {
+export class ThreadController {
   private activeThreadId: string | null = null;
   private activeTurnId: string | null = null;
   private acceptingFirstTurn = false;
+  private awaitingTurnStartAcceptance = false;
+  private settledBeforeAcceptanceTurnId: string | null = null;
+  private settledTurnId: string | null = null;
   private currentSnapshot: ThreadSnapshot | null;
+  private currentContext: ThreadContextReadResult | null = null;
+  private readonly snapshotListeners = new Set<() => void>();
 
   constructor(snapshot: ThreadSnapshot | null = null) {
     this.currentSnapshot = snapshot;
@@ -89,6 +102,142 @@ export class ThreadTranscriptController {
     return this.currentSnapshot;
   }
 
+  subscribe(listener: () => void): () => void {
+    this.snapshotListeners.add(listener);
+    return () => this.snapshotListeners.delete(listener);
+  }
+
+  context(): ThreadContextReadResult | null {
+    return this.currentContext;
+  }
+
+  setContext(context: ThreadContextReadResult | null): void {
+    this.currentContext = context;
+  }
+
+  target(targetId: string): RunnableTargetView | null {
+    return this.currentContext?.compatibleTargets.find((target) => target.targetId === targetId) ?? null;
+  }
+
+  contextReadTarget(targetId: string): RunnableTargetInput | null {
+    const target = this.target(targetId);
+    return target ? {
+      agentRef: target.agentRef ?? null,
+      runtimeProfileRef: target.runtimeProfileRef
+    } : null;
+  }
+
+  applyControlReceipt(receipt: ThreadControlSetResult): void {
+    this.currentContext = receipt.context;
+  }
+
+  turnControls(
+    targetId: string,
+    turnOverrides: Record<string, unknown>
+  ): ThreadTurnControls {
+    const context = this.currentContext;
+    return {
+      targetId,
+      omitTarget: Boolean(context?.binding),
+      turnOverrides,
+      expectedContextRevision: context?.contextRevision ?? null,
+      expectedControlRevision: context?.controlRevision ?? null
+    };
+  }
+
+  controlSetParams(
+    targetId: string,
+    control: ThreadControlDescriptorView,
+    value: unknown,
+    scope: GatewayRequestScope,
+    threadId: string | null
+  ): ThreadControlSetParams {
+    const context = this.currentContext;
+    const target = this.target(targetId);
+    if (!context || !target || context.targetId !== targetId) {
+      throw new Error("The selected Agent target does not match the current Thread Context.");
+    }
+    if (!control.enabled || control.mutability !== "selectable") {
+      throw new Error(control.unavailableReason ?? `${control.label} is unavailable.`);
+    }
+    return {
+      threadId,
+      targetId: target.targetId,
+      controlId: control.id,
+      value,
+      expectedCapabilityRevision: control.capabilityRevision,
+      expectedBindingRevision: context.binding?.bindingRevision ?? 0,
+      expectedContextRevision: context.contextRevision,
+      expectedControlRevision: context.controlRevision,
+      scope
+    };
+  }
+
+  sendability(): ThreadTurnAdmission {
+    return this.currentContext?.sendability ?? {
+      allowed: false,
+      reason: "Thread Context is required before starting a turn."
+    };
+  }
+
+  admitTurn(input: Pick<ThreadTurnStartInput, "controls" | "input" | "mentions">): ThreadTurnAdmission {
+    const context = this.currentContext;
+    if (!context) {
+      return this.sendability();
+    }
+    if (!context.sendability.allowed) {
+      return {
+        allowed: false,
+        reason: context.sendability.reason ?? "This Agent target cannot start a turn."
+      };
+    }
+    if (!context.contextRevision.trim() || !context.controlRevision.trim()) {
+      return {
+        allowed: false,
+        reason: "Thread Context revisions are required before starting a turn."
+      };
+    }
+    const targetAdmission = admitTurnTarget(context, input.controls);
+    if (!targetAdmission.allowed) return targetAdmission;
+
+    for (const control of context.controls) {
+      if (!control.required) continue;
+      if (!control.enabled) {
+        return {
+          allowed: false,
+          reason: control.unavailableReason ?? `${control.label} is required but unavailable.`
+        };
+      }
+      const override = input.controls?.turnOverrides?.[control.id];
+      if (override == null && control.effectiveValue == null) {
+        return {
+          allowed: false,
+          reason: control.unavailableReason ?? `${control.label} is required before starting a turn.`
+        };
+      }
+    }
+
+    return this.admitInput(input.input, input.mentions);
+  }
+
+  admitInput(input: GatewayInputPart[], mentions: GatewayMention[] = []): ThreadTurnAdmission {
+    const context = this.currentContext;
+    if (!context) {
+      return {
+        allowed: false,
+        reason: "Thread Context is required before adding turn input."
+      };
+    }
+    for (const part of input) {
+      const admission = admitInputCapability(context, inputCapabilityKind(part));
+      if (!admission.allowed) return admission;
+    }
+    if (mentions.some((mention) => mention.target.kind === "agent")) {
+      return admitInputCapability(context, "agentMention");
+    }
+    return { allowed: true, reason: null };
+  }
+
   threadId(): string | null {
     return this.activeThreadId;
   }
@@ -98,10 +247,19 @@ export class ThreadTranscriptController {
   }
 
   reset(snapshot: ThreadSnapshot | null): void {
-    this.currentSnapshot = snapshot;
+    const sameThread = this.activeThreadId !== null && snapshot?.thread?.id === this.activeThreadId;
+    const preservePendingAcceptance = this.awaitingTurnStartAcceptance &&
+      sameThread;
     this.activeThreadId = snapshot?.thread?.id ?? null;
     this.activeTurnId = snapshot?.activity.activeTurnId ?? null;
-    this.acceptingFirstTurn = false;
+    if (!preservePendingAcceptance) {
+      this.acceptingFirstTurn = false;
+      this.awaitingTurnStartAcceptance = false;
+      this.settledBeforeAcceptanceTurnId = null;
+    }
+    if (!sameThread) this.settledTurnId = null;
+    if (!snapshot?.thread) this.currentContext = null;
+    this.replaceSnapshot(snapshot);
   }
 
   setThreadId(threadId: string | null): void {
@@ -109,20 +267,29 @@ export class ThreadTranscriptController {
   }
 
   beginTurn(input: ThreadTurnStartInput): ThreadTurnStartPlan {
+    if (this.awaitingTurnStartAcceptance) {
+      throw new Error("A turn is already awaiting Gateway acceptance.");
+    }
+    const admission = this.admitTurn(input);
+    if (!admission.allowed) {
+      throw new Error(admission.reason ?? "This turn is not admitted by Thread Context.");
+    }
     const snapshot = this.currentSnapshot ?? emptyThreadSnapshot(input.scope, input.threadId ?? null);
     const requestedThreadId = input.threadId ?? snapshot.thread?.id ?? null;
     const prepared = prepareThreadTurn(snapshot, input.optimisticText, requestedThreadId);
-    this.currentSnapshot = prepared.snapshot;
     this.activeThreadId = requestedThreadId;
     this.activeTurnId = prepared.snapshot.activity.activeTurnId;
     this.acceptingFirstTurn = !requestedThreadId;
+    this.awaitingTurnStartAcceptance = true;
+    this.settledBeforeAcceptanceTurnId = null;
+    this.replaceSnapshot(prepared.snapshot);
     return {
       params: threadTurnStartParams({
         controls: input.controls,
+        context: this.currentContext,
         input: input.input,
         mentions: input.mentions,
         scope: input.scope,
-        text: input.text,
         threadId: prepared.requestedThreadId
       }),
       prepared,
@@ -141,13 +308,42 @@ export class ThreadTranscriptController {
       prepared.requestedThreadId,
       label
     );
+    if (
+      this.settledBeforeAcceptanceTurnId &&
+      this.settledBeforeAcceptanceTurnId !== result.turnId
+    ) {
+      throw new Error(`Gateway accepted the ${label} with a different turn id.`);
+    }
+    if (this.activeThreadId && this.activeThreadId !== accepted.threadId) {
+      throw new Error(`Gateway accepted the ${label} for a different thread.`);
+    }
     this.activeThreadId = accepted.threadId;
+    this.activeTurnId = this.settledBeforeAcceptanceTurnId === result.turnId
+      ? null
+      : result.turnId;
     this.acceptingFirstTurn = false;
-    this.currentSnapshot = bindThreadSnapshot(this.currentSnapshot ?? accepted.snapshot, accepted.threadId);
+    this.awaitingTurnStartAcceptance = false;
+    this.settledBeforeAcceptanceTurnId = null;
+    this.replaceSnapshot(bindThreadSnapshot(
+      this.currentSnapshot ?? accepted.snapshot,
+      accepted.thread
+    ));
     return {
       threadId: accepted.threadId,
-      snapshot: this.currentSnapshot
+      thread: accepted.thread,
+      snapshot: this.currentSnapshot!
     };
+  }
+
+  rejectTurnStart(prepared: ThreadTurnPreparation): ThreadSnapshot | null {
+    if (!this.awaitingTurnStartAcceptance) return this.currentSnapshot;
+    this.activeThreadId = prepared.previousSnapshot.thread?.id ?? null;
+    this.activeTurnId = prepared.previousSnapshot.activity.activeTurnId ?? null;
+    this.acceptingFirstTurn = false;
+    this.awaitingTurnStartAcceptance = false;
+    this.settledBeforeAcceptanceTurnId = null;
+    this.replaceSnapshot(prepared.previousSnapshot);
+    return this.currentSnapshot;
   }
 
   applyGatewayEvent(event: GatewayEvent): ThreadGatewayEventApplication {
@@ -159,7 +355,8 @@ export class ThreadTranscriptController {
       event,
       this.activeThreadId,
       this.activeTurnId,
-      acceptingDetachedTurn
+      acceptingDetachedTurn,
+      this.settledTurnId
     )) {
       return { applied: false, completed: false, running: null, snapshot: this.currentSnapshot };
     }
@@ -170,9 +367,17 @@ export class ThreadTranscriptController {
       this.acceptingFirstTurn = false;
       this.activeTurnId = event.turnId;
     }
-    this.currentSnapshot = applyGatewayEventToThreadSnapshot(this.currentSnapshot, event);
+    const observedThreadId = eventThreadIdForEvent(event);
+    if (this.awaitingTurnStartAcceptance && !this.activeThreadId && observedThreadId) {
+      this.activeThreadId = observedThreadId;
+    }
+    this.replaceSnapshot(applyGatewayEventToThreadSnapshot(this.currentSnapshot, event));
     this.activeThreadId = this.currentSnapshot.thread?.id ?? this.activeThreadId;
     if (event.type === "turnCompleted") {
+      if (this.awaitingTurnStartAcceptance) {
+        this.settledBeforeAcceptanceTurnId = event.turnId;
+      }
+      this.settledTurnId = event.turnId;
       this.acceptingFirstTurn = false;
       this.activeTurnId = null;
       return { applied: true, completed: true, running: false, snapshot: this.currentSnapshot };
@@ -195,21 +400,125 @@ export class ThreadTranscriptController {
     if (!this.currentSnapshot) {
       return { applied: false, snapshot: this.currentSnapshot, threadId: null };
     }
-    if (payload.thread.id !== this.activeThreadId && payload.turn.id !== this.activeTurnId) {
+    const adoptingFirstTurn = this.acceptingFirstTurn && this.activeThreadId === null;
+    const adoptingPendingThread = this.awaitingTurnStartAcceptance && this.activeThreadId === null;
+    const adoptingPendingTurn = this.awaitingTurnStartAcceptance && this.activeTurnId === null;
+    const threadMatches = adoptingFirstTurn || adoptingPendingThread || payload.thread.id === this.activeThreadId;
+    const turnMatches = this.activeTurnId
+      ? payload.turn.id === this.activeTurnId
+      : adoptingFirstTurn || adoptingPendingTurn;
+    if (!threadMatches || !turnMatches) {
       return { applied: false, snapshot: this.currentSnapshot, threadId: null };
     }
     this.activeThreadId = payload.thread.id;
+    if (this.awaitingTurnStartAcceptance) {
+      this.settledBeforeAcceptanceTurnId = payload.turn.id;
+    }
+    this.settledTurnId = payload.turn.id;
     this.activeTurnId = null;
     this.acceptingFirstTurn = false;
-    this.currentSnapshot = applyTurnResultToThreadSnapshot(this.currentSnapshot, payload);
+    this.replaceSnapshot(applyTurnResultToThreadSnapshot(this.currentSnapshot, payload));
     return { applied: true, snapshot: this.currentSnapshot, threadId: payload.thread.id };
   }
 
   applyTurnError(payload: TurnErrorPayload): ThreadTurnErrorApplication {
+    const adoptingFirstTurn = this.acceptingFirstTurn && this.activeThreadId === null;
+    const adoptingPendingThread = this.awaitingTurnStartAcceptance && this.activeThreadId === null;
+    const adoptingPendingTurn = this.awaitingTurnStartAcceptance && this.activeTurnId === null;
+    const threadMatches = Boolean(payload.threadId) && (
+      adoptingFirstTurn || adoptingPendingThread || payload.threadId === this.activeThreadId
+    );
+    const turnMatches = Boolean(payload.turnId) && (
+      this.activeTurnId
+        ? payload.turnId === this.activeTurnId
+        : adoptingFirstTurn || adoptingPendingTurn
+    );
+    if (!threadMatches || !turnMatches) {
+      return { applied: false, message: payload.error.message || "Turn failed." };
+    }
+    this.activeThreadId = payload.threadId;
     this.acceptingFirstTurn = false;
+    if (this.awaitingTurnStartAcceptance) {
+      this.settledBeforeAcceptanceTurnId = payload.turnId;
+    }
+    this.settledTurnId = payload.turnId;
     this.activeTurnId = null;
-    return { applied: true, message: payload.message || "Turn failed." };
+    if (this.currentSnapshot) {
+      this.replaceSnapshot({
+        ...this.currentSnapshot,
+        activity: {
+          ...this.currentSnapshot.activity,
+          activeTurnId: null,
+          running: false
+        }
+      });
+    }
+    return { applied: true, message: payload.error.message || "Turn failed." };
   }
+
+  private replaceSnapshot(snapshot: ThreadSnapshot | null): void {
+    if (this.currentSnapshot === snapshot) return;
+    this.currentSnapshot = snapshot;
+    for (const listener of this.snapshotListeners) listener();
+  }
+}
+
+function admitTurnTarget(
+  context: ThreadContextReadResult,
+  controls: ThreadTurnControls | undefined
+): ThreadTurnAdmission {
+  const targetId = controls?.targetId.trim() ?? "";
+  if (context.binding) {
+    if (targetId && targetId !== context.targetId) {
+      return {
+        allowed: false,
+        reason: "The requested Agent target conflicts with this Thread binding."
+      };
+    }
+    return { allowed: true, reason: null };
+  }
+  if (!targetId) {
+    return {
+      allowed: false,
+      reason: "Select an Agent target before starting a turn."
+    };
+  }
+  if (targetId !== context.targetId) {
+    return {
+      allowed: false,
+      reason: "The selected Agent target does not match the current Thread Context."
+    };
+  }
+  const target = context.compatibleTargets.find((candidate) => candidate.targetId === targetId);
+  if (!target) {
+    return {
+      allowed: false,
+      reason: "The selected Agent target is not compatible with this Thread Context."
+    };
+  }
+  if (!target.ready) {
+    return {
+      allowed: false,
+      reason: target.unavailableReason ?? `${target.label || target.targetId} is not ready.`
+    };
+  }
+  return { allowed: true, reason: null };
+}
+
+function admitInputCapability(
+  context: ThreadContextReadResult,
+  kind: string
+): ThreadTurnAdmission {
+  const capability = context.inputCapabilities.find((candidate) => candidate.kind === kind) ?? null;
+  if (capability?.enabled) return { allowed: true, reason: null };
+  return {
+    allowed: false,
+    reason: capability?.unavailableReason ?? `Input capability \`${kind}\` is unavailable for this Agent target.`
+  };
+}
+
+function inputCapabilityKind(part: GatewayInputPart): string {
+  return part.type === "context" ? "embeddedContext" : part.type;
 }
 
 export function emptyThreadSnapshot(
@@ -218,6 +527,7 @@ export function emptyThreadSnapshot(
 ): ThreadSnapshot {
   return {
     activity: { activeTurnId: null, queuedTurns: 0, running: false },
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries: [],
     pendingActions: [],
     scope,
@@ -232,6 +542,7 @@ export function prepareThreadTurn(
   requestedThreadId: string | null = snapshot.thread?.id ?? null
 ): ThreadTurnPreparation {
   return {
+    previousSnapshot: snapshot,
     requestedThreadId,
     snapshot: appendOptimisticPrompt(snapshot, prompt)
   };
@@ -239,51 +550,37 @@ export function prepareThreadTurn(
 
 export function threadTurnStartParams({
   controls,
+  context,
   input,
   mentions,
   scope,
-  text,
   threadId
 }: {
   controls?: ThreadTurnControls | undefined;
+  context: ThreadContextReadResult | null;
   input: GatewayInputPart[];
   mentions?: GatewayMention[] | undefined;
   scope: GatewayRequestScope;
-  text?: string | null | undefined;
   threadId: string | null;
 }): TurnStartParams {
+  const target = controls && !controls.omitTarget
+    ? context?.compatibleTargets.find((candidate) => candidate.targetId === controls.targetId) ?? null
+    : null;
+  if (controls && !controls.omitTarget && !target) {
+    throw new Error("The selected Agent target is not present in the current Thread Context.");
+  }
   return {
-    agentName: controls?.agentName ?? null,
     input,
     mentions: mentions ?? [],
-    mode: controls?.mode ?? null,
-    model: controls?.model ?? null,
-    permissionMode: controls?.permissionMode ?? null,
-    reasoningEffort: controls?.reasoningEffort ?? null,
-    runtimeOptions: controls?.runtimeOptions ?? {},
-    runtimeRef: controls?.runtimeRef ?? null,
-    runtimeSessionId: controls?.runtimeSessionId ?? null,
     scope,
-    text: text ?? null,
-    threadId
-  };
-}
-
-export function threadTurnControlsFromWorkbenchControls(
-  controls: WorkbenchControlsView | null | undefined,
-  overrides: Partial<ThreadTurnControls> = {}
-): ThreadTurnControls {
-  const runtimeRef = overrides.runtimeRef ?? controls?.runtimeRef ?? null;
-  const mode = controls?.mode ?? null;
-  return {
-    agentName: overrides.agentName ?? controls?.agent ?? null,
-    mode: overrides.mode ?? (runtimeRef === "native" ? mode : null),
-    model: overrides.model ?? controls?.model ?? null,
-    permissionMode: overrides.permissionMode ?? controls?.permissionMode ?? null,
-    reasoningEffort: overrides.reasoningEffort ?? (controls?.variant === "none" ? null : controls?.variant ?? null),
-    runtimeOptions: overrides.runtimeOptions ?? (runtimeRef && runtimeRef !== "native" && mode ? { mode } : {}),
-    runtimeRef,
-    runtimeSessionId: overrides.runtimeSessionId ?? null
+    target: target ? {
+      agentRef: target.agentRef ?? null,
+      runtimeProfileRef: target.runtimeProfileRef
+    } : null,
+    threadId,
+    turnOverrides: controls?.turnOverrides ?? {},
+    expectedContextRevision: controls?.expectedContextRevision ?? null,
+    expectedControlRevision: controls?.expectedControlRevision ?? null
   };
 }
 
@@ -296,26 +593,40 @@ export function acceptThreadTurn(
   if (!result.accepted) {
     throw new Error(`Gateway rejected the ${label}.`);
   }
-  const threadId = requestedThreadId ?? result.threadId;
-  if (!threadId) {
-    throw new Error(`Gateway accepted the ${label} without a thread id.`);
+  const thread = result.thread;
+  if (!thread || !result.threadId) {
+    throw new Error(`Gateway accepted the ${label} without its required thread identity.`);
+  }
+  if (result.threadId !== thread.id) {
+    throw new Error(`Gateway accepted the ${label} with conflicting thread identities.`);
+  }
+  if (requestedThreadId && requestedThreadId !== thread.id) {
+    throw new Error(`Gateway accepted the ${label} for a different thread.`);
   }
   return {
-    threadId,
-    snapshot: bindThreadSnapshot(snapshot, threadId)
+    threadId: result.threadId,
+    thread,
+    snapshot: bindThreadSnapshot(snapshot, thread)
   };
 }
 
 export function bindThreadSnapshot(
   snapshot: ThreadSnapshot,
-  threadId: string
+  thread: GatewayThread | string
 ): ThreadSnapshot {
+  const authoritativeThread = typeof thread === "string"
+    ? (snapshot.thread?.id === thread ? snapshot.thread : null)
+    : thread;
+  if (!authoritativeThread) {
+    throw new Error("Binding a Thread snapshot requires authoritative GatewayThread metadata.");
+  }
+  const threadId = authoritativeThread.id;
   return {
     ...snapshot,
     entries: snapshot.entries.map((entry) => (
       entry.threadId ? entry : { ...entry, threadId }
     )),
-    thread: gatewayThread(threadId)
+    thread: authoritativeThread
   };
 }
 
@@ -362,13 +673,17 @@ function belongsToActiveThreadTurn(
   event: GatewayEvent,
   threadId: string | null,
   turnId: string | null,
-  acceptingDetachedTurn: boolean
+  acceptingDetachedTurn: boolean,
+  settledTurnId: string | null
 ): boolean {
   const eventThreadId = eventThreadIdForEvent(event);
   if (eventThreadId && threadId && eventThreadId !== threadId) {
     return false;
   }
   const eventTurnId = eventTurnIdForEvent(event);
+  if (eventTurnId && eventTurnId === settledTurnId && event.type !== "turnCompleted") {
+    return false;
+  }
   if (eventTurnId && turnId) {
     return eventTurnId === turnId;
   }
@@ -462,7 +777,7 @@ function sourceFromScope(scope: GatewayRequestScope): GatewaySource {
 
 function gatewayThread(threadId: string): GatewayThread {
   return {
-    backend: { kind: "psychevo", sessionHandle: threadId, runtimeRef: "native" },
+    backend: { kind: "native", sessionHandle: threadId, runtimeRef: "native" },
     id: threadId,
     sourceKey: null
   };

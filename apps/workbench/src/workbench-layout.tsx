@@ -1,4 +1,4 @@
-import { type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
 import { ActionButton, Composer, HistoryPanel, TranscriptPanel, type WorkspaceFileLinkContext } from "@psychevo/components";
 import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
@@ -11,7 +11,12 @@ import { RightWorkspace, rightWorkspaceTabLabel } from "./right-workspace";
 import { DEFAULT_RIGHT_WIDTH_PX } from "./storage";
 import { EMPTY_BACKEND_DRAFT, backendDraftFromBackend } from "./capabilities-agents-config";
 import { confirmedSteerTurnId } from "./gateway-event-feed";
+import {
+  enabledThreadAction,
+  snapshotThreadApplicationTarget
+} from "./thread-application";
 import type { RightWorkspaceTab } from "./types";
+import { AgentSessionImportDialog, DeleteSessionDialog } from "./agent-session-import-dialog";
 
 const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
 
@@ -36,8 +41,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     beginRightResize,
     capabilitiesTab,
     changeRuntimeControl,
-    changeRuntimeProfile,
-    changeAgentSelection,
+    changeRunnableTarget,
     clearRightWorkspaceTabPendingPrompt,
     channelDoctor,
     client,
@@ -75,9 +79,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     loadThreadSearchText,
     mainView,
     mobilePanel,
-    modelReady,
-    modelTurnBlockReason,
-    nativeRuntimeSelected,
+    turnSendable,
+    turnBlockReason,
     openDiffPreview,
     openCapabilitiesTab,
     openAgentSessionTab,
@@ -88,10 +91,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     onModelCatalogLoaded,
     pendingClarifyActions,
     pendingPermissionActions,
-    permissionMode,
     pinnedSessionIds,
     pinnedSessions,
-    planModeAvailable,
     pauseAutomation,
     pollWechatQrSetup,
     refreshAutomations,
@@ -106,24 +107,21 @@ export function WorkbenchLayout(props: Record<string, any>) {
     rightCollapsed,
     rightTabs,
     rightWidthPx,
-    runnableAgents,
     runAction,
     runAutomation,
     runCommandAlternateAction,
     running,
-    runtimeAcceptsAgentPersona,
     runtimeContext,
-    runtimeControlValues,
+    runtimeControls,
+    runtimeControlDrafts,
     runtimeOptionsLoading,
     runtimeOptionsError,
     runtimeProfiles,
     saveBackendDraft,
     saveAutomation,
     saveFileFromEditor,
-    selectedAgentName,
-    selectedModel,
-    selectedRuntimeRef,
-    selectedVariant,
+    selectedTargetId,
+    contextMatchesTarget,
     sessionBrowserWorkspaces,
     sessionUsage,
     sessions,
@@ -139,18 +137,12 @@ export function WorkbenchLayout(props: Record<string, any>) {
     setLeftCollapsed,
     setMainView,
     setMobilePanel,
-    setPermissionMode,
     setRightCollapsed,
     setRightTabs,
     setRightWidthPx,
     setCommandFeedback,
-    setSelectedModel,
-    setSelectedModelSelection,
-    setSelectedRuntimeMode,
-    setSelectedVariant,
     setSettingsSection,
     setSnapshot,
-    setWorkMode,
     settings,
     settingsSection,
     showSessionChrome,
@@ -174,7 +166,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
     usageStats,
     usageStatsError,
     usageStatsLoading,
-    workMode,
     workspaceChanges,
     workspaceDialogOpen,
     workspaceDiff,
@@ -194,25 +185,51 @@ export function WorkbenchLayout(props: Record<string, any>) {
         root: workspaceFiles.root
       }
     : undefined;
-  const selectedRuntimeProfile = (runtimeProfiles ?? []).find((profile: any) => profile.id === selectedRuntimeRef) ?? null;
-  const runtimeSafetyLabel = nativeRuntimeSelected
+  const selectedRuntimeRef = runtimeContext?.compatibleTargets.find((target: any) => (
+    target.targetId === selectedTargetId
+  ))?.runtimeProfileRef ?? null;
+  const selectedRuntimeProfile = (runtimeProfiles ?? []).find((profile: any) => (
+    profile.id === selectedRuntimeRef
+  )) ?? null;
+  const runtimeSafetyParts = [selectedRuntimeProfile?.approvalMode, selectedRuntimeProfile?.sandbox]
+    .filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
+  const runtimeSafetyLabel = runtimeSafetyParts.length > 0
+    ? ["Profile safety", ...runtimeSafetyParts].join(" · ")
+    : null;
+  const activeRuntimeControls = runtimeControls ?? [];
+  const modelControl = activeRuntimeControls.find((control: any) => control.surfaceRole === "model") ?? null;
+  const reasoningControl = activeRuntimeControls.find((control: any) => control.surfaceRole === "reasoning") ?? null;
+  const inputCapabilities = contextMatchesTarget ? runtimeContext?.inputCapabilities ?? [] : [];
+  const textCapability = inputCapabilities.find((capability: any) => capability.kind === "text") ?? null;
+  const promptTextUnavailableReason = textCapability?.enabled
     ? null
-    : [
-        "Profile safety",
-        selectedRuntimeProfile?.approvalMode || "runtime approval",
-        selectedRuntimeProfile?.sandbox || "runtime sandbox"
-      ].join(" · ");
+    : textCapability?.unavailableReason ?? turnBlockReason;
+  const attachmentCapabilities = inputCapabilities.filter((capability: any) => (
+    capability.kind === "image"
+    || capability.kind === "resource"
+    || capability.kind === "embeddedContext"
+  ));
+  const attachmentsEnabled = attachmentCapabilities.some((capability: any) => capability.enabled);
+  const attachmentUnavailableReason = attachmentsEnabled
+    ? null
+    : attachmentCapabilities.find((capability: any) => capability.unavailableReason)?.unavailableReason
+      ?? turnBlockReason;
+  const agentMentionsEnabled = inputCapabilities.some((capability: any) => (
+    capability.kind === "agentMention" && capability.enabled
+  ));
   const steerTurnId = confirmedSteerTurnId(
     latestGatewayEvent,
     snapshot.thread?.id ?? null,
     activity.activeTurnId
   );
-  const steerAvailable = Boolean(steerTurnId) && (
-    nativeRuntimeSelected || selectedRuntimeProfile?.runtime === "acp" || (
-      runtimeContext?.runtimeRef === selectedRuntimeRef
-      && runtimeContext.capabilities.some((capability: any) => capability.id === "turn.steer" && capability.enabled)
-    )
-  );
+  const steerAvailable = Boolean(steerTurnId)
+    && contextMatchesTarget
+    && enabledThreadAction(runtimeContext, "steer") !== null;
+  const interruptAvailable = enabledThreadAction(runtimeContext, "interrupt") !== null;
+  const [agentSessionImportOpen, setAgentSessionImportOpen] = useState(false);
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<any | null>(null);
+  const [deleteSessionPending, setDeleteSessionPending] = useState(false);
+  const importScope = activeScope ?? init?.scope ?? scopeForCwd(activeWorkbenchCwd);
 
   return (
     <main className="appShell" data-main-view={mainView}>
@@ -230,6 +247,40 @@ export function WorkbenchLayout(props: Record<string, any>) {
             await createWorkspace(name);
             props.setWorkspaceDialogOpen(false);
           })}
+        />
+      )}
+      {agentSessionImportOpen && (
+        <AgentSessionImportDialog
+          client={client}
+          disabled={disabled}
+          onClose={() => setAgentSessionImportOpen(false)}
+          onImported={(threadId) => void runAction(async () => {
+            const epoch = beginExplicitViewSwitch();
+            await refreshSnapshot(client, threadId, undefined, false, epoch);
+            await refreshHistory();
+            updateMainView("transcript");
+            setMobilePanel("transcript");
+          })}
+          scope={importScope}
+        />
+      )}
+      {pendingDeleteSession && (
+        <DeleteSessionDialog
+          disabled={deleteSessionPending}
+          onCancel={() => setPendingDeleteSession(null)}
+          onConfirm={() => void runAction(async () => {
+            setDeleteSessionPending(true);
+            try {
+              setDraftSession(null);
+              await client?.request("thread/delete", { threadId: pendingDeleteSession.id });
+              setPendingDeleteSession(null);
+              await refreshHistory();
+              await refreshHistory(client, true);
+            } finally {
+              setDeleteSessionPending(false);
+            }
+          })}
+          session={pendingDeleteSession}
         />
       )}
       <nav className="mobileTabs" aria-label="Workbench panels">
@@ -310,16 +361,32 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     await refreshHistory(client, true);
                   })}
                   onDelete={(threadId) => void runAction(async () => {
-                    setDraftSession(null);
-                    await client?.request("thread/delete", { threadId });
-                    await refreshHistory();
-                    await refreshHistory(client, true);
+                    const session = [...sessions, ...archivedSessions]
+                      .find((candidate: any) => candidate.id === threadId);
+                    if (session) setPendingDeleteSession(session);
                   })}
                   onExport={(threadId) => {
                     if (endpoint) {
                       void host?.open.downloadSession(endpoint, threadId, "export");
                     }
                   }}
+                  onFork={(threadId) => void runAction(async () => {
+                    const session = sessions.find((candidate: any) => candidate.id === threadId);
+                    if (!session) return;
+                    const result = await client?.request("thread/action/run", {
+                      action: { kind: "fork" },
+                      scope: scopeForCwd(session.cwd),
+                      threadId
+                    });
+                    const forkedThreadId = result?.kind === "fork" ? result.snapshot.thread?.id : null;
+                    if (!forkedThreadId) return;
+                    const epoch = beginExplicitViewSwitch();
+                    await refreshSnapshot(client, forkedThreadId, undefined, false, epoch);
+                    await refreshHistory();
+                    updateMainView("transcript");
+                    setMobilePanel("transcript");
+                  })}
+                  onImportSessions={() => setAgentSessionImportOpen(true)}
                   onNew={() => void runAction(async () => {
                     await startNewThread();
                   })}
@@ -465,6 +532,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 <TranscriptPanel
                   activity={activity}
                   entries={transcriptEntries}
+                  history={snapshot.history}
                   onCopyText={copyText}
                   onOpenAgentSession={openAgentSessionTab}
                   threadId={snapshot.thread?.id ?? null}
@@ -492,6 +560,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               />
             )}
             <Composer
+              attachmentUnavailableReason={attachmentUnavailableReason}
               attachments={attachments}
               completionProvider={async (text, cursor) => {
                 const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
@@ -501,12 +570,12 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   text,
                   threadId: snapshot.thread?.id ?? null
                 }) ?? { items: [], replacement: null };
-                if (runtimeAcceptsAgentPersona) {
-                  return result;
-                }
                 return {
                   ...result,
-                  items: result.items.filter((item: any) => item.target?.kind !== "agent")
+                  items: result.items.filter((item: any) => (
+                    agentMentionsEnabled
+                    || item.target?.kind !== "agent"
+                  ))
                 };
               }}
               disabled={disabled}
@@ -514,20 +583,17 @@ export function WorkbenchLayout(props: Record<string, any>) {
               leftControls={(
                 <>
                   <ComposerRuntimeControls
-                    agents={runnableAgents}
-                    profiles={runtimeProfiles}
                     binding={runtimeContext?.binding ?? null}
-                    controls={runtimeContext?.runtimeRef === selectedRuntimeRef ? runtimeContext.controls : []}
-                    controlValues={runtimeControlValues}
+                    controls={activeRuntimeControls}
+                    profiles={runtimeContext?.profiles ?? []}
+                    targets={runtimeContext?.compatibleTargets ?? []}
+                    controlValues={runtimeControlDrafts}
                     disabled={disabled}
-                    agentValue={selectedAgentName}
-                    runtimeValue={selectedRuntimeRef}
+                    targetId={selectedTargetId}
                     contextError={runtimeOptionsError}
                     contextLoading={runtimeOptionsLoading}
-                    onAgentChange={(value) => void runAction(async () => changeAgentSelection(value))}
-                    onRuntimeChange={(value) => void runAction(async () => changeRuntimeProfile(value))}
+                    onTargetChange={(value) => void runAction(async () => changeRunnableTarget(value))}
                     onControlChange={(control, value) => void runAction(async () => changeRuntimeControl(control, value))}
-                    onManageRuntimes={() => openCapabilitiesTab("agents")}
                   />
                 </>
               )}
@@ -540,9 +606,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   onToggleRealtime={onVoiceRealtimeToggle}
                 />
               )}
-              mode={nativeRuntimeSelected ? workMode : "default"}
-              modeControlVisible={nativeRuntimeSelected}
-              planModeAvailable={nativeRuntimeSelected && planModeAvailable}
+              mode="default"
+              modeControlVisible={false}
+              planModeAvailable={false}
               preActionControls={(
                 <ComposerDictationButton
                   disabled={disabled}
@@ -550,98 +616,109 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   onToggle={onVoiceDictationToggle}
                 />
               )}
-              promptSubmitBlockReason={modelTurnBlockReason}
-              promptSubmitDisabled={!modelReady}
+              promptSubmitBlockReason={turnBlockReason}
+              promptSubmitDisabled={!turnSendable}
+              promptTextUnavailableReason={promptTextUnavailableReason}
               rightControls={(
-                <ComposerSubmitControls
-                  context={contextUsage}
-                  controls={controls}
-                  usage={sessionUsage}
-                  model={selectedModel}
-                  showNativeModelControls={nativeRuntimeSelected}
-                  variant={selectedVariant}
-                  onModelChange={setSelectedModel}
-                  onModelSelectionChange={setSelectedModelSelection}
-                  onVariantChange={setSelectedVariant}
-                />
+                <>
+                  <ComposerSubmitControls
+                    context={contextUsage}
+                    controls={controls}
+                    usage={sessionUsage}
+                    controlValues={runtimeControlDrafts}
+                    disabled={disabled || runtimeOptionsLoading}
+                    modelControl={modelControl}
+                    reasoningControl={reasoningControl}
+                    onControlChange={(control, value) => void runAction(async () => changeRuntimeControl(control, value))}
+                  />
+                </>
               )}
               requestPanel={(pendingClarifyActions.length > 0 || pendingPermissionActions.length > 0) ? (
                 <ComposerRequests
                   clarifies={pendingClarifyActions}
                   permissions={pendingPermissionActions}
                   onClarify={(request, answers, cancel) => void runAction(async () => {
-                    const response = await client?.request("clarify/respond", {
-                      requestId: request.actionId,
-                      threadId: request.threadId ?? snapshot.thread?.id ?? null,
-                      sourceKey: request.sourceKey ?? null,
-                      activityId: request.activityId ?? null,
-                      answers,
-                      cancel
+                    const target = snapshotThreadApplicationTarget(snapshot, request.threadId);
+                    if (!client || !target) {
+                      setInteractionFeedback(setCommandFeedback, false, "Clarify response does not belong to the active Thread.");
+                      return;
+                    }
+                    const response = await client.request("thread/interaction/respond", {
+                      ...target,
+                      interactionId: request.actionId,
+                      response: cancel
+                        ? { kind: "cancelClarify" }
+                        : { kind: "clarify", answers: answers ?? [] }
                     });
-                    if (!acceptedInteractionResponse(response)) {
-                      setCommandFeedback?.({
-                        accepted: false,
-                        command: "clarify/respond",
-                        message: "Clarify response was not accepted.",
-                        feedbackAnchor: "composer"
-                      });
-                    }
-                    if (request.threadId) {
-                      await refreshSnapshot(client, request.threadId, undefined, true);
-                    }
+                    setInteractionFeedback(
+                      setCommandFeedback,
+                      acceptedInteractionResponse(response),
+                      response.accepted ? "Clarify response accepted." : "Clarify response was not accepted."
+                    );
+                    await refreshSnapshot(client, target.threadId, undefined, true);
                   })}
                   onPermission={(request, decision) => void runAction(async () => {
-                    const response = await client?.request("permission/respond", {
-                      requestId: request.actionId,
-                      threadId: request.threadId ?? snapshot.thread?.id ?? null,
-                      sourceKey: request.sourceKey ?? null,
-                      activityId: request.activityId ?? null,
-                      decision
+                    const target = snapshotThreadApplicationTarget(snapshot, request.threadId);
+                    if (!client || !target) {
+                      setInteractionFeedback(setCommandFeedback, false, "Permission response does not belong to the active Thread.");
+                      return;
+                    }
+                    const response = await client.request("thread/interaction/respond", {
+                      ...target,
+                      interactionId: request.actionId,
+                      response: { kind: "permission", decision }
                     });
-                    if (!acceptedInteractionResponse(response)) {
-                      setCommandFeedback?.({
-                        accepted: false,
-                        command: "permission/respond",
-                        message: "Permission response was not accepted.",
-                        feedbackAnchor: "composer"
-                      });
-                    }
-                    if (request.threadId) {
-                      await refreshSnapshot(client, request.threadId, undefined, true);
-                    }
+                    setInteractionFeedback(
+                      setCommandFeedback,
+                      acceptedInteractionResponse(response),
+                      response.accepted ? "Permission response accepted." : "Permission response was not accepted."
+                    );
+                    await refreshSnapshot(client, target.threadId, undefined, true);
                   })}
                 />
               ) : null}
               running={running}
               runningStartedAtMs={activity.startedAtMs ?? null}
               steerAvailable={steerAvailable}
-              onAttach={() => void runAction(async () => handleAttachment())}
-              onAttachFiles={(files) => void runAction(async () => handleAttachmentFiles(files))}
+              {...(attachmentsEnabled ? {
+                onAttach: () => void runAction(async () => handleAttachment()),
+                onAttachFiles: (files: File[]) => void runAction(async () => handleAttachmentFiles(files))
+              } : {})}
               onCommand={(command) => void runAction(async () => executeCommand(command, "composer"))}
               onInterrupt={() => void runAction(async () => {
-                const threadId = snapshot.thread?.id ?? null;
-                await client?.request("turn/interrupt", { threadId });
-                await refreshSnapshot(client, threadId ?? undefined, undefined, true, props.viewEpochRef.current);
-              })}
-              onModeChange={(mode) => {
-                setWorkMode(mode);
-                if (mode === "plan") {
-                  setSelectedRuntimeMode("");
+                const target = snapshotThreadApplicationTarget(snapshot);
+                if (!client || !target || !interruptAvailable) {
+                  setCommandFeedback?.({
+                    accepted: false,
+                    command: "interrupt",
+                    message: "Interrupt is not available for the active Thread.",
+                    feedbackAnchor: "composer"
+                  });
+                  return;
                 }
-              }}
+                await client.request("thread/action/run", {
+                  ...target,
+                  action: { kind: "interrupt" }
+                });
+                await refreshSnapshot(client, target.threadId, undefined, true, props.viewEpochRef.current);
+              })}
+              onModeChange={() => {}}
               onRemoveAttachment={(id) => setAttachments((current: any[]) => current.filter((attachment) => attachment.id !== id))}
               onShell={(command) => void runAction(async () => startShell(command))}
               onSteer={(text) => void runAction(async () => {
                 if (!steerTurnId) {
                   return;
                 }
+                const target = snapshotThreadApplicationTarget(snapshot);
+                if (!client || !target || !steerAvailable) {
+                  return;
+                }
                 clearCommandTransientUi();
-                const result = await client?.request("turn/steer", {
-                  expectedTurnId: steerTurnId,
-                  threadId: snapshot.thread?.id ?? null,
-                  text
+                const result = await client.request("thread/action/run", {
+                  ...target,
+                  action: { kind: "steer", expectedTurnId: steerTurnId, text }
                 });
-                if (result?.accepted) {
+                if (result.kind === "steer" && result.accepted) {
                   setSnapshot((current: any) => appendOptimisticPrompt(current, text));
                   await refreshHistory();
                 } else {
@@ -657,9 +734,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
             />
             <ComposerStatusLine
               branch={settings?.project?.branch ?? null}
-              controls={controls}
               path={settings?.project?.displayPath ?? settings?.cwd ?? ""}
-              permissionMode={permissionMode}
               runtimeSafetyLabel={runtimeSafetyLabel}
               profile={init?.profile ?? null}
               onBranchClick={() => {
@@ -668,7 +743,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onPathClick={() => {
                 openRightWorkspaceTab("files");
               }}
-              onPermissionModeChange={setPermissionMode}
             />
           </div>}
         </section>
@@ -700,8 +774,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
               scope={activeScope ?? init?.scope ?? null}
               sessionId={snapshot.thread?.id ?? null}
               status={props.status}
-              promptSubmitBlockReason={modelTurnBlockReason}
-              promptSubmitDisabled={!modelReady}
+              promptSubmitBlockReason={turnBlockReason}
+              promptSubmitDisabled={!turnSendable}
               usage={sessionUsage}
               tabs={rightTabs}
               terminalEvents={terminalEvents}
@@ -751,7 +825,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onRefreshTrace={() => void props.refreshTrace()}
               onSaveFile={(path, content, expectedRevision, force) => saveFileFromEditor(path, content, expectedRevision, force)}
               onShowHome={() => props.revealRightWorkspace(null)}
-              onSubmitThreadTurn={submitThreadTurn}
             />
           </aside>
         )}
@@ -764,4 +837,17 @@ function acceptedInteractionResponse(value: unknown): boolean {
   return typeof value === "object"
     && value !== null
     && (value as { accepted?: unknown }).accepted === true;
+}
+
+function setInteractionFeedback(
+  setCommandFeedback: ((feedback: Record<string, unknown>) => void) | undefined,
+  accepted: boolean,
+  message: string
+) {
+  setCommandFeedback?.({
+    accepted,
+    command: "thread/interaction/respond",
+    message,
+    feedbackAnchor: "composer"
+  });
 }

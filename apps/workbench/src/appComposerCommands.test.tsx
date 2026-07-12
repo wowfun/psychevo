@@ -391,6 +391,95 @@ describe("Workbench command routing", () => {
     });
   });
 
+  it("submits a spawned child follow-up through the visible panel controller", async () => {
+    const spawnEntry = spawnedChildEntry();
+    (gatewayMock.snapshot as unknown as { entries: TranscriptEntry[] }).entries = [spawnEntry];
+
+    render(<App />);
+    await resumeSession();
+
+    const initialUser = childCommittedEntry("message:1", 1, "user", "Main Agent instruction", "turn-initial");
+    const initialAssistant = childCommittedEntry("message:2", 2, "assistant", "Initial answer", "turn-initial");
+    (gatewayMock.snapshot as unknown as { entries: TranscriptEntry[] }).entries = [initialUser, initialAssistant];
+    gatewayMock.runtimeContextRead = () => writableChildContext();
+    gatewayMock.turnStart = () => ({
+      accepted: true,
+      threadId: "child-thread",
+      turnId: "turn-follow-up",
+      thread: {
+        id: "child-thread",
+        backend: { kind: "native", runtimeRef: "native", sessionHandle: "child-thread" },
+        sourceKey: "source-child-thread"
+      }
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open investigate agent session" }));
+    const panel = await screen.findByRole("region", { name: "investigate" });
+    const composer = await within(panel).findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(composer, { target: { value: "Second question" } });
+    fireEvent.submit(composer.closest("form") as HTMLFormElement);
+
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "turn/start",
+      params: expect.objectContaining({
+        input: [{ type: "text", text: "Second question" }],
+        threadId: "child-thread"
+      })
+    }));
+
+    const committedUser = childCommittedEntry("message:3", 3, "user", "Second question", "turn-follow-up");
+    const committedAssistant = childCommittedEntry("message:4", 4, "assistant", "Second answer", "turn-follow-up");
+    (gatewayMock.snapshot as unknown as { entries: TranscriptEntry[] }).entries = [
+      initialUser,
+      initialAssistant,
+      committedUser,
+      committedAssistant
+    ];
+    await act(async () => {
+      for (const subscriber of gatewayMock.subscribers) {
+        subscriber({
+          method: "gateway/event",
+          params: {
+            type: "turnStarted",
+            threadId: "child-thread",
+            turnId: "turn-follow-up",
+            selectedSkills: []
+          }
+        });
+        subscriber({
+          method: "gateway/event",
+          params: { type: "entryUpdated", turnId: "turn-follow-up", entry: committedUser }
+        });
+        subscriber({
+          method: "gateway/event",
+          params: {
+            type: "turnCompleted",
+            threadId: "child-thread",
+            turnId: "turn-follow-up",
+            turn: {
+              id: "turn-follow-up",
+              threadId: "child-thread",
+              status: "completed",
+              outcome: "normal",
+              error: null,
+              startedAtMs: 10,
+              completedAtMs: 20
+            },
+            committedEntries: [committedUser, committedAssistant]
+          }
+        });
+      }
+      await Promise.resolve();
+    });
+
+    expect(await within(panel).findByText("Second answer")).toBeTruthy();
+    expect(within(panel).getAllByText("Main Agent instruction")).toHaveLength(1);
+    expect(within(panel).getAllByText("Second question")).toHaveLength(1);
+    expect(panel.querySelectorAll('[data-entry-id="message:1"]')).toHaveLength(1);
+    expect(panel.querySelectorAll('[data-entry-id="message:3"]')).toHaveLength(1);
+    expect(panel.querySelectorAll('[data-entry-id^="optimistic:"]')).toHaveLength(0);
+  });
+
   it("routes /agents to Capabilities Agents", async () => {
     gatewayMock.commandList = [
       commandItem("commands", "navigate", "commands")
@@ -430,29 +519,32 @@ describe("Workbench command routing", () => {
       feedbackAnchor: "composer",
       action: { type: "threadCompactStart", instructions: "keep decisions" }
     });
-    gatewayMock.compactStart = (params: unknown) => ({
-      accepted: true,
-      threadId: (params as { threadId?: string | null }).threadId,
-      compacted: true,
-      reason: "manual",
-      message: "context compacted",
-      checkpoint: {
-        checkpointId: 7,
+    gatewayMock.threadActionRun = (params: unknown) => ({
+      kind: "compact",
+      threadId: (params as { threadId: string }).threadId,
+      result: {
+        accepted: true,
+        compacted: true,
         reason: "manual",
-        createdAtMs: 1_798_650_000_000,
-        firstKeptSessionSeq: 3,
+        message: "context compacted",
+        checkpoint: {
+          checkpointId: 7,
+          reason: "manual",
+          createdAtMs: 1_798_650_000_000,
+          firstKeptSessionSeq: 3,
+          tokensBefore: 120,
+          tokensAfter: 42,
+          summaryProvider: "fake",
+          summaryModel: "fake-model",
+          summary: "summary"
+        },
         tokensBefore: 120,
         tokensAfter: 42,
         summaryProvider: "fake",
         summaryModel: "fake-model",
-        summary: "summary"
-      },
-      tokensBefore: 120,
-      tokensAfter: 42,
-      summaryProvider: "fake",
-      summaryModel: "fake-model",
-      unavailable: false,
-      error: null
+        unavailable: false,
+        error: null
+      }
     });
 
     render(<App />);
@@ -464,12 +556,12 @@ describe("Workbench command routing", () => {
 
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
-        method: "thread/compact/start",
-        params: expect.objectContaining({
+        method: "thread/action/run",
+        params: {
+          scope: gatewayMock.scope,
           threadId: "thread-1",
-          instructions: "keep decisions",
-          runtimeRef: "native"
-        })
+          action: { kind: "compact", instructions: "keep decisions" }
+        }
       });
     });
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
@@ -682,7 +774,11 @@ describe("Workbench command routing", () => {
 
   it("reports an active steer rejected by the selected Runtime Profile", async () => {
     gatewayMock.snapshot.activity = { running: true, activeTurnId: "turn-1", queuedTurns: 0 };
-    gatewayMock.turnSteer = () => ({ accepted: false });
+    gatewayMock.threadActionRun = (params: unknown) => ({
+      kind: "steer",
+      threadId: (params as { threadId: string }).threadId,
+      accepted: false
+    });
     gatewayMock.commandExecute = (command: string) => ({
       accepted: true,
       command,
@@ -693,16 +789,28 @@ describe("Workbench command routing", () => {
     });
 
     render(<App />);
+    await resumeSession();
 
     const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/context/read",
+        params: expect.objectContaining({ threadId: "thread-1" })
+      });
+      expect((screen.getByRole("button", { name: "Agent target" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     await screen.findByRole("button", { name: "Interrupt active turn" });
     fireEvent.change(textarea, { target: { value: "/steer hello" } });
     fireEvent.submit(textarea.closest("form") as HTMLFormElement);
 
     expect(await screen.findByText("The selected Runtime Profile does not support steering this turn.")).toBeTruthy();
     expect(gatewayMock.requestLog).toContainEqual({
-      method: "turn/steer",
-      params: { expectedTurnId: "turn-1", threadId: null, text: "hello" }
+      method: "thread/action/run",
+      params: {
+        scope: gatewayMock.scope,
+        threadId: "thread-1",
+        action: { kind: "steer", expectedTurnId: "turn-1", text: "hello" }
+      }
     });
   });
 
@@ -744,6 +852,9 @@ describe("Workbench command routing", () => {
     render(<App />);
 
     const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Agent target" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.change(textarea, { target: { value: "/tmp/output.txt" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -795,7 +906,7 @@ describe("Workbench command routing", () => {
         })
       });
     });
-    expect(gatewayMock.optimisticLog).toContain("/x-daily latest");
+    expect(await screen.findByText("/x-daily latest")).toBeTruthy();
   });
 
   it("submits slash actions to a returned thread id", async () => {
@@ -877,7 +988,7 @@ describe("Workbench command routing", () => {
         })
       });
     });
-    expect(gatewayMock.optimisticLog).toContain("/queue hello");
+    expect(await screen.findByText("/queue hello")).toBeTruthy();
   });
 
   it("shows a bounded export error instead of opening downloads without a host endpoint", async () => {
@@ -1047,3 +1158,127 @@ describe("Workbench command routing", () => {
     expect(await screen.findByText("Export download opened.")).toBeTruthy();
   });
 });
+
+function spawnedChildEntry(): TranscriptEntry {
+  return {
+    id: "entry-agent",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    messageSeq: 2,
+    role: "assistant",
+    status: "completed",
+    source: "psychevo",
+    blocks: [{
+      id: "block-agent",
+      kind: "agent",
+      status: "completed",
+      order: 0,
+      source: "runtime",
+      title: "Agent",
+      body: "{\"child_thread_id\":\"child-thread\"}",
+      preview: "child-thread",
+      detail: null,
+      artifactIds: [],
+      metadata: {
+        projection: "tool",
+        tool_name: "spawn_agent",
+        tool_call_id: "call-agent",
+        result: {
+          agent_name: "Planck",
+          child_thread_id: "child-thread",
+          parent_thread_id: "thread-1",
+          task_name: "investigate"
+        }
+      },
+      result: null,
+      createdAtMs: 1_000,
+      updatedAtMs: 2_000
+    }],
+    metadata: null,
+    usage: null,
+    accounting: null,
+    createdAtMs: 1_000,
+    updatedAtMs: 2_000
+  };
+}
+
+function childCommittedEntry(
+  id: string,
+  messageSeq: number,
+  role: "user" | "assistant",
+  body: string,
+  turnId: string
+): TranscriptEntry {
+  return {
+    id,
+    threadId: "child-thread",
+    turnId,
+    messageSeq,
+    role,
+    status: "completed",
+    source: "runtime.message",
+    blocks: [{
+      id: `${id}:text`,
+      kind: "text",
+      status: "completed",
+      order: 0,
+      source: "runtime.message",
+      title: null,
+      body,
+      preview: body,
+      detail: body,
+      artifactIds: [],
+      metadata: null,
+      result: null,
+      createdAtMs: messageSeq,
+      updatedAtMs: messageSeq
+    }],
+    metadata: null,
+    usage: null,
+    accounting: null,
+    createdAtMs: messageSeq,
+    updatedAtMs: messageSeq
+  };
+}
+
+function writableChildContext(): Record<string, unknown> {
+  return {
+    targetId: "target:child-native",
+    runtimeProfileRef: "native",
+    selectionState: "bound",
+    profiles: [],
+    binding: {
+      threadId: "child-thread",
+      agentRef: "investigate",
+      agentFingerprint: "agent-fingerprint",
+      runtimeRef: "native",
+      backendKind: "native",
+      nativeKind: "native",
+      sessionHandle: "child-thread",
+      cwd: "/tmp/project",
+      profileFingerprint: "profile-fingerprint",
+      ownership: "readWrite",
+      bindingRevision: 1
+    },
+    controls: [],
+    stability: "stable",
+    capabilities: [{ id: "turn.start", enabled: true, stability: "stable", unavailableReason: null }],
+    compatibleTargets: [{
+      targetId: "target:child-native",
+      agentRef: "investigate",
+      runtimeProfileRef: "native",
+      agentLabel: "investigate",
+      profileLabel: "Psychevo (Native)",
+      label: "investigate · Psychevo (Native)",
+      ready: true,
+      unavailableReason: null
+    }],
+    inputCapabilities: [{ kind: "text", enabled: true, unavailableReason: null }],
+    actions: [],
+    sendability: { allowed: true, reason: null, recoveryAction: null },
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+    pendingInteractions: [],
+    contextRevision: "child-context-1",
+    controlRevision: "child-controls-1"
+  };
+}

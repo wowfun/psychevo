@@ -17,7 +17,6 @@ import {
   type ContextReadResult,
   type GatewayRequestScope,
   type ObservabilityReadResult,
-  type RuntimeOptionsResult,
   type SessionSummary,
   type SettingsReadResult,
   type ThreadBrowserResult,
@@ -36,6 +35,7 @@ import {
   normalizeSessionSummary,
   normalizeSnapshot
 } from "./session-utils";
+import { hydrateThreadSnapshotHistory } from "./thread-application";
 import type {
   DebugEvent,
   TraceState,
@@ -67,21 +67,12 @@ type SurfaceActionsParams = {
   setDebugEvents: Dispatch<SetStateAction<DebugEvent[]>>;
   setError: Dispatch<SetStateAction<string | null>>;
   setObservability: Dispatch<SetStateAction<ObservabilityReadResult | null>>;
-  setPermissionMode: Dispatch<SetStateAction<string>>;
   setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
-  setRuntimeOptionsResult: Dispatch<SetStateAction<RuntimeOptionsResult | null>>;
-  setRuntimeSessionId: Dispatch<SetStateAction<string | null>>;
-  setSelectedAgentName: Dispatch<SetStateAction<string>>;
-  setSelectedModel: Dispatch<SetStateAction<string | null>>;
-  setSelectedRuntimeMode: Dispatch<SetStateAction<string>>;
-  setSelectedRuntimeRef: Dispatch<SetStateAction<string>>;
-  setSelectedVariant: Dispatch<SetStateAction<string>>;
   setSessions: Dispatch<SetStateAction<SessionSummary[]>>;
   setSessionBrowserWorkspaces: Dispatch<SetStateAction<SessionBrowserWorkspaceState[]>>;
   setSettings: Dispatch<SetStateAction<SettingsReadResult | undefined>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
   setTraceState: Dispatch<SetStateAction<TraceState>>;
-  setWorkMode: Dispatch<SetStateAction<string>>;
   setWorkspaceChanges: Dispatch<SetStateAction<WorkspaceChangesResult | null>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   setWorkspaceFiles: Dispatch<SetStateAction<WorkspaceFilesResult | null>>;
@@ -106,7 +97,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return;
     }
     if (threadId && readOnly) {
-      const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
+      const bootstrap = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
+      const nextSnapshot = await hydrateThreadSnapshotHistory(nextClient, bootstrap);
       if (expectedEpoch != null && expectedEpoch !== params.viewEpochRef.current) {
         return;
       }
@@ -132,7 +124,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     }
     const nextScope = scope ?? defaultScope();
     const requestParams = threadId ? { threadId, scope: nextScope } : { scope: nextScope };
-    const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/resume", requestParams));
+    const bootstrap = parseThreadSnapshot(await nextClient.request("thread/resume", requestParams));
+    const nextSnapshot = await hydrateThreadSnapshotHistory(nextClient, bootstrap);
     params.setSnapshot((current) => {
       if (expectedEpoch != null && expectedEpoch !== params.viewEpochRef.current) {
         return current;
@@ -164,7 +157,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !threadId) {
       return;
     }
-    const nextSnapshot = normalizeSnapshot(parseThreadSnapshot(await nextClient.request("thread/read", { threadId })));
+    const bootstrap = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
+    const nextSnapshot = normalizeSnapshot(await hydrateThreadSnapshotHistory(nextClient, bootstrap));
     params.setSnapshot((current) => (
       (current.thread?.id ?? null) === threadId ? (() => {
         params.selectedThreadIdRef.current = nextSnapshot.thread?.id ?? null;
@@ -379,16 +373,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextControls) {
       return;
     }
-    params.setPermissionMode(nextControls.permissionMode || "default");
-    params.setWorkMode(nextControls.mode || "default");
-    params.setSelectedRuntimeRef(nextControls.runtimeRef || "native");
-    params.setRuntimeSessionId(null);
-    params.setRuntimeOptionsResult(null);
     params.setRuntimeOptionsError(null);
-    params.setSelectedRuntimeMode("");
-    params.setSelectedAgentName(nextControls.agent ?? "");
-    params.setSelectedModel(nextControls.model ?? null);
-    params.setSelectedVariant(nextControls.variant ?? "none");
   }
 
   async function runAction(action: () => Promise<void>) {

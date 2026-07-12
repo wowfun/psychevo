@@ -118,6 +118,136 @@ describe("TranscriptPanel Markdown rendering", () => {
   });
 });
 
+describe("TranscriptPanel externally owned history", () => {
+  it("keeps a retained earlier-turn live answer before a later detached optimistic prompt", () => {
+    const firstQuestion: TranscriptEntry = {
+      ...transcriptEntry([transcriptBlock({
+        id: "message:1:text",
+        kind: "text",
+        body: "first question",
+        metadata: null
+      })]),
+      id: "message:1",
+      role: "user",
+      source: "runtime.message",
+      turnId: "turn-1",
+      messageSeq: 1,
+      createdAtMs: 100,
+      updatedAtMs: 100
+    };
+    const firstAnswer: TranscriptEntry = {
+      ...transcriptEntry([transcriptBlock({
+        id: "live:turn-1:assistant:0:text",
+        kind: "text",
+        body: "first answer",
+        metadata: null
+      })]),
+      id: "live:turn-1:assistant:0",
+      source: "runtime.stream",
+      turnId: "turn-1",
+      messageSeq: null,
+      metadata: { liveOrder: 0, projection: "assistant_segment" },
+      createdAtMs: 200,
+      updatedAtMs: 200
+    };
+    const secondQuestion: TranscriptEntry = {
+      ...transcriptEntry([transcriptBlock({
+        id: "optimistic:300:second:text",
+        kind: "text",
+        body: "second question",
+        metadata: null
+      })]),
+      id: "optimistic:300:second",
+      role: "user",
+      source: "client.optimistic",
+      turnId: null,
+      messageSeq: null,
+      metadata: { liveOrder: -1, projection: "optimistic_prompt" },
+      createdAtMs: 300,
+      updatedAtMs: 300
+    };
+
+    const { container } = render(
+      <TranscriptPanel entries={[firstQuestion, firstAnswer, secondQuestion]} threadId="thread-1" />
+    );
+
+    expect(Array.from(container.querySelectorAll("[data-entry-id]"), (node) => (
+      node.getAttribute("data-entry-id")
+    ))).toEqual([
+      "message:1",
+      "live:turn-1:assistant:0",
+      "optimistic:300:second"
+    ]);
+  });
+
+  it("keeps native phase labels collapsed until the user asks for them", () => {
+    const phaseOne = transcriptBlock({
+      id: "phase-1",
+      kind: "reasoning",
+      body: "Inspect the workspace",
+      metadata: null,
+      phaseOrdinal: 1
+    });
+    const phaseTwo = transcriptBlock({
+      id: "phase-2",
+      kind: "text",
+      body: "Implemented the change",
+      metadata: null,
+      phaseOrdinal: 2
+    });
+
+    const { container } = render(<TranscriptPanel entries={[transcriptEntry([phaseOne, phaseTwo])]} />);
+
+    expect(screen.getByRole("button", { name: "Show native phases" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("region", { name: "Phase 1" })).toBeNull();
+    expect(container.querySelector('[data-phase-ordinal="2"]')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show native phases" }));
+    expect(screen.getByRole("region", { name: "Phase 1" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Phase 2" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hide native phases" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("states degraded agent history fidelity without adapter-specific labels", () => {
+    render(
+      <TranscriptPanel
+        entries={[]}
+        history={{
+          owner: "agent",
+          fidelity: "partial",
+          cursor: "opaque-agent-cursor",
+          hint: "Earlier turns are available only as a partial agent history."
+        }}
+      />
+    );
+
+    const notice = screen.getByRole("note");
+    expect(notice.getAttribute("data-history-owner")).toBe("agent");
+    expect(notice.getAttribute("data-history-fidelity")).toBe("partial");
+    expect(notice.textContent).toContain("Earlier turns are available only as a partial agent history.");
+    expect(notice.textContent).not.toContain("Codex");
+    expect(notice.textContent).not.toContain("OpenCode");
+  });
+
+  it("identifies degraded process-owned history", () => {
+    render(
+      <TranscriptPanel
+        entries={[]}
+        history={{
+          owner: "process",
+          fidelity: "unavailable",
+          cursor: null,
+          hint: null
+        }}
+      />
+    );
+
+    const notice = screen.getByRole("note");
+    expect(notice.getAttribute("data-history-owner")).toBe("process");
+    expect(notice.textContent).toBe("Earlier history is unavailable from this process.");
+  });
+});
+
 describe("TranscriptPanel inline diff evidence", () => {
   it("default-opens successful edit diffs with a compact edited title", () => {
     const block = transcriptBlock({
@@ -211,6 +341,28 @@ describe("TranscriptPanel inline diff evidence", () => {
       text: "sqlite3 /home/kevin/Projects/feedgarden/feeds/.cache/hn.db \"SELECT id FROM stories;\"",
       title: "Command"
     });
+  });
+
+  it("renders ACP Agent shell snapshots through the standard typed tool evidence path", () => {
+    const block = transcriptBlock({
+      kind: "shell",
+      title: "exec_command",
+      metadata: {
+        projection: "tool",
+        origin: "acp_peer",
+        runtimeProjection: "acp_peer",
+        tool_name: "exec_command",
+        args: { command: "cargo test" },
+        result: { output: "33 passed" }
+      }
+    });
+
+    const display = evidenceDisplay(block, "");
+
+    expect(display.title).toBe("exec_command cargo test");
+    expect(display.sections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "text", text: "cargo test", title: "Command" })
+    ]));
   });
 
   it("falls back to raw diff detail when update diff parsing fails", () => {

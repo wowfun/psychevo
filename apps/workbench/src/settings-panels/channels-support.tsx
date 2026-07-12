@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { Activity, MessageCircle, PlugZap, RotateCcw, Wrench } from "lucide-react";
-import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, RuntimeProfileView } from "@psychevo/protocol";
+import type {
+  ChannelWechatQrPollResult,
+  ChannelWechatQrStartResult,
+  RunnableTargetView,
+  RuntimeProfileView,
+  ThreadContextReadResult,
+  ThreadControlDescriptorView
+} from "@psychevo/protocol";
 import type { SessionBrowserWorkspaceState, WorkbenchChannel, WorkbenchChannelDoctor } from "../types";
-import type { ChannelSettingsControls, ChannelUpdateDraft } from "./types";
+import type { ChannelUpdateDraft } from "./types";
 
 export type ChannelChoice = "wechat" | "telegram" | "feishu" | "lark";
 
@@ -26,7 +33,6 @@ export function sectionDomId(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-const DEFAULT_PERMISSION_MODE_OPTIONS = ["default", "acceptEdits", "dontAsk", "bypassPermissions"];
 export const CHANNEL_WORKSPACE_MANUAL_VALUE = "__manual__";
 
 export function channelWorkspaceOptions(workspaces: SessionBrowserWorkspaceState[]): string[] {
@@ -107,31 +113,6 @@ export function splitChannelListText(value: string): string[] {
   return items;
 }
 
-export function channelPermissionOptions(
-  controls: ChannelSettingsControls,
-  channel: WorkbenchChannel,
-  draft: ChannelSettingsDraft
-): string[] {
-  return uniqueStrings([
-    ...(controls?.permissionModeOptions ?? DEFAULT_PERMISSION_MODE_OPTIONS),
-    "default",
-    channel.permissionMode ?? "",
-    draft.permissionMode
-  ]).filter((value) => DEFAULT_PERMISSION_MODE_OPTIONS.includes(value));
-}
-
-export function channelModelOptions(
-  controls: ChannelSettingsControls,
-  channel: WorkbenchChannel,
-  draft: ChannelSettingsDraft
-): string[] {
-  return uniqueStrings([
-    ...(controls?.modelOptions ?? []),
-    channel.model ?? "",
-    draft.model
-  ]).filter(Boolean);
-}
-
 export function channelRuntimeProfileOptions(
   channel: WorkbenchChannel,
   draft: ChannelSettingsDraft,
@@ -144,32 +125,13 @@ export function channelRuntimeProfileOptions(
   ])];
 }
 
-export function channelModelControlAvailable(
-  runtimeRef: string,
-  profiles: RuntimeProfileView[]
-): boolean {
-  const selected = profiles.find((profile) => profile.id === runtimeRef.trim());
-  return selected?.runtime === "native";
-}
-
-export function channelNativePermissionControlAvailable(
-  runtimeRef: string,
-  profiles: RuntimeProfileView[]
-): boolean {
-  const normalized = runtimeRef.trim();
-  if (!normalized || normalized === "native") {
-    return true;
-  }
-  return profiles.find((profile) => profile.id === normalized)?.runtime === "native";
-}
-
 export function channelRuntimeSafetyLabel(
   runtimeRef: string,
   profiles: RuntimeProfileView[]
 ): string {
   const selected = profiles.find((profile) => profile.id === runtimeRef.trim());
-  if (!selected || selected.runtime === "native") {
-    return "Native permission mode";
+  if (!selected) {
+    return "Profile default safety policy";
   }
   return [
     selected.label || selected.id,
@@ -192,6 +154,83 @@ export function uniqueStrings(values: string[]): string[] {
   return out;
 }
 
+export function channelProspectiveTarget(
+  context: ThreadContextReadResult,
+  runtimeRef: string
+): RunnableTargetView | null {
+  const normalized = runtimeRef.trim();
+  if (!normalized) {
+    return context.compatibleTargets.find((target) => target.targetId === context.targetId) ?? null;
+  }
+  const candidates = context.compatibleTargets.filter((target) => target.runtimeProfileRef === normalized);
+  const profile = context.profiles.find((candidate) => candidate.id === normalized);
+  const preferredAgentRefs = uniqueStrings([
+    profile?.defaultAgent ?? "",
+    profile?.backendRef ?? ""
+  ]);
+  for (const agentRef of preferredAgentRefs) {
+    const target = candidates.find((candidate) => candidate.agentRef === agentRef);
+    if (target) {
+      return target;
+    }
+  }
+  const defaultTarget = candidates.find((candidate) => candidate.agentRef === null);
+  if (defaultTarget) {
+    return defaultTarget;
+  }
+  return candidates.length === 1 ? candidates[0]! : null;
+}
+
+export function channelControlDescriptor(
+  context: ThreadContextReadResult | null,
+  predicate: (control: ThreadControlDescriptorView) => boolean
+): ThreadControlDescriptorView | null {
+  return context?.controls.find(predicate) ?? null;
+}
+
+export function channelControlIsExposed(control: ThreadControlDescriptorView | null): boolean {
+  return Boolean(control && control.stability === "stable" && control.channelSafe);
+}
+
+export function channelControlStringChoices(control: ThreadControlDescriptorView | null): Array<{
+  value: string;
+  label: string;
+}> {
+  if (!control) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return control.choices.flatMap((choice) => {
+    if (typeof choice.value !== "string" || seen.has(choice.value)) {
+      return [];
+    }
+    seen.add(choice.value);
+    return [{ value: choice.value, label: choice.label || choice.value }];
+  });
+}
+
+export function channelControlUnavailableReason(
+  control: ThreadControlDescriptorView | null,
+  label: string
+): string {
+  if (!control) {
+    return `The selected Agent target does not expose a ${label} control.`;
+  }
+  if (control.stability !== "stable") {
+    return `${control.label} is ${control.stability} and is not available in Channels.`;
+  }
+  if (!control.channelSafe) {
+    return `${control.label} is not certified for Channels.`;
+  }
+  if (!control.enabled) {
+    return control.unavailableReason ?? `${control.label} is currently unavailable.`;
+  }
+  if (control.mutability !== "selectable") {
+    return control.unavailableReason ?? `${control.label} is read-only for this Agent target.`;
+  }
+  return control.unavailableReason ?? `${control.label} is unavailable.`;
+}
+
 export function permissionModeLabel(value: string): string {
   switch (value) {
     case "acceptEdits":
@@ -203,13 +242,6 @@ export function permissionModeLabel(value: string): string {
     default:
       return "Profile default";
   }
-}
-
-export function modelOptionLabel(value: string, channel: WorkbenchChannel, controls: ChannelSettingsControls): string {
-  if (channel.model === value && !(controls?.modelOptions ?? []).includes(value)) {
-    return `${value} (current)`;
-  }
-  return value;
 }
 
 export function runtimeProfileOptionLabel(value: string, profiles: RuntimeProfileView[] = []): string {

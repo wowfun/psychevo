@@ -18,9 +18,9 @@ test.describe("pevo Web Workbench", () => {
     try {
           await page.goto(server.url);
           await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
-        await page.getByRole("button", { name: "Agent", exact: true }).click();
-        await expect(page.getByRole("dialog", { name: "Agent Definition" }).getByRole("radiogroup", { name: "Main agent" }).getByRole("radio", { name: "translate" })).toBeVisible();
-        await page.getByRole("button", { name: "Agent", exact: true }).click();
+        await page.getByRole("button", { name: "Agent Definition", exact: true }).click();
+        await expect(page.getByRole("dialog", { name: "Agent Definition and Runtime Profile" }).getByRole("radiogroup", { name: "Main agent" }).getByRole("radio", { name: "translate" })).toBeVisible();
+        await page.getByRole("button", { name: "Agent Definition", exact: true }).click();
         if (isMobile) {
           await openPanel(page, isMobile, "History");
         }

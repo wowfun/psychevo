@@ -184,6 +184,7 @@ export type SwitchProps = {
   ariaLabel?: string | undefined;
   className?: string | undefined;
   disabled?: boolean | undefined;
+  icon?: ReactNode;
   pending?: boolean | undefined;
   showLabel?: boolean | undefined;
   size?: "default" | "compact" | undefined;
@@ -195,6 +196,7 @@ export function Switch({
   checked,
   className,
   disabled = false,
+  icon,
   label,
   onCheckedChange,
   pending = false,
@@ -224,7 +226,12 @@ export function Switch({
       <span aria-hidden="true" className="pevo-switchTrack">
         <span className="pevo-switchThumb" />
       </span>
-      {showLabel && <span className="pevo-switchLabel">{label}</span>}
+      {showLabel && (
+        <span className="pevo-switchLabel">
+          {icon && <span aria-hidden="true" className="pevo-switchLabelIcon">{icon}</span>}
+          <span>{label}</span>
+        </span>
+      )}
     </button>
   );
 }

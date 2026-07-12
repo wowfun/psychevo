@@ -1,24 +1,17 @@
 import type {
   BackendConfigTarget,
-  RuntimeAccountRateLimitsView,
   RuntimeBindingView,
-  RuntimeContextReadResult,
-  RuntimeControlDescriptorView,
-  RuntimeCreditsSnapshotView,
-  RuntimeGoalStatusView,
-  RuntimeGoalView,
-  RuntimeHistoryFidelityView,
   RuntimeProfileView,
-  RuntimeRateLimitReachedTypeView,
-  RuntimeRateLimitSnapshotView,
-  RuntimeRateLimitWindowView,
   RuntimeReadinessStageView,
   RuntimeReadinessStatusView,
-  RuntimeSessionOwnershipView,
-  RuntimeSessionView,
-  RuntimeSpendControlLimitSnapshotView
+  RuntimeBindingOwnershipView,
+  RunnableTargetView,
+  ThreadActionDescriptorView,
+  ThreadActionKind,
+  ThreadContextReadResult,
+  ThreadControlDescriptorView,
+  ThreadHistoryOwnerView
 } from "@psychevo/protocol";
-import type { AgentContribution, RightWorkspaceTab, WorkbenchAgent } from "./types";
 
 const READINESS_STATES = new Set<RuntimeReadinessStatusView>([
   "unchecked",
@@ -29,59 +22,106 @@ const READINESS_STATES = new Set<RuntimeReadinessStatusView>([
   "error"
 ]);
 
-const SESSION_OWNERSHIP = new Set<RuntimeSessionOwnershipView>([
+const SESSION_OWNERSHIP = new Set<RuntimeBindingOwnershipView>([
   "readWrite",
   "readOnly",
   "active"
 ]);
 
-const HISTORY_FIDELITY = new Set<RuntimeHistoryFidelityView>([
-  "full",
-  "summary",
-  "partial"
+const THREAD_ACTION_KINDS = new Set<ThreadActionKind>([
+  "interrupt",
+  "steer",
+  "compact"
 ]);
 
-const GOAL_STATUSES = new Set<RuntimeGoalStatusView>([
-  "active",
-  "paused",
-  "blocked",
-  "usage_limited",
-  "budget_limited",
-  "complete"
-]);
-
-const RATE_LIMIT_REACHED_TYPES = new Set<RuntimeRateLimitReachedTypeView>([
-  "rate_limit_reached",
-  "workspace_owner_credits_depleted",
-  "workspace_member_credits_depleted",
-  "workspace_owner_usage_limit_reached",
-  "workspace_member_usage_limit_reached"
-]);
-
-export function parseRuntimeContext(value: unknown): RuntimeContextReadResult {
+export function parseThreadContext(value: unknown): ThreadContextReadResult {
   const record = objectValue(value);
   const profiles = arrayValue(record.profiles).map(parseRuntimeProfile).filter((profile) => profile.id);
-  const fallbackRuntimeRef = profiles.find((profile) => profile.runtime === "native")?.id
-    ?? profiles[0]?.id
-    ?? "native";
+  const runtimeProfileRef = stringValue(record.runtimeProfileRef)
+    || "";
+  const targetId = stringValue(record.targetId).trim();
+  if (!targetId) {
+    throw new Error("Thread Context is missing its canonical targetId.");
+  }
+  const sendability = objectValue(record.sendability);
+  const history = objectValue(record.history);
   return {
-    runtimeRef: stringValue(record.runtimeRef) || fallbackRuntimeRef,
+    targetId,
+    runtimeProfileRef,
     selectionState: stringValue(record.selectionState) || "default",
     profiles,
     binding: record.binding == null ? null : parseRuntimeBinding(record.binding),
-    controls: arrayValue(record.controls).map(parseRuntimeControl).filter((control) => control.id),
+    controls: arrayValue(record.controls).map(parseThreadControl).filter((control) => control.id),
     stability: parseRuntimeStability(record.stability),
     capabilities: parseRuntimeCapabilities(record.capabilities),
-    activeSession: record.activeSession == null ? null : parseRuntimeSession(record.activeSession),
-    children: arrayValue(record.children).map(parseRuntimeSession).filter((session) => session.threadId),
-    goal: parseRuntimeGoal(record.goal),
-    accountRateLimits: parseRuntimeAccountRateLimits(record.accountRateLimits)
+    compatibleTargets: arrayValue(record.compatibleTargets).map((target) => {
+      const item = objectValue(target);
+      return {
+        targetId: stringValue(item.targetId),
+        agentRef: nullableString(item.agentRef),
+        runtimeProfileRef: stringValue(item.runtimeProfileRef),
+        agentLabel: stringValue(item.agentLabel),
+        profileLabel: stringValue(item.profileLabel),
+        label: stringValue(item.label),
+        ready: item.ready === true,
+        unavailableReason: nullableString(item.unavailableReason)
+      };
+    }).filter((target) => target.targetId && target.runtimeProfileRef),
+    inputCapabilities: arrayValue(record.inputCapabilities).map((capability) => {
+      const item = objectValue(capability);
+      return {
+        kind: stringValue(item.kind),
+        enabled: item.enabled === true,
+        unavailableReason: nullableString(item.unavailableReason)
+      };
+    }).filter((capability) => capability.kind),
+    actions: arrayValue(record.actions).flatMap((action): ThreadActionDescriptorView[] => {
+      const item = objectValue(action);
+      const id = threadActionKind(item.id);
+      if (!id) return [];
+      return [{
+        id,
+        label: stringValue(item.label) || stringValue(item.id),
+        enabled: item.enabled === true,
+        stability: parseRuntimeStability(item.stability) ?? "unavailable",
+        channelSafe: item.channelSafe === true,
+        unavailableReason: nullableString(item.unavailableReason)
+      }];
+    }),
+    sendability: {
+      allowed: sendability.allowed === true,
+      reason: nullableString(sendability.reason),
+      recoveryAction: nullableString(sendability.recoveryAction)
+    },
+    history: {
+      owner: threadHistoryOwner(history.owner),
+      fidelity: history.fidelity === "full"
+        || history.fidelity === "summary"
+        || history.fidelity === "partial"
+        ? history.fidelity
+        : "unavailable",
+      cursor: nullableString(history.cursor),
+      hint: nullableString(history.hint)
+    },
+    pendingInteractions: arrayValue(record.pendingInteractions) as ThreadContextReadResult["pendingInteractions"],
+    contextRevision: stringValue(record.contextRevision),
+    controlRevision: stringValue(record.controlRevision)
   };
+}
+
+function threadActionKind(value: unknown): ThreadActionKind | null {
+  const action = stringValue(value) as ThreadActionKind;
+  return THREAD_ACTION_KINDS.has(action) ? action : null;
+}
+
+function threadHistoryOwner(value: unknown): ThreadHistoryOwnerView {
+  return value === "agent" || value === "process" ? value : "psychevo";
 }
 
 export function parseRuntimeProfile(value: unknown): RuntimeProfileView {
   const record = objectValue(value);
-  const runtime = stringValue(record.runtime) || "native";
+  const runtimeValue = stringValue(record.runtime);
+  const runtime = runtimeValue === "acp" || runtimeValue === "native" ? runtimeValue : "";
   return {
     id: stringValue(record.id),
     runtime,
@@ -89,8 +129,6 @@ export function parseRuntimeProfile(value: unknown): RuntimeProfileView {
     label: stringValue(record.label) || stringValue(record.id),
     generated: record.generated === true,
     configured: record.configured === true,
-    command: nullableString(record.command),
-    args: stringArray(record.args),
     backendRef: nullableString(record.backendRef),
     provenance: stringValue(record.provenance) || defaultRuntimeProvenance(runtime),
     profileRevision: unsignedDecimalString(record.profileRevision),
@@ -103,7 +141,6 @@ export function parseRuntimeProfile(value: unknown): RuntimeProfileView {
     approvalMode: nullableString(record.approvalMode),
     sandbox: nullableString(record.sandbox),
     workspaceRoots: stringArray(record.workspaceRoots),
-    envKeys: stringArray(record.envKeys),
     optionKeys: stringArray(record.optionKeys),
     sourceTargets: stringArray(record.sourceTargets).filter(isBackendConfigTarget),
     health: parseRuntimeHealth(record.health),
@@ -115,49 +152,9 @@ export function parseRuntimeProfile(value: unknown): RuntimeProfileView {
   };
 }
 
-export function registerRuntimeContextChildTabs(
-  current: RightWorkspaceTab[],
-  context: RuntimeContextReadResult
-): RightWorkspaceTab[] {
-  return context.children.reduce((tabs, child) => {
-    if (!child.threadId || child.parentThreadId !== context.binding?.threadId) {
-      return tabs;
-    }
-    const existing = tabs.find((tab) => tab.kind === "agentSession" && tab.threadId === child.threadId);
-    const next: RightWorkspaceTab = {
-      id: existing?.id ?? `runtime-child:${encodeURIComponent(child.threadId)}`,
-      kind: "agentSession",
-      title: child.title?.trim() || `${runtimeRefShortLabel(context.runtimeRef)} child`,
-      threadId: child.threadId,
-      parentThreadId: child.parentThreadId,
-      runtimeRef: context.runtimeRef,
-      runtimeStatus: child.status ?? null,
-      runtimeReadOnly: child.ownership === "readOnly",
-      historyFidelity: child.fidelity,
-      pendingPrompt: null,
-      path: null,
-      diff: null,
-      file: null,
-      preview: null,
-      message: null
-    };
-    return existing
-      ? tabs.map((tab) => tab.id === existing.id ? { ...tab, ...next } : tab)
-      : [...tabs, next];
-  }, current);
-}
-
-export function runtimeSessionHistoryFidelity(value: unknown): RuntimeHistoryFidelityView | null {
-  const session = objectValue(objectValue(value).session);
-  const fidelity = stringValue(session.fidelity) as RuntimeHistoryFidelityView;
-  return HISTORY_FIDELITY.has(fidelity) ? fidelity : null;
-}
-
 export function runtimeProfileDisplayLabel(profile: RuntimeProfileView): string {
   const label = profile.label.trim() || profile.id;
-  if (profile.runtime !== "acp") {
-    return label;
-  }
+  if (profile.runtime !== "acp") return label;
   const base = label.replace(/\s*\(ACP\)\s*$/i, "").trim()
     || profile.id.replace(/^acp:/i, "").trim();
   return `${base} (ACP)`;
@@ -172,16 +169,12 @@ export function runtimeProfileCapsuleLabel(profile: RuntimeProfileView): string 
 }
 
 export function runtimeProfileSourceLabel(profile: RuntimeProfileView): string {
-  if (profile.sourceTargets.length > 0) {
-    return profile.sourceTargets.map(capitalize).join(" + ");
-  }
+  if (profile.sourceTargets.length > 0) return profile.sourceTargets.map(capitalize).join(" + ");
   return profile.generated ? "Generated" : "Configured";
 }
 
 export function runtimeProfileUnavailableReason(profile: RuntimeProfileView): string | null {
-  if (!profile.enabled) {
-    return "This Runtime Profile is disabled.";
-  }
+  if (!profile.enabled) return "This Runtime Profile is disabled.";
   switch (profile.health.status) {
     case "missing":
       return `${runtimeProfileDisplayLabel(profile)} is missing on this device. Open Runtime Profiles to repair it.`;
@@ -195,83 +188,42 @@ export function runtimeProfileUnavailableReason(profile: RuntimeProfileView): st
   }
 }
 
-export function unsupportedRequiredAgentContributions(
-  agent: WorkbenchAgent | null,
-  profile: RuntimeProfileView | null
-): AgentContribution[] {
-  if (!agent || !profile || profile.runtime === "native") {
-    return [];
-  }
-  const optional = new Set(agent.optionalContributions);
-  const supported = profile.runtime === "codex" || profile.runtime === "opencode" || profile.runtime === "acp"
-    ? new Set<AgentContribution>(["instructions"])
-    : new Set<AgentContribution>();
-  return agent.contributions.filter((contribution) => (
-    !optional.has(contribution) && !supported.has(contribution)
-  ));
-}
-
-export function agentPairingUnavailableReason(
-  agent: WorkbenchAgent | null,
-  profile: RuntimeProfileView | null
-): string | null {
-  if (agent && profile?.runtime === "acp" && agent.backend?.ref !== profile.backendRef) {
-    return `${runtimeProfileDisplayLabel(profile)} can only use the Agent Definition backed by ${profile.backendRef ?? "its configured ACP backend"}. Choose that ACP agent or another Runtime Profile.`;
-  }
-  const unsupported = unsupportedRequiredAgentContributions(agent, profile);
-  if (!profile || unsupported.length === 0) {
-    return null;
-  }
-  const labels = unsupported.map(agentContributionLabel);
-  const contributions = labels.length === 1
-    ? labels[0]
-    : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
-  return `${runtimeProfileDisplayLabel(profile)} cannot faithfully apply the required Agent Definition ${contributions} contribution${labels.length === 1 ? "" : "s"}. Mark ${contributions} optional or choose Native.`;
-}
-
-function agentContributionLabel(contribution: AgentContribution): string {
-  switch (contribution) {
-    case "instructions": return "instructions";
-    case "tools": return "tool policy";
-    case "mcp": return "MCP servers";
-    case "skills": return "skills";
-  }
+export function runnableTargetUnavailableReason(target: RunnableTargetView | null): string | null {
+  if (!target) return "Select an Agent target before starting a turn.";
+  return target.ready
+    ? null
+    : target.unavailableReason ?? `${target.label || target.targetId} is not ready.`;
 }
 
 export function runtimeControlValueLabel(
-  control: RuntimeControlDescriptorView,
-  value: unknown = control.currentValue
+  control: ThreadControlDescriptorView,
+  value: unknown = control.effectiveValue
 ): string {
   const choice = control.choices.find((candidate) => valuesEqual(candidate.value, value));
-  if (choice) {
-    return choice.label;
-  }
-  if (value == null || value === "") {
-    return "Runtime default";
-  }
+  if (choice) return choice.label;
+  if (value == null || value === "") return "Unavailable";
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 export function runtimeControlSelections(
-  controls: RuntimeControlDescriptorView[],
+  controls: ThreadControlDescriptorView[],
   values: Record<string, unknown>
-): Record<string, string> {
+): Record<string, unknown> {
   return Object.fromEntries(controls.flatMap((control) => {
     if (
-      control.state !== "selectable"
+      control.mutability !== "selectable"
+      || !control.enabled
       || !runtimeControlDependencyMatches(control, controls, values)
       || !Object.prototype.hasOwnProperty.call(values, control.id)
-    ) {
-      return [];
-    }
-    const serialized = serializeRuntimeControlValue(values[control.id]);
-    return serialized == null ? [] : [[control.id, serialized]];
+    ) return [];
+    const value = values[control.id];
+    return value == null ? [] : [[control.id, value]];
   }));
 }
 
 export function runtimeControlDependencyMatches(
-  control: RuntimeControlDescriptorView,
-  controls: RuntimeControlDescriptorView[],
+  control: ThreadControlDescriptorView,
+  controls: ThreadControlDescriptorView[],
   values: Record<string, unknown>
 ): boolean {
   const dependency = control.dependsOn;
@@ -280,42 +232,65 @@ export function runtimeControlDependencyMatches(
     return valuesEqual(values[dependency.controlId], dependency.value);
   }
   const source = controls.find((candidate) => candidate.id === dependency.controlId);
-  if (!source) return false;
-  // An unset selectable parent means "Runtime default". Dependent descriptors
-  // are emitted only for that catalog default, so they remain applicable until
-  // the user explicitly selects a different parent choice.
-  return source.currentValue == null || valuesEqual(source.currentValue, dependency.value);
-}
-
-export function runtimeOptionsWithModeFallback(
-  selections: Record<string, string>,
-  mode: string
-): Record<string, string> {
-  return mode && !Object.prototype.hasOwnProperty.call(selections, "mode")
-    ? { ...selections, mode }
-    : selections;
-}
-
-function serializeRuntimeControlValue(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (value == null) return null;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
+  return source ? valuesEqual(source.effectiveValue, dependency.value) : false;
 }
 
 export function formatRuntimeCheckedAt(checkedAtMs: number | null): string {
-  if (checkedAtMs == null || !Number.isFinite(checkedAtMs)) {
-    return "Never checked";
-  }
+  if (checkedAtMs == null || !Number.isFinite(checkedAtMs)) return "Never checked";
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(checkedAtMs));
+}
+
+function parseThreadControl(value: unknown): ThreadControlDescriptorView {
+  const record = objectValue(value);
+  const surfaceRole = stringValue(record.surfaceRole);
+  const effectiveSource = stringValue(record.effectiveSource);
+  const dependency = objectValue(record.dependsOn);
+  const dependencyControlId = stringValue(dependency.controlId);
+  return {
+    id: stringValue(record.id),
+    label: stringValue(record.label) || stringValue(record.id),
+    surfaceRole: surfaceRole === "mode" || surfaceRole === "model" || surfaceRole === "reasoning"
+      ? surfaceRole
+      : "advanced",
+    mutability: record.mutability === "selectable" ? "selectable" : "readOnly",
+    enabled: record.enabled === true,
+    required: record.required === true,
+    unavailableReason: nullableString(record.unavailableReason),
+    effectiveValue: record.effectiveValue ?? null,
+    effectiveSource: parseControlEffectiveSource(effectiveSource),
+    isDefault: record.isDefault === true,
+    choices: arrayValue(record.choices).map((choice) => {
+      const item = objectValue(choice);
+      return {
+        value: item.value,
+        label: stringValue(item.label) || String(item.value ?? ""),
+        description: nullableString(item.description)
+      };
+    }),
+    dependsOn: dependencyControlId
+      ? { controlId: dependencyControlId, value: dependency.value }
+      : null,
+    applyScope: record.applyScope === "session" ? "session" : "turnDraft",
+    stability: parseRuntimeStability(record.stability) ?? "unavailable",
+    channelSafe: record.channelSafe === true,
+    capabilityRevision: stringValue(record.capabilityRevision)
+  };
+}
+
+function parseControlEffectiveSource(value: string): ThreadControlDescriptorView["effectiveSource"] {
+  switch (value) {
+    case "profileDefault":
+    case "sourceDraft":
+    case "threadPreference":
+    case "turnOverride":
+    case "runtimeObserved":
+      return value;
+    default:
+      return "runtimeDefault";
+  }
 }
 
 function parseRuntimeHealth(value: unknown): RuntimeProfileView["health"] {
@@ -339,36 +314,8 @@ function parseReadinessStage(value: unknown): RuntimeReadinessStageView {
   };
 }
 
-function parseRuntimeControl(value: unknown): RuntimeControlDescriptorView {
-  const record = objectValue(value);
-  const state = stringValue(record.state);
-  const dependency = objectValue(record.dependsOn);
-  const dependencyControlId = stringValue(dependency.controlId);
-  return {
-    id: stringValue(record.id),
-    label: stringValue(record.label) || stringValue(record.id),
-    state: state === "readOnlyCurrent" || state === "selectable" ? state : "runtimeDefault",
-    currentValue: record.currentValue ?? null,
-    choices: arrayValue(record.choices).map((choice) => {
-      const item = objectValue(choice);
-      return {
-        value: item.value,
-        label: stringValue(item.label) || String(item.value ?? ""),
-        description: nullableString(item.description)
-      };
-    }),
-    dependsOn: dependencyControlId
-      ? { controlId: dependencyControlId, value: dependency.value }
-      : null,
-    channelSafe: record.channelSafe === true,
-    capabilityRevision: unsignedDecimalString(record.capabilityRevision)
-  };
-}
-
 function parseRuntimeStability(value: unknown): RuntimeProfileView["stability"] {
-  return value === "stable" || value === "experimental" || value === "unavailable"
-    ? value
-    : null;
+  return value === "stable" || value === "experimental" || value === "unavailable" ? value : null;
 }
 
 function parseRuntimeCapabilities(value: unknown): RuntimeProfileView["capabilities"] {
@@ -377,16 +324,19 @@ function parseRuntimeCapabilities(value: unknown): RuntimeProfileView["capabilit
     return {
       id: stringValue(record.id),
       enabled: record.enabled === true,
-      stability: parseRuntimeStability(record.stability) ?? "unavailable"
+      stability: parseRuntimeStability(record.stability) ?? "unavailable",
+      unavailableReason: nullableString(record.unavailableReason)
     };
   }).filter((capability) => capability.id);
 }
 
 function parseRuntimeBinding(value: unknown): RuntimeBindingView {
   const record = objectValue(value);
-  const ownership = stringValue(record.ownership) as RuntimeSessionOwnershipView;
+  const ownership = stringValue(record.ownership) as RuntimeBindingOwnershipView;
   return {
     threadId: stringValue(record.threadId),
+    agentRef: nullableString(record.agentRef),
+    agentFingerprint: stringValue(record.agentFingerprint),
     runtimeRef: stringValue(record.runtimeRef),
     backendKind: stringValue(record.backendKind),
     nativeKind: nullableString(record.nativeKind),
@@ -398,194 +348,27 @@ function parseRuntimeBinding(value: unknown): RuntimeBindingView {
   };
 }
 
-function parseRuntimeSession(value: unknown): RuntimeSessionView {
-  const record = objectValue(value);
-  const fidelity = stringValue(record.fidelity) as RuntimeHistoryFidelityView;
-  const ownership = stringValue(record.ownership) as RuntimeSessionOwnershipView;
-  return {
-    sessionHandle: stringValue(record.sessionHandle),
-    threadId: nullableString(record.threadId),
-    title: nullableString(record.title),
-    archived: record.archived === true,
-    updatedAtMs: nullableNumber(record.updatedAtMs),
-    parentThreadId: nullableString(record.parentThreadId),
-    status: runtimeChildStatus(record.status),
-    dedupKey: stringValue(record.dedupKey) || stringValue(record.sessionHandle),
-    fidelity: HISTORY_FIDELITY.has(fidelity) ? fidelity : "partial",
-    ownership: SESSION_OWNERSHIP.has(ownership) ? ownership : "readOnly",
-    actions: stringArray(record.actions)
-  };
-}
-
-function parseRuntimeGoal(value: unknown): RuntimeGoalView | null {
-  if (!isUnknownRecord(value)) return null;
-  const status = stringValue(value.status) as RuntimeGoalStatusView;
-  const tokenBudget = nullableNonNegativeSafeInteger(value.tokenBudget);
-  const tokensUsed = requiredNonNegativeSafeInteger(value.tokensUsed);
-  const timeUsedSeconds = requiredNonNegativeSafeInteger(value.timeUsedSeconds);
-  const createdAt = requiredNonNegativeSafeInteger(value.createdAt);
-  const updatedAt = requiredNonNegativeSafeInteger(value.updatedAt);
-  const objective = stringValue(value.objective);
-  if (
-    !objective
-    || !GOAL_STATUSES.has(status)
-    || tokenBudget === undefined
-    || tokensUsed == null
-    || timeUsedSeconds == null
-    || createdAt == null
-    || updatedAt == null
-  ) {
-    return null;
-  }
-  return {
-    objective,
-    status,
-    tokenBudget,
-    tokensUsed,
-    timeUsedSeconds,
-    createdAt,
-    updatedAt
-  };
-}
-
-function parseRuntimeAccountRateLimits(value: unknown): RuntimeAccountRateLimitsView | null {
-  if (!isUnknownRecord(value) || !isUnknownRecord(value.rateLimits)) return null;
-  const rateLimits = parseRuntimeRateLimitSnapshot(value.rateLimits);
-  if (!rateLimits || !isUnknownRecord(value.rateLimitsByLimitId)) return null;
-  const rateLimitRows: Array<[string, RuntimeRateLimitSnapshotView]> = [];
-  for (const [id, snapshotValue] of Object.entries(value.rateLimitsByLimitId)) {
-    const snapshot = parseRuntimeRateLimitSnapshot(snapshotValue);
-    if (!id || !snapshot) return null;
-    rateLimitRows.push([id, snapshot]);
-  }
-  const rateLimitsByLimitId: RuntimeAccountRateLimitsView["rateLimitsByLimitId"] =
-    Object.fromEntries(rateLimitRows);
-  const resetCreditsAvailable = nullableNonNegativeSafeInteger(value.resetCreditsAvailable);
-  if (resetCreditsAvailable === undefined) return null;
-  return { rateLimits, rateLimitsByLimitId, resetCreditsAvailable };
-}
-
-function parseRuntimeRateLimitSnapshot(value: unknown): RuntimeRateLimitSnapshotView | null {
-  if (!isUnknownRecord(value)) return null;
-  const limitId = parsedNullableString(value.limitId);
-  const limitName = parsedNullableString(value.limitName);
-  const primary = parsedNullableObject(value.primary, parseRuntimeRateLimitWindow);
-  const secondary = parsedNullableObject(value.secondary, parseRuntimeRateLimitWindow);
-  const credits = parsedNullableObject(value.credits, parseRuntimeCreditsSnapshot);
-  const individualLimit = parsedNullableObject(
-    value.individualLimit,
-    parseRuntimeSpendControlLimitSnapshot
-  );
-  const planType = parsedNullableString(value.planType);
-  const reachedType = value.rateLimitReachedType;
-  const rateLimitReachedType = reachedType == null
-    ? null
-    : stringValue(reachedType) as RuntimeRateLimitReachedTypeView;
-  if (
-    limitId === undefined
-    || limitName === undefined
-    || primary === undefined
-    || secondary === undefined
-    || credits === undefined
-    || individualLimit === undefined
-    || planType === undefined
-    || (rateLimitReachedType != null && !RATE_LIMIT_REACHED_TYPES.has(rateLimitReachedType))
-  ) {
-    return null;
-  }
-  return {
-    limitId,
-    limitName,
-    primary,
-    secondary,
-    credits,
-    individualLimit,
-    planType,
-    rateLimitReachedType
-  };
-}
-
-function parseRuntimeRateLimitWindow(value: unknown): RuntimeRateLimitWindowView | null {
-  if (!isUnknownRecord(value)) return null;
-  const usedPercent = requiredSafeInteger(value.usedPercent);
-  const windowDurationMins = nullableNonNegativeSafeInteger(value.windowDurationMins);
-  const resetsAt = nullableNonNegativeSafeInteger(value.resetsAt);
-  if (usedPercent == null || windowDurationMins === undefined || resetsAt === undefined) return null;
-  return { usedPercent, windowDurationMins, resetsAt };
-}
-
-function parseRuntimeCreditsSnapshot(value: unknown): RuntimeCreditsSnapshotView | null {
-  if (
-    !isUnknownRecord(value)
-    || typeof value.hasCredits !== "boolean"
-    || typeof value.unlimited !== "boolean"
-  ) {
-    return null;
-  }
-  const balance = parsedNullableString(value.balance);
-  if (balance === undefined) return null;
-  return { hasCredits: value.hasCredits, unlimited: value.unlimited, balance };
-}
-
-function parseRuntimeSpendControlLimitSnapshot(
-  value: unknown
-): RuntimeSpendControlLimitSnapshotView | null {
-  if (!isUnknownRecord(value)) return null;
-  const limit = stringValue(value.limit);
-  const used = stringValue(value.used);
-  const remainingPercent = requiredSafeInteger(value.remainingPercent);
-  const resetsAt = requiredNonNegativeSafeInteger(value.resetsAt);
-  if (!limit || !used || remainingPercent == null || resetsAt == null) return null;
-  return { limit, used, remainingPercent, resetsAt };
-}
-
-function parsedNullableObject<T>(
-  value: unknown,
-  parse: (candidate: unknown) => T | null
-): T | null | undefined {
-  if (value == null) return null;
-  return parse(value) ?? undefined;
-}
-
-function parsedNullableString(value: unknown): string | null | undefined {
-  if (value == null) return null;
-  return typeof value === "string" ? value : undefined;
-}
-
-function nullableNonNegativeSafeInteger(value: unknown): number | null | undefined {
-  if (value == null) return null;
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-}
-
-function requiredSafeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
-}
-
-function requiredNonNegativeSafeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
-}
-
 function defaultRuntimeProvenance(runtime: string): string {
-  if (runtime === "acp") return "ACP";
-  if (runtime === "native") return "Native";
-  return "Direct";
+  return runtime === "native" ? "Built in" : "ACP backend";
 }
 
-function runtimeRefShortLabel(runtimeRef: string): string {
-  if (runtimeRef === "codex") return "Codex";
-  if (runtimeRef === "opencode") return "OpenCode";
-  if (runtimeRef === "native") return "Native";
-  return runtimeRef;
+function isBackendConfigTarget(value: string): value is BackendConfigTarget {
+  return value === "project" || value === "profile";
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-}
-
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function arrayValue(value: unknown): unknown[] {
@@ -597,16 +380,7 @@ function stringValue(value: unknown): string {
 }
 
 function nullableString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function runtimeChildStatus(value: unknown): string | null {
-  if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) return null;
-  return value;
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function nullableNumber(value: unknown): number | null {
@@ -618,27 +392,15 @@ function nonNegativeNumber(value: unknown): number {
 }
 
 function unsignedDecimalString(value: unknown): string {
-  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(value)) return "0";
-  try {
-    return BigInt(value) <= 18_446_744_073_709_551_615n ? value : "0";
-  } catch {
-    return "0";
-  }
+  if (typeof value === "string" && /^\d+$/.test(value)) return value;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return "0";
 }
 
-function isBackendConfigTarget(value: string): value is BackendConfigTarget {
-  return value === "project" || value === "profile";
+function stringArray(value: unknown): string[] {
+  return arrayValue(value).map(stringValue).filter(Boolean);
 }
 
 function capitalize(value: string): string {
-  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
-}
-
-function valuesEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  try {
-    return JSON.stringify(left) === JSON.stringify(right);
-  } catch {
-    return false;
-  }
+  return value ? `${value[0]?.toUpperCase()}${value.slice(1)}` : value;
 }

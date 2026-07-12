@@ -27,10 +27,9 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
 
       const agentsPanel = await openCapabilityBackendPanel(page);
       const existingOpenCode = agentsPanel.locator(".agentBackendRow").filter({ hasText: /opencode \(ACP\)/i });
-      if ((await existingOpenCode.count()) === 0) {
-        await expect(agentsPanel.getByText("No ACP backends configured.")).toBeVisible();
+      if (!(await waitForOpenCodeBackend(existingOpenCode))) {
         await expectElementInsideViewport(page, agentsPanel);
-        await capture(page, testInfo, "01-agents-empty");
+        await capture(page, testInfo, "01-agents-without-opencode");
 
         await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
         const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
@@ -49,6 +48,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
 
         await form.getByRole("button", { name: "Save" }).click();
         await expect(form).toBeHidden();
+        await expect(existingOpenCode.first()).toBeVisible();
       } else {
         await expect(existingOpenCode.first()).toBeVisible();
         await expectElementInsideViewport(page, agentsPanel);
@@ -69,19 +69,20 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
 
       await page.getByRole("button", { name: "New Session", exact: true }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
-      await page.getByRole("button", { name: "Agent", exact: true }).click();
-      const agentPopover = page.getByRole("dialog", { name: "Agent Definition" });
-      const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
-      await expect(agentGroup.getByRole("radio", { name: /^opencode$/i })).toBeHidden();
-      await page.getByRole("button", { name: "Agent", exact: true }).click();
-      await page.getByRole("button", { name: "Runtime Profile", exact: true }).click();
-      const runtimePopover = page.getByRole("dialog", { name: "Runtime Profile selection" });
-      const runtimeGroup = runtimePopover.getByRole("radiogroup", { name: "Runtime" });
-      const opencodeRuntime = runtimeGroup.getByRole("radio", { name: /^opencode \(ACP\)$/i });
-      await expect(opencodeRuntime).toBeVisible();
-      await opencodeRuntime.click();
-      await expect(page.getByRole("button", { name: "Runtime Profile" })).toContainText("opencode (ACP)");
-      await expect(page.getByLabel("Runtime control state")).toHaveText("Runtime default");
+      const selector = page.getByRole("button", { name: "Agent target", exact: true });
+      await selector.click();
+      const targetPopover = page.getByRole("dialog", { name: "Agent target" });
+      const targetGroup = targetPopover.getByRole("radiogroup", { name: "Agent target" });
+      const opencodeTarget = targetGroup.getByRole("radio", { name: "opencode · OpenCode (ACP)" });
+      await expect(opencodeTarget).toBeVisible();
+      await opencodeTarget.click();
+      await expect(selector).toContainText(/opencode \(ACP\)/i);
+      await expect(page.getByLabel("Runtime control state")).toHaveCount(0);
+      const mode = page.getByRole("combobox", { name: "Session Mode" });
+      await expect(mode).toBeVisible({ timeout: 30_000 });
+      await expect(mode.locator("option")).toHaveText(["build", "plan"]);
+      await expect(mode).toHaveValue("0");
+      await expect(page.getByRole("button", { name: "Model" })).toBeVisible();
       await capture(page, testInfo, "05-opencode-selected");
 
       await page.getByPlaceholder("Ask Psychevo...").fill(
@@ -91,17 +92,70 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
 
       const assistantMessage = page.locator(".pevo-message.is-assistant").last();
       await expect(assistantMessage).toBeVisible({ timeout: 240_000 });
+      const semanticResponse = /ACP[\s\S]*(?:streaming|流式)|(?:streaming|流式)[\s\S]*ACP/i;
       await expectTextGrowthOrCompletion(
         assistantMessage,
-        /OPENCODE_ACP_GUI_LIVE_OK/,
+        semanticResponse,
         20_000
       );
-      await expect(assistantMessage).toContainText(/OPENCODE_ACP_GUI_LIVE_OK/, { timeout: 240_000 });
+      await expect(assistantMessage).toContainText(semanticResponse, { timeout: 240_000 });
 
       await openPanel(page, isMobile, "Status");
       const statusRegion = page.getByRole("region", { name: "Workspace status" });
-      await expect(statusRegion).toContainText("reported by ACP peer", { timeout: 30_000 });
+      await expect(statusRegion.getByRole("region", { name: "Session observability" })).toContainText("exact", {
+        timeout: 30_000
+      });
+      await expect(statusRegion).not.toContainText("reported by ACP peer");
       await expect(statusRegion).toContainText("Session tokens");
+      const listedThreads = await gatewayRequest(page, "thread/list", {
+        cwd: server.cwd,
+        archived: false,
+        limit: 20
+      }) as { sessions?: Array<{ id?: string; lifecycle?: { actions?: Array<{ id?: string; enabled?: boolean }> } }> };
+      const thread = listedThreads.sessions?.find((session) => session.id);
+      expect(thread?.id).toBeTruthy();
+      const contextResult = await gatewayRequest(page, "thread/context/read", {
+        scope: { cwd: server.cwd, source: { kind: "web", rawId: "opencode-lifecycle-live" } },
+        threadId: thread!.id
+      }) as { actions?: Array<{ id?: string; enabled?: boolean }> };
+      expect(contextResult.actions).toContainEqual(expect.objectContaining({ id: "fork", enabled: true }));
+      const forked = await gatewayRequest(page, "thread/action/run", {
+        scope: { cwd: server.cwd, source: { kind: "web", rawId: "opencode-lifecycle-live" } },
+        threadId: thread!.id,
+        action: { kind: "fork" }
+      }) as { kind?: string; snapshot?: { thread?: { id?: string } } };
+      const forkedThreadId = forked.snapshot?.thread?.id;
+      expect(forked.kind).toBe("fork");
+      expect(forkedThreadId).toBeTruthy();
+      await gatewayRequest(page, "thread/archive", { threadId: forkedThreadId });
+      await gatewayRequest(page, "thread/restore", { threadId: forkedThreadId });
+      const importable = await gatewayRequest(page, "thread/import/list", {
+        scope: { cwd: server.cwd, source: { kind: "web", rawId: "opencode-lifecycle-live" } },
+        cursors: {}
+      }) as {
+        profiles?: Array<{
+          alreadyImportedCount?: number;
+          runtimeProfileRef?: string;
+          sessions?: unknown[];
+          status?: string;
+        }>;
+      };
+      const openCodeImportProfile = importable.profiles
+        ?.find((profile) => profile.runtimeProfileRef === "opencode");
+      expect(openCodeImportProfile).toEqual(expect.objectContaining({
+        alreadyImportedCount: expect.any(Number),
+        sessions: expect.any(Array),
+        status: "ready"
+      }));
+      const refreshedThreads = await gatewayRequest(page, "thread/list", {
+        cwd: server.cwd,
+        archived: false,
+        limit: 20
+      }) as { sessions?: Array<{ id?: string; lifecycle?: { actions?: Array<{ id?: string; enabled?: boolean }> } }> };
+      const opencodeLifecycle = refreshedThreads.sessions
+        ?.find((session) => session.id === thread!.id)
+        ?.lifecycle;
+      expect(opencodeLifecycle?.actions).toContainEqual(expect.objectContaining({ id: "delete", enabled: false }));
       await assertNoWorkbenchRenderError(page);
       await assertTranscriptRowsFit(page);
       await capture(page, testInfo, "06-live-response");
@@ -138,13 +192,13 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await page.getByRole("button", { name: "New Session", exact: true }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
 
-      await page.getByRole("button", { name: "Agent", exact: true }).click();
-      const agentPopover = page.getByRole("dialog", { name: "Agent Definition" });
-      await expect(agentPopover.getByRole("radio", { name: "Default Agent" })).toHaveAttribute("aria-checked", "true");
-      await page.keyboard.press("Escape");
-      await page.getByRole("button", { name: "Runtime Profile", exact: true }).click();
-      const runtimePopover = page.getByRole("dialog", { name: "Runtime Profile selection" });
-      await expect(runtimePopover.getByRole("radio", { name: "Native" })).toHaveAttribute("aria-checked", "true");
+      await page.getByRole("button", { name: "Agent target", exact: true }).click();
+      const targetPopover = page.getByRole("dialog", { name: "Agent target" });
+      await expect(
+        targetPopover
+          .getByRole("radiogroup", { name: "Agent target" })
+          .getByRole("radio", { name: "Default Agent · Psychevo (Native)" })
+      ).toHaveAttribute("aria-checked", "true");
       await page.keyboard.press("Escape");
 
       const textarea = page.getByPlaceholder("Ask Psychevo...");
@@ -159,10 +213,10 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await page.getByRole("button", { name: "Send message" }).click();
 
       const mainTranscript = page.getByRole("region", { name: "Transcript" }).first();
-      const parentCompletion = mainTranscript
-        .locator(".pevo-message.is-assistant")
-        .filter({ hasText: /OPENCODE_ACP_DELEGATE_LIVE_OK/ });
+      const parentComposer = page.locator(".pevo-composer").first();
+      const parentCompletion = mainTranscript.locator(".pevo-message.is-assistant");
       const openAgentSession = mainTranscript.getByRole("button", { name: /Open .*agent session/i }).first();
+      await expect(parentComposer).toHaveClass(/is-running/, { timeout: 30_000 });
       await expect(openAgentSession).toBeVisible({ timeout: 240_000 });
       await expect(parentCompletion).toHaveCount(0);
       await openAgentSession.click();
@@ -177,7 +231,9 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await capture(page, testInfo, "08-delegate-streaming");
 
       await expect(childAssistant).toContainText(/OPENCODE_ACP_DELEGATE_LIVE_OK/, { timeout: 420_000 });
-      await expect(parentCompletion).toContainText(/OPENCODE_ACP_DELEGATE_LIVE_OK/, { timeout: 420_000 });
+      await expect(parentComposer).not.toHaveClass(/is-running/, { timeout: 420_000 });
+      await expect(parentCompletion.last()).toHaveText(/\S/, { timeout: 420_000 });
+      await expectDelegatePersistence(server.dbPath);
       await expectProviderSession(server.dbPath, "acp:opencode");
       await assertNoWorkbenchRenderError(page);
       await assertTranscriptRowsFit(page);
@@ -230,7 +286,7 @@ async function openCapabilityBackendPanel(page: Page): Promise<Locator> {
 
 async function ensureOpenCodeBackend(agentsPanel: Locator) {
   const existing = agentsPanel.locator(".agentBackendRow").filter({ hasText: /opencode \(ACP\)/i });
-  if (await existing.count() === 0) {
+  if (!(await waitForOpenCodeBackend(existing))) {
     await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
     const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
     await expect(form).toBeVisible();
@@ -259,12 +315,76 @@ async function ensureOpenCodeBackend(agentsPanel: Locator) {
   }
 }
 
+async function waitForOpenCodeBackend(existing: Locator) {
+  return existing.first().waitFor({ state: "visible", timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
 async function expectProviderSession(dbPath: string, provider: string) {
   const output = execFileSync("sqlite3", [
     dbPath,
     "select provider from sessions order by started_at_ms;"
   ], { encoding: "utf8" });
   expect(output.split(/\r?\n/).filter(Boolean)).toContain(provider);
+}
+
+async function expectDelegatePersistence(dbPath: string) {
+  await expect.poll(() => {
+    const output = execFileSync("sqlite3", [
+      "-json",
+      dbPath,
+      `SELECT
+      e.status AS edge_status,
+      EXISTS(
+        SELECT 1 FROM messages child_message
+        WHERE child_message.session_id = child.id
+          AND child_message.role = 'assistant'
+          AND instr(child_message.content_text, 'OPENCODE_ACP_DELEGATE_LIVE_OK') > 0
+      ) AS child_marker,
+      EXISTS(
+        SELECT 1 FROM messages parent_result
+        WHERE parent_result.session_id = parent.id
+          AND parent_result.role = 'tool_result'
+          AND instr(parent_result.content_text, 'OPENCODE_ACP_DELEGATE_LIVE_OK') > 0
+      ) AS tool_result_marker,
+      EXISTS(
+        SELECT 1 FROM messages parent_message
+        WHERE parent_message.session_id = parent.id
+          AND parent_message.role = 'assistant'
+          AND length(trim(coalesce(parent_message.content_text, ''))) > 0
+      ) AS parent_final,
+      (
+        SELECT terminal.status FROM gateway_turn_terminals terminal
+        WHERE terminal.thread_id = parent.id
+        ORDER BY terminal.completed_at_ms DESC LIMIT 1
+      ) AS parent_terminal_status,
+      (
+        SELECT terminal.outcome FROM gateway_turn_terminals terminal
+        WHERE terminal.thread_id = parent.id
+        ORDER BY terminal.completed_at_ms DESC LIMIT 1
+      ) AS parent_terminal_outcome
+    FROM sessions parent
+    JOIN agent_edges e ON e.parent_session_id = parent.id
+    JOIN sessions child ON child.id = e.child_session_id
+    WHERE EXISTS(
+      SELECT 1 FROM messages request
+      WHERE request.session_id = parent.id
+        AND request.role = 'user'
+        AND instr(request.content_text, 'OPENCODE_ACP_DELEGATE_LIVE_OK') > 0
+    )
+    ORDER BY parent.started_at_ms DESC
+    LIMIT 1;`
+    ], { encoding: "utf8" });
+    return JSON.parse(output) as Array<Record<string, string | number | null>>;
+  }, { timeout: 30_000 }).toEqual([{
+    edge_status: "closed",
+    child_marker: 1,
+    tool_result_marker: 1,
+    parent_final: 1,
+    parent_terminal_status: "completed",
+    parent_terminal_outcome: "normal"
+  }]);
 }
 
 async function expectTextGrowthOrCompletion(
@@ -408,4 +528,28 @@ async function assertNoWorkbenchRenderError(page: Page) {
   if (alertText?.includes("Workbench render failed")) {
     throw new Error(alertText);
   }
+}
+
+async function gatewayRequest(page: Page, method: string, params: unknown): Promise<unknown> {
+  return page.evaluate(async ({ method, params }) => await new Promise((resolve, reject) => {
+    const url = new URL("/ws", window.location.origin);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(url);
+    const id = `opencode-session-lifecycle-${method}`;
+    const timeout = window.setTimeout(() => {
+      socket.close();
+      reject(new Error(`${method} timed out`));
+    }, 30_000);
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    });
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.id !== id) return;
+      window.clearTimeout(timeout);
+      socket.close();
+      if (message.error) reject(new Error(message.error.message));
+      else resolve(message.result);
+    });
+  }), { method, params });
 }

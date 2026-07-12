@@ -1,12 +1,9 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
-  acceptThreadTurn,
-  bindThreadSnapshot,
   parseThreadSnapshot,
-  prepareThreadTurn,
   scopeForCwd,
-  threadTurnStartParams,
-  type GatewayClient
+  type GatewayClient,
+  type ThreadController
 } from "@psychevo/client";
 import {
   SettingsReadResultSchema,
@@ -24,8 +21,7 @@ import {
   type GatewayMention,
   type GatewayRequestScope,
   type ObservabilityReadResult,
-  type RuntimeOptionsResult,
-  type RuntimeControlDescriptorView,
+  type ThreadControlDescriptorView,
   type SettingsReadResult,
   type ThreadSnapshot,
   type WorkspaceChangesResult,
@@ -45,6 +41,7 @@ import {
   multilineList,
   normalizeSnapshot
 } from "./session-utils";
+import { readProjectedThreadHistory } from "./thread-application";
 import type {
   BackendDraft,
   CommandFeedback,
@@ -68,7 +65,7 @@ import {
   fileBasename,
   isUnsupportedPreviewFile
 } from "./right-workspace";
-import { runtimeControlSelections, runtimeOptionsWithModeFallback } from "./runtime-context";
+import { runtimeControlSelections } from "./runtime-context";
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
@@ -97,26 +94,16 @@ type AppActionsParams = {
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
   fallbackCwd: string;
-  modelReady: boolean;
-  modelTurnBlockReason: string;
+  turnBlockReason: string;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
-  permissionMode: string;
-  agentPairingError: string | null;
-  runtimeAcceptsAgentPersona: boolean;
-  runtimeControls: RuntimeControlDescriptorView[];
-  runtimeControlValues: Record<string, unknown>;
-  runtimeOptionsError: string | null;
-  runtimeSessionId: string | null;
-  selectedAgentName: string;
-  selectedModel: string | null;
-  selectedPeerRuntimeMode: string;
-  selectedRuntimeRef: string;
-  selectedVariant: string;
+  runtimeControls: ThreadControlDescriptorView[];
+  runtimeControlDrafts: Record<string, unknown>;
+  selectedTargetId: string;
   selectedThreadIdRef: MutableRefObject<string | null>;
   settings: SettingsReadResult | undefined;
   snapshot: ThreadSnapshot;
+  threadController: ThreadController;
   viewEpochRef: MutableRefObject<number>;
-  workMode: string;
   adoptSnapshotScope(nextClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
@@ -124,6 +111,7 @@ type AppActionsParams = {
   openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch?: Partial<RightWorkspaceTab>, forceNew?: boolean): void;
   refreshAgentSurface(nextClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
   refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<unknown>;
+  refreshRuntimeContext(): void;
   refreshSnapshot: RefreshSnapshot;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
   setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
@@ -139,17 +127,12 @@ type AppActionsParams = {
   setRightTabs: Dispatch<SetStateAction<RightWorkspaceTab[]>>;
   setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
   setRuntimeOptionsLoading: Dispatch<SetStateAction<boolean>>;
-  setRuntimeOptionsResult: Dispatch<SetStateAction<RuntimeOptionsResult | null>>;
-  setRuntimeSessionId: Dispatch<SetStateAction<string | null>>;
-  setSelectedAgentName: Dispatch<SetStateAction<string>>;
-  setSelectedRuntimeMode: Dispatch<SetStateAction<string>>;
-  setSelectedRuntimeRef: Dispatch<SetStateAction<string>>;
+  setSelectedTargetId: Dispatch<SetStateAction<string>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
   setSettings: Dispatch<SetStateAction<SettingsReadResult | undefined>>;
   setTraceState: Dispatch<SetStateAction<TraceState>>;
   setWorkspaceChanges: Dispatch<SetStateAction<WorkspaceChangesResult | null>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
-  setWorkMode: Dispatch<SetStateAction<string>>;
   updateMainView(value: MainView): void;
 };
 
@@ -169,12 +152,9 @@ export function createAppActions(params: AppActionsParams) {
   }
 
   function resetRuntimeSelection() {
-    params.setSelectedRuntimeRef("native");
-    params.setRuntimeSessionId(null);
-    params.setRuntimeOptionsResult(null);
+    params.setSelectedTargetId("");
     params.setRuntimeOptionsLoading(false);
     params.setRuntimeOptionsError(null);
-    params.setSelectedRuntimeMode("");
   }
 
   function clearSessionObservability() {
@@ -196,14 +176,15 @@ export function createAppActions(params: AppActionsParams) {
       ? scopeForCwd(cwd)
       : scope();
     const nextSnapshot = parseThreadSnapshot(await params.client.request("thread/start", { scope: nextScope }));
+    const normalized = normalizeSnapshot(nextSnapshot);
     if (params.viewEpochRef.current === epoch) {
-      const normalized = normalizeSnapshot(nextSnapshot);
       params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
       params.setSnapshot(normalized);
       params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
       await params.adoptSnapshotScope(params.client, nextSnapshot);
     }
     await params.refreshHistory(params.client);
+    return normalized;
   }
 
   async function createWorkspace(name: string) {
@@ -228,100 +209,54 @@ export function createAppActions(params: AppActionsParams) {
   }
 
   async function submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null) {
-    const submittedMentions = params.runtimeAcceptsAgentPersona
-      ? mentions
-      : mentions.filter((mention) => mention.target.kind !== "agent");
+    if (!params.client) return;
     const nextInput: GatewayInputPart[] = [
       ...(text.trim() ? [{ type: "text" as const, text }] : []),
       ...params.attachments.map((attachment) => attachment.input)
     ];
-    if (!params.modelReady) {
-      params.setCommandFeedback({
-        accepted: false,
-        command: "model",
-        message: params.modelTurnBlockReason,
-        feedbackAnchor: "composer"
-      });
-      return;
-    }
-    if (params.agentPairingError) {
-      params.setCommandFeedback({
-        accepted: false,
-        command: "agent",
-        message: params.agentPairingError,
-        feedbackAnchor: "composer"
-      });
-      return;
-    }
-    if (params.selectedRuntimeRef !== "native" && params.runtimeOptionsError) {
-      params.setCommandFeedback({
-        accepted: false,
-        command: params.selectedRuntimeRef,
-        message: `Unable to load ${params.selectedRuntimeRef} runtime options: ${params.runtimeOptionsError}`,
-        feedbackAnchor: "composer"
-      });
-      return;
-    }
     const optimisticText = displayText?.trim()
       || text.trim()
       || params.attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
-    const runtimeOptions = params.selectedRuntimeRef === "native"
-      ? {}
-      : runtimeOptionsWithModeFallback(
-        runtimeControlSelections(params.runtimeControls, params.runtimeControlValues),
-        params.selectedPeerRuntimeMode
-      );
+    const turnOverrides = runtimeControlSelections(params.runtimeControls, params.runtimeControlDrafts);
+    const turnControls = params.threadController.turnControls(
+      params.selectedTargetId,
+      turnOverrides
+    );
+    const admission = params.threadController.admitTurn({ controls: turnControls, input: nextInput, mentions });
+    if (!admission.allowed) {
+      params.setCommandFeedback({
+        accepted: false,
+        command: "turn/start",
+        message: admission.reason ?? params.turnBlockReason,
+        feedbackAnchor: "composer"
+      });
+      return;
+    }
     params.pendingDetachedShellRef.current = null;
     params.clearCommandTransientUi();
-    const requestedThreadId = params.snapshot.thread?.id ?? null;
-    const prepared = prepareThreadTurn(params.snapshot, optimisticText, requestedThreadId);
-    params.setSnapshot(prepared.snapshot);
-    const result = await params.client?.request("turn/start", threadTurnStartParams({
-      controls: {
-        agentName: params.selectedAgentName || null,
-        mode: params.selectedRuntimeRef === "native" ? params.workMode : null,
-        model: params.selectedRuntimeRef === "native" ? params.selectedModel : null,
-        permissionMode: params.selectedRuntimeRef === "native" ? params.permissionMode : null,
-        reasoningEffort: params.selectedRuntimeRef === "native" && params.selectedVariant !== "none"
-          ? params.selectedVariant
-          : null,
-        runtimeOptions,
-        runtimeRef: params.selectedRuntimeRef,
-        runtimeSessionId: params.runtimeSessionId
-      },
+    const turnEpoch = params.viewEpochRef.current;
+    const plan = params.threadController.beginTurn({
+      controls: turnControls,
       input: nextInput,
-      mentions: submittedMentions,
+      mentions,
+      optimisticText,
       scope: scope(),
-      threadId: prepared.requestedThreadId,
-      text: null
-    }));
-    if (result) {
-      const accepted = acceptThreadTurn(prepared.snapshot, result, prepared.requestedThreadId);
+      threadId: params.snapshot.thread?.id ?? null
+    });
+    const result = await params.client.request("turn/start", plan.params).catch((error) => {
+      if (params.viewEpochRef.current === turnEpoch) {
+        params.threadController.rejectTurnStart(plan.prepared);
+        params.refreshRuntimeContext();
+      }
+      throw error;
+    });
+    if (params.viewEpochRef.current === turnEpoch) {
+      const accepted = params.threadController.acceptTurnStart(result, plan.prepared);
       params.selectedThreadIdRef.current = accepted.threadId;
-      params.setSnapshot((current) => {
-        const currentThreadId = current.thread?.id ?? null;
-        if (currentThreadId && currentThreadId !== accepted.threadId) {
-          return current;
-        }
-        return normalizeSnapshot(bindThreadSnapshot(current, accepted.threadId));
-      });
+      params.refreshRuntimeContext();
     }
     params.setAttachments([]);
     await params.refreshHistory();
-  }
-
-  async function changeAgentSelection(value: string) {
-    params.setSelectedAgentName(value);
-    if (!params.client || !params.currentThreadId) {
-      return;
-    }
-    const nextSettings = SettingsReadResultSchema.parse(await params.client.request("settings/update", {
-      agent: value || null,
-      threadId: params.currentThreadId,
-      scope: scope()
-    }));
-    params.setSettings(nextSettings);
-    params.setSelectedAgentName(nextSettings.controls?.agent ?? value);
   }
 
   async function startShell(command: string) {
@@ -455,8 +390,8 @@ export function createAppActions(params: AppActionsParams) {
     if (!params.client) {
       return "";
     }
-    const snapshot = parseThreadSnapshot(await params.client.request("thread/read", { threadId }));
-    return transcriptSearchText(snapshot.entries);
+    const history = await readProjectedThreadHistory(params.client, scope(), threadId);
+    return transcriptSearchText(history.entries);
   }
 
   async function copyText(text: string) {
@@ -483,6 +418,11 @@ export function createAppActions(params: AppActionsParams) {
       return;
     }
     const attachments = await Promise.all(files.map((file) => attachmentFromFile(file)));
+    const admission = params.threadController.admitInput(attachments.map((attachment) => attachment.input));
+    if (!admission.allowed) {
+      params.setError(admission.reason ?? "The selected Agent target does not accept this attachment.");
+      return;
+    }
     params.setAttachments((current) => [...current, ...attachments]);
     params.setError(null);
   }
@@ -709,7 +649,6 @@ export function createAppActions(params: AppActionsParams) {
 
   return {
     acceptWorkspaceChange,
-    changeAgentSelection,
     copyText,
     createWorkspace,
     deleteArchivedSession,

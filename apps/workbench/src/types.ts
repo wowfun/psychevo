@@ -6,7 +6,7 @@ import type {
   ChannelSourceBindingView,
   GatewayEvent,
   GatewayInputPart,
-  RuntimeHistoryFidelityView,
+  ThreadHistoryFidelityView,
   SessionUsageSummaryView,
   TerminalExitedPayload,
   TerminalOutputPayload,
@@ -140,7 +140,7 @@ export type RightWorkspaceTab = {
   runtimeRef?: string | null;
   runtimeStatus?: string | null;
   runtimeReadOnly?: boolean;
-  historyFidelity?: RuntimeHistoryFidelityView | null;
+  historyFidelity?: ThreadHistoryFidelityView | null;
   pendingPrompt?: string | null;
   path?: string | null;
   diff?: WorkspaceDiffResult | null;

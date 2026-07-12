@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ArrowLeft, MessageCircle, Play, Plus, Save, Settings2, Trash2, Wrench, X } from "lucide-react";
 import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
-import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, RuntimeProfileView } from "@psychevo/protocol";
+import { scopeForCwd, type GatewayClient } from "@psychevo/client";
+import type {
+  ChannelWechatQrPollResult,
+  ChannelWechatQrStartResult,
+  RuntimeProfileView,
+  ThreadContextReadResult
+} from "@psychevo/protocol";
 import type { SessionBrowserWorkspaceState, WorkbenchChannel, WorkbenchChannelDoctor, WorkbenchChannelSource } from "../types";
-import type { ChannelSettingsControls, ChannelUpdateDraft } from "./types";
+import { parseThreadContext } from "../runtime-context";
+import type { ChannelUpdateDraft } from "./types";
 import {
   CHANNEL_CHOICES,
   CHANNEL_WORKSPACE_MANUAL_VALUE,
@@ -14,10 +21,11 @@ import {
   channelDoctorOk,
   channelDraftFromChannel,
   channelDraftSignature,
-  channelModelControlAvailable,
-  channelModelOptions,
-  channelNativePermissionControlAvailable,
-  channelPermissionOptions,
+  channelControlDescriptor,
+  channelControlIsExposed,
+  channelControlStringChoices,
+  channelControlUnavailableReason,
+  channelProspectiveTarget,
   channelRuntimeProfileOptions,
   channelRuntimeSafetyLabel,
   channelRunnerTone,
@@ -30,7 +38,6 @@ import {
   channelWorkspaceSelectValue,
   formatChannelName,
   formatRunnerTimestamp,
-  modelOptionLabel,
   permissionModeLabel,
   runtimeProfileOptionLabel,
   sectionDomId,
@@ -41,7 +48,7 @@ import {
 export function ChannelsSettingsPanel({
   channelDoctor,
   channels,
-  controls,
+  client,
   disabled,
   onDeleteChannel,
   onDoctorChannel,
@@ -57,7 +64,7 @@ export function ChannelsSettingsPanel({
 }: {
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
-  controls: ChannelSettingsControls;
+  client: GatewayClient | null;
   disabled: boolean;
   onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
@@ -85,7 +92,7 @@ export function ChannelsSettingsPanel({
     return (
       <ChannelSettingsDetail
         channel={selectedChannel}
-        controls={controls}
+        client={client}
         doctor={channelDoctor[selectedChannel.id] ?? null}
         disabled={disabled}
         onBack={() => setSelectedChannelId(null)}
@@ -203,7 +210,7 @@ export function ChannelsSettingsPanel({
 
 function ChannelSettingsDetail({
   channel,
-  controls,
+  client,
   disabled,
   doctor,
   onBack,
@@ -216,7 +223,7 @@ function ChannelSettingsDetail({
   cwd
 }: {
   channel: WorkbenchChannel;
-  controls: ChannelSettingsControls;
+  client: GatewayClient | null;
   disabled: boolean;
   doctor: WorkbenchChannelDoctor | null;
   onBack(): void;
@@ -238,6 +245,11 @@ function ChannelSettingsDetail({
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sources, setSources] = useState<WorkbenchChannelSource[] | null>(null);
+  const [targetContextState, setTargetContextState] = useState<{
+    context: ThreadContextReadResult | null;
+    error: string | null;
+    status: "loading" | "ready" | "error";
+  }>({ context: null, error: null, status: "loading" });
 
   useEffect(() => {
     setDraft(channelDraftFromChannel(channel));
@@ -250,16 +262,132 @@ function ChannelSettingsDetail({
     setSources(null);
   }, [channel.id]);
 
-  const savedSignature = channelDraftSignature(channelDraftFromChannel(channel));
+  useEffect(() => {
+    if (!client) {
+      setTargetContextState({
+        context: null,
+        error: "Gateway is unavailable, so Channel target controls cannot be inspected.",
+        status: "error"
+      });
+      return undefined;
+    }
+    let cancelled = false;
+    const selectedCwd = draft.cwd.trim() || cwd;
+    const scope = scopeForCwd(selectedCwd);
+    scope.source = {
+      kind: "web",
+      rawId: `channel-settings:${channel.id}`,
+      lifetime: "invocation",
+      rawIdentity: { kind: "channel-settings", connectionId: channel.id },
+      visibleName: `${channel.label || channel.id} settings`
+    };
+    setTargetContextState((current) => ({ context: current.context, error: null, status: "loading" }));
+    void (async () => {
+      const catalog = parseThreadContext(await client.request("thread/context/read", {
+        threadId: null,
+        target: null,
+        scope
+      }));
+      const runtimeRef = draft.runtimeRef.trim();
+      if (!runtimeRef) {
+        return catalog;
+      }
+      const target = channelProspectiveTarget(catalog, runtimeRef);
+      if (!target) {
+        throw new Error(`Runtime Profile ${runtimeRef} has no unambiguous compatible Agent target.`);
+      }
+      const context = parseThreadContext(await client.request("thread/context/read", {
+        threadId: null,
+        target: {
+          agentRef: target.agentRef,
+          runtimeProfileRef: target.runtimeProfileRef
+        },
+        scope
+      }));
+      if (context.targetId !== target.targetId || context.runtimeProfileRef !== target.runtimeProfileRef) {
+        throw new Error("Gateway returned a different Agent target than the selected Runtime Profile.");
+      }
+      return context;
+    })().then((context) => {
+      if (!cancelled) {
+        setTargetContextState({ context, error: null, status: "ready" });
+      }
+    }).catch((reason: unknown) => {
+      if (!cancelled) {
+        setTargetContextState({
+          context: null,
+          error: reason instanceof Error ? reason.message : String(reason),
+          status: "error"
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [channel.id, channel.label, client, cwd, draft.cwd, draft.runtimeRef]);
+
+  const savedDraft = channelDraftFromChannel(channel);
+  const savedSignature = channelDraftSignature(savedDraft);
   const draftSignature = channelDraftSignature(draft);
   const dirty = draftSignature !== savedSignature;
-  const permissionOptions = channelPermissionOptions(controls, channel, draft);
-  const modelOptions = channelModelOptions(controls, channel, draft);
+  const targetContext = targetContextState.context;
+  const selectedTarget = targetContext?.compatibleTargets.find((target) => target.targetId === targetContext.targetId) ?? null;
+  const targetReady = selectedTarget?.ready ?? false;
+  const modelControl = channelControlDescriptor(targetContext, (control) => control.surfaceRole === "model");
+  const modelControlExposed = channelControlIsExposed(modelControl);
+  const modelOptions = channelControlStringChoices(modelControl);
+  const modelEditable = targetContextState.status === "ready"
+    && targetReady
+    && modelControlExposed
+    && modelControl?.enabled === true
+    && modelControl.mutability === "selectable";
+  const permissionControl = channelControlDescriptor(targetContext, (control) => control.id === "permissionMode");
+  const permissionControlExposed = channelControlIsExposed(permissionControl);
+  const permissionOptions = channelControlStringChoices(permissionControl);
+  const permissionEditable = targetContextState.status === "ready"
+    && targetReady
+    && permissionControlExposed
+    && permissionControl?.enabled === true
+    && permissionControl.mutability === "selectable";
   const runtimeProfileOptions = channelRuntimeProfileOptions(channel, draft, runtimeProfiles);
-  const modelControlAvailable = channelModelControlAvailable(draft.runtimeRef, runtimeProfiles);
-  const nativePermissionControlAvailable = channelNativePermissionControlAvailable(draft.runtimeRef, runtimeProfiles);
   const workspaceOptions = channelWorkspaceOptions(sessionBrowserWorkspaces);
   const busy = disabled || saving || deleting;
+  const targetSelectionChanged = draft.runtimeRef.trim() !== savedDraft.runtimeRef.trim()
+    || draft.cwd.trim() !== savedDraft.cwd.trim();
+  const runtimeSettingsChanged = targetSelectionChanged
+    || draft.model.trim() !== savedDraft.model.trim()
+    || draft.permissionMode !== savedDraft.permissionMode;
+  const modelChoiceValid = !draft.model.trim() || modelOptions.some((option) => option.value === draft.model);
+  const permissionChoiceValid = draft.permissionMode === "default"
+    || permissionOptions.some((option) => option.value === draft.permissionMode);
+  const targetUnavailableReason = selectedTarget?.unavailableReason
+    ?? targetContext?.sendability.reason
+    ?? "The selected Agent target is unavailable.";
+  const modelUnavailableReason = targetContextState.status === "loading"
+    ? "Loading the selected Agent target controls."
+    : targetContextState.status === "error"
+      ? targetContextState.error ?? "The selected Agent target controls are unavailable."
+      : !targetReady
+        ? targetUnavailableReason
+        : channelControlUnavailableReason(modelControl, "Channel-safe model");
+  const permissionUnavailableReason = targetContextState.status === "loading"
+    ? "Loading the selected Agent target controls."
+    : targetContextState.status === "error"
+      ? targetContextState.error ?? "The selected Agent target controls are unavailable."
+      : !targetReady
+        ? targetUnavailableReason
+        : channelControlUnavailableReason(permissionControl, "Channel-safe permission mode");
+  const runtimeValidationMessage = !runtimeSettingsChanged
+    ? null
+    : targetContextState.status === "loading"
+      ? "Wait for Gateway to inspect the selected Channel target."
+      : targetContextState.status === "error"
+        ? targetContextState.error ?? "The selected Channel target cannot be inspected."
+        : !modelChoiceValid
+          ? `Model ${draft.model} is not an authoritative choice for the selected Agent target.`
+          : !permissionChoiceValid
+            ? `Permission mode ${draft.permissionMode} is not an authoritative choice for the selected Agent target.`
+            : null;
 
   function updateDraft(patch: Partial<ChannelSettingsDraft>) {
     setError(null);
@@ -284,7 +412,7 @@ function ChannelSettingsDetail({
   }
 
   async function saveDraft() {
-    if (!dirty || busy) {
+    if (!dirty || busy || runtimeValidationMessage) {
       return;
     }
     const workspaceChanged = draft.cwd.trim() !== channelDraftFromChannel(channel).cwd.trim();
@@ -352,8 +480,9 @@ function ChannelSettingsDetail({
           )}
           <button
             className="channelDetailSave"
-            disabled={busy || !dirty}
+            disabled={busy || !dirty || Boolean(runtimeValidationMessage)}
             onClick={() => void saveDraft()}
+            title={runtimeValidationMessage ?? undefined}
             type="button"
           >
             <Save size={13} />
@@ -446,16 +575,7 @@ function ChannelSettingsDetail({
               <select
                 aria-label="Channel Runtime Profile"
                 disabled={busy}
-                onChange={(event) => {
-                  const runtimeRef = event.currentTarget.value;
-                  updateDraft({
-                    runtimeRef,
-                    model: channelModelControlAvailable(runtimeRef, runtimeProfiles) ? draft.model : "",
-                    permissionMode: channelNativePermissionControlAvailable(runtimeRef, runtimeProfiles)
-                      ? draft.permissionMode
-                      : "default"
-                  });
-                }}
+                onChange={(event) => updateDraft({ runtimeRef: event.currentTarget.value })}
                 value={draft.runtimeRef}
               >
                 {runtimeProfileOptions.map((option) => (
@@ -464,49 +584,75 @@ function ChannelSettingsDetail({
               </select>
             </div>
           </ChannelFormRow>
-          {nativePermissionControlAvailable ? (
-            <ChannelFormRow label="Permission mode" hint="Controls write and command approval defaults for native execution.">
+          {permissionControlExposed ? (
+            <ChannelFormRow
+              label="Permission mode"
+              hint={permissionEditable ? "Controls the selected Agent target's Channel approval default." : permissionUnavailableReason}
+            >
               <div className="channelSegmentedControl" role="group" aria-label="Permission mode">
                 {permissionOptions.map((option) => (
                   <button
-                    className={draft.permissionMode === option ? "is-selected" : ""}
-                    disabled={busy}
-                    key={option}
-                    onClick={() => updateDraft({ permissionMode: option })}
+                    className={draft.permissionMode === option.value ? "is-selected" : ""}
+                    disabled={busy || !permissionEditable}
+                    key={option.value}
+                    onClick={() => updateDraft({ permissionMode: option.value })}
                     type="button"
                   >
-                    {permissionModeLabel(option)}
+                    {option.label === option.value ? permissionModeLabel(option.value) : option.label}
                   </button>
                 ))}
               </div>
             </ChannelFormRow>
           ) : (
-            <ChannelFormRow label="Safety policy" hint="Direct execution uses the immutable Runtime Profile policy.">
-              <span className="channelFieldHint" aria-label="Runtime Profile safety policy">
-                {channelRuntimeSafetyLabel(draft.runtimeRef, runtimeProfiles)}
-              </span>
+            <ChannelFormRow label="Safety policy" hint={permissionUnavailableReason}>
+              <div className="channelControl">
+                <span className="channelFieldHint" aria-label="Runtime Profile safety policy">
+                  {channelRuntimeSafetyLabel(draft.runtimeRef, runtimeProfiles)}
+                </span>
+                {draft.permissionMode !== "default" && (
+                  <button disabled={busy} onClick={() => updateDraft({ permissionMode: "default" })} type="button">
+                    Use profile safety policy
+                  </button>
+                )}
+              </div>
             </ChannelFormRow>
           )}
-          {modelControlAvailable ? (
-            <ChannelFormRow label="Model" hint="Blank uses the profile default model.">
+          {modelControlExposed ? (
+            <ChannelFormRow
+              label="Model"
+              hint={modelEditable ? "Blank uses the selected Agent target's profile default model." : modelUnavailableReason}
+            >
               <div className="channelControl">
                 <select
                   aria-label="Channel model"
-                  disabled={busy}
+                  disabled={busy || !modelEditable}
                   onChange={(event) => updateDraft({ model: event.currentTarget.value })}
                   value={draft.model}
                 >
                   <option value="">Profile default</option>
                   {modelOptions.map((option) => (
-                    <option key={option} value={option}>{modelOptionLabel(option, channel, controls)}</option>
+                    <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
+                  {!modelChoiceValid && (
+                    <option disabled value={draft.model}>{draft.model} (current, unavailable)</option>
+                  )}
                 </select>
               </div>
             </ChannelFormRow>
           ) : (
-            <ChannelFormRow label="Model" hint="This Runtime Profile does not declare a Channel-safe model control.">
-              <span className="channelFieldHint">Uses runtime default</span>
+            <ChannelFormRow label="Model" hint={modelUnavailableReason}>
+              <div className="channelControl">
+                <span className="channelFieldHint">Model control unavailable</span>
+                {draft.model && (
+                  <button disabled={busy} onClick={() => updateDraft({ model: "" })} type="button">
+                    Use profile default
+                  </button>
+                )}
+              </div>
             </ChannelFormRow>
+          )}
+          {runtimeValidationMessage && dirty && (
+            <p className="channelDetailError" role="alert">{runtimeValidationMessage}</p>
           )}
           <ChannelFormRow label="Workspace" hint="Changing workspace starts a fresh channel thread on the next message. Current running work is not interrupted.">
             <div className="channelControl channelWorkspaceControl">

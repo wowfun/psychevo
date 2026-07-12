@@ -46,10 +46,12 @@ describe("parseThreadSnapshot", () => {
         visibleName: "psychevo"
       },
       thread: null,
+      history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
       entries: []
     });
 
     expect(parsed.entries).toEqual([]);
+    expect(parsed.history).toEqual({ owner: "psychevo", fidelity: "full", cursor: null, hint: null });
     expect(parsed.activity).toEqual({ running: false, activeTurnId: null, queuedTurns: 0 });
     expect(parsed.pendingActions).toEqual([]);
   });
@@ -64,6 +66,7 @@ describe("parseThreadSnapshot", () => {
         visibleName: "psychevo"
       },
       thread: null,
+      history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
       entries: [],
       activity: {
         running: true,
@@ -102,9 +105,10 @@ describe("parseThreadSnapshot", () => {
       },
       thread: {
         id: "thread-1",
-        backend: { kind: "psychevo", sessionHandle: "thread-1", runtimeRef: "native" },
+        backend: { kind: "native", sessionHandle: "thread-1", runtimeRef: "native" },
         sourceKey: "web:cwd:abc"
       },
+      history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
       entries: [
         {
           id: "message:1",
@@ -182,6 +186,71 @@ describe("GatewayClient transport", () => {
     transport.disconnect("bridge closed");
 
     await expect(pending).rejects.toThrow("bridge closed");
+  });
+
+  it("sends the sealed Thread Application action, interaction, and history methods", async () => {
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    const scope = scopeForCwd("/tmp/project");
+    await client.connect();
+
+    const action = client.request("thread/action/run", {
+      action: { kind: "interrupt" },
+      scope,
+      threadId: "thread-1"
+    });
+    expect(JSON.parse(transport.sent.at(-1)!)).toMatchObject({
+      method: "thread/action/run",
+      params: { action: { kind: "interrupt" }, threadId: "thread-1" }
+    });
+    transport.emit(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "1",
+      result: { kind: "interrupt", threadId: "thread-1", interrupted: true, cleared: 0 }
+    }));
+    await expect(action).resolves.toMatchObject({ kind: "interrupt", interrupted: true });
+
+    const interaction = client.request("thread/interaction/respond", {
+      interactionId: "permission-1",
+      response: { kind: "permission", decision: "allowOnce" },
+      scope,
+      threadId: "thread-1"
+    });
+    expect(JSON.parse(transport.sent.at(-1)!)).toMatchObject({
+      method: "thread/interaction/respond",
+      params: {
+        interactionId: "permission-1",
+        response: { kind: "permission", decision: "allowOnce" }
+      }
+    });
+    transport.emit(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "2",
+      result: { accepted: true, interactionId: "permission-1", outcome: "accepted" }
+    }));
+    await expect(interaction).resolves.toMatchObject({ accepted: true, outcome: "accepted" });
+
+    const history = client.request("thread/history/read", {
+      cursor: null,
+      limit: 20,
+      scope,
+      threadId: "thread-1"
+    });
+    expect(JSON.parse(transport.sent.at(-1)!)).toMatchObject({
+      method: "thread/history/read",
+      params: { cursor: null, limit: 20, threadId: "thread-1" }
+    });
+    transport.emit(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "3",
+      result: {
+        threadId: "thread-1",
+        history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+        entries: [],
+        nextCursor: null
+      }
+    }));
+    await expect(history).resolves.toMatchObject({ entries: [], nextCursor: null });
   });
 });
 

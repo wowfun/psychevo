@@ -287,6 +287,17 @@
   cursor: pointer;
 }
 
+.composerSubmitControls .modelReasoningButton:hover:not(:disabled),
+.composerSubmitControls .modelReasoningButton:focus-visible {
+  color: var(--pevo-ink);
+  background: var(--pevo-panel-muted);
+}
+
+.composerSubmitControls .modelReasoningButton:focus-visible {
+  outline: 2px solid var(--pevo-switch-focus, var(--pevo-accent));
+  outline-offset: 2px;
+}
+
 .composerSubmitControls .modelReasoningButton {
   grid-template-columns: minmax(0, auto) auto;
   width: auto;
@@ -344,6 +355,25 @@
 .modelReasoningRows {
   display: grid;
   gap: 2px;
+}
+
+.modelReasoningReadOnly {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 30px;
+  gap: 8px;
+  padding: 0 7px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-ink) 4%);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerSubmitControls .runtimeControlState {
+  min-height: 26px;
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
 }
 
 .modelReasoningSearch {
@@ -478,6 +508,11 @@
   background: conic-gradient(var(--pevo-accent) var(--pevo-context-percent, 0%), var(--pevo-panel-muted) 0);
 }
 
+.contextStatusButton span.is-limitUnavailable {
+  background: none;
+  border: 2px solid var(--pevo-border-strong);
+}
+
 .composerContextPopover {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -518,6 +553,11 @@
   border-radius: 999px;
   font-size: var(--pevo-font-size-xsmall);
   font-weight: 700;
+}
+
+.composerContextSummary > span.is-limitUnavailable {
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border-strong);
 }
 
 .composerContextSummary small {

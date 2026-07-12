@@ -1,85 +1,62 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 import type {
+  RunnableTargetView,
   RuntimeBindingView,
-  RuntimeConfigOptionValueView,
-  RuntimeConfigOptionView,
-  RuntimeControlDescriptorView,
-  RuntimeProfileView
+  RuntimeProfileView,
+  ThreadControlDescriptorView
 } from "@psychevo/protocol";
 import { StatusSelect } from "./composer-controls";
 import {
-  agentPairingUnavailableReason,
   runtimeControlDependencyMatches,
   runtimeControlValueLabel,
-  runtimeProfileCapsuleLabel,
-  runtimeProfileDisplayLabel,
-  runtimeProfileProvenance,
-  runtimeProfileSourceLabel,
-  runtimeProfileUnavailableReason
+  runnableTargetUnavailableReason
 } from "./runtime-context";
-import type { WorkbenchAgent, WorkbenchBackend } from "./types";
+import type { WorkbenchAgent } from "./types";
 
 export function ComposerRuntimeControls({
-  agents,
-  profiles,
   binding,
   controls,
+  profiles = [],
+  targets = [],
   controlValues,
   disabled,
-  agentValue,
-  runtimeValue,
+  targetId,
   contextError,
   contextLoading,
-  onAgentChange,
-  onRuntimeChange,
-  onControlChange,
-  onManageRuntimes
+  onTargetChange,
+  onControlChange
 }: {
-  agents: WorkbenchAgent[];
-  profiles: RuntimeProfileView[];
   binding: RuntimeBindingView | null;
-  controls: RuntimeControlDescriptorView[];
+  controls: ThreadControlDescriptorView[];
+  profiles?: RuntimeProfileView[];
+  targets?: RunnableTargetView[];
   controlValues: Record<string, unknown>;
   disabled: boolean;
-  agentValue: string;
-  runtimeValue: string;
+  targetId: string;
   contextError: string | null;
   contextLoading: boolean;
-  onAgentChange(value: string): void;
-  onRuntimeChange(value: string): void;
-  onControlChange(control: RuntimeControlDescriptorView, value: unknown): void;
-  onManageRuntimes(): void;
+  onTargetChange(targetId: string): void;
+  onControlChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
-  const selectedProfile = profiles.find((profile) => profile.id === runtimeValue) ?? null;
-  const nativeProfileSelected = runtimeValue === "native" || selectedProfile?.runtime === "native";
-  const visibleControls = nativeProfileSelected
-    ? controls.filter((control) => control.id !== "mode")
-    : controls;
+  const modeControls = controls.filter((control) => control.surfaceRole === "mode");
   return (
     <div className="composerRuntimeControls" aria-label="Runtime controls">
-      <AgentDefinitionSelector
-        agents={agents}
+      <AgentRuntimeSelector
         binding={binding}
-        disabled={disabled}
-        profile={selectedProfile}
-        value={agentValue}
-        onChange={onAgentChange}
-      />
-      <RuntimeProfileSelector
-        agentValue={agentValue}
-        agents={agents}
-        binding={binding}
-        disabled={disabled || contextLoading}
+        controls={controls}
         profiles={profiles}
-        value={runtimeValue}
-        onRuntimeChange={onRuntimeChange}
-        onManageRuntimes={onManageRuntimes}
+        targets={targets}
+        controlValues={controlValues}
+        disabled={disabled}
+        targetId={targetId}
+        contextLoading={contextLoading}
+        onTargetChange={onTargetChange}
+        onControlChange={onControlChange}
       />
       <RuntimeControlFields
-        controls={visibleControls}
-        disabled={disabled}
-        emptyStateVisible={!nativeProfileSelected}
+        controls={modeControls}
+        disabled={disabled || contextLoading}
         values={controlValues}
         onChange={onControlChange}
       />
@@ -88,27 +65,38 @@ export function ComposerRuntimeControls({
   );
 }
 
-function AgentDefinitionSelector({
-  agents,
+function AgentRuntimeSelector({
   binding,
+  controls,
+  profiles,
+  targets,
+  controlValues,
   disabled,
-  profile,
-  value,
-  onChange
+  targetId,
+  contextLoading,
+  onTargetChange,
+  onControlChange
 }: {
-  agents: WorkbenchAgent[];
   binding: RuntimeBindingView | null;
+  controls: ThreadControlDescriptorView[];
+  profiles: RuntimeProfileView[];
+  targets: RunnableTargetView[];
+  controlValues: Record<string, unknown>;
   disabled: boolean;
-  profile: RuntimeProfileView | null;
-  value: string;
-  onChange(value: string): void;
+  targetId: string;
+  contextLoading: boolean;
+  onTargetChange(targetId: string): void;
+  onControlChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const selectedAgent = agents.find((agent) => agentOptionValue(agent) === value) ?? null;
-  const agentLabel = selectedAgent?.name ?? "Default Agent";
-  const selectedPairingReason = agentPairingUnavailableReason(selectedAgent, profile);
-  const startsNewDirectThread = binding?.backendKind === "runtime";
+  const selectedTarget = targets.find((target) => target.targetId === targetId) ?? null;
+  const agentLabel = selectedTarget?.agentLabel || "Select Agent";
+  const profileLabel = selectedTarget?.profileLabel || "Runtime Profile";
+  const displayLabel = selectedTarget ? agentTargetDisplayLabel(selectedTarget, profiles) : agentLabel;
+  const optionControls = controls.filter((control) => control.surfaceRole === "advanced");
+  const selectedPairingReason = runnableTargetUnavailableReason(selectedTarget);
+  const startsNewBoundThread = binding != null;
   usePopoverDismiss(open, rootRef, () => setOpen(false));
 
   return (
@@ -118,192 +106,129 @@ function AgentDefinitionSelector({
       <button
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label="Agent"
+        aria-label="Agent target"
         className="agentRuntimeButton"
-        disabled={disabled}
+        disabled={disabled || contextLoading}
         onClick={() => setOpen((current) => !current)}
-        title={agentLabel}
+        title={`${agentLabel} · ${profileLabel}`}
         type="button"
       >
-        <span>{agentLabel}</span>
-        <ChevronDown aria-hidden="true" size={13} />
+        <span>{displayLabel}</span>
       </button>
       {open && (
-        <div className="agentRuntimePopover agentDefinitionPopover" role="dialog" aria-label="Agent Definition">
+        <div className="agentRuntimePopover agentDefinitionPopover" role="dialog" aria-label="Agent target">
           <div className="agentRuntimeGroup">
-            <div className="agentRuntimeGroupLabel">{startsNewDirectThread ? "Start a new thread" : "Agent Definition"}</div>
-            <div className="agentRuntimeRows" role="radiogroup" aria-label="Main agent">
-              <AgentRuntimeRow
-                ariaLabel={startsNewDirectThread && value !== "" ? "Start a new thread with Default Agent" : "Default Agent"}
-                disabled={disabled || (startsNewDirectThread && value === "")}
-                label="Default Agent"
-                selected={value === ""}
-                title={startsNewDirectThread ? "The current thread keeps its existing Agent Definition." : undefined}
-                onSelect={() => onChange("")}
-              />
-              {agents.map((agent) => {
-                const optionValue = agentOptionValue(agent);
-                const pairingReason = agentPairingUnavailableReason(agent, profile);
+            <div className="agentRuntimeRows" role="radiogroup" aria-label="Agent target">
+              {targets.map((target) => {
+                const selected = target.targetId === targetId;
                 return (
                   <AgentRuntimeRow
-                    key={`${agent.source}:${agent.path ?? agent.name}`}
-                    ariaLabel={startsNewDirectThread && value !== optionValue ? `Start a new thread with ${agent.name}` : agent.name}
-                    disabled={disabled || Boolean(pairingReason) || (startsNewDirectThread && value === optionValue)}
-                    label={agent.name}
-                    selected={value === optionValue}
-                    title={pairingReason ?? (startsNewDirectThread ? "The current thread keeps its existing Agent Definition." : undefined)}
-                    onSelect={() => onChange(optionValue)}
+                    key={target.targetId}
+                    ariaLabel={startsNewBoundThread && !selected ? `Start a new thread with ${target.label}` : target.label}
+                    disabled={disabled || !target.ready || (startsNewBoundThread && selected)}
+                    label={agentTargetDisplayLabel(target, profiles)}
+                    selected={selected}
+                    title={!target.ready
+                      ? target.unavailableReason ?? `${target.label} is not ready.`
+                      : startsNewBoundThread
+                        ? selected
+                          ? "Immutable provenance for the current Thread."
+                          : "Starts a new Thread; the current Thread remains bound to its existing Agent target."
+                        : target.label}
+                    onSelect={() => {
+                      setOpen(false);
+                      onTargetChange(target.targetId);
+                    }}
                   />
                 );
               })}
             </div>
           </div>
           {selectedPairingReason && <div className="agentRuntimeHint is-warning">{selectedPairingReason}</div>}
+          {optionControls.length > 0 && (
+            <div className="agentRuntimeOptions">
+              <div className="agentRuntimeDivider" />
+              <div className="agentRuntimeGroupLabel">Runtime Options</div>
+              <RuntimeControlFields
+                controls={optionControls}
+                dependencyControls={controls}
+                disabled={disabled || contextLoading}
+                values={controlValues}
+                onChange={onControlChange}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function RuntimeProfileSelector({
-  agentValue,
-  agents,
-  binding,
-  disabled,
-  profiles,
-  value,
-  onRuntimeChange,
-  onManageRuntimes
-}: {
-  agentValue: string;
-  agents: WorkbenchAgent[];
-  binding: RuntimeBindingView | null;
-  disabled: boolean;
-  profiles: RuntimeProfileView[];
-  value: string;
-  onRuntimeChange(value: string): void;
-  onManageRuntimes(): void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const selected = profiles.find((profile) => profile.id === value) ?? null;
-  const selectedAgent = agents.find((agent) => agentOptionValue(agent) === agentValue) ?? null;
-  const label = selected
-    ? binding ? runtimeProfileCapsuleLabel(selected) : runtimeProfileDisplayLabel(selected)
-    : value || "Runtime Profile";
-  usePopoverDismiss(open, rootRef, () => setOpen(false));
-
-  return (
-    <div ref={rootRef} className="agentRuntimeSelector runtimeProfileSelector" onKeyDown={(event) => {
-      if (event.key === "Escape") setOpen(false);
-    }}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-label={binding ? `Bound Runtime Profile ${label}` : "Runtime Profile"}
-        className={binding ? "agentRuntimeButton runtimeProvenanceCapsule" : "agentRuntimeButton"}
-        disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
-        title={binding ? `${label}. Runtime bindings are immutable.` : label}
-        type="button"
-      >
-        <span>{label}</span>
-        <ChevronDown aria-hidden="true" size={13} />
-      </button>
-      {open && (
-        <div className="agentRuntimePopover runtimeProfilePopover" role="dialog" aria-label="Runtime Profile selection">
-          <div className="agentRuntimeGroupLabel">{binding ? "Start a new thread" : "Runtime Profile"}</div>
-          <div className="agentRuntimeRows" role="radiogroup" aria-label="Runtime">
-            {profiles.map((profile) => {
-              const pairingReason = agentPairingUnavailableReason(selectedAgent, profile);
-              const unavailableReason = runtimeProfileUnavailableReason(profile);
-              const reason = pairingReason ?? unavailableReason;
-              const displayLabel = runtimeProfileDisplayLabel(profile);
-              return (
-                <AgentRuntimeRow
-                  key={profile.id}
-                  ariaLabel={binding && profile.id !== binding.runtimeRef ? `Start a new thread with ${displayLabel}` : displayLabel}
-                  description={`${runtimeProfileProvenance(profile)} · ${runtimeProfileSourceLabel(profile)}${profile.health.status === "unchecked" ? " · Unchecked" : ""}`}
-                  disabled={disabled || Boolean(reason) || (binding != null && profile.id === binding.runtimeRef)}
-                  label={displayLabel}
-                  selected={profile.id === value}
-                  title={reason ?? (binding ? "The current thread keeps its existing Runtime Profile." : undefined)}
-                  onSelect={() => {
-                    setOpen(false);
-                    onRuntimeChange(profile.id);
-                  }}
-                />
-              );
-            })}
-          </div>
-          <button className="runtimeProfileManageButton" onClick={() => {
-            setOpen(false);
-            onManageRuntimes();
-          }} type="button">
-            Manage Runtime Profiles
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RuntimeControlFields({
+export function RuntimeControlFields({
   controls,
+  dependencyControls = controls,
   disabled,
-  emptyStateVisible,
+  hideDefaults = false,
   values,
   onChange
 }: {
-  controls: RuntimeControlDescriptorView[];
+  controls: ThreadControlDescriptorView[];
+  dependencyControls?: ThreadControlDescriptorView[];
   disabled: boolean;
-  emptyStateVisible: boolean;
+  hideDefaults?: boolean;
   values: Record<string, unknown>;
-  onChange(control: RuntimeControlDescriptorView, value: unknown): void;
+  onChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
-  const runtimeDefaultKey = "__runtime_default__";
   const visibleControls = controls.filter((control) =>
-    runtimeControlDependencyMatches(control, controls, values)
+    runtimeControlDependencyMatches(control, dependencyControls, values)
+    && !(
+      hideDefaults
+      && control.isDefault
+      && valuesEqual(
+        Object.prototype.hasOwnProperty.call(values, control.id) ? values[control.id] : control.effectiveValue,
+        control.effectiveValue
+      )
+    )
   );
-  if (visibleControls.length === 0) {
-    return emptyStateVisible
-      ? <span aria-label="Runtime control state" className="runtimeControlState">Runtime default</span>
-      : null;
-  }
+  if (visibleControls.length === 0) return null;
   return <>{visibleControls.map((control) => {
     const value = Object.prototype.hasOwnProperty.call(values, control.id)
       ? values[control.id]
-      : control.currentValue;
-    if (control.state === "readOnlyCurrent" || disabled) {
+      : control.effectiveValue;
+    const valueLabel = runtimeControlValueLabel(control, value);
+    if (!control.enabled || control.mutability === "readOnly" || control.choices.length === 0) {
       return (
-        <span aria-label={`${control.label}: ${runtimeControlValueLabel(control, value)} (read-only)`} className="runtimeControlState is-readonly" key={control.id} title="Observed current value · read-only">
-          {control.label}: {runtimeControlValueLabel(control, value)}
+        <span
+          aria-label={`${control.label}: ${valueLabel} (${control.enabled ? "read-only" : "unavailable"})`}
+          className={`runtimeControlState is-readonly ${value == null ? "is-unavailable" : ""}`}
+          key={control.id}
+          title={control.unavailableReason ?? `${runtimeControlSourceLabel(control)} · read-only`}
+        >
+          {control.label}: {valueLabel}
         </span>
       );
     }
-    if (control.state === "runtimeDefault" || control.choices.length === 0) {
-      return <span aria-label={`${control.label}: Runtime default`} className="runtimeControlState" key={control.id}>Runtime default</span>;
-    }
-    const optionKeys = [runtimeDefaultKey, ...control.choices.map((_, index) => String(index))];
+    const unavailableKey = "__unavailable__";
     const selectedIndex = control.choices.findIndex((choice) => valuesEqual(choice.value, value));
-    const selectedKey = selectedIndex < 0 ? runtimeDefaultKey : String(selectedIndex);
+    const selectedKey = selectedIndex < 0 ? unavailableKey : String(selectedIndex);
+    const optionKeys = selectedIndex < 0
+      ? [unavailableKey, ...control.choices.map((_, index) => String(index))]
+      : control.choices.map((_, index) => String(index));
     const optionLabels: Record<string, string> = {
-      [runtimeDefaultKey]: "Runtime default",
+      [unavailableKey]: control.surfaceRole === "model" ? "Unavailable" : `Choose ${control.label}`,
       ...Object.fromEntries(control.choices.map((choice, index) => [String(index), choice.label]))
     };
     return (
       <StatusSelect
+        disabled={disabled}
         key={control.id}
         label={control.label}
         optionLabels={optionLabels}
-        renderDisplayValue={(key) => optionLabels[key] ?? "Runtime default"}
+        renderDisplayValue={(key) => optionLabels[key] ?? valueLabel}
         value={selectedKey}
         values={optionKeys}
         onChange={(key) => {
-          if (key === runtimeDefaultKey) {
-            onChange(control, undefined);
-            return;
-          }
+          if (key === unavailableKey) return;
           const choice = control.choices[Number(key)];
           if (choice) onChange(control, choice.value);
         }}
@@ -312,9 +237,19 @@ function RuntimeControlFields({
   })}</>;
 }
 
+function runtimeControlSourceLabel(control: ThreadControlDescriptorView): string {
+  switch (control.effectiveSource) {
+    case "profileDefault": return "Profile default";
+    case "sourceDraft": return "Source draft";
+    case "threadPreference": return "Thread preference";
+    case "turnOverride": return "Turn override";
+    case "runtimeObserved": return "Observed runtime value";
+    case "runtimeDefault": return "Runtime default";
+  }
+}
+
 function AgentRuntimeRow({
   ariaLabel,
-  description,
   disabled,
   label,
   selected,
@@ -322,7 +257,6 @@ function AgentRuntimeRow({
   onSelect
 }: {
   ariaLabel?: string | undefined;
-  description?: string | undefined;
   disabled: boolean;
   label: string;
   selected: boolean;
@@ -340,10 +274,17 @@ function AgentRuntimeRow({
       title={title}
       type="button"
     >
-      <span className="agentRuntimeRowCopy"><span>{label}</span>{description && <small>{description}</small>}</span>
+      <span>{label}</span>
       {selected && <Check aria-hidden="true" size={13} />}
     </button>
   );
+}
+
+function agentTargetDisplayLabel(target: RunnableTargetView, profiles: RuntimeProfileView[]): string {
+  const profile = profiles.find((candidate) => candidate.id === target.runtimeProfileRef) ?? null;
+  return profile?.runtime.toLowerCase() === "acp"
+    ? `${target.agentLabel} (ACP)`
+    : target.agentLabel;
 }
 
 function usePopoverDismiss(open: boolean, rootRef: RefObject<HTMLDivElement | null>, close: () => void) {
@@ -368,32 +309,30 @@ function valuesEqual(left: unknown, right: unknown): boolean {
   }
 }
 
+function hasReadyTargetForAgent(
+  targets: RunnableTargetView[],
+  agent: WorkbenchAgent | null,
+  selectedAgentRef: string
+): boolean {
+  if (targets.length === 0) return false;
+  if (!selectedAgentRef) {
+    return targets.some((target) => target.agentRef == null && target.ready);
+  }
+  const refs = new Set([selectedAgentRef, agent?.name].filter((value): value is string => Boolean(value)));
+  return targets.some((target) => (
+    target.ready && target.agentRef != null && refs.has(target.agentRef)
+  ));
+}
+
 export function agentOptionValue(agent: WorkbenchAgent): string {
   return agent.source === "explicit" ? agent.path?.trim() || agent.name : agent.name;
 }
 
-export function isComposerRunnableAgent(agent: WorkbenchAgent): boolean {
-  if (!agent.name) {
-    return false;
-  }
-  return !agent.backend?.ref;
-}
-
-export function isComposerRuntimeBackend(backend: WorkbenchBackend): boolean {
-  return backend.enabled
-    && Boolean(backend.command?.trim())
-    && backend.entrypoints.includes("peer");
-}
-
-export function runtimeSupportsAgentPersona(runtimeRef: string): boolean {
-  return runtimeRef === "native";
-}
-
 export function runtimeControlAsConfigOption(
-  control: RuntimeControlDescriptorView | null
-): RuntimeConfigOptionView | null {
+  control: ThreadControlDescriptorView | null
+): RuntimeModeOption | null {
   if (!control) return null;
-  const values = control.choices.flatMap((choice): RuntimeConfigOptionValueView[] => (
+  const values = control.choices.flatMap((choice): RuntimeModeValue[] => (
     typeof choice.value === "string"
       ? [{ value: choice.value, name: choice.label, description: choice.description, group: null }]
       : []
@@ -402,21 +341,38 @@ export function runtimeControlAsConfigOption(
     id: control.id,
     name: control.label,
     description: null,
-    category: control.id === "mode" ? "mode" : null,
+    category: control.surfaceRole === "mode" ? "mode" : null,
     type: values.length > 0 ? "select" : "readonly",
-    currentValue: typeof control.currentValue === "string" ? control.currentValue : null,
+    currentValue: typeof control.effectiveValue === "string" ? control.effectiveValue : null,
     values
   };
 }
 
 export type RuntimeModeProjection = {
-  allValues: RuntimeConfigOptionValueView[];
+  allValues: RuntimeModeValue[];
   defaultValue: string;
-  extraValues: RuntimeConfigOptionValueView[];
+  extraValues: RuntimeModeValue[];
   supportsPlan: boolean;
 };
 
-export function projectRuntimeModeOption(option: RuntimeConfigOptionView | null): RuntimeModeProjection {
+export type RuntimeModeValue = {
+  value: string;
+  name: string;
+  description: string | null;
+  group: string | null;
+};
+
+export type RuntimeModeOption = {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  type: "select" | "readonly";
+  currentValue: string | null;
+  values: RuntimeModeValue[];
+};
+
+export function projectRuntimeModeOption(option: RuntimeModeOption | null): RuntimeModeProjection {
   const allValues = option?.values ?? [];
   const valueSet = new Set(allValues.map((value) => value.value));
   const currentValue = option?.currentValue && valueSet.has(option.currentValue)
@@ -435,20 +391,6 @@ export function projectRuntimeModeOption(option: RuntimeConfigOptionView | null)
     extraValues,
     supportsPlan
   };
-}
-
-export function resolvePeerRuntimeMode(
-  projection: RuntimeModeProjection,
-  workMode: string,
-  selectedExtraMode: string
-): string {
-  if (projection.supportsPlan) {
-    if (selectedExtraMode && projection.extraValues.some((value) => value.value === selectedExtraMode)) {
-      return selectedExtraMode;
-    }
-    return workMode === "plan" ? "plan" : projection.defaultValue;
-  }
-  return selectedExtraMode || projection.defaultValue;
 }
 
 export function runtimeModeCommandValues(projection: RuntimeModeProjection): string[] {
@@ -487,6 +429,6 @@ export function formatRuntimeModeValues(projection: RuntimeModeProjection): stri
   return projection.allValues.map((value) => value.value).join(", ") || "none";
 }
 
-export function isRuntimeModeOption(option: RuntimeConfigOptionView): boolean {
+export function isRuntimeModeOption(option: RuntimeModeOption): boolean {
   return option.id === "mode" || option.category === "mode";
 }

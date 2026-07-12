@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import {
   sideInheritedMetadataHidden,
   type GatewayActivity,
+  type ThreadHistoryView,
   type TranscriptBlock,
   type TranscriptEntry
 } from "@psychevo/protocol";
@@ -24,12 +25,15 @@ export type TranscriptAgentSession = {
 export interface TranscriptPanelProps {
   activity?: GatewayActivity;
   entries: TranscriptEntry[];
+  history?: TranscriptHistoryView | null | undefined;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
   onReadAloudText?: ((text: string) => void | Promise<void>) | undefined;
   threadId?: string | null;
   workspaceFileLinks?: WorkspaceFileLinkContext;
 }
+
+export type TranscriptHistoryView = ThreadHistoryView;
 
 type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
 type ReadAloudTextHandler = ((text: string) => void | Promise<void>) | undefined;
@@ -45,7 +49,7 @@ type TranscriptScrollMemory = {
   top: number;
 };
 
-export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSession, onReadAloudText, threadId, workspaceFileLinks }: TranscriptPanelProps) {
+export function TranscriptPanel({ activity, entries, history, onCopyText, onOpenAgentSession, onReadAloudText, threadId, workspaceFileLinks }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -123,6 +127,7 @@ export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSess
           }, 900);
         }}
       >
+        {historyFidelityNotice(history)}
         {visibleEntries.length === 0 ? (
           <div className="pevo-empty pevo-emptyThread">No messages yet</div>
         ) : (
@@ -159,6 +164,31 @@ export function TranscriptPanel({ activity, entries, onCopyText, onOpenAgentSess
         </button>
       )}
     </section>
+  );
+}
+
+function historyFidelityNotice(history: TranscriptHistoryView | null | undefined) {
+  if (!history || history.owner === "psychevo" || history.fidelity === "full") {
+    return null;
+  }
+  const ownerLabel = history.owner === "agent" ? "agent" : "process";
+  const message = history.hint?.trim() || (() => {
+    switch (history.fidelity) {
+      case "summary": return `Only a summarized history is available from this ${ownerLabel}.`;
+      case "partial": return `Only part of the history is available from this ${ownerLabel}.`;
+      case "unavailable": return `Earlier history is unavailable from this ${ownerLabel}.`;
+      default: return `This ${ownerLabel} owns the session history.`;
+    }
+  })();
+  return (
+    <div
+      className="pevo-historyNotice"
+      data-history-fidelity={history.fidelity}
+      data-history-owner={history.owner}
+      role="note"
+    >
+      {message}
+    </div>
   );
 }
 
@@ -233,16 +263,19 @@ function orderTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
       }
       return left.messageSeq !== null ? -1 : 1;
     }
-    const leftLiveOrder = liveOrder(left);
-    const rightLiveOrder = liveOrder(right);
-    if (leftLiveOrder !== null && rightLiveOrder !== null && leftLiveOrder !== rightLiveOrder) {
-      return leftLiveOrder - rightLiveOrder;
-    }
-    if (leftLiveOrder !== null && rightLiveOrder === null) {
-      return -1;
-    }
-    if (leftLiveOrder === null && rightLiveOrder !== null) {
-      return 1;
+    const sameTurn = Boolean(left.turnId) && left.turnId === right.turnId;
+    if (sameTurn) {
+      const leftLiveOrder = liveOrder(left);
+      const rightLiveOrder = liveOrder(right);
+      if (leftLiveOrder !== null && rightLiveOrder !== null && leftLiveOrder !== rightLiveOrder) {
+        return leftLiveOrder - rightLiveOrder;
+      }
+      if (leftLiveOrder !== null && rightLiveOrder === null) {
+        return -1;
+      }
+      if (leftLiveOrder === null && rightLiveOrder !== null) {
+        return 1;
+      }
     }
     if (left.createdAtMs !== right.createdAtMs) {
       return left.createdAtMs - right.createdAtMs;
@@ -329,22 +362,68 @@ function TranscriptEntryView({
   onReadAloudText: ReadAloudTextHandler;
   workspaceFileLinks: WorkspaceFileLinkContext | undefined;
 }) {
+  const blocks = visibleBlocks(entry);
+  const phaseOrdinals = Array.from(new Set(blocks.flatMap((block) => (
+    Number.isInteger(block.phaseOrdinal) && Number(block.phaseOrdinal) > 0
+      ? [Number(block.phaseOrdinal)]
+      : []
+  ))));
+  const hasNativePhases = phaseOrdinals.length > 1;
+  const [showNativePhases, setShowNativePhases] = useState(false);
+  const renderedBlocks = (items: TranscriptBlock[]) => items.map((block) => (
+    <TranscriptBlockView
+      activityTick={activityTick}
+      block={block}
+      entry={entry}
+      key={block.id}
+      onCopyText={onCopyText}
+      onOpenAgentSession={onOpenAgentSession}
+      onReadAloudText={onReadAloudText}
+      workspaceFileLinks={workspaceFileLinks}
+    />
+  ));
+  if (!hasNativePhases) {
+    return <>{renderedBlocks(blocks)}</>;
+  }
   return (
-    <>
-      {visibleBlocks(entry).map((block) => (
-        <TranscriptBlockView
-          activityTick={activityTick}
-          block={block}
-          entry={entry}
-          key={block.id}
-          onCopyText={onCopyText}
-          onOpenAgentSession={onOpenAgentSession}
-          onReadAloudText={onReadAloudText}
-          workspaceFileLinks={workspaceFileLinks}
-        />
-      ))}
-    </>
+    <div className="pevo-nativePhases">
+      <button
+        aria-expanded={showNativePhases}
+        className="pevo-nativePhasesToggle"
+        onClick={() => setShowNativePhases((current) => !current)}
+        type="button"
+      >
+        {showNativePhases ? "Hide native phases" : "Show native phases"}
+      </button>
+      {showNativePhases
+        ? nativePhaseGroups(blocks).map((group, index) => group.ordinal == null ? (
+          <div className="pevo-nativePhaseUngrouped" key={`unphased:${index}`}>
+            {renderedBlocks(group.blocks)}
+          </div>
+        ) : (
+          <section className="pevo-nativePhase" key={`phase:${group.ordinal}:${index}`} aria-label={`Phase ${group.ordinal}`}>
+            <header>Phase {group.ordinal}</header>
+            {renderedBlocks(group.blocks)}
+          </section>
+        ))
+        : renderedBlocks(blocks)}
+    </div>
   );
+}
+
+function nativePhaseGroups(blocks: TranscriptBlock[]): Array<{ ordinal: number | null; blocks: TranscriptBlock[] }> {
+  return blocks.reduce<Array<{ ordinal: number | null; blocks: TranscriptBlock[] }>>((groups, block) => {
+    const ordinal = Number.isInteger(block.phaseOrdinal) && Number(block.phaseOrdinal) > 0
+      ? Number(block.phaseOrdinal)
+      : null;
+    const previous = groups.at(-1);
+    if (previous?.ordinal === ordinal) {
+      previous.blocks.push(block);
+      return groups;
+    }
+    groups.push({ ordinal, blocks: [block] });
+    return groups;
+  }, []);
 }
 
 function TranscriptBlockView({
@@ -1034,7 +1113,8 @@ function transcriptBlockDataAttributes(entry: TranscriptEntry, block: Transcript
     "data-block-id": block.id,
     "data-block-kind": block.kind,
     "data-turn-id": entry.turnId ?? "",
-    "data-source": block.source || entry.source
+    "data-source": block.source || entry.source,
+    "data-phase-ordinal": block.phaseOrdinal ?? ""
   };
 }
 

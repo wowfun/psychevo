@@ -84,13 +84,13 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     const next = applyLiveTranscriptEvent(optimistic, {
       type: "turnCompleted",
       threadId: "thread-1",
-      turnId: "turn-direct",
-      turn: completedTurn("turn-direct", "thread-1"),
+      turnId: "turn-detached",
+      turn: completedTurn("turn-detached", "thread-1"),
       committedEntries: [
         entry({
           id: "message:1:user",
           threadId: "thread-1",
-          turnId: "turn-direct",
+          turnId: "turn-detached",
           messageSeq: 1,
           role: "user",
           source: "runtime.message",
@@ -100,6 +100,137 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     });
 
     expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:1:user"]);
+  });
+
+  it("replaces a bound optimistic prompt as soon as its committed user entry arrives", () => {
+    const history = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "message:1",
+          threadId: "thread-1",
+          turnId: "turn-initial",
+          messageSeq: 1,
+          role: "user",
+          source: "runtime.message",
+          status: "completed",
+          blocks: [block({
+            id: "message:1:text",
+            body: "Main Agent instruction",
+            detail: "Main Agent instruction",
+            source: "runtime.message",
+            status: "completed"
+          })]
+        }),
+        entry({
+          id: "message:2",
+          threadId: "thread-1",
+          turnId: "turn-initial",
+          messageSeq: 2,
+          role: "assistant",
+          source: "runtime.message",
+          status: "completed",
+          blocks: [block({
+            id: "message:2:text",
+            body: "Initial answer",
+            detail: "Initial answer",
+            source: "runtime.message",
+            status: "completed"
+          })]
+        })
+      ],
+      activity: {
+        running: false,
+        activeTurnId: null,
+        queuedTurns: 0
+      }
+    };
+    const optimistic = appendOptimisticPrompt(history, "你有哪些工具", 10);
+    const started = applyLiveTranscriptEvent(optimistic, {
+      type: "turnStarted",
+      threadId: "thread-1",
+      turnId: "turn-follow-up",
+      selectedSkills: []
+    });
+    const next = applyLiveTranscriptEvent(started, {
+      type: "entryUpdated",
+      turnId: "turn-follow-up",
+      entry: entry({
+        id: "message:3",
+        threadId: "thread-1",
+        turnId: "turn-follow-up",
+        messageSeq: 3,
+        role: "user",
+        source: "runtime.message",
+        status: "completed",
+        blocks: [block({
+          id: "message:3:text",
+          body: "你有哪些工具",
+          detail: "你有哪些工具",
+          source: "runtime.message",
+          status: "completed"
+        })]
+      })
+    });
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "message:1",
+      "message:2",
+      "message:3"
+    ]);
+    expect(next.entries.filter((candidate) => candidate.role === "user"))
+      .toHaveLength(2);
+    expect(next.entries[0]?.blocks[0]?.body).toBe("Main Agent instruction");
+  });
+
+  it("keeps identical committed user text from separate turns", () => {
+    const firstTurn = {
+      ...threadSnapshot(),
+      entries: [entry({
+        id: "message:1",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        messageSeq: 1,
+        role: "user",
+        source: "runtime.message",
+        status: "completed",
+        blocks: [block({
+          id: "message:1:text",
+          body: "repeat this",
+          source: "runtime.message",
+          status: "completed"
+        })]
+      })],
+      activity: { running: false, activeTurnId: null, queuedTurns: 0 }
+    };
+    const optimistic = appendOptimisticPrompt(firstTurn, "repeat this", 20);
+    const started = applyLiveTranscriptEvent(optimistic, {
+      type: "turnStarted",
+      threadId: "thread-1",
+      turnId: "turn-2",
+      selectedSkills: []
+    });
+    const next = applyLiveTranscriptEvent(started, {
+      type: "entryUpdated",
+      turnId: "turn-2",
+      entry: entry({
+        id: "message:2",
+        threadId: "thread-1",
+        turnId: "turn-2",
+        messageSeq: 2,
+        role: "user",
+        source: "runtime.message",
+        status: "completed",
+        blocks: [block({
+          id: "message:2:text",
+          body: "repeat this",
+          source: "runtime.message",
+          status: "completed"
+        })]
+      })
+    });
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual(["message:1", "message:2"]);
   });
 
   it("replaces one matching detached optimistic prompt on failed completion", () => {
@@ -116,16 +247,18 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     const next = applyLiveTranscriptEvent(optimistic, {
       type: "turnCompleted",
       threadId: "thread-1",
-      turnId: "turn-direct",
+      turnId: "turn-agent",
       turn: {
-        ...completedTurn("turn-direct", "thread-1"),
+        ...completedTurn("turn-agent", "thread-1"),
         status: "failed",
         outcome: "failed",
         error: {
-          message: "direct runtime failed",
+          message: "agent runtime failed",
           code: null,
           stage: null,
           retryClass: null,
+          delivery: "unknown",
+          recoveryAction: null,
           diagnosticRef: null
         }
       },
@@ -133,7 +266,7 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
         entry({
           id: "message:1:user",
           threadId: "thread-1",
-          turnId: "turn-direct",
+          turnId: "turn-agent",
           messageSeq: 1,
           role: "user",
           source: "runtime.message",
@@ -147,7 +280,7 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     expect(users.filter((candidate) => candidate.id === "message:1:user")).toHaveLength(1);
     expect(users.filter((candidate) => candidate.source === "client.optimistic")).toHaveLength(1);
     expect(users.find((candidate) => candidate.source === "client.optimistic")?.createdAtMs).toBe(10);
-    expect(next.entries.some((candidate) => candidate.id === "turn:turn-direct:terminal")).toBe(true);
+    expect(next.entries.some((candidate) => candidate.id === "turn:turn-agent:terminal")).toBe(true);
   });
 
   it("settles a failed terminal turn and keeps the diagnostic visible", () => {
@@ -179,6 +312,8 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
           code: null,
           stage: null,
           retryClass: null,
+          delivery: "unknown",
+          recoveryAction: null,
           diagnosticRef: null
         },
         completedAtMs: 20
@@ -272,7 +407,7 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
       thread: {
         id: "child-thread",
         backend: {
-          kind: "psychevo" as const,
+          kind: "native" as const,
           sessionHandle: "child-thread"
         },
         sourceKey: "web:test"
@@ -728,7 +863,7 @@ describe("reconcileThreadSnapshot", () => {
       thread: {
         id: "thread-2",
         backend: {
-          kind: "psychevo" as const,
+          kind: "native" as const,
           sessionHandle: "thread-2",
           runtimeRef: "native"
         },
@@ -824,6 +959,57 @@ describe("reconcileThreadSnapshot", () => {
       "message:4",
       "live:turn-1:assistant:13",
       "message:15"
+    ]);
+  });
+
+  it("keeps a retained earlier-turn live answer before a later detached optimistic prompt", () => {
+    const incoming = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "message:1",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: 1,
+          role: "user",
+          source: "runtime.message",
+          createdAtMs: 100,
+          updatedAtMs: 100,
+          blocks: [block({ id: "message:1:text", body: "first question" })]
+        }),
+        entry({
+          id: "live:turn-1:assistant:0",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          messageSeq: null,
+          role: "assistant",
+          source: "runtime.stream",
+          createdAtMs: 200,
+          updatedAtMs: 200,
+          metadata: { liveOrder: 0, projection: "assistant_segment" },
+          blocks: [block({ id: "live:turn-1:assistant:0:text", body: "first answer" })]
+        }),
+        entry({
+          id: "optimistic:300:second",
+          threadId: "thread-1",
+          turnId: null,
+          messageSeq: null,
+          role: "user",
+          source: "client.optimistic",
+          createdAtMs: 300,
+          updatedAtMs: 300,
+          metadata: { liveOrder: -1, projection: "optimistic_prompt" },
+          blocks: [block({ id: "optimistic:300:second:text", body: "second question" })]
+        })
+      ]
+    };
+
+    const next = reconcileThreadSnapshot(threadSnapshot(), incoming);
+
+    expect(next.entries.map((candidate) => candidate.id)).toEqual([
+      "message:1",
+      "live:turn-1:assistant:0",
+      "optimistic:300:second"
     ]);
   });
 
@@ -1258,6 +1444,12 @@ function detachedSnapshot(): ThreadSnapshot {
       }
     },
     thread: null,
+    history: {
+      owner: "psychevo",
+      fidelity: "full",
+      cursor: null,
+      hint: null
+    },
     entries: [],
     activity: {
       running: false,
@@ -1274,7 +1466,7 @@ function threadSnapshot(): ThreadSnapshot {
     thread: {
       id: "thread-1",
       backend: {
-        kind: "psychevo",
+        kind: "native",
         sessionHandle: "thread-1",
         runtimeRef: "native"
       },

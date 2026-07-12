@@ -40,8 +40,8 @@ test.describe("Psychevo ACP server live validation", () => {
     try {
       const initialize = await rpc.request("initialize", {
         protocolVersion: 2,
-        clientCapabilities: {},
-        clientInfo: {
+        capabilities: {},
+        info: {
           name: "psychevo-playwright-acp-client",
           title: "Psychevo Playwright ACP Client",
           version: "0.0.0"
@@ -61,12 +61,14 @@ test.describe("Psychevo ACP server live validation", () => {
       const modelUpdate = await rpc.request("session/set_config_option", {
         sessionId,
         configId: "model",
+        type: "id",
         value: "mock/other"
       });
       expect(selectCurrentValue(readArray(modelUpdate, "configOptions"), "model")).toBe("mock/other");
       const effortUpdate = await rpc.request("session/set_config_option", {
         sessionId,
         configId: "effort",
+        type: "id",
         value: "high"
       });
       expect(selectCurrentValue(readArray(effortUpdate, "configOptions"), "effort")).toBe("high");
@@ -84,8 +86,14 @@ test.describe("Psychevo ACP server live validation", () => {
         isSessionUpdate(message, "agent_message_chunk", "pevo server streaming")
       );
       const usage = await rpc.waitForNotification((message) => isSessionUpdate(message, "usage_update"));
-      const promptResult = await prompt;
-      expect(readString(promptResult, "stopReason")).toBe("end_turn");
+      const terminalState = await rpc.waitForNotification((message) => {
+        if (!isSessionUpdate(message, "state_update")) {
+          return false;
+        }
+        const update = readUpdate(message);
+        return update.state === "idle" && update.stopReason === "end_turn";
+      });
+      await prompt;
 
       expect(mockServer.requests.length).toBeGreaterThanOrEqual(1);
       const requestBody = mockServer.requests[0];
@@ -98,8 +106,8 @@ test.describe("Psychevo ACP server live validation", () => {
       await renderProtocolSummary(page, {
         initialize,
         firstChunk,
-        promptResult,
         requestBody,
+        stopReason: readString(readUpdate(terminalState), "stopReason"),
         usageUpdate
       });
       await capture(page, testInfo, screenshotDir, "01-server-protocol-desktop");
@@ -391,7 +399,7 @@ function asObject(value: unknown): Record<string, unknown> {
 }
 
 function selectCurrentValue(options: Array<Record<string, unknown>>, id: string): string | null {
-  const option = options.find((item) => item.id === id);
+  const option = options.find((item) => item.configId === id);
   if (!option) {
     return null;
   }
@@ -405,8 +413,8 @@ function selectCurrentValue(options: Array<Record<string, unknown>>, id: string)
 async function renderProtocolSummary(page: Page, data: {
   firstChunk: JsonRpcMessage;
   initialize: Record<string, unknown>;
-  promptResult: Record<string, unknown>;
   requestBody: Record<string, unknown>;
+  stopReason: string;
   usageUpdate: Record<string, unknown>;
 }) {
   await page.setContent(`<!doctype html>
@@ -528,7 +536,7 @@ async function renderProtocolSummary(page: Page, data: {
             <dt>Reasoning effort</dt>
             <dd>${escapeHtml(String(data.requestBody.reasoning_effort))}</dd>
             <dt>Stop reason</dt>
-            <dd>${escapeHtml(String(data.promptResult.stopReason))}</dd>
+            <dd>${escapeHtml(data.stopReason)}</dd>
             <dt>Usage</dt>
             <dd>${escapeHtml(`${data.usageUpdate.used} / ${data.usageUpdate.size} tokens`)}</dd>
           </dl>

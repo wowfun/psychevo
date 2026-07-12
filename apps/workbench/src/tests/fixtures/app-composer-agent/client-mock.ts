@@ -53,6 +53,231 @@ function defaultAgentRecord(): Record<string, unknown> {
   });
 }
 
+function defaultAgentRecords(): Array<Record<string, unknown>> {
+  return [
+    defaultAgentRecord(),
+    generatedAcpAgentRecord("codex", "Codex"),
+    generatedAcpAgentRecord("opencode", "OpenCode")
+  ];
+}
+
+function generatedAcpAgentRecord(name: string, label: string): Record<string, unknown> {
+  return {
+    name,
+    description: `${label} ACP Agent`,
+    enabled: true,
+    source: "generated",
+    sourceLabel: "Generated",
+    generated: true,
+    target: null,
+    mutable: false,
+    path: null,
+    backend: { ref: name },
+    entrypoints: ["peer", "subagent"],
+    tools: [],
+    mcpServers: [],
+    contributions: ["instructions"],
+    optionalContributions: [],
+    diagnostics: [],
+    instructions: `Use the ${label} ACP Agent.`,
+    rawMarkdown: ""
+  };
+}
+
+function composerAgentRecords(): Array<Record<string, unknown>> {
+  return gatewayMock.agentRecords.length > 0 ? gatewayMock.agentRecords : defaultAgentRecords();
+}
+
+function compatibleRuntimeTargets(): Array<Record<string, unknown>> {
+  const agents = composerAgentRecords();
+  return gatewayMock.runtimeProfileRecords.flatMap((profile) => {
+    const runtimeProfileRef = typeof profile.id === "string" ? profile.id : "";
+    if (!runtimeProfileRef || profile.enabled === false) return [];
+    const label = typeof profile.label === "string" ? profile.label : runtimeProfileRef;
+    if (profile.runtime === "native") {
+      return [
+        {
+          targetId: `target:default:${runtimeProfileRef}`,
+          agentRef: null,
+          runtimeProfileRef,
+          agentLabel: "Default Agent",
+          profileLabel: label,
+          label: `Default Agent · ${label}`,
+          ready: true,
+          unavailableReason: null
+        },
+        ...agents.flatMap((agent) => (
+          agent.enabled !== false && agent.backend == null && typeof agent.name === "string"
+            ? [{
+                targetId: `target:${agent.name}:${runtimeProfileRef}`,
+                agentRef: agent.name,
+                runtimeProfileRef,
+                agentLabel: agent.name,
+                profileLabel: label,
+                label: `${agent.name} · ${label}`,
+                ready: true,
+                unavailableReason: null
+              }]
+            : []
+        ))
+      ];
+    }
+    const backendRef = typeof profile.backendRef === "string" ? profile.backendRef : null;
+    return agents.flatMap((agent) => {
+      const backend = agent.backend && typeof agent.backend === "object" && !Array.isArray(agent.backend)
+        ? agent.backend as { ref?: unknown }
+        : null;
+      const entrypoints = Array.isArray(agent.entrypoints) ? agent.entrypoints : [];
+      return backendRef
+        && backend?.ref === backendRef
+        && entrypoints.includes("peer")
+        && agent.enabled !== false
+        && typeof agent.name === "string"
+        ? [{
+            targetId: `target:${agent.name}:${runtimeProfileRef}`,
+            agentRef: agent.name,
+            runtimeProfileRef,
+            agentLabel: agent.name,
+            profileLabel: label,
+            label: `${agent.name} · ${label}`,
+            ready: true,
+            unavailableReason: null
+          }]
+        : [];
+    });
+  });
+}
+
+function nativeThreadControls(): Array<Record<string, unknown>> {
+  const settings = gatewayMock.settingsResult(null);
+  const controls = settings.controls as {
+    modelOptions?: unknown;
+    modelDetails?: unknown;
+  };
+  const modelDetails = Array.isArray(controls.modelDetails)
+    ? controls.modelDetails.filter((item): item is Record<string, unknown> => (
+        Boolean(item) && typeof item === "object" && !Array.isArray(item)
+      ))
+    : [];
+  const model = gatewayMock.modelStatus === "resolved"
+    ? gatewayMock.modelOverride ?? gatewayMock.model
+    : null;
+  const selectedModel = modelDetails.find((item) => item.value === model);
+  const reasoningEfforts = Array.isArray(selectedModel?.reasoningEfforts)
+    ? selectedModel.reasoningEfforts.filter((value): value is string => typeof value === "string")
+    : ["none"];
+  return [
+    {
+      id: "mode",
+      label: "Mode",
+      surfaceRole: "mode",
+      mutability: "selectable",
+      enabled: true,
+      required: false,
+      unavailableReason: null,
+      effectiveValue: "default",
+      effectiveSource: "runtimeDefault",
+      isDefault: true,
+      choices: [
+        { value: "default", label: "Default", description: "Use the Runtime Profile default" },
+        { value: "plan", label: "Plan", description: "Plan before editing" }
+      ],
+      dependsOn: null,
+      applyScope: "turnDraft",
+      stability: "stable",
+      channelSafe: true,
+      capabilityRevision: "1"
+    },
+    {
+      id: "model",
+      label: "Model",
+      surfaceRole: "model",
+      mutability: "selectable",
+      enabled: true,
+      required: true,
+      unavailableReason: null,
+      effectiveValue: model,
+      effectiveSource: model ? "sourceDraft" : "runtimeDefault",
+      isDefault: false,
+      choices: modelDetails.flatMap((item) => typeof item.value === "string"
+        ? [{ value: item.value, label: item.value, description: null }]
+        : []),
+      dependsOn: null,
+      applyScope: "turnDraft",
+      stability: "stable",
+      channelSafe: true,
+      capabilityRevision: "2"
+    },
+    {
+      id: "reasoning",
+      label: "Reasoning",
+      surfaceRole: "reasoning",
+      mutability: "selectable",
+      enabled: model != null,
+      required: false,
+      unavailableReason: model == null ? "Select a model first." : null,
+      effectiveValue: gatewayMock.modelVariantOverride ?? gatewayMock.modelVariant,
+      effectiveSource: "sourceDraft",
+      isDefault: false,
+      choices: reasoningEfforts.map((value) => ({ value, label: value, description: null })),
+      dependsOn: null,
+      applyScope: "turnDraft",
+      stability: "stable",
+      channelSafe: true,
+      capabilityRevision: "3"
+    },
+    {
+      id: "permissionMode",
+      label: "Permission mode",
+      surfaceRole: "advanced",
+      mutability: "selectable",
+      enabled: true,
+      required: false,
+      unavailableReason: null,
+      effectiveValue: "default",
+      effectiveSource: "runtimeDefault",
+      isDefault: true,
+      choices: ["default", "acceptEdits", "dontAsk", "bypassPermissions"].map((value) => ({
+        value,
+        label: value,
+        description: null
+      })),
+      dependsOn: null,
+      applyScope: "turnDraft",
+      stability: "stable",
+      channelSafe: true,
+      capabilityRevision: "4"
+    }
+  ];
+}
+
+function canonicalMockThreadContext(value: unknown, params: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (typeof record.targetId === "string" && record.targetId.trim()) return value;
+  const targets = Array.isArray(record.compatibleTargets)
+    ? record.compatibleTargets.filter((target): target is Record<string, unknown> => (
+        Boolean(target) && typeof target === "object" && !Array.isArray(target)
+      ))
+    : [];
+  const targetInput = (params as { target?: { agentRef?: unknown; runtimeProfileRef?: unknown } | null } | null)?.target;
+  const runtimeProfileRef = typeof targetInput?.runtimeProfileRef === "string"
+    ? targetInput.runtimeProfileRef
+    : typeof record.runtimeProfileRef === "string"
+      ? record.runtimeProfileRef
+      : "native";
+  const agentRef = typeof targetInput?.agentRef === "string" ? targetInput.agentRef : null;
+  const selected = targets.find((target) => (
+    target.runtimeProfileRef === runtimeProfileRef && (target.agentRef ?? null) === agentRef
+  )) ?? targets.find((target) => target.runtimeProfileRef === runtimeProfileRef);
+  return {
+    ...record,
+    targetId: typeof selected?.targetId === "string"
+      ? selected.targetId
+      : `target:mock:${runtimeProfileRef}`
+  };
+}
+
 function managedAgentRecord(input: {
   name?: string;
   description?: string;
@@ -389,10 +614,26 @@ vi.mock("@psychevo/client", async () => {
           thread: threadId
             ? {
                 id: threadId,
-                backend: { kind: "psychevo" as const, sessionHandle: threadId, runtimeRef: "native" },
+                backend: { kind: "native" as const, sessionHandle: threadId, runtimeRef: "native" },
                 sourceKey: `source-${threadId}`
               }
             : null
+        };
+      }
+      if (method === "thread/history/read") {
+        const record = params as { threadId: string; cursor?: string | null; limit?: number | null };
+        const entries = gatewayMock.snapshot.entries as Array<{ id: string }>;
+        const start = record.cursor
+          ? Math.max(0, entries.findIndex((entry) => entry.id === record.cursor) + 1)
+          : 0;
+        const limit = record.limit ?? 200;
+        const page = entries.slice(start, start + limit);
+        const nextCursor = start + page.length < entries.length ? page.at(-1)?.id ?? null : null;
+        return {
+          threadId: record.threadId,
+          history: gatewayMock.snapshot.history,
+          entries: page,
+          nextCursor
         };
       }
       if (method === "thread/list") {
@@ -417,31 +658,14 @@ vi.mock("@psychevo/client", async () => {
         };
       }
       if (method === "thread/start") {
+        if (gatewayMock.threadStart) {
+          return gatewayMock.threadStart(params);
+        }
         return {
           ...gatewayMock.snapshot,
           thread: null,
           entries: [],
           activity: { ...gatewayMock.snapshot.activity }
-        };
-      }
-      if (method === "thread/compact/start") {
-        if (gatewayMock.compactStart) {
-          return gatewayMock.compactStart(params);
-        }
-        const record = params as { threadId?: string | null } | undefined;
-        return {
-          accepted: true,
-          threadId: record?.threadId ?? gatewayMock.snapshot.thread?.id ?? null,
-          compacted: false,
-          reason: "manual",
-          message: "not enough messages to compact",
-          checkpoint: null,
-          tokensBefore: null,
-          tokensAfter: null,
-          summaryProvider: null,
-          summaryModel: null,
-          unavailable: false,
-          error: null
         };
       }
       if (method === "settings/read") {
@@ -619,7 +843,7 @@ vi.mock("@psychevo/client", async () => {
       }
       if (method === "agent/list") {
         return {
-          agents: gatewayMock.agentRecords.length > 0 ? gatewayMock.agentRecords : [defaultAgentRecord()],
+          agents: composerAgentRecords(),
           shadowedAgents: gatewayMock.shadowedAgentRecords,
           disabledAgents: gatewayMock.disabledAgentRecords,
           diagnostics: []
@@ -803,91 +1027,353 @@ vi.mock("@psychevo/client", async () => {
           }
         };
       }
-      if (method === "runtime/context/read") {
+      if (method === "thread/draft/prepare") {
+        const record = params as { targetId?: string; scope?: unknown };
+        const target = compatibleRuntimeTargets().find((candidate) => (
+          candidate.targetId === record.targetId
+        ));
+        if (!target) throw new Error("The selected Agent target is unavailable.");
+        const contextParams = {
+          threadId: null,
+          target: {
+            agentRef: target.agentRef ?? null,
+            runtimeProfileRef: target.runtimeProfileRef
+          },
+          scope: record.scope
+        };
+        const runtimeProfileRef = String(target.runtimeProfileRef);
         if (gatewayMock.runtimeContextRead) {
-          return gatewayMock.runtimeContextRead(params);
+          return {
+            context: canonicalMockThreadContext(
+              await gatewayMock.runtimeContextRead(contextParams),
+              contextParams
+            )
+          };
+        }
+        const profile = findMockRuntimeProfile(runtimeProfileRef);
+        const acp = profile?.runtime === "acp";
+        const model = runtimeProfileRef === "codex" ? "gpt-fixture" : "openai/gpt-fixture";
+        const context: Record<string, unknown> = {
+          targetId: target.targetId,
+          runtimeProfileRef,
+          selectionState: "draft",
+          profiles: gatewayMock.runtimeProfileRecords,
+          binding: null,
+          controls: acp
+            ? [
+                {
+                  id: "model",
+                  label: "Model",
+                  surfaceRole: "model",
+                  mutability: "selectable",
+                  enabled: true,
+                  required: false,
+                  unavailableReason: null,
+                  effectiveValue: model,
+                  effectiveSource: "runtimeObserved",
+                  isDefault: false,
+                  choices: [
+                    { value: model, label: model, description: null },
+                    { value: "openai/second-fixture", label: "Second fixture", description: null }
+                  ],
+                  dependsOn: null,
+                  applyScope: "session",
+                  stability: "stable",
+                  channelSafe: true,
+                  capabilityRevision: typeof profile?.capabilityRevision === "string"
+                    ? profile.capabilityRevision
+                    : "1"
+                },
+                {
+                  id: "mode",
+                  label: "Session Mode",
+                  surfaceRole: "mode",
+                  mutability: "selectable",
+                  enabled: true,
+                  required: false,
+                  unavailableReason: null,
+                  effectiveValue: "build",
+                  effectiveSource: "runtimeObserved",
+                  isDefault: false,
+                  choices: [
+                    { value: "build", label: "build", description: null },
+                    { value: "plan", label: "plan", description: null }
+                  ],
+                  dependsOn: null,
+                  applyScope: "session",
+                  stability: "stable",
+                  channelSafe: true,
+                  capabilityRevision: typeof profile?.capabilityRevision === "string"
+                    ? profile.capabilityRevision
+                    : "1"
+                }
+              ]
+            : nativeThreadControls(),
+          stability: "stable",
+          capabilities: [{ id: "turn.start", enabled: true, stability: "stable", unavailableReason: null }],
+          compatibleTargets: compatibleRuntimeTargets(),
+          inputCapabilities: [{ kind: "text", enabled: true, unavailableReason: null }],
+          actions: [],
+          sendability: { allowed: true, reason: null, recoveryAction: null },
+          history: { owner: acp ? "agent" : "psychevo", fidelity: "unavailable", cursor: null, hint: null },
+          pendingInteractions: [],
+          contextRevision: `context-draft-${runtimeProfileRef}`,
+          controlRevision: `controls-draft-${runtimeProfileRef}`
+        };
+        return { context };
+      }
+      if (method === "thread/context/read") {
+        if (gatewayMock.runtimeContextRead) {
+          return canonicalMockThreadContext(await gatewayMock.runtimeContextRead(params), params);
+        }
+        const requestedRuntimeRef = typeof (params as { target?: { runtimeProfileRef?: unknown } | null } | undefined)?.target?.runtimeProfileRef === "string"
+          ? String((params as { target: { runtimeProfileRef: string } }).target.runtimeProfileRef)
+          : "native";
+        const requestedProfile = findMockRuntimeProfile(requestedRuntimeRef);
+        const requestedThreadId = typeof (params as { threadId?: unknown } | undefined)?.threadId === "string"
+          ? String((params as { threadId: string }).threadId)
+          : null;
+        const running = gatewayMock.snapshot.activity.running;
+        const activeTurn = Boolean(gatewayMock.snapshot.activity.activeTurnId);
+        const compatibleTargets = compatibleRuntimeTargets();
+        const requestedTarget = (params as { target?: { agentRef?: unknown; runtimeProfileRef?: unknown } | null } | undefined)?.target;
+        const requestedAgentRef = typeof requestedTarget?.agentRef === "string"
+          ? requestedTarget.agentRef
+          : null;
+        const selectedTarget = compatibleTargets.find((target) => (
+          target.runtimeProfileRef === requestedRuntimeRef &&
+          (target.agentRef ?? null) === requestedAgentRef
+        )) ?? compatibleTargets.find((target) => target.runtimeProfileRef === requestedRuntimeRef);
+        const selectedProfileReady = compatibleTargets.some((target) => (
+          target.runtimeProfileRef === requestedRuntimeRef && target.ready === true
+        ));
+        if (requestedProfile?.runtime === "acp") {
+          const effectiveModel = requestedRuntimeRef === "codex"
+            ? "gpt-fixture"
+            : "openai/gpt-fixture";
+          return {
+            targetId: selectedTarget?.targetId ?? `target:mock:${requestedRuntimeRef}`,
+            runtimeProfileRef: requestedRuntimeRef,
+            selectionState: "draft",
+            profiles: gatewayMock.runtimeProfileRecords,
+            binding: null,
+            controls: [{
+              id: "model",
+              label: "Model",
+              surfaceRole: "model",
+              mutability: "selectable",
+              enabled: true,
+              required: false,
+              unavailableReason: null,
+              effectiveValue: effectiveModel,
+              effectiveSource: "runtimeDefault",
+              isDefault: true,
+              choices: [{ value: effectiveModel, label: effectiveModel, description: null }],
+              dependsOn: null,
+              applyScope: "turnDraft",
+              stability: "stable",
+              channelSafe: gatewayMock.acpChannelModelSafe,
+              capabilityRevision: typeof requestedProfile.capabilityRevision === "string"
+                ? requestedProfile.capabilityRevision
+                : "1"
+            }],
+            stability: "stable",
+            capabilities: [{
+              id: "turn.start",
+              enabled: true,
+              stability: "stable",
+              unavailableReason: null
+            }],
+            compatibleTargets,
+            inputCapabilities: [
+              { kind: "text", enabled: true, unavailableReason: null },
+              { kind: "agentMention", enabled: true, unavailableReason: null }
+            ],
+            actions: requestedThreadId ? [{
+              id: "interrupt",
+              label: "Interrupt",
+              enabled: running,
+              stability: "stable",
+              channelSafe: true,
+              unavailableReason: running ? null : "No turn is currently running on this Thread."
+            }] : [],
+            sendability: {
+              allowed: selectedProfileReady,
+              reason: selectedProfileReady ? null : `${requestedRuntimeRef} has no compatible Agent Definition.`,
+              recoveryAction: selectedProfileReady ? null : "agent/select"
+            },
+            history: {
+              owner: requestedProfile.runtime === "acp" ? "agent" : "psychevo",
+              fidelity: "full",
+              cursor: null,
+              hint: null
+            },
+            pendingInteractions: [],
+            contextRevision: `context-${requestedRuntimeRef}`,
+            controlRevision: `controls-${requestedRuntimeRef}`
+          };
         }
         const native = findMockRuntimeProfile("native") ?? gatewayMock.runtimeProfileRecords[0];
         const capabilityRevision = typeof native?.capabilityRevision === "string" ? native.capabilityRevision : "1";
         return {
-          runtimeRef: "native",
+          targetId: selectedTarget?.targetId ?? "target:default:native",
+          runtimeProfileRef: "native",
           selectionState: "default",
           profiles: gatewayMock.runtimeProfileRecords,
           binding: null,
-          controls: [
-            {
-              id: "mode",
-              label: "Mode",
-              state: "selectable",
-              currentValue: "default",
-              choices: [
-                { value: "default", label: "Default", description: "Use the Runtime Profile default" },
-                { value: "plan", label: "Plan", description: "Plan before editing" }
-              ],
-              channelSafe: true,
-              capabilityRevision
-            }
+          controls: nativeThreadControls().map((control) => ({
+            ...control,
+            capabilityRevision: control.id === "mode" ? capabilityRevision : control.capabilityRevision
+          })),
+          stability: "stable",
+          capabilities: [{
+            id: "turn.start",
+            enabled: true,
+            stability: "stable",
+            unavailableReason: null
+          }],
+          compatibleTargets,
+          inputCapabilities: [
+            { kind: "text", enabled: true, unavailableReason: null },
+            { kind: "agentMention", enabled: true, unavailableReason: null }
           ],
-          activeSession: null
+          actions: requestedThreadId ? [
+            {
+              id: "interrupt",
+              label: "Interrupt",
+              enabled: running,
+              stability: "stable",
+              channelSafe: true,
+              unavailableReason: running ? null : "No turn is currently running on this Thread."
+            },
+            {
+              id: "steer",
+              label: "Steer",
+              enabled: activeTurn,
+              stability: "stable",
+              channelSafe: true,
+              unavailableReason: activeTurn ? null : "No turn is currently running on this Thread."
+            },
+            {
+              id: "compact",
+              label: "Compact context",
+              enabled: true,
+              stability: "stable",
+              channelSafe: true,
+              unavailableReason: null
+            }
+          ] : [],
+          sendability: gatewayMock.modelStatus === "resolved" && Boolean(gatewayMock.modelOverride ?? gatewayMock.model)
+            ? { allowed: true, reason: null, recoveryAction: null }
+            : {
+                allowed: false,
+                reason: "Select a provider/model before starting a conversation.",
+                recoveryAction: "control/model"
+              },
+          history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+          pendingInteractions: [],
+          contextRevision: "context-native",
+          controlRevision: "controls-native"
         };
       }
-      if (method === "runtime/control/set") {
+      if (method === "thread/control/set") {
         const record = params as {
           controlId?: string;
           value?: unknown;
+          targetId?: string;
+          threadId?: string | null;
+          scope?: unknown;
           expectedBindingRevision?: number;
           expectedCapabilityRevision?: string;
+          expectedContextRevision?: string;
+          expectedControlRevision?: string;
         };
-        return {
-          changed: false,
-          observed: true,
-          bindingRevision: record.expectedBindingRevision ?? 1,
-          control: {
-            id: record.controlId ?? "mode",
-            label: record.controlId === "model" ? "Model" : "Mode",
-            state: "readOnlyCurrent",
-            currentValue: record.value ?? null,
-            choices: [],
-            channelSafe: true,
-            capabilityRevision: record.expectedCapabilityRevision ?? "1"
+        if (record.controlId === "model") {
+          gatewayMock.model = typeof record.value === "string" && record.value.trim() ? record.value : null;
+          gatewayMock.modelStatus = gatewayMock.model ? "resolved" : "unconfigured";
+          gatewayMock.modelVariant = "none";
+          if (gatewayMock.model) {
+            gatewayMock.recentModels = [
+              gatewayMock.model,
+              ...gatewayMock.recentModels.filter((item) => item !== gatewayMock.model)
+            ];
           }
+        } else if (record.controlId === "reasoning" && typeof record.value === "string") {
+          gatewayMock.modelVariant = record.value;
+        }
+        const controls = nativeThreadControls();
+        const updatedControl = controls.find((control) => control.id === record.controlId);
+        const authoritativeControl = updatedControl ?? {
+          id: record.controlId ?? "mode",
+          label: record.controlId === "model" ? "Model" : "Mode",
+          surfaceRole: record.controlId === "model" ? "model" : "mode",
+          mutability: "selectable",
+          enabled: true,
+          required: false,
+          unavailableReason: null,
+          effectiveValue: record.value ?? null,
+          effectiveSource: "threadPreference",
+          isDefault: false,
+          choices: [],
+          dependsOn: null,
+          applyScope: "turnDraft",
+          stability: "stable",
+          channelSafe: true,
+          capabilityRevision: record.expectedCapabilityRevision ?? "1"
         };
-      }
-      if (method === "runtime/auth/action") {
-        const record = params as { runtimeRef?: string; action?: string; input?: { loginId?: string } | null };
-        if (record.runtimeRef === "codex" && record.action === "repair") {
-          return {
-            accepted: true,
-            status: "login_required",
-            message: "Codex requires managed account login.",
-            output: null
-          };
-        }
-        if (record.runtimeRef === "codex" && record.action === "login") {
-          return {
-            accepted: true,
-            status: "login_pending",
-            message: "Codex started a managed login flow.",
-            output: {
-              authUrl: "https://auth.example.test/codex",
-              loginId: "login-fixture",
-              userCode: "CODE-123"
+        const authoritativeControls = controls.some((control) => control.id === authoritativeControl.id)
+          ? controls.map((control) => control.id === authoritativeControl.id ? authoritativeControl : control)
+          : [...controls, authoritativeControl];
+        const targets = compatibleRuntimeTargets();
+        const selectedTarget = targets.find((target) => target.targetId === record.targetId)
+          ?? targets[0];
+        const runtimeProfileRef = selectedTarget?.runtimeProfileRef ?? "native";
+        const contextParams = {
+          threadId: record.threadId ?? null,
+          target: {
+            agentRef: selectedTarget?.agentRef ?? null,
+            runtimeProfileRef
+          },
+          scope: record.scope
+        };
+        const customContext = gatewayMock.runtimeContextRead
+          ? canonicalMockThreadContext(await gatewayMock.runtimeContextRead(contextParams), contextParams)
+          : null;
+        const context = customContext && typeof customContext === "object" && !Array.isArray(customContext)
+          ? {
+              ...customContext,
+              controls: authoritativeControls,
+              contextRevision: record.expectedContextRevision ?? "context-1",
+              controlRevision: record.expectedControlRevision ?? "controls-1"
             }
-          };
-        }
-        if (record.runtimeRef === "codex" && record.action === "cancel") {
-          return {
-            accepted: true,
-            status: "login_cancelled",
-            message: `Cancelled ${record.input?.loginId ?? "login"}.`,
-            output: null
-          };
-        }
+          : {
+              targetId: selectedTarget?.targetId ?? `target:mock:${runtimeProfileRef}`,
+              runtimeProfileRef,
+              selectionState: "default",
+              profiles: gatewayMock.runtimeProfileRecords,
+              binding: null,
+              controls: authoritativeControls,
+              stability: "stable",
+              capabilities: [],
+              compatibleTargets: targets,
+              inputCapabilities: [{ kind: "text", enabled: true, unavailableReason: null }],
+              actions: [],
+              sendability: gatewayMock.modelStatus === "resolved" && Boolean(gatewayMock.modelOverride ?? gatewayMock.model)
+                ? { allowed: true, reason: null, recoveryAction: null }
+                : { allowed: false, reason: "Select a provider/model before starting a conversation.", recoveryAction: "control/model" },
+              history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+              pendingInteractions: [],
+              contextRevision: record.expectedContextRevision ?? "context-1",
+              controlRevision: record.expectedControlRevision ?? "controls-1"
+            };
         return {
-          accepted: false,
-          status: "cli_required",
-          message: "Run `opencode auth login`, then Doctor again.",
-          output: null
+          changed: true,
+          status: "stored",
+          bindingRevision: record.expectedBindingRevision ?? 1,
+          contextRevision: record.expectedContextRevision ?? "context-1",
+          controlRevision: record.expectedControlRevision ?? "controls-1",
+          control: authoritativeControl,
+          context
         };
       }
       if (method === "runtime/profile/list") {
@@ -905,10 +1391,7 @@ vi.mock("@psychevo/client", async () => {
           runtime?: string;
           enabled?: boolean | null;
           label?: string | null;
-          command?: string | null;
-          args?: string[];
           backendRef?: string | null;
-          env?: Record<string, string>;
           defaultModel?: string | null;
           defaultMode?: string | null;
           defaultAgent?: string | null;
@@ -925,10 +1408,8 @@ vi.mock("@psychevo/client", async () => {
           label: normalizeNullableString(record.label) ?? String(existing?.label ?? id),
           generated: false,
           configured: true,
-          command: normalizeNullableString(record.command) ?? existing?.command ?? null,
-          args: record.args ?? existing?.args ?? [],
           backendRef: normalizeNullableString(record.backendRef) ?? existing?.backendRef ?? null,
-          provenance: (record.runtime ?? existing?.runtime) === "acp" ? "ACP" : (record.runtime ?? existing?.runtime) === "native" ? "Native" : "Direct",
+          provenance: (record.runtime ?? existing?.runtime) === "acp" ? "ACP" : (record.runtime ?? existing?.runtime) === "native" ? "Native" : "Unsupported",
           profileRevision: incrementRevision(existing?.profileRevision),
           capabilityRevision: incrementRevision(existing?.capabilityRevision),
           defaultModel: normalizeNullableString(record.defaultModel) ?? existing?.defaultModel ?? null,
@@ -937,9 +1418,6 @@ vi.mock("@psychevo/client", async () => {
           approvalMode: normalizeNullableString(record.approvalMode) ?? existing?.approvalMode ?? null,
           sandbox: normalizeNullableString(record.sandbox) ?? existing?.sandbox ?? null,
           workspaceRoots: record.workspaceRoots ?? existing?.workspaceRoots ?? [],
-          envKeys: Object.keys(record.env ?? {}).length > 0
-            ? Object.keys(record.env ?? {})
-            : existing?.envKeys ?? [],
           optionKeys: existing?.optionKeys ?? [],
           sourceTargets: [record.target ?? "profile"],
           health: existing?.health ?? runtimeProfileHealth("unchecked", "Not checked"),
@@ -959,14 +1437,12 @@ vi.mock("@psychevo/client", async () => {
         const record = params as { id?: string; target?: "project" | "profile"; enabled?: boolean };
         const existing = findMockRuntimeProfile(record.id) ?? {
           id: record.id ?? "runtime",
-          runtime: record.id ?? "native",
+          runtime: record.id === "native" ? "native" : "acp",
           label: record.id ?? "Runtime",
           generated: true,
           configured: false,
-          command: null,
-          args: [],
-          backendRef: null,
-          provenance: "Direct",
+          backendRef: record.id === "native" ? null : record.id ?? null,
+          provenance: record.id === "native" ? "Native" : "ACP",
           profileRevision: "1",
           capabilityRevision: "1",
           defaultModel: null,
@@ -975,7 +1451,6 @@ vi.mock("@psychevo/client", async () => {
           approvalMode: null,
           sandbox: null,
           workspaceRoots: [],
-          envKeys: [],
           optionKeys: [],
           sourceTargets: [],
           health: runtimeProfileHealth("unchecked", "Not checked"),
@@ -1009,65 +1484,6 @@ vi.mock("@psychevo/client", async () => {
           id: record.id ?? "runtime",
           path: record.target === "project" ? "/tmp/project/.psychevo/config.toml" : "/tmp/profile/config.toml",
           target: record.target ?? "profile"
-        };
-      }
-      if (method === "runtime/health/check") {
-        const record = params as { runtimeRef?: string };
-        const profile = findMockRuntimeProfile(record.runtimeRef) ?? {
-          id: record.runtimeRef ?? "native",
-          label: record.runtimeRef ?? "Native Runtime"
-        };
-        const updated = {
-          ...profile,
-          health: runtimeProfileHealth("ready", `${profile.label ?? profile.id} is available`)
-        };
-        upsertMockRuntimeProfile(updated);
-        return updated;
-      }
-      if (method === "runtime/snapshot") {
-        return {
-          profiles: gatewayMock.runtimeProfileRecords,
-          agents: [
-            { name: "opencode-build", label: "OpenCode build", runtimeRef: "opencode", nativeId: "build", mode: "build" },
-            { name: "opencode-plan", label: "OpenCode plan", runtimeRef: "opencode", nativeId: "plan", mode: "plan" }
-          ]
-        };
-      }
-      if (method.startsWith("runtime/session/") && gatewayMock.runtimeSessionRequest) {
-        return await gatewayMock.runtimeSessionRequest(method, params);
-      }
-      if (method === "runtime/session/list") {
-        const record = params as { runtimeRef?: string | null } | undefined;
-        const runtimeRef = record?.runtimeRef?.trim() || "native";
-        return {
-          runtimeRef,
-          supported: runtimeRef === "native",
-          sessions: runtimeRef === "native"
-            ? gatewayMock.sessionSummaries.map((session) => ({
-                sessionHandle: session.id,
-                threadId: session.id,
-                title: session.title,
-                archived: false,
-                updatedAtMs: session.updatedAtMs,
-                parentThreadId: null,
-                dedupKey: session.id,
-                fidelity: "full",
-                ownership: "readWrite",
-                actions: ["resume", "rename", "archive", "delete", "fork"]
-              }))
-            : [],
-          nextCursor: null
-        };
-      }
-      if (method.startsWith("runtime/session/")) {
-        const record = params as { runtimeRef?: string | null; sessionHandle?: string | null };
-        return {
-          runtimeRef: record.runtimeRef ?? "native",
-          sessionHandle: record.sessionHandle ?? "thread-1",
-          supported: record.runtimeRef == null || record.runtimeRef === "native",
-          changed: true,
-          session: null,
-          message: null
         };
       }
       if (method === "backend/list") {
@@ -1135,6 +1551,18 @@ vi.mock("@psychevo/client", async () => {
             { name: "enabled", ok: true, message: "backend enabled", path: null },
             { name: "command", ok: true, message: "command resolved", path: "/usr/bin/opencode" }
           ]
+        };
+      }
+      if (method === "backend/install" || method === "backend/repair" || method === "backend/upgrade") {
+        const record = params as { id?: string };
+        const operation = method.slice("backend/".length);
+        return {
+          id: record.id ?? "codex",
+          operation,
+          changed: true,
+          status: "ready",
+          path: "/tmp/psychevo/runtime-adapters/codex-acp/1.1.2",
+          message: "Managed Codex ACP 1.1.2 is ready."
         };
       }
       if (method === "channel/list") {
@@ -1769,44 +2197,6 @@ vi.mock("@psychevo/client", async () => {
         gatewayMock.automationRecords = gatewayMock.automationRecords.filter((automation) => automation.id !== automationId);
         return { deleted: true, automationId };
       }
-      if (method === "runtime/options") {
-        const record = params as { runtimeRef?: string | null; runtimeSessionId?: string | null } | undefined;
-        const runtimeRef = record?.runtimeRef?.trim() || "native";
-        return {
-          runtimeRef,
-          runtimeSessionId: record?.runtimeSessionId ?? `${runtimeRef}-session`,
-          options: runtimeRef === "native"
-            ? [
-                {
-                  id: "mode",
-                  name: "Mode",
-                  description: null,
-                  category: "mode",
-                  type: "select",
-                  currentValue: "default",
-                  values: [
-                    { value: "default", name: "default", description: null },
-                    { value: "plan", name: "plan", description: null }
-                  ]
-                }
-              ]
-            : [
-                {
-                  id: "mode",
-                  name: "Mode",
-                  description: "OpenCode mode",
-                  category: "mode",
-                  type: "select",
-                  currentValue: "build",
-                  values: [
-                    { value: "build", name: "build", description: null },
-                    { value: "plan", name: "plan", description: null },
-                    { value: "review", name: "Review", description: null }
-                  ]
-                }
-              ]
-        };
-      }
       if (method === "command/list") {
         return { commands: gatewayMock.commandList, hiddenDynamic: 0 };
       }
@@ -1873,7 +2263,7 @@ vi.mock("@psychevo/client", async () => {
           context: {
             available: hasThread,
             label: hasThread ? "200/1.0k (20.0%)" : "No active session",
-            status: hasThread ? "provider_usage" : "unavailable",
+            status: hasThread ? "exact" : "unavailable",
             usedTokens: hasThread ? 200 : 0,
             contextLimit: hasThread ? 1000 : null,
             percent: hasThread ? 20 : null,
@@ -1950,19 +2340,67 @@ vi.mock("@psychevo/client", async () => {
         return gatewayMock.completionResult;
       }
       if (method === "turn/start") {
+        if (gatewayMock.turnStart) {
+          return gatewayMock.turnStart(params);
+        }
         const record = params && typeof params === "object" && !Array.isArray(params)
-          ? params as { threadId?: string | null }
+          ? params as {
+              threadId?: string | null;
+              target?: { runtimeProfileRef?: string | null } | null;
+            }
           : {};
-        return { accepted: true, threadId: record.threadId ?? "thread-1" };
+        const threadId = record.threadId ?? "thread-1";
+        const runtimeRef = record.target?.runtimeProfileRef ?? "native";
+        return {
+          accepted: true,
+          threadId,
+          turnId: `turn:${threadId}`,
+          thread: {
+            id: threadId,
+            backend: {
+              kind: runtimeRef === "native" ? "native" : "acp",
+              runtimeRef,
+              sessionHandle: null
+            },
+            sourceKey: null
+          }
+        };
       }
-      if (method === "turn/steer") {
-        return gatewayMock.turnSteer(params);
+      if (method === "thread/action/run") {
+        if (gatewayMock.threadActionRun) {
+          return gatewayMock.threadActionRun(params);
+        }
+        const record = params as {
+          threadId: string;
+          action: { kind: "compact" | "interrupt" | "steer" };
+        };
+        if (record.action.kind === "compact") {
+          return {
+            kind: "compact",
+            threadId: record.threadId,
+            result: {
+              accepted: true,
+              threadId: record.threadId,
+              compacted: false,
+              reason: "manual",
+              message: "not enough messages to compact",
+              checkpoint: null,
+              tokensBefore: null,
+              tokensAfter: null,
+              summaryProvider: null,
+              summaryModel: null,
+              unavailable: false,
+              error: null
+            }
+          };
+        }
+        if (record.action.kind === "steer") {
+          return { kind: "steer", threadId: record.threadId, accepted: true };
+        }
+        return { kind: "interrupt", threadId: record.threadId, interrupted: true, cleared: 0 };
       }
-      if (method === "permission/respond") {
-        return gatewayMock.permissionRespond(params);
-      }
-      if (method === "clarify/respond") {
-        return gatewayMock.clarifyRespond(params);
+      if (method === "thread/interaction/respond") {
+        return gatewayMock.threadInteractionRespond(params);
       }
       if (method === "terminal/start") {
         return { terminalId: "terminal-1", cwd: gatewayMock.scope.cwd, pid: null };
@@ -1976,6 +2414,7 @@ vi.mock("@psychevo/client", async () => {
 
   return {
     GatewayClient,
+    ThreadController: actual.ThreadController,
     acceptThreadTurn: actual.acceptThreadTurn,
     appendOptimisticPrompt: (current: unknown, text: string) => {
       gatewayMock.optimisticLog.push(text);

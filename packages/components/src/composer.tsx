@@ -1,10 +1,11 @@
-import { ArrowUp, Bot, Command, FileText, Folder, Image as ImageIcon, Settings2, Sparkles, X, Plus } from "lucide-react";
+import { ArrowUp, Bot, Command, FileText, Folder, Image as ImageIcon, Paperclip, Settings2, Sparkles, X, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { CompletionItem, CompletionListResult, GatewayMention, PendingAction } from "@psychevo/protocol";
 import { IconButton, Switch } from "./primitives";
 
 export interface ComposerProps {
   addMenuOptions?: ReactNode;
+  attachmentUnavailableReason?: string | null;
   attachments?: ComposerAttachmentView[] | undefined;
   completionProvider?: (text: string, cursor: number) => Promise<CompletionListResult>;
   disabled?: boolean;
@@ -16,6 +17,7 @@ export interface ComposerProps {
   preActionControls?: ReactNode;
   promptSubmitBlockReason?: string | undefined;
   promptSubmitDisabled?: boolean;
+  promptTextUnavailableReason?: string | null;
   requestPanel?: ReactNode;
   rightControls?: ReactNode;
   running: boolean;
@@ -48,6 +50,7 @@ export interface ComposerAttachmentView {
 
 export function Composer({
   addMenuOptions,
+  attachmentUnavailableReason,
   attachments,
   completionProvider,
   disabled,
@@ -59,6 +62,7 @@ export function Composer({
   preActionControls,
   promptSubmitBlockReason,
   promptSubmitDisabled = false,
+  promptTextUnavailableReason,
   requestPanel,
   rightControls,
   running,
@@ -95,6 +99,10 @@ export function Composer({
   const planMode = planModeAvailable && mode === "plan";
   const attachmentItems = attachments ?? [];
   const hasPromptPayload = Boolean(trimmed) || attachmentItems.length > 0;
+  const promptTextBlocked = Boolean(trimmed) && Boolean(promptTextUnavailableReason);
+  const effectivePromptBlockReason = promptTextBlocked
+    ? promptTextUnavailableReason ?? undefined
+    : promptSubmitBlockReason;
   const slashCommandCandidate = Boolean(trimmed)
     && trimmed.startsWith("/")
     && !trimmed.includes("\n")
@@ -201,7 +209,7 @@ export function Composer({
     }
     if (running && steerAvailable && turnMode === "steer" && attachmentItems.length === 0) {
       onSteer(trimmed);
-    } else if (promptSubmitDisabled) {
+    } else if (promptSubmitDisabled || promptTextBlocked) {
       return;
     } else {
       onSubmit(trimmed, activeMentionsForDraft(draft, mentionsRef.current));
@@ -367,8 +375,8 @@ export function Composer({
     <button
       aria-label={shellMode ? "Run shell command" : "Send message"}
       className="pevo-primaryButton pevo-sendButton"
-      disabled={disabled || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload || (promptSubmitDisabled && !slashCommandCandidate))}
-      title={!shellMode && promptSubmitDisabled && !slashCommandCandidate ? promptSubmitBlockReason : undefined}
+      disabled={disabled || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload || ((promptSubmitDisabled || promptTextBlocked) && !slashCommandCandidate))}
+      title={!shellMode && (promptSubmitDisabled || promptTextBlocked) && !slashCommandCandidate ? effectivePromptBlockReason : undefined}
       type="submit"
     >
       <ArrowUp size={17} aria-hidden />
@@ -510,9 +518,11 @@ export function Composer({
                     onAttach?.();
                   }}
                   role="menuitem"
+                  title={attachmentUnavailableReason ?? undefined}
                   type="button"
                 >
-                  Add images and files
+                  <span aria-hidden="true" className="pevo-addRowIcon"><Paperclip size={14} /></span>
+                  <span>Add images and files</span>
                 </button>
                 {modeControlVisible && (
                   <Switch

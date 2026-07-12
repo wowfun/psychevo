@@ -34,11 +34,12 @@ describe("Desktop open-thread runtime wiring", () => {
     expect(bridge.openThreadInWorkbench).toHaveBeenCalledWith("thread-floating");
   });
 
-  it("reads shared Workbench controls for Floating turns", async () => {
+  it("uses the canonical Thread Context target for Floating turns", async () => {
     const { createDesktopFloatingRuntime } = await import("./runtime");
     const runtime = createDesktopFloatingRuntime("floating");
     const client = {
-      request: vi.fn().mockResolvedValue(settingsReadResult())
+      request: vi.fn()
+        .mockResolvedValueOnce(threadContext())
     };
 
     const controls = await runtime.turnControls?.({
@@ -56,18 +57,19 @@ describe("Desktop open-thread runtime wiring", () => {
       threadId: "thread-floating"
     });
 
-    expect(client.request).toHaveBeenCalledWith("settings/read", {
-      cwd: "/repo",
-      threadId: "thread-floating"
+    expect(client.request).toHaveBeenCalledWith("thread/context/read", {
+      threadId: "thread-floating",
+      target: null,
+      scope: expect.objectContaining({ cwd: "/repo" })
     });
     expect(controls).toMatchObject({
-      agentName: "review",
-      mode: "plan",
-      model: "deepseek/deepseek-chat",
-      permissionMode: "ask",
-      reasoningEffort: "medium",
-      runtimeOptions: {},
-      runtimeRef: "native"
+      context: { targetId: "target:review:native" },
+      controls: {
+        targetId: "target:review:native",
+        turnOverrides: {},
+        expectedContextRevision: "context-1",
+        expectedControlRevision: "controls-1"
+      },
     });
   });
 
@@ -85,32 +87,32 @@ describe("Desktop open-thread runtime wiring", () => {
   });
 });
 
-function settingsReadResult() {
+function threadContext() {
   return {
-    channels: { channels: [] },
-    controls: {
-      agent: "review",
-      mode: "plan",
-      modeOptions: ["default", "plan"],
-      model: "deepseek/deepseek-chat",
-      modelDetails: [],
-      modelError: null,
-      modelOptions: ["deepseek/deepseek-chat"],
-      modelStatus: "resolved",
-      permissionMode: "ask",
-      permissionModeOptions: ["default", "ask"],
-      recentModels: [],
-      runtimeRef: "native",
-      variant: "medium",
-      variantOptions: ["none", "medium"]
-    },
-    cwd: "/repo",
-    memoryResources: {},
-    project: {
-      branch: null,
-      displayPath: "/repo",
-      path: "/repo"
-    },
-    secrets: {}
+    targetId: "target:review:native",
+    runtimeProfileRef: "native",
+    selectionState: "bound",
+    profiles: [],
+    binding: { runtimeRef: "native" },
+    controls: [],
+    stability: "stable",
+    capabilities: [],
+    compatibleTargets: [{
+      targetId: "target:review:native",
+      agentRef: "review",
+      runtimeProfileRef: "native",
+      agentLabel: "review",
+      profileLabel: "Psychevo (Native)",
+      label: "review · Psychevo (Native)",
+      ready: true,
+      unavailableReason: null
+    }],
+    inputCapabilities: [],
+    actions: [],
+    sendability: { allowed: true, reason: null, recoveryAction: null },
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+    pendingInteractions: [],
+    contextRevision: "context-1",
+    controlRevision: "controls-1"
   };
 }

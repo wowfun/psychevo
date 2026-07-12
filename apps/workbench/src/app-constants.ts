@@ -6,6 +6,7 @@ export const EMPTY_SNAPSHOT: ThreadSnapshot = {
   source: { kind: "web", rawId: "pending", lifetime: "persistent", rawIdentity: null, visibleName: null },
   scope: scopeForCwd(""),
   thread: null,
+  history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
   entries: [],
   activity: idleActivity(),
   pendingActions: []

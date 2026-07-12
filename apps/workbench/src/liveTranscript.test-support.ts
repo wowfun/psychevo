@@ -22,12 +22,13 @@ export function snapshot(): ThreadSnapshot {
     thread: {
       id: "thread-1",
       backend: {
-        kind: "psychevo",
+        kind: "native",
         sessionHandle: "thread-1",
         runtimeRef: "native"
       },
       sourceKey: "source-1"
     },
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries: [],
     activity: {
       running: true,

@@ -8,9 +8,9 @@ import {
   WorkspaceDiffResultSchema,
   type GatewayMention,
   type GatewayRequestScope,
-  type RuntimeOptionsResult,
   type SessionSummary,
   type SettingsReadResult,
+  type ThreadContextReadResult,
   type ThreadSnapshot,
   type WorkspaceDiffResult
 } from "@psychevo/protocol";
@@ -24,11 +24,10 @@ import {
 } from "./data";
 import {
   formatRuntimeModeValues,
-  isRuntimeModeOption,
   normalizeRequestedRuntimeMode,
   projectRuntimeModeOption,
-  resolvePeerRuntimeMode,
-  runtimeModeCommandValues
+  runtimeModeCommandValues,
+  type RuntimeModeOption
 } from "./runtime-controls";
 import type {
   CommandAlternateAction,
@@ -42,6 +41,11 @@ import type {
   RightWorkspaceTabKind
 } from "./types";
 import type { PendingDetachedShell } from "./viewGuard";
+import {
+  enabledThreadAction,
+  snapshotThreadApplicationTarget,
+  threadActionDescriptor
+} from "./thread-application";
 
 type RefreshSnapshot = (
   nextClient?: GatewayClient | null,
@@ -68,18 +72,15 @@ type CommandActionsParams = {
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
-  runtimeModeOption: RuntimeOptionsResult["options"][number] | null;
-  runtimeOptionsError: string | null;
-  runtimeSessionId: string | null;
-  selectedRuntimeMode: string;
-  selectedRuntimeRef: string;
+  runtimeModeOption: RuntimeModeOption | null;
+  runtimeContext: ThreadContextReadResult | null;
   settings: SettingsReadResult | undefined;
   snapshot: ThreadSnapshot;
   viewEpochRef: MutableRefObject<number>;
-  workMode: string;
   workspaceDiff: WorkspaceDiffResult | null;
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
+  changeRuntimeMode(value: string): Promise<void>;
   handleAttachment(): Promise<void>;
   openReviewTab(diff: WorkspaceDiffResult, path?: string | null): void;
   openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch?: Partial<RightWorkspaceTab>, forceNew?: boolean): void;
@@ -98,12 +99,7 @@ type CommandActionsParams = {
   setDraftSession(value: null): void;
   setError: Dispatch<SetStateAction<string | null>>;
   setMobilePanel: Dispatch<SetStateAction<"history" | "transcript" | "status">>;
-  setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
-  setRuntimeOptionsResult: Dispatch<SetStateAction<RuntimeOptionsResult | null>>;
-  setRuntimeSessionId: Dispatch<SetStateAction<string | null>>;
-  setSelectedRuntimeMode: Dispatch<SetStateAction<string>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
-  setWorkMode: Dispatch<SetStateAction<string>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   startNewThread(cwd?: string): Promise<void>;
   submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[], displayText?: string | null): Promise<void>;
@@ -239,71 +235,12 @@ export function createCommandActions(params: CommandActionsParams) {
       return false;
     }
     const requested = match[1]?.trim() ?? "";
-    if (params.selectedRuntimeRef === "native") {
-      if (!requested) {
-        const feedback = {
-          accepted: true,
-          command,
-          message: `Current Psychevo mode: ${params.workMode}. Available: default, plan.`,
-          feedbackAnchor: trigger
-        } satisfies CommandFeedback;
-        params.setCommandFeedback(feedback);
-        routeCommandFeedback(feedback, trigger);
-        return true;
-      }
-      if (!["default", "plan"].includes(requested)) {
-        const feedback = {
-          accepted: false,
-          command,
-          message: `Unknown Psychevo mode: ${requested}. Available: default, plan.`,
-          feedbackAnchor: trigger
-        } satisfies CommandFeedback;
-        params.setCommandFeedback(feedback);
-        routeCommandFeedback(feedback, trigger);
-        return true;
-      }
-      params.setWorkMode(requested);
-      const feedback = {
-        accepted: true,
-        command,
-        message: `Psychevo mode set to ${requested}.`,
-        feedbackAnchor: trigger
-      } satisfies CommandFeedback;
-      params.setCommandFeedback(feedback);
-      routeCommandFeedback(feedback, trigger);
-      return true;
-    }
-
-    let modeOption = params.runtimeModeOption;
-    if (!modeOption && params.client) {
-      try {
-        const result = await params.client.request("runtime/options", {
-          runtimeRef: params.selectedRuntimeRef,
-          runtimeSessionId: params.runtimeSessionId,
-          scope: commandScope(),
-          threadId: params.snapshot.thread?.id ?? null
-        });
-        params.setRuntimeOptionsResult(result);
-        params.setRuntimeSessionId(result.runtimeSessionId ?? null);
-        modeOption = result.options.find(isRuntimeModeOption) ?? null;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const feedback = {
-          accepted: false,
-          command,
-          message: `Unable to load ${params.selectedRuntimeRef} modes: ${message}`,
-          feedbackAnchor: trigger
-        } satisfies CommandFeedback;
-        params.setCommandFeedback(feedback);
-        routeCommandFeedback(feedback, trigger);
-        return true;
-      }
-    }
+    const modeOption = params.runtimeModeOption;
     if (!modeOption) {
       const feedback = {
         accepted: false,
         command,
-        message: `${params.selectedRuntimeRef} does not expose runtime modes.`,
+        message: "The active Thread does not expose a mode control.",
         feedbackAnchor: trigger
       } satisfies CommandFeedback;
       params.setCommandFeedback(feedback);
@@ -312,12 +249,12 @@ export function createCommandActions(params: CommandActionsParams) {
     }
     const projected = projectRuntimeModeOption(modeOption);
     const values = runtimeModeCommandValues(projected);
-    const currentMode = resolvePeerRuntimeMode(projected, params.workMode, params.selectedRuntimeMode);
+    const currentMode = modeOption.currentValue || projected.defaultValue;
     if (!requested) {
       const feedback = {
         accepted: true,
         command,
-        message: `Current ${params.selectedRuntimeRef} mode: ${currentMode || "none"}. Available: ${formatRuntimeModeValues(projected)}.`,
+        message: `Current mode: ${currentMode || "none"}. Available: ${formatRuntimeModeValues(projected)}.`,
         feedbackAnchor: trigger
       } satisfies CommandFeedback;
       params.setCommandFeedback(feedback);
@@ -329,24 +266,18 @@ export function createCommandActions(params: CommandActionsParams) {
       const feedback = {
         accepted: false,
         command,
-        message: `Unknown ${params.selectedRuntimeRef} mode: ${requested}. Available: ${formatRuntimeModeValues(projected)}.`,
+        message: `Unknown mode: ${requested}. Available: ${formatRuntimeModeValues(projected)}.`,
         feedbackAnchor: trigger
       } satisfies CommandFeedback;
       params.setCommandFeedback(feedback);
       routeCommandFeedback(feedback, trigger);
       return true;
     }
-    if (projected.supportsPlan && (requestedMode === "plan" || requestedMode === projected.defaultValue)) {
-      params.setWorkMode(requestedMode === "plan" ? "plan" : "default");
-      params.setSelectedRuntimeMode("");
-    } else {
-      params.setWorkMode("default");
-      params.setSelectedRuntimeMode(requestedMode);
-    }
+    await params.changeRuntimeMode(requestedMode);
     const feedback = {
       accepted: true,
       command,
-      message: `${params.selectedRuntimeRef} mode set to ${requestedMode}.`,
+      message: `Mode set to ${requestedMode}.`,
       feedbackAnchor: trigger
     } satisfies CommandFeedback;
     params.setCommandFeedback(feedback);
@@ -362,15 +293,28 @@ export function createCommandActions(params: CommandActionsParams) {
         break;
       }
       case "threadCompactStart": {
-        const threadId = params.snapshot.thread?.id ?? null;
-        const result = await params.client?.request("thread/compact/start", {
-          scope: commandScope(),
-          threadId,
-          instructions: optionalStringField(record.instructions),
-          runtimeRef: params.selectedRuntimeRef
+        const target = snapshotThreadApplicationTarget(params.snapshot);
+        const descriptor = threadActionDescriptor(params.runtimeContext, "compact");
+        if (!params.client || !target || !descriptor?.enabled) {
+          const feedback = {
+            accepted: false,
+            command: "/compact",
+            message: descriptor?.unavailableReason ?? "Context compaction is not available for the active Thread.",
+            feedbackAnchor: "composer"
+          } satisfies NonNullable<CommandFeedback>;
+          params.setCommandFeedback(feedback);
+          params.setMobilePanel("transcript");
+          break;
+        }
+        const actionResult = await params.client.request("thread/action/run", {
+          ...target,
+          action: {
+            kind: "compact",
+            instructions: optionalStringField(record.instructions)
+          }
         });
-        const compact = asRecord(result);
-        const compactThreadId = optionalStringField(compact.threadId) ?? threadId;
+        const compact = actionResult.kind === "compact" ? asRecord(actionResult.result) : {};
+        const compactThreadId = actionResult.kind === "compact" ? actionResult.threadId : null;
         const feedback = {
           accepted: compact.accepted === true && compact.error == null,
           command: "/compact",
@@ -416,9 +360,21 @@ export function createCommandActions(params: CommandActionsParams) {
         break;
       case "turnInterrupt":
         {
-          const threadId = params.snapshot.thread?.id ?? null;
-          await params.client?.request("turn/interrupt", { threadId });
-          await params.refreshSnapshot(params.client, threadId ?? undefined, undefined, true, params.viewEpochRef.current);
+          const target = snapshotThreadApplicationTarget(params.snapshot);
+          if (!params.client || !target || !enabledThreadAction(params.runtimeContext, "interrupt")) {
+            params.setCommandFeedback({
+              accepted: false,
+              command: "interrupt",
+              message: "Interrupt is not available for the active Thread.",
+              feedbackAnchor: "composer"
+            });
+            break;
+          }
+          await params.client.request("thread/action/run", {
+            ...target,
+            action: { kind: "interrupt" }
+          });
+          await params.refreshSnapshot(params.client, target.threadId, undefined, true, params.viewEpochRef.current);
         }
         break;
       case "sessionUndo": {
@@ -472,13 +428,14 @@ export function createCommandActions(params: CommandActionsParams) {
       }
       case "steerPrompt": {
         const text = stringField(record.text).trim();
-        if (text && params.activity.activeTurnId) {
-          const result = await params.client?.request("turn/steer", {
-            expectedTurnId: params.activity.activeTurnId,
-            threadId: params.snapshot.thread?.id ?? null,
-            text
+        const target = snapshotThreadApplicationTarget(params.snapshot);
+        const steer = threadActionDescriptor(params.runtimeContext, "steer");
+        if (text && params.activity.activeTurnId && params.client && target && steer?.enabled) {
+          const result = await params.client.request("thread/action/run", {
+            ...target,
+            action: { kind: "steer", expectedTurnId: params.activity.activeTurnId, text }
           });
-          if (result?.accepted) {
+          if (result.kind === "steer" && result.accepted) {
             params.setSnapshot((current) => appendOptimisticPrompt(current, text));
             await params.refreshHistory();
           } else {
@@ -494,7 +451,9 @@ export function createCommandActions(params: CommandActionsParams) {
           params.setCommandFeedback({
             accepted: false,
             command: "/steer",
-            message: "/steer is only available while a turn is running.",
+            message: !params.activity.activeTurnId
+              ? "/steer is only available while a turn is running."
+              : steer?.unavailableReason ?? "The selected Runtime Profile does not support steering this turn.",
             feedbackAnchor: "composer"
           });
           params.setMobilePanel("transcript");

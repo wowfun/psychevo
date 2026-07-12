@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GatewayClient, type GatewayRawMessageHandler, type GatewayTransport } from "@psychevo/client";
+import type { ThreadContextReadResult } from "@psychevo/protocol";
 import { FloatingApp, type FloatingActivation, type FloatingRuntime } from "./FloatingApp";
 
 beforeEach(() => {
@@ -46,15 +47,20 @@ describe("FloatingApp Gateway flow", () => {
 
   it("passes shared turn controls into the floating turn/start request", async () => {
     const transport = new TestGatewayTransport();
+    const context = floatingThreadContext("review");
     const turnControls = vi.fn().mockResolvedValue({
-      agentName: "review",
-      mode: "plan",
-      model: "deepseek/deepseek-chat",
-      permissionMode: "ask",
-      reasoningEffort: "medium",
-      runtimeOptions: {},
-      runtimeRef: "native",
-      runtimeSessionId: "runtime-session"
+      context,
+      controls: {
+        targetId: context.targetId,
+        turnOverrides: {
+          mode: "plan",
+          model: "deepseek/deepseek-chat",
+          permissionMode: "ask",
+          reasoning: "medium"
+        },
+        expectedContextRevision: "context-1",
+        expectedControlRevision: "controls-1"
+      }
     });
     render(<FloatingApp runtime={floatingRuntime(transport, { turnControls })} />);
 
@@ -68,13 +74,15 @@ describe("FloatingApp Gateway flow", () => {
       threadId: null
     }));
     expect(transport.turnStartParams()[0]).toMatchObject({
-      agentName: "review",
-      mode: "plan",
-      model: "deepseek/deepseek-chat",
-      permissionMode: "ask",
-      reasoningEffort: "medium",
-      runtimeRef: "native",
-      runtimeSessionId: "runtime-session"
+      target: { agentRef: "review", runtimeProfileRef: "native" },
+      turnOverrides: {
+        mode: "plan",
+        model: "deepseek/deepseek-chat",
+        permissionMode: "ask",
+        reasoning: "medium"
+      },
+      expectedContextRevision: "context-1",
+      expectedControlRevision: "controls-1"
     });
     expect(screen.queryByText("Working")).toBeNull();
   });
@@ -251,6 +259,41 @@ function floatingRuntime(
   };
 }
 
+function floatingThreadContext(agentRef: string | null): ThreadContextReadResult {
+  const targetId = `target:${agentRef ?? "default"}:native`;
+  return {
+    targetId,
+    runtimeProfileRef: "native",
+    selectionState: "prospective",
+    profiles: [],
+    binding: null,
+    controls: [],
+    stability: "stable",
+    capabilities: [],
+    compatibleTargets: [{
+      targetId,
+      agentRef,
+      runtimeProfileRef: "native",
+      agentLabel: agentRef ?? "Default Agent",
+      profileLabel: "Psychevo (Native)",
+      label: `${agentRef ?? "Default Agent"} · Psychevo (Native)`,
+      ready: true,
+      unavailableReason: null
+    }],
+    inputCapabilities: ["text", "image", "embeddedContext"].map((kind) => ({
+      kind,
+      enabled: true,
+      unavailableReason: null
+    })),
+    actions: [],
+    sendability: { allowed: true, reason: null, recoveryAction: null },
+    history: { owner: "psychevo", fidelity: "unavailable", cursor: null, hint: null },
+    pendingInteractions: [],
+    contextRevision: "context-1",
+    controlRevision: "controls-1"
+  };
+}
+
 function activation(label: string): FloatingActivation {
   return {
     activationId: `activation-${label}`,
@@ -313,10 +356,23 @@ class TestGatewayTransport implements GatewayTransport {
       });
       return;
     }
+    if (request.method === "thread/context/read") {
+      this.respond(request.id, floatingThreadContext(null));
+      return;
+    }
     if (request.method === "turn/start") {
       const turnId = `turn-${++this.turnCount}`;
       const completedAtMs = Date.now();
-      this.respond(request.id, { accepted: true, threadId: "thread-floating" });
+      this.respond(request.id, {
+        accepted: true,
+        threadId: "thread-floating",
+        turnId,
+        thread: {
+          backend: { kind: "native", sessionHandle: "thread-floating", runtimeRef: "native" },
+          id: "thread-floating",
+          sourceKey: null
+        }
+      });
       window.setTimeout(() => {
         this.emit({
           jsonrpc: "2.0",
@@ -325,7 +381,7 @@ class TestGatewayTransport implements GatewayTransport {
             committedEntries: [transcriptEntry("assistant", `assistant:${turnId}`, this.finalAnswer, turnId, completedAtMs)],
             result: { finalAnswer: this.finalAnswer },
             thread: {
-              backend: { kind: "psychevo", sessionHandle: "thread-floating" },
+              backend: { kind: "native", sessionHandle: "thread-floating", runtimeRef: "native" },
               id: "thread-floating",
               sourceKey: null
             },
@@ -400,6 +456,10 @@ class PreResponseLiveGatewayTransport implements GatewayTransport {
       throw new Error("not connected");
     }
     const request = JSON.parse(data) as { id: string; method: string };
+    if (request.method === "thread/context/read") {
+      this.respond(request.id, floatingThreadContext(null));
+      return;
+    }
     if (request.method !== "turn/start") {
       this.respond(request.id, {});
       return;
@@ -439,7 +499,16 @@ class PreResponseLiveGatewayTransport implements GatewayTransport {
       throw new Error("turn/start was not requested");
     }
     this.resolved = true;
-    this.respond(this.pendingRequestId, { accepted: true, threadId: "thread-floating" });
+    this.respond(this.pendingRequestId, {
+      accepted: true,
+      threadId: "thread-floating",
+      turnId: "turn-live",
+      thread: {
+        backend: { kind: "native", sessionHandle: "thread-floating", runtimeRef: "native" },
+        id: "thread-floating",
+        sourceKey: null
+      }
+    });
   }
 
   turnStartResolved(): boolean {

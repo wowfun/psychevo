@@ -30,10 +30,3 @@ export function mergeModelCatalogOptionsIntoSettings(
     }
   };
 }
-
-export function modelTurnBlockReasonForControls(controls: SettingsReadResult["controls"]): string {
-  if (controls?.modelStatus === "error" && controls.modelError?.trim()) {
-    return `Model unavailable: ${controls.modelError.trim()}`;
-  }
-  return "Select a provider/model before starting a conversation.";
-}

@@ -1,16 +1,14 @@
 import { useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import {
-  applyGatewayEventToThreadSnapshot,
-  type GatewayClient
+  type GatewayClient,
+  type ThreadController
 } from "@psychevo/client";
 import type {
   GatewayEvent,
-  GatewayRequestScope,
-  ThreadSnapshot
+  GatewayRequestScope
 } from "@psychevo/protocol";
 import { applyTurnCompletionQueueBarrier } from "./liveTranscript";
 import { appendGatewayEventFeed, type GatewayThreadEventFeed } from "./gateway-event-feed";
-import { normalizeSnapshot } from "./session-utils";
 
 export const LIVE_EVENT_REFRESH_SETTLE_MS = 650;
 
@@ -27,7 +25,7 @@ type GatewayLiveEventsParams = {
   refreshSnapshot: RefreshSnapshot;
   selectedThreadIdRef: MutableRefObject<string | null>;
   setLatestGatewayEvent: Dispatch<SetStateAction<GatewayThreadEventFeed>>;
-  setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
+  threadController: ThreadController;
   viewEpochRef: MutableRefObject<number>;
 };
 
@@ -37,16 +35,16 @@ function pacedGatewayEvent(event: GatewayEvent): boolean {
     event.type === "entryCompleted";
 }
 
-export function applyWorkbenchGatewayEventSnapshot(
-  current: ThreadSnapshot,
-  event: GatewayEvent
-): ThreadSnapshot {
-  return normalizeSnapshot(applyGatewayEventToThreadSnapshot(current, event));
-}
-
 export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
   const gatewayEventQueueRef = useRef<GatewayEvent[]>([]);
   const gatewayEventRafRef = useRef<number | null>(null);
+
+  function reduceGatewayEvent(event: GatewayEvent) {
+    const application = params.threadController.applyGatewayEvent(event);
+    if (application.applied) {
+      params.selectedThreadIdRef.current = application.snapshot?.thread?.id ?? null;
+    }
+  }
 
   function scheduleGatewayEventFlush() {
     if (gatewayEventRafRef.current !== null) {
@@ -55,13 +53,7 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
     gatewayEventRafRef.current = window.requestAnimationFrame(() => {
       gatewayEventRafRef.current = null;
       const event = gatewayEventQueueRef.current.shift();
-      if (event) {
-        params.setSnapshot((current) => {
-          const next = applyWorkbenchGatewayEventSnapshot(current, event);
-          params.selectedThreadIdRef.current = next.thread?.id ?? null;
-          return next;
-        });
-      }
+      if (event) reduceGatewayEvent(event);
       if (gatewayEventQueueRef.current.length > 0) {
         scheduleGatewayEventFlush();
       }
@@ -76,19 +68,11 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
     publishGatewayEvent(event);
     if (event.type === "turnCompleted") {
       gatewayEventQueueRef.current = applyTurnCompletionQueueBarrier(gatewayEventQueueRef.current, event);
-      params.setSnapshot((current) => {
-        const next = applyWorkbenchGatewayEventSnapshot(current, event);
-        params.selectedThreadIdRef.current = next.thread?.id ?? null;
-        return next;
-      });
+      reduceGatewayEvent(event);
       return;
     }
     if (!pacedGatewayEvent(event)) {
-      params.setSnapshot((current) => {
-        const next = applyWorkbenchGatewayEventSnapshot(current, event);
-        params.selectedThreadIdRef.current = next.thread?.id ?? null;
-        return next;
-      });
+      reduceGatewayEvent(event);
       return;
     }
     gatewayEventQueueRef.current.push(event);

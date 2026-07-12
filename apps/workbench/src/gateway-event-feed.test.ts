@@ -78,25 +78,6 @@ describe("Gateway thread event feed", () => {
     ]);
   });
 
-  it("routes a stable runtime child event to its public child thread", () => {
-    const event: GatewayEvent = {
-      type: "runtimeChildChanged",
-      runtimeRef: "opencode",
-      parentThreadId: "parent-thread",
-      threadId: "runtime-child-thread",
-      dedupKey: "opaque-child-handle",
-      status: "running",
-      readOnly: true
-    };
-
-    const feed = appendGatewayEventFeed(EMPTY_GATEWAY_EVENT_FEED, event);
-
-    expect(gatewayEventsForThread(feed, "runtime-child-thread")).toEqual([
-      { event, seq: 1 }
-    ]);
-    expect(gatewayEventsForThread(feed, "parent-thread")).toEqual([]);
-  });
-
   it("rejects stale snapshot turns until the queued follow-up actually starts", () => {
     let feed = appendGatewayEventFeed(EMPTY_GATEWAY_EVENT_FEED, {
       type: "turnCompleted",

@@ -4,7 +4,6 @@ import { DismissibleDetails, type TranscriptAgentSession, type WorkspaceFileLink
 import type { GatewayClient } from "@psychevo/client";
 import type {
   ContextReadResult,
-  GatewayMention,
   GatewayRequestScope,
   SessionUsageSummaryView,
   ThreadSnapshot,
@@ -71,7 +70,6 @@ export function RightWorkspace({
   onRefreshTrace,
   onSaveFile,
   onShowHome,
-  onSubmitThreadTurn,
   promptSubmitBlockReason,
   promptSubmitDisabled
 }: {
@@ -118,7 +116,6 @@ export function RightWorkspace({
   onRefreshTrace(): void;
   onSaveFile(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
   onShowHome(): void;
-  onSubmitThreadTurn(threadId: string, text: string, mentions: GatewayMention[]): Promise<void>;
 }) {
   const visibleTabs = tabs.filter((tab) => rightWorkspaceTabVisibleForSession(tab, sessionId));
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
@@ -250,7 +247,6 @@ export function RightWorkspace({
                 onCopyText={onCopyText}
                 onOpenAgentSession={onOpenAgentSession}
                 onPendingPromptConsumed={() => onConsumePendingPrompt(tab.id)}
-                onSubmitThreadTurn={onSubmitThreadTurn}
                 workspaceFileLinks={workspaceFileLinks}
               />
             )}

@@ -189,6 +189,8 @@ describe("applyLiveTranscriptEvent", () => {
           code: null,
           stage: null,
           retryClass: null,
+          delivery: "unknown",
+          recoveryAction: null,
           diagnosticRef: null
         }
       },

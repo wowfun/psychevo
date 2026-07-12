@@ -61,6 +61,36 @@ function renderHistory(props: Partial<ComponentProps<typeof HistoryPanel>> = {})
 }
 
 describe("HistoryPanel", () => {
+  it("opens Agent import and renders lifecycle actions from product descriptors", () => {
+    const onImportSessions = vi.fn();
+    const onFork = vi.fn();
+    const onDelete = vi.fn();
+    const { container } = renderHistory({
+      onDelete,
+      onFork,
+      onImportSessions,
+      sessions: [session({
+        lifecycle: {
+          targetLabel: "OpenCode",
+          actions: [
+            { id: "fork", enabled: true, unavailableReason: null },
+            { id: "delete", enabled: false, unavailableReason: "OpenCode cannot delete sessions." }
+          ]
+        }
+      })]
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Import Agent session" }));
+    expect(onImportSessions).toHaveBeenCalledTimes(1);
+    fireEvent.click(container.querySelector(".pevo-sessionMenu summary") as HTMLElement);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fork" }));
+    expect(onFork).toHaveBeenCalledWith("session-1234567890");
+    const deleteButton = screen.getByRole("menuitem", { name: "Delete" });
+    expect((deleteButton as HTMLButtonElement).disabled).toBe(true);
+    expect(deleteButton.getAttribute("title")).toBe("OpenCode cannot delete sessions.");
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
   it("uses the native title tooltip for truncated session titles", () => {
     const { container } = renderHistory();
 

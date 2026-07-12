@@ -1,13 +1,12 @@
 import {
   GatewayClient,
   emptyThreadSnapshot,
-  threadTurnStartParams,
-  ThreadTranscriptController,
+  ThreadController,
   type ThreadTurnControls
 } from "@psychevo/client";
 import { TranscriptPanel } from "@psychevo/components";
 import type { HostCapabilityResult } from "@psychevo/host";
-import type { GatewayEvent, GatewayRequestScope, ThreadSnapshot, TurnErrorPayload, TurnResultPayload } from "@psychevo/protocol";
+import type { GatewayEvent, GatewayRequestScope, ThreadContextReadResult, ThreadSnapshot, TurnErrorPayload, TurnResultPayload } from "@psychevo/protocol";
 import { ArrowUp, Camera, FilePlus2, Languages, Maximize2, MessageCircle, Minus, RefreshCcw, Sparkles, Square, TextCursorInput, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -48,13 +47,18 @@ export interface FloatingRuntime {
   locale?: string;
   openThreadInWorkbench?(threadId: string): Promise<void>;
   startWindowDrag?(): Promise<void>;
-  turnControls?(context: FloatingTurnControlsContext): Promise<ThreadTurnControls | null>;
+  turnControls?(context: FloatingTurnControlsContext): Promise<FloatingTurnPreparation | null>;
 }
 
 export interface FloatingTurnControlsContext {
   client: GatewayClient;
   scope: GatewayRequestScope;
   threadId: string | null;
+}
+
+export interface FloatingTurnPreparation {
+  context: ThreadContextReadResult;
+  controls: ThreadTurnControls;
 }
 
 export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
@@ -65,7 +69,7 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
   const [transcript, setTranscript] = useState<ThreadSnapshot | null>(null);
   const capsuleRef = useRef<HTMLElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const threadControllerRef = useRef(new ThreadTranscriptController(null));
+  const threadControllerRef = useRef(new ThreadController(null));
   const lastWindowFitRef = useRef<{ width: number; height: number } | null>(null);
   const locale = useMemo(
     () => runtime.locale ?? (typeof navigator === "undefined" ? "system locale" : navigator.language || "system locale"),
@@ -273,25 +277,28 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
     ];
     const scope = floatingScope(cwd || "/", state.activationId);
     const requestedThreadId = state.threadId;
-    dispatch({ type: "submit", action, prompt });
-    const plan = threadControllerRef.current.beginTurn({
-      input,
-      optimisticText: prompt,
-      scope,
-      threadId: requestedThreadId ?? null
-    });
-    setTranscript(plan.snapshot);
     try {
-      const controls = await floatingTurnControls(runtime, client, scope, requestedThreadId ?? null)
-        .catch(() => null);
-      const result = await client.request("turn/start", threadTurnStartParams({
-        controls: controls ?? undefined,
-        input,
-        mentions: [],
+      const preparation = await floatingTurnPreparation(
+        runtime,
+        client,
         scope,
-        text: null,
-        threadId: plan.prepared.requestedThreadId
-      }));
+        requestedThreadId ?? null
+      );
+      threadControllerRef.current.setContext(preparation.context);
+      const plan = threadControllerRef.current.beginTurn({
+        controls: preparation.controls,
+        input,
+        optimisticText: prompt,
+        scope,
+        threadId: requestedThreadId ?? null
+      });
+      dispatch({ type: "submit", action, prompt });
+      setTranscript(plan.snapshot);
+      const result = await client.request("turn/start", plan.params).catch((error) => {
+        const snapshot = threadControllerRef.current.rejectTurnStart(plan.prepared);
+        setTranscript(snapshot);
+        throw error;
+      });
       const accepted = threadControllerRef.current.acceptTurnStart(result, plan.prepared, "floating turn");
       const threadId = accepted.threadId;
       setTranscript(accepted.snapshot);
@@ -316,11 +323,15 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
   }
 
   async function interrupt() {
-    if (!client || !state.threadId) {
+    if (!client || !state.threadId || !state.activationId) {
       return;
     }
     try {
-      await client.request("turn/interrupt", { threadId: state.threadId });
+      await client.request("thread/action/run", {
+        scope: floatingScope(cwd || "/", state.activationId),
+        threadId: state.threadId,
+        action: { kind: "interrupt" }
+      });
       dispatch({ running: false, type: "running" });
     } catch (error) {
       dispatch({ type: "error", message: errorMessage(error) });
@@ -480,16 +491,41 @@ function FloatingLogo() {
   return <img className="pevo-floating-logo" src={logoUrl} alt="" aria-hidden="true" />;
 }
 
-async function floatingTurnControls(
+async function floatingTurnPreparation(
   runtime: FloatingRuntime,
   client: GatewayClient,
   scope: GatewayRequestScope,
   threadId: string | null
-): Promise<ThreadTurnControls | null> {
-  if (!runtime.turnControls) {
-    return null;
+): Promise<FloatingTurnPreparation> {
+  if (runtime.turnControls) {
+    const prepared = await runtime.turnControls({ client, scope, threadId });
+    if (prepared) return prepared;
   }
-  return runtime.turnControls({ client, scope, threadId });
+  const discovery = await client.request("thread/context/read", {
+    threadId,
+    target: null,
+    scope
+  });
+  let context = discovery;
+  if (!threadId) {
+    const discoveryController = new ThreadController();
+    discoveryController.setContext(discovery);
+    const target = discoveryController.contextReadTarget(discovery.targetId);
+    if (!target) {
+      throw new Error("Gateway did not provide a canonical Floating Agent target.");
+    }
+    context = await client.request("thread/context/read", {
+      threadId: null,
+      target,
+      scope
+    });
+  }
+  const controller = new ThreadController();
+  controller.setContext(context);
+  return {
+    context,
+    controls: controller.turnControls(context.targetId, {})
+  };
 }
 
 function AttachmentStrip({

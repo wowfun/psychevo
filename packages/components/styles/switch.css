@@ -46,11 +46,21 @@
 }
 
 .pevo-switchLabel {
+  display: inline-flex;
+  align-items: center;
   min-width: 0;
+  gap: 8px;
   overflow: hidden;
   color: currentColor;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pevo-switchLabelIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
 }
 
 .pevo-switch--compact {

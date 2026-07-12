@@ -1,9 +1,6 @@
-import {
-  threadTurnControlsFromWorkbenchControls
-} from "@psychevo/client";
+import { ThreadController } from "@psychevo/client";
 import type { FloatingRuntime } from "@psychevo/floating";
 import { LocalHostStorage, capabilityFailure, unsupported, type GatewayEndpoint, type HostCapabilityResult, type HostRect, type PsychevoHost } from "@psychevo/host";
-import { SettingsReadResultSchema } from "@psychevo/protocol";
 import type { WorkbenchRuntime } from "@psychevo/workbench/runtime";
 import {
   desktopFallbackCwd,
@@ -84,11 +81,28 @@ export function createDesktopFloatingRuntime(connectionId: string): FloatingRunt
       return openThreadInWorkbench(threadId);
     },
     async turnControls({ client, scope, threadId }) {
-      const settings = SettingsReadResultSchema.parse(await client.request("settings/read", {
-        cwd: scope.cwd,
-        threadId
-      }));
-      return threadTurnControlsFromWorkbenchControls(settings.controls);
+      const discovery = await client.request("thread/context/read", {
+        threadId,
+        target: null,
+        scope
+      });
+      const discoveryController = new ThreadController();
+      discoveryController.setContext(discovery);
+      const target = threadId ? null : discoveryController.contextReadTarget(discovery.targetId);
+      const context = target
+        ? await client.request("thread/context/read", { threadId: null, target, scope })
+        : discovery;
+      const controller = new ThreadController();
+      controller.setContext(context);
+      const controls = controller.turnControls(context.targetId, Object.fromEntries(
+        context.controls.flatMap((control) => (
+          control.effectiveValue == null ? [] : [[control.id, control.effectiveValue]]
+        ))
+      ));
+      return {
+        context,
+        controls
+      };
     }
   };
 }

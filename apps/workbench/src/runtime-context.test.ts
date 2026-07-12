@@ -1,60 +1,47 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentPairingUnavailableReason,
-  parseRuntimeContext,
-  registerRuntimeContextChildTabs,
+  parseThreadContext as parseRawThreadContext,
+  runnableTargetUnavailableReason,
   runtimeControlSelections,
   runtimeProfileCapsuleLabel,
-  runtimeProfileDisplayLabel,
-  unsupportedRequiredAgentContributions
+  runtimeProfileDisplayLabel
 } from "./runtime-context";
-import type { AgentContribution, WorkbenchAgent } from "./types";
 
-function agentWith(
-  contributions: AgentContribution[],
-  optionalContributions: AgentContribution[] = []
-): WorkbenchAgent {
-  return {
-    name: "reviewer",
-    description: "Review changes",
-    enabled: true,
-    source: "project",
-    sourceLabel: "Project",
-    generated: false,
-    mutable: true,
-    entrypoints: ["subagent"],
-    tools: [],
-    mcpServers: [],
-    contributions,
-    optionalContributions,
-    diagnostics: []
-  };
+function parseThreadContext(value: Record<string, unknown>) {
+  return parseRawThreadContext({ targetId: "target:test", ...value });
 }
-
 describe("runtime context projection", () => {
-  it("parses Profile, binding, control, and session fields without trusting raw payloads", () => {
-    const context = parseRuntimeContext({
-      runtimeRef: "codex",
+  it("parses the Thread Context interface without trusting raw payloads", () => {
+    const context = parseThreadContext({
+      runtimeProfileRef: "codex",
       selectionState: "bound",
       profiles: [{
         id: "codex",
-        runtime: "codex",
+        runtime: "acp",
         enabled: true,
         label: "Codex",
         generated: true,
         configured: false,
-        provenance: "Direct",
+        backendRef: "codex",
+        provenance: "ACP",
         capabilityRevision: "9007199254740993",
         profileRevision: "18446744073709551615",
         stability: "stable",
-        capabilities: [{ id: "turn.start", enabled: true, stability: "stable" }],
+        capabilities: [{
+          id: "turn.start",
+          enabled: true,
+          stability: "stable",
+          unavailableReason: null
+        }],
         health: { status: "ready", summary: "Ready", checkedAtMs: 100 },
         readinessStages: [{ id: "transport", status: "ready", summary: "Connected", observedAtMs: 100 }]
       }],
       binding: {
         threadId: "thread-1",
         runtimeRef: "codex",
-        backendKind: "runtime",
+        backendKind: "acp",
+        nativeKind: null,
+        sessionHandle: "codex-session",
         cwd: "/tmp/project",
         profileFingerprint: "fingerprint",
         ownership: "readWrite",
@@ -63,63 +50,59 @@ describe("runtime context projection", () => {
       controls: [{
         id: "mode",
         label: "Mode",
-        state: "readOnlyCurrent",
-        currentValue: "review",
+        surfaceRole: "mode",
+        mutability: "readOnly",
+        enabled: true,
+        required: false,
+        unavailableReason: null,
+        effectiveValue: "review",
+        effectiveSource: "runtimeObserved",
+        isDefault: false,
         choices: [],
+        applyScope: "session",
+        stability: "stable",
         channelSafe: true,
         capabilityRevision: "9007199254740993"
       }],
       stability: "stable",
-      capabilities: [{ id: "turn.start", enabled: true, stability: "stable" }],
-      activeSession: {
-        sessionHandle: "rts_parent",
-        dedupKey: "rtd_parent",
-        fidelity: "summary",
-        ownership: "readOnly",
-        actions: ["fork"]
-      },
-      children: [{
-        sessionHandle: "rts_child",
-        threadId: "thread-child",
-        parentThreadId: "thread-1",
-        title: "Runtime review",
-        status: "idle",
-        dedupKey: "rtd_child",
-        fidelity: "partial",
-        ownership: "readOnly",
-        actions: ["read", "fork"]
+      capabilities: [{
+        id: "turn.start",
+        enabled: true,
+        stability: "stable",
+        unavailableReason: "A newer capability-pack schema is required."
       }],
-      goal: {
-        objective: "Ship evidence",
-        status: "active",
-        tokenBudget: 20_000,
-        tokensUsed: 500,
-        timeUsedSeconds: 40,
-        createdAt: 10,
-        updatedAt: 20,
-        nativeThreadId: "native-thread-secret"
-      },
-      accountRateLimits: {
-        rateLimits: {
-          limitId: "codex",
-          limitName: "Codex",
-          primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 9_000 },
-          secondary: null,
-          credits: { hasCredits: true, unlimited: false, balance: "12.50" },
-          individualLimit: null,
-          planType: "pro",
-          rateLimitReachedType: null,
-          nativeAccountId: "account-secret"
-        },
-        rateLimitsByLimitId: {
-          codex: {
-            limitId: "codex",
-            primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 9_000 }
-          }
-        },
-        resetCreditsAvailable: 2,
-        nativeAccountId: "account-secret"
-      }
+      compatibleTargets: [{
+        targetId: "target:codex:codex",
+        agentRef: "codex",
+        runtimeProfileRef: "codex",
+        agentLabel: "Codex",
+        profileLabel: "Codex (ACP)",
+        label: "Codex · Codex (ACP)",
+        ready: true,
+        unavailableReason: null
+      }],
+      inputCapabilities: [{ kind: "text", enabled: true, unavailableReason: null }],
+      actions: [{
+        id: "session.fork",
+        label: "Fork",
+        enabled: true,
+        stability: "stable",
+        channelSafe: false,
+        unavailableReason: null
+      }, {
+        id: "compact",
+        label: "Compact",
+        enabled: true,
+        stability: "stable",
+        channelSafe: true,
+        unavailableReason: null
+      }],
+      sendability: { allowed: true, reason: null, recoveryAction: null },
+      history: { owner: "agent", fidelity: "summary", cursor: "next", hint: "Agent history" },
+      pendingInteractions: [],
+      contextRevision: "7",
+      controlRevision: "9",
+      ignoredNativeSecret: "must-not-cross-interface"
     });
 
     expect(context.binding).toMatchObject({ runtimeRef: "codex", bindingRevision: 2 });
@@ -129,96 +112,57 @@ describe("runtime context projection", () => {
     });
     expect(context.controls[0]).toMatchObject({
       id: "mode",
-      state: "readOnlyCurrent",
-      currentValue: "review",
+      surfaceRole: "mode",
+      mutability: "readOnly",
+      effectiveValue: "review",
+      effectiveSource: "runtimeObserved",
+      applyScope: "session",
       capabilityRevision: "9007199254740993"
     });
-    expect(context.activeSession).toMatchObject({ dedupKey: "rtd_parent", fidelity: "summary", ownership: "readOnly" });
     expect(context.stability).toBe("stable");
-    expect(context.capabilities).toEqual([{ id: "turn.start", enabled: true, stability: "stable" }]);
-    expect(context.children[0]).toMatchObject({
-      threadId: "thread-child",
-      sessionHandle: "rts_child",
-      status: "idle"
-    });
-    expect(context.goal).toEqual({
-      objective: "Ship evidence",
-      status: "active",
-      tokenBudget: 20_000,
-      tokensUsed: 500,
-      timeUsedSeconds: 40,
-      createdAt: 10,
-      updatedAt: 20
-    });
-    expect(context.accountRateLimits).toEqual({
-      rateLimits: {
-        limitId: "codex",
-        limitName: "Codex",
-        primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 9_000 },
-        secondary: null,
-        credits: { hasCredits: true, unlimited: false, balance: "12.50" },
-        individualLimit: null,
-        planType: "pro",
-        rateLimitReachedType: null
-      },
-      rateLimitsByLimitId: {
-        codex: {
-          limitId: "codex",
-          limitName: null,
-          primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 9_000 },
-          secondary: null,
-          credits: null,
-          individualLimit: null,
-          planType: null,
-          rateLimitReachedType: null
-        }
-      },
-      resetCreditsAvailable: 2
-    });
-    expect(JSON.stringify(context)).not.toContain("native-thread-secret");
-    expect(JSON.stringify(context)).not.toContain("account-secret");
-    expect(registerRuntimeContextChildTabs([], context)).toEqual([
-      expect.objectContaining({
-        kind: "agentSession",
-        threadId: "thread-child",
-        parentThreadId: "thread-1",
-        title: "Runtime review",
-        historyFidelity: "partial",
-        runtimeStatus: "idle"
-      })
-    ]);
-    expect(runtimeProfileCapsuleLabel(context.profiles[0]!)).toBe("Codex · Direct");
-    expect(agentPairingUnavailableReason(agentWith(["instructions"]), context.profiles[0]!)).toBeNull();
+    expect(context.capabilities).toEqual([{
+      id: "turn.start",
+      enabled: true,
+      stability: "stable",
+      unavailableReason: "A newer capability-pack schema is required."
+    }]);
+    expect(context.compatibleTargets[0]).toMatchObject({ runtimeProfileRef: "codex", ready: true });
+    expect(context.inputCapabilities).toEqual([{ kind: "text", enabled: true, unavailableReason: null }]);
+    expect(context.actions).toEqual([{
+      id: "compact",
+      label: "Compact",
+      enabled: true,
+      stability: "stable",
+      channelSafe: true,
+      unavailableReason: null
+    }]);
+    expect(context.sendability).toEqual({ allowed: true, reason: null, recoveryAction: null });
+    expect(context.history).toEqual({ owner: "agent", fidelity: "summary", cursor: "next", hint: "Agent history" });
+    expect(context.contextRevision).toBe("7");
+    expect(context.controlRevision).toBe("9");
+    expect(JSON.stringify(context)).not.toContain("must-not-cross-interface");
+    expect(runtimeProfileCapsuleLabel(context.profiles[0]!)).toBe("Codex (ACP) · ACP");
   });
 
-  it("validates direct Runtime Profile pairing per required Agent Definition contribution", () => {
-    const profile = parseRuntimeContext({
-      runtimeRef: "opencode",
-      profiles: [{ id: "opencode", runtime: "opencode", label: "OpenCode" }]
-    }).profiles[0]!;
-
-    expect(unsupportedRequiredAgentContributions(
-      agentWith(["instructions", "tools", "mcp", "skills"], ["mcp", "skills"]),
-      profile
-    )).toEqual(["tools"]);
-    expect(agentPairingUnavailableReason(
-      agentWith(["instructions", "tools", "mcp", "skills"], ["mcp", "skills"]),
-      profile
-    )).toBe(
-      "OpenCode cannot faithfully apply the required Agent Definition tool policy contribution. Mark tool policy optional or choose Native."
-    );
-    expect(agentPairingUnavailableReason(
-      agentWith(["instructions", "tools", "mcp", "skills"], ["tools", "mcp", "skills"]),
-      profile
-    )).toBeNull();
+  it("uses the compatible target reason without inferring from implementation kind", () => {
+    expect(runnableTargetUnavailableReason({
+      targetId: "target:reviewer:opaque",
+      agentRef: "reviewer",
+      runtimeProfileRef: "opaque-profile",
+      agentLabel: "Reviewer",
+      profileLabel: "Opaque",
+      label: "Reviewer",
+      ready: false,
+      unavailableReason: "The projected target is not ready."
+    })).toBe("The projected target is not ready.");
   });
 
   it("never coerces public runtime revisions through JavaScript numbers", () => {
-    const context = parseRuntimeContext({
-      runtimeRef: "codex",
+    const context = parseThreadContext({
+      runtimeProfileRef: "codex",
       profiles: [{
         id: "codex",
-        runtime: "codex",
+        runtime: "acp",
         label: "Codex",
         profileRevision: 9_007_199_254_740_993,
         capabilityRevision: "018",
@@ -227,51 +171,27 @@ describe("runtime context projection", () => {
       controls: [{
         id: "mode",
         label: "Mode",
-        state: "selectable",
-        capabilityRevision: "18446744073709551616"
+        surfaceRole: "mode",
+        mutability: "selectable",
+        enabled: true,
+        required: false,
+        capabilityRevision: "5db92a55f2f24d87"
       }]
     });
 
     expect(context.profiles[0]?.profileRevision).toBe("0");
-    expect(context.profiles[0]?.capabilityRevision).toBe("0");
-    expect(context.controls[0]?.capabilityRevision).toBe("0");
+    expect(context.profiles[0]?.capabilityRevision).toBe("018");
+    expect(context.controls[0]?.capabilityRevision).toBe("5db92a55f2f24d87");
   });
 
-  it("drops malformed runtime-child status instead of forwarding native payload text", () => {
-    const context = parseRuntimeContext({
-      children: [{
-        sessionHandle: "rts_child",
-        threadId: "thread-child",
-        parentThreadId: "thread-1",
-        status: "idle; nativeSession=secret",
-        fidelity: "partial",
-        ownership: "readOnly"
-      }]
-    });
-
-    expect(context.children[0]?.status).toBeNull();
-  });
-
-  it("requires an ACP profile to use its matching backend-backed Agent Definition", () => {
-    const profile = parseRuntimeContext({
-      runtimeRef: "acp:cursor",
-      profiles: [{
-        id: "acp:cursor",
-        runtime: "acp",
-        label: "Cursor (ACP)",
-        backendRef: "cursor"
-      }]
-    }).profiles[0]!;
-    const plain = agentWith(["instructions"]);
-    expect(agentPairingUnavailableReason(plain, profile)).toContain(
-      "can only use the Agent Definition backed by cursor"
-    );
-    const matching = { ...plain, backend: { ref: "cursor" } };
-    expect(agentPairingUnavailableReason(matching, profile)).toBeNull();
+  it("fails closed when the context omits its selected target ref", () => {
+    expect(() => parseRawThreadContext({
+      profiles: [{ id: "opaque-profile", runtime: "acp", label: "Opaque" }]
+    })).toThrow("missing its canonical targetId");
   });
 
   it("normalizes ACP suffixes and fails malformed enums to conservative defaults", () => {
-    const context = parseRuntimeContext({
+    const context = parseThreadContext({
       profiles: [{
         id: "acp:cursor",
         runtime: "acp",
@@ -279,48 +199,30 @@ describe("runtime context projection", () => {
         health: { status: "unchecked", summary: "Not checked" }
       }],
       binding: { ownership: "unexpected" },
-      controls: [{ id: "mode", state: "unexpected" }]
+      controls: [{ id: "mode", surfaceRole: "unexpected", mutability: "unexpected" }],
+      history: { owner: "runtime" }
     });
 
-    expect(context.runtimeRef).toBe("acp:cursor");
+    expect(context.runtimeProfileRef).toBe("");
     expect(runtimeProfileDisplayLabel(context.profiles[0]!)).toBe("Cursor (ACP)");
     expect(context.binding?.ownership).toBe("readOnly");
-    expect(context.controls[0]?.state).toBe("runtimeDefault");
-    expect(context.goal).toBeNull();
-    expect(context.accountRateLimits).toBeNull();
-  });
-
-  it("fails malformed goal and account metadata closed instead of inventing status", () => {
-    const malformedGoal = parseRuntimeContext({
-      goal: {
-        objective: "Ship evidence",
-        status: "native_future_status",
-        tokenBudget: 100,
-        tokensUsed: 1,
-        timeUsedSeconds: 2,
-        createdAt: 3,
-        updatedAt: 4
-      },
-      accountRateLimits: {
-        rateLimits: {
-          primary: { usedPercent: "25", windowDurationMins: 300, resetsAt: 9_000 }
-        },
-        rateLimitsByLimitId: {},
-        resetCreditsAvailable: 2
-      }
+    expect(context.history.owner).toBe("psychevo");
+    expect(context.controls[0]).toMatchObject({
+      surfaceRole: "advanced",
+      mutability: "readOnly",
+      effectiveSource: "runtimeDefault",
+      applyScope: "turnDraft",
+      stability: "unavailable"
     });
-
-    expect(malformedGoal.goal).toBeNull();
-    expect(malformedGoal.accountRateLimits).toBeNull();
   });
 
-  it("serializes every selected observed runtime control by descriptor id", () => {
-    const controls = parseRuntimeContext({
+  it("serializes only explicit selectable runtime drafts by descriptor id", () => {
+    const controls = parseThreadContext({
       controls: [
-        { id: "mode", state: "selectable", choices: [{ value: "plan", label: "Plan" }] },
-        { id: "effort", state: "selectable", choices: [{ value: "high", label: "High" }] },
-        { id: "feature.fast", state: "selectable", choices: [{ value: true, label: "Fast" }] },
-        { id: "model", state: "readOnlyCurrent", currentValue: "observed/model" }
+        { id: "mode", mutability: "selectable", enabled: true, choices: [{ value: "plan", label: "Plan" }] },
+        { id: "effort", mutability: "selectable", enabled: true, choices: [{ value: "high", label: "High" }] },
+        { id: "feature.fast", mutability: "selectable", enabled: true, choices: [{ value: true, label: "Fast" }] },
+        { id: "model", mutability: "readOnly", enabled: true, effectiveValue: "observed/model", effectiveSource: "runtimeObserved" }
       ]
     }).controls;
 
@@ -332,16 +234,41 @@ describe("runtime context projection", () => {
     })).toEqual({
       mode: "plan",
       effort: "high",
-      "feature.fast": "true"
+      "feature.fast": true
+    });
+    expect(runtimeControlSelections(controls, {})).toEqual({});
+  });
+
+  it("never serializes a disabled control draft", () => {
+    const controls = parseThreadContext({
+      controls: [{
+        id: "opaque.control",
+        label: "Opaque control",
+        mutability: "selectable",
+        enabled: false,
+        required: true,
+        unavailableReason: "The Adapter has not implemented this control.",
+        choices: [{ value: "on", label: "On" }]
+      }]
+    }).controls;
+
+    expect(runtimeControlSelections(controls, { "opaque.control": "on" })).toEqual({});
+    expect(controls[0]).toMatchObject({
+      enabled: false,
+      required: true,
+      unavailableReason: "The Adapter has not implemented this control."
     });
   });
 
   it("drops dependent selections when their catalog model no longer matches", () => {
-    const controls = parseRuntimeContext({
+    const controls = parseThreadContext({
       controls: [
         {
           id: "model",
-          state: "selectable",
+          surfaceRole: "model",
+          mutability: "selectable",
+          enabled: true,
+          effectiveValue: "model-a",
           choices: [
             { value: "model-a", label: "Model A" },
             { value: "model-b", label: "Model B" }
@@ -349,7 +276,10 @@ describe("runtime context projection", () => {
         },
         {
           id: "effort",
-          state: "selectable",
+          surfaceRole: "reasoning",
+          mutability: "selectable",
+          enabled: true,
+          effectiveValue: "high",
           choices: [{ value: "high", label: "High" }],
           dependsOn: { controlId: "model", value: "model-a" }
         }

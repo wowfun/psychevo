@@ -5,7 +5,7 @@ import type {
 } from "react";
 import type { GatewayClient } from "@psychevo/client";
 import type { TranscriptAgentSession } from "@psychevo/components";
-import type { WorkspaceDiffResult } from "@psychevo/protocol";
+import type { GatewayRequestScope, WorkspaceDiffResult } from "@psychevo/protocol";
 import {
   createRightTabId,
   fileBasename,
@@ -27,6 +27,7 @@ type RightWorkspaceActionsParams = {
   dirtyRightTabs: Record<string, boolean>;
   rightTabs: RightWorkspaceTab[];
   rightWidthPx: number;
+  scope: GatewayRequestScope;
   runAction(action: () => Promise<void>): Promise<void>;
   setActiveCommandOverlay: Dispatch<SetStateAction<CommandOverlay | null>>;
   setActiveRightTabId: Dispatch<SetStateAction<string | null>>;
@@ -102,7 +103,21 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
     if (closingTab?.kind === "sideConversation" && closingTab.threadId) {
       const threadId = closingTab.threadId;
       void params.runAction(async () => {
-        await params.client?.request("turn/interrupt", { threadId });
+        if (!params.client) {
+          return;
+        }
+        const context = await params.client.request("thread/context/read", {
+          threadId,
+          target: null,
+          scope: params.scope
+        });
+        if (context.actions.some((action) => action.id === "interrupt" && action.enabled)) {
+          await params.client.request("thread/action/run", {
+            scope: params.scope,
+            threadId,
+            action: { kind: "interrupt" }
+          });
+        }
         await params.client?.request("thread/delete", { threadId });
       });
     }

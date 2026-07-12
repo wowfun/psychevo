@@ -9,7 +9,7 @@ import { repoRoot } from "./harness";
 export { analyzeTranscriptRuntimeRows };
 export type { TranscriptRuntimeRowSample };
 
-export const LIVE_TRANSLATE_SUBAGENT_PROMPT = "使用 translate agent 并发演示简单的中译英和英译中";
+export const LIVE_TRANSLATE_SUBAGENT_PROMPT = "使用 translate agent 演示简单的中译英和英译中";
 export const CHANNELS_VISUAL_CONFIG = `
 
 [[channels.connections]]

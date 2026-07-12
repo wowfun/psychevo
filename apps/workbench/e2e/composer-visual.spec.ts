@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { startPevoWeb } from "./harness";
-import { prepareDeterministicRuntime } from "./runtime-live.support";
 import { visualScreenshotRoot } from "./visualArtifacts";
 
 const screenshotDir = visualScreenshotRoot();
@@ -150,8 +149,13 @@ test.describe("Workbench composer visual contract", () => {
     }
   });
 
-  test("renders composer controls, plan chip, and interrupt state without overlap", async ({ page, isMobile }, testInfo) => {
+  test("renders descriptor-driven composer controls and interrupt state without overlap", async ({ page, isMobile }, testInfo) => {
     const server = await startPevoWeb({ configAppend: MANY_MODEL_CONFIG, live: false, model: "opencode-zen/big-pickle" });
+    const websocketFrames = { received: [] as string[], sent: [] as string[] };
+    page.on("websocket", (socket) => {
+      socket.on("framesent", (event) => websocketFrames.sent.push(String(event.payload)));
+      socket.on("framereceived", (event) => websocketFrames.received.push(String(event.payload)));
+    });
     mkdirSync(screenshotDir, { recursive: true });
     try {
       await page.goto(server.url);
@@ -165,60 +169,67 @@ test.describe("Workbench composer visual contract", () => {
 
       const composer = page.locator(".pevo-composer");
       await expect(composer).toBeVisible();
-      const agentControl = page.getByRole("button", { name: "Agent", exact: true });
+      const promptInput = page.getByPlaceholder("Ask Psychevo...");
+      await promptInput.focus();
+      expect(await promptInput.evaluate((element) => ({
+        borderWidth: getComputedStyle(element).borderTopWidth,
+        outlineStyle: getComputedStyle(element).outlineStyle
+      }))).toEqual({ borderWidth: "1px", outlineStyle: "none" });
+      const agentControl = page.getByRole("button", { name: "Agent target", exact: true });
       await expect(agentControl).toBeVisible();
       await expect(agentControl).toContainText("Default Agent");
+      await expect(agentControl).not.toContainText("Psychevo (Native)");
+      await expect(agentControl).toHaveAttribute("title", "Default Agent · Psychevo (Native)");
       await agentControl.click();
-      const agentPopover = page.getByRole("dialog", { name: "Agent Definition" });
-      const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
-      await expect(agentGroup.getByRole("radio", { name: "Default Agent" })).toHaveAttribute("aria-checked", "true");
-      await expect(agentGroup.getByRole("radio", { name: "translate" })).toBeVisible();
-      await expect(agentPopover.getByRole("combobox")).toHaveCount(0);
+      const agentPopover = page.getByRole("dialog", { name: "Agent target" });
+      const agentGroup = agentPopover.getByRole("radiogroup", { name: "Agent target" });
+      await expect(agentGroup.getByRole("radio", { name: "Default Agent · Psychevo (Native)" })).toHaveAttribute("aria-checked", "true");
+      await expect(agentGroup.getByRole("radio", { name: "translate · Psychevo (Native)" })).toBeVisible();
+      await expect(agentPopover.getByText("Agent target", { exact: true })).toHaveCount(0);
+      await expect(agentPopover.getByText("Manage Agent targets", { exact: true })).toHaveCount(0);
+      await expect(agentPopover.getByText("Runtime Options", { exact: true })).toBeVisible();
+      const permissionMode = agentPopover.getByRole("combobox", { name: "Permission mode" });
+      await expect(permissionMode).toBeVisible();
+      expect(await selectedOptionText(permissionMode)).toBe("Choose Permission mode");
+      await expect(permissionMode.getByRole("option", { name: "default" })).toBeAttached();
       await page.screenshot({
         path: path.join(screenshotDir, `composer-agent-runtime-${testInfo.project.name}.png`)
       });
       await agentControl.click();
-      expect(await selectedOptionText(page.getByRole("combobox", { name: "Permission mode" }))).toBe("Default Permission");
-      const modelButton = page.getByRole("button", { name: "Model" });
+      await expect(permissionMode).toHaveCount(0);
+
+      const modeSelect = page.getByRole("combobox", { name: "Mode", exact: true });
+      const modelButton = page.getByRole("button", { name: "Model", exact: true });
+      await expect(modeSelect).toBeVisible();
       await expect(modelButton).toBeVisible();
+      expect(await selectedOptionText(modeSelect)).toBe("default");
+      await expectSelectTextFits(modeSelect);
       await expect(modelButton).toContainText("big-pickle Default");
-      await expect(modelButton).not.toContainText("opencode-zen/big-pickle");
       await expect(modelButton).toHaveAttribute("title", "opencode-zen/big-pickle / Default");
       await expectTextFits(modelButton.locator("span").first());
+      for (const control of [agentControl, modeSelect, modelButton]) {
+        expect(await control.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe("0px");
+      }
+      expect(await modeSelect.locator("..").evaluate((element) => getComputedStyle(element, "::after").display)).toBe("none");
+      await expect(agentControl.locator("svg")).toHaveCount(0);
+      await expect(modelButton.locator("svg")).toHaveCount(0);
       await expect(page.getByRole("combobox", { name: "Model" })).toHaveCount(0);
-      await expect(page.getByRole("combobox", { name: "Variant" })).toHaveCount(0);
-      await expect(page.getByRole("option", { name: "Select model" })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Reasoning" })).toHaveCount(0);
       await modelButton.click();
       const modelPopover = page.getByRole("dialog", { name: "Model and reasoning" });
       await expect(modelPopover).toBeVisible();
       await expect(modelPopover.getByRole("searchbox", { name: "Model filter" })).toBeVisible();
-      const freeModelRow = modelPopover.getByRole("radiogroup", { name: "Model" }).getByRole("radio", { name: /big-pickle/ });
-      await expect(freeModelRow).toHaveAttribute("aria-checked", "true");
-      await expect(freeModelRow).toHaveAttribute("data-model-value", "opencode-zen/big-pickle");
-      await expect(freeModelRow).toHaveAttribute("data-model-free", "true");
-      await expect(freeModelRow.locator(".modelReasoningFreeBadge")).toHaveText("Free");
-      await expect(freeModelRow).not.toHaveAttribute("title", /.+/);
-      await expect(modelPopover.getByText("opencode-zen/big-pickle")).toHaveCount(0);
-      await expect(modelPopover.locator(".modelReasoningProviderHeading", { hasText: "OpenCode Zen" })).toBeVisible();
+      await expect(modelPopover.getByRole("radiogroup", { name: "Model" }).getByRole("radio")).toHaveCount(7);
       await expect(modelPopover.getByRole("radiogroup", { name: "Reasoning" }).getByRole("radio", { name: "Default" })).toHaveAttribute("aria-checked", "true");
-      await expect(modelPopover.getByText("Explicit reasoning effort")).toHaveCount(0);
-      const modelRows = modelPopover.locator(".modelReasoningModelRows");
-      await expect(modelRows.getByRole("radio")).toHaveCount(7);
-      expect(await modelRows.evaluate((element) => element.scrollHeight > element.clientHeight && element.clientHeight <= 232)).toBe(true);
-      await expectModelRowsFillPopover(modelPopover);
-      await expectElementInsideViewport(page, modelPopover);
-      const modelPopoverBox = await modelPopover.boundingBox();
-      expect(modelPopoverBox).not.toBeNull();
-      expect(modelPopoverBox!.width).toBeGreaterThanOrEqual(220);
-      expect(modelPopoverBox!.width).toBeLessThan(320);
+      await expect(page.getByRole("option", { name: "Select model" })).toHaveCount(0);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-model-reasoning-${testInfo.project.name}.png`)
       });
-      await modelButton.click();
+      await page.keyboard.press("Escape");
       await expect(page.getByRole("button", { name: "Context usage" })).toBeVisible();
       await expect(page.getByRole("combobox", { name: "Psychevo mode" })).toHaveCount(0);
       await expect(page.getByRole("tablist", { name: "Turn mode" })).toHaveCount(0);
-      await assertComposerGeometry(page, { isMobile, plan: false });
+      await assertComposerGeometry(page, isMobile);
       const defaultFooterBox = await page.locator(".pevo-composerFooter").boundingBox();
       expect(defaultFooterBox).not.toBeNull();
       await page.screenshot({
@@ -239,16 +250,44 @@ test.describe("Workbench composer visual contract", () => {
       }
 
       await page.getByRole("button", { name: "Add attachments and options" }).click();
-      await expect(page.getByRole("menuitem", { name: "Add images and files" })).toBeVisible();
-      await expect(page.getByRole("switch", { name: "Auto-speak" })).toBeVisible();
-      await expect(page.getByRole("switch", { name: "Realtime voice" })).toBeVisible();
+      const addPopover = page.getByRole("menu");
+      const addFiles = page.getByRole("menuitem", { name: "Add images and files" });
+      const autoSpeak = page.getByRole("switch", { name: "Auto-speak" });
+      const realtime = page.getByRole("switch", { name: "Realtime voice" });
+      await expect(addFiles).toBeVisible();
+      await expect(autoSpeak).toBeVisible();
+      await expect(realtime).toBeVisible();
+      await expect(addFiles.locator(".lucide-paperclip")).toBeVisible();
+      await expect(autoSpeak.locator(".lucide-volume-2")).toBeVisible();
+      await expect(realtime.locator(".lucide-radio")).toBeVisible();
+      const [popoverBox, autoLabelBox, autoTrackBox] = await Promise.all([
+        addPopover.boundingBox(),
+        autoSpeak.locator(".pevo-switchLabel").boundingBox(),
+        autoSpeak.locator(".pevo-switchTrack").boundingBox()
+      ]);
+      expect(popoverBox).not.toBeNull();
+      expect(autoLabelBox).not.toBeNull();
+      expect(autoTrackBox).not.toBeNull();
+      expect(popoverBox!.width).toBeLessThan(260);
+      expect(autoTrackBox!.x - (autoLabelBox!.x + autoLabelBox!.width)).toBeLessThanOrEqual(14);
+      await expect(page.getByRole("switch", { name: "Plan mode" })).toHaveCount(0);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-menu-${testInfo.project.name}.png`)
       });
-      await page.getByRole("switch", { name: "Plan mode" }).click();
-      await expect(page.locator(".pevo-planChip")).toContainText("Plan");
       await page.keyboard.press("Escape");
-      await assertComposerGeometry(page, { isMobile, plan: true });
+      const beforeControl = workbenchRpcResultsForMethod(websocketFrames, "thread/context/read").at(-1);
+      expect(beforeControl).toBeDefined();
+      await modeSelect.selectOption({ label: "plan" });
+      await expect.poll(() => selectedOptionText(modeSelect)).toBe("plan");
+      await expect.poll(() => workbenchRpcResultsForMethod(websocketFrames, "thread/control/set").length).toBe(1);
+      const controlReceipt = workbenchRpcResultsForMethod(websocketFrames, "thread/control/set")[0]!;
+      expect(controlReceipt.status).toBe("applied");
+      expect((controlReceipt.context as Record<string, unknown>).targetId).toBe(beforeControl!.targetId);
+      expect(controlReceipt.contextRevision).toBe(beforeControl!.contextRevision);
+      expect(controlReceipt.controlRevision).not.toBe(beforeControl!.controlRevision);
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(page.locator(".pevo-planChip")).toHaveCount(0);
+      await assertComposerGeometry(page, isMobile);
       const planFooterBox = await page.locator(".pevo-composerFooter").boundingBox();
       expect(planFooterBox).not.toBeNull();
       expect(Math.abs(planFooterBox!.height - defaultFooterBox!.height)).toBeLessThanOrEqual(1);
@@ -263,7 +302,7 @@ test.describe("Workbench composer visual contract", () => {
       expect(oneLineBox).not.toBeNull();
       expect(multilineBox).not.toBeNull();
       expect(multilineBox!.height).toBeGreaterThan(oneLineBox!.height + 20);
-      await assertComposerGeometry(page, { isMobile, plan: true });
+      await assertComposerGeometry(page, isMobile);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-multiline-${testInfo.project.name}.png`)
       });
@@ -273,98 +312,9 @@ test.describe("Workbench composer visual contract", () => {
       await expect(page.locator(".pevo-composerTurnStatus")).toContainText("1m05s");
       await expect(page.locator(".pevo-composerTurnSpinner")).toBeVisible();
       await expect(page.locator(".pevo-composerRightControls .pevo-composerTurnStatus")).toHaveCount(0);
-      await assertComposerGeometry(page, { isMobile, plan: true });
+      await assertComposerGeometry(page, isMobile);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-interrupt-${testInfo.project.name}.png`)
-      });
-    } finally {
-      await server.stop();
-    }
-  });
-
-  test("renders Runtime Profile selection and immutable provenance without overflow", async ({ page, isMobile }, testInfo) => {
-    mkdirSync(screenshotDir, { recursive: true });
-    const fixture = prepareDeterministicRuntime("codex", screenshotDir);
-    const server = await startPevoWeb({
-      configAppend: fixture.configAppend,
-      live: false,
-      pevoBin: process.env.PEVO_BIN
-    });
-    try {
-      await page.goto(server.url);
-      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
-      await openPanel(page, isMobile, "History");
-      await page.getByRole("button", { name: "New Session" }).click();
-      await openPanel(page, isMobile, "Transcript");
-
-      const agentButton = page.getByRole("button", { name: "Agent", exact: true });
-      const runtimeButton = page.getByRole("button", { name: "Runtime Profile", exact: true });
-      await expect(agentButton).toContainText("Default Agent");
-      await expect(runtimeButton).toBeVisible();
-      await runtimeButton.click();
-      const popover = page.getByRole("dialog", { name: "Runtime Profile selection" });
-      await expect(popover).toBeVisible();
-      await expect(popover.getByRole("radiogroup", { name: "Runtime" }).getByRole("radio", { name: "Codex" })).toBeVisible();
-      await expect(popover.getByText("Direct · Generated").first()).toBeVisible();
-      await expectElementInsideViewport(page, popover);
-      await popover.getByRole("radio", { name: "Codex", exact: true }).click();
-      const prompt = "Bind this visual thread to deterministic Codex.";
-      await page.getByPlaceholder("Ask Psychevo...").fill(prompt);
-      await page.getByRole("button", { name: "Send message" }).click();
-      await expect(page.locator(".pevo-message.is-assistant").filter({ hasText: fixture.expectedAnswer })).toHaveCount(1, { timeout: 60_000 });
-
-      const capsule = page.getByRole("button", { name: "Bound Runtime Profile Codex · Direct" });
-      await expect(capsule).toHaveClass(/runtimeProvenanceCapsule/);
-      await expect(capsule).toContainText("Codex · Direct");
-      await expect(capsule).toHaveAttribute("title", /Runtime bindings are immutable/);
-      await expectTextFits(capsule.locator("span").first());
-      const overflow = await page.locator(".pevo-composer").evaluate((composer) => ({
-        composer: composer.scrollWidth - composer.clientWidth,
-        controls: (() => {
-          const controls = composer.querySelector<HTMLElement>(".composerRuntimeControls");
-          return controls ? controls.scrollWidth - controls.clientWidth : 0;
-        })()
-      }));
-      expect(overflow.composer).toBeLessThanOrEqual(1);
-      expect(overflow.controls).toBeLessThanOrEqual(1);
-      await page.screenshot({
-        path: path.join(screenshotDir, `runtime-profile-provenance-${testInfo.project.name}.png`)
-      });
-    } finally {
-      await server.stop();
-    }
-  });
-
-  test("keeps incomplete runtime-child history fidelity visible without overflow", async ({ page, isMobile }, testInfo) => {
-    mkdirSync(screenshotDir, { recursive: true });
-    const fixture = prepareDeterministicRuntime("codex", screenshotDir, "child");
-    const server = await startPevoWeb({
-      configAppend: fixture.configAppend,
-      live: false,
-      pevoBin: process.env.PEVO_BIN
-    });
-    try {
-      await page.goto(server.url);
-      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
-      const runtimeButton = page.getByRole("button", { name: "Runtime Profile", exact: true });
-      await runtimeButton.click();
-      await page.getByRole("dialog", { name: "Runtime Profile selection" }).getByRole("radio", { name: "Codex", exact: true }).click();
-      await page.getByPlaceholder("Ask Psychevo...").fill("Spawn a deterministic runtime child.");
-      await page.getByRole("button", { name: "Send message" }).click();
-      await expect(page.locator(".pevo-message.is-assistant").filter({ hasText: "parent done" })).toHaveCount(1, { timeout: 60_000 });
-
-      const childTab = page.getByRole("button", { name: "Codex child", exact: true });
-      await expect(childTab).toBeVisible({ timeout: 30_000 });
-      await childTab.click();
-      const child = page.getByRole("region", { name: "Codex child" });
-      const notice = child.getByRole("note");
-      await expect(notice).toHaveAttribute("data-history-fidelity", "partial");
-      await expect(notice).toHaveText("Read-only runtime child · Partial history; some messages or detail may be missing.");
-      await expect(child).toContainText("hi");
-      await expectElementInsideViewport(page, notice);
-      expect(await notice.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
-      await page.screenshot({
-        path: path.join(screenshotDir, `runtime-child-partial-history-${testInfo.project.name}.png`)
       });
     } finally {
       await server.stop();
@@ -381,18 +331,15 @@ test.describe("Workbench composer visual contract", () => {
       await page.getByRole("button", { name: "New Session" }).click();
       await openPanel(page, isMobile, "Transcript");
 
-      const modelButton = page.getByRole("button", { name: "Model" });
+      const modelButton = page.getByRole("button", { name: "Model", exact: true });
       await expect(modelButton).toBeVisible();
       await expect(modelButton).toContainText("mimo-v2.5-pro Default");
-      await expect(modelButton).not.toContainText("lmstudio/mimo-v2.5-pro");
-      await expectTextFits(modelButton.locator("span").first());
       await expect(modelButton).toHaveAttribute("title", "lmstudio/mimo-v2.5-pro / Default");
+      await expectTextFits(modelButton.locator("span").first());
       await modelButton.click();
-      const modelPopover = page.getByRole("dialog", { name: "Model and reasoning" });
-      await expect(modelPopover.getByRole("radio", { name: /mimo-v2\.5-pro/ })).toHaveAttribute("data-model-value", "lmstudio/mimo-v2.5-pro");
-      await expect(modelPopover.getByRole("radio", { name: /mimo-v2\.5-pro/ })).not.toHaveAttribute("title", /.+/);
-      await expectElementInsideViewport(page, modelPopover);
-      await modelButton.click();
+      const modelPicker = page.getByRole("dialog", { name: "Model and reasoning" });
+      await expect(modelPicker.getByRole("radio", { name: "mimo-v2.5-pro" })).toHaveAttribute("data-model-value", "lmstudio/mimo-v2.5-pro");
+      await page.keyboard.press("Escape");
 
       const threadItems = page.locator(".pevo-threadItems");
       await threadItems.evaluate((container) => {
@@ -562,6 +509,34 @@ async function selectedOptionText(select: Locator): Promise<string> {
   });
 }
 
+function workbenchRpcResultsForMethod(
+  capture: { received: string[]; sent: string[] },
+  method: string
+): Array<Record<string, unknown>> {
+  const requestIds = new Set(capture.sent.flatMap((payload) => {
+    try {
+      const message = JSON.parse(payload) as { id?: unknown; method?: string };
+      const id = message.id == null ? "" : String(message.id);
+      return message.method === method && /^\d+$/.test(id) ? [id] : [];
+    } catch {
+      return [];
+    }
+  }));
+  return capture.received.flatMap((payload) => {
+    try {
+      const message = JSON.parse(payload) as { id?: unknown; result?: unknown };
+      return message.id != null
+        && requestIds.has(String(message.id))
+        && typeof message.result === "object"
+        && message.result !== null
+        ? [message.result as Record<string, unknown>]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 async function expectHtmlPreviewChromeOutsideDocument(preview: Locator) {
   const [noticeBox, iframeBox] = await Promise.all([
     preview.locator(".htmlPreviewNotice").boundingBox(),
@@ -575,11 +550,11 @@ async function expectHtmlPreviewChromeOutsideDocument(preview: Locator) {
 async function expectSelectTextFits(select: Locator) {
   const result = await select.evaluate((element) => {
     const control = element as HTMLSelectElement;
-    const style = getComputedStyle(control);
     const display = control.closest(".statusSelect")?.querySelector<HTMLElement>(".statusSelectDisplay") ?? null;
+    const wrapper = control.closest<HTMLElement>(".statusSelect");
     const selectedText = display?.textContent?.trim() ?? control.selectedOptions[0]?.textContent?.trim() ?? "";
     const probe = document.createElement("span");
-    const measureStyle = display ? getComputedStyle(display) : style;
+    const measureStyle = getComputedStyle(display ?? control);
     probe.style.font = measureStyle.font;
     probe.style.letterSpacing = measureStyle.letterSpacing;
     probe.style.position = "absolute";
@@ -589,18 +564,16 @@ async function expectSelectTextFits(select: Locator) {
     document.body.appendChild(probe);
     const textWidth = probe.getBoundingClientRect().width;
     probe.remove();
-    const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
-    const paddingRight = Number.parseFloat(style.paddingRight) || 0;
     return {
-      contentWidth: display ? display.clientWidth : control.clientWidth - paddingLeft - paddingRight,
-      paddingRight,
+      displayWidth: display?.clientWidth ?? control.clientWidth,
       selectedText,
-      textWidth
+      textWidth,
+      wrapperWidth: wrapper?.clientWidth ?? control.clientWidth
     };
   });
-  expect(result.paddingRight).toBeGreaterThanOrEqual(12);
-  expect(result.paddingRight).toBeLessThanOrEqual(16);
-  expect(result.textWidth).toBeLessThanOrEqual(result.contentWidth + 1);
+  expect(result.selectedText.length).toBeGreaterThan(0);
+  expect(result.textWidth).toBeLessThanOrEqual(result.displayWidth + 1);
+  expect(result.textWidth + 10).toBeLessThanOrEqual(result.wrapperWidth + 1);
 }
 
 async function expectTextNotClipped(locator: Locator) {
@@ -672,26 +645,26 @@ async function assertComposerDockTracksTranscriptColumn(page: Page, isMobile: bo
   expect(Math.abs(dockBox!.width - probeBox!.width)).toBeLessThanOrEqual(16);
 }
 
-async function assertComposerGeometry(page: Page, options: { isMobile: boolean; plan: boolean }) {
+async function assertComposerGeometry(page: Page, isMobile: boolean) {
   const add = page.getByRole("button", { name: "Add attachments and options" });
   const input = page.locator(".pevo-composerInput");
   const footer = page.locator(".pevo-composerFooter");
   const action = page.locator(".pevo-sendButton");
   const dictation = page.getByRole("button", { name: /dictation/ });
-  const agent = page.getByRole("button", { name: "Agent", exact: true });
-  const model = page.getByRole("button", { name: "Model" });
+  const agent = page.getByRole("button", { name: "Agent target", exact: true });
+  const mode = page.getByRole("combobox", { name: "Mode", exact: true });
+  const model = page.getByRole("button", { name: "Model", exact: true });
   const context = page.getByRole("button", { name: "Context usage" });
-  const chip = page.locator(".pevo-planChip");
-  const [addBox, inputBox, footerBox, actionBox, dictationBox, agentBox, modelBox, contextBox, chipBox] = await Promise.all([
+  const [addBox, inputBox, footerBox, actionBox, dictationBox, agentBox, modeBox, modelBox, contextBox] = await Promise.all([
     add.boundingBox(),
     input.boundingBox(),
     footer.boundingBox(),
     action.boundingBox(),
     dictation.boundingBox(),
     agent.boundingBox(),
+    mode.boundingBox(),
     model.boundingBox(),
-    context.boundingBox(),
-    options.plan ? chip.boundingBox() : Promise.resolve(null)
+    context.boundingBox()
   ]);
 
   expect(addBox).not.toBeNull();
@@ -700,6 +673,7 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   expect(actionBox).not.toBeNull();
   expect(dictationBox).not.toBeNull();
   expect(agentBox).not.toBeNull();
+  expect(modeBox).not.toBeNull();
   expect(modelBox).not.toBeNull();
   expect(contextBox).not.toBeNull();
   expect(agentBox!.width).toBeLessThanOrEqual(210);
@@ -710,50 +684,55 @@ async function assertComposerGeometry(page: Page, options: { isMobile: boolean; 
   const dictationCenterY = dictationBox!.y + dictationBox!.height / 2;
   const addCenterY = addBox!.y + addBox!.height / 2;
   const agentCenterY = agentBox!.y + agentBox!.height / 2;
+  const modeCenterY = modeBox!.y + modeBox!.height / 2;
   const modelCenterY = modelBox!.y + modelBox!.height / 2;
   const contextCenterY = contextBox!.y + contextBox!.height / 2;
-  if (options.isMobile) {
+  if (isMobile) {
     const viewport = await page.viewportSize();
     expect(viewport).not.toBeNull();
-    const visibleBoxes = [addBox!, agentBox!, modelBox!, contextBox!, dictationBox!, actionBox!];
+    const visibleBoxes = [addBox!, agentBox!, modeBox!, modelBox!, contextBox!, dictationBox!, actionBox!];
     for (const box of visibleBoxes) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(viewport!.width);
     }
     expect(Math.abs(addCenterY - agentCenterY)).toBeLessThanOrEqual(5);
+    expect(Math.abs(agentCenterY - modeCenterY)).toBeLessThanOrEqual(5);
     expect(Math.abs(actionCenterY - dictationCenterY)).toBeLessThanOrEqual(5);
-    expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(5);
-    expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(5);
-    if (options.plan) {
-      expect(chipBox).not.toBeNull();
-      expect(Math.abs(agentCenterY - (chipBox!.y + chipBox!.height / 2))).toBeLessThanOrEqual(5);
-    }
+    expect(contextBox!.y).toBeGreaterThanOrEqual(modelBox!.y - 1);
+    await expectNoBoxOverlap({ action: actionBox!, context: contextBox!, dictation: dictationBox!, model: modelBox! });
+    expect(await footer.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
     expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
     expect(addBox!.x).toBeLessThan(agentBox!.x);
-    expect(contextBox!.x).toBeGreaterThan(modelBox!.x);
-    expect(contextBox!.x).toBeLessThan(dictationBox!.x);
     expect(dictationBox!.x).toBeLessThan(actionBox!.x);
     return;
   }
   expect(Math.abs(actionCenterY - dictationCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - agentCenterY)).toBeLessThanOrEqual(4);
+  expect(Math.abs(actionCenterY - modeCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(4);
 
-  if (options.plan) {
-    expect(chipBox).not.toBeNull();
-    expect(chipBox!.x).toBeGreaterThan(agentBox!.x);
-    expect(modelBox!.x).toBeGreaterThan(chipBox!.x);
-    expect(Math.abs(actionCenterY - (chipBox!.y + chipBox!.height / 2))).toBeLessThanOrEqual(5);
-  }
-
   expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
   expect(addBox!.x).toBeLessThan(agentBox!.x);
+  expect(modeBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeLessThan(dictationBox!.x);
   expect(contextBox!.x).toBeGreaterThan(modelBox!.x);
   expect(contextBox!.x).toBeLessThan(dictationBox!.x);
   expect(dictationBox!.x).toBeLessThan(actionBox!.x);
+}
+
+async function expectNoBoxOverlap(boxes: Record<string, { x: number; y: number; width: number; height: number }>) {
+  const entries = Object.entries(boxes);
+  for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
+      const [leftName, left] = entries[leftIndex]!;
+      const [rightName, right] = entries[rightIndex]!;
+      const overlapX = Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x);
+      const overlapY = Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y);
+      expect(overlapX > 1 && overlapY > 1, `${leftName} overlaps ${rightName}`).toBe(false);
+    }
+  }
 }
 
 async function forceInterruptVisualState(page: Page) {
@@ -781,17 +760,6 @@ async function forceInterruptVisualState(page: Page) {
       footer.insertBefore(status, rightControls);
     }
   });
-}
-
-async function expectModelRowsFillPopover(popover: Locator) {
-  const gaps = await popover.locator(".modelReasoningModelRows .modelReasoningRow").evaluateAll((rows) => (
-    rows.map((row) => {
-      const element = row as HTMLElement;
-      const parent = element.parentElement as HTMLElement | null;
-      return parent ? parent.clientWidth - element.clientWidth : 0;
-    })
-  ));
-  expect(Math.max(...gaps)).toBeLessThanOrEqual(8);
 }
 
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {

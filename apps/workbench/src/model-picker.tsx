@@ -1,6 +1,10 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
-import type { ModelOptionView, SettingsReadResult } from "@psychevo/protocol";
+import type {
+  ModelOptionView,
+  SettingsReadResult,
+  ThreadControlDescriptorView
+} from "@psychevo/protocol";
 
 const DEFAULT_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -24,6 +28,9 @@ export function ModelReasoningSelector({
   placement = "top-end",
   recentModels = [],
   resetLabel,
+  reasoningPresentation = "selectable",
+  reasoningValues: projectedReasoningValues,
+  showChevron = true,
   variant,
   variantOptions,
   onModelChange,
@@ -39,6 +46,9 @@ export function ModelReasoningSelector({
   placement?: "top-end" | "bottom-start";
   recentModels?: string[];
   resetLabel?: string | undefined;
+  reasoningPresentation?: "selectable" | "readOnly" | "hidden";
+  reasoningValues?: string[] | undefined;
+  showChevron?: boolean;
   variant: string;
   variantOptions?: string[];
   onModelChange(value: string | null): void;
@@ -52,8 +62,18 @@ export function ModelReasoningSelector({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const selected = model ? options.find((option) => option.value === model) ?? fallbackModelOption(model) : null;
   const recentModelsKey = recentModels.join("\u0000");
-  const reasoningValues = reasoningEffortsForModelOption(selected, variantOptions);
-  const selectedReasoning = reasoningValues.includes(variant) ? variant : "none";
+  const reasoningValues = reasoningPresentation === "selectable"
+    ? projectedReasoningValues === undefined
+      ? reasoningEffortsForModelOption(selected, variantOptions)
+      : authoritativeReasoningEfforts(projectedReasoningValues)
+    : [];
+  const selectedReasoning = reasoningPresentation === "readOnly"
+    ? variant || "none"
+    : reasoningValues.includes(variant) ? variant : reasoningValues[0] ?? "none";
+  const showReasoning = reasoningPresentation !== "hidden";
+  const popoverReasoningValues = reasoningPresentation === "readOnly"
+    ? [selectedReasoning]
+    : reasoningValues;
   const filteredOptions = useMemo(
     () => filterAndOrderModelOptions(options, model, optimisticRecentModels, modelFilter),
     [model, modelFilter, options, optimisticRecentModels]
@@ -64,18 +84,18 @@ export function ModelReasoningSelector({
       emptyLabel,
       filteredOptions,
       modelGroups,
-      reasoningValues,
+      reasoningValues: popoverReasoningValues,
       resetLabel
     })}ch`
-  }) as CSSProperties, [emptyLabel, filteredOptions, modelGroups, reasoningValues, resetLabel]);
+  }) as CSSProperties, [emptyLabel, filteredOptions, modelGroups, popoverReasoningValues, resetLabel]);
   const resetSelected = Boolean(resetLabel) && !selected && !model;
   const displayLabel = selected
-    ? `${modelShortLabel(selected)} ${reasoningLabel(selectedReasoning)}`
+    ? `${modelShortLabel(selected)}${showReasoning ? ` ${reasoningLabel(selectedReasoning)}` : ""}`
     : resetSelected
       ? resetLabel
       : emptyLabel;
   const title = selected
-    ? `${selected.value} / ${reasoningLabel(selectedReasoning)}`
+    ? `${selected.value}${showReasoning ? ` / ${reasoningLabel(selectedReasoning)}` : ""}`
     : resetSelected
       ? resetLabel
       : emptyLabel;
@@ -104,26 +124,38 @@ export function ModelReasoningSelector({
   }, [open]);
 
   useEffect(() => {
+    if (reasoningPresentation !== "selectable") {
+      return;
+    }
     if (selected) {
       if (!reasoningValues.includes(variant)) {
-        onVariantChange("none");
+        const fallback = reasoningValues[0];
+        if (fallback !== undefined) {
+          onVariantChange(fallback);
+        }
       }
       return;
     }
     if (variant !== "none") {
       onVariantChange("none");
     }
-  }, [onVariantChange, reasoningValues, selected, variant]);
+  }, [onVariantChange, reasoningPresentation, reasoningValues, selected, variant]);
 
   function selectModel(option: ModelOptionView) {
-    const nextReasoningValues = reasoningEffortsForModelOption(option, variantOptions);
-    const nextVariant = nextReasoningValues.includes(variant) ? variant : "none";
+    const nextReasoningValues = reasoningPresentation === "selectable"
+      ? projectedReasoningValues === undefined
+        ? reasoningEffortsForModelOption(option, variantOptions)
+        : authoritativeReasoningEfforts(projectedReasoningValues)
+      : [];
+    const nextVariant = reasoningPresentation === "selectable"
+      ? nextReasoningValues.includes(variant) ? variant : nextReasoningValues[0] ?? "none"
+      : variant;
     setOptimisticRecentModels((current) => recordRecentModel(option.value, current));
     if (onSelectionChange) {
       onSelectionChange(option.value, nextVariant);
       return;
     }
-    if (nextVariant !== variant) {
+    if (reasoningPresentation === "selectable" && nextVariant !== variant) {
       onVariantChange(nextVariant);
     }
     onModelChange(option.value);
@@ -134,7 +166,7 @@ export function ModelReasoningSelector({
       onSelectionChange(null, "none");
       return;
     }
-    if (variant !== "none") {
+    if (reasoningPresentation === "selectable" && variant !== "none") {
       onVariantChange("none");
     }
     onModelChange(null);
@@ -161,7 +193,7 @@ export function ModelReasoningSelector({
         onClick={() => setOpen((current) => !current)}
       >
         <span>{displayLabel}</span>
-        <ChevronDown size={13} aria-hidden="true" />
+        {showChevron && <ChevronDown size={13} aria-hidden="true" />}
       </button>
       {open && (
         <div
@@ -213,34 +245,48 @@ export function ModelReasoningSelector({
               )}
             </div>
           </div>
-          <div className="modelReasoningDivider" />
-          <div className="modelReasoningGroup">
-            <div className="modelReasoningGroupLabel">Reasoning</div>
-            {selected ? (
-              <div className="modelReasoningRows" role="radiogroup" aria-label={ariaLabel === "Model" ? "Reasoning" : `${ariaLabel} reasoning`}>
-                {reasoningValues.map((value) => (
-                  <ModelReasoningRow
-                    key={value}
-                    checked={selectedReasoning === value}
-                    label={reasoningLabel(value)}
-                    onSelect={() => {
-                      if (onSelectionChange) {
-                        onSelectionChange(model, value);
-                        return;
-                      }
-                      onVariantChange(value);
-                    }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="modelReasoningHint">Select a model first</div>
-            )}
-          </div>
+          {showReasoning && <div className="modelReasoningDivider" />}
+          {showReasoning && (
+            <div className="modelReasoningGroup">
+              <div className="modelReasoningGroupLabel">Reasoning</div>
+              {selected ? reasoningPresentation === "selectable" ? (
+                <div className="modelReasoningRows" role="radiogroup" aria-label={ariaLabel === "Model" ? "Reasoning" : `${ariaLabel} reasoning`}>
+                  {reasoningValues.map((value) => (
+                    <ModelReasoningRow
+                      key={value}
+                      checked={selectedReasoning === value}
+                      label={reasoningLabel(value)}
+                      onSelect={() => {
+                        if (onSelectionChange) {
+                          onSelectionChange(model, value);
+                          return;
+                        }
+                        onVariantChange(value);
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div
+                  aria-label={`Reasoning: ${reasoningLabel(selectedReasoning)} (read-only)`}
+                  className="modelReasoningReadOnly"
+                >
+                  <strong>{reasoningLabel(selectedReasoning)}</strong>
+                  <Check size={13} aria-hidden="true" />
+                </div>
+              ) : (
+                <div className="modelReasoningHint">Select a model first</div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
+}
+
+function authoritativeReasoningEfforts(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function ModelReasoningRow({
@@ -287,6 +333,29 @@ export function modelOptionsForControls(
     return details;
   }
   return [fallbackModelOption(selected), ...details];
+}
+
+export function modelOptionsForThreadControl(
+  control: ThreadControlDescriptorView,
+  controls: SettingsReadResult["controls"],
+  model: string | null
+): ModelOptionView[] {
+  const metadata = new Map(
+    modelOptionsForControls(controls, model).map((option) => [option.value, option])
+  );
+  return control.choices.flatMap((choice): ModelOptionView[] => {
+    if (typeof choice.value !== "string" || !choice.value.trim()) return [];
+    const value = choice.value.trim();
+    const existing = metadata.get(value);
+    if (existing) return [existing];
+    const fallback = fallbackModelOption(value);
+    return [{
+      ...fallback,
+      name: choice.label.trim() && choice.label.trim() !== value
+        ? choice.label.trim()
+        : fallback.name
+    }];
+  });
 }
 
 function filterAndOrderModelOptions(

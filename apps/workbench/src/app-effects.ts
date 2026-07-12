@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, type MutableRefObject } from "react";
 import {
-  applyTurnResultToThreadSnapshot,
   parseThreadSnapshot,
-  type GatewayClient
+  type GatewayClient,
+  type ThreadController
 } from "@psychevo/client";
 import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
@@ -10,17 +10,16 @@ import {
   InitializeResultSchema,
   TerminalExitedPayloadSchema,
   TerminalOutputPayloadSchema,
+  TurnErrorNotificationSchema,
   TurnResultNotificationSchema,
   type GatewayEvent,
   type GatewayRequestScope,
   type InitializeResult,
-  type RuntimeConfigOptionView,
   type SessionSummary,
   type SettingsReadResult,
   type ThreadSnapshot
 } from "@psychevo/protocol";
 import { asRecord, commandFeedbackAutoDismissable, optionalStringField } from "./data";
-import { agentOptionValue, type RuntimeModeProjection } from "./runtime-controls";
 import {
   normalizeSnapshot,
   startupDraftScope
@@ -40,7 +39,6 @@ import type {
   RightWorkspaceTab,
   TerminalNotificationEvent,
   TraceState,
-  WorkbenchAgent,
   WorkbenchPrefs
 } from "./types";
 import {
@@ -97,21 +95,16 @@ type AppEffectsParams = {
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
   rightTabs: RightWorkspaceTab[];
   rightWidthPx: number;
-  runnableAgents: WorkbenchAgent[];
-  runtimeModeOption: RuntimeConfigOptionView | null;
-  runtimeModeProjection: RuntimeModeProjection;
-  selectedAgentName: string;
-  selectedRuntimeRef: string;
   settingsSection: string;
   fallbackCwd: string;
   showSessionChrome: boolean;
   skipNextPinnedPersistRef: MutableRefObject<boolean>;
   snapshot: ThreadSnapshot;
+  threadController: ThreadController;
   scopeRef: MutableRefObject<GatewayRequestScope | null>;
   selectedThreadIdRef: MutableRefObject<string | null>;
   mainViewRef: MutableRefObject<MainView>;
   viewEpochRef: MutableRefObject<number>;
-  workMode: string;
   adoptSnapshotScope(runtimeClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
   applyGatewayEvent(event: GatewayEvent): void;
   beginExplicitViewSwitch(): number;
@@ -119,6 +112,7 @@ type AppEffectsParams = {
   pushDebugEvent(method: string, payload: unknown): void;
   refreshAgentSurface(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
   refreshHistory(runtimeClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<SessionSummary[]>;
+  refreshRuntimeContext(): void;
   refreshSnapshot: RefreshSnapshot;
   refreshTrace(runtimeClient?: GatewayClient | null, threadId?: string | null): Promise<void>;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
@@ -137,31 +131,14 @@ type AppEffectsParams = {
   setPinnedSessionIds(value: string[]): void;
   setRightCollapsed(value: boolean): void;
   setRightTabs(updater: (current: RightWorkspaceTab[]) => RightWorkspaceTab[]): void;
-  setSelectedAgentName(value: string): void;
   setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)): void;
   setStatus(value: string): void;
   setTerminalEvents(updater: (current: TerminalNotificationEvent[]) => TerminalNotificationEvent[]): void;
   setTraceState(value: TraceState): void;
-  setWorkMode(value: string): void;
   updateMainView(value: MainView): void;
 };
 
 export function useWorkbenchEffects(params: AppEffectsParams) {
-  useEffect(() => {
-    if (
-      params.selectedAgentName &&
-      !params.runnableAgents.some((agent) => agentOptionValue(agent) === params.selectedAgentName || agent.name === params.selectedAgentName)
-    ) {
-      params.setSelectedAgentName("");
-    }
-  }, [params.runnableAgents, params.selectedAgentName]);
-
-  useEffect(() => {
-    if (params.selectedRuntimeRef !== "native" && params.runtimeModeOption && !params.runtimeModeProjection.supportsPlan && params.workMode === "plan") {
-      params.setWorkMode("default");
-    }
-  }, [params.runtimeModeOption, params.runtimeModeProjection.supportsPlan, params.selectedRuntimeRef, params.workMode]);
-
   useEffect(() => {
     if (params.debugEnabled) {
       return;
@@ -319,15 +296,13 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           if (event.type === "activityChanged" || event.type === "titleChanged") {
             void params.refreshHistory(runtimeClient);
           }
-          if (event.type === "runtimeChildChanged" && event.threadId) {
-            params.setRightTabs((current) => registerRuntimeChildTab(current, event));
-            params.setRightCollapsed(false);
-            params.setMobilePanel("status");
-          }
           if (event.type === "turnCompleted" && (event.threadId || event.turn.threadId)) {
             const threadId = event.threadId ?? event.turn.threadId;
             if (!threadId) {
               return;
+            }
+            if (threadId === params.selectedThreadIdRef.current) {
+              params.refreshRuntimeContext();
             }
             const eventEpoch = params.viewEpochRef.current;
             params.scheduleSnapshotRefreshAfterLiveSettle(runtimeClient, threadId, eventEpoch);
@@ -395,11 +370,10 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           ? parsed.data.thread.id
           : optionalStringField(thread.id);
         if (parsed.success) {
-          params.setSnapshot((current) => {
-            const next = normalizeSnapshot(applyTurnResultToThreadSnapshot(current, parsed.data));
-            params.selectedThreadIdRef.current = next.thread?.id ?? null;
-            return next;
-          });
+          const application = params.threadController.applyTurnResult(parsed.data);
+          if (application.applied) {
+            params.selectedThreadIdRef.current = application.threadId;
+          }
         }
         if (threadId) {
           params.scheduleSnapshotRefreshAfterLiveSettle(runtimeClient, threadId, params.viewEpochRef.current);
@@ -414,10 +388,21 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       }
       if (notification.method === "turn/error") {
         const record = asRecord(notification.params);
-        params.setError(optionalStringField(record.message) ?? "Turn failed");
-        const threadId = optionalStringField(record.threadId);
+        const parsed = TurnErrorNotificationSchema.safeParse(notification.params);
+        const application = parsed.success
+          ? params.threadController.applyTurnError(parsed.data)
+          : null;
+        if (application?.applied) {
+          params.setError(application.message);
+        } else if (!parsed.success) {
+          const error = asRecord(record.error);
+          params.setError(optionalStringField(error.message) ?? optionalStringField(record.message) ?? "Turn failed");
+        }
+        const threadId = parsed.success
+          ? parsed.data.threadId
+          : optionalStringField(record.threadId);
         if (threadId) {
-          void params.refreshSnapshot(runtimeClient, threadId, undefined, true, params.viewEpochRef.current);
+          params.scheduleSnapshotRefreshAfterLiveSettle(runtimeClient, threadId, params.viewEpochRef.current);
         } else {
           void params.refreshSnapshot(runtimeClient);
         }
@@ -528,44 +513,4 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       void params.refreshAgentSurface(params.client, params.activeScope);
     }
   }, [params.client, params.activeScope, params.currentThreadId, params.snapshot.activity.running]);
-}
-
-function registerRuntimeChildTab(
-  current: RightWorkspaceTab[],
-  event: Extract<GatewayEvent, { type: "runtimeChildChanged" }>
-): RightWorkspaceTab[] {
-  if (!event.threadId) {
-    return current;
-  }
-  const existing = current.find((tab) => (
-    tab.kind === "agentSession" && tab.threadId === event.threadId
-  ));
-  const next: RightWorkspaceTab = {
-    id: existing?.id ?? `runtime-child:${encodeURIComponent(event.threadId)}`,
-    kind: "agentSession",
-    title: `${runtimeRefLabel(event.runtimeRef)} child`,
-    threadId: event.threadId,
-    parentThreadId: event.parentThreadId,
-    runtimeRef: event.runtimeRef,
-    runtimeStatus: event.status,
-    runtimeReadOnly: event.readOnly,
-    historyFidelity: existing?.historyFidelity ?? null,
-    pendingPrompt: null,
-    path: null,
-    diff: null,
-    file: null,
-    preview: null,
-    message: null
-  };
-  if (!existing) {
-    return [...current, next];
-  }
-  return current.map((tab) => tab.id === existing.id ? { ...tab, ...next } : tab);
-}
-
-function runtimeRefLabel(runtimeRef: string): string {
-  if (runtimeRef === "opencode") return "OpenCode";
-  if (runtimeRef === "codex") return "Codex";
-  if (runtimeRef === "native") return "Native";
-  return runtimeRef;
 }

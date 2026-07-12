@@ -1,4 +1,4 @@
-import { Edit3, PlugZap, Plus, Save, Trash2, Wrench, X } from "lucide-react";
+import { Edit3, PlugZap, Plus, RefreshCw, Save, Trash2, Wrench, X } from "lucide-react";
 import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
 import { backendDisplayLabel, prettyJson } from "./data";
 import type { BackendCommandJson, BackendDraft, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
@@ -22,6 +22,8 @@ export const EMPTY_BACKEND_DRAFT: BackendDraft = {
   mcpServersText: ""
 };
 
+export type ManagedBackendAction = "install" | "repair" | "upgrade";
+
 export function AgentsConfigPanel({
   backendDraft,
   backendDoctor,
@@ -32,6 +34,7 @@ export function AgentsConfigPanel({
   onDeleteBackend,
   onDoctorBackend,
   onEditBackend,
+  onManageBackend,
   onNewBackend,
   onSaveBackendDraft,
   onSetBackendEnabled,
@@ -46,16 +49,17 @@ export function AgentsConfigPanel({
   onDeleteBackend(backend: WorkbenchBackend): void;
   onDoctorBackend(backend: WorkbenchBackend): void;
   onEditBackend(backend: WorkbenchBackend): void;
+  onManageBackend(backend: WorkbenchBackend, action: ManagedBackendAction): void;
   onNewBackend(): void;
   onSaveBackendDraft(draft: BackendDraft): void;
   onSetBackendEnabled(backend: WorkbenchBackend, enabled: boolean): void;
   onSetBackendEntrypoints(backend: WorkbenchBackend, entrypoints: string[]): void;
 }) {
-  const profileBackends = backends.filter((backend) => backend.sourceTargets.includes("profile"));
+  const catalogBackends = backends;
   return (
     <section className="agentSurfacePanel agentsConfigPanel" aria-label="Agents">
       <header className="agentSurfaceHeaderWithAction">
-        <span><PlugZap size={15} /> ACP Backends <b>{profileBackends.length}</b></span>
+        <span><PlugZap size={15} /> ACP Backends <b>{catalogBackends.length}</b></span>
         {!backendDraft && (
           <ActionButton ariaLabel="Add ACP backend" disabled={disabled} icon={<Plus size={14} />} onClick={onNewBackend} size="compact" tooltip="Add ACP backend" variant="primary">
             Add backend
@@ -71,9 +75,11 @@ export function AgentsConfigPanel({
           onSave={onSaveBackendDraft}
         />
       )}
-      {(!backendDraft || profileBackends.length > 0) && <div className="agentSurfaceList">
-        {profileBackends.map((backend) => {
+      {(!backendDraft || catalogBackends.length > 0) && <div className="agentSurfaceList">
+        {catalogBackends.map((backend) => {
           const doctor = backendDoctor[backend.id] ?? null;
+          const profileMutable = backend.sourceTargets.includes("profile");
+          const managedAction = managedBackendAction(backend, doctor);
           return (
             <div className="agentSurfaceRow agentBackendRow" key={backend.id}>
 	              <div>
@@ -93,7 +99,7 @@ export function AgentsConfigPanel({
                   <Switch
                     ariaLabel={`${backend.enabled ? "Disable" : "Enable"} ${backend.id}`}
                     checked={backend.enabled}
-                    disabled={disabled}
+                    disabled={disabled || !profileMutable}
                     label={backend.enabled ? "Enabled" : "Disabled"}
                     onCheckedChange={(enabled) => onSetBackendEnabled(backend, enabled)}
                     showLabel={false}
@@ -101,12 +107,26 @@ export function AgentsConfigPanel({
                   />
                   <BackendEntrypointControls
                     backend={backend}
-                    disabled={disabled}
+                    disabled={disabled || !profileMutable}
                     onChange={(entrypoints) => onSetBackendEntrypoints(backend, entrypoints)}
                   />
                 </div>
                 <div className="agentBackendActions">
-                  <ActionButton ariaLabel={`Edit ${backend.id}`} disabled={disabled} icon={<Edit3 size={13} />} iconOnly onClick={() => onEditBackend(backend)} size="compact" tooltip="Edit Profile backend" variant="ghost">
+                  {managedAction && (
+                    <ActionButton
+                      ariaLabel={`${managedActionLabel(managedAction)} managed ${backend.id}`}
+                      disabled={disabled}
+                      icon={managedAction === "upgrade" ? <RefreshCw size={13} /> : managedAction === "repair" ? <Wrench size={13} /> : <Plus size={13} />}
+                      iconOnly
+                      onClick={() => onManageBackend(backend, managedAction)}
+                      size="compact"
+                      tooltip={`${managedActionLabel(managedAction)} managed adapter`}
+                      variant={managedAction === "repair" ? "danger" : "ghost"}
+                    >
+                      {managedActionLabel(managedAction)} managed {backend.id}
+                    </ActionButton>
+                  )}
+                  <ActionButton ariaLabel={`Edit ${backend.id}`} disabled={disabled || !profileMutable} icon={<Edit3 size={13} />} iconOnly onClick={() => onEditBackend(backend)} size="compact" tooltip={profileMutable ? "Edit Profile backend" : "Generated or Project backend is read-only here"} variant="ghost">
                     Edit {backend.id}
                   </ActionButton>
                   <ActionButton ariaLabel={`Doctor ${backend.id}`} disabled={disabled} icon={<Wrench size={13} />} iconOnly onClick={() => onDoctorBackend(backend)} size="compact" tooltip="Doctor" variant="ghost">
@@ -114,7 +134,7 @@ export function AgentsConfigPanel({
                   </ActionButton>
                   <ActionButton
                     ariaLabel={`Delete ${backend.id} from Profile`}
-                    disabled={disabled}
+                    disabled={disabled || !profileMutable}
                     icon={<Trash2 size={13} />}
                     iconOnly
                     onClick={() => onDeleteBackend(backend)}
@@ -129,10 +149,25 @@ export function AgentsConfigPanel({
             </div>
           );
         })}
-        {profileBackends.length === 0 && <p>No ACP backends configured.</p>}
+        {catalogBackends.length === 0 && <p>No ACP backends configured.</p>}
       </div>}
     </section>
   );
+}
+
+function managedBackendAction(
+  backend: WorkbenchBackend,
+  doctor: WorkbenchBackendDoctor | null
+): ManagedBackendAction | null {
+  if (backend.id !== "codex") return null;
+  const managedCheck = doctor?.checks.find((check) => check.name === "managedAdapter") ?? null;
+  if (doctor?.ok || managedCheck?.ok) return "upgrade";
+  if (managedCheck?.message.toLowerCase().includes("repair")) return "repair";
+  return "install";
+}
+
+function managedActionLabel(action: ManagedBackendAction): string {
+  return `${action.charAt(0).toUpperCase()}${action.slice(1)}`;
 }
 
 function BackendEntrypointControls({

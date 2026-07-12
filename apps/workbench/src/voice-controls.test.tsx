@@ -33,7 +33,7 @@ describe("ComposerDictationButton", () => {
 });
 
 describe("ComposerVoiceOptionSwitches", () => {
-  it("renders auto-speak and realtime as labelled switches without icons", () => {
+  it("renders auto-speak and realtime as icon-led labelled switches", () => {
     const onToggleAutoSpeak = vi.fn();
     const onToggleRealtime = vi.fn();
 
@@ -52,6 +52,7 @@ describe("ComposerVoiceOptionSwitches", () => {
 
     expect(onToggleAutoSpeak).toHaveBeenCalledTimes(1);
     expect(onToggleRealtime).toHaveBeenCalledTimes(1);
-    expect(container.querySelector("svg")).toBeNull();
+    expect(container.querySelector(".lucide-volume-2")).toBeTruthy();
+    expect(container.querySelector(".lucide-radio")).toBeTruthy();
   });
 });

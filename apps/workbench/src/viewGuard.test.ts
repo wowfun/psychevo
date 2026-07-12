@@ -43,6 +43,7 @@ function detachedSnapshot(): ThreadSnapshot {
       rawIdentity: null,
       visibleName: null
     },
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     scope: {
       cwd: "/tmp/project",
       source: {
@@ -70,7 +71,7 @@ function threadSnapshot(threadId: string): ThreadSnapshot {
     thread: {
       id: threadId,
       backend: {
-        kind: "psychevo",
+        kind: "native",
         sessionHandle: threadId,
         runtimeRef: "native"
       },

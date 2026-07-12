@@ -1,4 +1,4 @@
-import { Mic } from "lucide-react";
+import { Mic, Radio, Volume2 } from "lucide-react";
 import { Switch } from "@psychevo/components";
 
 export function ComposerDictationButton({
@@ -45,6 +45,7 @@ export function ComposerVoiceOptionSwitches({
         checked={autoSpeak}
         className="pevo-modeSwitchRow composerVoiceOptionRow"
         disabled={disabled}
+        icon={<Volume2 size={14} />}
         label="Auto-speak"
         onCheckedChange={onToggleAutoSpeak}
         size="compact"
@@ -53,6 +54,7 @@ export function ComposerVoiceOptionSwitches({
         checked={realtimeActive}
         className="pevo-modeSwitchRow composerVoiceOptionRow"
         disabled={disabled}
+        icon={<Radio size={14} />}
         label="Realtime voice"
         onCheckedChange={onToggleRealtime}
         size="compact"

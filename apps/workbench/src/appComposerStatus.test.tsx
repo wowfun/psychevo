@@ -249,8 +249,35 @@ describe("Workbench session status observability", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Context usage" }));
 
     const contextPopover = await screen.findByRole("dialog", { name: "Context usage" });
-    expect(within(contextPopover).getByText("No session context is active.")).toBeTruthy();
+    expect(within(contextPopover).getByText("Context unavailable.")).toBeTruthy();
+    expect(within(contextPopover).queryByText("0%")).toBeNull();
     expect(screen.queryByRole("region", { name: "Workspace status" })).toBeNull();
     expect(screen.getByLabelText("Show right inspector")).toBeTruthy();
+  });
+
+  it("shows token usage and Limit unavailable when a runtime reports no context ceiling", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("runtime-context-thread", "Runtime context")];
+    gatewayMock.observabilityRead = () => ({
+      ...observabilityResult("runtime-context-thread", true),
+      context: {
+        available: true,
+        label: "Runtime context",
+        status: "reported by runtime",
+        usedTokens: 12_345,
+        contextLimit: null,
+        percent: null,
+        categories: [],
+        advice: []
+      }
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Runtime context"));
+    fireEvent.click(await screen.findByRole("button", { name: "Context usage" }));
+
+    const popover = await screen.findByRole("dialog", { name: "Context usage" });
+    expect(within(popover).getByText("12.3k")).toBeTruthy();
+    expect(within(popover).getByText("12,345 tokens · Limit unavailable")).toBeTruthy();
+    expect(within(popover).queryByText("0%")).toBeNull();
   });
 });

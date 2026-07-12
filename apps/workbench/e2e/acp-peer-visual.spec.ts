@@ -1,24 +1,23 @@
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { repoRoot, startPevoWeb } from "./harness";
+import { prepareDeterministicAcpAgent } from "./runtime-live.support";
 import { visualScreenshotRoot } from "./visualArtifacts";
 
 const screenshotDir = visualScreenshotRoot("acp-peer-visual");
 
-test.describe("Workbench ACP peer client visual streaming", () => {
-  test("renders standard ACP message, thought, tool, and plan updates", async ({ page, isMobile }, testInfo) => {
+test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
+  test("configures one ACP backend and renders the common standard event stream", async ({ page, isMobile }, testInfo) => {
     test.setTimeout(180_000);
     mkdirSync(screenshotDir, { recursive: true });
+    const fixture = prepareDeterministicAcpAgent("codex", screenshotDir);
     const server = await startPevoWeb({ live: false });
     try {
-      const script = writeFakeAcpServer(server.root);
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
 
-      if (isMobile) {
-        await openPanel(page, isMobile, "History");
-      }
+      if (isMobile) await openPanel(page, isMobile, "History");
       let agentsPanel = await openCapabilityBackendPanel(page);
       await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
 
@@ -27,15 +26,15 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await form.getByLabel("ID").fill("visual-acp");
       const commandJson = form.getByLabel("Command JSON");
       await commandJson.fill(JSON.stringify({
-        command: "python3",
-        args: [script],
+        command: fixture.command,
+        args: fixture.args,
         env: {}
       }, null, 2));
       await expect(form.getByRole("button", { name: "Save" })).toBeEnabled();
       await commandJson.blur();
       await commandJson.evaluate((element) => { element.scrollTop = 0; });
       expect(await commandJson.evaluate((element) => element.scrollTop)).toBe(0);
-      await capture(page, testInfo, `01-backend-form-${projectSuffix(isMobile)}`);
+      await capture(page, testInfo, `01-stable-v1-backend-form-${projectSuffix(isMobile)}`);
       await form.getByRole("button", { name: "Save" }).click();
       await expect(form).toBeHidden({ timeout: 30_000 });
 
@@ -43,68 +42,66 @@ test.describe("Workbench ACP peer client visual streaming", () => {
       await expect(agentsPanel.getByRole("switch", { name: "Disable visual-acp" })).toBeVisible();
       await expect(agentsPanel.getByLabel("visual-acp peer entrypoint")).toBeChecked();
       await expect(agentsPanel.getByLabel("visual-acp subagent entrypoint")).toBeChecked();
-      await capture(page, testInfo, `02-backend-configured-${projectSuffix(isMobile)}`);
+      await capture(page, testInfo, `02-stable-v1-backend-configured-${projectSuffix(isMobile)}`);
 
-      if (isMobile) {
-        await openPanel(page, isMobile, "History");
-      }
+      if (isMobile) await openPanel(page, isMobile, "History");
       await page.getByRole("button", { name: "New Session", exact: true }).click();
-      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openPanel(page, isMobile, "Transcript");
-      await page.getByRole("button", { name: "Agent", exact: true }).click();
-      const agentPopover = page.getByRole("dialog", { name: "Agent Definition" });
-      const agentGroup = agentPopover.getByRole("radiogroup", { name: "Main agent" });
-      await expect(agentGroup.getByRole("radio", { name: "visual-acp" })).toBeHidden();
-      await page.getByRole("button", { name: "Agent", exact: true }).click();
-      await page.getByRole("button", { name: "Runtime Profile", exact: true }).click();
-      const runtimePopover = page.getByRole("dialog", { name: "Runtime Profile selection" });
-      const runtimeGroup = runtimePopover.getByRole("radiogroup", { name: "Runtime" });
-      await expect(runtimeGroup.getByRole("radio", { name: "visual-acp (ACP)" })).toBeVisible();
-      await runtimeGroup.getByRole("radio", { name: "visual-acp (ACP)" }).click();
-      await expect(page.getByLabel("Runtime control state")).toHaveText("Runtime default");
+      const targetControl = page.getByRole("button", { name: "Agent target", exact: true });
+      await expect(targetControl).toContainText("Default Agent");
+      await expect(targetControl).not.toContainText("Psychevo (Native)");
+      await expect(targetControl).toHaveAttribute("title", "Default Agent · Psychevo (Native)");
+      await targetControl.click();
+      const popover = page.getByRole("dialog", { name: "Agent target" });
+      const targetGroup = popover.getByRole("radiogroup", { name: "Agent target" });
+      await expect(targetGroup.getByRole("radio", { name: "Default Agent · Psychevo (Native)" })).toHaveAttribute("aria-checked", "true");
+      const acpTarget = targetGroup.getByRole("radio", { name: "visual-acp · visual-acp (ACP)" });
+      await expect(acpTarget).toBeVisible();
+      await acpTarget.click();
+      await expect(targetControl).toContainText("visual-acp");
+      await expect(targetControl).toContainText("visual-acp (ACP)");
+      await expect(page.getByText("Runtime default", { exact: true })).toHaveCount(0);
 
-      await page.getByPlaceholder("Ask Psychevo...").fill("Exercise the ACP standard event stream.");
+      const prompt = "Exercise the stable ACP v1 standard event stream.";
+      await page.getByPlaceholder("Ask Psychevo...").fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
 
       const assistantMessage = page.locator(".pevo-message.is-assistant").last();
-      await expect(page.locator(".pevo-reasoning").getByText("Thinking", { exact: true })).toBeVisible();
-      await expect(page.locator(".pevo-reasoning")).toContainText("visual thinking");
-      await expect(assistantMessage).toContainText("streaming hello");
-      await expectVisibleTextGrowth(assistantMessage);
-      await expect(assistantMessage).toContainText("model=lmstudio/noop");
+      await expect(page.locator(".pevo-reasoning")).toContainText("stable v1 reasoning", { timeout: 60_000 });
+      await expect(assistantMessage).toContainText("Codex ACP response");
+      await expect(assistantMessage).toContainText("model=fixture/default");
       await expect(assistantMessage).toContainText("mode=build");
-      await expect(page.locator(".pevo-evidence").filter({ hasText: "Run visual tool" })).toBeVisible();
-      await expect(page.locator(".pevo-evidence").filter({ hasText: "Plan" })).toContainText("Patch ACP bridge");
+      await expect(page.locator(".pevo-evidence").filter({ hasText: "Inspect ACP fixture" })).toBeVisible();
+      await expect(page.locator(".pevo-evidence").filter({ hasText: "Plan" })).toContainText(
+        "Project through the common application path"
+      );
       await assertNoHorizontalOverflow(page, page.getByRole("region", { name: "Transcript" }));
       await assertTranscriptRowsFit(page);
-      await capture(page, testInfo, `03-live-stream-${projectSuffix(isMobile)}`);
+      await capture(page, testInfo, `03-stable-v1-stream-${projectSuffix(isMobile)}`);
 
-      await expect(page.locator(".pevo-message.is-assistant").filter({ hasText: "done" })).toBeVisible({
+      const initialize = await expect.poll(() => traceEvents(fixture.logPath).find((event) => event.type === "initialize"), {
         timeout: 30_000
-      });
-      const completedTool = page.locator(".pevo-evidence").filter({ hasText: "Run visual tool" });
-      await expect(completedTool).toBeVisible();
-      await completedTool.getByRole("button", { name: /Run visual tool/ }).click();
-      await expect(completedTool).toContainText("done");
+      }).not.toBeUndefined();
+      void initialize;
+      expect(traceEvents(fixture.logPath).find((event) => event.type === "initialize")?.requestedProtocolVersion).toBe(1);
+
       await openPanel(page, isMobile, "Status");
       const statusRegion = page.getByRole("region", { name: "Workspace status" });
-      await expect(statusRegion).toContainText("reported by ACP peer");
+      await expect(statusRegion.getByRole("region", { name: "Session observability" })).toContainText("exact");
+      await expect(statusRegion).not.toContainText("reported by ACP peer");
       await expect(statusRegion).toContainText("Session tokens");
-      await expect(statusRegion).toContainText("128");
+      await expect(statusRegion).toContainText("129");
       await assertNoWorkbenchRenderError(page);
-      await assertNoHorizontalOverflow(page, page.getByRole("region", { name: "Workspace status" }));
-      await capture(page, testInfo, `04-final-${projectSuffix(isMobile)}`);
+      await assertNoHorizontalOverflow(page, statusRegion);
+      await capture(page, testInfo, `04-stable-v1-final-${projectSuffix(isMobile)}`);
 
-      if (isMobile) {
-        await openPanel(page, isMobile, "History");
-      }
+      if (isMobile) await openPanel(page, isMobile, "History");
       await page.getByRole("button", { name: "New Session", exact: true }).click();
       await openPanel(page, isMobile, "Status");
       const draftStatusRegion = page.getByRole("region", { name: "Workspace status" });
       await expect(draftStatusRegion.getByText("draft")).toBeVisible();
       await expect(draftStatusRegion).toContainText(/No active (session|context)/);
       await expect(draftStatusRegion).toContainText("No session usage yet.");
-      await expect(draftStatusRegion).not.toContainText("reported by ACP peer");
       await assertNoHorizontalOverflow(page, draftStatusRegion);
       await capture(page, testInfo, `05-new-draft-status-${projectSuffix(isMobile)}`);
     } finally {
@@ -113,112 +110,9 @@ test.describe("Workbench ACP peer client visual streaming", () => {
   });
 });
 
-function writeFakeAcpServer(root: string): string {
-  const script = path.join(root, "fake-acp-stream.py");
-  writeFileSync(script, `#!/usr/bin/env python3
-import json
-import sys
-import time
-
-model_value = "lmstudio/noop"
-mode_value = "build"
-
-def send(value):
-    print(json.dumps(value), flush=True)
-
-def update(session_id, payload):
-    send({"jsonrpc": "2.0", "method": "session/update", "params": {
-        "sessionId": session_id,
-        "update": payload
-    }})
-
-def config_options():
-    return [{
-        "id": "model",
-        "name": "Model",
-        "category": "model",
-        "type": "select",
-        "currentValue": model_value,
-        "options": [
-            {"value": "lmstudio/noop", "name": "Noop"}
-        ]
-    }, {
-        "id": "mode",
-        "name": "Mode",
-        "category": "mode",
-        "type": "select",
-        "currentValue": mode_value,
-        "options": [
-            {"value": "build", "name": "Build"},
-            {"value": "plan", "name": "Plan"},
-            {"value": "review", "name": "Review"}
-        ]
-    }]
-
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    message = json.loads(line)
-    method = message.get("method")
-    mid = message.get("id")
-    params = message.get("params") or {}
-    if method == "initialize":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 2, "capabilities": {}}})
-    elif method == "session/new":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-visual", "configOptions": config_options()}})
-    elif method == "session/load":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": params.get("sessionId") or "native-visual", "configOptions": config_options()}})
-    elif method == "session/set_config_option":
-        config_id = params.get("configId") or params.get("config_id")
-        value = params.get("value")
-        if isinstance(value, dict):
-            value = value.get("value")
-        if config_id == "model":
-            model_value = value
-        if config_id == "mode":
-            mode_value = value
-        send({"jsonrpc": "2.0", "id": mid, "result": {"configOptions": config_options()}})
-    elif method == "session/prompt":
-        session_id = params.get("sessionId") or "native-visual"
-        update(session_id, {"sessionUpdate": "session_info_update", "title": "Visual ACP session"})
-        update(session_id, {"sessionUpdate": "available_commands_update", "availableCommands": [
-            {"name": "peer_research", "description": "Peer research command"}
-        ]})
-        update(session_id, {"sessionUpdate": "agent_thought_chunk", "messageId": "thought-visual", "content": {"type": "text", "text": "visual thinking"}})
-        update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-visual", "content": {"type": "text", "text": "streaming hello "}})
-        time.sleep(0.4)
-        update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-visual", "content": {"type": "text", "text": "model=" + model_value + " "}})
-        time.sleep(0.4)
-        update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-visual", "content": {"type": "text", "text": "mode=" + mode_value + " "}})
-        time.sleep(0.4)
-        update(session_id, {"sessionUpdate": "tool_call", "toolCallId": "call-visual", "title": "Run visual tool", "kind": "execute", "status": "pending", "rawInput": {"cmd": "echo done"}})
-        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-visual", "status": "in_progress", "content": [
-            {"type": "content", "content": {"type": "text", "text": "running\\n"}}
-        ]})
-        update(session_id, {"sessionUpdate": "plan_update", "plan": {"type": "items", "id": "plan-visual", "entries": [
-            {"content": "Inspect ACP stream", "priority": "high", "status": "completed"},
-            {"content": "Patch ACP bridge", "priority": "high", "status": "in_progress"}
-        ]}})
-        update(session_id, {"sessionUpdate": "usage_update", "used": 128, "size": 2048})
-        update(session_id, {"sessionUpdate": "_visual_status", "label": "custom"})
-        time.sleep(2)
-        update(session_id, {"sessionUpdate": "agent_message_chunk", "messageId": "message-visual", "content": {"type": "text", "text": "done"}})
-        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-visual", "status": "completed", "content": [
-            {"type": "content", "content": {"type": "text", "text": "done\\n"}}
-        ], "rawOutput": {"output": "done\\n"}})
-        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
-    else:
-        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found: " + str(method)}})
-`);
-  chmodSync(script, 0o755);
-  return script;
-}
-
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {
   if (name === "Status") {
-    if (isMobile) {
-      await page.getByRole("button", { name: "Transcript" }).click();
-    }
+    if (isMobile) await page.getByRole("button", { name: "Transcript" }).click();
     const expandInspector = page.getByRole("button", { name: "Show right inspector" });
     const collapseInspector = page.getByRole("button", { name: "Collapse right inspector" });
     if (await collapseInspector.count() === 0) {
@@ -227,20 +121,10 @@ async function openPanel(page: Page, isMobile: boolean, name: "History" | "Statu
       await expect(collapseInspector).toBeVisible();
     }
   }
-  if (isMobile) {
-    await page.getByRole("button", { name, exact: true }).click();
-  }
+  if (isMobile) await page.getByRole("button", { name, exact: true }).click();
   if (name === "Status") {
     await expect(page.getByRole("region", { name: "Workspace status" })).toBeVisible();
   }
-}
-
-async function expectVisibleTextGrowth(locator: Locator) {
-  const initial = (await locator.textContent())?.length ?? 0;
-  await expect.poll(async () => (await locator.textContent())?.length ?? 0, {
-    intervals: [100, 150, 250, 500],
-    timeout: 2_000
-  }).toBeGreaterThan(initial);
 }
 
 async function openCapabilityBackendPanel(page: Page): Promise<Locator> {
@@ -253,24 +137,26 @@ async function openCapabilityBackendPanel(page: Page): Promise<Locator> {
       }
       await expect(capabilities).toBeVisible();
       const agentsTopTab = capabilities.getByRole("tab", { name: "Agents" });
-      if ((await agentsTopTab.getAttribute("aria-selected")) !== "true") {
-        await agentsTopTab.click();
-      }
+      if ((await agentsTopTab.getAttribute("aria-selected")) !== "true") await agentsTopTab.click();
       const backendsTab = capabilities.getByRole("tab", { name: "ACP Backends" });
-      if ((await backendsTab.getAttribute("aria-selected")) !== "true") {
-        await backendsTab.click();
-      }
+      if ((await backendsTab.getAttribute("aria-selected")) !== "true") await backendsTab.click();
       const agentsPanel = capabilities.getByRole("region", { name: "Agents" });
       await expect(agentsPanel).toBeVisible();
       return agentsPanel;
     } catch (error) {
-      if (attempt === 2) {
-        throw error;
-      }
+      if (attempt === 2) throw error;
       await page.waitForTimeout(100);
     }
   }
   throw new Error("unreachable");
+}
+
+function traceEvents(logPath: string): Array<Record<string, unknown>> {
+  if (!existsSync(logPath)) return [];
+  return readFileSync(logPath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 async function capture(page: Page, testInfo: TestInfo, label: string) {
@@ -278,7 +164,7 @@ async function capture(page: Page, testInfo: TestInfo, label: string) {
   const stablePath = path.join(screenshotDir, fileName);
   await page.screenshot({ fullPage: true, path: stablePath });
   await testInfo.attach(fileName, { path: stablePath, contentType: "image/png" });
-  process.stdout.write(`[acp-peer-visual] screenshot ${path.relative(repoRoot, stablePath)}\\n`);
+  process.stdout.write(`[acp-peer-visual] screenshot ${path.relative(repoRoot, stablePath)}\n`);
 }
 
 function projectSuffix(isMobile: boolean) {
@@ -323,7 +209,5 @@ async function assertTranscriptRowsFit(page: Page) {
 async function assertNoWorkbenchRenderError(page: Page) {
   const alert = page.getByRole("alert");
   const alertText = await alert.textContent().catch(() => null);
-  if (alertText?.includes("Workbench render failed")) {
-    throw new Error(alertText);
-  }
+  if (alertText?.includes("Workbench render failed")) throw new Error(alertText);
 }

@@ -74,8 +74,7 @@
 .pevo-sessionMenu button:focus-visible,
 .pevo-segmented button:focus-visible,
 .pevo-rename input:focus-visible,
-.pevo-request input:focus-visible,
-.pevo-composer textarea:focus-visible {
+.pevo-request input:focus-visible {
   outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
   outline-offset: 2px;
 }
@@ -394,6 +393,13 @@
   opacity: 1;
   pointer-events: auto;
   transition: opacity 80ms ease;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .pevo-sessionMenu {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .pevo-sessionMenu summary {

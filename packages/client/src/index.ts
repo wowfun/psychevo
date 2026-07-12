@@ -44,6 +44,8 @@ import {
   type BackendDoctorResult,
   type BackendListParams,
   type BackendListResult,
+  type BackendManageParams,
+  type BackendManageResult,
   type BackendWriteParams,
   type BackendWriteResult,
   type ChannelDoctorParams,
@@ -59,7 +61,6 @@ import {
   type ChannelWechatQrPollResult,
   type ChannelWechatQrStartParams,
   type ChannelWechatQrStartResult,
-  type ClarifyRespondParams,
   type CommandExecuteParams,
   type CommandExecuteResult,
   type CommandListParams,
@@ -71,7 +72,6 @@ import {
   type GatewayRequestScope,
   type InitializeParams,
   type InitializeResult,
-  type InteractionRespondResult,
   type ModelAssignmentSetParams,
   type ModelAssignmentSetResult,
   type ModelProviderCatalogParams,
@@ -92,7 +92,6 @@ import {
   type McpUpsertParams,
   type ObservabilityReadParams,
   type ObservabilityReadResult,
-  type PermissionRespondParams,
   type PluginCatalogAddParams,
   type PluginCatalogListParams,
   type PluginCatalogRemoveParams,
@@ -105,23 +104,22 @@ import {
   type PluginSetTrustParams,
   type PluginUninstallParams,
   type RpcNotification,
-  type RuntimeHealthCheckParams,
-  type RuntimeAuthActionParams,
-  type RuntimeAuthActionResult,
-  type RuntimeAccountRateLimitsReadParams,
-  type RuntimeAccountRateLimitsReadResult,
-  type RuntimeContextReadParams,
-  type RuntimeContextReadResult,
-  type RuntimeControlSetParams,
-  type RuntimeControlSetResult,
-  type RuntimeGoalClearParams,
-  type RuntimeGoalClearResult,
-  type RuntimeGoalReadParams,
-  type RuntimeGoalReadResult,
-  type RuntimeGoalSetParams,
-  type RuntimeGoalSetResult,
-  type RuntimeOptionsParams,
-  type RuntimeOptionsResult,
+  type ThreadContextReadParams,
+  type ThreadContextReadResult,
+  type ThreadDraftPrepareParams,
+  type ThreadDraftPrepareResult,
+  type ThreadControlSetParams,
+  type ThreadControlSetResult,
+  type ThreadActionRunParams,
+  type ThreadActionRunResult,
+  type ThreadInteractionRespondParams,
+  type ThreadInteractionRespondResult,
+  type ThreadHistoryReadParams,
+  type ThreadHistoryReadResult,
+  type ThreadImportListParams,
+  type ThreadImportListResult,
+  type ThreadImportParams,
+  type ThreadImportResult,
   type RuntimeProfileDeleteParams,
   type RuntimeProfileDeleteResult,
   type RuntimeProfileListParams,
@@ -129,18 +127,8 @@ import {
   type RuntimeProfileReadParams,
   type RuntimeProfileReadResult,
   type RuntimeProfileSetEnabledParams,
-  type RuntimeProfileView,
   type RuntimeProfileWriteParams,
   type RuntimeProfileWriteResult,
-  type RuntimeSessionListParams,
-  type RuntimeSessionListResult,
-  type RuntimeSessionMutationResult,
-  type RuntimeSessionParams,
-  type RuntimeSessionReadParams,
-  type RuntimeSessionRenameParams,
-  type RuntimeSessionRevisionParams,
-  type RuntimeSnapshotParams,
-  type RuntimeSnapshotResult,
   type SettingsReadParams,
   type SettingsReadResult,
   type SettingsUpdateParams,
@@ -178,8 +166,6 @@ import {
   type ToolSetEnabledParams,
   type ThreadBrowserParams,
   type ThreadBrowserResult,
-  type ThreadCompactStartParams,
-  type ThreadCompactStartResult,
   type ThreadDeleteResult,
   type ThreadIdParams,
   type ThreadListParams,
@@ -192,11 +178,8 @@ import {
   type ThreadStartParams,
   type ThreadTraceParams,
   type ThreadTraceResult,
-  type TurnControlResult,
   type TurnStartParams,
   type TurnStartResult,
-  type TurnSteerParams,
-  type TurnTakeoverResult,
   type UsageReadParams,
   type UsageReadResult,
   type VoiceAsrTranscribeParams,
@@ -237,14 +220,14 @@ export {
   emptyThreadSnapshot,
   latestAssistantTranscriptText,
   prepareThreadTurn,
-  threadTurnControlsFromWorkbenchControls,
   threadTurnStartParams,
-  ThreadTranscriptController,
+  ThreadController,
   turnCompletedEventFromResult,
   turnResultThreadId
 } from "./thread-controller";
 export type {
   ThreadGatewayEventApplication,
+  ThreadTurnAdmission,
   ThreadTurnAcceptance,
   ThreadTurnControls,
   ThreadTurnErrorApplication,
@@ -289,7 +272,10 @@ export interface GatewayRequestParams {
   "automation/write": AutomationWriteParams;
   "backend/delete": BackendDeleteParams;
   "backend/doctor": BackendDoctorParams;
+  "backend/install": BackendManageParams;
   "backend/list": BackendListParams;
+  "backend/repair": BackendManageParams;
+  "backend/upgrade": BackendManageParams;
   "backend/write": BackendWriteParams;
   "channel/doctor": ChannelDoctorParams;
   "channel/delete": ChannelIdParams;
@@ -300,7 +286,6 @@ export interface GatewayRequestParams {
   "channel/update": ChannelUpdateParams;
   "channel/wechat-qr/poll": ChannelWechatQrPollParams;
   "channel/wechat-qr/start": ChannelWechatQrStartParams;
-  "clarify/respond": ClarifyRespondParams;
   "command/execute": CommandExecuteParams;
   "command/list": CommandListParams;
   "completion/list": CompletionListParams;
@@ -314,7 +299,6 @@ export interface GatewayRequestParams {
   "observability/read": ObservabilityReadParams;
   "usage/read": UsageReadParams;
   "initialize": InitializeParams;
-  "permission/respond": PermissionRespondParams;
   "plugin/catalog/add": PluginCatalogAddParams;
   "plugin/catalog/list": PluginCatalogListParams;
   "plugin/catalog/remove": PluginCatalogRemoveParams;
@@ -347,32 +331,11 @@ export interface GatewayRequestParams {
   "mcp/setToolPolicy": McpSetToolPolicyParams;
   "mcp/test": McpNameParams;
   "mcp/upsert": McpUpsertParams;
-  "runtime/options": RuntimeOptionsParams;
-  "runtime/context/read": RuntimeContextReadParams;
-  "runtime/control/set": RuntimeControlSetParams;
-  "runtime/auth/action": RuntimeAuthActionParams;
-  "runtime/goal/read": RuntimeGoalReadParams;
-  "runtime/goal/set": RuntimeGoalSetParams;
-  "runtime/goal/clear": RuntimeGoalClearParams;
-  "runtime/account/rateLimits/read": RuntimeAccountRateLimitsReadParams;
   "runtime/profile/delete": RuntimeProfileDeleteParams;
   "runtime/profile/list": RuntimeProfileListParams;
   "runtime/profile/read": RuntimeProfileReadParams;
   "runtime/profile/setEnabled": RuntimeProfileSetEnabledParams;
   "runtime/profile/write": RuntimeProfileWriteParams;
-  "runtime/snapshot": RuntimeSnapshotParams;
-  "runtime/health/check": RuntimeHealthCheckParams;
-  "runtime/session/list": RuntimeSessionListParams;
-  "runtime/session/read": RuntimeSessionReadParams;
-  "runtime/session/attach": RuntimeSessionParams;
-  "runtime/session/resume": RuntimeSessionParams;
-  "runtime/session/archive": RuntimeSessionParams;
-  "runtime/session/unarchive": RuntimeSessionParams;
-  "runtime/session/delete": RuntimeSessionParams;
-  "runtime/session/rename": RuntimeSessionRenameParams;
-  "runtime/session/fork": RuntimeSessionParams;
-  "runtime/session/revert": RuntimeSessionRevisionParams;
-  "runtime/session/unrevert": RuntimeSessionRevisionParams;
   "settings/read": SettingsReadParams;
   "settings/update": SettingsUpdateParams;
   "shell/start": ShellStartParams;
@@ -385,7 +348,14 @@ export interface GatewayRequestParams {
   "terminal/write": TerminalWriteParams;
   "thread/archive": ThreadIdParams;
   "thread/browser": ThreadBrowserParams;
-  "thread/compact/start": ThreadCompactStartParams;
+  "thread/context/read": ThreadContextReadParams;
+  "thread/draft/prepare": ThreadDraftPrepareParams;
+  "thread/control/set": ThreadControlSetParams;
+  "thread/action/run": ThreadActionRunParams;
+  "thread/interaction/respond": ThreadInteractionRespondParams;
+  "thread/history/read": ThreadHistoryReadParams;
+  "thread/import/list": ThreadImportListParams;
+  "thread/import": ThreadImportParams;
   "thread/delete": ThreadIdParams;
   "thread/list": ThreadListParams;
   "thread/read": ThreadReadParams;
@@ -400,10 +370,7 @@ export interface GatewayRequestParams {
   "thread/realtime/listVoices": ThreadRealtimeSessionParams;
   "thread/realtime/start": ThreadRealtimeStartParams;
   "thread/realtime/stop": ThreadRealtimeSessionParams;
-  "turn/interrupt": { sourceKey?: string | null; threadId?: string | null };
   "turn/start": TurnStartParams;
-  "turn/steer": TurnSteerParams;
-  "turn/takeover": { sourceKey?: string | null; threadId?: string | null };
   "voice/asr/transcribe": VoiceAsrTranscribeParams;
   "voice/policy/read": VoicePolicyReadParams;
   "voice/policy/update": VoicePolicyUpdateParams;
@@ -441,7 +408,10 @@ export interface GatewayRequestResults {
   "automation/write": AutomationMutationResult;
   "backend/delete": BackendDeleteResult;
   "backend/doctor": BackendDoctorResult;
+  "backend/install": BackendManageResult;
   "backend/list": BackendListResult;
+  "backend/repair": BackendManageResult;
+  "backend/upgrade": BackendManageResult;
   "backend/write": BackendWriteResult;
   "channel/doctor": ChannelDoctorResult;
   "channel/delete": ChannelListResult;
@@ -452,7 +422,6 @@ export interface GatewayRequestResults {
   "channel/update": ChannelEnableResult;
   "channel/wechat-qr/poll": ChannelWechatQrPollResult;
   "channel/wechat-qr/start": ChannelWechatQrStartResult;
-  "clarify/respond": InteractionRespondResult;
   "command/execute": CommandExecuteResult;
   "command/list": CommandListResult;
   "completion/list": CompletionListResult;
@@ -466,7 +435,6 @@ export interface GatewayRequestResults {
   "observability/read": ObservabilityReadResult;
   "usage/read": UsageReadResult;
   "initialize": InitializeResult;
-  "permission/respond": InteractionRespondResult;
   "plugin/catalog/add": GatewayJsonResult;
   "plugin/catalog/list": GatewayJsonResult;
   "plugin/catalog/remove": GatewayJsonResult;
@@ -499,32 +467,11 @@ export interface GatewayRequestResults {
   "mcp/setToolPolicy": GatewayJsonResult;
   "mcp/test": GatewayJsonResult;
   "mcp/upsert": GatewayJsonResult;
-  "runtime/options": RuntimeOptionsResult;
-  "runtime/context/read": RuntimeContextReadResult;
-  "runtime/control/set": RuntimeControlSetResult;
-  "runtime/auth/action": RuntimeAuthActionResult;
-  "runtime/goal/read": RuntimeGoalReadResult;
-  "runtime/goal/set": RuntimeGoalSetResult;
-  "runtime/goal/clear": RuntimeGoalClearResult;
-  "runtime/account/rateLimits/read": RuntimeAccountRateLimitsReadResult;
   "runtime/profile/delete": RuntimeProfileDeleteResult;
   "runtime/profile/list": RuntimeProfileListResult;
   "runtime/profile/read": RuntimeProfileReadResult;
   "runtime/profile/setEnabled": RuntimeProfileWriteResult;
   "runtime/profile/write": RuntimeProfileWriteResult;
-  "runtime/snapshot": RuntimeSnapshotResult;
-  "runtime/health/check": RuntimeProfileView;
-  "runtime/session/list": RuntimeSessionListResult;
-  "runtime/session/read": RuntimeSessionMutationResult;
-  "runtime/session/attach": RuntimeSessionMutationResult;
-  "runtime/session/resume": RuntimeSessionMutationResult;
-  "runtime/session/archive": RuntimeSessionMutationResult;
-  "runtime/session/unarchive": RuntimeSessionMutationResult;
-  "runtime/session/delete": RuntimeSessionMutationResult;
-  "runtime/session/rename": RuntimeSessionMutationResult;
-  "runtime/session/fork": RuntimeSessionMutationResult;
-  "runtime/session/revert": RuntimeSessionMutationResult;
-  "runtime/session/unrevert": RuntimeSessionMutationResult;
   "settings/read": SettingsReadResult;
   "settings/update": SettingsReadResult;
   "shell/start": ShellStartResult;
@@ -537,7 +484,14 @@ export interface GatewayRequestResults {
   "terminal/write": TerminalMutationResult;
   "thread/archive": ThreadMutationResult;
   "thread/browser": ThreadBrowserResult;
-  "thread/compact/start": ThreadCompactStartResult;
+  "thread/context/read": ThreadContextReadResult;
+  "thread/draft/prepare": ThreadDraftPrepareResult;
+  "thread/control/set": ThreadControlSetResult;
+  "thread/action/run": ThreadActionRunResult;
+  "thread/interaction/respond": ThreadInteractionRespondResult;
+  "thread/history/read": ThreadHistoryReadResult;
+  "thread/import/list": ThreadImportListResult;
+  "thread/import": ThreadImportResult;
   "thread/delete": ThreadDeleteResult;
   "thread/list": ThreadListResult;
   "thread/read": ThreadSnapshot;
@@ -552,10 +506,7 @@ export interface GatewayRequestResults {
   "thread/realtime/listVoices": ThreadRealtimeListVoicesResult;
   "thread/realtime/start": ThreadRealtimeStartResult;
   "thread/realtime/stop": ThreadRealtimeMutationResult;
-  "turn/interrupt": TurnControlResult;
   "turn/start": TurnStartResult;
-  "turn/steer": TurnControlResult;
-  "turn/takeover": TurnTakeoverResult;
   "voice/asr/transcribe": VoiceAsrTranscribeResult;
   "voice/policy/read": VoicePolicyResult;
   "voice/policy/update": VoicePolicyResult;

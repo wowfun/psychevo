@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { act, renderHook } from "@testing-library/react";
+import { ThreadController } from "@psychevo/client";
+import { describe, expect, it, vi } from "vitest";
 import type {
   GatewayEvent,
   GatewayRequestScope,
@@ -7,11 +11,14 @@ import type {
   TranscriptBlock,
   TranscriptEntry
 } from "@psychevo/protocol";
-import { applyWorkbenchGatewayEventSnapshot } from "./app-live-events";
+import { useGatewayLiveEvents } from "./app-live-events";
 
-describe("applyWorkbenchGatewayEventSnapshot", () => {
+describe("useGatewayLiveEvents", () => {
   it("settles the selected thread when a floating-origin completion is broadcast", () => {
-    const next = applyWorkbenchGatewayEventSnapshot(runningSnapshot(), {
+    const controller = new ThreadController(runningSnapshot());
+    const apply = vi.spyOn(controller, "applyGatewayEvent");
+    const { result } = renderLiveEvents(controller);
+    const event: GatewayEvent = {
       committedEntries: [
         entry({
           body: "Hi from Floating.",
@@ -24,8 +31,12 @@ describe("applyWorkbenchGatewayEventSnapshot", () => {
       turn: completedTurn("turn-floating", "thread-shared"),
       turnId: "turn-floating",
       type: "turnCompleted"
-    });
+    };
 
+    act(() => result.current.applyGatewayEvent(event));
+
+    const next = controller.snapshot()!;
+    expect(apply).toHaveBeenCalledWith(event);
     expect(next.activity.running).toBe(false);
     expect(next.activity.activeTurnId).toBeNull();
     expect(next.entries).toHaveLength(1);
@@ -34,7 +45,9 @@ describe("applyWorkbenchGatewayEventSnapshot", () => {
 
   it("does not apply another thread's broadcast completion", () => {
     const current = runningSnapshot();
-    const next = applyWorkbenchGatewayEventSnapshot(current, {
+    const controller = new ThreadController(current);
+    const { result } = renderLiveEvents(controller);
+    act(() => result.current.applyGatewayEvent({
       committedEntries: [
         entry({
           body: "Wrong thread.",
@@ -47,13 +60,24 @@ describe("applyWorkbenchGatewayEventSnapshot", () => {
       turn: completedTurn("turn-other", "thread-other"),
       turnId: "turn-other",
       type: "turnCompleted"
-    });
+    }));
 
+    const next = controller.snapshot()!;
     expect(next.activity.running).toBe(true);
     expect(next.entries).toEqual([]);
     expect(next.thread?.id).toBe("thread-shared");
   });
 });
+
+function renderLiveEvents(controller: ThreadController) {
+  return renderHook(() => useGatewayLiveEvents({
+    refreshSnapshot: async () => {},
+    selectedThreadIdRef: { current: controller.snapshot()?.thread?.id ?? null },
+    setLatestGatewayEvent: vi.fn(),
+    threadController: controller,
+    viewEpochRef: { current: 0 }
+  }));
+}
 
 function runningSnapshot(): ThreadSnapshot {
   return {
@@ -62,6 +86,7 @@ function runningSnapshot(): ThreadSnapshot {
       queuedTurns: 0,
       running: true
     },
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries: [],
     pendingActions: [],
     scope: scope(),
@@ -73,7 +98,7 @@ function runningSnapshot(): ThreadSnapshot {
       visibleName: null
     },
     thread: {
-      backend: { kind: "psychevo", sessionHandle: "thread-shared", runtimeRef: "native" },
+      backend: { kind: "native", sessionHandle: "thread-shared", runtimeRef: "native" },
       id: "thread-shared",
       sourceKey: null
     }

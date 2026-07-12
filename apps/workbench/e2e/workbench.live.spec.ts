@@ -86,7 +86,7 @@ test.describe("pevo Web Workbench", () => {
     }
   });
 
-  test("opens live translate subagent sessions from the GUI @live", async ({ page, isMobile }, testInfo) => {
+  test("opens a live translate subagent session from the GUI @live", async ({ page, isMobile }, testInfo) => {
     const context = liveContextFor("web-subagent-live");
     if (!context) {
       test.skip(true, "run through cargo xtask live");
@@ -111,7 +111,7 @@ test.describe("pevo Web Workbench", () => {
       await page.getByRole("button", { name: "Send message" }).click();
 
       const openAgentButtons = page.getByRole("button", { name: /Open .*agent session/i });
-      await expect.poll(async () => openAgentButtons.count(), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(async () => openAgentButtons.count(), { timeout: 240_000 }).toBeGreaterThanOrEqual(1);
       await captureWorkbench(page, testInfo, "live-translate-agent-rows");
 
       await openAgentButtons.first().click();

@@ -359,7 +359,7 @@ function SettingsSectionPanel({
         <ChannelsSettingsPanel
           channelDoctor={channelDoctor}
           channels={channels}
-          controls={controls}
+          client={client}
           disabled={disabled}
           onDeleteChannel={onDeleteChannel}
           onDoctorChannel={onDoctorChannel}

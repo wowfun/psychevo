@@ -184,6 +184,186 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   box-shadow: none;
 }
 
+.agentSessionImportDialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+}
+
+.agentSessionImportDialog .pevo-createPanelBody {
+  min-height: 180px;
+  overflow: auto;
+}
+
+.agentSessionImportDialog .pevo-createPanelFooter {
+  justify-content: space-between;
+}
+
+.agentSessionImportCount {
+  color: var(--pevo-muted);
+  font-size: 0.78rem;
+}
+
+.agentSessionImportProfiles,
+.agentSessionImportRows {
+  display: grid;
+  gap: 10px;
+}
+
+.agentSessionImportProfile {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 12px 12px 12px 16px;
+  overflow: hidden;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+}
+
+.agentSessionImportProfile::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  content: "";
+  background: var(--pevo-accent);
+}
+
+.agentSessionImportProfile.is-error::before {
+  background: var(--pevo-danger);
+}
+
+.agentSessionImportProfile > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.agentSessionImportProfile h4,
+.agentSessionImportProfile p {
+  margin: 0;
+}
+
+.agentSessionImportProfile h4 {
+  color: var(--pevo-ink);
+  font-size: 0.9rem;
+}
+
+.agentSessionImportProfile header p,
+.agentSessionImportProfile label span,
+.agentSessionImportRow small {
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.agentSessionImportProfile label {
+  display: grid;
+  gap: 4px;
+  min-width: 190px;
+}
+
+.agentSessionImportProfile select {
+  min-width: 0;
+  padding: 6px 28px 6px 8px;
+  color: var(--pevo-ink);
+  background: var(--pevo-bg);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.agentSessionImportRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 10px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-bg) 35%);
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+}
+
+.agentSessionImportRow:hover:not(:disabled),
+.agentSessionImportRow:focus-visible {
+  background: var(--pevo-panel-muted);
+  border-color: var(--pevo-accent);
+}
+
+.agentSessionImportRow > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.agentSessionImportRow strong,
+.agentSessionImportRow small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentSessionImportRow > span:last-child {
+  flex: 0 0 auto;
+  color: var(--pevo-muted);
+  font-size: 0.72rem;
+}
+
+.agentSessionImportEmpty,
+.agentSessionImportError {
+  padding: 8px 2px;
+  color: var(--pevo-muted);
+  font-size: 0.8rem;
+}
+
+.agentSessionImportError {
+  color: var(--pevo-danger);
+}
+
+.agentSessionDeleteDialog {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.agentSessionDeleteName {
+  margin: 0;
+  color: var(--pevo-ink);
+  font-weight: 650;
+}
+
+.agentSessionDeleteWarning {
+  margin: 8px 0 0;
+  color: var(--pevo-danger);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 640px) {
+  .agentSessionImportBackdrop {
+    align-items: end;
+    padding: 8px;
+  }
+
+  .agentSessionImportDialog {
+    width: 100%;
+    max-height: calc(100vh - 16px);
+  }
+
+  .agentSessionImportProfile > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .agentSessionImportProfile label {
+    min-width: 0;
+  }
+
+  .agentSessionImportRow {
+    align-items: start;
+    flex-direction: column;
+    gap: 5px;
+  }
+}
+
 .workspaceDialog > header,
 .workspaceDialog > footer,
 .workspaceDialog > .workspaceDialogTitle {

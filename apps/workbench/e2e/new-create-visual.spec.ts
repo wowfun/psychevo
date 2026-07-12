@@ -100,10 +100,11 @@ test.describe("Workbench New/Create visual contract", () => {
       const teamDetail = capabilities.getByRole("complementary", { name: "Team definition detail" });
       const teamForm = teamDetail.getByRole("form", { name: "Team definition" });
       await teamForm.getByLabel("Team name").fill("runtime-review");
-      await teamForm.getByLabel("Team description").fill("Review with a captured direct runtime profile");
+      await teamForm.getByLabel("Team description").fill("Review with a captured ACP Runtime Profile");
       await teamForm.getByLabel("Team leader").fill("general");
       const members = teamForm.getByLabel("Team members");
-      await members.fill("reviewer: general | role=review | runtime=codex | option.mode=auto-review");
+      await members.fill("reviewer: codex | role=review | runtime=codex | option.mode=auto-review");
+      await expect(members).toHaveValue(/reviewer: codex/);
       await expect(members).toHaveValue(/runtime=codex/);
       await members.evaluate((element) => {
         const textarea = element as HTMLTextAreaElement;
@@ -127,6 +128,7 @@ test.describe("Workbench New/Create visual contract", () => {
       await savedTeam.click();
       await capabilities.getByRole("button", { name: "Edit runtime-review Markdown" }).click();
       const persistedMembers = capabilities.getByRole("form", { name: "Team definition" }).getByLabel("Team members");
+      await expect(persistedMembers).toHaveValue(/reviewer: codex/);
       await expect(persistedMembers).toHaveValue(/runtime=codex/);
       await expect(persistedMembers).toHaveValue(/option\.mode=auto-review/);
     } finally {

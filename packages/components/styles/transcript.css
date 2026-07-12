@@ -18,6 +18,59 @@
   background: transparent;
 }
 
+.pevo-historyNotice {
+  width: min(760px, 100%);
+  justify-self: start;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  color: var(--pevo-muted-strong);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 24%);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-small);
+  line-height: 1.45;
+}
+
+.pevo-nativePhases,
+.pevo-nativePhase,
+.pevo-nativePhaseUngrouped {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: min(760px, 100%);
+  justify-self: start;
+  gap: 9px;
+}
+
+.pevo-nativePhasesToggle {
+  justify-self: start;
+  min-height: 24px;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  font-family: var(--pevo-mono);
+  font-size: var(--pevo-font-size-xsmall);
+  cursor: pointer;
+}
+
+.pevo-nativePhasesToggle:hover,
+.pevo-nativePhasesToggle:focus-visible {
+  color: var(--pevo-ink);
+}
+
+.pevo-nativePhase {
+  box-sizing: border-box;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid var(--pevo-border-strong);
+}
+
+.pevo-nativePhase > header {
+  color: var(--pevo-muted);
+  font-family: var(--pevo-mono);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.2;
+}
+
 .pevo-message {
   display: block;
   max-width: min(760px, 100%);

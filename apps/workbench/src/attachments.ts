@@ -47,24 +47,30 @@ export async function attachmentFromFile(file: File): Promise<PendingAttachment>
     };
   }
 
+  const blob = await fileToBase64(file);
   return {
     id,
     input: {
-      type: "context",
-      label: `Attachment: ${file.name || "file"}`,
-      text: [
-        `Attached file: ${file.name || "file"}`,
-        `MIME: ${file.type || "unknown"}`,
-        `Size: ${sizeLabel}`,
-        "Binary content is selected in Workbench but is not embedded as model text."
-      ].join("\n"),
-      visibleToModel: true
+      type: "resource",
+      uri: `attachment://${encodeURIComponent(file.name || "file")}`,
+      mimeType: file.type || "application/octet-stream",
+      text: null,
+      blob
     },
     kind: "file",
     name: file.name || "file",
     size: file.size,
     sizeLabel
   };
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
 }
 
 function fileToDataUrl(file: File): Promise<string> {

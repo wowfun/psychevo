@@ -1,7 +1,7 @@
 import { GatewayClient, type GatewayRawMessageHandler, type GatewayTransport } from "@psychevo/client";
 import type { FloatingActivation, FloatingRuntime } from "@psychevo/floating";
 import type { HostRect } from "@psychevo/host";
-import type { TranscriptEntry } from "@psychevo/protocol";
+import type { ThreadContextReadResult, TranscriptEntry } from "@psychevo/protocol";
 import { createDesktopFloatingWindowControls } from "./windowControls";
 
 export function createVisualFloatingRuntime(): FloatingRuntime {
@@ -38,18 +38,54 @@ export function createVisualFloatingRuntime(): FloatingRuntime {
       return undefined;
     },
     async turnControls() {
+      const context = visualThreadContext();
       return {
-        model: "visual/model",
-        permissionMode: "default",
-        reasoningEffort: null,
-        runtimeOptions: {},
-        runtimeRef: "native",
-        runtimeSessionId: null,
-        mode: "default",
-        agentName: null
+        context,
+        controls: {
+          targetId: context.targetId,
+          turnOverrides: {
+            mode: "default",
+            model: "visual/model",
+            permissionMode: "default"
+          }
+        }
       };
     },
     locale: "English"
+  };
+}
+
+function visualThreadContext(): ThreadContextReadResult {
+  return {
+    targetId: "target:visual-native",
+    runtimeProfileRef: "native",
+    selectionState: "prospective",
+    profiles: [],
+    binding: null,
+    controls: [],
+    stability: "stable",
+    capabilities: [],
+    compatibleTargets: [{
+      targetId: "target:visual-native",
+      agentRef: null,
+      runtimeProfileRef: "native",
+      agentLabel: "Default Agent",
+      profileLabel: "Psychevo (Native)",
+      label: "Default Agent · Psychevo (Native)",
+      ready: true,
+      unavailableReason: null
+    }],
+    inputCapabilities: ["text", "image", "embeddedContext"].map((kind) => ({
+      kind,
+      enabled: true,
+      unavailableReason: null
+    })),
+    actions: [],
+    sendability: { allowed: true, reason: null, recoveryAction: null },
+    history: { owner: "psychevo", fidelity: "unavailable", cursor: null, hint: null },
+    pendingInteractions: [],
+    contextRevision: "visual-context",
+    controlRevision: "visual-controls"
   };
 }
 
@@ -154,7 +190,16 @@ class VisualGatewayTransport implements GatewayTransport {
           }
         });
       }, 0);
-      this.respond(message.id, { accepted: true, threadId: requestedThreadId });
+      this.respond(message.id, {
+        accepted: true,
+        threadId: requestedThreadId,
+        turnId,
+        thread: {
+          backend: { kind: "native", sessionHandle: requestedThreadId, runtimeRef: "native" },
+          id: requestedThreadId,
+          sourceKey: null
+        }
+      });
       window.setTimeout(() => {
         this.emit({
           jsonrpc: "2.0",
@@ -172,7 +217,7 @@ class VisualGatewayTransport implements GatewayTransport {
               finalAnswer
             },
             thread: {
-              backend: { kind: "psychevo", sessionHandle: requestedThreadId },
+              backend: { kind: "native", sessionHandle: requestedThreadId, runtimeRef: "native" },
               id: requestedThreadId,
               sourceKey: null
             },
@@ -190,8 +235,13 @@ class VisualGatewayTransport implements GatewayTransport {
       }, 1_200);
       return;
     }
-    if (message.method === "turn/interrupt") {
-      this.respond(message.id, { accepted: true });
+    if (message.method === "thread/action/run") {
+      this.respond(message.id, {
+        kind: "interrupt",
+        threadId: "visual-thread",
+        interrupted: true,
+        cleared: 0
+      });
       return;
     }
     this.respond(message.id, {});

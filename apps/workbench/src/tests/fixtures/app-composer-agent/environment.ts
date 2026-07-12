@@ -95,11 +95,9 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       id: "native",
       runtime: "native",
       enabled: true,
-      label: "Native Runtime",
+      label: "Psychevo (Native)",
       generated: true,
       configured: false,
-      command: null,
-      args: [],
       backendRef: null,
       provenance: "Native",
       profileRevision: "1",
@@ -110,8 +108,6 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       approvalMode: null,
       sandbox: null,
       workspaceRoots: [],
-      envKeys: [],
-      optionKeys: [],
       sourceTargets: [],
       health: { status: "ready", summary: "Built in runtime", commandPath: null, checkedAtMs: null },
       readinessStages: [{ id: "configuration", status: "ready", summary: "Built in", observedAtMs: null }],
@@ -119,15 +115,13 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
     },
     {
       id: "codex",
-      runtime: "codex",
+      runtime: "acp",
       enabled: true,
-      label: "Codex",
+      label: "Codex (ACP)",
       generated: true,
       configured: false,
-      command: "codex",
-      args: ["app-server", "--stdio"],
-      backendRef: null,
-      provenance: "Direct",
+      backendRef: "codex",
+      provenance: "ACP",
       profileRevision: "2",
       capabilityRevision: "2",
       defaultModel: null,
@@ -136,7 +130,6 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
       approvalMode: null,
       sandbox: null,
       workspaceRoots: [],
-      envKeys: [],
       optionKeys: ["mode"],
       sourceTargets: [],
       health: { status: "warning", summary: "Command not checked", commandPath: null, checkedAtMs: null },
@@ -145,25 +138,22 @@ function defaultRuntimeProfileRecords(): Array<Record<string, unknown>> {
     },
     {
       id: "opencode",
-      runtime: "opencode",
+      runtime: "acp",
       enabled: true,
-      label: "OpenCode",
+      label: "OpenCode (ACP)",
       generated: true,
       configured: false,
-      command: "opencode",
-      args: ["serve"],
-      backendRef: null,
-      provenance: "Direct",
+      backendRef: "opencode",
+      provenance: "ACP",
       profileRevision: "3",
       capabilityRevision: "3",
       defaultModel: null,
       defaultMode: "build",
-      defaultAgent: "build",
+      defaultAgent: null,
       approvalMode: null,
       sandbox: null,
       workspaceRoots: [],
-      envKeys: [],
-      optionKeys: ["mode", "agent"],
+      optionKeys: ["mode"],
       sourceTargets: [],
       health: { status: "warning", summary: "Command not checked", commandPath: null, checkedAtMs: null },
       readinessStages: [{ id: "executable", status: "unchecked", summary: "Not checked", observedAtMs: null }],
@@ -203,7 +193,9 @@ afterEach(() => {
     action: { type: "passThroughPrompt", text: command }
   });
   gatewayMock.completionResult = { items: [], replacement: null };
-  gatewayMock.turnSteer = () => ({ accepted: true });
+  gatewayMock.threadActionRun = null;
+  gatewayMock.threadStart = null;
+  gatewayMock.turnStart = null;
   gatewayMock.commandList = [];
   gatewayMock.slashSettings = {
     scope: "global",
@@ -216,6 +208,7 @@ afterEach(() => {
   };
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.model = "xiaomi/xiaomi-token-high";
+  gatewayMock.acpChannelModelSafe = true;
   gatewayMock.modelVariant = "none";
   gatewayMock.modelOverride = null;
   gatewayMock.modelVariantOverride = null;
@@ -280,8 +273,11 @@ afterEach(() => {
   gatewayMock.observabilityRead = null;
   gatewayMock.usageRead = null;
   gatewayMock.wechatQrPoll = null;
-  gatewayMock.permissionRespond = () => ({ accepted: true });
-  gatewayMock.clarifyRespond = () => ({ accepted: true });
+  gatewayMock.threadInteractionRespond = (params: unknown) => ({
+    accepted: true,
+    interactionId: (params as { interactionId?: string }).interactionId ?? "interaction-1",
+    outcome: "accepted"
+  });
   gatewayMock.clipboardWriteLog.length = 0;
   gatewayMock.openDownloadLog.length = 0;
   gatewayMock.optimisticLog.length = 0;
@@ -300,7 +296,6 @@ afterEach(() => {
   gatewayMock.teamStatusResult = null;
   gatewayMock.backendRecords = [];
   gatewayMock.runtimeContextRead = null;
-  gatewayMock.runtimeSessionRequest = null;
   gatewayMock.runtimeProfileRecords = defaultRuntimeProfileRecords();
   gatewayMock.skillRecords = defaultSkillRecords();
   gatewayMock.automationRecords = [];
@@ -375,7 +370,7 @@ afterEach(() => {
   gatewayMock.sessionSummaries = [];
   gatewayMock.snapshot.thread = {
     id: "thread-1",
-    backend: { kind: "psychevo" as const, sessionHandle: "thread-1", runtimeRef: "native" },
+    backend: { kind: "native" as const, sessionHandle: "thread-1", runtimeRef: "native" },
     sourceKey: "source-key"
   };
   gatewayMock.snapshot.pendingActions = [];

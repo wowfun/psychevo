@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./composer";
 
@@ -49,5 +49,22 @@ describe("Composer attachments", () => {
     });
 
     expect(onAttachFiles).toHaveBeenCalledWith([file]);
+  });
+
+  it("renders the attachment drawer action with a leading paperclip icon", () => {
+    render(
+      <Composer
+        running={false}
+        onAttach={vi.fn()}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add attachments and options" }));
+    const attachment = screen.getByRole("menuitem", { name: "Add images and files" });
+    expect(within(attachment).getByText("Add images and files")).toBeTruthy();
+    expect(attachment.querySelector(".lucide-paperclip")).toBeTruthy();
   });
 });

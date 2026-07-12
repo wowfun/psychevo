@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { HistoryDraftSession } from "@psychevo/components";
 import {
-  acceptThreadTurn,
-  bindThreadSnapshot,
   GatewayClient,
   latestAssistantTranscriptText,
-  prepareThreadTurn,
+  parseThreadSnapshot,
   scopeForCwd,
-  threadTurnStartParams
+  ThreadController
 } from "@psychevo/client";
 import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
@@ -20,9 +18,8 @@ import {
   type InitializeResult,
   type ModelOptionView,
   type ObservabilityReadResult,
-  type RuntimeContextReadResult,
-  type RuntimeControlDescriptorView,
-  type RuntimeOptionsResult,
+  type ThreadContextReadResult,
+  type ThreadControlDescriptorView,
   type SessionSummary,
   type SettingsReadResult,
   type ThreadSnapshot,
@@ -31,11 +28,6 @@ import {
   type WorkspaceDiffResult,
   type WorkspaceFilesResult
 } from "@psychevo/protocol";
-import {
-  asRecord,
-  optionalStringField,
-  stringArray
-} from "./data";
 import { createCommandActions } from "./command-actions";
 import { createAppActions } from "./app-actions";
 import { useWorkbenchEffects } from "./app-effects";
@@ -43,8 +35,7 @@ import { useAutomations } from "./app-automations";
 import { EMPTY_SNAPSHOT } from "./app-constants";
 import { useGatewayLiveEvents } from "./app-live-events";
 import {
-  mergeModelCatalogOptionsIntoSettings,
-  modelTurnBlockReasonForControls
+  mergeModelCatalogOptionsIntoSettings
 } from "./app-model-state";
 import {
   createSurfaceActions,
@@ -56,20 +47,9 @@ import { WorkbenchLayout } from "./workbench-layout";
 import {
   rightWorkspaceTabVisibleForSession
 } from "./right-workspace";
+import { runtimeControlAsConfigOption } from "./runtime-controls";
 import {
-  agentOptionValue,
-  isComposerRunnableAgent,
-  projectRuntimeModeOption,
-  resolvePeerRuntimeMode,
-  runtimeControlAsConfigOption
-} from "./runtime-controls";
-import {
-  agentPairingUnavailableReason,
-  parseRuntimeContext,
-  registerRuntimeContextChildTabs,
-  runtimeControlDependencyMatches,
-  runtimeControlSelections,
-  runtimeOptionsWithModeFallback
+  parseThreadContext
 } from "./runtime-context";
 import {
   normalizeActivity,
@@ -138,12 +118,21 @@ function mergeBrowserWorkspaces(
 }
 
 export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtimeFactory?: WorkbenchRuntimeFactory } = {}) {
+  const threadController = useMemo(() => new ThreadController(EMPTY_SNAPSHOT), []);
+  const threadSnapshotStore = useMemo(() => ({
+    getSnapshot: () => threadController.snapshot() ?? EMPTY_SNAPSHOT,
+    subscribe: (listener: () => void) => threadController.subscribe(listener)
+  }), [threadController]);
+  const snapshot = useSyncExternalStore(
+    threadSnapshotStore.subscribe,
+    threadSnapshotStore.getSnapshot,
+    threadSnapshotStore.getSnapshot
+  );
   const [client, setClient] = useState<GatewayClient | null>(null);
   const [host, setHost] = useState<PsychevoHost | null>(null);
   const [endpoint, setEndpoint] = useState<GatewayEndpoint | null>(null);
   const [init, setInit] = useState<InitializeResult | null>(null);
   const [activeScope, setActiveScope] = useState<GatewayRequestScope | null>(null);
-  const [snapshot, setSnapshot] = useState<ThreadSnapshot>(EMPTY_SNAPSHOT);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [sessionBrowserWorkspaces, setSessionBrowserWorkspaces] = useState<SessionBrowserWorkspaceState[]>([]);
@@ -166,19 +155,13 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const [rightCollapsed, setRightCollapsed] = useState(true);
   const [commandFeedback, setCommandFeedback] = useState<CommandFeedback>(null);
   const [activeCommandOverlay, setActiveCommandOverlay] = useState<CommandOverlay | null>(null);
-  const [selectedAgentName, setSelectedAgentName] = useState<string>("");
-  const [selectedRuntimeRef, setSelectedRuntimeRef] = useState<string>("native");
-  const [runtimeContext, setRuntimeContext] = useState<RuntimeContextReadResult | null>(null);
-  const [runtimeControlValues, setRuntimeControlValues] = useState<Record<string, unknown>>({});
-  const [runtimeSessionId, setRuntimeSessionId] = useState<string | null>(null);
-  const [, setRuntimeOptionsResult] = useState<RuntimeOptionsResult | null>(null);
+  const [selectedTargetId, setSelectedTargetId] = useState<string>("");
+  const [runtimeContext, setRuntimeContext] = useState<ThreadContextReadResult | null>(null);
+  const [runtimeContextTargetId, setRuntimeContextTargetId] = useState<string>("");
+  const [runtimeContextRefreshRevision, setRuntimeContextRefreshRevision] = useState(0);
+  const [runtimeControlDrafts, setRuntimeControlDrafts] = useState<Record<string, unknown>>({});
   const [runtimeOptionsLoading, setRuntimeOptionsLoading] = useState(false);
   const [runtimeOptionsError, setRuntimeOptionsError] = useState<string | null>(null);
-  const [selectedRuntimeMode, setSelectedRuntimeMode] = useState<string>("");
-  const [permissionMode, setPermissionMode] = useState("default");
-  const [workMode, setWorkMode] = useState("default");
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [selectedVariant, setSelectedVariant] = useState<string>("none");
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFilesResult | null>(null);
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiffResult | null>(null);
@@ -221,7 +204,15 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const skipNextPinnedPersistRef = useRef(false);
   const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
   const voiceAutoSpeakKeyRef = useRef<string | null>(null);
-  const pendingRuntimeSelectionRef = useRef<string | null>(null);
+  const pendingTargetSelectionRef = useRef<string | null>(null);
+  const skipNextRuntimeContextReadRef = useRef(false);
+  const runtimeTargetTransitionRef = useRef(false);
+
+  function setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)) {
+    const current = threadController.snapshot() ?? EMPTY_SNAPSHOT;
+    const next = typeof value === "function" ? value(current) : value;
+    if (next !== current) threadController.reset(next);
+  }
 
   const activity = normalizeActivity(snapshot.activity);
   const transcriptEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
@@ -245,88 +236,79 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       .filter((session): session is SessionSummary => Boolean(session)),
     [pinnedSessionIds, sessions]
   );
-  const runnableAgents = useMemo(
-    () => agents.filter(isComposerRunnableAgent),
-    [agents]
-  );
   const runtimeProfiles = runtimeContext?.profiles ?? [];
   const runtimeBinding = runtimeContext?.binding ?? null;
-  const selectedRuntimeProfile = runtimeProfiles.find((profile) => profile.id === selectedRuntimeRef) ?? null;
-  const nativeRuntimeSelected = selectedRuntimeProfile?.runtime === "native"
-    || (!selectedRuntimeProfile && selectedRuntimeRef === "native");
-  const selectedAgent = runnableAgents.find((agent) => agentOptionValue(agent) === selectedAgentName) ?? null;
-  const runtimeControls = runtimeContext?.runtimeRef === selectedRuntimeRef ? runtimeContext.controls : [];
-  const runtimeModeControl = runtimeControls.find((control) => control.id === "mode") ?? null;
+  const compatibleTargets = runtimeContext?.compatibleTargets ?? [];
+  const runtimeControls = runtimeContext
+    && runtimeContextTargetId === selectedTargetId
+    && Boolean(selectedTargetId)
+    ? runtimeContext.controls
+    : [];
+  const runtimeModeControl = runtimeControls.find((control) => control.surfaceRole === "mode") ?? null;
   const runtimeModeOption = useMemo(() => runtimeControlAsConfigOption(runtimeModeControl), [runtimeModeControl]);
-  const runtimeModeProjection = useMemo(
-    () => projectRuntimeModeOption(runtimeModeOption),
-    [runtimeModeOption]
-  );
-  const selectedPeerRuntimeMode = runtimeBinding || nativeRuntimeSelected
-    ? ""
-    : resolvePeerRuntimeMode(runtimeModeProjection, workMode, selectedRuntimeMode);
-  const planModeAvailable = !runtimeBinding && (selectedRuntimeProfile?.runtime === "native" || runtimeModeProjection.supportsPlan);
-  const runtimeAcceptsAgentPersona = nativeRuntimeSelected;
-  const agentPairingError = agentPairingUnavailableReason(selectedAgent, selectedRuntimeProfile);
 
   useEffect(() => {
+    if (runtimeTargetTransitionRef.current) {
+      return;
+    }
+    if (skipNextRuntimeContextReadRef.current) {
+      skipNextRuntimeContextReadRef.current = false;
+      return;
+    }
     if (!client) {
       setRuntimeContext(null);
+      threadController.setContext(null);
       return;
     }
     const scope = activeScope
       ?? init?.scope
       ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
     let cancelled = false;
+    const pendingTarget = runtimeContext?.compatibleTargets.find((target) => (
+      target.targetId === pendingTargetSelectionRef.current
+    )) ?? null;
+    const requestedTarget = pendingTarget
+      ? {
+          agentRef: pendingTarget.agentRef ?? null,
+          runtimeProfileRef: pendingTarget.runtimeProfileRef
+        }
+      : currentThreadId || runtimeBinding
+        ? null
+        : threadController.contextReadTarget(selectedTargetId);
     setRuntimeOptionsLoading(true);
     setRuntimeOptionsError(null);
-    void client.request("runtime/context/read", {
+    void client.request("thread/context/read", {
       threadId: currentThreadId ?? null,
-      runtimeRef: runtimeBinding ? null : selectedRuntimeRef,
+      target: requestedTarget,
       scope
     }).then((value) => {
       if (cancelled) return;
-      const context = parseRuntimeContext(value);
+      const context = parseThreadContext(value);
       setRuntimeContext(context);
-      setRightTabs((current) => registerRuntimeContextChildTabs(current, context));
-      const pendingRuntimeRef = pendingRuntimeSelectionRef.current;
-      const nextRuntimeRef = context.binding?.runtimeRef
-        ?? (pendingRuntimeRef && context.profiles.some((profile) => profile.id === pendingRuntimeRef)
-          ? pendingRuntimeRef
-          : context.runtimeRef);
-      if (context.binding) pendingRuntimeSelectionRef.current = null;
-      setSelectedRuntimeRef(nextRuntimeRef);
-      setRuntimeSessionId(context.activeSession?.sessionHandle ?? context.binding?.sessionHandle ?? null);
-      const nextControlValues = Object.fromEntries(
-        context.controls
-          .filter((control) => control.currentValue != null)
-          .map((control) => [control.id, control.currentValue])
-      );
-      setRuntimeControlValues(nextControlValues);
-      const modeOption = runtimeControlAsConfigOption(context.controls.find((control) => control.id === "mode") ?? null);
-      setRuntimeOptionsResult({
-        runtimeRef: context.runtimeRef,
-        runtimeSessionId: context.activeSession?.sessionHandle ?? context.binding?.sessionHandle ?? null,
-        options: modeOption ? [modeOption] : []
-      });
-      const projectedMode = projectRuntimeModeOption(modeOption);
-      const currentMode = typeof context.controls.find((control) => control.id === "mode")?.currentValue === "string"
-        ? String(context.controls.find((control) => control.id === "mode")?.currentValue)
-        : "";
-      if (currentMode === "plan" && projectedMode.supportsPlan) {
-        setWorkMode("plan");
-        setSelectedRuntimeMode("");
-      } else {
-        setSelectedRuntimeMode(
-          currentMode && projectedMode.extraValues.some((choice) => choice.value === currentMode)
-            ? currentMode
-            : projectedMode.supportsPlan
-              ? ""
-              : projectedMode.defaultValue
-        );
+      threadController.setContext(context);
+      const pendingTarget = context.compatibleTargets.find((target) => (
+        target.targetId === pendingTargetSelectionRef.current
+      )) ?? null;
+      const retainedTarget = context.compatibleTargets.find((target) => target.targetId === selectedTargetId) ?? null;
+      const authoritativeTarget = context.compatibleTargets.find((target) => (
+        target.targetId === context.targetId
+      )) ?? null;
+      const nextTarget = pendingTarget
+        ?? (context.binding ? authoritativeTarget : retainedTarget)
+        ?? authoritativeTarget
+        ?? context.compatibleTargets[0]
+        ?? null;
+      setRuntimeContextTargetId(context.targetId);
+      setSelectedTargetId(nextTarget?.targetId ?? "");
+      if (context.binding) {
+        pendingTargetSelectionRef.current = null;
+        setRuntimeControlDrafts({});
       }
     }).catch((cause) => {
       if (cancelled) return;
+      setRuntimeContext(null);
+      setRuntimeContextTargetId("");
+      threadController.setContext(null);
       setRuntimeOptionsError(cause instanceof Error ? cause.message : String(cause));
     }).finally(() => {
       if (!cancelled) setRuntimeOptionsLoading(false);
@@ -334,11 +316,19 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     return () => {
       cancelled = true;
     };
-  }, [activeScope, backends, client, currentThreadId, fallbackCwd, init?.scope, runtimeBinding?.runtimeRef, selectedRuntimeRef, settings?.cwd]);
+  }, [activeScope, backends, client, currentThreadId, fallbackCwd, init?.scope, runtimeBinding?.runtimeRef, runtimeContextRefreshRevision, selectedTargetId, settings?.cwd]);
 
   const controls = settings?.controls ?? null;
-  const modelReady = !nativeRuntimeSelected || Boolean(selectedModel?.trim());
-  const modelTurnBlockReason = modelTurnBlockReasonForControls(controls);
+  const contextSendable = runtimeContextTargetId === selectedTargetId
+    && Boolean(selectedTargetId)
+    && (runtimeContext?.sendability.allowed ?? false);
+  const turnSendable = contextSendable && !runtimeOptionsLoading && !runtimeOptionsError;
+  const turnBlockReason = runtimeContext?.sendability.reason
+    ?? (runtimeOptionsError
+      ? `Thread context unavailable: ${runtimeOptionsError}`
+      : runtimeOptionsLoading
+        ? "Loading Agent and Runtime Profile context."
+        : "This Agent and Runtime Profile cannot start a turn.");
 
   function mergeModelCatalogOptions(options: ModelOptionView[]) {
     if (options.length === 0) {
@@ -357,12 +347,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
         cwd: activeWorkbenchCwd
       }));
       setSettings(nextSettings);
-      const nextControls = nextSettings.controls;
-      if (!nextControls) {
-        return;
-      }
-      setSelectedModel(nextControls.model ?? null);
-      setSelectedVariant(nextControls.variant ?? "none");
+      setRuntimeContextRefreshRevision((current) => current + 1);
     });
   }
 
@@ -402,21 +387,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setDebugEvents,
     setError,
     setObservability,
-    setPermissionMode,
     setRuntimeOptionsError,
-    setRuntimeOptionsResult,
-    setRuntimeSessionId,
-    setSelectedAgentName,
-    setSelectedModel,
-    setSelectedRuntimeMode,
-    setSelectedRuntimeRef,
-    setSelectedVariant,
     setSessions,
     setSessionBrowserWorkspaces,
     setSettings,
     setSnapshot,
     setTraceState,
-    setWorkMode,
     setWorkspaceChanges,
     setWorkspaceDiff,
     setWorkspaceFiles
@@ -431,7 +407,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     refreshSnapshot,
     selectedThreadIdRef,
     setLatestGatewayEvent,
-    setSnapshot,
+    threadController,
     viewEpochRef
   });
 
@@ -539,20 +515,15 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     pinnedSessionIds,
     rightTabs,
     rightWidthPx,
-    runnableAgents,
-    runtimeModeOption,
-    runtimeModeProjection,
     scopeRef,
-    selectedAgentName,
-    selectedRuntimeRef,
     selectedThreadIdRef,
     settingsSection,
     fallbackCwd,
     showSessionChrome,
     skipNextPinnedPersistRef,
     snapshot,
+    threadController,
     viewEpochRef,
-    workMode,
     adoptSnapshotScope,
     applyGatewayEvent,
     beginExplicitViewSwitch,
@@ -560,6 +531,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     pushDebugEvent,
     refreshAgentSurface,
     refreshHistory,
+    refreshRuntimeContext: () => setRuntimeContextRefreshRevision((current) => current + 1),
     refreshSnapshot,
     refreshTrace,
     refreshWorkspaceSurface,
@@ -578,12 +550,10 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setPinnedSessionIds,
     setRightCollapsed,
     setRightTabs,
-    setSelectedAgentName,
     setSnapshot,
     setStatus,
     setTerminalEvents,
     setTraceState,
-    setWorkMode,
     updateMainView
   });
 
@@ -669,6 +639,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     dirtyRightTabs,
     rightTabs,
     rightWidthPx,
+    scope: snapshot.scope,
     runAction,
     setActiveCommandOverlay,
     setActiveRightTabId,
@@ -682,7 +653,6 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
 
   const {
     acceptWorkspaceChange,
-    changeAgentSelection: changeAgentSelectionInPlace,
     copyText,
     createWorkspace,
     deleteArchivedSession,
@@ -719,25 +689,14 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     host,
     initScope: init?.scope ?? null,
     pendingDetachedShellRef,
-    permissionMode,
-    runtimeAcceptsAgentPersona,
-    agentPairingError,
     runtimeControls,
-    runtimeControlValues,
-    runtimeOptionsError,
-    runtimeSessionId,
-    selectedAgentName,
-    selectedModel,
-    selectedPeerRuntimeMode,
-    selectedRuntimeRef,
+    runtimeControlDrafts,
+    selectedTargetId,
     selectedThreadIdRef,
-    selectedVariant,
     settings,
     snapshot,
     viewEpochRef,
-    workMode,
-    modelReady,
-    modelTurnBlockReason,
+    turnBlockReason,
     adoptSnapshotScope,
     beginExplicitViewSwitch,
     clearCommandTransientUi,
@@ -745,6 +704,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     openRightWorkspaceTab,
     refreshAgentSurface,
     refreshHistory,
+    refreshRuntimeContext: () => setRuntimeContextRefreshRevision((current) => current + 1),
     refreshSnapshot,
     refreshWorkspaceSurface,
     setAttachments,
@@ -760,112 +720,100 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setRightTabs,
     setRuntimeOptionsError,
     setRuntimeOptionsLoading,
-    setRuntimeOptionsResult,
-    setRuntimeSessionId,
-    setSelectedAgentName,
-    setSelectedRuntimeMode,
-    setSelectedRuntimeRef,
+    setSelectedTargetId,
     setSnapshot,
     setSettings,
     setTraceState,
     setWorkspaceChanges,
     setWorkspaceDiff,
-    setWorkMode,
+    threadController,
     updateMainView
   });
 
-  async function changeAgentSelection(value: string) {
-    if (value === selectedAgentName) return;
-    if (runtimeBinding?.backendKind === "runtime") {
-      const runtimeRef = runtimeBinding.runtimeRef;
-      pendingRuntimeSelectionRef.current = runtimeRef;
-      await startNewThread();
-      setSelectedRuntimeRef(runtimeRef);
-      setRuntimeSessionId(null);
-      setRuntimeControlValues({});
-      setRuntimeOptionsResult(null);
-      setRuntimeOptionsError(null);
-      setSelectedRuntimeMode("");
-      setWorkMode("default");
-      setSelectedAgentName(value);
-      setRuntimeContext((current) => current ? {
-        ...current,
-        runtimeRef,
-        selectionState: "default",
-        binding: null,
-        controls: [],
-        activeSession: null
-      } : current);
+  async function changeRunnableTarget(targetId: string) {
+    const target = compatibleTargets.find((candidate) => candidate.targetId === targetId) ?? null;
+    if (!target?.ready) {
+      setCommandFeedback({
+        accepted: false,
+        command: "target",
+        message: target?.unavailableReason ?? "The selected Agent target is not ready.",
+        feedbackAnchor: "composer"
+      });
       return;
     }
-    await changeAgentSelectionInPlace(value);
-  }
-
-  async function changeRuntimeProfile(runtimeRef: string) {
-    if (runtimeRef === selectedRuntimeRef && !runtimeBinding) return;
-    pendingRuntimeSelectionRef.current = runtimeRef;
-    if (runtimeBinding) {
-      await startNewThread();
-    }
-    setSelectedRuntimeRef(runtimeRef);
-    setRuntimeSessionId(null);
-    setRuntimeControlValues({});
-    setRuntimeOptionsResult(null);
+    pendingTargetSelectionRef.current = targetId;
+    runtimeTargetTransitionRef.current = true;
+    setRuntimeOptionsLoading(true);
     setRuntimeOptionsError(null);
-    setSelectedRuntimeMode("");
-    setWorkMode("default");
-    setRuntimeContext((current) => current ? {
-      ...current,
-      runtimeRef,
-      selectionState: "default",
-      binding: null,
-      controls: [],
-      activeSession: null
-    } : current);
+    try {
+      let scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
+      if (runtimeBinding) {
+        const nextSnapshot = await startNewThread();
+        scope = nextSnapshot?.scope ?? scope;
+        setRuntimeContext((current) => current ? { ...current, binding: null, selectionState: "draft" } : current);
+        setRuntimeContextTargetId("");
+        threadController.setContext(null);
+      }
+      setRuntimeControlDrafts({});
+      if (!client) {
+        setSelectedTargetId(targetId);
+        return;
+      }
+      const result = await client.request("thread/draft/prepare", { scope, targetId });
+      const context = parseThreadContext(result.context);
+      skipNextRuntimeContextReadRef.current = true;
+      setRuntimeContext(context);
+      threadController.setContext(context);
+      setRuntimeContextTargetId(context.targetId);
+      setSelectedTargetId(targetId);
+      pendingTargetSelectionRef.current = null;
+    } catch (cause) {
+      skipNextRuntimeContextReadRef.current = true;
+      setSelectedTargetId(targetId);
+      setRuntimeContext(null);
+      setRuntimeContextTargetId("");
+      threadController.setContext(null);
+      setRuntimeOptionsError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      runtimeTargetTransitionRef.current = false;
+      setRuntimeOptionsLoading(false);
+    }
   }
 
-  async function changeRuntimeControl(control: RuntimeControlDescriptorView, value: unknown) {
-    if (value !== undefined && runtimeBinding && control.state === "selectable" && client) {
+  async function changeRuntimeControl(control: ThreadControlDescriptorView, value: unknown) {
+    if (
+      value !== undefined
+      && control.enabled
+      && control.mutability === "selectable"
+      && client
+      && runtimeContext
+    ) {
       const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
-      const result = await client.request("runtime/control/set", {
-        runtimeRef: selectedRuntimeRef,
-        controlId: control.id,
-        value,
-        expectedCapabilityRevision: control.capabilityRevision,
-        expectedBindingRevision: runtimeBinding.bindingRevision,
-        scope
-      });
-      setRuntimeContext((current) => current ? {
-        ...current,
-        controls: current.controls.map((item) => item.id === result.control.id ? result.control : item),
-        binding: current.binding ? { ...current.binding, bindingRevision: result.bindingRevision } : null
-      } : current);
-    }
-    setRuntimeControlValues((current) => {
-      const next = { ...current };
-      if (value !== undefined) next[control.id] = value;
-      else delete next[control.id];
-      for (const candidate of runtimeControls) {
-        if (
-          candidate.dependsOn?.controlId === control.id
-          && !runtimeControlDependencyMatches(candidate, runtimeControls, next)
-        ) {
-          delete next[candidate.id];
-        }
+      setRuntimeOptionsLoading(true);
+      try {
+        threadController.setContext(runtimeContext);
+        const result = await client.request(
+          "thread/control/set",
+          threadController.controlSetParams(
+            selectedTargetId,
+            control,
+            value,
+            scope,
+            currentThreadId ?? null
+          )
+        );
+        threadController.applyControlReceipt(result);
+        setRuntimeContext(result.context);
+        setRuntimeContextTargetId(result.context.targetId);
+        setRuntimeControlDrafts((current) => {
+          const next = { ...current };
+          delete next[control.id];
+          return next;
+        });
+      } finally {
+        setRuntimeOptionsLoading(false);
       }
-      return next;
-    });
-    if (control.id === "mode" && typeof value === "string") {
-      if (value === "plan") {
-        setWorkMode("plan");
-        setSelectedRuntimeMode("");
-      } else {
-        setWorkMode("default");
-        setSelectedRuntimeMode(value);
-      }
-    } else if (control.id === "mode" && value === undefined) {
-      setWorkMode("default");
-      setSelectedRuntimeMode("");
+      return;
     }
   }
 
@@ -879,74 +827,60 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     if (!client || !trimmed) {
       return;
     }
-    if (!modelReady) {
+    const selectedAtStart = snapshot.thread?.id === threadId;
+    const targetSnapshot = selectedAtStart
+      ? snapshot
+      : normalizeSnapshot(parseThreadSnapshot(await client.request("thread/read", { threadId })));
+    const targetScope = targetSnapshot.scope;
+    const targetContext = parseThreadContext(await client.request("thread/context/read", {
+      threadId,
+      target: null,
+      scope: targetScope
+    }));
+    const targetController = selectedAtStart
+      ? threadController
+      : new ThreadController(targetSnapshot);
+    targetController.setContext(targetContext);
+    const binding = targetContext.binding;
+    const turnControls = targetController.turnControls(targetContext.targetId, {});
+    const input = [{ type: "text" as const, text: trimmed }];
+    const admission = targetController.admitTurn({ controls: turnControls, input, mentions });
+    if (!admission.allowed) {
       setCommandFeedback({
         accepted: false,
-        command: "model",
-        message: modelTurnBlockReason,
+        command: "turn/start",
+        message: admission.reason ?? "The destination Thread cannot accept this turn.",
         feedbackAnchor: "composer"
       });
       return;
     }
-    if (agentPairingError) {
-      setCommandFeedback({
-        accepted: false,
-        command: "agent",
-        message: agentPairingError,
-        feedbackAnchor: "composer"
-      });
-      return;
-    }
-    const submittedMentions = runtimeAcceptsAgentPersona
-      ? mentions
-      : mentions.filter((mention) => mention.target.kind !== "agent");
-    if (!nativeRuntimeSelected && runtimeOptionsError) {
-      setCommandFeedback({
-        accepted: false,
-        command: selectedRuntimeRef,
-        message: `Unable to load ${selectedRuntimeRef} runtime options: ${runtimeOptionsError}`,
-        feedbackAnchor: "composer"
-      });
-      return;
-    }
-    const runtimeOptions = nativeRuntimeSelected
-      ? {}
-      : runtimeOptionsWithModeFallback(
-        runtimeControlSelections(runtimeControls, runtimeControlValues),
-        selectedPeerRuntimeMode
-      );
     clearCommandTransientUi();
     const optimisticText = displayText?.trim() || trimmed;
-    const prepared = prepareThreadTurn(snapshot, optimisticText, threadId);
-    setSnapshot(prepared.snapshot);
-    const result = await client.request("turn/start", threadTurnStartParams({
-      controls: {
-        agentName: selectedAgentName || null,
-        mode: nativeRuntimeSelected ? workMode : null,
-        model: nativeRuntimeSelected ? selectedModel : null,
-        permissionMode: nativeRuntimeSelected ? permissionMode : null,
-        reasoningEffort: nativeRuntimeSelected && selectedVariant !== "none"
-          ? selectedVariant
-          : null,
-        runtimeOptions,
-        runtimeRef: selectedRuntimeRef,
-        runtimeSessionId
-      },
-      input: [{ type: "text", text: trimmed }],
-      mentions: submittedMentions,
-      scope: activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd || fallbackCwd),
-      threadId: prepared.requestedThreadId,
-      text: null
-    }));
-    const accepted = acceptThreadTurn(prepared.snapshot, result, prepared.requestedThreadId);
-    selectedThreadIdRef.current = accepted.threadId;
-    setSnapshot((current) => {
-      const currentThreadId = current.thread?.id ?? null;
-      if (currentThreadId && currentThreadId !== accepted.threadId) {
-        return current;
-      }
-      return normalizeSnapshot(bindThreadSnapshot(current, accepted.threadId));
+    const turnEpoch = viewEpochRef.current;
+    const plan = targetController.beginTurn({
+      controls: turnControls,
+      input,
+      mentions,
+      optimisticText,
+      scope: targetScope,
+      threadId
     });
+    const result = await client.request("turn/start", plan.params).catch((error) => {
+      targetController.rejectTurnStart(plan.prepared);
+      if (selectedAtStart && viewEpochRef.current === turnEpoch) {
+        setRuntimeContextRefreshRevision((current) => current + 1);
+      }
+      throw error;
+    });
+    if (selectedAtStart && viewEpochRef.current !== turnEpoch) {
+      await refreshHistory();
+      return;
+    }
+    const accepted = targetController.acceptTurnStart(result, plan.prepared);
+    if (selectedAtStart) {
+      selectedThreadIdRef.current = accepted.threadId;
+      setRuntimeContextRefreshRevision((current) => current + 1);
+    }
     await refreshHistory();
   }
 
@@ -1098,16 +1032,17 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     initScope: init?.scope ?? null,
     pendingDetachedShellRef,
     runtimeModeOption,
-    runtimeOptionsError,
-    runtimeSessionId,
-    selectedRuntimeMode,
-    selectedRuntimeRef,
+    runtimeContext,
     settings,
     snapshot,
     viewEpochRef,
-    workMode,
     workspaceDiff,
     beginExplicitViewSwitch,
+    changeRuntimeMode: async (value) => {
+      if (runtimeModeControl) {
+        await changeRuntimeControl(runtimeModeControl, value);
+      }
+    },
     clearCommandTransientUi,
     handleAttachment,
     openCapabilitiesTab,
@@ -1127,92 +1062,40 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setDraftSession,
     setError,
     setMobilePanel,
-    setRuntimeOptionsError,
-    setRuntimeOptionsResult,
-    setRuntimeSessionId,
-    setSelectedRuntimeMode,
     setSnapshot,
-    setWorkMode,
     setWorkspaceDiff,
-    startNewThread,
+    startNewThread: async (cwd) => {
+      await startNewThread(cwd);
+    },
     submitThreadTurn,
     submitTurn,
     updateMainView
   });
 
-  function persistComposerModelState(nextModel: string | null, nextVariant: string) {
-    const model = nextModel?.trim();
-    if (!client || !model) {
-      return;
-    }
-    void runAction(async () => {
-      const result = asRecord(await client.request("model/state/set", {
-        cwd: activeWorkbenchCwd,
-        threadId: currentThreadId ?? null,
-        model,
-        reasoningEffort: nextVariant === "none" ? null : nextVariant
-      }));
-      const resultModel = optionalStringField(result.model) ?? model;
-      const resultVariant = optionalStringField(result.reasoningEffort) ?? "none";
-      const recentModels = stringArray(result.recentModels);
-      setSettings((current) => {
-        if (!current?.controls) {
-          return current;
-        }
-        return {
-          ...current,
-          controls: {
-            ...current.controls,
-            model: resultModel,
-            variant: resultVariant,
-            recentModels: recentModels.length > 0 ? recentModels : current.controls.recentModels
-          }
-        };
-      });
-    });
-  }
-
-  function changeComposerModelSelection(nextModel: string | null, nextVariant: string) {
-    setSelectedModel(nextModel);
-    setSelectedVariant(nextVariant);
-    persistComposerModelState(nextModel, nextVariant);
-  }
-
-  function changeComposerModel(nextModel: string | null) {
-    setSelectedModel(nextModel);
-    persistComposerModelState(nextModel, selectedVariant);
-  }
-
-  function changeComposerVariant(nextVariant: string) {
-    setSelectedVariant(nextVariant);
-    persistComposerModelState(selectedModel, nextVariant);
-  }
-
   return <WorkbenchLayout {...{
     acceptWorkspaceChange, activeCommandOverlay, activeRightTab, activeRightTabId, activeScope, activeWorkbenchCwd,
     automations, automationsError, automationsLoading,
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch, capabilitiesTab,
-    beginRightResize, changeAgentSelection, changeRuntimeControl, changeRuntimeProfile, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
+    beginRightResize, changeRuntimeControl, changeRunnableTarget, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
     channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyText, createWorkspace, currentThreadId,
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, handleAttachment, handleAttachmentFiles, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
     loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openCapabilitiesTab, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
     openAutomationThread,
     onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
-    pendingClarifyActions, pendingPermissionActions, permissionMode, pinnedSessionIds, pinnedSessions, planModeAvailable, pollWechatQrSetup,
+    pendingClarifyActions, pendingPermissionActions, pinnedSessionIds, pinnedSessions, pollWechatQrSetup,
     refreshAgentSurface, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
-    restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runnableAgents, runAction,
+    restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runAction,
     deleteAutomation, draftAutomation, pauseAutomation, refreshAutomations, resumeAutomation, runAutomation, saveAutomation,
-    runCommandAlternateAction, running, runtimeAcceptsAgentPersona, runtimeContext, runtimeControlValues, runtimeOptionsError, runtimeOptionsLoading, runtimeProfiles,
-    saveBackendDraft, saveFileFromEditor, selectedAgentName, selectedModel,
-    selectedRuntimeRef, selectedVariant, nativeRuntimeSelected, modelReady, modelTurnBlockReason, sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
+    runCommandAlternateAction, running, runtimeContext, runtimeControls, runtimeControlDrafts, runtimeOptionsError, runtimeOptionsLoading, runtimeProfiles,
+    saveBackendDraft, saveFileFromEditor,
+    selectedTargetId, contextMatchesTarget: runtimeContextTargetId === selectedTargetId && Boolean(selectedTargetId), sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
     setAttachments, setBackendDraft, setCapabilitiesTab, setChannelEnabled, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
-    setMobilePanel, setCommandFeedback, setPermissionMode, setRightCollapsed, setRightTabs, setRightWidthPx,
-    setSelectedModel: changeComposerModel, setSelectedModelSelection: changeComposerModelSelection,
-    setSelectedRuntimeMode, setSelectedVariant: changeComposerVariant, setSettingsSection, setSnapshot, setWorkMode, setWorkspaceDialogOpen, fallbackCwd, settings, settingsSection,
+    setMobilePanel, setCommandFeedback, setRightCollapsed, setRightTabs, setRightWidthPx,
+    setSettingsSection, setSnapshot, setWorkspaceDialogOpen, fallbackCwd, settings, settingsSection,
     usageStats, usageStatsError, usageStatsLoading, refreshUsageStats,
     clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, startWechatQrSetup, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
-    togglePinnedSession, traceState, transcriptEntries, updateBackendDraftFields, updateChannel, updateMainView, viewEpochRef, workMode,
+    togglePinnedSession, traceState, transcriptEntries, turnBlockReason, turnSendable, updateBackendDraftFields, updateChannel, updateMainView, viewEpochRef,
     voiceAutoSpeak, voiceListening, voiceRealtimeActive: Boolean(voiceRealtimeSessionId),
     onReadAloudText: readAloudText, onVoiceAutoSpeakToggle: toggleVoiceAutoSpeak,
     onVoiceDictationToggle: toggleVoiceDictation, onVoiceRealtimeToggle: toggleVoiceRealtime,

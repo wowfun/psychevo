@@ -2,6 +2,7 @@ import type { ThreadSnapshot, TranscriptBlock, TranscriptBlockStatus, Transcript
 
 import {
   LIVE_SOURCE,
+  OPTIMISTIC_SOURCE,
   artifactIdsForBlock,
   blocksForEntry,
   entryHasVisibleTranscriptText,
@@ -10,6 +11,7 @@ import {
   liveOrder,
   mergeBlockMetadata,
   normalizedBlockText,
+  normalizedEntryText,
   recordForValue,
   sortBlocks,
   stringValue
@@ -76,16 +78,17 @@ export function reconcileIncomingEntryForSnapshot(
   entries: TranscriptEntry[],
   entry: TranscriptEntry
 ): { entries: TranscriptEntry[]; entry: TranscriptEntry | null } {
+  const reconciledEntries = removeCommittedUserOptimisticOwner(entries, entry);
   if (isCommittedAssistantOwner(entry)) {
     return {
-      entries: removeLiveAssistantOwnerEntries(entries, entry),
+      entries: removeLiveAssistantOwnerEntries(reconciledEntries, entry),
       entry
     };
   }
   if (entry.source !== LIVE_SOURCE || entry.messageSeq !== null) {
-    return { entries, entry };
+    return { entries: reconciledEntries, entry };
   }
-  const anchoredEntries = anchorCoveredLiveToolBlocks(entries, entry);
+  const anchoredEntries = anchorCoveredLiveToolBlocks(reconciledEntries, entry);
   if (committedAssistantOwnerExists(anchoredEntries, entry)) {
     return {
       entries: anchoredEntries.filter((candidate) => candidate.id !== entry.id),
@@ -96,6 +99,52 @@ export function reconcileIncomingEntryForSnapshot(
     entries: anchoredEntries,
     entry: removeSnapshotCoveredBlocks(entry, snapshotToolCoverage(anchoredEntries))
   };
+}
+
+function removeCommittedUserOptimisticOwner(
+  entries: TranscriptEntry[],
+  committed: TranscriptEntry
+): TranscriptEntry[] {
+  if (!isMessageDerivedEntry(committed) || committed.role !== "user") {
+    return entries;
+  }
+  const identityMatch = findLastIndex(entries, (candidate) => (
+    candidate.source === OPTIMISTIC_SOURCE &&
+    candidate.role === "user" &&
+    candidate.messageSeq === null &&
+    Boolean(candidate.threadId) &&
+    candidate.threadId === committed.threadId &&
+    Boolean(candidate.turnId) &&
+    candidate.turnId === committed.turnId
+  ));
+  if (identityMatch >= 0) {
+    return entries.filter((_, index) => index !== identityMatch);
+  }
+  const committedText = normalizedEntryText(committed);
+  if (!committedText) {
+    return entries;
+  }
+  const detachedMatch = findLastIndex(entries, (candidate) => (
+    candidate.source === OPTIMISTIC_SOURCE &&
+    candidate.role === "user" &&
+    candidate.messageSeq === null &&
+    !candidate.turnId &&
+    (!candidate.threadId || candidate.threadId === committed.threadId) &&
+    normalizedEntryText(candidate) === committedText
+  ));
+  return detachedMatch >= 0
+    ? entries.filter((_, index) => index !== detachedMatch)
+    : entries;
+}
+
+function findLastIndex<T>(values: T[], predicate: (value: T) => boolean): number {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = values[index];
+    if (value !== undefined && predicate(value)) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function isPendingOnlyToolBlock(block: TranscriptBlock): boolean {
