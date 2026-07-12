@@ -189,20 +189,86 @@ Sessions, Workspace, Automations, Settings, and Capabilities.
 
 ## Runtime Provenance And Attention
 
-Composer reads runtime/context/read and independently selects Agent Definition
-and Runtime Profile before the first turn. After binding, the selector becomes
-an immutable provenance capsule, such as Codex · Direct. Its only switch action
-starts a new thread; it never mutates the current thread.
+Composer reads `thread/context/read` through the headless client
+`ThreadController` and presents one Agent Definition entry point before the
+first turn. The compact target control renders one visible Agent identity per
+compatible target: Native uses `agentLabel`, while ACP appends `(ACP)` to that
+same Agent label without repeating Runtime Profile provenance. The visible
+popover omits redundant target headings and management links; its accessible
+name remains `Agent target` and full provenance remains available as a title.
+After binding, the selector becomes immutable provenance. Its only identity
+switch action starts a new thread; it never mutates the current thread.
+
+Selecting an unbound ACP target explicitly calls `thread/draft/prepare` and
+adopts the returned complete context before enabling submit. Loading disables
+runtime controls. Failure keeps the requested Agent identity visible, blocks
+submit, and shows the bounded Gateway error. Reconnect may reuse a cached
+prepared projection, but ordinary context refresh remains side-effect free.
 
 The capsule is the only new runtime visual signature. It uses existing
 Workbench type, spacing, and semantic status colours rather than runtime brand
-colours. Runtime controls render as Runtime default, read-only current, or
-selectable. Shared Attention carries runtime/profile and parent/child origin and
-states the exact authorization lifetime.
+colours. Runtime controls keep effective value/source, local draft override,
+mutability, apply scope, stability, and Channel safety distinct. Shared
+Attention carries runtime/profile and parent/child origin and states the exact
+authorization lifetime.
+
+Composer places Mode on the left and the grouped Model/Reasoning selector plus
+Context on the right. These footer selection triggers are borderless,
+chevron-free, and intrinsically sized to the current value with bounded narrow
+viewport truncation; action controls such as add, dictation, and Send retain
+their existing icon-button treatment. Mode focus removes the rectangular
+outline and uses the same muted background state as the Agent trigger, keeping
+keyboard focus visible without restoring a frame. An enabled Mode trigger also
+uses the Agent trigger's pointer cursor and muted hover background; disabled
+Mode retains the not-allowed cursor. Neither trigger adds a hover box shadow.
+Focusing the prompt textarea does not add
+a nested focus outline; the persistent input frame remains its only visible
+boundary. Model and Reasoning render from the
+selected target's Thread Context descriptors through the same picker used by
+Settings assignment rows. Reasoning is selectable only when its descriptor is
+selectable, renders the effective value without interaction when read-only, and
+is omitted when absent; the client never invents a `Default` reasoning choice.
+Model shows a proven effective value or an explicit unavailable reason. An ACP
+draft renders only Agent-provided config choices; Settings metadata may enrich
+labels and grouping but never synthesizes values. An unbound draft sends only
+explicit user choices. A bound change uses
+`thread/control/set` as a sticky next-turn preference; an applied value is not
+labelled observed until an authoritative update or readback confirms it.
+Display-only Agent updates may refresh commands, history, title, or usage while
+a picker is open without invalidating that picker. A genuine target, admission,
+or control revision change remains an explicit error; Workbench does not hide it
+behind an automatic refresh-and-retry.
+Context fidelity is `exact`, `estimated`, `partial`, or `unavailable`. A known
+token count without a limit renders the count plus `Limit unavailable`, never a
+fabricated `0%`. Ordinary GUI exposes an experimental runtime control only when
+the exact runtime-version gate and capability gate both match.
+
+Agent-authoritative transcript blocks may keep public phase ordinals. One phase
+stays visually flat. Multiple phases expose a collapsed `Show agent phases`
+action and neutral `Phase N` labels when expanded. Raw Adapter phase names and
+Thinking are never reused as Channel delivery content.
 
 The leader-first panel visually separates controllable Psychevo-managed members
-from read-only runtime-native activity. A read-only native child tab omits
+from capability-gated Agent-native activity. A read-only Agent child tab omits
 composer and control affordances and loads history lazily.
+
+React is a composition root. Runtime target pairing, sendability, control
+resolution, revisions, turn serialization, and runtime-name decisions do not
+live in `App.tsx` or presentation Modules. Native and ACP use the same semantic
+control placement and disabled/unavailable treatment.
+
+The Sessions header contains one `Import Agent session` action. Opening that
+surface is the user intent that permits Agent session discovery; merely opening
+Sessions or archived history is not. The import surface groups candidates by
+ACP Profile, keeps successful groups usable when another Profile fails, offers
+refresh, and asks for an Agent target only when a Profile has multiple
+compatible targets. Empty and error states state the next action plainly.
+
+Session menus render Gateway lifecycle descriptors. Fork is visible only for a
+negotiated fork-capable Agent. Delete remains visible but disabled with its
+Gateway reason when an ACP Agent cannot delete its session. Remote deletion uses
+an explicit confirmation that names both the Psychevo Thread and Agent-owned
+session; Native deletion retains its existing local meaning.
 
 ## Visual Direction
 
@@ -237,6 +303,12 @@ flows.
 Live provider browser validation is opt-in only. It may reuse the user's real
 Psychevo config and credentials, but must still use an isolated cwd and
 repo-local test state unless the caller explicitly chooses otherwise.
+
+Targeted desktop and narrow-viewport proofs cover the import surface, grouped
+partial results, target selection, refresh, fork/delete capability differences,
+and remote-delete confirmation. Permanent spec filenames, describe labels,
+request ids, and required-proof names describe behavior and never include an
+implementation date or planning-batch id.
 Long-running live skill validation uses a reusable Playwright spec that samples
 the page every three seconds, stores screenshots, and checks each sampled
 transcript against the message-derived SQLite transcript so transient row-order

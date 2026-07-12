@@ -24,7 +24,7 @@ pub(crate) fn send_slash_text(
         session_id.clone(),
         agent_message_update(session_id, text),
     );
-    SlashPromptAction::Handled(PromptResponse::new(StopReason::EndTurn))
+    SlashPromptAction::Handled(PromptResponse::new())
 }
 
 pub(crate) fn agent_message_update(
@@ -57,7 +57,7 @@ pub(crate) fn send_diff_tool_call(
     let (start, completed) = diff_tool_call_updates(call_id, diff);
     send_session_update(cx, session_id.clone(), start);
     send_session_update(cx, session_id.clone(), completed);
-    SlashPromptAction::Handled(PromptResponse::new(StopReason::EndTurn))
+    SlashPromptAction::Handled(PromptResponse::new())
 }
 
 fn diff_tool_call_updates(
@@ -66,40 +66,43 @@ fn diff_tool_call_updates(
 ) -> (SessionUpdate, SessionUpdate) {
     let call_id = call_id.into();
     (
-        SessionUpdate::ToolCall(
-            ToolCall::new(call_id.clone(), "Workspace diff")
+        SessionUpdate::ToolCallUpdate(
+            ToolCallUpdate::new(call_id.clone())
+                .title("Workspace diff")
                 .kind(ToolKind::Read)
                 .status(ToolCallStatus::InProgress)
                 .raw_input(json!({ "command": "/diff" })),
         ),
-        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-            call_id,
-            ToolCallUpdateFields::new()
+        SessionUpdate::ToolCallUpdate(
+            ToolCallUpdate::new(call_id)
                 .title("Workspace diff")
                 .kind(ToolKind::Read)
                 .status(ToolCallStatus::Completed)
                 .content(acp_diff_content(diff))
                 .raw_output(diff_raw_output(diff)),
-        )),
+        ),
     )
 }
 
 fn acp_diff_content(diff: &WorkspaceDiff) -> Vec<ToolCallContent> {
-    diff.files
+    let changes = diff
+        .files
         .iter()
         .map(|file| {
-            let new_text = file.new_text.clone().unwrap_or_else(|| {
-                file.placeholder
-                    .clone()
-                    .unwrap_or_else(|| format!("diff unavailable for {}", file.path))
-            });
-            let mut acp_diff = AcpDiff::new(PathBuf::from(&file.path), new_text);
-            if let Some(old_text) = file.old_text.clone() {
-                acp_diff = acp_diff.old_text(old_text);
+            let path = PathBuf::from(&file.path);
+            match (file.old_text.is_some(), file.new_text.is_some()) {
+                (false, true) => DiffChange::add(path),
+                (true, false) => DiffChange::delete(path),
+                _ => DiffChange::modify(path),
             }
-            ToolCallContent::Diff(acp_diff)
         })
-        .collect()
+        .collect();
+    let acp_diff = if diff.unified_diff.trim().is_empty() {
+        AcpDiff::new(changes)
+    } else {
+        AcpDiff::patch(diff.unified_diff.clone(), changes)
+    };
+    vec![ToolCallContent::Diff(acp_diff)]
 }
 
 fn diff_raw_output(diff: &WorkspaceDiff) -> Value {
@@ -220,9 +223,9 @@ pub(crate) fn available_commands_from(
             };
             let input = match command.argument_kind {
                 psychevo_runtime::command_registry::CommandArgumentKind::None => None,
-                _ => Some(AvailableCommandInput::Unstructured(
-                    UnstructuredCommandInput::new(command.usage),
-                )),
+                _ => Some(AvailableCommandInput::Text(TextCommandInput::new(
+                    command.usage,
+                ))),
             };
             AvailableCommand::new(command.name, description).input(input)
         })
@@ -237,7 +240,7 @@ pub(crate) fn available_command_lines_from(commands: Vec<AvailableCommand>) -> V
                 .input
                 .as_ref()
                 .map(|input| match input {
-                    AvailableCommandInput::Unstructured(input) => input.hint.clone(),
+                    AvailableCommandInput::Text(input) => input.hint.clone(),
                     _ => String::new(),
                 })
                 .unwrap_or_default();
@@ -384,18 +387,16 @@ impl ApprovalHandler for AcpApprovalHandler {
         let session_id = self.session_id.clone();
         let cx = self.cx.clone();
         Box::pin(async move {
-            let tool_call = ToolCallUpdate::new(
-                request.tool_call_id.clone(),
-                ToolCallUpdateFields::new()
-                    .title(format!("Permission: {}", request.tool_name))
-                    .status(ToolCallStatus::Pending)
-                    .raw_input(json!({
-                        "summary": request.summary,
-                        "reason": request.reason,
-                        "matched_rule": request.matched_rule,
-                        "suggested_rule": request.suggested_rule,
-                    })),
-            );
+            let title = format!("Permission: {}", request.tool_name);
+            let tool_call = ToolCallUpdate::new(request.tool_call_id.clone())
+                .title(title.clone())
+                .status(ToolCallStatus::Pending)
+                .raw_input(json!({
+                    "summary": request.summary,
+                    "reason": request.reason,
+                    "matched_rule": request.matched_rule,
+                    "suggested_rule": request.suggested_rule,
+                }));
             let mut options = vec![
                 PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
                 PermissionOption::new(
@@ -416,9 +417,11 @@ impl ApprovalHandler for AcpApprovalHandler {
                 );
             }
             match cx
-                .send_request(RequestPermissionRequest::new(
-                    session_id, tool_call, options,
-                ))
+                .send_request(
+                    RequestPermissionRequest::new(session_id, title, options)
+                        .description(request.reason)
+                        .subject(RequestPermissionSubject::from(tool_call)),
+                )
                 .block_task()
                 .await
             {
@@ -463,7 +466,7 @@ pub(crate) fn send_session_update(
     session_id: SessionId,
     update: SessionUpdate,
 ) {
-    let _ = cx.send_notification(SessionNotification::new(session_id, update));
+    let _ = cx.send_notification(UpdateSessionNotification::new(session_id, update));
 }
 
 #[derive(Debug, Default)]

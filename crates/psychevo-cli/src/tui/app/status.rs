@@ -1,6 +1,49 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 impl TuiApp {
+    pub(crate) fn thread_turn_request(&self, prompt: String) -> ThreadTurnRequest {
+        self.thread_turn_request_with_images(prompt, Vec::new())
+    }
+
+    pub(crate) fn thread_turn_request_with_images(
+        &self,
+        prompt: String,
+        image_inputs: Vec<ImageInput>,
+    ) -> ThreadTurnRequest {
+        let mut input = Vec::with_capacity(1 + image_inputs.len());
+        if !prompt.is_empty() {
+            input.push(GatewayInputPart::Text { text: prompt });
+        }
+        input.extend(
+            image_inputs
+                .into_iter()
+                .map(|image| GatewayInputPart::Image {
+                    input: match image {
+                        ImageInput::LocalPath(path) => GatewayImageInput::LocalPath {
+                            path: path.display().to_string(),
+                        },
+                        ImageInput::ImageUrl(url) => GatewayImageInput::Url { url },
+                    },
+                }),
+        );
+        let mut request = ThreadTurnRequest::new(self.cwd.clone(), input);
+        request.thread_id = self.current_session.clone();
+        request.policy.snapshot_root = Some(self.home.join("snapshots"));
+        request.policy.continue_latest = self.current_session.is_none() && !self.force_new_once;
+        request.policy.config_path = self.config_path.clone();
+        request.policy.model = self.current_model.clone();
+        request.policy.reasoning_effort = self.current_variant.clone();
+        request.policy.mode = self.current_mode;
+        request.policy.permission_mode = Some(self.current_permission_mode);
+        request.policy.clarify_enabled = true;
+        request.policy.inherited_env = Some(self.env_map.clone());
+        request.policy.agent_ref = self.current_agent.clone();
+        request.policy.no_agents = self.no_agents;
+        request.policy.no_skills = self.no_skills;
+        request.policy.skill_inputs = self.skill_inputs.clone();
+        request
+    }
+
     pub(crate) fn run_options(&self, prompt: String) -> RunOptions {
         self.run_options_with_images(prompt, Vec::new())
     }

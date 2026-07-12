@@ -15,32 +15,11 @@ pub struct GatewayShellResult {
 
 pub struct BackendTurnRequest {
     pub options: RunOptions,
+    pub input: Vec<GatewayInputPart>,
     pub runtime_source: String,
     pub continue_sources: Vec<String>,
     pub stream: Option<RunStreamSink>,
     pub control: Option<RunControl>,
-}
-
-fn apply_acp_profile_turn_controls(
-    options: &mut RunOptions,
-    profile: &RuntimeProfileConfig,
-) {
-    // Top-level model/reasoning fields belong to Psychevo's native provider
-    // controls. ACP receives only its Profile default or an observed control
-    // serialized through runtimeOptions.
-    options.model = options
-        .runtime_options
-        .get("model")
-        .cloned()
-        .or_else(|| profile.default_model.clone());
-    options.reasoning_effort = options.runtime_options.get("effort").cloned();
-    if !options.runtime_options.contains_key("mode")
-        && let Some(default_mode) = profile.default_mode.clone()
-    {
-        options
-            .runtime_options
-            .insert("mode".to_string(), default_mode);
-    }
 }
 
 pub trait GatewayBackend: Send + Sync + fmt::Debug {
@@ -90,8 +69,6 @@ impl GatewayExternalAgentDelegate {
         let child_turn_id = request.run_id.clone();
         let terminal_gateway = self.gateway.clone();
         let terminal_event_sink = self.event_sink.clone();
-        let execution_gateway = self.gateway.clone();
-        let execution_event_sink = self.event_sink.clone();
         let mut options = self.base_options.clone();
         options.session = Some(child_session_id.clone());
         options.continue_latest = false;
@@ -110,18 +87,48 @@ impl GatewayExternalAgentDelegate {
             .session_summary(&child_session_id)?
             .ok_or_else(|| Error::Message(format!("session not found: {child_session_id}")))?;
         if child.parent_session_id.as_deref() != Some(request.parent_session_id.as_str()) {
-            return Err(runtime_host_configuration_error(format!(
+            return Err(agent_session_configuration_error(format!(
                 "Runtime-backed child `{child_session_id}` is not owned by parent `{}`.",
                 request.parent_session_id
             )));
         }
         let (control_handle, control) = run_control();
+        let child_activity = self.gateway.claim_durable_gateway_activity(
+            DurableGatewayActivityClaim {
+                activity_id: &child_turn_id,
+                thread_id: Some(&child_session_id),
+                source_key: None,
+                turn_id: Some(&child_turn_id),
+                kind: "turn",
+                owner_surface: Some("agent"),
+                queued_turns: 0,
+                intent: Some(json!({
+                    "kind": "delegated_agent_turn",
+                    "threadId": child_session_id,
+                    "parentThreadId": request.parent_session_id,
+                })),
+            },
+        )?;
+        let child_heartbeat = self
+            .gateway
+            .spawn_durable_activity_heartbeat(child_activity.clone());
+        self.gateway.register_active(
+            &thread_key(&child_session_id),
+            child_turn_id.clone(),
+            Some(control_handle.clone()),
+            ActiveActivityKind::Turn,
+        );
         let abort_bridge =
             spawn_external_delegate_abort_bridge(request.abort.clone(), control_handle);
         let stream = self.stream.map(|stream| {
             let child_session_id = child_session_id.clone();
+            let child_turn_id = child_turn_id.clone();
             Arc::new(move |event| {
-                stream(RunStreamEvent::scoped(child_session_id.clone(), event));
+                stream(RunStreamEvent::scoped_turn(
+                    child_session_id.clone(),
+                    child_turn_id.clone(),
+                    event,
+                ));
             }) as RunStreamSink
         });
         let result = async move {
@@ -131,10 +138,11 @@ impl GatewayExternalAgentDelegate {
                 .expected_runtime_profile_revision
                 .is_some_and(|expected| expected != profile_revision)
             {
-                return Err(runtime_host_error(RuntimeError::new(
+                return Err(agent_session_error(
                     "stale_profile_revision",
-                    RuntimeErrorStage::Binding,
-                    RetryClass::UserAction,
+                    AgentErrorStage::Binding,
+                    "user_action",
+                    "not_delivered",
                     format!(
                         "Team member `{}` captured Runtime Profile `{}` revision {}, but the current revision is {}. Re-save or reactivate the Team before execution.",
                         request.agent_name,
@@ -142,89 +150,73 @@ impl GatewayExternalAgentDelegate {
                         request.expected_runtime_profile_revision.unwrap_or_default(),
                         profile_revision,
                     ),
-                )));
+                    Some(format!("agent-binding:{child_session_id}")),
+                ));
             }
             match profile_config.runtime {
                 RuntimeProfileKind::Acp => {
                     let expected_backend = profile_config.backend_ref.as_deref().ok_or_else(|| {
-                        runtime_host_configuration_error(format!(
+                        agent_session_configuration_error(format!(
                             "ACP Runtime Profile `{}` is missing backendRef.",
                             profile_config.id
                         ))
                     })?;
                     if request.backend_ref.as_deref() != Some(expected_backend) {
-                        return Err(runtime_host_configuration_error(format!(
+                        return Err(agent_session_configuration_error(format!(
                             "Agent Definition `{}` uses ACP backend `{}`, but Runtime Profile `{}` resolves to backend `{expected_backend}`.",
                             request.agent_name,
                             request.backend_ref.as_deref().unwrap_or("none"),
                             profile_config.id,
                         )));
                     }
-                    apply_acp_profile_turn_controls(&mut options, &profile_config);
-                    options.runtime_ref = Some(expected_backend.to_string());
                     options.agent = Some(request.agent_name.clone());
-                    let peer = resolve_peer_delegate(&options, &request)?;
-                    acp_peer::run_acp_peer_turn(
-                        peer,
+                    let existing_binding = options
+                        .state
+                        .store()
+                        .gateway_runtime_binding(&child_session_id)?;
+                    let agent_binding = resolve_gateway_agent_binding_snapshot(
+                        &options,
+                        &profile_config,
+                        existing_binding.as_ref(),
+                        AgentEntrypoint::Subagent,
+                    )?;
+                    let binding = ensure_gateway_runtime_binding(
+                        &options.state,
+                        &child_session_id,
+                        &agent_binding,
+                        &profile_config,
+                        profile_revision,
+                        &profile_fingerprint,
+                    )?;
+                    options.runtime_ref = Some(expected_backend.to_string());
+                    let peer = resolve_peer_delegate(&options, &request, &profile_fingerprint)?;
+                    let captured_binding = binding.clone();
+                    let session_ready =
+                        acp_session_ready_for_binding(options.state.clone(), binding);
+                    self.gateway
+                        .run_internal_agent_turn(
+                            Some(captured_binding),
+                            profile_config,
+                            Some(peer),
                         BackendTurnRequest {
                             options,
+                            input: Vec::new(),
                             runtime_source: "agent".to_string(),
                             continue_sources: vec!["agent".to_string()],
                             stream,
                             control: Some(control),
                         },
                         request.run_id,
+                        Some(session_ready),
                     )
                     .await
-                    .map(|result| ExternalAgentDelegateResult {
+                    .map(|run| ExternalAgentDelegateResult {
                         child_session_id,
-                        final_answer: result.run.final_answer,
-                        outcome: result.run.outcome,
+                        final_answer: run.final_answer,
+                        outcome: run.outcome,
                     })
                 }
-                RuntimeProfileKind::Codex | RuntimeProfileKind::OpenCode => {
-                    options.mode = psychevo_runtime::RunMode::Default;
-                    if let Some(model) = options.model.take() {
-                        options
-                            .runtime_options
-                            .entry("model".to_string())
-                            .or_insert(model);
-                    }
-                    options.agent = request.runtime_options.get("agent").cloned();
-                    let binding = ensure_gateway_runtime_binding(
-                        &options.state,
-                        &child_session_id,
-                        &profile_config,
-                        profile_revision,
-                        &profile_fingerprint,
-                    )?;
-                    run_direct_runtime_turn(
-                        &execution_gateway,
-                        DirectRuntimeTurnInput {
-                            profile_config,
-                            profile_revision,
-                            profile_fingerprint,
-                            binding,
-                            request: BackendTurnRequest {
-                                options,
-                                runtime_source: "agent".to_string(),
-                                continue_sources: vec!["agent".to_string()],
-                                stream,
-                                control: Some(control),
-                            },
-                            turn_id: request.run_id,
-                            event_sink: execution_event_sink,
-                            instructions: request.instructions,
-                        },
-                    )
-                    .await
-                    .map(|result| ExternalAgentDelegateResult {
-                        child_session_id,
-                        final_answer: result.run.final_answer,
-                        outcome: result.run.outcome,
-                    })
-                }
-                RuntimeProfileKind::Native => Err(runtime_host_configuration_error(format!(
+                RuntimeProfileKind::Native => Err(agent_session_configuration_error(format!(
                     "Runtime Profile `{}` is native and cannot be executed by the external Team delegate.",
                     profile_config.id
                 ))),
@@ -232,11 +224,20 @@ impl GatewayExternalAgentDelegate {
         }
         .await;
         abort_bridge.abort();
+        let _ = child_heartbeat.send(());
+        terminal_gateway
+            .state
+            .store()
+            .set_agent_edge_status(
+                &terminal_child_session_id,
+                psychevo_runtime::AgentEdgeStatus::Closed,
+            )?;
         match &result {
             Ok(result) => terminal_gateway.record_external_delegate_terminal(
                 &terminal_child_session_id,
                 &child_turn_id,
                 result,
+                Some(&child_activity),
                 terminal_event_sink.as_ref(),
             )?,
             Err(error) => terminal_gateway.ensure_failed_terminal_after_turn_error(
@@ -256,14 +257,12 @@ impl Gateway {
         child_session_id: &str,
         turn_id: &str,
         result: &ExternalAgentDelegateResult,
+        durable_activity: Option<&DurableGatewayActivity>,
         event_sink: Option<&GatewayEventSink>,
     ) -> psychevo_runtime::Result<()> {
-        if self
-            .state
-            .store()
-            .gateway_turn_terminal(turn_id)?
-            .is_some()
-        {
+        if let Some(terminal) = self.state.store().gateway_turn_terminal(turn_id)? {
+            self.mark_active_turn_terminal(turn_id);
+            self.finish_durable_gateway_activity(durable_activity, &terminal.status);
             return Ok(());
         }
         let status = gateway_turn_status_for_outcome(result.outcome);
@@ -284,9 +283,13 @@ impl Gateway {
             classified_error: None,
             first_committed_seq: None,
             last_committed_seq: None,
-            durable_activity: None,
+            durable_activity,
         })?;
         let committed_entries = self.project_terminal_entry_for_turn(turn_id);
+        self.finish_durable_gateway_activity(
+            durable_activity,
+            durable_activity_status_for_turn(status),
+        );
         if let Some(event_sink) = event_sink {
             event_sink(GatewayEvent::TurnCompleted {
                 thread_id: Some(child_session_id.to_string()),
@@ -312,6 +315,7 @@ fn spawn_external_delegate_abort_bridge(
 fn resolve_peer_delegate(
     options: &RunOptions,
     request: &ExternalAgentDelegateRequest,
+    profile_fingerprint: &str,
 ) -> psychevo_runtime::Result<ResolvedPeerTurn> {
     if options.no_agents {
         return Err(Error::Message("agent delegation is disabled".to_string()));
@@ -378,6 +382,7 @@ fn resolve_peer_delegate(
         agent,
         backend,
         env,
+        process_scope_fingerprint: Some(profile_fingerprint.to_string()),
     })
 }
 
@@ -386,7 +391,7 @@ pub struct PsychevoRuntimeBackend;
 
 impl GatewayBackend for PsychevoRuntimeBackend {
     fn kind(&self) -> BackendKind {
-        BackendKind::Psychevo
+        BackendKind::Native
     }
 
     fn run_turn(

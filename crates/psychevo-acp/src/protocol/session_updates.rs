@@ -1,4 +1,3 @@
-
 pub(crate) fn resolve_path(value: &str, env: &BTreeMap<String, String>, cwd: &Path) -> PathBuf {
     let path = if value == "~" {
         env.get("HOME")
@@ -125,11 +124,11 @@ pub(crate) mod tests {
         }))
         .expect("session update");
 
-        let SessionUpdate::ToolCall(tool_call) = update else {
+        let SessionUpdate::ToolCallUpdate(tool_call) = update else {
             panic!("expected tool call update");
         };
         assert_eq!(
-            tool_call.meta.as_ref().expect("meta")["psychevo"]["toolTiming"],
+            tool_call.meta.value().expect("meta")["psychevo"]["toolTiming"],
             json!({
                 "source": "psychevo_runtime",
                 "startedAtMs": 1_234,
@@ -153,7 +152,7 @@ pub(crate) mod tests {
             panic!("expected tool call update");
         };
         assert_eq!(
-            update.meta.as_ref().expect("meta")["psychevo"]["toolTiming"],
+            update.meta.value().expect("meta")["psychevo"]["toolTiming"],
             json!({
                 "source": "psychevo_runtime",
                 "elapsedMs": 321,

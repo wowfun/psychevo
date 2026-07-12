@@ -6,9 +6,8 @@ export const gatewayBackendCoreSchemas = {
   "definitions": {
     "BackendKind": {
       "enum": [
-        "psychevo",
-        "peerAgent",
-        "runtime"
+        "native",
+        "acp"
       ],
       "type": "string"
     }

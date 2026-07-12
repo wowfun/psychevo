@@ -30,12 +30,13 @@ logs go to stderr. The ready JSON includes non-secret address and endpoint
 metadata; it does not include tokens.
 
 The foreground CLI installs explicit SIGINT/SIGTERM handling. On either signal
-it stops accepting new HTTP/WebSocket work, asks every runtime-host adapter to
-shut down gracefully within a fixed deadline, and falls back to a separately
-bounded forced runtime shutdown when graceful shutdown times out or fails. The
-server process does not exit until this cleanup path and its bounded connection
-drain have settled. This applies equally to direct `pevo serve` and the managed
-`serve` child started by `pevo gateway`.
+it stops accepting new HTTP/WebSocket work, asks the Gateway-owned
+`AgentSessionHost` to shut down its resident Agent adapters gracefully within a
+fixed deadline, and falls back to a separately bounded forced shutdown when
+graceful shutdown times out or fails. The server process does not exit until
+this cleanup path and its bounded connection drain have settled. This applies
+equally to direct `pevo serve` and the managed `serve` child started by
+`pevo gateway`.
 
 `BoundGatewayWebServer` keeps signal ownership explicit for library callers.
 Its ordinary `run` method does not install process-global signal handlers; an
@@ -63,7 +64,8 @@ The WebSocket transport is strict JSON-RPC 2.0:
 - notification: `{ "jsonrpc": "2.0", "method": ..., "params": ... }`
 
 Fields are camelCase. Methods use singular resource-oriented names such as
-`thread/start`, `turn/start`, `permission/respond`, and `clarify/respond`.
+`thread/start`, `turn/start`, `thread/action/run`, and
+`thread/interaction/respond`.
 
 ## Request Scope
 

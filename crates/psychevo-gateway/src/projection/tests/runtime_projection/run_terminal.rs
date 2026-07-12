@@ -57,3 +57,27 @@ fn turn_complete_projects_terminal_turn_status() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
+
+#[test]
+fn detached_session_title_projects_title_changed() {
+    let event = gateway_event_from_run_stream(
+        "turn-1",
+        &RunStreamEvent::value(json!({
+            "type": "session_title_changed",
+            "session_id": "thread-1",
+            "title": "Greeting session"
+        })),
+    );
+    match event.expect("session title should project a Gateway event") {
+        GatewayEvent::TitleChanged {
+            thread_id,
+            title,
+            display_title,
+        } => {
+            assert_eq!(thread_id, "thread-1");
+            assert_eq!(title.as_deref(), Some("Greeting session"));
+            assert_eq!(display_title.as_deref(), Some("Greeting session"));
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}

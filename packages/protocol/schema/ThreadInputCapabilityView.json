@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "unavailableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "enabled",
+    "kind"
+  ],
+  "title": "ThreadInputCapabilityView",
+  "type": "object"
+}

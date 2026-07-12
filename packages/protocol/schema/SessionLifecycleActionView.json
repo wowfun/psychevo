@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SessionLifecycleActionKind": {
+      "enum": [
+        "fork",
+        "delete"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "id": {
+      "$ref": "#/definitions/SessionLifecycleActionKind"
+    },
+    "unavailableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "enabled",
+    "id"
+  ],
+  "title": "SessionLifecycleActionView",
+  "type": "object"
+}

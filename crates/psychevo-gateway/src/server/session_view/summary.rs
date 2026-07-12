@@ -15,6 +15,7 @@ fn session_summary_value(
         .or_else(|| preview.clone())
         .unwrap_or_else(|| short_thread_id(&summary.id));
     let project = session_project_value(&summary.cwd);
+    let lifecycle = session_lifecycle_value(state, &summary.id)?;
     Ok(json!({
         "id": summary.id,
         "cwd": summary.cwd,
@@ -33,6 +34,93 @@ fn session_summary_value(
         "title": summary.title,
         "displayTitle": display_title,
         "preview": preview,
+        "lifecycle": lifecycle,
+    }))
+}
+
+fn session_lifecycle_value(state: &WebState, thread_id: &str) -> psychevo_runtime::Result<Value> {
+    let binding = state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding(thread_id)?;
+    if binding
+        .as_ref()
+        .is_none_or(|binding| binding.backend_kind.as_deref() != Some("acp"))
+    {
+        return Ok(json!({
+            "targetLabel": "Psychevo (Native)",
+            "actions": [
+                {
+                    "id": "fork",
+                    "enabled": false,
+                    "unavailableReason": "This Agent does not expose session fork."
+                },
+                {"id": "delete", "enabled": true}
+            ]
+        }));
+    }
+    let metadata = state.inner.state.store().session_metadata(thread_id)?;
+    let lifecycle = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("agentSessionLifecycle"));
+    let session_projection = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get(ACP_PEER_METADATA_KEY))
+        .and_then(|peer| peer.get("sessionProjection"));
+    let pending_delete = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("agentSessionDeleteIntent"))
+        .is_some();
+    let target_label = lifecycle
+        .and_then(|value| value.get("targetLabel"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            session_projection
+                .and_then(|projection| projection.get("agent"))
+                .and_then(|agent| agent.get("title").or_else(|| agent.get("name")))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| binding.as_ref().and_then(|binding| binding.runtime_ref.as_deref()));
+    let fork = lifecycle
+        .and_then(|value| value.get("fork"))
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            session_projection
+                .and_then(|projection| projection.pointer("/capabilities/session/fork"))
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false);
+    let delete = lifecycle
+        .and_then(|value| value.get("delete"))
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            session_projection
+                .and_then(|projection| projection.pointer("/capabilities/session/delete"))
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false)
+        && !pending_delete;
+    Ok(json!({
+        "targetLabel": target_label,
+        "actions": [
+            {
+                "id": "fork",
+                "enabled": fork,
+                "unavailableReason": (!fork).then_some(
+                    "This ACP Agent did not advertise session fork."
+                )
+            },
+            {
+                "id": "delete",
+                "enabled": delete,
+                "unavailableReason": (!delete).then_some(if pending_delete {
+                    "Remote deletion is pending reconciliation."
+                } else {
+                    "This ACP Agent did not advertise persistent session deletion."
+                })
+            }
+        ]
     }))
 }
 

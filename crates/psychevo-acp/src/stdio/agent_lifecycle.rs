@@ -51,7 +51,7 @@ impl PsychevoAcpAgent {
             .on_receive_request(
                 {
                     let agent = Arc::clone(&agent);
-                    async move |request: AuthenticateRequest, responder, _cx| {
+                    async move |request: LoginAuthRequest, responder, _cx| {
                         responder.respond_with_result(agent.authenticate(request).await)
                     }
                 },
@@ -63,10 +63,7 @@ impl PsychevoAcpAgent {
                     async move |request: NewSessionRequest, responder, cx: ConnectionTo<Client>| {
                         let result = agent.new_session(request).await;
                         let setup = result.as_ref().ok().map(|response| {
-                            (
-                                response.session_id.clone(),
-                                response.config_options.clone().unwrap_or_default(),
-                            )
+                            (response.session_id.clone(), response.config_options.clone())
                         });
                         let response = responder.respond_with_result(result);
                         if response.is_ok()
@@ -83,13 +80,15 @@ impl PsychevoAcpAgent {
             .on_receive_request(
                 {
                     let agent = Arc::clone(&agent);
-                    async move |request: LoadSessionRequest, responder, cx: ConnectionTo<Client>| {
+                    async move |request: ResumeSessionRequest,
+                                responder,
+                                cx: ConnectionTo<Client>| {
                         let session_id = request.session_id.clone();
-                        let result = agent.load_session(request).await;
+                        let result = agent.resume_session(request).await;
                         let config_options = result
                             .as_ref()
                             .ok()
-                            .and_then(|response| response.config_options.clone())
+                            .map(|response| response.config_options.clone())
                             .unwrap_or_default();
                         let response = responder.respond_with_result(result);
                         if response.is_ok() {
@@ -141,7 +140,7 @@ impl PsychevoAcpAgent {
             .on_receive_notification(
                 {
                     let agent = Arc::clone(&agent);
-                    async move |notification: CancelNotification, _cx| {
+                    async move |notification: CancelSessionNotification, _cx| {
                         agent.cancel(notification).await;
                         Ok(())
                     }
@@ -168,7 +167,12 @@ impl PsychevoAcpAgent {
         &self,
         request: InitializeRequest,
     ) -> Result<InitializeResponse, Error> {
-        let terminal_auth = request.capabilities.auth.terminal.is_some();
+        let terminal_auth = request
+            .capabilities
+            .auth
+            .as_ref()
+            .and_then(|auth| auth.terminal.as_ref())
+            .is_some();
         let terminal_output = self.client_terminal_output_enabled(&request.capabilities);
         if let Ok(mut value) = self.client_terminal_auth.lock() {
             *value = terminal_auth;
@@ -180,29 +184,26 @@ impl PsychevoAcpAgent {
         let capabilities = AgentCapabilities::new()
             .session(
                 SessionCapabilities::new()
-                    .load(SessionLoadCapabilities::new())
-                    .close(SessionCloseCapabilities::new())
-                    .list(SessionListCapabilities::new()),
+                    .prompt(
+                        PromptCapabilities::new()
+                            .embedded_context(PromptEmbeddedContextCapabilities::new())
+                            .image(PromptImageCapabilities::new()),
+                    )
+                    .mcp(McpCapabilities::new().http(McpHttpCapabilities::new())),
             )
-            .prompt(
-                PromptCapabilities::new()
-                    .embedded_context(PromptEmbeddedContextCapabilities::new())
-                    .image(PromptImageCapabilities::new()),
-            )
-            .mcp(McpCapabilities::new().http(McpHttpCapabilities::new()))
             .auth(AgentAuthCapabilities::new());
-        Ok(InitializeResponse::new(ProtocolVersion::V2)
-            .capabilities(capabilities)
-            .agent_info(
-                Implementation::new("psychevo-acp", env!("CARGO_PKG_VERSION")).title("Psychevo"),
-            )
-            .auth_methods(auth_methods))
+        Ok(InitializeResponse::new(
+            ProtocolVersion::V2,
+            Implementation::new("psychevo-acp", env!("CARGO_PKG_VERSION")).title("Psychevo"),
+        )
+        .capabilities(capabilities)
+        .auth_methods(auth_methods))
     }
 
     pub(crate) async fn authenticate(
         &self,
-        request: AuthenticateRequest,
-    ) -> Result<AuthenticateResponse, Error> {
+        request: LoginAuthRequest,
+    ) -> Result<LoginAuthResponse, Error> {
         let method = request.method_id.to_string();
         let ready = self.ready_auth_provider();
         if ready
@@ -210,7 +211,7 @@ impl PsychevoAcpAgent {
             .is_some_and(|provider| provider.eq_ignore_ascii_case(&method))
             || (method == TERMINAL_SETUP_AUTH_METHOD_ID && ready.is_some())
         {
-            return Ok(AuthenticateResponse::new());
+            return Ok(LoginAuthResponse::new());
         }
         Err(Error::invalid_params().data(format!("unsupported auth method: {method}")))
     }
@@ -233,10 +234,10 @@ impl PsychevoAcpAgent {
         Ok(NewSessionResponse::new(session_id).config_options(config_options))
     }
 
-    pub(crate) async fn load_session(
+    pub(crate) async fn resume_session(
         &self,
-        request: LoadSessionRequest,
-    ) -> Result<LoadSessionResponse, Error> {
+        request: ResumeSessionRequest,
+    ) -> Result<ResumeSessionResponse, Error> {
         let runtime_session_id = request.session_id.to_string();
         let store = self.state.store().clone();
         store
@@ -252,7 +253,7 @@ impl PsychevoAcpAgent {
             .lock()
             .expect("acp session lock poisoned")
             .insert(request.session_id.to_string(), session);
-        Ok(LoadSessionResponse::new().config_options(config_options))
+        Ok(ResumeSessionResponse::new().config_options(config_options))
     }
 
     pub(crate) async fn list_sessions(
@@ -302,6 +303,11 @@ impl PsychevoAcpAgent {
         cx: ConnectionTo<Client>,
     ) -> Result<PromptResponse, Error> {
         let session_id = request.session_id.clone();
+        send_session_update(
+            &cx,
+            session_id.clone(),
+            SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new())),
+        );
         let session_key = session_id.to_string();
         let prompt_blocks = request.prompt;
         let slash_prompt = single_text_prompt(&prompt_blocks).map(str::to_string);
@@ -319,7 +325,16 @@ impl PsychevoAcpAgent {
                 .handle_slash_prompt(&session_id, &session, &slash_prompt, &cx)
                 .await?
             {
-                SlashPromptAction::Handled(response) => return Ok(response),
+                SlashPromptAction::Handled(response) => {
+                    send_session_update(
+                        &cx,
+                        session_id,
+                        SessionUpdate::StateUpdate(StateUpdate::Idle(
+                            IdleStateUpdate::new().stop_reason(StopReason::EndTurn),
+                        )),
+                    );
+                    return Ok(response);
+                }
                 SlashPromptAction::RunPrompt(prompt) => {
                     return self
                         .run_prompt_and_drain(session_id, prompt, Vec::new(), cx)
@@ -361,19 +376,24 @@ impl PsychevoAcpAgent {
                 )
                 .await?;
         }
-        let mut response = PromptResponse::new(reason);
+        let mut idle = IdleStateUpdate::new().stop_reason(reason);
         // Accounting is diagnostic metadata; it must not block the required
-        // JSON-RPC prompt response after the runtime turn has completed.
+        // idle state update after the runtime turn has completed.
         if let Ok(usage) = usage.try_lock() {
             let usage = usage.clone();
             if let Some(metrics) = usage.to_usage() {
-                response = response.usage(metrics);
+                idle = idle.usage(metrics);
             }
             if let Some(meta) = usage.response_meta() {
-                response = response.meta(meta);
+                idle = idle.meta(meta);
             }
         }
-        Ok(response)
+        send_session_update(
+            &cx,
+            session_id,
+            SessionUpdate::StateUpdate(StateUpdate::Idle(idle)),
+        );
+        Ok(PromptResponse::new())
     }
 
     pub(crate) async fn run_prompt_once(
@@ -424,27 +444,17 @@ impl PsychevoAcpAgent {
                 send_gateway_event_update(&event_cx, &event_session_id, event, &mut projection);
             }
         });
-        let options = self.run_options(&session, prompt, image_inputs, Some(approval_handler));
+        let mut request =
+            self.thread_turn_request(&session, prompt, image_inputs, Some(approval_handler));
         let source = self.gateway_source(&session_id, &session);
-        let result = self
-            .gateway
-            .send_turn(SendTurnRequest {
-                thread_id: session.runtime_session_id.clone(),
-                source: Some(source),
-                bind_source: None,
-                reset_source_binding: false,
-                input: Vec::new(),
-                options,
-                runtime_source: Some("acp".to_string()),
-                continue_sources: vec!["acp".to_string(), "run".to_string(), "tui".to_string()],
-                stream: Some(stream),
-                event_sink: Some(event_sink),
-                control_handle: Some(handle),
-                control: Some(control),
-                lineage: None,
-            })
-            .await
-            .map(|turn| turn.result);
+        request.source = Some(source);
+        request.runtime_source = Some("acp".to_string());
+        request.continue_sources = vec!["acp".to_string(), "run".to_string(), "tui".to_string()];
+        request.stream = Some(stream);
+        request.event_sink = Some(event_sink);
+        request.control_handle = Some(handle);
+        request.control = Some(control);
+        let result = self.gateway.run_turn(request).await.map(|turn| turn.result);
         match result {
             Ok(result) => {
                 if !result.final_answer.trim().is_empty() {
@@ -503,7 +513,7 @@ impl PsychevoAcpAgent {
         }
     }
 
-    pub(crate) async fn cancel(&self, notification: CancelNotification) {
+    pub(crate) async fn cancel(&self, notification: CancelSessionNotification) {
         let selector = self.gateway_selector(&notification.session_id);
         let interrupted = self.gateway.interrupt_turn(selector.clone());
         self.gateway.clear_queue(selector);
@@ -529,8 +539,9 @@ impl PsychevoAcpAgent {
     ) -> Result<SetSessionConfigOptionResponse, Error> {
         let value = request
             .value
-            .as_value_id()
+            .as_id()
             .map(ToString::to_string)
+            .or_else(|| request.value.as_bool().map(|value| value.to_string()))
             .unwrap_or_default();
         let updated_session = {
             let mut sessions = self.sessions.lock().expect("acp session lock poisoned");

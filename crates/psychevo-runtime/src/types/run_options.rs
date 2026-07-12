@@ -129,7 +129,7 @@ pub struct ExternalAgentDelegateRequest {
     /// the generated or configured Profile id, never the raw backend id.
     pub runtime_ref: String,
     /// ACP implementation identity when the selected Runtime Profile is ACP.
-    /// Direct Runtime Profiles deliberately leave this unset.
+    /// Native Runtime Profiles deliberately leave this unset.
     pub backend_ref: Option<String>,
     /// Agent Definition instructions for adapters that expose a native
     /// developer/system-instruction field.
@@ -215,6 +215,40 @@ pub struct McpServerInput {
     pub source_kind: Option<String>,
     pub transport: McpTransportInput,
     pub policy: McpServerPolicy,
+}
+
+/// A fully resolved MCP declaration ready to cross an Agent-adapter boundary.
+///
+/// The bearer token deliberately has no serde implementation and its `Debug`
+/// representation is redacted. It may live in process memory long enough to
+/// build an ACP session request, but must never enter persistence or product
+/// projections.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ResolvedMcpServerInput {
+    pub server: McpServerInput,
+    pub bearer_token: Option<String>,
+}
+
+impl fmt::Debug for ResolvedMcpServerInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let transport = match &self.server.transport {
+            McpTransportInput::Stdio { .. } => "stdio",
+            McpTransportInput::StreamableHttp { .. } => "streamable_http",
+            McpTransportInput::Unsupported { .. } => "unsupported",
+        };
+        formatter
+            .debug_struct("ResolvedMcpServerInput")
+            .field("name", &self.server.name)
+            .field("source_id", &self.server.source_id)
+            .field("source_kind", &self.server.source_kind)
+            .field("transport", &transport)
+            .field("policy", &self.server.policy)
+            .field(
+                "bearer_token",
+                &self.bearer_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -107,6 +107,10 @@ switch to a separate page. Notes are also entered inline while the option list
 remains visible. Inline note and custom-answer fields must show a cursor and
 support editing in the middle of the text with cursor movement, insertion,
 backspace, and delete.
+Workbench treats a pending clarify `actionId` as the identity of an immutable
+question set. Unrelated Gateway events and equivalent payload re-projections
+must preserve in-progress option, Other, and text state; only a different
+action id starts a fresh answer draft.
 Background-session requests do not steal focus; they surface as pending input
 status until the user switches to that session.
 

@@ -572,7 +572,7 @@ model = "lmstudio/test-model"
                 &source,
                 &first,
                 &GatewayBackendInfo {
-                    kind: BackendKind::Psychevo,
+                    kind: BackendKind::Native,
                     runtime_ref: Some("native".to_string()),
                     native_id: Some(first.clone()),
                 },
@@ -592,7 +592,7 @@ model = "lmstudio/test-model"
                 &source,
                 &second,
                 &GatewayBackendInfo {
-                    kind: BackendKind::Psychevo,
+                    kind: BackendKind::Native,
                     runtime_ref: Some("native".to_string()),
                     native_id: Some(second.clone()),
                 },
@@ -760,4 +760,87 @@ model = "lmstudio/test-model"
                 .activity_for_selector(GatewayThreadSelector::thread_id(&child_thread))
                 .running
         );
+    }
+
+    #[test]
+    fn gateway_event_sink_attributes_child_interaction_to_child_activity() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend);
+        let parent_thread = harness
+            .state
+            .store()
+            .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
+            .expect("parent session");
+        let child_thread = harness
+            .state
+            .store()
+            .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
+            .expect("child session");
+        let parent_activity = harness
+            .gateway
+            .claim_durable_gateway_activity(DurableGatewayActivityClaim {
+                activity_id: "turn-parent",
+                thread_id: Some(&parent_thread),
+                source_key: None,
+                turn_id: Some("turn-parent"),
+                kind: "turn",
+                owner_surface: Some("web"),
+                queued_turns: 0,
+                intent: None,
+            })
+            .expect("parent activity");
+        harness
+            .gateway
+            .claim_durable_gateway_activity(DurableGatewayActivityClaim {
+                activity_id: "turn-child",
+                thread_id: Some(&child_thread),
+                source_key: None,
+                turn_id: Some("turn-child"),
+                kind: "turn",
+                owner_surface: Some("agent"),
+                queued_turns: 0,
+                intent: None,
+            })
+            .expect("child activity");
+        let observed = Arc::new(Mutex::new(None));
+        let observed_for_sink = Arc::clone(&observed);
+        let downstream: GatewayEventSink = Arc::new(move |event| {
+            *observed_for_sink.lock().expect("observed event") = Some(event);
+        });
+        let sink = harness
+            .gateway
+            .wrap_gateway_event_sink(
+                Some(downstream),
+                Some(parent_activity),
+                Some("thread:parent".to_string()),
+                Some("turn-parent".to_string()),
+            )
+            .expect("wrapped sink");
+
+        sink(GatewayEvent::ActionRequested {
+            action: PendingActionView {
+                action_id: "permission-child".to_string(),
+                kind: GatewayActionKind::Permission,
+                title: Some("child permission".to_string()),
+                summary: None,
+                payload: json!({}),
+                thread_id: Some(child_thread),
+                turn_id: Some("turn-child".to_string()),
+                activity_id: None,
+                source_key: None,
+                owner_id: None,
+                lease_expires_at_ms: None,
+            },
+        });
+
+        let event = observed
+            .lock()
+            .expect("observed event")
+            .clone()
+            .expect("event");
+        let GatewayEvent::ActionRequested { action } = event else {
+            panic!("expected child action");
+        };
+        assert_eq!(action.activity_id.as_deref(), Some("turn-child"));
+        assert_eq!(action.turn_id.as_deref(), Some("turn-child"));
     }

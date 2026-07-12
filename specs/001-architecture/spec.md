@@ -25,8 +25,18 @@ Out of scope:
 
 - Layering over bundling. Psychevo separates provider protocol, agent execution, runtime assembly, persistence, and transport instead of bundling product concerns into lower layers.
 - Component specialization. Each primary architecture component owns one system-level responsibility area and must not absorb responsibilities from adjacent components.
-- Runtime is the execution and persistence kernel. Session coordination, agent-invocation assembly, resource surface wiring, tool surface assembly, context assembly, durable evidence, persistence, and replay wiring converge in `psychevo-runtime`.
-- Gateway is the caller-facing orchestration surface. Interactive entrypoints should route thread/turn requests, source mapping, queueing, steering, interrupt, reset, permission request, clarify request, and observation projection through `psychevo-gateway` instead of reimplementing those semantics per surface.
+- Runtime is the Native Psychevo execution kernel. Native agent-invocation
+  assembly, resource and tool surface wiring, context assembly, and Native
+  durable evidence converge in `psychevo-runtime`.
+- Gateway is the application kernel and caller-facing orchestration surface.
+  Interactive entrypoints route thread context, immutable agent/runtime
+  binding, turns, controls, queueing, interaction requests, delivery state,
+  history projection, and observation through `psychevo-gateway` instead of
+  reimplementing those semantics per surface.
+- Native Psychevo Agents and external ACP Agents are equal execution Adapters
+  behind one Gateway-owned Agent Session seam. ACP is an external protocol at
+  that seam; it is not Psychevo's internal application interface and Native is
+  not lowered through ACP.
 - Transport is replaceable. CLI parsing, terminal rendering, stdin/stdout behavior, exit codes, and environment handling must remain outside the core runtime and lower layers.
 - Large crate implementations should be organized internally by owned responsibility instead of collecting unrelated behavior in a single root source file. Root crate files may act as facades that re-export stable public surfaces while private modules keep implementation details near their owning boundary.
 
@@ -133,12 +143,20 @@ entrypoint crates.
 ### `psychevo-gateway`
 
 Owns:
-- transport-neutral Thread/Turn orchestration over runtime
+- the `ThreadApplication` Module used by every interactive caller
+- the sole caller-facing typed turn request and its lowering into
+  runtime-internal `RunOptions`; caller Adapters never construct `RunOptions`
+  or the application queue envelope
+- the `AgentSessionHost` Module and its Native and outbound ACP Adapters
+- transport-neutral Thread/Turn orchestration over Native and ACP Agents
 - source identity normalization and source-to-thread mapping
 - active-turn queue, steer, interrupt, and reset coordination
 - caller-facing permission and clarify request rendezvous
 - canonical live event and item projection for product surfaces
-- backend boundary for Psychevo runtime and future peer-agent executors
+- immutable Agent Definition and Runtime Profile binding
+- delivery classification, product history ownership/fidelity, and interaction
+  brokering
+- outbound ACP process, connection, and session supervision
 
 Must not own:
 - agent loop behavior
@@ -147,17 +165,27 @@ Must not own:
 - runtime permission policy
 - capability selection semantics
 - context assembly semantics
-- durable evidence schemas or replay semantics
+- Native durable evidence schemas or Native replay semantics
 - concrete CLI, TUI, ACP, Web, desktop, or IM rendering/protocol behavior
 
 ### `psychevo-acp`
 
 Owns:
-- ACP server packaging over stdio for the first product slice
+- inbound ACP server packaging over stdio for the first product slice
 - ACP request and notification handling according to [027 ACP](../027-acp/spec.md)
 - ACP projection of gateway/runtime sessions, observations, permissions, commands,
   auth, model/mode choices, config options, and MCP source inputs
 - construction of gateway calls from ACP inputs
+
+`psychevo-acp` is a caller-side Adapter. It must not own or be reused as the
+outbound ACP Agent Adapter; the latter lives behind Gateway's Agent Session
+seam and has the opposite protocol role.
+
+Inbound ACP, CLI, TUI, Web/Desktop, and Channels submit turns through the same
+`ThreadApplication.run_turn` Interface. Surface-specific environment,
+presentation, and interaction choices are typed caller intent on that request;
+runtime state handles, native session ids, internal delegates, and queue
+delivery policy remain private to Gateway.
 
 Must not own:
 - agent loop behavior
@@ -192,6 +220,7 @@ Dependencies between primary architecture components must point inward:
 ```text
 psychevo-cli -> psychevo-gateway -> psychevo-runtime -> psychevo-agent-core -> psychevo-ai
 psychevo-acp -> psychevo-gateway -> psychevo-runtime -> psychevo-agent-core -> psychevo-ai
+                                 -> outbound ACP Agent processes
 ```
 
 Allowed dependency rules:
@@ -199,13 +228,19 @@ Allowed dependency rules:
 - `psychevo-acp` may depend on `psychevo-runtime`.
 - `psychevo-cli` and `psychevo-acp` may depend on `psychevo-gateway`.
 - `psychevo-gateway` may depend on `psychevo-runtime`.
+- `psychevo-gateway` may depend on the ACP SDK and launch configured outbound
+  ACP Agent processes through structured process configuration.
 - `psychevo-runtime` may depend on `psychevo-agent-core` and `psychevo-ai`.
 - `psychevo-agent-core` may depend on `psychevo-ai`.
 - `psychevo-ai` must not depend on higher Psychevo crates.
 
 Allowed direct interaction rules:
 - Interactive `psychevo-cli` and `psychevo-acp` work should interact with `psychevo-gateway` for thread/turn orchestration and may interact with `psychevo-runtime` for non-interactive administrative helpers that are not gateway semantics.
-- `psychevo-gateway` may directly interact with `psychevo-runtime` only.
+- `psychevo-gateway` may directly interact with `psychevo-runtime` through its
+  Native Adapter and with external ACP Agents through its outbound ACP Adapter.
+- Workbench, Channels, CLI/TUI, and inbound `psychevo-acp` must interact with
+  the same Gateway application uses cases and must not select an Adapter by
+  implementation name.
 - `psychevo-runtime` may directly interact with `psychevo-agent-core`, `psychevo-ai`, agent-invocation scoped tool surface bindings, and runtime-owned durable records.
 - `psychevo-runtime` may accept capability-extension declarations and assemble
   the runtime extension registry for an invocation.

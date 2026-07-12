@@ -70,10 +70,28 @@ snapshots. Live deltas and preview updates may be retained briefly for
 cross-process delivery repair, but clients must be able to recover by loading an
 authoritative `thread/read` or `thread/resume` snapshot.
 
-`thread/read` and `thread/resume` snapshots are authoritative. A client that
+For an Agent-authoritative ACP thread, materialized transcript facts belong to
+the bound Agent session rather than Psychevo `messages`. The ACP Adapter
+normalizes replay and live updates into bounded typed Agent facts before
+crossing the Agent Session seam. Gateway applies them through one reducer; it
+does not feed Adapter-shaped JSON through the legacy projector or keep a second
+final-answer accumulator. Live, Channel, and history projection derive from the
+same typed state. Terminal completion clears retained live facts; reconnect
+loads Agent history when that capability was negotiated.
+
+`thread/read` and `thread/resume` snapshots are authoritative. Each snapshot
+names its history owner, fidelity, and resumability. An Agent history owner that
+cannot be reached returns thread metadata with `fidelity=unavailable`; it
+does not substitute local transcript content. A client that
 detects a live sequence gap, stale owner, expired retained buffer, or unknown
 live identity must refresh the snapshot and discard stale live overlay state for
 that thread. Snapshot refresh must not require replaying missed token deltas.
+
+`ThreadHistoryOwnerView` names the content authority as `psychevo`, `agent`, or
+`process`. `runtime` is not a history owner: a Runtime Profile selects an
+execution Adapter but does not itself own conversation content. Public surfaces
+must preserve these owner values without branching on Native versus ACP
+implementation kind.
 
 Live entry events are previews. They may update an existing live entry or block
 by stable identity, and they may be coalesced into latest-entry snapshots.

@@ -11,15 +11,24 @@ fn ensure_local_session(
     let store = options.state.store();
     if let Some(session_id) = &options.session {
         store.resume_session(session_id)?;
-        let native = store
+        let metadata_native = store
             .session_metadata(session_id)?
             .and_then(|metadata| peer_native_session_id(&metadata, &peer.backend.id));
+        let native = match metadata_native {
+            Some(native) => Some(native),
+            None => store
+                .gateway_runtime_binding(session_id)?
+                .filter(|binding| {
+                    binding.status == psychevo_runtime::GatewayRuntimeBindingStatus::Resolved
+                        && binding.native_kind.as_deref()
+                            == Some(psychevo_runtime::RuntimeProfileKind::Acp.as_str())
+                })
+                .and_then(|binding| binding.native_session_id),
+        };
         let top_level = store
             .session_summary(session_id)?
             .is_some_and(|summary| summary.parent_session_id.is_none());
-        let created = native.is_none()
-            && top_level
-            && store.load_messages(session_id)?.is_empty();
+        let created = native.is_none() && top_level && store.load_messages(session_id)?.is_empty();
         return Ok(LocalPeerSession {
             session_id: session_id.clone(),
             native_session_id: native,
@@ -48,6 +57,7 @@ fn peer_session_metadata(
     native_session_id: Option<&str>,
     usage_update: Option<&Value>,
     runtime_options: &BTreeMap<String, String>,
+    session_projection: Option<&AcpSessionSnapshot>,
 ) -> Value {
     let mut value = json!({
         "agentName": peer.agent.name.clone(),
@@ -76,12 +86,26 @@ fn peer_session_metadata(
     {
         object.insert("runtimeOptions".to_string(), json!(runtime_options));
     }
+    if let Some(session_projection) = session_projection
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert(
+            "sessionProjection".to_string(),
+            serde_json::to_value(session_projection).expect("product-safe ACP projection serializes"),
+        );
+    }
     value
 }
 
 fn peer_root_metadata(peer: &ResolvedPeerTurn, native_session_id: Option<&str>) -> Value {
     json!({
-        ACP_PEER_METADATA_KEY: peer_session_metadata(peer, native_session_id, None, &BTreeMap::new()),
+        ACP_PEER_METADATA_KEY: peer_session_metadata(
+            peer,
+            native_session_id,
+            None,
+            &BTreeMap::new(),
+            None,
+        ),
     })
 }
 
@@ -102,29 +126,6 @@ fn emit_runtime_event(stream: &Option<psychevo_runtime::RunStreamSink>, value: V
     }
 }
 
-fn peer_prompt_text(
-    agent: &AgentDefinition,
-    prompt: &str,
-    images: &[ImageInput],
-    include_instructions: bool,
-) -> String {
-    let mut parts = Vec::new();
-    if include_instructions && !agent.instructions.trim().is_empty() {
-        parts.push(agent.instructions.trim().to_string());
-    }
-    parts.push(prompt.to_string());
-    for image in images {
-        match image {
-            ImageInput::ImageUrl(url) => parts.push(format!("[image: {url}]")),
-            ImageInput::LocalPath(path) => parts.push(format!(
-                "[local image omitted for ACP peer: {}]",
-                path.display()
-            )),
-        }
-    }
-    parts.join("\n\n")
-}
-
 fn prompt_history_text(prompt: &str, images: &[ImageInput]) -> String {
     let mut parts = vec![prompt.to_string()];
     for image in images {
@@ -141,11 +142,8 @@ fn client_capabilities(peer: &ResolvedPeerTurn) -> ClientCapabilities {
         .fs(FileSystemCapabilities::new()
             .read_text_file(peer_allows_fs_read(peer))
             .write_text_file(peer_allows_fs_write(peer)))
-        .terminal(false)
-}
-
-fn client_capabilities_v2() -> acp_v2::ClientCapabilities {
-    acp_v2::ClientCapabilities::new()
+        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()))
+        .terminal(peer_allows_terminal(peer))
 }
 
 fn peer_allows_fs_read(peer: &ResolvedPeerTurn) -> bool {
@@ -158,6 +156,11 @@ fn peer_allows_fs_write(peer: &ResolvedPeerTurn) -> bool {
         && agent_allows_any_tool(&peer.agent, &["write", "edit"])
 }
 
+fn peer_allows_terminal(peer: &ResolvedPeerTurn) -> bool {
+    peer.backend.client_capabilities.contains("terminal")
+        && agent_allows_any_tool(&peer.agent, &["exec_command", "write_stdin"])
+}
+
 fn agent_allows_any_tool(agent: &AgentDefinition, tools: &[&str]) -> bool {
     let allowed = agent
         .tool_policy
@@ -168,6 +171,23 @@ fn agent_allows_any_tool(agent: &AgentDefinition, tools: &[&str]) -> bool {
         .iter()
         .all(|tool| agent.tool_policy.denied.contains(*tool));
     allowed && !denied
+}
+
+fn acp_request_context(
+    contexts: &Arc<std::sync::Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
+    session_id: &str,
+) -> Result<Arc<AcpClientContext>, agent_client_protocol::Error> {
+    contexts
+        .lock()
+        .map_err(|_| {
+            agent_client_protocol::Error::internal_error().data("ACP session context lock poisoned")
+        })?
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| {
+            agent_client_protocol::Error::invalid_request()
+                .data(format!("unknown ACP session context: {session_id}"))
+        })
 }
 
 async fn read_text_file(
@@ -280,47 +300,6 @@ async fn request_permission(
     ))
 }
 
-async fn request_permission_v2(
-    context: Arc<AcpClientContext>,
-    request: acp_v2::RequestPermissionRequest,
-) -> Result<acp_v2::RequestPermissionResponse, agent_client_protocol::Error> {
-    let title = request
-        .tool_call
-        .fields
-        .title
-        .clone()
-        .unwrap_or_else(|| "ACP tool".to_string());
-    let decision = if let Some(handler) = &context.approval_handler {
-        handler
-            .request_permission(PermissionApprovalRequest {
-                tool_call_id: request.tool_call.tool_call_id.to_string(),
-                tool_name: title.clone(),
-                summary: title,
-                reason: "ACP peer requested permission".to_string(),
-                matched_rule: None,
-                suggested_rule: None,
-                allow_always: request
-                    .options
-                    .iter()
-                    .any(|option| option.kind == acp_v2::PermissionOptionKind::AllowAlways),
-                timeout_secs: handler.timeout_secs(),
-            })
-            .await
-    } else {
-        PermissionApprovalDecision::deny()
-    };
-    let Some(option_id) = permission_option_id_v2(&request.options, decision.outcome) else {
-        return Ok(acp_v2::RequestPermissionResponse::new(
-            acp_v2::RequestPermissionOutcome::Cancelled,
-        ));
-    };
-    Ok(acp_v2::RequestPermissionResponse::new(
-        acp_v2::RequestPermissionOutcome::Selected(acp_v2::SelectedPermissionOutcome::new(
-            option_id,
-        )),
-    ))
-}
-
 fn permission_option_id(
     options: &[PermissionOption],
     outcome: PermissionApprovalOutcome,
@@ -354,45 +333,7 @@ fn permission_option_id(
         .map(|option| option.option_id.to_string())
 }
 
-fn permission_option_id_v2(
-    options: &[acp_v2::PermissionOption],
-    outcome: PermissionApprovalOutcome,
-) -> Option<String> {
-    let preferred = match outcome {
-        PermissionApprovalOutcome::AllowAlways => acp_v2::PermissionOptionKind::AllowAlways,
-        PermissionApprovalOutcome::AllowOnce | PermissionApprovalOutcome::AllowSession => {
-            acp_v2::PermissionOptionKind::AllowOnce
-        }
-        PermissionApprovalOutcome::Deny => acp_v2::PermissionOptionKind::RejectOnce,
-    };
-    options
-        .iter()
-        .find(|option| option.kind == preferred)
-        .or_else(|| {
-            options.iter().find(|option| {
-                matches!(
-                    (outcome, &option.kind),
-                    (
-                        PermissionApprovalOutcome::AllowOnce
-                            | PermissionApprovalOutcome::AllowSession
-                            | PermissionApprovalOutcome::AllowAlways,
-                        acp_v2::PermissionOptionKind::AllowOnce
-                            | acp_v2::PermissionOptionKind::AllowAlways
-                    ) | (
-                        PermissionApprovalOutcome::Deny,
-                        acp_v2::PermissionOptionKind::RejectOnce
-                            | acp_v2::PermissionOptionKind::RejectAlways
-                    )
-                )
-            })
-        })
-        .map(|option| option.option_id.to_string())
-}
-
-fn guarded_existing_path(
-    cwd: &Path,
-    path: &Path,
-) -> Result<PathBuf, agent_client_protocol::Error> {
+fn guarded_existing_path(cwd: &Path, path: &Path) -> Result<PathBuf, agent_client_protocol::Error> {
     let path = path
         .canonicalize()
         .map_err(|err| agent_client_protocol::Error::invalid_request().data(err.to_string()))?;
@@ -406,10 +347,7 @@ fn guarded_existing_path(
     Ok(path)
 }
 
-fn guarded_writable_path(
-    cwd: &Path,
-    path: &Path,
-) -> Result<PathBuf, agent_client_protocol::Error> {
+fn guarded_writable_path(cwd: &Path, path: &Path) -> Result<PathBuf, agent_client_protocol::Error> {
     if !path.is_absolute() {
         return Err(agent_client_protocol::Error::invalid_request()
             .data("fs/write_text_file path must be absolute"));

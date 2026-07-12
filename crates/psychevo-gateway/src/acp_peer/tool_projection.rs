@@ -13,13 +13,6 @@ fn acp_content_chunk_text(chunk: ContentChunk) -> Option<String> {
     }
 }
 
-fn acp_v2_content_chunk_text(chunk: acp_v2::ContentChunk) -> Option<String> {
-    match chunk.content {
-        acp_v2::ContentBlock::Text(text) => Some(text.text),
-        _ => None,
-    }
-}
-
 fn acp_tool_call_id(value: &Value) -> String {
     value
         .get("toolCallId")

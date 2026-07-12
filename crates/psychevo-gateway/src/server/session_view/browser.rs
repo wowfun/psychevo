@@ -160,11 +160,24 @@ fn browser_workspace_latest_at(workspace: &Value) -> i64 {
         .unwrap_or_default()
 }
 
-fn human_visible_session(_state: &WebState, summary: &SessionSummary) -> bool {
+fn human_visible_session(state: &WebState, summary: &SessionSummary) -> bool {
     if summary.parent_session_id.is_some() {
         return false;
     }
     if INTERNAL_SESSION_SOURCES.contains(&summary.source.as_str()) {
+        return false;
+    }
+    if state
+        .inner
+        .state
+        .store()
+        .session_metadata(&summary.id)
+        .ok()
+        .flatten()
+        .as_ref()
+        .and_then(|metadata| metadata.get("agentSessionImportState"))
+        .is_some()
+    {
         return false;
     }
     true

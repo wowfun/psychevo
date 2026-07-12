@@ -282,6 +282,124 @@ pub(crate) async fn new_visible_session_title_preserves_existing_title() {
     assert_eq!(summary.title.as_deref(), Some("Manual Title"));
 }
 
+#[tokio::test]
+pub(crate) async fn streaming_run_returns_before_new_session_title_generation_finishes() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&cwd).expect("cwd");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let address = listener.local_addr().expect("address");
+    let (title_started_tx, title_started_rx) = tokio::sync::oneshot::channel();
+    let (release_title_tx, release_title_rx) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut main_stream, _) = listener.accept().expect("main request");
+        let _ = read_http_request(&mut main_stream);
+        write_test_sse(&mut main_stream, "Hi from the main turn.");
+
+        let (mut title_stream, _) = listener.accept().expect("title request");
+        let _ = read_http_request(&mut title_stream);
+        title_started_tx.send(()).expect("title started");
+        release_title_rx.recv().expect("release title");
+        write_test_sse(&mut title_stream, "Greeting session");
+    });
+    write_config(
+        home.join("config.toml"),
+        &format!(
+            r#"
+model = "custom/main"
+
+[provider.custom]
+api = "http://{address}/v1"
+
+[provider.custom.models.main]
+
+[auxiliary.title_generation]
+provider = "custom"
+model = "main"
+"#,
+        ),
+    )
+    .expect("config");
+
+    let mut options = base_options(&temp);
+    options.cwd = cwd;
+    options.model = Some("custom/main".to_string());
+    options.no_agents = true;
+    options.no_skills = true;
+    let state = options.state.clone();
+    let (title_event_tx, mut title_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        if let Some(value) = event.legacy_value()
+            && value.get("type").and_then(Value::as_str) == Some("session_title_changed")
+        {
+            let _ = title_event_tx.send(value.clone());
+        }
+    });
+    let mut run =
+        tokio::spawn(async move { run_live_streaming(options, "web", &["web"], stream).await });
+
+    tokio::time::timeout(Duration::from_secs(2), title_started_rx)
+        .await
+        .expect("title request timeout")
+        .expect("title request started");
+    let returned_before_title = tokio::time::timeout(Duration::from_millis(200), &mut run).await;
+    let returned_before_title_finished = returned_before_title.is_ok();
+    let result = match returned_before_title {
+        Ok(joined) => {
+            let result = joined.expect("run task").expect("streaming run");
+            state
+                .store()
+                .set_session_title(&result.session_id, "Manual title")
+                .expect("manual title");
+            release_title_tx.send(()).expect("release title");
+            result
+        }
+        Err(_) => {
+            release_title_tx.send(()).expect("release title");
+            run.await
+                .expect("run task after title")
+                .expect("streaming run after title")
+        }
+    };
+    server.join().expect("server");
+
+    assert!(
+        returned_before_title_finished,
+        "streaming run remained active while display-only title generation was pending"
+    );
+    let event = tokio::time::timeout(Duration::from_secs(2), title_event_rx.recv())
+        .await
+        .expect("detached title event timeout")
+        .expect("detached title event");
+    assert_eq!(event["title"], "Manual title");
+    assert_eq!(
+        state
+            .store()
+            .session_summary(&result.session_id)
+            .expect("summary")
+            .and_then(|summary| summary.title)
+            .as_deref(),
+        Some("Manual title")
+    );
+}
+
+fn write_test_sse(stream: &mut std::net::TcpStream, content: &str) {
+    let body = format!(
+        "data: {{\"choices\":[{{\"delta\":{{\"content\":{}}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n",
+        serde_json::to_string(content).expect("content json")
+    );
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .expect("write response");
+}
+
 #[test]
 pub(crate) fn visible_session_source_title_rules_match_history_sources() {
     for source in [

@@ -327,32 +327,20 @@ impl TuiApp {
             let mut stdout = stdout_for_sink.lock().expect("stdout lock poisoned");
             let _ = turn.render_gateway_event(&event, &mut *stdout);
         });
-        let options = self.run_options(prompt);
+        let mut request = self.thread_turn_request(prompt);
         let source = self.gateway_source();
         let bind_source = self.canonical_gateway_source();
         let reset_source_binding = self.force_new_once && self.current_session.is_none();
-        let result = self
-            .gateway
-            .send_turn(SendTurnRequest {
-                thread_id: options.session.clone(),
-                source: Some(source),
-                bind_source: Some(bind_source),
-                reset_source_binding,
-                input: Vec::new(),
-                options,
-                runtime_source: Some("tui".to_string()),
-                continue_sources: TUI_CONTINUE_SESSION_SOURCES
-                    .iter()
-                    .map(|source| (*source).to_string())
-                    .collect(),
-                stream: None,
-                event_sink: Some(sink),
-                control_handle: None,
-                control: None,
-                lineage: None,
-            })
-            .await?
-            .result;
+        request.source = Some(source);
+        request.bind_source = Some(bind_source);
+        request.reset_source_binding = reset_source_binding;
+        request.runtime_source = Some("tui".to_string());
+        request.continue_sources = TUI_CONTINUE_SESSION_SOURCES
+            .iter()
+            .map(|source| (*source).to_string())
+            .collect();
+        request.event_sink = Some(sink);
+        let result = self.gateway.run_turn(request).await?.result;
         self.last_context_snapshot = result.context_snapshot.clone();
         {
             let mut turn = turn.lock().expect("turn lock poisoned");

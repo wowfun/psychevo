@@ -1,5 +1,48 @@
 import { describe, expect, it } from "vitest";
-import { ThreadSnapshotSchema } from "./index";
+import { GatewayEventSchema, ThreadSnapshotSchema, gatewaySchemas } from "./index";
+
+describe("ThreadApplication hard-cut schemas", () => {
+  it("projects an optional diagnostic reason on runtime capability facts", () => {
+    expect(gatewaySchemas.RuntimeCapabilityView.required).toEqual([
+      "enabled",
+      "id",
+      "stability"
+    ]);
+    expect(gatewaySchemas.RuntimeCapabilityView.properties.unavailableReason).toEqual({
+      default: null,
+      type: ["string", "null"]
+    });
+  });
+
+  it("exports semantic history owners without the retired runtime owner", () => {
+    expect(gatewaySchemas.ThreadHistoryOwnerView.enum).toEqual([
+      "psychevo",
+      "agent",
+      "process"
+    ]);
+  });
+
+  it("rejects producerless runtime state and child events", () => {
+    expect(GatewayEventSchema.safeParse({
+      type: "runtimeStateChanged",
+      runtimeRef: "acp:codex",
+      threadId: "thread-1",
+      state: "ready",
+      detail: null,
+      processEpoch: 2,
+      instanceEpoch: 1
+    }).success).toBe(false);
+    expect(GatewayEventSchema.safeParse({
+      type: "runtimeChildChanged",
+      runtimeRef: "acp:codex",
+      parentThreadId: "thread-1",
+      threadId: "thread-child",
+      dedupKey: "child-1",
+      status: "running",
+      readOnly: true
+    }).success).toBe(false);
+  });
+});
 
 describe("ThreadSnapshotSchema", () => {
   it("parses the Gateway web snapshot shape", () => {
@@ -23,9 +66,10 @@ describe("ThreadSnapshotSchema", () => {
       },
       thread: {
         id: "s1",
-        backend: { kind: "psychevo", sessionHandle: "s1" },
+        backend: { kind: "native", sessionHandle: "s1" },
         sourceKey: "web:cwd:abc"
       },
+      history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
       entries: [
         {
           id: "message:1:user",
@@ -97,6 +141,7 @@ describe("ThreadSnapshotSchema", () => {
     });
 
     expect(parsed.thread?.id).toBe("s1");
+    expect(parsed.history).toEqual({ owner: "psychevo", fidelity: "full", cursor: null, hint: null });
     expect(parsed.entries).toHaveLength(2);
   });
 });

@@ -150,12 +150,6 @@ fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
             (!entry.thread_id.is_empty()).then_some(entry.thread_id.as_str())
         }
         GatewayEvent::ActivityChanged { thread_id, .. } => thread_id.as_deref(),
-        GatewayEvent::RuntimeStateChanged { thread_id, .. } => thread_id.as_deref(),
-        GatewayEvent::RuntimeChildChanged {
-            thread_id,
-            parent_thread_id,
-            ..
-        } => thread_id.as_deref().or(Some(parent_thread_id.as_str())),
         GatewayEvent::TitleChanged { thread_id, .. } => Some(thread_id.as_str()),
         GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
             action.thread_id.as_deref()

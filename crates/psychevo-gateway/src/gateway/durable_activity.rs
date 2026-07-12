@@ -102,14 +102,22 @@ impl Gateway {
         }
         let gateway = self.clone();
         Some(Arc::new(move |event: GatewayEvent| {
-            let event = gateway.attention_event_with_public_provenance(event, activity.as_ref());
-            let accepted_thread_id = activity.as_ref().and_then(|activity| {
+            let effective_activity =
+                gateway.activity_for_gateway_event(activity.as_ref(), &event);
+            let event = gateway
+                .attention_event_with_public_provenance(event, effective_activity.as_ref());
+            let accepted_thread_id = effective_activity.as_ref().and_then(|activity| {
                 gateway
                     .persist_gateway_event(activity, &event, default_turn_id.as_deref())
                     .accepted_thread_id
             });
             if let Some(thread_id) = accepted_thread_id.as_deref()
                 && let Some(queue_key) = queue_key.as_deref()
+                && effective_activity.as_ref().is_some_and(|effective| {
+                    activity
+                        .as_ref()
+                        .is_some_and(|root| effective.activity_id == root.activity_id)
+                })
             {
                 gateway.register_active_thread_alias(queue_key, thread_id);
             }
@@ -117,6 +125,57 @@ impl Gateway {
                 event_sink(event);
             }
         }) as GatewayEventSink)
+    }
+
+    fn activity_for_gateway_event(
+        &self,
+        root: Option<&DurableGatewayActivity>,
+        event: &GatewayEvent,
+    ) -> Option<DurableGatewayActivity> {
+        let Some(thread_id) = gateway_event_thread_id(event) else {
+            return root.cloned();
+        };
+        if root.is_some_and(|activity| {
+            self.state
+                .store()
+                .gateway_activity(&activity.activity_id)
+                .ok()
+                .flatten()
+                .and_then(|record| record.thread_id)
+                .as_deref()
+                == Some(thread_id.as_str())
+        }) {
+            return root.cloned();
+        }
+        let event_turn_id = gateway_event_turn_id(event);
+        let matching_turn = event_turn_id
+            .and_then(|turn_id| self.state.store().gateway_activity(turn_id).ok().flatten())
+            .filter(|record| {
+                record.owner_id == self.owner_id()
+                    && record.thread_id.as_deref() == Some(thread_id.as_str())
+            });
+        matching_turn
+            .or_else(|| {
+                self.state
+                    .store()
+                    .active_gateway_activity_for_thread(&thread_id)
+                    .ok()
+                    .flatten()
+                    .filter(|record| {
+                        record.owner_id == self.owner_id()
+                            && event_turn_id.is_none_or(|turn_id| {
+                                record.turn_id.as_deref() == Some(turn_id)
+                            })
+                    })
+            })
+            .map(|record| DurableGatewayActivity {
+                activity_id: record.activity_id,
+                owner_id: record.owner_id,
+                generation: record.generation,
+                turn_id: record.turn_id,
+                kind: record.kind,
+            })
+            .or_else(|| root.cloned())
     }
 
     fn attention_event_with_public_provenance(
@@ -702,12 +761,6 @@ fn gateway_event_thread_id(event: &GatewayEvent) -> Option<String> {
         GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
             action.thread_id.clone()
         }
-        GatewayEvent::RuntimeStateChanged { thread_id, .. } => thread_id.clone(),
-        GatewayEvent::RuntimeChildChanged {
-            thread_id,
-            parent_thread_id,
-            ..
-        } => thread_id.clone().or_else(|| Some(parent_thread_id.clone())),
         GatewayEvent::TitleChanged { thread_id, .. } => Some(thread_id.clone()),
         _ => None,
     }
@@ -751,8 +804,6 @@ fn should_append_gateway_live_event(
             | GatewayEvent::ActionCancelled { .. }
             | GatewayEvent::Warning { .. }
             | GatewayEvent::ActivityChanged { .. }
-            | GatewayEvent::RuntimeStateChanged { .. }
-            | GatewayEvent::RuntimeChildChanged { .. }
             | GatewayEvent::TitleChanged { .. }
     )
 }

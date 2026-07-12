@@ -163,38 +163,27 @@ impl TuiApp {
             let _ = tx.send(event);
         });
         let (control_handle, control) = run_control();
-        let mut options = self.run_options_with_images(prompt, image_inputs);
-        options.prompt_display = prompt_display_metadata(display_prompt, &images, &self.cwd);
+        let mut request = self.thread_turn_request_with_images(prompt, image_inputs);
+        request.policy.prompt_display = prompt_display_metadata(display_prompt, &images, &self.cwd);
         let gateway = self.gateway.clone();
         let source = self.gateway_source();
         let bind_source = self.canonical_gateway_source();
         let selector = GatewayThreadSelector::source(source.source_key());
         let reset_source_binding = self.force_new_once && self.current_session.is_none();
-        let thread_id = options.session.clone();
         let gateway_control_handle = control_handle.clone();
-        let task = tokio::spawn(async move {
-            gateway
-                .send_turn(SendTurnRequest {
-                    thread_id,
-                    source: Some(source),
-                    bind_source: Some(bind_source),
-                    reset_source_binding,
-                    input: Vec::new(),
-                    options,
-                    runtime_source: Some("tui".to_string()),
-                    continue_sources: TUI_CONTINUE_SESSION_SOURCES
-                        .iter()
-                        .map(|source| (*source).to_string())
-                        .collect(),
-                    stream: None,
-                    event_sink: Some(event_sink),
-                    control_handle: Some(gateway_control_handle),
-                    control: Some(control),
-                    lineage: None,
-                })
-                .await
-                .map(|turn| turn.result)
-        });
+        request.source = Some(source);
+        request.bind_source = Some(bind_source);
+        request.reset_source_binding = reset_source_binding;
+        request.runtime_source = Some("tui".to_string());
+        request.continue_sources = TUI_CONTINUE_SESSION_SOURCES
+            .iter()
+            .map(|source| (*source).to_string())
+            .collect();
+        request.event_sink = Some(event_sink);
+        request.control_handle = Some(gateway_control_handle);
+        request.control = Some(control);
+        let task =
+            tokio::spawn(async move { gateway.run_turn(request).await.map(|turn| turn.result) });
         ui.scroll_to_bottom();
         ui.running = Some(RunningTurn {
             session_id: self.current_session.clone(),

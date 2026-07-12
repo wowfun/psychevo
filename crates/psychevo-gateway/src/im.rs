@@ -214,7 +214,7 @@ pub fn gateway_source_for_im(message: &ImInboundMessage) -> GatewaySource {
     }
 }
 
-pub fn gateway_input_parts_for_im(message: &ImInboundMessage) -> Vec<GatewayInputPart> {
+pub fn gateway_input_parts_for_im(message: &ImInboundMessage) -> Result<Vec<GatewayInputPart>> {
     let mut input = Vec::new();
     let text = message.text.trim();
     if !text.is_empty() {
@@ -231,7 +231,11 @@ pub fn gateway_input_parts_for_im(message: &ImInboundMessage) -> Vec<GatewayInpu
                     },
                 });
             }
-            ImAttachment::Image { .. } => {}
+            ImAttachment::Image { .. } => {
+                return Err(Error::Message(
+                    "Channel image attachment is missing its validated local path.".to_string(),
+                ));
+            }
             ImAttachment::File {
                 filename,
                 mime_type,
@@ -270,7 +274,7 @@ pub fn gateway_input_parts_for_im(message: &ImInboundMessage) -> Vec<GatewayInpu
             }
         }
     }
-    input
+    Ok(input)
 }
 
 pub fn im_task_route_key(message: &ImInboundMessage) -> String {
@@ -529,7 +533,7 @@ mod tests {
             },
         ];
 
-        let parts = gateway_input_parts_for_im(&message);
+        let parts = gateway_input_parts_for_im(&message).expect("normalize channel input");
 
         assert_eq!(parts.len(), 3);
         match &parts[0] {
@@ -557,6 +561,24 @@ mod tests {
             }
             other => panic!("expected context input, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn im_input_parts_reject_an_image_without_a_local_path() {
+        let mut message = inbound("chat-raw", "user-raw", None);
+        message.text.clear();
+        message.attachments = vec![ImAttachment::Image {
+            path: "  ".to_string(),
+            filename: Some("missing.png".to_string()),
+            mime_type: Some("image/png".to_string()),
+        }];
+
+        let error = gateway_input_parts_for_im(&message).expect_err("empty path must fail closed");
+
+        assert_eq!(
+            error.to_string(),
+            "Channel image attachment is missing its validated local path."
+        );
     }
 
     #[tokio::test]

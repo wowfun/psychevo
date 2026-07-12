@@ -32,6 +32,7 @@ import type {
   ThreadListResult,
   ThreadTraceResult,
   ThreadSnapshot,
+  TurnErrorPayload,
   TurnResultPayload,
   UsageReadResult,
   WorkspaceCreateResult,
@@ -78,6 +79,8 @@ export const CompletionListResultSchema =
   schema<CompletionListResult>("CompletionListResult");
 export const TurnResultNotificationSchema =
   schema<TurnResultPayload>("TurnResultPayload");
+export const TurnErrorNotificationSchema =
+  schema<TurnErrorPayload>("TurnErrorPayload");
 export const TerminalOutputPayloadSchema =
   schema<TerminalOutputPayload>("TerminalOutputPayload");
 export const TerminalExitedPayloadSchema =

@@ -1,10 +1,11 @@
 use std::env;
 use std::fs::{self, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
@@ -17,6 +18,8 @@ use super::context::GatewayContext;
 const GATEWAY_DIR: &str = "gateway";
 const MANAGED_GATEWAY_DEFAULT_PORT: u16 = 58_080;
 const MANAGED_GATEWAY_FALLBACK_PORTS: u16 = 19;
+const MANAGED_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+const MANAGED_STARTUP_LOG_EXCERPT_BYTES: u64 = 16 * 1024;
 const MANAGED_STOP_GRACE_TIMEOUT: Duration = Duration::from_secs(15);
 const MANAGED_STOP_FORCE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -56,6 +59,11 @@ pub(super) struct ExecutableFingerprint {
 struct ManagedReuseTarget {
     executable: ExecutableFingerprint,
     static_dir: String,
+}
+
+struct ManagedLaunch {
+    child: Child,
+    log_offset: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,20 +143,21 @@ pub(super) async fn ensure_started(
     }
     cleanup_state(&ctx.paths)?;
     rotate_token(&ctx.paths)?;
-    spawn_serve(ctx, bind_policy, static_dir)?;
-    wait_for_state(&ctx.paths).await
+    let launch = spawn_serve(ctx, bind_policy, static_dir)?;
+    wait_for_state(&ctx.paths, launch).await
 }
 
 fn spawn_serve(
     ctx: &GatewayContext,
     bind_policy: ManagedBindPolicy,
     static_dir: &Path,
-) -> Result<()> {
+) -> Result<ManagedLaunch> {
     let exe = env::current_exe().context("resolve pevo executable")?;
     let log = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&ctx.paths.log)?;
+    let log_offset = log.metadata()?.len();
     let log_err = log.try_clone()?;
     let mut command = Command::new(exe);
     command
@@ -178,24 +187,75 @@ fn spawn_serve(
         command.process_group(0);
     }
     let child = command.spawn().context("spawn pevo serve")?;
-    let _ = child.id();
-    Ok(())
+    Ok(ManagedLaunch { child, log_offset })
 }
 
-async fn wait_for_state(paths: &ManagedPaths) -> Result<ManagedServerState> {
+async fn wait_for_state(
+    paths: &ManagedPaths,
+    mut launch: ManagedLaunch,
+) -> Result<ManagedServerState> {
     let started = Instant::now();
-    while started.elapsed() < Duration::from_secs(10) {
+    while started.elapsed() < MANAGED_STARTUP_TIMEOUT {
         if let Some(state) = read_state(paths)?
             && pid_alive(state.pid)
         {
             return Ok(state);
         }
+        if let Some(status) = launch
+            .child
+            .try_wait()
+            .context("poll managed gateway process")?
+        {
+            return Err(managed_startup_error(
+                paths,
+                launch.log_offset,
+                Some(status),
+            ));
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Err(anyhow!(
-        "managed gateway did not become ready; see {}",
-        paths.log.display()
-    ))
+    Err(managed_startup_error(paths, launch.log_offset, None))
+}
+
+pub(super) fn managed_startup_error(
+    paths: &ManagedPaths,
+    log_offset: u64,
+    status: Option<ExitStatus>,
+) -> anyhow::Error {
+    let summary = status.map_or_else(
+        || "managed gateway did not become ready".to_string(),
+        |status| format!("managed gateway did not become ready (child exited with {status})"),
+    );
+    match startup_log_excerpt(&paths.log, log_offset) {
+        Some(excerpt) => anyhow!(
+            "{summary}\nmanaged gateway output:\n{excerpt}\nfull log: {}",
+            paths.log.display()
+        ),
+        None => anyhow!("{summary}; see {}", paths.log.display()),
+    }
+}
+
+fn startup_log_excerpt(path: &Path, log_offset: u64) -> Option<String> {
+    let mut log = fs::File::open(path).ok()?;
+    let log_len = log.metadata().ok()?.len();
+    if log_len <= log_offset {
+        return None;
+    }
+
+    let read_start = log_offset.max(log_len.saturating_sub(MANAGED_STARTUP_LOG_EXCERPT_BYTES));
+    let read_len = log_len.saturating_sub(read_start);
+    log.seek(SeekFrom::Start(read_start)).ok()?;
+    let mut bytes = Vec::with_capacity(read_len as usize);
+    log.take(read_len).read_to_end(&mut bytes).ok()?;
+    let output = String::from_utf8_lossy(&bytes).trim().to_string();
+    if output.is_empty() {
+        return None;
+    }
+    if read_start > log_offset {
+        Some(format!("[earlier startup output omitted]\n{output}"))
+    } else {
+        Some(output)
+    }
 }
 
 #[derive(Debug, Deserialize)]

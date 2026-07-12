@@ -24,9 +24,9 @@ pub(crate) use crossterm::terminal::{
 pub(crate) use psychevo_ai::Outcome;
 pub(crate) use psychevo_gateway::{
     Gateway, GatewayActionKind, GatewayActionOutcome, GatewayActivity, GatewayEvent,
-    GatewayEventSink, GatewaySource, GatewayThreadSelector, GatewayTurnStatus, SendTurnRequest,
-    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
-    TranscriptEntryRole,
+    GatewayEventSink, GatewayImageInput, GatewayInputPart, GatewaySource, GatewayThreadSelector,
+    GatewayTurnStatus, ThreadTurnRequest, TranscriptBlock, TranscriptBlockKind,
+    TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
 };
 pub(crate) use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentEntrypoint, AgentMissionRunInput,

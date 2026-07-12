@@ -213,6 +213,14 @@ export const transcriptSchemas = {
       "format": "int64",
       "type": "integer"
     },
+    "phaseOrdinal": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "preview": {
       "type": [
         "string",
@@ -297,6 +305,14 @@ export const transcriptSchemas = {
         "order": {
           "format": "int64",
           "type": "integer"
+        },
+        "phaseOrdinal": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "preview": {
           "type": [

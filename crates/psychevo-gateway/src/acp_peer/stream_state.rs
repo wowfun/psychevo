@@ -3,10 +3,18 @@ struct AcpTurnOutput {
     final_answer: String,
     final_content: Vec<Value>,
     content_slots: Vec<AcpPeerContentSlot>,
+    latest_plan: Option<AcpPeerPlanProjection>,
     session_title: Option<String>,
     tools: BTreeMap<String, Value>,
     usage_update: Option<Value>,
     events: Vec<Value>,
+    session_snapshot: AcpSessionSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct AcpPeerPlanProjection {
+    body: String,
+    update: Value,
 }
 
 impl AcpTurnOutput {
@@ -20,7 +28,7 @@ impl AcpTurnOutput {
                         provider_evidence: None,
                     });
                 }
-                AcpPeerContentSlot::Text { text } if !text.trim().is_empty() => {
+                AcpPeerContentSlot::Text { text, .. } if !text.trim().is_empty() => {
                     content.push(AssistantBlock::Text { text: text.clone() });
                 }
                 AcpPeerContentSlot::Tool { tool_call_id } => {
@@ -42,6 +50,21 @@ impl AcpTurnOutput {
             }
         }
         content
+    }
+
+    fn persisted_assistant_message_ids(&self) -> Vec<String> {
+        self.content_slots
+            .iter()
+            .filter_map(|slot| match slot {
+                AcpPeerContentSlot::Text {
+                    message_id: Some(message_id),
+                    ..
+                } => Some(message_id.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     fn final_message_content(&self) -> Vec<Value> {
@@ -90,8 +113,62 @@ struct AcpPeerToolState {
 #[derive(Debug, Clone, PartialEq)]
 enum AcpPeerContentSlot {
     Reasoning { text: String },
-    Text { text: String },
+    Text {
+        text: String,
+        message_id: Option<String>,
+    },
     Tool { tool_call_id: String },
+}
+
+const ACP_MAX_HISTORY_REPLAY_MESSAGES: usize = 256;
+const ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS: usize = 262_144;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct AcpHistoryReplayProjection {
+    assistant_messages: Vec<AcpHistoryReplayMessage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AcpHistoryReplayMessage {
+    message_id: String,
+    text: String,
+}
+
+impl AcpHistoryReplayProjection {
+    fn reduce_agent_message_chunk(&mut self, chunk: ContentChunk) {
+        let Some(message_id) = chunk.message_id.as_ref().map(ToString::to_string) else {
+            // Stable ACP permits a missing messageId for tolerant clients, but
+            // a replay fact without stable identity cannot safely reconcile or
+            // deduplicate durable product history.
+            return;
+        };
+        let Some(text) = acp_content_chunk_text(chunk) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        if let Some(existing) = self
+            .assistant_messages
+            .iter_mut()
+            .find(|message| message.message_id == message_id)
+        {
+            let remaining = ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS
+                .saturating_sub(existing.text.chars().count());
+            existing.text.extend(text.chars().take(remaining));
+            return;
+        }
+        if self.assistant_messages.len() >= ACP_MAX_HISTORY_REPLAY_MESSAGES {
+            return;
+        }
+        self.assistant_messages.push(AcpHistoryReplayMessage {
+            message_id,
+            text: text
+                .chars()
+                .take(ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS)
+                .collect(),
+        });
+    }
 }
 
 struct AcpPeerStreamState {
@@ -101,11 +178,14 @@ struct AcpPeerStreamState {
     reasoning_text: String,
     reasoning_open: bool,
     content_slots: Vec<AcpPeerContentSlot>,
+    latest_plan: Option<AcpPeerPlanProjection>,
     tool_slots: BTreeMap<String, usize>,
     session_title: Option<String>,
     tools: BTreeMap<String, AcpPeerToolState>,
     usage_update: Option<Value>,
     events: Vec<Value>,
+    history_replay: AcpHistoryReplayProjection,
+    prompt_active: bool,
 }
 
 impl AcpPeerStreamState {
@@ -117,32 +197,65 @@ impl AcpPeerStreamState {
             reasoning_text: String::new(),
             reasoning_open: false,
             content_slots: Vec::new(),
+            latest_plan: None,
             tool_slots: BTreeMap::new(),
             session_title: None,
             tools: BTreeMap::new(),
             usage_update: None,
             events: Vec::new(),
+            history_replay: AcpHistoryReplayProjection::default(),
+            prompt_active: false,
         }
     }
 
-    fn handle_notification(&mut self, notification: SessionNotification) {
-        let native_session_id = notification.session_id.to_string();
-        let update_value = serde_json::to_value(&notification.update).unwrap_or_else(|err| {
+    fn begin_prompt(&mut self) {
+        self.prompt_active = true;
+    }
+
+    fn reduce_notification(
+        &mut self,
+        envelope: AcpPeerInboundNotification,
+        origin: AcpFactOrigin,
+        generation: u64,
+        session_epoch: u64,
+    ) {
+        let sequence = envelope.sequence;
+        let notification = match envelope.payload {
+            AcpPeerInboundPayload::Session(notification) => notification,
+            AcpPeerInboundPayload::Unknown { method, params } => {
+                self.handle_unknown_notification(
+                    method,
+                    params,
+                    origin,
+                    generation,
+                    session_epoch,
+                    sequence,
+                );
+                return;
+            }
+            AcpPeerInboundPayload::Barrier => return,
+        };
+        self.record_notification(&notification, origin, generation, session_epoch, sequence);
+        // Replay is reduced into a separate typed projection. It must be
+        // durably committed to the prior turn before a new prompt is sent and
+        // must never be mistaken for the new turn's assistant output.
+        if origin == AcpFactOrigin::History {
+            if let SessionUpdate::AgentMessageChunk(chunk) = notification.update {
+                self.history_replay.reduce_agent_message_chunk(chunk);
+            }
+            return;
+        }
+        // Pre-prompt live facts remain observable, but only facts observed
+        // after prompt dispatch may contribute to this turn's assistant result.
+        if !self.prompt_active {
+            return;
+        }
+        let update_value = acp_product_json(&notification.update).unwrap_or_else(|err| {
             json!({
                 "sessionUpdate": "decode_error",
                 "error": err.to_string(),
             })
         });
-        let update_kind = acp_update_kind(&update_value);
-        let event = json!({
-            "type": "acp_peer_session_update",
-            "session_id": self.local_session_id.clone(),
-            "native_session_id": native_session_id,
-            "update_kind": update_kind,
-            "update": update_value.clone(),
-        });
-        self.events.push(event.clone());
-        emit_runtime_event(&self.stream, event);
 
         match notification.update {
             SessionUpdate::AgentMessageChunk(chunk) => self.handle_agent_message_chunk(chunk),
@@ -161,9 +274,43 @@ impl AcpPeerStreamState {
         }
     }
 
-    fn handle_notification_v2(&mut self, notification: acp_v2::SessionNotification) {
+    fn handle_unknown_notification(
+        &mut self,
+        method: String,
+        params: Value,
+        origin: AcpFactOrigin,
+        generation: u64,
+        session_epoch: u64,
+        sequence: u64,
+    ) {
+        let event = json!({
+            "type": "acp_peer_unknown_notification",
+            "session_id": self.local_session_id.clone(),
+            "native_session_id": params.get("sessionId").and_then(Value::as_str),
+            "method": method,
+            "update_kind": params
+                .get("update")
+                .and_then(|update| update.get("sessionUpdate"))
+                .and_then(Value::as_str),
+            "origin": origin.as_str(),
+            "process_generation": generation,
+            "session_epoch": session_epoch,
+            "notification_sequence": sequence,
+        });
+        self.events.push(event.clone());
+        emit_runtime_event(&self.stream, event);
+    }
+
+    fn record_notification(
+        &mut self,
+        notification: &SessionNotification,
+        origin: AcpFactOrigin,
+        generation: u64,
+        session_epoch: u64,
+        sequence: u64,
+    ) {
         let native_session_id = notification.session_id.to_string();
-        let update_value = serde_json::to_value(&notification.update).unwrap_or_else(|err| {
+        let update_value = acp_product_json(&notification.update).unwrap_or_else(|err| {
             json!({
                 "sessionUpdate": "decode_error",
                 "error": err.to_string(),
@@ -174,42 +321,27 @@ impl AcpPeerStreamState {
             "type": "acp_peer_session_update",
             "session_id": self.local_session_id.clone(),
             "native_session_id": native_session_id,
-            "protocol_version": "2",
             "update_kind": update_kind,
+            "origin": origin.as_str(),
+            "process_generation": generation,
+            "session_epoch": session_epoch,
+            "notification_sequence": sequence,
             "update": update_value.clone(),
         });
         self.events.push(event.clone());
         emit_runtime_event(&self.stream, event);
-
-        match notification.update {
-            acp_v2::SessionUpdate::AgentMessageChunk(chunk) => {
-                self.handle_agent_message_chunk_text(acp_v2_content_chunk_text(chunk))
-            }
-            acp_v2::SessionUpdate::AgentThoughtChunk(chunk) => {
-                self.handle_agent_thought_chunk_text(acp_v2_content_chunk_text(chunk))
-            }
-            acp_v2::SessionUpdate::ToolCall(_tool_call) => self.handle_tool_call(update_value),
-            acp_v2::SessionUpdate::ToolCallUpdate(_tool_call) => {
-                self.handle_tool_call_update(update_value)
-            }
-            acp_v2::SessionUpdate::PlanUpdate(_plan) => self.handle_plan(update_value),
-            acp_v2::SessionUpdate::SessionInfoUpdate(_) => {
-                self.handle_session_info_update(update_value)
-            }
-            acp_v2::SessionUpdate::UsageUpdate(_) => self.handle_usage_update(update_value),
-            acp_v2::SessionUpdate::UserMessageChunk(_)
-            | acp_v2::SessionUpdate::AvailableCommandsUpdate(_)
-            | acp_v2::SessionUpdate::ConfigOptionUpdate(_) => {}
-            #[allow(unreachable_patterns)]
-            _ => {}
-        }
     }
 
     fn handle_agent_message_chunk(&mut self, chunk: ContentChunk) {
-        self.handle_agent_message_chunk_text(acp_content_chunk_text(chunk));
+        let message_id = chunk.message_id.as_ref().map(ToString::to_string);
+        self.handle_agent_message_chunk_text(acp_content_chunk_text(chunk), message_id);
     }
 
-    fn handle_agent_message_chunk_text(&mut self, text: Option<String>) {
+    fn handle_agent_message_chunk_text(
+        &mut self,
+        text: Option<String>,
+        message_id: Option<String>,
+    ) {
         let Some(text) = text else {
             return;
         };
@@ -217,7 +349,7 @@ impl AcpPeerStreamState {
             return;
         }
         self.final_answer.push_str(&text);
-        self.append_text_slot(text);
+        self.append_text_slot(text, message_id);
         emit_runtime_event(
             &self.stream,
             json!({
@@ -286,10 +418,16 @@ impl AcpPeerStreamState {
         emit_runtime_event(&self.stream, runtime_event);
     }
 
-    fn append_text_slot(&mut self, text: String) {
+    fn append_text_slot(&mut self, text: String, message_id: Option<String>) {
         match self.content_slots.last_mut() {
-            Some(AcpPeerContentSlot::Text { text: existing }) => existing.push_str(&text),
-            _ => self.content_slots.push(AcpPeerContentSlot::Text { text }),
+            Some(AcpPeerContentSlot::Text {
+                text: existing,
+                message_id: existing_message_id,
+            }) if *existing_message_id == message_id => existing.push_str(&text),
+            _ => self.content_slots.push(AcpPeerContentSlot::Text {
+                text,
+                message_id,
+            }),
         }
     }
 
@@ -315,6 +453,10 @@ impl AcpPeerStreamState {
 
     fn handle_plan(&mut self, update_value: Value) {
         let body = acp_plan_body(&update_value);
+        self.latest_plan = Some(AcpPeerPlanProjection {
+            body: body.clone(),
+            update: update_value.clone(),
+        });
         emit_runtime_event(
             &self.stream,
             json!({
@@ -351,6 +493,47 @@ impl AcpPeerStreamState {
         );
     }
 
+    fn handle_prompt_usage(&mut self, usage: Value) {
+        let mut usage = usage;
+        strip_acp_reserved_meta(&mut usage);
+        self.handle_usage_update(json!({ "usage": usage, "source": "prompt_response" }));
+    }
+
+    fn handle_codex_prompt_quota(&mut self, quota: CodexPromptQuotaProjection) {
+        let Ok(quota) = serde_json::to_value(quota) else {
+            return;
+        };
+        let usage_update = self
+            .usage_update
+            .get_or_insert_with(|| json!({ "source": "prompt_response" }));
+        if !usage_update.is_object() {
+            *usage_update = json!({ "source": "prompt_response" });
+        }
+        if let Some(object) = usage_update.as_object_mut() {
+            object.insert("codexPromptQuota".to_string(), quota.clone());
+        }
+        let event = json!({
+            "type": "acp_peer_codex_prompt_quota",
+            "session_id": self.local_session_id.clone(),
+            "source": "codex_acp_pack",
+            "quota": quota,
+        });
+        self.events.push(event.clone());
+        emit_runtime_event(&self.stream, event);
+    }
+
+    fn handle_codex_prompt_quota_rejection(&mut self, rejection: CodexPromptQuotaRejection) {
+        let event = json!({
+            "type": "acp_peer_capability_metadata_rejected",
+            "session_id": self.local_session_id.clone(),
+            "pack": "codex",
+            "field": "prompt_response._meta.quota",
+            "reason": rejection.as_str(),
+        });
+        self.events.push(event.clone());
+        emit_runtime_event(&self.stream, event);
+    }
+
     fn finish(&mut self) {
         if self.reasoning_open {
             if let Some(stream) = &self.stream {
@@ -371,7 +554,7 @@ impl AcpPeerStreamState {
                         "content_index": content.len(),
                     }));
                 }
-                AcpPeerContentSlot::Text { text } if !text.trim().is_empty() => {
+                AcpPeerContentSlot::Text { text, .. } if !text.trim().is_empty() => {
                     content.push(json!({
                         "type": "text",
                         "text": text,
@@ -382,5 +565,28 @@ impl AcpPeerStreamState {
             }
         }
         content
+    }
+}
+
+fn acp_product_json(value: &impl serde::Serialize) -> Result<Value, serde_json::Error> {
+    let mut value = serde_json::to_value(value)?;
+    strip_acp_reserved_meta(&mut value);
+    Ok(value)
+}
+
+fn strip_acp_reserved_meta(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("_meta");
+            for value in object.values_mut() {
+                strip_acp_reserved_meta(value);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                strip_acp_reserved_meta(value);
+            }
+        }
+        _ => {}
     }
 }

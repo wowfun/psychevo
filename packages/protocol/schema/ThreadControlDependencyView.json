@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "controlId": {
+      "type": "string"
+    },
+    "value": true
+  },
+  "required": [
+    "controlId",
+    "value"
+  ],
+  "title": "ThreadControlDependencyView",
+  "type": "object"
+}

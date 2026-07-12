@@ -42,7 +42,9 @@ impl Gateway {
                         raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
                         visible_name: source.visible_name.as_deref(),
                         thread_id: Some(new_thread_id),
-                        draft_runtime_ref: None,
+                        draft_agent_ref: None,
+                        draft_profile_ref: None,
+                        draft_control_values: &Default::default(),
                         lineage: Some(json!({"reason": "gateway_reset"})),
                     })?;
             }
@@ -121,12 +123,10 @@ impl Gateway {
             );
 
             if archived_threads.insert(binding.thread_id.clone()) {
-                self.state
-                    .store()
-                    .mark_session_ended_with_reason(
-                        &binding.thread_id,
-                        "channel_workspace_changed",
-                    )?;
+                self.state.store().mark_session_ended_with_reason(
+                    &binding.thread_id,
+                    "channel_workspace_changed",
+                )?;
                 self.state.store().archive_session(&binding.thread_id)?;
             }
         }
@@ -163,7 +163,9 @@ impl Gateway {
                         raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
                         visible_name: source.visible_name.as_deref(),
                         thread_id: Some(thread_id),
-                        draft_runtime_ref: None,
+                        draft_agent_ref: None,
+                        draft_profile_ref: None,
+                        draft_control_values: &Default::default(),
                         lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
                     })?;
             }
@@ -171,10 +173,12 @@ impl Gateway {
         self.bump_source_generation_key(&source_key);
         Ok(())
     }
-
 }
 
-fn lineage_with_runtime_ref(mut lineage: Option<Value>, runtime_ref: Option<&str>) -> Option<Value> {
+fn lineage_with_runtime_ref(
+    mut lineage: Option<Value>,
+    runtime_ref: Option<&str>,
+) -> Option<Value> {
     let runtime_ref = runtime_ref?;
     let value = lineage.get_or_insert_with(|| json!({}));
     if let Some(object) = value.as_object_mut() {

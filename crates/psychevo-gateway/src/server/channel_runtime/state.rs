@@ -29,6 +29,7 @@ struct ChannelRuntimeInner {
     active: BTreeMap<String, CancellationToken>,
     wechat_login_grace_until_ms: BTreeMap<String, i64>,
     interaction_tokens: BTreeMap<String, ChannelInteractionToken>,
+    source_threads: BTreeMap<(String, String), String>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +100,38 @@ impl ChannelRuntimeState {
         }
     }
 
+    pub(super) fn observe_source_thread(
+        &self,
+        connection_id: &str,
+        source_key: &SourceKey,
+        thread_id: &str,
+    ) {
+        if thread_id.trim().is_empty() {
+            return;
+        }
+        self.inner
+            .lock()
+            .expect("channel runtime state poisoned")
+            .source_threads
+            .insert(
+                (connection_id.to_string(), source_key.0.clone()),
+                thread_id.to_string(),
+            );
+    }
+
+    pub(super) fn observed_source_thread(
+        &self,
+        connection_id: &str,
+        source_key: &SourceKey,
+    ) -> Option<String> {
+        self.inner
+            .lock()
+            .expect("channel runtime state poisoned")
+            .source_threads
+            .get(&(connection_id.to_string(), source_key.0.clone()))
+            .cloned()
+    }
+
     pub(super) fn issue_interaction_token(
         &self,
         connection_id: &str,
@@ -149,7 +182,7 @@ impl ChannelRuntimeState {
         Some(token)
     }
 
-    pub(super) fn take_interaction_token(
+    pub(super) fn interaction_route(
         &self,
         connection_id: &str,
         source_key: &SourceKey,
@@ -168,13 +201,35 @@ impl ChannelRuntimeState {
         {
             return None;
         }
+        Some(ChannelInteractionRoute {
+            action_id: record.action_id.clone(),
+            thread_id: record.thread_id.clone(),
+        })
+    }
+
+    pub(super) fn consume_interaction_token(
+        &self,
+        connection_id: &str,
+        source_key: &SourceKey,
+        kind: ChannelInteractionKind,
+        token: &str,
+        expected_action_id: &str,
+    ) -> bool {
+        let now_ms = gateway_now_ms();
+        let mut inner = self.inner.lock().expect("channel runtime state poisoned");
         inner
             .interaction_tokens
-            .remove(token)
-            .map(|record| ChannelInteractionRoute {
-                action_id: record.action_id,
-                thread_id: record.thread_id,
-            })
+            .retain(|_, record| record.expires_at_ms > now_ms);
+        let matches = inner.interaction_tokens.get(token).is_some_and(|record| {
+            record.connection_id == connection_id
+                && record.source_key == source_key.0
+                && record.kind == kind
+                && record.action_id == expected_action_id
+        });
+        if matches {
+            inner.interaction_tokens.remove(token);
+        }
+        matches
     }
 
     pub(super) fn clarify_question_count(

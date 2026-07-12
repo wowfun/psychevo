@@ -172,9 +172,8 @@ fn gateway_backend_info_for_thread(
             )
         })?;
         let kind = match binding.backend_kind.as_deref() {
-            Some("psychevo") => BackendKind::Psychevo,
-            Some("peer_agent") => BackendKind::PeerAgent,
-            Some("runtime") => BackendKind::Runtime,
+            Some("native") => BackendKind::Native,
+            Some("acp") => BackendKind::Acp,
             other => {
                 let message = format!(
                     "Thread `{thread_id}` has unsupported runtime backend kind `{}`.",
@@ -202,33 +201,14 @@ fn gateway_backend_info_for_thread(
         });
     }
 
-    // Legacy sessions created before immutable runtime bindings remain readable.
-    // New turns always create a runtime binding before invoking a backend.
-    let summary = store
+    store
         .session_summary(thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
-    if summary.source == "peer_agent" {
-        let metadata = store.session_metadata(thread_id)?;
-        Ok(GatewayBackendInfo {
-            kind: BackendKind::PeerAgent,
-            runtime_ref: metadata_runtime_ref(&metadata),
-            native_id: None,
-        })
-    } else {
-        Ok(GatewayBackendInfo {
-            kind: BackendKind::Psychevo,
-            runtime_ref: Some("native".to_string()),
-            native_id: Some(thread_id.to_string()),
-        })
-    }
-}
-
-fn metadata_runtime_ref(metadata: &Option<Value>) -> Option<String> {
-    metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get("runtimeRef").or_else(|| metadata.get("runtime_ref")))
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
+    Ok(GatewayBackendInfo {
+        kind: BackendKind::Native,
+        runtime_ref: Some("native".to_string()),
+        native_id: None,
+    })
 }
 
 fn default_resolved_scope(

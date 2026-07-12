@@ -8,26 +8,23 @@ impl PsychevoAcpAgent {
         command: &str,
         reason: &str,
     ) -> bool {
-        let tool_call = ToolCallUpdate::new(
-            format!("slash_command_{}", Uuid::now_v7()),
-            ToolCallUpdateFields::new()
-                .title(format!("Command: {command}"))
-                .status(ToolCallStatus::Pending)
-                .raw_input(json!({
-                    "command": command,
-                    "reason": reason,
-                })),
-        );
+        let title = format!("Command: {command}");
+        let tool_call = ToolCallUpdate::new(format!("slash_command_{}", Uuid::now_v7()))
+            .title(title.clone())
+            .status(ToolCallStatus::Pending)
+            .raw_input(json!({
+                "command": command,
+                "reason": reason,
+            }));
         let options = vec![
             PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
             PermissionOption::new("deny", "Deny", PermissionOptionKind::RejectOnce),
         ];
         match cx
-            .send_request(RequestPermissionRequest::new(
-                session_id.clone(),
-                tool_call,
-                options,
-            ))
+            .send_request(
+                RequestPermissionRequest::new(session_id.clone(), title, options)
+                    .subject(RequestPermissionSubject::from(tool_call)),
+            )
             .block_task()
             .await
         {

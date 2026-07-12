@@ -881,16 +881,53 @@ pub(crate) async fn run_live_internal(
         first_use_empty_visible_session,
         completion.outcome,
     ) {
-        ensure_new_visible_session_title(
-            &store,
-            &session_id,
-            &options.prompt,
-            &selected_skills,
-            &skill_catalog,
-            provider_for_title,
-            &title_resolved,
-        )
-        .await?;
+        if let Some(title_stream) = stream_events_after.clone() {
+            let title_store = store.clone();
+            let title_session_id = session_id.clone();
+            let title_prompt = options.prompt.clone();
+            let title_selected_skills = selected_skills.clone();
+            let title_skill_catalog = skill_catalog.clone();
+            let title_resolved = title_resolved.clone();
+            tokio::spawn(async move {
+                match ensure_new_visible_session_title(
+                    &title_store,
+                    &title_session_id,
+                    &title_prompt,
+                    &title_selected_skills,
+                    &title_skill_catalog,
+                    provider_for_title,
+                    &title_resolved,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        if let Ok(Some(summary)) = title_store.session_summary(&title_session_id) {
+                            title_stream(RunStreamEvent::value(json!({
+                                "type": "session_title_changed",
+                                "session_id": title_session_id,
+                                "title": summary.title,
+                            })));
+                        }
+                    }
+                    Err(error) => title_stream(RunStreamEvent::value(json!({
+                        "type": "warning",
+                        "kind": "title_generation_failed",
+                        "message": error.to_string(),
+                    }))),
+                }
+            });
+        } else {
+            ensure_new_visible_session_title(
+                &store,
+                &session_id,
+                &options.prompt,
+                &selected_skills,
+                &skill_catalog,
+                provider_for_title,
+                &title_resolved,
+            )
+            .await?;
+        }
     }
 
     tokio::task::yield_now().await;

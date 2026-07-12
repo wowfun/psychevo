@@ -19,9 +19,9 @@ impl SqliteStore {
                 r#"
                 INSERT INTO gateway_source_bindings (
                     source_key, source_kind, raw_identity_json, visible_name,
-                    thread_id, backend_kind, backend_native_id, draft_runtime_ref,
-                    created_at_ms, updated_at_ms, lineage_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?8, ?9)
+                    thread_id, backend_kind, backend_native_id, draft_agent_ref, draft_profile_ref,
+                    draft_control_values_json, created_at_ms, updated_at_ms, lineage_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, NULL, ?8, ?8, ?9)
                 ON CONFLICT(source_key) DO UPDATE SET
                     source_kind = excluded.source_kind,
                     raw_identity_json = excluded.raw_identity_json,
@@ -29,7 +29,9 @@ impl SqliteStore {
                     thread_id = excluded.thread_id,
                     backend_kind = excluded.backend_kind,
                     backend_native_id = excluded.backend_native_id,
-                    draft_runtime_ref = NULL,
+                    draft_agent_ref = NULL,
+                    draft_profile_ref = NULL,
+                    draft_control_values_json = NULL,
                     updated_at_ms = excluded.updated_at_ms,
                     lineage_json = excluded.lineage_json
                 "#,
@@ -65,8 +67,8 @@ impl SqliteStore {
             r#"
             SELECT source_key, source_kind, raw_identity_json, visible_name,
                    thread_id, COALESCE(backend_kind, 'unresolved'),
-                   backend_native_id, draft_runtime_ref, created_at_ms,
-                   updated_at_ms, lineage_json
+                   backend_native_id, draft_agent_ref, draft_profile_ref, draft_control_values_json,
+                   created_at_ms, updated_at_ms, lineage_json
             FROM gateway_source_bindings
             WHERE source_key = ?1 AND thread_id IS NOT NULL
             "#,
@@ -86,8 +88,8 @@ impl SqliteStore {
             r#"
             SELECT source_key, source_kind, raw_identity_json, visible_name,
                    thread_id, COALESCE(backend_kind, 'unresolved'),
-                   backend_native_id, draft_runtime_ref, created_at_ms,
-                   updated_at_ms, lineage_json
+                   backend_native_id, draft_agent_ref, draft_profile_ref, draft_control_values_json,
+                   created_at_ms, updated_at_ms, lineage_json
             FROM gateway_source_bindings
             WHERE source_kind LIKE 'im.%' AND thread_id IS NOT NULL
             ORDER BY updated_at_ms DESC
@@ -118,8 +120,8 @@ impl SqliteStore {
             r#"
             SELECT source_key, source_kind, raw_identity_json, visible_name,
                    thread_id, COALESCE(backend_kind, 'unresolved'),
-                   backend_native_id, draft_runtime_ref, created_at_ms,
-                   updated_at_ms, lineage_json
+                   backend_native_id, draft_agent_ref, draft_profile_ref, draft_control_values_json,
+                   created_at_ms, updated_at_ms, lineage_json
             FROM gateway_source_bindings
             WHERE thread_id = ?1
             ORDER BY updated_at_ms DESC, source_key ASC
@@ -147,18 +149,25 @@ impl SqliteStore {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
-        let draft_runtime_ref = input
-            .draft_runtime_ref
+        let draft_profile_ref = input
+            .draft_profile_ref
             .map(str::trim)
             .filter(|value| !value.is_empty());
+        let draft_agent_ref = input
+            .draft_agent_ref
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let draft_control_values_json = (!input.draft_control_values.is_empty())
+            .then(|| serde_json::to_string(input.draft_control_values))
+            .transpose()?;
         self.write_retry(|conn| {
             conn.execute(
                 r#"
                 INSERT INTO gateway_source_bindings (
                     source_key, source_kind, raw_identity_json, visible_name,
-                    thread_id, backend_kind, backend_native_id, draft_runtime_ref,
-                    created_at_ms, updated_at_ms, lineage_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7, ?7, ?8)
+                    thread_id, backend_kind, backend_native_id, draft_agent_ref, draft_profile_ref,
+                    draft_control_values_json, created_at_ms, updated_at_ms, lineage_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7, ?8, ?9, ?9, ?10)
                 ON CONFLICT(source_key) DO UPDATE SET
                     source_kind = excluded.source_kind,
                     raw_identity_json = excluded.raw_identity_json,
@@ -166,7 +175,9 @@ impl SqliteStore {
                     thread_id = excluded.thread_id,
                     backend_kind = NULL,
                     backend_native_id = NULL,
-                    draft_runtime_ref = excluded.draft_runtime_ref,
+                    draft_agent_ref = excluded.draft_agent_ref,
+                    draft_profile_ref = excluded.draft_profile_ref,
+                    draft_control_values_json = excluded.draft_control_values_json,
                     updated_at_ms = excluded.updated_at_ms,
                     lineage_json = excluded.lineage_json
                 "#,
@@ -176,7 +187,9 @@ impl SqliteStore {
                     raw_identity_json,
                     input.visible_name,
                     input.thread_id,
-                    draft_runtime_ref,
+                    draft_agent_ref,
+                    draft_profile_ref,
+                    draft_control_values_json,
                     now,
                     lineage_json,
                 ],
@@ -196,8 +209,8 @@ impl SqliteStore {
         conn.query_row(
             r#"
             SELECT source_key, source_kind, raw_identity_json, visible_name,
-                   thread_id, draft_runtime_ref, created_at_ms, updated_at_ms,
-                   lineage_json
+                   thread_id, draft_agent_ref, draft_profile_ref, created_at_ms, updated_at_ms,
+                   draft_control_values_json, lineage_json
             FROM gateway_source_bindings
             WHERE source_key = ?1
             "#,
@@ -255,6 +268,44 @@ fn gateway_source_binding_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<GatewaySourceBindingRecord> {
     let raw_identity_json: String = row.get(2)?;
+    let draft_control_values_json: Option<String> = row.get(9)?;
+    let lineage_json: Option<String> = row.get(12)?;
+    let raw_identity = serde_json::from_str(&raw_identity_json).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(err))
+    })?;
+    let lineage = lineage_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                12,
+                rusqlite::types::Type::Text,
+                Box::new(err),
+            )
+        })?;
+    Ok(GatewaySourceBindingRecord {
+        source_key: row.get(0)?,
+        source_kind: row.get(1)?,
+        raw_identity,
+        visible_name: row.get(3)?,
+        thread_id: row.get(4)?,
+        backend_kind: row.get(5)?,
+        backend_native_id: row.get(6)?,
+        draft_agent_ref: row.get(7)?,
+        draft_profile_ref: row.get(8)?,
+        draft_control_values: decode_draft_control_values(draft_control_values_json.as_deref(), 9)?,
+        created_at_ms: row.get(10)?,
+        updated_at_ms: row.get(11)?,
+        lineage,
+    })
+}
+
+fn gateway_source_lane_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<GatewaySourceLaneRecord> {
+    let raw_identity_json: String = row.get(2)?;
+    let draft_control_values_json: Option<String> = row.get(9)?;
     let lineage_json: Option<String> = row.get(10)?;
     let raw_identity = serde_json::from_str(&raw_identity_json).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(err))
@@ -270,45 +321,34 @@ fn gateway_source_binding_from_row(
                 Box::new(err),
             )
         })?;
-    Ok(GatewaySourceBindingRecord {
-        source_key: row.get(0)?,
-        source_kind: row.get(1)?,
-        raw_identity,
-        visible_name: row.get(3)?,
-        thread_id: row.get(4)?,
-        backend_kind: row.get(5)?,
-        backend_native_id: row.get(6)?,
-        draft_runtime_ref: row.get(7)?,
-        created_at_ms: row.get(8)?,
-        updated_at_ms: row.get(9)?,
-        lineage,
-    })
-}
-
-fn gateway_source_lane_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<GatewaySourceLaneRecord> {
-    let raw_identity_json: String = row.get(2)?;
-    let lineage_json: Option<String> = row.get(8)?;
-    let raw_identity = serde_json::from_str(&raw_identity_json).map_err(|err| {
-        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(err))
-    })?;
-    let lineage = lineage_json
-        .as_deref()
-        .map(serde_json::from_str)
-        .transpose()
-        .map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(err))
-        })?;
     Ok(GatewaySourceLaneRecord {
         source_key: row.get(0)?,
         source_kind: row.get(1)?,
         raw_identity,
         visible_name: row.get(3)?,
         thread_id: row.get(4)?,
-        draft_runtime_ref: row.get(5)?,
-        created_at_ms: row.get(6)?,
-        updated_at_ms: row.get(7)?,
+        draft_agent_ref: row.get(5)?,
+        draft_profile_ref: row.get(6)?,
+        draft_control_values: decode_draft_control_values(draft_control_values_json.as_deref(), 9)?,
+        created_at_ms: row.get(7)?,
+        updated_at_ms: row.get(8)?,
         lineage,
     })
+}
+
+fn decode_draft_control_values(
+    value: Option<&str>,
+    column: usize,
+) -> rusqlite::Result<BTreeMap<String, String>> {
+    value
+        .map(serde_json::from_str)
+        .transpose()
+        .map(Option::unwrap_or_default)
+        .map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(err),
+            )
+        })
 }

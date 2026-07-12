@@ -125,6 +125,7 @@ fn live_entry(
             kind,
             status,
             order: 0,
+            phase_ordinal: None,
             source: "runtime.stream".to_string(),
             title,
             preview: body.as_deref().map(|text| compact_text(text, 240)),

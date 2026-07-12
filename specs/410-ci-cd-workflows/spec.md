@@ -81,7 +81,9 @@ Initial profiles:
 - `web`: Workbench build, tests, and typecheck.
 - `visual`: deterministic visual diagnostics using fake/local providers; v1
   owns the TUI/VHS capture workflow and Workbench deterministic Playwright
-  visual specs directly in `xtask`.
+  visual specs directly in `xtask`. Permanent visual filenames, suite labels,
+  request ids, and proof inventory describe behavior and contain no planning
+  date or implementation-batch identifier.
 - `live`: opt-in live validation using explicit provider credentials.
 - `package`: artifact-only CD profile that builds local reviewable artifacts
   and checksums without publishing or creating hosted release objects.
@@ -89,6 +91,12 @@ Initial profiles:
 Workflow definitions are code-owned in `xtask` for v1. Do not add a public
 TOML/YAML manifest until there are multiple real adapters or external
 customization needs.
+
+Deterministic Workbench harnesses must not acquire extra ACP targets from the
+host `PATH`. Unless a test explicitly configures a local shortcut backend, its
+isolated config records the known OpenCode and Hermes shortcuts as disabled so
+catalog, screenshot, and control assertions cannot depend on developer-machine
+executables. Live checks keep normal host discovery semantics.
 
 Rust dependency hygiene is part of the `rust-broad` gate. Workspace-owned
 dependencies should use one compatible version line when existing transitive
@@ -116,7 +124,10 @@ Registered live checks:
   rather than a separate opt-in gate.
 - `web-composer-live`: Workbench real-provider composer check.
 - `web-automation-live`: Workbench GUI automation live check.
-- `web-subagent-live`: Workbench live subagent GUI check.
+- `web-subagent-live`: Workbench live subagent GUI check. It proves that at
+  least one provider-created child session is rendered and can be opened from
+  its parent transcript. The provider's choice to split a request across one
+  or several children is not a validation invariant.
   The Workbench web live checks live in
   `apps/workbench/e2e/workbench.live.spec.ts`; the live registry must track
   that file when Workbench deterministic specs are split or renamed.
@@ -128,8 +139,25 @@ Registered live checks:
   Completion checks for live skill flows must scope running/streaming DOM state
   to the active Transcript region so shell, sidebar, or history running
   affordances cannot mask a completed assistant response.
-- `opencode-acp-gui-live`: OpenCode ACP GUI live flow.
-- `opencode-acp-delegate-live`: `@opencode` delegate live flow.
+- `opencode-acp-gui-live`: OpenCode ACP GUI live flow. The check must wait for
+  the asynchronous ACP backend inventory before deciding whether OpenCode must
+  be configured, and it must tolerate other locally materialized ACP backends;
+  an initially empty backend list is not a validation invariant.
+- `opencode-acp-delegate-live`: `@opencode` delegate live flow. The check proves
+  that the child streams before the parent finishes, the child and persisted
+  delegate result contain the requested sentinel, and the parent reaches a
+  non-empty normal terminal response. A provider may summarize that result
+  instead of copying the child's sentinel verbatim into its final prose, so
+  verbatim parent repetition is not a validation invariant.
+- `agent-acp-session-lifecycle`: deterministic Workbench lifecycle flow covering
+  explicit discovery, import/resume, fork/close/delete capability gating, and
+  proof that ordinary Session reads do not initialize ACP processes.
+- `codex-acp-session-lifecycle-live`: opt-in Codex ACP list/resume/close/delete
+  flow scoped to a unique temporary cwd and a session created by that check.
+- `opencode-acp-session-lifecycle-live`: opt-in OpenCode ACP
+  list/resume/fork/close flow scoped to a unique temporary cwd; it also proves
+  that delete remains unavailable. Lifecycle checks never mutate an unrelated
+  discovered Agent session.
 
 Suites:
 
@@ -168,6 +196,14 @@ Workflow artifacts live under `.local/.psychevo-dev/ci/<run-id>/` unless the
 caller selects an explicit artifact root. The runner creates separate output
 paths for plans, step logs, package artifacts, checksums, and live/visual
 diagnostics when those workflows run.
+
+A relative explicit `cargo xtask live run --artifact-root` value resolves once
+against the xtask caller's working directory before the runner creates any
+check paths. Plans, run results, and implementation-only context files must
+then carry absolute artifact, home, config, database, and isolated-workspace
+paths. Deterministic ACP fixture commands, including the managed Codex ACP
+offline launcher, must therefore remain valid when the Gateway launches them
+from the isolated workspace rather than the xtask caller's working directory.
 
 Workbench deterministic visual screenshots belong under the CI artifact root,
 not only under `.local/playwright`. The runner must provide a screenshot root

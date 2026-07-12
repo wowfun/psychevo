@@ -4,9 +4,8 @@ export const gatewayBackendConfigSchemas = {
   BackendKind: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "enum": [
-    "psychevo",
-    "peerAgent",
-    "runtime"
+    "native",
+    "acp"
   ],
   "title": "BackendKind",
   "type": "string"
@@ -100,6 +99,94 @@ export const gatewayBackendConfigSchemas = {
     }
   },
   "title": "BackendListParams",
+  "type": "object"
+},
+  BackendManageParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "BackendManageParams",
   "type": "object"
 },
   BackendWriteParams: {
@@ -812,6 +899,39 @@ export const gatewayBackendConfigSchemas = {
     "target"
   ],
   "title": "BackendDeleteResult",
+  "type": "object"
+},
+  BackendManageResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "changed": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "operation": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "changed",
+    "id",
+    "message",
+    "operation",
+    "path",
+    "status"
+  ],
+  "title": "BackendManageResult",
   "type": "object"
 },
 } as const;

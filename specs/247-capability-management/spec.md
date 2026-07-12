@@ -103,13 +103,13 @@ fixtures that capture a populated
 multi-line Command JSON field must show the value from its first line rather
 than inheriting an internal textarea scroll position from test input.
 
-`Runtime Profiles` carries the user-facing runtime selector management surface
-for native Psychevo, direct Codex, direct OpenCode, and future runtime
-profiles. Rows show generated/configured state, runtime kind, enablement,
-cached health, command diagnostics, Refresh/Doctor actions, and session
-takeover affordances when supported. Editing or enabling a generated Codex or
-OpenCode row writes a real Profile or Project `runtime_profiles.<id>` config
-entry; ordinary list/refresh reads must not spawn real provider processes.
+`Runtime Profiles` carries the user-facing target-profile management surface
+for Psychevo Native and ACP Agents, including Codex ACP and OpenCode ACP. Rows
+show generated/configured state, `Native | ACP` kind, enablement, cached
+readiness, command diagnostics, and bounded install, repair, upgrade, or Doctor
+actions when supported. Editing or enabling a generated Codex or OpenCode row
+writes a real Profile or Project `runtime_profiles.<id>` config entry; ordinary
+list and context reads must not spawn an Agent process or access the network.
 
 When the local Gateway detects known ACP executables in its launch environment,
 it may auto-create Profile ACP backend rows so `Capabilities > Agents > ACP
@@ -306,16 +306,12 @@ is distinct from Browser automation.
 Gateway exposes domain RPCs instead of a capability aggregate:
 
 - `agent/list`, `agent/read`, `agent/write`, `agent/setEnabled`,
-  `agent/delete`, `backend/list`, `backend/doctor`, `backend/write`,
-  `backend/delete`
+  `agent/delete`, `backend/list`, `backend/doctor`, `backend/install`,
+  `backend/repair`, `backend/upgrade`, `backend/write`, `backend/delete`
 - `runtime/profile/list`, `runtime/profile/read`, `runtime/profile/write`,
-  `runtime/profile/setEnabled`, `runtime/profile/delete`, `runtime/snapshot`,
-  `runtime/health/check`, `runtime/session/list`, `runtime/session/read`,
-  `runtime/session/attach`, `runtime/session/resume`, `runtime/session/archive`,
-  `runtime/session/unarchive`, `runtime/session/delete`,
-  `runtime/session/rename`, capability-gated `runtime/session/fork`,
-  `runtime/session/revert`, `runtime/session/unrevert`,
-  `runtime/context/read`, `runtime/control/set`, and `runtime/auth/*`
+  `runtime/profile/setEnabled`, `runtime/profile/delete`
+- `thread/context/read`, `thread/control/set`, `thread/action/run`,
+  `thread/interaction/respond`, `thread/history/read`, and `turn/start`
 - `skill/list`, `skill/read`, `skill/install`, `skill/uninstall`,
   `skill/setEnabled`, `skill/write`
 - `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
@@ -330,41 +326,26 @@ Gateway exposes domain RPCs instead of a capability aggregate:
 All responses are secret-free. RPCs that accept secret-bearing environment
 variable names may echo the variable name but never the resolved secret value.
 
-## Runtime Profiles And Native Sessions
+## Runtime Profiles And Thread Application
 
-The Runtime Profiles subsection uses structured fields and shows Direct or ACP
-provenance, configuration source, cached readiness, last checked, Refresh
-Catalog, bounded Doctor, auth repair, and Native Sessions. Ordinary browsing and
-selectors do not launch a CLI.
+The Runtime Profiles subsection uses structured fields and shows Native or ACP
+provenance, configuration source, cached readiness, last checked state, bounded
+Doctor results, and managed-adapter recovery actions. Ordinary browsing and
+selectors do not launch an Agent process or perform an installation.
 
-Native Sessions are grouped by Profile and cwd and show active/archive state,
-history fidelity, ownership, update time, and only capability-backed actions.
-Active sessions attach read-only unless the adapter proves idle takeover.
-Persisted runtime-native children may show the optional short public status
-projected into their Psychevo child thread; the panel never derives one from a
-native event or raw adapter payload. History gaps and recursive archive/delete
-effects remain visible.
+Runtime Profiles do not expose adapter-native session catalogs or lifecycle
+commands. Workbench reads the immutable public binding, compatible targets,
+controls, actions, pending interactions, and history authority from
+`thread/context/read`. It pages only the public projected transcript through
+`thread/history/read`, invokes capability-backed actions through
+`thread/action/run`, and sends permission or clarification responses through
+`thread/interaction/respond`.
 
-For a Direct Active root that advertises Gateway `attach`, Native Sessions shows
-one explicit `Attach read-only` action. Success creates or reuses its immutable
-read-only public thread, imports lazy history, and navigates Workbench to that
-thread. Resume remains unavailable for Active ownership.
-
-For a direct OpenCode session that declares staged revert, Workbench explicitly
-reads history and renders only Gateway-owned opaque revision handles with safe
-role/time labels. Revert requires selecting one of those returned revision
-points; Unrevert is shown only when declared and carries no revision selector.
-Raw native message ids are neither rendered nor accepted by the public RPC.
-Direct Codex sessions do not show these actions because no stable native
-revert/unrevert operation exists.
-When native history is paginated, Workbench advances only with the opaque
-`nextCursor` returned by `runtime/session/read`; it never fabricates a cursor or
-assumes that the first page is complete.
-Native Sessions list pagination follows the same rule and appends pages by
-opaque `sessionHandle`; adapter list cursors never enter Workbench state.
-If Gateway reports an expired opaque cursor or revision handle after restart or
-bounded-cache eviction, the error directs the user to reload Native Sessions or
-session history; Workbench never substitutes or submits a native identifier.
+Adapter-native session identifiers, history cursors, and implementation-only
+actions never enter this capability-management surface. Unsupported capabilities
+remain explicit unavailable descriptors rather than simulated success. The
+complete Thread Application and Adapter contract is owned by
+[`specs/052-agent-runtimes`](../052-agent-runtimes/spec.md).
 
 ## Validation
 
@@ -394,7 +375,8 @@ at their initial scroll origin before the screenshot is written.
 - [051 Agents](../051-agents/spec.md) owns agent definition, discovery,
   enablement, and backend-reference semantics.
 - [052 Agent Runtimes](../052-agent-runtimes/spec.md) owns Runtime Profiles,
-  direct runtime snapshots, and native session takeover semantics.
+  Native/outbound-ACP Adapter descriptors, immutable target bindings, and
+  Agent-native session ownership semantics.
 - [055 Skills](../055-skills/spec.md) owns skill package and lifecycle
   semantics.
 - [056 MCP](../056-mcp/spec.md) owns MCP runtime normalization, auth, and

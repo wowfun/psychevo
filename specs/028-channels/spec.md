@@ -157,14 +157,19 @@ Channel agent discovery is shared agent discovery, not a channel-specific
 registry. In messaging channels, `/agents` answers "which agents can this lane
 call from the current workspace?" and therefore prioritizes `subagent`
 entrypoints that can be invoked with `@agent-name <task>` during a normal
-channel turn. Peer runtimes may be shown as secondary diagnostics, but they do
-not replace callable agents unless the channel also has a peer-runtime
-selection flow.
+channel turn. `/agent [name|default]` selects the lane's top-level Agent through
+the shared Thread Application target-selection use case; it does not reuse the
+subagent meaning of `/agents`.
 
 Channels use Runtime Profiles for runtime switching. `/profile` and its
 subcommands select or inspect the source-bound Runtime Profile for future turns
 on the lane. Destructive native runtime session actions remain outside Channel
 commands because Channels cannot consistently provide confirmation UI.
+
+Channel command discovery is fail-closed. `/help`, `/status`, and runtime
+control commands read the same Thread Context as turn submission; if that
+context cannot be inspected, the command returns explicit failure guidance and
+must not render a fabricated default capability set.
 
 Attachment handling is a shared pipeline. For media kinds with a confirmed
 transfer contract, the adapter downloads platform media, checks size and MIME
@@ -177,7 +182,9 @@ URLs. Runtime code should not consume platform URLs directly.
 The first shared attachment contract maps images to Gateway image input and
 maps files to validated model-visible context or bounded metadata. A future
 native file input part may replace that fallback, but channels must not invent
-platform-specific runtime file semantics.
+platform-specific runtime file semantics. A normalized image with no usable
+local path is invalid input: ingress rejects it before turn delivery and emits
+visible channel guidance; it must not silently omit the attachment.
 
 Permission approvals and Ask requests route through the originating surface.
 When a platform cannot render buttons or cards, the channel degrades to bounded
@@ -187,27 +194,49 @@ connection and remote source lane. The reply never contains the underlying
 Gateway action id or a runtime-native id. The approval meaning stays the same
 as other user surfaces, but Channels expose only allow once, deny, answer, and
 cancel; session or durable grants require a richer surface.
+The channel token is consumed only after the shared
+`thread/interaction/respond` use case accepts the response. A stale,
+kind-mismatched, or otherwise rejected response remains an explicit failure and
+must not be reported as accepted merely because the opaque token was valid.
 
 ## Runtime Profile Lane Semantics
 
-Channel Runtime Profile choices come from cached runtime/context/read. Adapters
-must not hard-code native, Codex, OpenCode, or raw ACP backend ids.
+Channel Runtime Profile and Agent choices come from cached
+`thread/context/read`. Adapters must not hard-code Native, Codex, OpenCode, or
+raw ACP backend ids.
 
-Before the first thread, /profile use stores a lane draft preference. On a bound
-lane, /profile use creates and binds a new public thread while preserving the
-old thread. /profile sessions lists opaque handles for the current Runtime
-Profile, and /profile resume accepts only one of those handles; raw native and
-Gateway session ids are never rendered. An active native session is read-only
-and the Channel directs takeover to Workbench or Fork.
+Before the first thread, `/agent` and `/profile` store one source target draft.
+On a bound lane either command creates and binds a new public thread while
+preserving the old thread. Session actions are rendered only from stable,
+Channel-safe action descriptors and accept opaque product handles; raw Native
+or ACP session ids are never rendered.
 
-Only controls declared Channel-safe by the selected runtime are rendered.
-Otherwise the response says Uses runtime default. Runtime permission and
-question replies use expiring short tokens and expose allow once, deny, answer,
-or cancel only. Durable allow is not a Channel action.
+The Channel runner resolves that draft or immutable binding through the shared
+Runnable Target catalog and consumes its opaque `targetId`. It must not join an
+Agent ref and Runtime Profile ref locally or re-check a pair assembled by the
+adapter. `/stop`, `/pending cancel`, steering, and `/compact` cross the shared
+`thread/action/run` application seam and its target-scoped descriptors.
+
+Only controls whose descriptor is Stable and Channel-safe are rendered.
+`/model`, `/variant`, and `/mode` are descriptor-driven; they do not branch on
+runtime names. Before the first turn, a selection is stored in lane draft
+controls. Once a lane is bound, the matching draft is cleared and a change
+crosses `thread/control/set` as a sticky next-turn thread preference. A context
+or control failure is an explicit error and must not be presented as Uses
+runtime default. Permission and question replies use expiring short tokens and
+expose allow once, deny, answer, or cancel only.
+Durable allow is not a Channel action.
 
 Outbound runtime delivery contains necessary progress, attention, and final
-summary only. It excludes raw native ids and events, child transcript dumps,
-and Workbench multi-pane state.
+summary only. It excludes Thinking, native phase boundaries, raw native ids and
+events, child transcript dumps, and Workbench multi-pane state. Context and
+status use the shared `exact|estimated|partial|unavailable` fidelity semantics
+instead of hard-coding Native, Codex, or OpenCode behavior.
+
+For every Agent implementation, Gateway retains an outbox payload only until
+the platform acknowledges delivery. Acknowledgement erases the payload and
+keeps only delivery state and content hash. Retrying an unacknowledged outbox
+entry does not create or mutate transcript content.
 
 ## Outbound Delivery
 

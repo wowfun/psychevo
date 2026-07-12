@@ -44,8 +44,6 @@ pub(crate) fn send_gateway_event_update(
         | GatewayEvent::ActionResolved { .. }
         | GatewayEvent::ActionCancelled { .. }
         | GatewayEvent::ActivityChanged { .. }
-        | GatewayEvent::RuntimeStateChanged { .. }
-        | GatewayEvent::RuntimeChildChanged { .. }
         | GatewayEvent::TitleChanged { .. } => {}
     }
 }
@@ -103,15 +101,12 @@ fn transcript_block_session_update(
     let use_terminal_output =
         live_presentation && projection.terminal_output && tool_name == "exec_command";
     let content = transcript_tool_content(block, tool_name, &call_id, use_terminal_output);
-    let mut update = ToolCallUpdate::new(
-        call_id,
-        ToolCallUpdateFields::new()
-            .title(transcript_tool_title(block, tool_name))
-            .kind(tool_kind(tool_name))
-            .status(transcript_tool_status(block.status))
-            .content(content)
-            .raw_input(block.metadata.clone()),
-    );
+    let mut update = ToolCallUpdate::new(call_id)
+        .title(transcript_tool_title(block, tool_name))
+        .kind(tool_kind(tool_name))
+        .status(transcript_tool_status(block.status))
+        .content(content)
+        .raw_input(block.metadata.clone());
     if use_terminal_output
         && let Some(meta) = terminal_output_meta(block, update.tool_call_id.0.as_ref(), projection)
     {

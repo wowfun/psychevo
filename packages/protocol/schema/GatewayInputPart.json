@@ -104,6 +104,89 @@
         "visibleToModel"
       ],
       "type": "object"
+    },
+    {
+      "properties": {
+        "blob": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mimeType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "enum": [
+            "resource"
+          ],
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "uri"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mimeType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "type": {
+          "enum": [
+            "resourceLink"
+          ],
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "uri"
+      ],
+      "type": "object"
     }
   ],
   "title": "GatewayInputPart"

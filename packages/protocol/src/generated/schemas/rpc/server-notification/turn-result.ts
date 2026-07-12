@@ -4,11 +4,67 @@ export const serverNotificationTurnResultSchema = {
   "$id": "ServerNotification/turn-result.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AgentDeliveryStatusView": {
+      "enum": [
+        "notDelivered",
+        "unknown",
+        "delivered"
+      ],
+      "type": "string"
+    },
+    "AgentErrorView": {
+      "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivery": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentDeliveryStatusView"
+            }
+          ],
+          "default": "unknown"
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "recoveryAction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
     "BackendKind": {
       "enum": [
-        "psychevo",
-        "peerAgent",
-        "runtime"
+        "native",
+        "acp"
       ],
       "type": "string"
     },
@@ -70,7 +126,7 @@ export const serverNotificationTurnResultSchema = {
         "error": {
           "anyOf": [
             {
-              "$ref": "#/definitions/GatewayTurnError"
+              "$ref": "#/definitions/AgentErrorView"
             },
             {
               "type": "null"
@@ -109,41 +165,6 @@ export const serverNotificationTurnResultSchema = {
       "required": [
         "id",
         "status"
-      ],
-      "type": "object"
-    },
-    "GatewayTurnError": {
-      "properties": {
-        "code": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "diagnosticRef": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "message": {
-          "type": "string"
-        },
-        "retryClass": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "stage": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "message"
       ],
       "type": "object"
     },
@@ -191,6 +212,14 @@ export const serverNotificationTurnResultSchema = {
         "order": {
           "format": "int64",
           "type": "integer"
+        },
+        "phaseOrdinal": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "preview": {
           "type": [

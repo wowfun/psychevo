@@ -4,14 +4,85 @@ export const serverNotificationTurnErrorSchema = {
   "$id": "ServerNotification/turn-error.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "TurnErrorPayload": {
+    "AgentDeliveryStatusView": {
+      "enum": [
+        "notDelivered",
+        "unknown",
+        "delivered"
+      ],
+      "type": "string"
+    },
+    "AgentErrorView": {
       "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivery": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentDeliveryStatusView"
+            }
+          ],
+          "default": "unknown"
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "message": {
           "type": "string"
+        },
+        "recoveryAction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "message"
+      ],
+      "type": "object"
+    },
+    "TurnErrorPayload": {
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/AgentErrorView"
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "error"
       ],
       "type": "object"
     }

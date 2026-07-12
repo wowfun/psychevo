@@ -29,19 +29,6 @@ pub struct ThreadStartParams {
     pub scope: GatewayRequestScope,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadCompactStartParams {
-    #[serde(default)]
-    pub scope: Option<GatewayRequestScope>,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub instructions: Option<String>,
-    #[serde(default)]
-    pub runtime_ref: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadCompactionCheckpointView {
@@ -58,7 +45,7 @@ pub struct ThreadCompactionCheckpointView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadCompactStartResult {
+pub struct ThreadCompactionResult {
     pub accepted: bool,
     pub thread_id: Option<String>,
     pub compacted: bool,
@@ -464,70 +451,156 @@ pub struct TerminalExitedPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct RunnableTargetInput {
+    #[serde(default, rename = "agentRef")]
+    pub agent_ref: Option<String>,
+    #[serde(rename = "runtimeProfileRef")]
+    pub runtime_profile_ref: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadActionKind {
+    Interrupt,
+    Steer,
+    Compact,
+    Fork,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ThreadActionInput {
+    Interrupt,
+    Steer {
+        expected_turn_id: String,
+        text: String,
+    },
+    Compact {
+        #[serde(default)]
+        instructions: Option<String>,
+    },
+    Fork,
+}
+
+impl ThreadActionInput {
+    pub fn kind(&self) -> ThreadActionKind {
+        match self {
+            Self::Interrupt => ThreadActionKind::Interrupt,
+            Self::Steer { .. } => ThreadActionKind::Steer,
+            Self::Compact { .. } => ThreadActionKind::Compact,
+            Self::Fork => ThreadActionKind::Fork,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadActionRunParams {
+    pub scope: GatewayRequestScope,
+    pub thread_id: String,
+    pub action: ThreadActionInput,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ThreadActionRunResult {
+    Interrupt {
+        thread_id: String,
+        interrupted: bool,
+        cleared: usize,
+    },
+    Steer {
+        thread_id: String,
+        accepted: bool,
+    },
+    Compact {
+        thread_id: String,
+        result: Box<ThreadCompactionResult>,
+    },
+    Fork {
+        #[serde(rename = "sourceThreadId")]
+        source_thread_id: String,
+        snapshot: Box<ThreadSnapshot>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ThreadInteractionResponse {
+    Permission { decision: PermissionDecision },
+    Clarify { answers: Vec<Vec<String>> },
+    CancelClarify,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadInteractionRespondParams {
+    pub scope: GatewayRequestScope,
+    pub thread_id: String,
+    pub interaction_id: String,
+    pub response: ThreadInteractionResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadInteractionRespondResult {
+    pub accepted: bool,
+    pub interaction_id: String,
+    pub outcome: GatewayActionOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryReadParams {
+    pub scope: GatewayRequestScope,
+    pub thread_id: String,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryReadResult {
+    pub thread_id: String,
+    pub history: ThreadHistoryView,
+    pub entries: Vec<TranscriptEntry>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnStartParams {
     pub scope: GatewayRequestScope,
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
-    pub agent_name: Option<String>,
-    #[serde(default)]
-    pub runtime_ref: Option<String>,
-    #[serde(default)]
-    pub runtime_session_id: Option<String>,
-    #[serde(default)]
-    pub runtime_options: BTreeMap<String, String>,
+    pub target: Option<RunnableTargetInput>,
     #[serde(default)]
     pub input: Vec<GatewayInputPart>,
     #[serde(default)]
     pub mentions: Vec<GatewayMention>,
-    #[serde(default)]
-    pub text: Option<String>,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub reasoning_effort: Option<String>,
-    #[serde(default)]
-    pub mode: Option<String>,
-    #[serde(default)]
-    pub permission_mode: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnSteerParams {
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    pub expected_turn_id: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnInterruptParams {
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub source_key: Option<SourceKey>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnTakeoverParams {
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub source_key: Option<SourceKey>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeOptionsParams {
-    pub scope: GatewayRequestScope,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    pub runtime_ref: String,
-    #[serde(default)]
-    pub runtime_session_id: Option<String>,
+    #[serde(default, rename = "turnOverrides")]
+    #[ts(type = "Record<string, unknown>")]
+    pub turn_overrides: BTreeMap<String, Value>,
+    #[serde(default, rename = "expectedContextRevision")]
+    pub expected_context_revision: Option<String>,
+    #[serde(default, rename = "expectedControlRevision")]
+    pub expected_control_revision: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -560,37 +633,11 @@ pub struct RuntimeConfigOptionView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeOptionsResult {
-    pub runtime_ref: String,
-    #[serde(default)]
-    pub runtime_session_id: Option<String>,
-    pub options: Vec<RuntimeConfigOptionView>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
 pub struct TurnStartResult {
     pub accepted: bool,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnControlResult {
-    #[serde(default)]
-    pub accepted: Option<bool>,
-    #[serde(default)]
-    pub interrupted: Option<bool>,
-    #[serde(default)]
-    pub cleared: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnTakeoverResult {
-    pub accepted: bool,
-    pub activity: GatewayActivityView,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub thread: GatewayThread,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -619,7 +666,11 @@ pub struct TurnRunResult {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnErrorPayload {
-    pub message: String,
+    pub error: AgentErrorView,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -639,41 +690,6 @@ pub struct ShellErrorPayload {
     pub message: String,
     #[serde(default)]
     pub thread_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionRespondParams {
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub source_key: Option<String>,
-    #[serde(default)]
-    pub activity_id: Option<String>,
-    pub request_id: String,
-    pub decision: PermissionDecision,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ClarifyRespondParams {
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub source_key: Option<String>,
-    #[serde(default)]
-    pub activity_id: Option<String>,
-    pub request_id: String,
-    #[serde(default)]
-    pub answers: Option<Vec<Vec<String>>>,
-    #[serde(default)]
-    pub cancel: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct InteractionRespondResult {
-    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ThreadControlApplyScopeView": {
+      "enum": [
+        "turnDraft",
+        "session"
+      ],
+      "type": "string"
+    },
+    "ThreadControlChoiceView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ThreadControlDependencyView": {
+      "properties": {
+        "controlId": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "controlId",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ThreadControlEffectiveSourceView": {
+      "enum": [
+        "runtimeDefault",
+        "profileDefault",
+        "sourceDraft",
+        "threadPreference",
+        "turnOverride",
+        "runtimeObserved"
+      ],
+      "type": "string"
+    },
+    "ThreadControlMutabilityView": {
+      "enum": [
+        "readOnly",
+        "selectable"
+      ],
+      "type": "string"
+    },
+    "ThreadControlSurfaceRoleView": {
+      "enum": [
+        "mode",
+        "model",
+        "reasoning",
+        "advanced"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "applyScope": {
+      "$ref": "#/definitions/ThreadControlApplyScopeView"
+    },
+    "capabilityRevision": {
+      "type": "string"
+    },
+    "channelSafe": {
+      "default": false,
+      "type": "boolean"
+    },
+    "choices": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/ThreadControlChoiceView"
+      },
+      "type": "array"
+    },
+    "dependsOn": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadControlDependencyView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "effectiveSource": {
+      "$ref": "#/definitions/ThreadControlEffectiveSourceView"
+    },
+    "effectiveValue": {
+      "default": null
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "isDefault": {
+      "type": "boolean"
+    },
+    "label": {
+      "type": "string"
+    },
+    "mutability": {
+      "$ref": "#/definitions/ThreadControlMutabilityView"
+    },
+    "required": {
+      "type": "boolean"
+    },
+    "stability": {
+      "$ref": "#/definitions/RuntimeStabilityView"
+    },
+    "surfaceRole": {
+      "$ref": "#/definitions/ThreadControlSurfaceRoleView"
+    },
+    "unavailableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "applyScope",
+    "capabilityRevision",
+    "effectiveSource",
+    "enabled",
+    "id",
+    "isDefault",
+    "label",
+    "mutability",
+    "required",
+    "stability",
+    "surfaceRole"
+  ],
+  "title": "ThreadControlDescriptorView",
+  "type": "object"
+}

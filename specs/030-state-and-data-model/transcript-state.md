@@ -36,17 +36,31 @@ material needed to inspect that history after a turn settles. It is not a
 database table, timeline log, TUI ledger row, terminal-rendered string, viewport
 cache, or product-specific display artifact.
 
-Runtime `messages` are the only durable ordinary transcript fact source.
-Durable ordinary transcript material includes user message content, assistant
-visible text, local folded reasoning blocks when retained by runtime, assistant
-tool requests, tool-result messages or material, terminal assistant outcomes,
-and metadata that belongs to those messages.
+Transcript ownership is explicit per thread. Native Psychevo threads use
+runtime `messages` as their durable ordinary transcript fact source. An ACP
+Agent that advertises load/resume owns its native transcript; Gateway retains a
+bounded product projection/checkpoint but does not synthesize a replacement
+Agent session by replaying copied text. An ACP Agent without load/resume has a
+process-ephemeral native transcript and Gateway marks it non-resumable after
+process loss.
 
-Derived transcript views are projections over messages. A derived view may
-group, sort, attach, summarize, or render message material for a caller, but it
-must not become an additional durable ordinary transcript source. The same
-message facts must be enough to rebuild ordinary history after reload,
-session switch, export, or reconnect.
+Psychevo durably retains the public/native binding, captured Agent Definition
+and Runtime Profile, accepted user intent, classified terminal outcome, content
+hashes, context statistics, delivery state, and product-safe projection. These
+facts never justify fabricating missing Agent-authoritative content.
+
+Durable Native ordinary transcript material includes user message content,
+assistant visible text, local folded reasoning blocks when retained by runtime,
+assistant tool requests, tool-result messages or material, terminal assistant
+outcomes, and metadata that belongs to those messages.
+
+Derived Native transcript views are projections over messages. ACP transcript
+views are projections over Agent replay plus Gateway's product checkpoint. A
+derived view may group, sort, attach, summarize, or render content for a caller,
+but it must not become an additional durable ordinary transcript source. The
+owning content facts must be enough to rebuild ordinary history after reload,
+session switch, export, or reconnect. Psychevo never combines local and native
+content owners for one thread.
 
 ## Recoverability Classes
 
@@ -66,7 +80,10 @@ Transient observations exist only while a turn or process is active. Streaming
 reasoning deltas, provisional assistant text, pending tool-call input,
 tool-execution progress, live elapsed timers, active control handles, queued
 turn state, and optimistic local prompt echoes are transient unless their final
-effect is recorded in messages or another domain fact.
+effect is recorded by the thread's owning content source. Accepted prompt text
+is scrubbed from bounded delivery ledgers as soon as delivery is confirmed;
+only its hash and delivery state remain. Live snapshots are erased after
+terminal completion and reconnect uses the declared history owner.
 
 Raw or unclassified runtime/provider observations are transient diagnostics.
 They are not ordinary transcript facts, are not request-reconstruction facts,
@@ -106,6 +123,10 @@ Psychevo must not introduce a generic durable ordinary transcript sidecar. A
 future durable artifact or display history must be justified by a concrete
 domain spec, own its recoverability rules, and define how it relates back to
 messages without replacing them as the ordinary transcript source.
+
+A Channel delivery outbox for an Agent final payload is not transcript
+ownership. It retains the payload only until the platform acknowledges delivery,
+then erases it and keeps delivery status plus content hash.
 
 ## Related Topics
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "candidateId": {
+      "type": "string"
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "title": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updatedAt": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "candidateId",
+    "cwd"
+  ],
+  "title": "ThreadImportCandidateView",
+  "type": "object"
+}

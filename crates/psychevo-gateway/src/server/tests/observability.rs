@@ -303,7 +303,7 @@
 
         assert_eq!(value["context"]["usedTokens"], 1234);
         assert_eq!(value["context"]["contextLimit"], 8000);
-        assert_eq!(value["context"]["status"], "reported by ACP peer");
+        assert_eq!(value["context"]["status"], "exact");
         assert_eq!(value["context"]["categories"], json!([]));
         assert_eq!(value["usage"]["reportedTotalTokens"], 1234);
         assert_eq!(value["usage"]["contextInputTokens"], 1234);

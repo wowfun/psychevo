@@ -638,6 +638,7 @@ pub(crate) fn clarify_request_event() -> RunStreamEvent {
 pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
     vec![
         ClarifyQuestion {
+            header: String::new(),
             question: "Which mode should we use?".to_string(),
             options: vec![
                 psychevo_runtime::ClarifyQuestionOption {
@@ -649,8 +650,12 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
                     description: "Prioritize review".to_string(),
                 },
             ],
+            multiple: false,
+            custom: true,
+            secret: false,
         },
         ClarifyQuestion {
+            header: String::new(),
             question: "How much detail should the answer include?".to_string(),
             options: vec![
                 psychevo_runtime::ClarifyQuestionOption {
@@ -662,8 +667,12 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
                     description: "Cover tradeoffs".to_string(),
                 },
             ],
+            multiple: false,
+            custom: true,
+            secret: false,
         },
         ClarifyQuestion {
+            header: String::new(),
             question: "Which output format should be used?".to_string(),
             options: vec![
                 psychevo_runtime::ClarifyQuestionOption {
@@ -675,6 +684,9 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
                     description: "Use structured data".to_string(),
                 },
             ],
+            multiple: false,
+            custom: true,
+            secret: false,
         },
     ]
 }

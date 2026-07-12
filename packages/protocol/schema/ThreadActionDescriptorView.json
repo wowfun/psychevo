@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ThreadActionKind": {
+      "enum": [
+        "interrupt",
+        "steer",
+        "compact",
+        "fork"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "channelSafe": {
+      "default": false,
+      "type": "boolean"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "id": {
+      "$ref": "#/definitions/ThreadActionKind"
+    },
+    "label": {
+      "type": "string"
+    },
+    "stability": {
+      "$ref": "#/definitions/RuntimeStabilityView"
+    },
+    "unavailableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "enabled",
+    "id",
+    "label",
+    "stability"
+  ],
+  "title": "ThreadActionDescriptorView",
+  "type": "object"
+}

@@ -204,10 +204,7 @@ impl TuiApp {
             | GatewayEvent::ActionUpdated { .. }
             | GatewayEvent::ActionResolved { .. }
             | GatewayEvent::ActionCancelled { .. } => false,
-            GatewayEvent::ActivityChanged { .. }
-            | GatewayEvent::RuntimeStateChanged { .. }
-            | GatewayEvent::RuntimeChildChanged { .. }
-            | GatewayEvent::TitleChanged { .. } => false,
+            GatewayEvent::ActivityChanged { .. } | GatewayEvent::TitleChanged { .. } => false,
             GatewayEvent::Warning {
                 message,
                 suggestion,

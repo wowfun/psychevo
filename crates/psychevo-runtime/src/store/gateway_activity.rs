@@ -338,6 +338,15 @@ impl SqliteStore {
         })
     }
 
+    pub fn delete_gateway_live_events_for_activity(&self, activity_id: &str) -> Result<usize> {
+        self.write_retry(|conn| {
+            conn.execute(
+                "DELETE FROM gateway_live_events WHERE activity_id = ?1",
+                params![activity_id],
+            )
+        })
+    }
+
     pub fn upsert_gateway_live_snapshot(&self, input: GatewayLiveSnapshotInput<'_>) -> Result<i64> {
         let now = now_ms();
         let event_json = serde_json::to_string(&input.event)?;

@@ -102,6 +102,18 @@ machinery:
 - cwd
 - permission mode
 
+Runtime controls on this page are projected from the prospective Runnable
+Target for the selected Runtime Profile. Workbench reads the Gateway target
+catalog, resolves the Profile's compatible target, and renders only Stable,
+Channel-safe control descriptors and their authoritative choices. It must not
+show, hide, clear, or relabel model and permission controls by matching the
+Runtime Profile implementation kind. A disabled descriptor remains visible
+with its `unavailableReason`; a missing, incompatible, or unreadable target
+context disables runtime-control editing with an explicit diagnostic instead
+of claiming that the runtime default will be used. Existing saved values that
+are absent from the selected descriptor choices are preserved for review but
+cannot be newly selected or silently carried into a changed target.
+
 The page keeps operational hierarchy compact with a header, one concise health
 summary row, and editable configuration groups. Doctor checks and runner
 internals are diagnostics. They stay hidden until Test runs or the user opens
@@ -209,24 +221,37 @@ Channel `/agents` presents callable agents for the current Channel workspace.
 The primary group is `Callable agents`, containing agents with the `subagent`
 entrypoint that users can reference as `@agent-name <task>` in ordinary IM
 messages. Peer-only runtimes may appear in a secondary `Peer runtimes` group
-for visibility with copy that they require a peer-runtime entrypoint rather
-than ordinary `@agent` delegation. The command must not behave like the
-Workbench runtime selector.
+is removed; top-level execution identity is selected separately through
+`/agent`, while `/agents` remains the subagent/delegation catalog.
+
+Channel `/agent [name|default]` uses the same target-selection use case as
+Workbench. Before binding it stores the source target draft; after binding it
+creates a new public thread and preserves the old thread.
 
 Channel `/profile` is the runtime selector command for a remote lane. Bare
 `/profile` and `/profile status` show the effective Runtime Profile and cached
 health. `/profile list` lists enabled profiles that are valid for the lane.
 `/profile use <id>` stores a draft preference before the first thread. On a
 bound lane it starts and binds a new public thread while preserving the old
-thread. `/profile resume <short-handle>` never renders or accepts a raw native
-id; an active session is read-only and directs the user to Workbench or Fork.
+thread. `/profile resume <short-handle>` is available only through a stable,
+Channel-safe action descriptor and never renders or accepts a raw Agent id.
 `/profile reset` returns the lane to the channel connection default. Archive,
 revert, rename, and delete are Workbench-only actions.
 
-Model and mode controls appear only when the runtime marks them Channel-safe;
-otherwise the command says Uses runtime default. Permission and question
-fallbacks use expiring short tokens and allow only allow once, deny, answer, or
-cancel. They never expose durable allow.
+`/model`, `/variant`, and `/mode` appear only when the selected runtime exposes
+a Stable, Channel-safe descriptor for that role. Before a thread exists they
+edit lane draft controls. After binding they call `thread/control/set` to store
+a sticky next-turn thread preference. A successful apply is not labelled
+observed until Agent readback confirms it. When no eligible descriptor exists
+the command reports an explicit unavailable/default state from Thread Context;
+context failures never become Uses runtime default. Permission and
+question fallbacks use expiring short tokens and allow only allow once, deny,
+answer, or cancel. They never expose durable allow.
+
+Channel progress never renders Thinking or native phase labels. Context and
+status wording uses shared exact, estimated, partial, or unavailable fidelity.
+A final response is acknowledged through the Channel delivery path before its
+bounded outbox payload is erased; retries do not rerun the agent turn.
 
 Attachment UX is native to the messaging platform. Users send images and files
 with the IM client attachment flow; Channels normalize those attachments before

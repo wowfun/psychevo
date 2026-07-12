@@ -114,9 +114,8 @@ export const gatewayCoreSchemas = {
   "definitions": {
     "BackendKind": {
       "enum": [
-        "psychevo",
-        "peerAgent",
-        "runtime"
+        "native",
+        "acp"
       ],
       "type": "string"
     },
@@ -170,13 +169,29 @@ export const gatewayCoreSchemas = {
   GatewayTurn: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "GatewayTurnError": {
+    "AgentDeliveryStatusView": {
+      "enum": [
+        "notDelivered",
+        "unknown",
+        "delivered"
+      ],
+      "type": "string"
+    },
+    "AgentErrorView": {
       "properties": {
         "code": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "delivery": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentDeliveryStatusView"
+            }
+          ],
+          "default": "unknown"
         },
         "diagnosticRef": {
           "type": [
@@ -186,6 +201,12 @@ export const gatewayCoreSchemas = {
         },
         "message": {
           "type": "string"
+        },
+        "recoveryAction": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "retryClass": {
           "type": [
@@ -227,7 +248,7 @@ export const gatewayCoreSchemas = {
     "error": {
       "anyOf": [
         {
-          "$ref": "#/definitions/GatewayTurnError"
+          "$ref": "#/definitions/AgentErrorView"
         },
         {
           "type": "null"
@@ -386,6 +407,89 @@ export const gatewayCoreSchemas = {
         "text",
         "type",
         "visibleToModel"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "blob": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mimeType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "enum": [
+            "resource"
+          ],
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "uri"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mimeType": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "type": {
+          "enum": [
+            "resourceLink"
+          ],
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "uri"
       ],
       "type": "object"
     }

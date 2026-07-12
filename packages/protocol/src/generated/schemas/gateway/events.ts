@@ -21,6 +21,63 @@ export const gatewayEventSchemas = {
   GatewayEvent: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AgentDeliveryStatusView": {
+      "enum": [
+        "notDelivered",
+        "unknown",
+        "delivered"
+      ],
+      "type": "string"
+    },
+    "AgentErrorView": {
+      "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivery": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentDeliveryStatusView"
+            }
+          ],
+          "default": "unknown"
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "recoveryAction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
     "GatewayActionKind": {
       "enum": [
         "permission",
@@ -130,7 +187,7 @@ export const gatewayEventSchemas = {
         "error": {
           "anyOf": [
             {
-              "$ref": "#/definitions/GatewayTurnError"
+              "$ref": "#/definitions/AgentErrorView"
             },
             {
               "type": "null"
@@ -169,41 +226,6 @@ export const gatewayEventSchemas = {
       "required": [
         "id",
         "status"
-      ],
-      "type": "object"
-    },
-    "GatewayTurnError": {
-      "properties": {
-        "code": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "diagnosticRef": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "message": {
-          "type": "string"
-        },
-        "retryClass": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "stage": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "message"
       ],
       "type": "object"
     },
@@ -318,6 +340,14 @@ export const gatewayEventSchemas = {
         "order": {
           "format": "int64",
           "type": "integer"
+        },
+        "phaseOrdinal": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "preview": {
           "type": [
@@ -844,98 +874,6 @@ export const gatewayEventSchemas = {
       },
       "required": [
         "threadId",
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "detail": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "instanceEpoch": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "processEpoch": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "runtimeRef": {
-          "type": "string"
-        },
-        "state": {
-          "type": "string"
-        },
-        "threadId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "type": {
-          "enum": [
-            "runtimeStateChanged"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "processEpoch",
-        "runtimeRef",
-        "state",
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "dedupKey": {
-          "type": "string"
-        },
-        "parentThreadId": {
-          "type": "string"
-        },
-        "readOnly": {
-          "type": "boolean"
-        },
-        "runtimeRef": {
-          "type": "string"
-        },
-        "status": {
-          "type": "string"
-        },
-        "threadId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "type": {
-          "enum": [
-            "runtimeChildChanged"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "dedupKey",
-        "parentThreadId",
-        "readOnly",
-        "runtimeRef",
-        "status",
         "type"
       ],
       "type": "object"

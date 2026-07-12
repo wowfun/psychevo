@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadHistoryFidelityView": {
+      "enum": [
+        "full",
+        "summary",
+        "partial",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryOwnerView": {
+      "enum": [
+        "psychevo",
+        "agent",
+        "process"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "cursor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fidelity": {
+      "$ref": "#/definitions/ThreadHistoryFidelityView"
+    },
+    "hint": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "owner": {
+      "$ref": "#/definitions/ThreadHistoryOwnerView"
+    }
+  },
+  "required": [
+    "fidelity",
+    "owner"
+  ],
+  "title": "ThreadHistoryView",
+  "type": "object"
+}

@@ -110,8 +110,6 @@ impl TurnPrinter {
             | GatewayEvent::ActionResolved { .. }
             | GatewayEvent::ActionCancelled { .. }
             | GatewayEvent::ActivityChanged { .. }
-            | GatewayEvent::RuntimeStateChanged { .. }
-            | GatewayEvent::RuntimeChildChanged { .. }
             | GatewayEvent::TitleChanged { .. } => {}
         }
         out.flush()

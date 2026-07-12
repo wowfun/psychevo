@@ -513,6 +513,7 @@ fn gateway_test_entry(
             kind,
             status,
             order: 0,
+            phase_ordinal: None,
             source: "runtime.stream".to_string(),
             title: title.map(str::to_string),
             body: text.map(str::to_string),

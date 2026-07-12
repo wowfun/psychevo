@@ -109,13 +109,12 @@ External `--agents` JSON, settings-provided agents, and plugin-provided agents
 are future compatibility targets and are not loaded in the first implementation
 slice.
 
-Runtime Profiles may generate default agent identities from runtime snapshots,
-for example OpenCode native agents or Codex profile presets. Generated runtime
-agents follow normal catalog precedence, are shadowed by same-name Markdown
-definitions, and preserve their `runtimeRef` plus native runtime ids in
-metadata. Markdown definitions may reference runtime-backed generated agents by
-name, but command, args, env, and provider secrets remain Runtime Profile
-configuration, not Markdown frontmatter.
+ACP backends may generate default Agent identities from negotiated metadata,
+for example OpenCode and Codex ACP. Generated Agents follow normal catalog
+precedence, are shadowed by same-name Markdown definitions, and preserve their
+backend/Profile provenance without exposing native session ids. Markdown may
+reference generated Agents by name, but command, args, env, and provider
+secrets remain backend configuration, not Markdown frontmatter.
 
 Configured external backends may generate default agent definitions. Generated
 definitions follow normal catalog precedence and are shadowed by Markdown
@@ -353,7 +352,7 @@ permission, resource, context, tool, or registry boundaries.
   generated agent identities, ACP client behavior, and unified surface
   projection.
 - [052 Agent Runtimes](../052-agent-runtimes/spec.md) defines Runtime Profiles,
-  direct Codex/OpenCode adapters, and runtime-generated identities.
+  the Native/ACP Agent Session seam, and generated identities.
 
 ## Related Topics
 

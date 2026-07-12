@@ -85,32 +85,6 @@ pub enum GatewayEvent {
         #[serde(rename = "displayTitle")]
         display_title: Option<String>,
     },
-    RuntimeStateChanged {
-        #[serde(rename = "runtimeRef")]
-        runtime_ref: String,
-        #[serde(default, rename = "threadId")]
-        thread_id: Option<String>,
-        state: String,
-        #[serde(default)]
-        detail: Option<String>,
-        #[serde(rename = "processEpoch")]
-        process_epoch: u64,
-        #[serde(default, rename = "instanceEpoch")]
-        instance_epoch: Option<u64>,
-    },
-    RuntimeChildChanged {
-        #[serde(rename = "runtimeRef")]
-        runtime_ref: String,
-        #[serde(rename = "parentThreadId")]
-        parent_thread_id: String,
-        #[serde(default, rename = "threadId")]
-        thread_id: Option<String>,
-        #[serde(rename = "dedupKey")]
-        native_dedup_key: String,
-        status: String,
-        #[serde(rename = "readOnly")]
-        read_only: bool,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -216,6 +190,9 @@ pub struct TranscriptBlock {
     pub kind: TranscriptBlockKind,
     pub status: TranscriptBlockStatus,
     pub order: i64,
+    #[serde(default, rename = "phaseOrdinal", skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub phase_ordinal: Option<u32>,
     pub source: String,
     pub title: Option<String>,
     pub body: Option<String>,
@@ -327,9 +304,38 @@ pub struct ThreadSnapshot {
     pub scope: GatewayRequestScope,
     #[serde(default)]
     pub thread: Option<GatewayThread>,
+    pub history: ThreadHistoryView,
     pub entries: Vec<TranscriptEntry>,
     pub activity: GatewayActivityView,
     pub pending_actions: Vec<PendingActionView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadHistoryOwnerView {
+    Psychevo,
+    Agent,
+    Process,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadHistoryFidelityView {
+    Full,
+    Summary,
+    Partial,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryView {
+    pub owner: ThreadHistoryOwnerView,
+    pub fidelity: ThreadHistoryFidelityView,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -338,6 +344,31 @@ pub struct SessionProjectView {
     pub cwd: String,
     pub label: String,
     pub display_path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionLifecycleActionKind {
+    Fork,
+    Delete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLifecycleActionView {
+    pub id: SessionLifecycleActionKind,
+    pub enabled: bool,
+    #[serde(default, rename = "unavailableReason")]
+    pub unavailable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLifecycleView {
+    #[serde(default, rename = "targetLabel")]
+    pub target_label: Option<String>,
+    #[serde(default)]
+    pub actions: Vec<SessionLifecycleActionView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -370,4 +401,7 @@ pub struct SessionSummaryView {
     pub display_title: Option<String>,
     #[serde(default)]
     pub preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lifecycle: Option<SessionLifecycleView>,
 }

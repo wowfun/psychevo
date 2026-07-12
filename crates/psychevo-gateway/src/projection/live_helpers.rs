@@ -94,6 +94,7 @@ fn merge_live_block(existing: &TranscriptBlock, next: TranscriptBlock) -> Transc
         kind: next.kind,
         status: merge_live_block_status(existing.status, next.status),
         order: next.order,
+        phase_ordinal: next.phase_ordinal.or(existing.phase_ordinal),
         source: if next.source.trim().is_empty() {
             existing.source.clone()
         } else {
@@ -286,6 +287,7 @@ fn live_block(
         kind,
         status,
         order,
+        phase_ordinal: None,
         source: "runtime.stream".to_string(),
         title,
         preview: body.as_deref().map(|text| compact_text(text, 240)),

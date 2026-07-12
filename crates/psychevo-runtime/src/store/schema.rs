@@ -12,8 +12,7 @@ impl SqliteStore {
         conn.busy_timeout(Duration::from_millis(250))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        let mut user_version: i64 =
-            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let has_schema =
             sqlite_table_exists(&conn, "sessions")? || sqlite_table_exists(&conn, "messages")?;
         if user_version != 0
@@ -28,13 +27,6 @@ impl SqliteStore {
             return Err(Error::Config(
                 "state database has an unknown schema version; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database".to_string(),
             ));
-        }
-        if user_version == 24 {
-            migrate_sqlite_schema_v24_to_v25(&conn)?;
-            user_version = 25;
-        }
-        if user_version == 25 {
-            migrate_sqlite_schema_v25_to_v26(&conn)?;
         }
         conn.execute_batch(
             r#"
@@ -205,7 +197,9 @@ impl SqliteStore {
                 thread_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
                 backend_kind TEXT,
                 backend_native_id TEXT,
-                draft_runtime_ref TEXT,
+                draft_agent_ref TEXT,
+                draft_profile_ref TEXT,
+                draft_control_values_json TEXT,
                 created_at_ms INTEGER NOT NULL,
                 updated_at_ms INTEGER NOT NULL,
                 lineage_json TEXT
@@ -214,6 +208,9 @@ impl SqliteStore {
             CREATE TABLE IF NOT EXISTS gateway_runtime_bindings (
                 thread_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
                 resolution_status TEXT NOT NULL CHECK (resolution_status IN ('resolved', 'unresolved')),
+                agent_ref TEXT,
+                agent_fingerprint TEXT,
+                agent_definition_json TEXT,
                 runtime_ref TEXT,
                 backend_kind TEXT,
                 native_kind TEXT,
@@ -227,11 +224,16 @@ impl SqliteStore {
                 ownership TEXT NOT NULL CHECK (ownership IN ('read_write', 'read_only')),
                 parent_thread_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
                 binding_revision INTEGER NOT NULL CHECK (binding_revision > 0),
+                thread_preferences_json TEXT,
+                runtime_observed_json TEXT,
+                control_revision INTEGER NOT NULL CHECK (control_revision > 0),
                 unresolved_reason TEXT,
                 created_at_ms INTEGER NOT NULL,
                 updated_at_ms INTEGER NOT NULL,
                 CHECK (
                     (resolution_status = 'resolved'
+                        AND agent_fingerprint IS NOT NULL
+                        AND agent_definition_json IS NOT NULL
                         AND runtime_ref IS NOT NULL
                         AND backend_kind IS NOT NULL
                         AND native_kind IS NOT NULL
@@ -307,6 +309,33 @@ impl SqliteStore {
                 started_at_ms INTEGER,
                 completed_at_ms INTEGER NOT NULL,
                 metadata_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS gateway_turn_deliveries (
+                turn_id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                runtime_ref TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('not_delivered', 'delivered', 'unknown', 'terminal')),
+                input_json TEXT,
+                input_hash TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                delivery_confirmed_at_ms INTEGER,
+                terminal_at_ms INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS gateway_channel_outbox (
+                delivery_id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                turn_id TEXT NOT NULL,
+                connection_id TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('pending', 'acknowledged', 'failed')),
+                payload_text TEXT,
+                payload_hash TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                acknowledged_at_ms INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS automations (
@@ -385,6 +414,10 @@ impl SqliteStore {
                 ON gateway_control_commands(owner_id, status, id);
             CREATE INDEX IF NOT EXISTS idx_gateway_turn_terminals_thread
                 ON gateway_turn_terminals(thread_id, completed_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_gateway_turn_deliveries_thread
+                ON gateway_turn_deliveries(thread_id, updated_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_gateway_channel_outbox_pending
+                ON gateway_channel_outbox(connection_id, source_key, status, updated_at_ms);
             CREATE INDEX IF NOT EXISTS idx_automations_cwd_enabled_next
                 ON automations(cwd, enabled, next_run_at_ms);
             CREATE INDEX IF NOT EXISTS idx_automation_runs_task
@@ -400,412 +433,5 @@ impl SqliteStore {
                 successful_writes: AtomicUsize::new(0),
             }),
         })
-    }
-}
-
-#[derive(Debug)]
-struct LegacyGatewayBindingEvidence {
-    thread_id: String,
-    backend_kind: String,
-    backend_native_id: Option<String>,
-    lineage: Option<Value>,
-    metadata: Option<Value>,
-    malformed_json: bool,
-    cwd: String,
-    parent_thread_id: Option<String>,
-}
-
-#[derive(Debug)]
-struct LegacyGatewayBindingIdentity {
-    runtime_ref: Option<String>,
-    backend_kind: Option<String>,
-    native_kind: Option<String>,
-    native_session_id: Option<String>,
-    unresolved_reason: &'static str,
-}
-
-fn migrate_sqlite_schema_v25_to_v26(conn: &Connection) -> Result<()> {
-    conn.execute_batch("BEGIN IMMEDIATE")?;
-    let result = conn.execute_batch(
-        r#"
-        ALTER TABLE gateway_runtime_bindings ADD COLUMN profile_config_json TEXT;
-        UPDATE gateway_runtime_bindings
-        SET resolution_status = 'unresolved',
-            unresolved_reason = 'legacy_v25_profile_snapshot_required'
-        WHERE resolution_status = 'resolved';
-        PRAGMA user_version = 26;
-        "#,
-    );
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT")?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK");
-            Err(error.into())
-        }
-    }
-}
-
-fn migrate_sqlite_schema_v24_to_v25(conn: &Connection) -> Result<()> {
-    conn.execute_batch("BEGIN IMMEDIATE")?;
-    let result = migrate_sqlite_schema_v24_to_v25_inner(conn);
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT")?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK");
-            Err(error)
-        }
-    }
-}
-
-fn migrate_sqlite_schema_v24_to_v25_inner(conn: &Connection) -> Result<()> {
-    let had_source_bindings = sqlite_table_exists(conn, "gateway_source_bindings")?;
-    if had_source_bindings {
-        conn.execute_batch(
-            r#"
-            ALTER TABLE gateway_source_bindings RENAME TO gateway_source_bindings_v24;
-            "#,
-        )?;
-    }
-
-    conn.execute_batch(
-        r#"
-        CREATE TABLE gateway_source_bindings (
-            source_key TEXT PRIMARY KEY,
-            source_kind TEXT NOT NULL,
-            raw_identity_json TEXT NOT NULL,
-            visible_name TEXT,
-            thread_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
-            backend_kind TEXT,
-            backend_native_id TEXT,
-            draft_runtime_ref TEXT,
-            created_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL,
-            lineage_json TEXT
-        );
-
-        CREATE TABLE gateway_runtime_bindings (
-            thread_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-            resolution_status TEXT NOT NULL CHECK (resolution_status IN ('resolved', 'unresolved')),
-            runtime_ref TEXT,
-            backend_kind TEXT,
-            native_kind TEXT,
-            native_session_id TEXT,
-            cwd TEXT NOT NULL,
-            profile_fingerprint TEXT,
-            profile_revision TEXT,
-            adapter_kind TEXT,
-            adapter_revision TEXT,
-            ownership TEXT NOT NULL CHECK (ownership IN ('read_write', 'read_only')),
-            parent_thread_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
-            binding_revision INTEGER NOT NULL CHECK (binding_revision > 0),
-            unresolved_reason TEXT,
-            created_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL,
-            CHECK (
-                (resolution_status = 'resolved'
-                    AND runtime_ref IS NOT NULL
-                    AND backend_kind IS NOT NULL
-                    AND native_kind IS NOT NULL
-                    AND profile_fingerprint IS NOT NULL
-                    AND profile_revision IS NOT NULL
-                    AND adapter_kind IS NOT NULL
-                    AND adapter_revision IS NOT NULL
-                    AND unresolved_reason IS NULL)
-                OR
-                (resolution_status = 'unresolved' AND unresolved_reason IS NOT NULL)
-            )
-        );
-        "#,
-    )?;
-
-    if had_source_bindings {
-        let evidence = legacy_gateway_binding_evidence(conn)?;
-        conn.execute_batch(
-            r#"
-            INSERT INTO gateway_source_bindings (
-                source_key, source_kind, raw_identity_json, visible_name,
-                thread_id, backend_kind, backend_native_id, draft_runtime_ref,
-                created_at_ms, updated_at_ms, lineage_json
-            )
-            SELECT source_key, source_kind, raw_identity_json, visible_name,
-                   thread_id, backend_kind, backend_native_id, NULL,
-                   created_at_ms, updated_at_ms, lineage_json
-            FROM gateway_source_bindings_v24;
-            "#,
-        )?;
-        insert_legacy_runtime_bindings(conn, evidence)?;
-        conn.execute_batch("DROP TABLE gateway_source_bindings_v24;")?;
-    }
-
-    conn.execute_batch(
-        r#"
-        CREATE INDEX idx_gateway_source_bindings_thread
-            ON gateway_source_bindings(thread_id, updated_at_ms);
-        CREATE UNIQUE INDEX idx_gateway_runtime_bindings_native_session
-            ON gateway_runtime_bindings(runtime_ref, native_session_id)
-            WHERE native_session_id IS NOT NULL;
-        CREATE INDEX idx_gateway_runtime_bindings_parent
-            ON gateway_runtime_bindings(parent_thread_id, updated_at_ms);
-        PRAGMA user_version = 25;
-        "#,
-    )?;
-    Ok(())
-}
-
-fn legacy_gateway_binding_evidence(conn: &Connection) -> Result<Vec<LegacyGatewayBindingEvidence>> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT binding.thread_id, binding.backend_kind, binding.backend_native_id,
-               binding.lineage_json, sessions.metadata_json, sessions.cwd,
-               sessions.parent_session_id
-        FROM gateway_source_bindings_v24 AS binding
-        JOIN sessions ON sessions.id = binding.thread_id
-        ORDER BY binding.thread_id, binding.source_key
-        "#,
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, String>(5)?,
-            row.get::<_, Option<String>>(6)?,
-        ))
-    })?;
-    let mut evidence = Vec::new();
-    for row in rows {
-        let (
-            thread_id,
-            backend_kind,
-            backend_native_id,
-            lineage_json,
-            metadata_json,
-            cwd,
-            parent_thread_id,
-        ) = row?;
-        let (lineage, malformed_lineage) = parse_optional_legacy_json(lineage_json.as_deref());
-        let (metadata, malformed_metadata) = parse_optional_legacy_json(metadata_json.as_deref());
-        evidence.push(LegacyGatewayBindingEvidence {
-            thread_id,
-            backend_kind,
-            backend_native_id,
-            lineage,
-            metadata,
-            malformed_json: malformed_lineage || malformed_metadata,
-            cwd,
-            parent_thread_id,
-        });
-    }
-    Ok(evidence)
-}
-
-fn parse_optional_legacy_json(value: Option<&str>) -> (Option<Value>, bool) {
-    match value {
-        Some(value) => match serde_json::from_str(value) {
-            Ok(value) => (Some(value), false),
-            Err(_) => (None, true),
-        },
-        None => (None, false),
-    }
-}
-
-fn insert_legacy_runtime_bindings(
-    conn: &Connection,
-    evidence: Vec<LegacyGatewayBindingEvidence>,
-) -> Result<()> {
-    let mut by_thread = std::collections::BTreeMap::<String, Vec<_>>::new();
-    for row in evidence {
-        by_thread
-            .entry(row.thread_id.clone())
-            .or_default()
-            .push(row);
-    }
-    let now = now_ms();
-    let mut migrated = by_thread
-        .into_iter()
-        .map(|(thread_id, rows)| {
-            let identity = legacy_gateway_binding_identity(&rows);
-            let cwd = rows.first().map(|row| row.cwd.clone()).unwrap_or_default();
-            let parent_thread_id =
-                consistent_optional_value(rows.iter().map(|row| row.parent_thread_id.as_deref()));
-            (thread_id, cwd, parent_thread_id, identity)
-        })
-        .collect::<Vec<_>>();
-    let mut native_identity_counts = std::collections::BTreeMap::new();
-    for (_, _, _, identity) in &migrated {
-        if let (Some(runtime_ref), Some(native_session_id)) =
-            (&identity.runtime_ref, &identity.native_session_id)
-        {
-            *native_identity_counts
-                .entry((runtime_ref.clone(), native_session_id.clone()))
-                .or_insert(0usize) += 1;
-        }
-    }
-    for (_, _, _, identity) in &mut migrated {
-        if let (Some(runtime_ref), Some(native_session_id)) =
-            (&identity.runtime_ref, &identity.native_session_id)
-            && native_identity_counts
-                .get(&(runtime_ref.clone(), native_session_id.clone()))
-                .copied()
-                .unwrap_or_default()
-                > 1
-        {
-            *identity = ambiguous_legacy_binding();
-        }
-    }
-    for (thread_id, cwd, parent_thread_id, identity) in migrated {
-        conn.execute(
-            r#"
-            INSERT INTO gateway_runtime_bindings (
-                thread_id, resolution_status, runtime_ref, backend_kind,
-                native_kind, native_session_id, cwd, profile_fingerprint,
-                profile_revision, adapter_kind, adapter_revision, ownership,
-                parent_thread_id, binding_revision, unresolved_reason,
-                created_at_ms, updated_at_ms
-            ) VALUES (
-                ?1, 'unresolved', ?2, ?3, ?4, ?5, ?6, NULL, NULL, NULL,
-                NULL, 'read_write', ?7, 1, ?8, ?9, ?9
-            )
-            "#,
-            params![
-                thread_id,
-                identity.runtime_ref,
-                identity.backend_kind,
-                identity.native_kind,
-                identity.native_session_id,
-                cwd,
-                parent_thread_id,
-                identity.unresolved_reason,
-                now,
-            ],
-        )?;
-    }
-    Ok(())
-}
-
-fn legacy_gateway_binding_identity(
-    rows: &[LegacyGatewayBindingEvidence],
-) -> LegacyGatewayBindingIdentity {
-    if rows.is_empty()
-        || rows.iter().any(|row| row.malformed_json)
-        || !all_equal(rows.iter().map(|row| row.cwd.as_str()))
-    {
-        return ambiguous_legacy_binding();
-    }
-    let backend_kinds = rows
-        .iter()
-        .map(|row| row.backend_kind.as_str())
-        .collect::<BTreeSet<_>>();
-    if backend_kinds == BTreeSet::from(["psychevo"]) {
-        let runtime_refs = rows
-            .iter()
-            .filter_map(|row| legacy_lineage_runtime_ref(row.lineage.as_ref()))
-            .collect::<BTreeSet<_>>();
-        if runtime_refs.iter().any(|value| *value != "native") {
-            return ambiguous_legacy_binding();
-        }
-        let native_ids = rows
-            .iter()
-            .filter_map(|row| row.backend_native_id.as_deref())
-            .collect::<BTreeSet<_>>();
-        if native_ids.len() > 1 {
-            return ambiguous_legacy_binding();
-        }
-        let native_session_id = native_ids.into_iter().next().map(str::to_string);
-        return LegacyGatewayBindingIdentity {
-            runtime_ref: Some("native".to_string()),
-            backend_kind: Some("psychevo".to_string()),
-            native_kind: Some("native".to_string()),
-            native_session_id,
-            unresolved_reason: "legacy_v24_profile_snapshot_required",
-        };
-    }
-    if backend_kinds != BTreeSet::from(["peer_agent"]) {
-        return ambiguous_legacy_binding();
-    }
-
-    let peer_metadata = rows
-        .iter()
-        .filter_map(|row| row.metadata.as_ref()?.get("peer_agent"))
-        .collect::<Vec<_>>();
-    let backend_ids = peer_metadata
-        .iter()
-        .filter(|peer| peer.get("backendKind").and_then(Value::as_str) == Some("acp"))
-        .filter_map(|peer| peer.get("backendId").and_then(Value::as_str))
-        .filter(|value| !value.trim().is_empty())
-        .collect::<BTreeSet<_>>();
-    if backend_ids.len() != 1 {
-        return ambiguous_legacy_binding();
-    }
-    let backend_id = *backend_ids.iter().next().expect("one backend id");
-    let lineage_refs = rows
-        .iter()
-        .filter_map(|row| legacy_lineage_runtime_ref(row.lineage.as_ref()))
-        .collect::<BTreeSet<_>>();
-    if lineage_refs
-        .iter()
-        .any(|value| *value != backend_id && *value != format!("acp:{backend_id}"))
-    {
-        return ambiguous_legacy_binding();
-    }
-    let native_ids = rows
-        .iter()
-        .filter_map(|row| row.backend_native_id.as_deref())
-        .chain(
-            peer_metadata
-                .iter()
-                .filter_map(|peer| peer.get("nativeSessionId").and_then(Value::as_str)),
-        )
-        .filter(|value| !value.trim().is_empty())
-        .collect::<BTreeSet<_>>();
-    if native_ids.len() > 1 {
-        return ambiguous_legacy_binding();
-    }
-    LegacyGatewayBindingIdentity {
-        runtime_ref: Some(format!("acp:{backend_id}")),
-        backend_kind: Some("peer_agent".to_string()),
-        native_kind: Some("acp".to_string()),
-        native_session_id: native_ids.into_iter().next().map(str::to_string),
-        unresolved_reason: "legacy_v24_profile_snapshot_required",
-    }
-}
-
-fn legacy_lineage_runtime_ref(lineage: Option<&Value>) -> Option<&str> {
-    lineage?
-        .get("runtimeRef")
-        .or_else(|| lineage?.get("runtime_ref"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
-fn consistent_optional_value<'a>(values: impl Iterator<Item = Option<&'a str>>) -> Option<String> {
-    let values = values.flatten().collect::<BTreeSet<_>>();
-    (values.len() == 1).then(|| (*values.iter().next().expect("one value")).to_string())
-}
-
-fn all_equal<'a>(values: impl Iterator<Item = &'a str>) -> bool {
-    let mut values = values;
-    let Some(first) = values.next() else {
-        return true;
-    };
-    values.all(|value| value == first)
-}
-
-fn ambiguous_legacy_binding() -> LegacyGatewayBindingIdentity {
-    LegacyGatewayBindingIdentity {
-        runtime_ref: None,
-        backend_kind: None,
-        native_kind: None,
-        native_session_id: None,
-        unresolved_reason: "legacy_v24_backend_ambiguous",
     }
 }

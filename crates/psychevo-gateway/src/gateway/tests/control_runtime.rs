@@ -61,19 +61,120 @@
         first.await.expect("first task").expect("first turn");
     }
 
-    #[test]
-    fn direct_opencode_binding_rejects_public_steer_before_queueing() {
+    #[tokio::test]
+        async fn native_agent_adapter_lowers_runtime_control_map_without_dispatch_name_branch() {
+        let backend = Arc::new(FakeBackend::default());
+        let harness = harness(backend.clone());
+        let mut request = request(
+            &harness,
+            GatewaySource::new("web", "native-controls").process(),
+            "control lowering",
+        );
+        request.options.runtime_options = BTreeMap::from([
+            ("model".to_string(), "model-a".to_string()),
+            ("reasoning".to_string(), "high".to_string()),
+            ("mode".to_string(), "plan".to_string()),
+            ("permissionMode".to_string(), "dontAsk".to_string()),
+        ]);
+
+            let result = harness
+                .gateway
+                .send_turn(request)
+                .await
+                .expect("Native turn");
+
+            let runs = backend.runs();
+        let run = runs.first().expect("captured Native request");
+        assert_eq!(run.model.as_deref(), Some("model-a"));
+        assert_eq!(run.reasoning_effort.as_deref(), Some("high"));
+            assert_eq!(run.mode, RunMode::Plan);
+            assert_eq!(run.permission_mode, Some(PermissionMode::DontAsk));
+            assert!(run.runtime_options.is_empty());
+            let binding = harness
+                .state
+                .store()
+                .gateway_runtime_binding(&result.thread.id)
+                .expect("binding read")
+                .expect("binding");
+            assert_eq!(binding.agent_ref, None);
+            assert!(binding.agent_fingerprint.is_some());
+            assert!(
+                binding
+                    .agent_definition_json
+                    .as_deref()
+                    .is_some_and(|snapshot| snapshot.contains("psychevo.default-agent"))
+            );
+        }
+
+        #[tokio::test]
+        async fn bound_named_agent_ignores_current_definition_drift() {
+            let backend = Arc::new(FakeBackend::default());
+            let harness = harness(backend);
+            let home = harness._temp.path().join("home");
+            let agents = harness.cwd.join(".psychevo/agents");
+            std::fs::create_dir_all(&home).expect("home");
+            std::fs::create_dir_all(&agents).expect("agents");
+            let definition = agents.join("reviewer.md");
+            std::fs::write(
+                &definition,
+                "---\ndescription: Reviewer\n---\nReview version one.\n",
+            )
+            .expect("Agent Definition");
+            let env = BTreeMap::from([
+                (
+                    "HOME".to_string(),
+                    harness._temp.path().display().to_string(),
+                ),
+                ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+            ]);
+            let source = GatewaySource::new("web", "agent-fingerprint").process();
+            let mut first = request(&harness, source.clone(), "first");
+            first.options.agent = Some("reviewer".to_string());
+            first.options.inherited_env = Some(env.clone());
+            let first = harness.gateway.send_turn(first).await.expect("first turn");
+            let binding = harness
+                .state
+                .store()
+                .gateway_runtime_binding(&first.thread.id)
+                .expect("binding read")
+                .expect("binding");
+            assert_eq!(binding.agent_ref.as_deref(), Some("reviewer"));
+            assert!(binding.agent_definition_json.as_deref().is_some_and(|snapshot| {
+                snapshot.contains("Review version one.")
+            }));
+
+            std::fs::write(
+                &definition,
+                "---\ndescription: Reviewer\n---\nReview version two.\n",
+            )
+            .expect("changed Agent Definition");
+            let mut second = request(&harness, source, "second");
+            second.thread_id = Some(first.thread.id);
+            second.options.inherited_env = Some(env);
+            let second = harness
+                .gateway
+                .send_turn(second)
+                .await
+                .expect("captured Agent Definition remains authoritative");
+            let binding = harness
+                .state
+                .store()
+                .gateway_runtime_binding(&second.thread.id)
+                .expect("binding read")
+                .expect("binding");
+            assert!(binding.agent_definition_json.as_deref().is_some_and(|snapshot| {
+                snapshot.contains("Review version one.")
+                    && !snapshot.contains("Review version two.")
+            }));
+        }
+
+        #[test]
+    fn acp_binding_rejects_public_steer_before_queueing() {
         let harness = harness(Arc::new(FakeBackend::default()));
         let thread_id = harness
             .state
             .store()
-            .create_session_with_metadata(
-                &harness.cwd,
-                "test",
-                "model",
-                "provider",
-                None,
-            )
+            .create_session_with_metadata(&harness.cwd, "test", "model", "provider", None)
             .expect("session");
         let cwd = harness.cwd.to_string_lossy().to_string();
         harness
@@ -81,15 +182,18 @@
             .store()
             .create_gateway_runtime_binding(GatewayRuntimeBindingInput {
                 thread_id: &thread_id,
+                agent_ref: Some("opencode"),
+                agent_fingerprint: "agent-fingerprint",
+                agent_definition_json: r#"{"name":"opencode"}"#,
                 runtime_ref: "opencode",
-                backend_kind: "runtime",
-                native_kind: "opencode",
+                backend_kind: "acp",
+                native_kind: "acp",
                 native_session_id: Some("native-session"),
                 cwd: &cwd,
                 profile_fingerprint: "fingerprint",
                 profile_revision: "1",
                 profile_config_json: "{}",
-                adapter_kind: "opencode-direct",
+                adapter_kind: "acp",
                 adapter_revision: "1",
                 ownership: GatewayRuntimeBindingOwnership::ReadWrite,
                 parent_thread_id: None,

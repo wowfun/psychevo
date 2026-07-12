@@ -121,9 +121,8 @@ export const shellSchemas = {
   "definitions": {
     "BackendKind": {
       "enum": [
-        "psychevo",
-        "peerAgent",
-        "runtime"
+        "native",
+        "acp"
       ],
       "type": "string"
     },
@@ -207,6 +206,14 @@ export const shellSchemas = {
         "order": {
           "format": "int64",
           "type": "integer"
+        },
+        "phaseOrdinal": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "preview": {
           "type": [

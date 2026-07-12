@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::{AgentErrorStage, agent_error_view, agent_session_error};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
@@ -37,31 +38,31 @@ use psychevo_runtime::{
     AutomationRunFinishInput, AutomationRunRecord, AutomationSchedule, AutomationTaskInput,
     AutomationTaskRecord, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyResponse, ClarifyResult,
     ConfigScope, ContextOptions, Error, ExecutableResolveOptions, GatewayRuntimeBindingOwnership,
-    GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus, GatewaySourceLaneInput, HostPlatform,
-    InstallOptions, ListSkillsOptions, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP,
-    MAX_TEAM_PARALLEL_AGENTS_CAP, McpServerConfigInput, McpToolPolicyInput,
-    Message as RuntimeMessage, ModelCatalogEntry, ModelCatalogProvider, ModelState,
-    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionMode, PluginAdapterMode,
-    PluginInspectOptions, PluginInstallOptions, PluginMarketplaceEntry, PluginScope,
-    PluginSourceKind, REASONING_EFFORT_VALUES, RunMode, RunOptions, RunSandboxOverride,
-    RuntimeProfileConfig, RuntimeProfileKind, SESSION_COMPOSER_MODEL_METADATA_KEY,
-    SESSION_MAIN_AGENT_METADATA_KEY, SIDE_CONVERSATION_METADATA_KEY,
-    SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY, SessionArtifactKind,
-    SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionSummary,
-    SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions, SkillDiscoveryOptions,
-    SkillTarget, StateRuntime, UsageReadOptions, UserContentBlock, UserShellContextOptions,
-    WEB_SIDE_CONVERSATION_SESSION_SOURCE, agent_spawn_paused, agent_status_records,
-    auth_status_value, canonicalize_cwd, clear_mcp_oauth_access_token, config_show_value,
-    configured_models, context_snapshot, create_local_toolset, discover_agent_teams_with_catalog,
-    discover_agents, discover_skills, fetch_and_cache_model_catalog, format_context_total_value,
-    format_context_total_value_parts, image_generation_config_value, install_skill,
-    latest_due_at_ms, list_skill_bundles, list_skills_value_with_options,
-    load_agent_backend_configs, load_runtime_profile_configs, main_agent_default_metadata,
-    main_agent_from_session_metadata, main_agent_metadata, mcp_server_value, mcp_servers_value,
-    mcp_test_server_value, model_catalog_entry_is_free, model_catalog_provider,
-    model_catalog_providers, next_run_at_ms, normalize_provider_id, normalize_reasoning_effort,
-    parse_agent_definition_text, parse_agent_team_definition_text, plugin_doctor_value,
-    plugin_import_inspect_value, plugin_install_value, plugin_list_value,
+    GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch,
+    GatewaySourceLaneInput, HostPlatform, InstallOptions, ListSkillsOptions, LoadedMainAgent,
+    MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP, McpServerConfigInput,
+    McpToolPolicyInput, Message as RuntimeMessage, ModelCatalogEntry, ModelCatalogProvider,
+    ModelState, PermissionApprovalDecision, PermissionApprovalOutcome, PermissionMode,
+    PluginAdapterMode, PluginInspectOptions, PluginInstallOptions, PluginMarketplaceEntry,
+    PluginScope, PluginSourceKind, REASONING_EFFORT_VALUES, RunMode, RunOptions,
+    RunSandboxOverride, RuntimeProfileConfig, RuntimeProfileKind,
+    SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
+    SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
+    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
+    SessionSummary, SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions,
+    SkillDiscoveryOptions, SkillTarget, StateRuntime, UsageReadOptions, UserContentBlock,
+    UserShellContextOptions, WEB_SIDE_CONVERSATION_SESSION_SOURCE, agent_spawn_paused,
+    agent_status_records, auth_status_value, canonicalize_cwd, clear_mcp_oauth_access_token,
+    config_show_value, configured_models, context_snapshot, create_local_toolset,
+    discover_agent_teams_with_catalog, discover_agents, discover_skills,
+    fetch_and_cache_model_catalog, format_context_total_value, format_context_total_value_parts,
+    image_generation_config_value, install_skill, latest_due_at_ms, list_skill_bundles,
+    list_skills_value_with_options, load_agent_backend_configs, load_runtime_profile_configs,
+    main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
+    mcp_server_value, mcp_servers_value, mcp_test_server_value, model_catalog_entry_is_free,
+    model_catalog_provider, model_catalog_providers, next_run_at_ms, normalize_provider_id,
+    normalize_reasoning_effort, parse_agent_definition_text, parse_agent_team_definition_text,
+    plugin_doctor_value, plugin_import_inspect_value, plugin_install_value, plugin_list_value,
     plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
     plugin_set_enabled_value, plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
     read_cached_model_catalog, redo_session, remove_config_value, remove_installed_skill,
@@ -85,11 +86,11 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
-    ACP_PEER_METADATA_KEY, BackendKind, Gateway, GatewayActionKind, GatewayActivity,
-    GatewayBackendInfo, GatewayEvent, GatewayEventSink, GatewayInputPart, GatewayShellResult,
-    GatewaySource, GatewaySourceLifetime, GatewayThread, GatewayThreadSelector, GatewayTurnResult,
-    PendingActionView, PermissionDecision, SendCompactRequest, SendShellRequest, SourceKey,
-    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    ACP_PEER_METADATA_KEY, BackendKind, Gateway, GatewayActionKind, GatewayActionOutcome,
+    GatewayActivity, GatewayBackendInfo, GatewayEvent, GatewayEventSink, GatewayInputPart,
+    GatewayShellResult, GatewaySource, GatewaySourceLifetime, GatewayThread, GatewayThreadSelector,
+    GatewayTurnResult, PendingActionView, PermissionDecision, SendCompactRequest, SendShellRequest,
+    SourceKey, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
     TranscriptEntryRole, gateway_now_ms, transcript,
 };
 #[cfg(test)]
@@ -102,17 +103,20 @@ mod channels;
 mod commands;
 mod completion;
 mod runtime_profiles;
+mod session_lifecycle;
 mod terminal;
+mod thread_application;
 mod voice;
 mod workspace;
 
 use agents::{
     active_profile_config_dir, agent_control_result, agent_list_result, agent_read_result,
-    agent_status_result, backend_doctor_value, backend_values_for_scope, delete_agent_definition,
-    delete_backend_config, delete_team_definition, discover_gateway_teams,
-    materialize_local_acp_backends, read_agent_definition, read_team_definition,
-    set_agent_definition_enabled, set_team_definition_enabled, team_list_result, team_read_result,
-    team_status_result, write_agent_definition, write_backend_config, write_team_definition,
+    agent_status_result, backend_values_for_scope, delete_agent_definition, delete_backend_config,
+    delete_team_definition, discover_gateway_teams, manage_backend_value,
+    managed_backend_doctor_value_with_auth, materialize_local_acp_backends, read_agent_definition,
+    read_team_definition, set_agent_definition_enabled, set_team_definition_enabled,
+    team_list_result, team_read_result, team_status_result, write_agent_definition,
+    write_backend_config, write_team_definition,
 };
 use automations::{
     automation_delete_result, automation_draft_result, automation_list_result,
@@ -132,20 +136,36 @@ use commands::{
 #[cfg(test)]
 use completion::active_completion_token;
 use completion::completion_list_value;
+#[cfg(test)]
 use runtime_profiles::{
-    delete_runtime_profile, ensure_turn_runtime_profile_supported, resolve_runtime_ref_peer_turn,
-    runtime_account_rate_limits_read_result, runtime_auth_action_result,
-    runtime_context_read_result, runtime_control_set_result, runtime_goal_clear_result,
-    runtime_goal_read_result, runtime_goal_set_result, runtime_health_check_result,
-    runtime_profile_list_result, runtime_profile_options, runtime_profile_read_result,
-    runtime_session_archive_result, runtime_session_attach_result_live,
-    runtime_session_delete_result, runtime_session_direct_action_result,
-    runtime_session_direct_revision_result, runtime_session_list_result_live,
-    runtime_session_read_result, runtime_session_read_result_live, runtime_session_rename_result,
-    runtime_session_resume_result_live, runtime_snapshot_result, set_runtime_profile_enabled,
-    validate_and_capture_team_runtime_members, write_runtime_profile,
+    acp_session_mode_control_descriptor, combined_thread_revision, generated_runtime_profiles,
+};
+use runtime_profiles::{
+    apply_thread_control_precedence, cached_thread_history_descriptor, delete_runtime_profile,
+    ensure_turn_runtime_profile_supported, runnable_target_for_source,
+    runnable_target_for_source_profile, runtime_backend_kind, runtime_profile_list_result,
+    runtime_profile_read_result, set_runtime_profile_enabled,
+    thread_context_read_result_for_target_id, thread_context_read_result_live,
+    thread_control_override_string_value, thread_control_set_result, thread_draft_prepare_result,
+    validate_and_capture_team_runtime_members, validate_turn_runnable_target,
+    write_runtime_profile,
+};
+use session_lifecycle::{
+    archive_thread, delete_thread, fork_thread, import_agent_session,
+    list_importable_agent_sessions, reconcile_acknowledged_session_deletes, restore_thread,
 };
 use terminal::TerminalManager;
+use thread_application::{
+    RoutedThreadTurn, action_descriptors as thread_action_descriptors,
+    authoritative_history_projection, authoritative_history_view,
+    pending_interactions as thread_pending_interactions,
+    read_history as thread_history_read_result,
+    respond_to_interaction as thread_interaction_respond_result,
+    respond_to_routed_interaction_for_selector as thread_routed_interaction_respond_for_selector,
+    run_action as thread_action_run_result, run_routed_action as run_routed_thread_action,
+    run_routed_turn as run_routed_thread_turn, source_draft_control_values,
+    validate_turn_admission, validate_turn_revisions,
+};
 use voice::{
     RealtimeSessionState, update_voice_policy_for_source, voice_asr_transcribe_value,
     voice_policy_for_source, voice_policy_read_value, voice_policy_update_value,
@@ -179,11 +199,10 @@ mod tests {
     include!("server/tests/observability.rs");
     include!("server/tests/session_browser.rs");
     include!("server/tests/agents_settings.rs");
-    include!("server/tests/runtime_extensions.rs");
     include!("server/tests/workspace_commands.rs");
     include!("server/tests/automations.rs");
     include!("server/tests/voice_rpc.rs");
     include!("server/tests/terminal_launch.rs");
-    include!("server/tests/lifecycle.rs");
+    include!("server/tests/session_lifecycle.rs");
     include!("server/tests/helpers.rs");
 }

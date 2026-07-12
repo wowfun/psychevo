@@ -1,0 +1,755 @@
+use super::*;
+
+pub(super) struct RoutedThreadTurn {
+    pub(super) thread_id: Option<String>,
+    pub(super) context: wire::ThreadContextReadResult,
+    pub(super) control_values: BTreeMap<String, String>,
+    pub(super) initial_thread_preferences: BTreeMap<String, String>,
+    pub(super) input: Vec<GatewayInputPart>,
+    pub(super) mentions: Vec<wire::GatewayMention>,
+    pub(super) turn_overrides: BTreeMap<String, Value>,
+    pub(super) runtime_source: String,
+    pub(super) continue_sources: Vec<String>,
+    pub(super) event_sink: Option<GatewayEventSink>,
+    pub(super) lineage: Option<Value>,
+    pub(super) source: Option<GatewaySource>,
+    pub(super) bind_source: Option<GatewaySource>,
+    pub(super) turn_id: Option<String>,
+}
+
+pub(super) fn source_draft_control_values(
+    context: &wire::ThreadContextReadResult,
+) -> psychevo_runtime::Result<BTreeMap<String, String>> {
+    context
+        .controls
+        .iter()
+        .filter(|control| {
+            control.effective_source == wire::ThreadControlEffectiveSourceView::SourceDraft
+        })
+        .filter_map(|control| {
+            control
+                .effective_value
+                .as_ref()
+                .map(|value| (control.id.clone(), value))
+        })
+        .map(|(control_id, value)| {
+            thread_control_override_string_value(value).map(|value| (control_id, value))
+        })
+        .collect()
+}
+
+/// Delivers one turn for an internal source broker through the same target,
+/// descriptor, control-precedence, and Adapter boundary as public turn/start.
+pub(super) async fn run_routed_turn(
+    state: &WebState,
+    scope: &ResolvedScope,
+    request: RoutedThreadTurn,
+) -> psychevo_runtime::Result<crate::GatewayTurnResult> {
+    let context = request.context;
+    let target = context
+        .compatible_targets
+        .iter()
+        .find(|target| target.target_id == context.target_id)
+        .cloned()
+        .or_else(|| {
+            context
+                .binding
+                .as_ref()
+                .map(|binding| wire::RunnableTargetView {
+                    target_id: context.target_id.clone(),
+                    agent_ref: binding.agent_ref.clone(),
+                    runtime_profile_ref: context.runtime_profile_ref.clone(),
+                    agent_label: binding
+                        .agent_ref
+                        .clone()
+                        .unwrap_or_else(|| "Default Agent".to_string()),
+                    profile_label: context.runtime_profile_ref.clone(),
+                    label: context.runtime_profile_ref.clone(),
+                    ready: context.sendability.allowed,
+                    unavailable_reason: context.sendability.reason.clone(),
+                })
+        })
+        .ok_or_else(|| {
+            agent_session_error(
+                "target_not_found",
+                AgentErrorStage::Binding,
+                "user_action",
+                "not_delivered",
+                "The selected Agent target is no longer present in Thread Context.",
+                None,
+            )
+        })?;
+    validate_turn_admission(
+        &context,
+        &request.input,
+        &request.mentions,
+        &request.turn_overrides,
+    )?;
+    if context.binding.is_none() {
+        ensure_turn_runtime_profile_supported(state, scope, Some(&target.runtime_profile_ref))?;
+    }
+    let mut gateway_request =
+        state.thread_turn_request(scope.cwd.clone(), request.thread_id.clone(), request.input);
+    gateway_request.policy.runtime_profile_ref = Some(target.runtime_profile_ref);
+    gateway_request.policy.agent_ref = target.agent_ref;
+    gateway_request.policy.control_values = request.control_values;
+    gateway_request.policy.initial_thread_preferences = request.initial_thread_preferences;
+    for (control_id, value) in &request.turn_overrides {
+        gateway_request.policy.control_values.insert(
+            control_id.clone(),
+            thread_control_override_string_value(value)?,
+        );
+    }
+    apply_mentions_to_turn_policy(&mut gateway_request.policy, &request.mentions)?;
+    gateway_request.source = request.source;
+    gateway_request.bind_source = request.bind_source;
+    gateway_request.runtime_source = Some(request.runtime_source);
+    gateway_request.continue_sources = request.continue_sources;
+    gateway_request.event_sink = request.event_sink;
+    gateway_request.lineage = request.lineage;
+    gateway_request.turn_id = request.turn_id;
+    state.inner.gateway.run_turn(gateway_request).await
+}
+
+pub(super) fn action_descriptors(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<&str>,
+    supported_actions: &[wire::ThreadActionKind],
+    selected_ready: bool,
+    stability: Option<wire::RuntimeStabilityView>,
+) -> psychevo_runtime::Result<Vec<wire::ThreadActionDescriptorView>> {
+    let Some(thread_id) = thread_id else {
+        return Ok(Vec::new());
+    };
+    let activity = snapshot_activity(state, &scope.source, Some(thread_id))?;
+    let active = activity.running || activity.queued_turns > 0;
+    let stability = stability.unwrap_or(wire::RuntimeStabilityView::Stable);
+    let descriptor = |id, label: &str, enabled: bool, unavailable_reason: Option<String>| {
+        wire::ThreadActionDescriptorView {
+            id,
+            label: label.to_string(),
+            enabled,
+            stability,
+            channel_safe: true,
+            unavailable_reason,
+        }
+    };
+    let inactive_reason = || Some("No turn is currently running on this Thread.".to_string());
+    let actions = supported_actions
+        .iter()
+        .map(|action| match action {
+            wire::ThreadActionKind::Interrupt => descriptor(
+                *action,
+                "Interrupt",
+                active,
+                (!active).then(inactive_reason).flatten(),
+            ),
+            wire::ThreadActionKind::Steer => {
+                let enabled = activity.active_turn_id.is_some();
+                descriptor(
+                    *action,
+                    "Steer",
+                    enabled,
+                    (!enabled).then(inactive_reason).flatten(),
+                )
+            }
+            wire::ThreadActionKind::Compact => descriptor(
+                *action,
+                "Compact context",
+                selected_ready,
+                (!selected_ready)
+                    .then(|| "This Agent target is currently unavailable.".to_string()),
+            ),
+            wire::ThreadActionKind::Fork => descriptor(
+                *action,
+                "Fork session",
+                selected_ready && !active,
+                (!selected_ready)
+                    .then(|| "This Agent target is currently unavailable.".to_string())
+                    .or_else(|| active.then(|| "A running Thread cannot be forked.".to_string())),
+            ),
+        })
+        .collect();
+    Ok(actions)
+}
+
+pub(super) fn pending_interactions(
+    state: &WebState,
+    _scope: &ResolvedScope,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<Vec<PendingActionView>> {
+    let Some(thread_id) = thread_id else {
+        return Ok(Vec::new());
+    };
+    let selector = GatewayThreadSelector::thread_id(thread_id);
+    Ok(prune_pending_actions(state, &selector, Some(thread_id))?
+        .into_iter()
+        .filter(|action| {
+            matches!(
+                action.kind,
+                GatewayActionKind::Permission | GatewayActionKind::Clarify
+            )
+        })
+        .collect())
+}
+
+pub(super) fn authoritative_history_view(
+    state: &WebState,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<wire::ThreadHistoryView> {
+    cached_thread_history_descriptor(state, thread_id)
+}
+
+pub(super) fn authoritative_history_projection(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: &str,
+) -> psychevo_runtime::Result<Vec<TranscriptEntry>> {
+    let activity = snapshot_activity(state, &scope.source, Some(thread_id))?;
+    let mut entries = state.inner.gateway.thread_transcript(thread_id)?;
+    if let Some((turn_id, first_committed_seq)) =
+        active_turn_projection_window(state, thread_id, &activity)?
+    {
+        transcript::stamp_committed_entries_for_turn_window(
+            &mut entries,
+            transcript::TurnProjectionWindow {
+                turn_id: &turn_id,
+                first_committed_seq,
+            },
+        );
+    }
+    replay_running_live_transcript_overlay(state, thread_id, &activity, &mut entries)?;
+    Ok(entries)
+}
+
+pub(super) async fn read_history(
+    state: &WebState,
+    auth: &AuthContext,
+    requested_scope: &ResolvedScope,
+    params: wire::ThreadHistoryReadParams,
+) -> psychevo_runtime::Result<wire::ThreadHistoryReadResult> {
+    authorize_thread(state, auth, &params.thread_id)?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    if scope.cwd != requested_scope.cwd {
+        return Err(agent_session_error(
+            "thread_scope_mismatch",
+            AgentErrorStage::History,
+            "user_action",
+            "not_delivered",
+            "The requested Thread does not belong to this workspace scope.",
+            Some(format!("thread:{}", params.thread_id)),
+        ));
+    }
+    let context = thread_context_read_result_live(
+        state,
+        &scope,
+        wire::ThreadContextReadParams {
+            thread_id: Some(params.thread_id.clone()),
+            target: None,
+            scope: Some(scope.to_wire_scope()),
+        },
+    )
+    .await?;
+    let entries = authoritative_history_projection(state, &scope, &params.thread_id)?;
+    let start = match params.cursor.as_deref() {
+        None => 0,
+        Some(cursor) => entries
+            .iter()
+            .position(|entry| entry.id == cursor)
+            .map(|index| index + 1)
+            .ok_or_else(|| {
+                agent_session_error(
+                    "history_cursor_unknown",
+                    AgentErrorStage::History,
+                    "user_action",
+                    "not_delivered",
+                    "The history cursor is not present in this Thread projection.",
+                    Some(format!("thread:{}", params.thread_id)),
+                )
+            })?,
+    };
+    let limit = params.limit.unwrap_or(100).clamp(1, 200);
+    let end = start.saturating_add(limit).min(entries.len());
+    let page = entries[start..end].to_vec();
+    let next_cursor = (end < entries.len())
+        .then(|| page.last().map(|entry| entry.id.clone()))
+        .flatten();
+    let mut history = context.history;
+    history.cursor = next_cursor.clone();
+    Ok(wire::ThreadHistoryReadResult {
+        thread_id: params.thread_id,
+        history,
+        entries: page,
+        next_cursor,
+    })
+}
+
+pub(super) async fn run_action(
+    state: &WebState,
+    auth: &AuthContext,
+    requested_scope: &ResolvedScope,
+    params: wire::ThreadActionRunParams,
+    out_tx: mpsc::UnboundedSender<String>,
+) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
+    authorize_thread(state, auth, &params.thread_id)?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    if scope.cwd != requested_scope.cwd {
+        return Err(agent_session_error(
+            "thread_scope_mismatch",
+            AgentErrorStage::Control,
+            "user_action",
+            "not_delivered",
+            "The requested Thread does not belong to this workspace scope.",
+            Some(format!("thread:{}", params.thread_id)),
+        ));
+    }
+    run_routed_action(state, &scope, params, out_tx).await
+}
+
+/// Runs an action already authorized by an internal source broker. Public RPC
+/// callers must use `run_action`; Channels use this seam only after resolving
+/// their source lane to its authoritative public Thread.
+pub(super) async fn run_routed_action(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadActionRunParams,
+    out_tx: mpsc::UnboundedSender<String>,
+) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
+    let context = thread_context_read_result_live(
+        state,
+        scope,
+        wire::ThreadContextReadParams {
+            thread_id: Some(params.thread_id.clone()),
+            target: None,
+            scope: Some(scope.to_wire_scope()),
+        },
+    )
+    .await?;
+    let action_kind = params.action.kind();
+    let descriptor = context
+        .actions
+        .iter()
+        .find(|descriptor| descriptor.id == action_kind)
+        .ok_or_else(|| {
+            agent_session_error(
+                "action_unsupported",
+                AgentErrorStage::Control,
+                "user_action",
+                "not_delivered",
+                "This Thread runtime does not support the requested action.",
+                Some(format!("thread:{}", params.thread_id)),
+            )
+        })?;
+    if !descriptor.enabled {
+        return Err(agent_session_error(
+            "action_unavailable",
+            AgentErrorStage::Control,
+            "retry",
+            "not_delivered",
+            descriptor
+                .unavailable_reason
+                .clone()
+                .unwrap_or_else(|| "The requested action is temporarily unavailable.".to_string()),
+            Some(format!("thread:{}", params.thread_id)),
+        ));
+    }
+    let selector = GatewayThreadSelector::thread_id(&params.thread_id);
+    match params.action {
+        wire::ThreadActionInput::Interrupt => {
+            let interrupted = state.inner.gateway.interrupt_turn(selector.clone());
+            let cleared = state.inner.gateway.clear_queue(selector);
+            Ok(wire::ThreadActionRunResult::Interrupt {
+                thread_id: params.thread_id,
+                interrupted,
+                cleared,
+            })
+        }
+        wire::ThreadActionInput::Steer {
+            expected_turn_id,
+            text,
+        } => {
+            if text.trim().is_empty() {
+                return Err(agent_session_error(
+                    "invalid_action",
+                    AgentErrorStage::Control,
+                    "user_action",
+                    "not_delivered",
+                    "Steer text must be non-empty.",
+                    Some(format!("thread:{}", params.thread_id)),
+                ));
+            }
+            let message = RuntimeMessage::User {
+                content: vec![UserContentBlock::text(text)],
+                timestamp_ms: gateway_now_ms(),
+            };
+            let accepted = state
+                .inner
+                .gateway
+                .steer_turn(selector.clone(), Some(&expected_turn_id), message.clone())
+                .is_some()
+                || state.inner.gateway.steer_foreign_turn(
+                    selector,
+                    Some(&expected_turn_id),
+                    message,
+                );
+            Ok(wire::ThreadActionRunResult::Steer {
+                thread_id: params.thread_id,
+                accepted,
+            })
+        }
+        wire::ThreadActionInput::Compact { instructions } => {
+            let result = thread_compact_result_for_thread(
+                state,
+                scope,
+                params.thread_id.clone(),
+                instructions,
+                context.runtime_profile_ref,
+                out_tx,
+            )
+            .await?;
+            Ok(wire::ThreadActionRunResult::Compact {
+                thread_id: params.thread_id,
+                result: Box::new(result),
+            })
+        }
+        wire::ThreadActionInput::Fork => fork_thread(state, scope, &params.thread_id).await,
+    }
+}
+
+pub(super) fn respond_to_interaction(
+    state: &WebState,
+    auth: &AuthContext,
+    requested_scope: &ResolvedScope,
+    params: wire::ThreadInteractionRespondParams,
+) -> psychevo_runtime::Result<wire::ThreadInteractionRespondResult> {
+    authorize_thread(state, auth, &params.thread_id)?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    if scope.cwd != requested_scope.cwd {
+        return Err(agent_session_error(
+            "thread_scope_mismatch",
+            AgentErrorStage::Interaction,
+            "user_action",
+            "not_delivered",
+            "The requested interaction does not belong to this workspace scope.",
+            Some(format!("thread:{}", params.thread_id)),
+        ));
+    }
+    let pending = pending_interactions(state, &scope, Some(&params.thread_id))?;
+    let action = pending
+        .iter()
+        .find(|action| action.action_id == params.interaction_id)
+        .ok_or_else(|| {
+            agent_session_error(
+                "interaction_stale",
+                AgentErrorStage::Interaction,
+                "user_action",
+                "not_delivered",
+                "The interaction was already resolved, expired, or is not visible to this Thread.",
+                Some(format!("interaction:{}", params.interaction_id)),
+            )
+        })?;
+    respond_to_routed_interaction(
+        state,
+        &params.thread_id,
+        &params.interaction_id,
+        action.kind,
+        params.response,
+    )
+}
+
+/// Resolves a typed interaction already authorized by an internal broker such
+/// as the Channel token router. Public RPC callers must go through
+/// `respond_to_interaction`, which first proves projection visibility.
+pub(super) fn respond_to_routed_interaction(
+    state: &WebState,
+    thread_id: &str,
+    interaction_id: &str,
+    expected_kind: GatewayActionKind,
+    response: wire::ThreadInteractionResponse,
+) -> psychevo_runtime::Result<wire::ThreadInteractionRespondResult> {
+    respond_to_routed_interaction_for_selector(
+        state,
+        GatewayThreadSelector::thread_id(thread_id),
+        interaction_id,
+        expected_kind,
+        response,
+    )
+}
+
+/// Resolves an interaction through an internal broker-owned selector. Channel
+/// tokens are source-scoped, so their authoritative queue selector may remain
+/// the source alias while the public action already carries its bound Thread.
+pub(super) fn respond_to_routed_interaction_for_selector(
+    state: &WebState,
+    selector: GatewayThreadSelector,
+    interaction_id: &str,
+    expected_kind: GatewayActionKind,
+    response: wire::ThreadInteractionResponse,
+) -> psychevo_runtime::Result<wire::ThreadInteractionRespondResult> {
+    let (accepted, outcome) = match (expected_kind, response) {
+        (
+            GatewayActionKind::Permission,
+            wire::ThreadInteractionResponse::Permission { decision },
+        ) => {
+            let outcome = if decision == PermissionDecision::Deny {
+                GatewayActionOutcome::Rejected
+            } else {
+                GatewayActionOutcome::Accepted
+            };
+            (
+                state.inner.gateway.submit_permission(
+                    selector,
+                    interaction_id,
+                    permission_decision(decision),
+                ),
+                outcome,
+            )
+        }
+        (GatewayActionKind::Clarify, wire::ThreadInteractionResponse::Clarify { answers }) => (
+            state.inner.gateway.submit_clarify(
+                selector,
+                interaction_id,
+                ClarifyResult::Answered(ClarifyResponse {
+                    answers: answers
+                        .into_iter()
+                        .map(|answers| ClarifyAnswer { answers })
+                        .collect(),
+                }),
+            ),
+            GatewayActionOutcome::Accepted,
+        ),
+        (GatewayActionKind::Clarify, wire::ThreadInteractionResponse::CancelClarify) => (
+            state
+                .inner
+                .gateway
+                .submit_clarify(selector, interaction_id, ClarifyResult::Cancelled),
+            GatewayActionOutcome::Cancelled,
+        ),
+        _ => {
+            return Err(agent_session_error(
+                "interaction_kind_mismatch",
+                AgentErrorStage::Interaction,
+                "user_action",
+                "not_delivered",
+                "The interaction response kind does not match the pending request.",
+                Some(format!("interaction:{interaction_id}")),
+            ));
+        }
+    };
+    if !accepted {
+        state.remove_pending_permission(interaction_id);
+        return Err(agent_session_error(
+            "interaction_stale",
+            AgentErrorStage::Interaction,
+            "user_action",
+            "not_delivered",
+            "The interaction was already resolved or expired.",
+            Some(format!("interaction:{interaction_id}")),
+        ));
+    }
+    // A successful response is accepted exactly once. Removing the public
+    // projection only after the underlying responder accepts makes retries
+    // fail closed instead of acknowledging the same interaction twice.
+    state.remove_pending_permission(interaction_id);
+    Ok(wire::ThreadInteractionRespondResult {
+        accepted: true,
+        interaction_id: interaction_id.to_string(),
+        outcome,
+    })
+}
+
+pub(super) async fn validate_turn_revisions(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<String>,
+    target: Option<wire::RunnableTargetInput>,
+    expected_context_revision: Option<&str>,
+    expected_control_revision: Option<&str>,
+) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+    let require = |value: Option<&str>, name: &str| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                agent_session_error(
+                    "revision_required",
+                    AgentErrorStage::Control,
+                    "user_action",
+                    "not_delivered",
+                    format!("turn/start requires a non-empty `{name}` from Thread Context."),
+                    thread_id
+                        .as_ref()
+                        .map(|thread_id| format!("thread:{thread_id}")),
+                )
+            })
+    };
+    let expected_context_revision = require(expected_context_revision, "expectedContextRevision")?;
+    let expected_control_revision = require(expected_control_revision, "expectedControlRevision")?;
+    // Compare against the same negotiated live Thread Context returned to the
+    // caller. A base-only revision would make every bound ACP thread stale
+    // because its public revision also includes the resident session snapshot.
+    let context = thread_context_read_result_live(
+        state,
+        scope,
+        wire::ThreadContextReadParams {
+            thread_id: thread_id.clone(),
+            target,
+            scope: Some(scope.to_wire_scope()),
+        },
+    )
+    .await?;
+    if context.context_revision != expected_context_revision
+        || context.control_revision != expected_control_revision
+    {
+        return Err(agent_session_error(
+            "stale_revision",
+            AgentErrorStage::Control,
+            "user_action",
+            "not_delivered",
+            "Thread Context changed; refresh it before starting the turn.",
+            thread_id.map(|thread_id| format!("thread:{thread_id}")),
+        ));
+    }
+    Ok(context)
+}
+
+pub(super) fn validate_turn_admission(
+    context: &wire::ThreadContextReadResult,
+    input: &[wire::GatewayInputPart],
+    mentions: &[wire::GatewayMention],
+    turn_overrides: &BTreeMap<String, Value>,
+) -> psychevo_runtime::Result<()> {
+    let required_controls_satisfied_by_turn = context
+        .controls
+        .iter()
+        .filter(|control| control.required)
+        .all(|control| {
+            control.enabled
+                && (control.effective_value.is_some() || turn_overrides.contains_key(&control.id))
+        });
+    let recoverable_required_control_draft =
+        context.sendability.recovery_action.is_none() && required_controls_satisfied_by_turn;
+    if !context.sendability.allowed && !recoverable_required_control_draft {
+        return Err(agent_session_error(
+            "target_not_sendable",
+            AgentErrorStage::Delivery,
+            "user_action",
+            "not_delivered",
+            context
+                .sendability
+                .reason
+                .clone()
+                .unwrap_or_else(|| "This Agent target cannot accept a turn.".to_string()),
+            None,
+        ));
+    }
+    for part in input {
+        let kind = match part {
+            wire::GatewayInputPart::Text { .. } => "text",
+            wire::GatewayInputPart::Image { .. } => "image",
+            wire::GatewayInputPart::Resource { .. } => "resource",
+            wire::GatewayInputPart::ResourceLink { .. } => "resourceLink",
+            wire::GatewayInputPart::Context { .. } => "embeddedContext",
+        };
+        require_input_capability(context, kind)?;
+    }
+    if mentions
+        .iter()
+        .any(|mention| matches!(mention.target, wire::GatewayMentionTarget::Agent { .. }))
+    {
+        require_input_capability(context, "agentMention")?;
+    }
+    for (control_id, value) in turn_overrides {
+        let control = context
+            .controls
+            .iter()
+            .find(|control| control.id == *control_id)
+            .ok_or_else(|| {
+                agent_session_error(
+                    "control_not_found",
+                    AgentErrorStage::Control,
+                    "user_action",
+                    "not_delivered",
+                    format!("This Agent target does not expose control `{control_id}`."),
+                    None,
+                )
+            })?;
+        if !control.enabled {
+            return Err(agent_session_error(
+                "control_unavailable",
+                AgentErrorStage::Control,
+                "user_action",
+                "not_delivered",
+                control
+                    .unavailable_reason
+                    .clone()
+                    .unwrap_or_else(|| format!("Control `{control_id}` is unavailable.")),
+                None,
+            ));
+        }
+        if !control.choices.is_empty()
+            && !control.choices.iter().any(|choice| choice.value == *value)
+        {
+            return Err(agent_session_error(
+                "invalid_control",
+                AgentErrorStage::Control,
+                "user_action",
+                "not_delivered",
+                format!("Control `{control_id}` does not accept the requested value."),
+                None,
+            ));
+        }
+    }
+    for control in context.controls.iter().filter(|control| control.required) {
+        if !control.enabled {
+            return Err(agent_session_error(
+                "required_control_unavailable",
+                AgentErrorStage::Control,
+                "user_action",
+                "not_delivered",
+                control.unavailable_reason.clone().unwrap_or_else(|| {
+                    format!("Required control `{}` is unavailable.", control.id)
+                }),
+                None,
+            ));
+        }
+        if turn_overrides.get(&control.id).is_none() && control.effective_value.is_none() {
+            return Err(agent_session_error(
+                "required_control_missing",
+                AgentErrorStage::Control,
+                "user_action",
+                "not_delivered",
+                format!("{} is required before starting a turn.", control.label),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_input_capability(
+    context: &wire::ThreadContextReadResult,
+    kind: &str,
+) -> psychevo_runtime::Result<()> {
+    let capability = context
+        .input_capabilities
+        .iter()
+        .find(|capability| capability.kind == kind);
+    if capability.is_some_and(|capability| capability.enabled) {
+        return Ok(());
+    }
+    Err(agent_session_error(
+        "unsupported_input",
+        AgentErrorStage::Delivery,
+        "user_action",
+        "not_delivered",
+        capability
+            .and_then(|capability| capability.unavailable_reason.clone())
+            .unwrap_or_else(|| {
+                format!("Input capability `{kind}` is unavailable for this Agent target.")
+            }),
+        None,
+    ))
+}

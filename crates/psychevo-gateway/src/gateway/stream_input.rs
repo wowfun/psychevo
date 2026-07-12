@@ -22,6 +22,11 @@ fn wrap_stream(
                         .lock()
                         .expect("gateway live projector poisoned")
                         .project(&turn_id, &event)
+                    // Adapter stream terminals are useful as an internal
+                    // projection fence, but ThreadApplication owns the one
+                    // authoritative public terminal after persistence and
+                    // delivery classification have completed.
+                    && !matches!(event, GatewayEvent::TurnCompleted { .. })
                 {
                     event_sink(event);
                 }
@@ -42,6 +47,7 @@ fn apply_input_parts(
     }
     let mut prompt_parts = Vec::new();
     let mut image_inputs = Vec::new();
+    let mut has_structured_input = false;
     for part in input {
         match part {
             GatewayInputPart::Text { text } => prompt_parts.push(text.clone()),
@@ -54,11 +60,38 @@ fn apply_input_parts(
             GatewayInputPart::Image { input } => {
                 image_inputs.push(gateway_image_input_into_runtime(input.clone()))
             }
+            GatewayInputPart::Resource { text, blob, .. } => {
+                if text.is_some() == blob.is_some() {
+                    return Err(agent_session_error(
+                        "invalid_input",
+                        AgentErrorStage::Delivery,
+                        "user_action",
+                        "not_delivered",
+                        "A resource input must contain exactly one of `text` or `blob`.",
+                        None,
+                    ));
+                }
+                has_structured_input = true;
+            }
+            GatewayInputPart::ResourceLink { name, uri, .. } => {
+                if name.trim().is_empty() || uri.trim().is_empty() {
+                    return Err(agent_session_error(
+                        "invalid_input",
+                        AgentErrorStage::Delivery,
+                        "user_action",
+                        "not_delivered",
+                        "A resource link requires non-empty `name` and `uri`.",
+                        None,
+                    ));
+                }
+                has_structured_input = true;
+            }
         }
     }
     options.prompt = prompt_parts.join("\n");
     options.image_inputs = image_inputs;
-    if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
+    if options.prompt.trim().is_empty() && options.image_inputs.is_empty() && !has_structured_input
+    {
         return Err(Error::Message("gateway turn input is empty".to_string()));
     }
     Ok(())

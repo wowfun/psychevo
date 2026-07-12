@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PermissionDecision": {
+      "enum": [
+        "allowOnce",
+        "allowSession",
+        "allowAlways",
+        "deny"
+      ],
+      "type": "string"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "decision": {
+          "$ref": "#/definitions/PermissionDecision"
+        },
+        "kind": {
+          "enum": [
+            "permission"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "answers": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "clarify"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "answers",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "cancelClarify"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ThreadInteractionResponse"
+}

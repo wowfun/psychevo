@@ -8,9 +8,6 @@
       "$ref": "ClientRequest/thread-start.json"
     },
     {
-      "$ref": "ClientRequest/thread-compact-start.json"
-    },
-    {
       "$ref": "ClientRequest/thread-resume.json"
     },
     {
@@ -41,37 +38,28 @@
       "$ref": "ClientRequest/turn-start.json"
     },
     {
-      "$ref": "ClientRequest/turn-steer.json"
+      "$ref": "ClientRequest/thread-context-read.json"
     },
     {
-      "$ref": "ClientRequest/turn-interrupt.json"
+      "$ref": "ClientRequest/thread-draft-prepare.json"
     },
     {
-      "$ref": "ClientRequest/turn-takeover.json"
+      "$ref": "ClientRequest/thread-control-set.json"
     },
     {
-      "$ref": "ClientRequest/runtime-options.json"
+      "$ref": "ClientRequest/thread-action-run.json"
     },
     {
-      "$ref": "ClientRequest/runtime-context-read.json"
+      "$ref": "ClientRequest/thread-interaction-respond.json"
     },
     {
-      "$ref": "ClientRequest/runtime-control-set.json"
+      "$ref": "ClientRequest/thread-history-read.json"
     },
     {
-      "$ref": "ClientRequest/runtime-auth-action.json"
+      "$ref": "ClientRequest/thread-import-list.json"
     },
     {
-      "$ref": "ClientRequest/runtime-goal-read.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-goal-set.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-goal-clear.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-account-rate-limits-read.json"
+      "$ref": "ClientRequest/thread-import.json"
     },
     {
       "$ref": "ClientRequest/runtime-profile-list.json"
@@ -87,45 +75,6 @@
     },
     {
       "$ref": "ClientRequest/runtime-profile-set-enabled.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-snapshot.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-health-check.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-list.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-read.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-attach.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-resume.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-archive.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-unarchive.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-delete.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-rename.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-fork.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-revert.json"
-    },
-    {
-      "$ref": "ClientRequest/runtime-session-unrevert.json"
     },
     {
       "$ref": "ClientRequest/automation-list.json"
@@ -207,6 +156,15 @@
     },
     {
       "$ref": "ClientRequest/backend-doctor.json"
+    },
+    {
+      "$ref": "ClientRequest/backend-install.json"
+    },
+    {
+      "$ref": "ClientRequest/backend-repair.json"
+    },
+    {
+      "$ref": "ClientRequest/backend-upgrade.json"
     },
     {
       "$ref": "ClientRequest/backend-write.json"
@@ -354,12 +312,6 @@
     },
     {
       "$ref": "ClientRequest/source-reset.json"
-    },
-    {
-      "$ref": "ClientRequest/permission-respond.json"
-    },
-    {
-      "$ref": "ClientRequest/clarify-respond.json"
     },
     {
       "$ref": "ClientRequest/settings-update.json"

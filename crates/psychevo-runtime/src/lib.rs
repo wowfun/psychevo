@@ -112,6 +112,7 @@ pub use extensions::{
     ExtensionRegistryBuilder, McpServerContributor, SelectedCapabilityRoot,
     ThreadLifecycleContributor, TokenUsageContributor, ToolContributor, ToolLifecycleContributor,
     TurnInputContributor, TurnItemContributor, TurnLifecycleContributor,
+    resolve_mcp_server_handoffs,
 };
 pub use host_paths::{
     ExecutableResolveOptions, GitBashRuntime, HostPlatform, PSYCHEVO_GIT_BASH_PATH,
@@ -143,8 +144,8 @@ pub use process_env::{
     combined_path_value, decode_process_output, decode_process_output_for_platform,
     effective_process_env, env_value_case_insensitive, executable_path_candidates,
     prefixed_path_overlay, terminate_pty_child_tree, terminate_std_child_process_group,
-    terminate_std_child_tree, terminate_tokio_child_tree, windows_pathext_extensions,
-    windows_utf8_default_env,
+    terminate_std_child_tree, terminate_tokio_child_tree, tokio_host_process_command,
+    windows_pathext_extensions, windows_utf8_default_env,
 };
 pub use prompt_image::{
     extract_image_sources_from_prompt, model_metadata_explicitly_disallows_image_input,
@@ -195,13 +196,15 @@ pub use store::{
 pub use store::{
     AutomationRunFinishInput, AutomationRunRecord, AutomationTaskInput, AutomationTaskRecord,
     ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
-    GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
-    GatewayControlCommandRecord, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
-    GatewayLiveSnapshotRecord, GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership,
-    GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus, GatewaySourceBindingInput,
+    GatewayActivityClaimInput, GatewayActivityRecord, GatewayChannelOutboxInput,
+    GatewayChannelOutboxRecord, GatewayControlCommandInput, GatewayControlCommandRecord,
+    GatewayLiveEventRecord, GatewayLiveSnapshotInput, GatewayLiveSnapshotRecord,
+    GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord,
+    GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch, GatewaySourceBindingInput,
     GatewaySourceBindingRecord, GatewaySourceLaneInput, GatewaySourceLaneRecord,
-    GatewayTurnTerminalInput, GatewayTurnTerminalRecord, SessionCompactionInput,
-    SessionCompactionRecord, SessionMessageRecord, SqliteStore,
+    GatewayTurnDeliveryInput, GatewayTurnDeliveryRecord, GatewayTurnTerminalInput,
+    GatewayTurnTerminalRecord, SessionCompactionInput, SessionCompactionRecord,
+    SessionMessageRecord, SqliteStore,
 };
 pub use thread_lineage::{
     SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
@@ -211,15 +214,16 @@ pub use thread_lineage::{
 pub use tools::tool_names_for_mode;
 pub use types::{
     AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ClarifyAnswer,
-    ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent, ClarifyResolvedEvent,
-    ClarifyResolvedReason, ClarifyResponse, ClarifyResult, ConfigScope, ConfiguredModel,
-    CustomProviderInput, CustomProviderResult, ExternalAgentDelegate, ExternalAgentDelegateRequest,
-    ExternalAgentDelegateResult, ImageInput, McpServerInput, McpServerPolicy, McpTransportInput,
-    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
-    PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
-    ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
-    ReloadContextOptions, ReloadContextResult, RunControl, RunControlHandle, RunMode, RunOptions,
-    RunResult, RunSandboxMode, RunSandboxOverride, RunStreamEvent, RunStreamSink, RunTerminalError,
+    ClarifyInteractionOutcome, ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent,
+    ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResponse, ClarifyResult, ConfigScope,
+    ConfiguredModel, CustomProviderInput, CustomProviderResult, ExternalAgentDelegate,
+    ExternalAgentDelegateRequest, ExternalAgentDelegateResult, ImageInput, McpServerInput,
+    McpServerPolicy, McpTransportInput, ModelCatalogEntry, ModelCatalogProvider,
+    ModelMetadataCacheTarget, PermissionApprovalDecision, PermissionApprovalOutcome,
+    PermissionApprovalRequest, PermissionConfig, PermissionMode, ProjectContextInstructionMode,
+    PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions, ReloadContextResult,
+    ResolvedMcpServerInput, RunControl, RunControlHandle, RunMode, RunOptions, RunResult,
+    RunSandboxMode, RunSandboxOverride, RunStreamEvent, RunStreamSink, RunTerminalError,
     RunWarning, RuntimeTool, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
     SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
     SessionUndoResult, SessionUsageOptions, SessionUsageSummary, SmokeControl, StatsOptions,

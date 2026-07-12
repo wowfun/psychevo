@@ -121,17 +121,15 @@ impl GatewayThreadSelector {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum BackendKind {
-    Psychevo,
-    PeerAgent,
-    Runtime,
+    Native,
+    Acp,
 }
 
 impl BackendKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Psychevo => "psychevo",
-            Self::PeerAgent => "peer_agent",
-            Self::Runtime => "runtime",
+            Self::Native => "native",
+            Self::Acp => "acp",
         }
     }
 }
@@ -140,7 +138,11 @@ impl BackendKind {
 #[serde(rename_all = "camelCase")]
 pub struct GatewayBackendInfo {
     pub kind: BackendKind,
-    #[serde(default, rename = "runtimeRef", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "runtimeRef",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[ts(optional)]
     pub runtime_ref: Option<String>,
     #[serde(default, rename = "sessionHandle")]
@@ -166,28 +168,65 @@ pub struct GatewayTurn {
     #[serde(default)]
     pub outcome: Option<String>,
     #[serde(default)]
-    pub error: Option<GatewayTurnError>,
-    #[serde(rename = "startedAtMs", default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<AgentErrorView>,
+    #[serde(
+        rename = "startedAtMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     #[ts(optional)]
     pub started_at_ms: Option<i64>,
-    #[serde(rename = "completedAtMs", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "completedAtMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     #[ts(optional)]
     pub completed_at_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentDeliveryStatusView {
+    NotDelivered,
+    #[default]
+    Unknown,
+    Delivered,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct GatewayTurnError {
+pub struct AgentErrorView {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage: Option<String>,
-    #[serde(default, rename = "retryClass", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "retryClass",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub retry_class: Option<String>,
-    #[serde(default, rename = "diagnosticRef", skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub delivery: AgentDeliveryStatusView,
+    #[serde(
+        default,
+        rename = "recoveryAction",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub recovery_action: Option<String>,
+    #[serde(
+        default,
+        rename = "diagnosticRef",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub diagnostic_ref: Option<String>,
 }
+
+/// Compatibility name for code that models the terminal error attached to a
+/// `GatewayTurn`. The public wire shape is the shared `AgentErrorView`.
+pub type GatewayTurnError = AgentErrorView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -217,6 +256,25 @@ pub enum GatewayInputPart {
         text: String,
         #[serde(rename = "visibleToModel")]
         visible_to_model: bool,
+    },
+    Resource {
+        uri: String,
+        #[serde(default, rename = "mimeType")]
+        mime_type: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        blob: Option<String>,
+    },
+    ResourceLink {
+        name: String,
+        uri: String,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default, rename = "mimeType")]
+        mime_type: Option<String>,
+        #[serde(default)]
+        size: Option<i64>,
     },
 }
 

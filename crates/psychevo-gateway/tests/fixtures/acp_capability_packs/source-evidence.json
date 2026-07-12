@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "scripts/generate_acp_capability_fixtures.py",
+  "policy": "Exact reviewed package identity plus asserted source markers; source SHA256 detects drift.",
+  "fixtures": {
+    "codex": {
+      "fixture": "crates/psychevo-gateway/tests/fixtures/acp_capability_packs/codex_initialize_v1.json",
+      "scenario": "gateway auth opted in; browser auth enabled",
+      "packageIdentity": {
+        "name": "@agentclientprotocol/codex-acp",
+        "version": "1.1.2"
+      },
+      "sources": [
+        {
+          "path": ".references/codex-acp/package.json",
+          "sha256": "ce5b75cac78d20dbc4075ec4d4ba27a36babd0633b873c32c8ec5526f20f995f",
+          "assertedMarkers": [
+            "package-name",
+            "package-version",
+            "acp-sdk-dependency"
+          ]
+        },
+        {
+          "path": ".references/codex-acp/src/CodexAcpServer.ts",
+          "sha256": "cbeb1fff4c3781fc163ad0fe8cb76b48d87c8b756157b912688d772c582f3625",
+          "assertedMarkers": [
+            "identity-from-package",
+            "protocol-from-reviewed-sdk",
+            "agent-name-from-package",
+            "agent-title-codex",
+            "agent-version-from-package",
+            "auth-logout",
+            "providers",
+            "load-session",
+            "prompt-embedded-context",
+            "prompt-image",
+            "session-resume",
+            "session-list",
+            "session-close",
+            "session-delete",
+            "session-additional-directories",
+            "mcp-acp-disabled",
+            "mcp-http",
+            "mcp-sse-disabled",
+            "auth-methods-from-helper"
+          ]
+        },
+        {
+          "path": ".references/codex-acp/src/CodexAuthMethod.ts",
+          "sha256": "7407bdeb9ae7884a02dd93d11f5ff0b070fbb788deef9d7dfb036470910c6b28",
+          "assertedMarkers": [
+            "api-key-id",
+            "api-key-name",
+            "api-key-description",
+            "api-key-provider",
+            "chat-gpt-id",
+            "chat-gpt-name",
+            "chat-gpt-description",
+            "browser-auth-condition",
+            "gateway-id",
+            "gateway-name",
+            "gateway-description",
+            "gateway-client-opt-in"
+          ]
+        }
+      ]
+    },
+    "opencode": {
+      "fixture": "crates/psychevo-gateway/tests/fixtures/acp_capability_packs/opencode_initialize_v1.json",
+      "scenario": "terminal-auth opted in; reviewed release build version",
+      "packageIdentity": {
+        "name": "opencode",
+        "agentName": "OpenCode",
+        "version": "1.17.18"
+      },
+      "sources": [
+        {
+          "path": ".references/opencode/packages/opencode/package.json",
+          "sha256": "e0011b881695001c0e72f8bba7a80e61907afdeb4154db794bb204c69f10ba62",
+          "assertedMarkers": [
+            "package-name",
+            "package-version",
+            "acp-sdk-dependency"
+          ]
+        },
+        {
+          "path": ".references/opencode/packages/opencode/src/acp/service.ts",
+          "sha256": "7cc70dfb753922548229b7f51bfba2f8d213c84418e675814665ef87a029214e",
+          "assertedMarkers": [
+            "version-from-installation",
+            "auth-method-id",
+            "auth-description",
+            "auth-name",
+            "terminal-auth-opt-in",
+            "terminal-auth-command",
+            "terminal-auth-args",
+            "terminal-auth-label",
+            "protocol-v1",
+            "load-session",
+            "mcp-http",
+            "mcp-sse",
+            "prompt-embedded-context",
+            "prompt-image",
+            "session-close",
+            "session-fork",
+            "session-list",
+            "session-resume",
+            "auth-method-list",
+            "agent-name",
+            "agent-version"
+          ]
+        },
+        {
+          "path": ".references/opencode/packages/core/src/installation/version.ts",
+          "sha256": "9382873484a5920b549832dfa4ac0f09300f4eaeb1781a41d548dbd2ffe65d9a",
+          "assertedMarkers": [
+            "build-version-declaration",
+            "installation-version-from-build"
+          ]
+        },
+        {
+          "path": ".references/opencode/packages/opencode/script/build.ts",
+          "sha256": "73bac3ce4360e7016cd103176c934c7fc09e8691992f3a316098645f70061901",
+          "assertedMarkers": [
+            "build-injects-script-version"
+          ]
+        }
+      ]
+    }
+  }
+}

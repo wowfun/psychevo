@@ -106,7 +106,7 @@ pub(crate) async fn ensure_new_visible_session_title(
     .and_then(|result| result.ok())
     .flatten();
     let title = generated.unwrap_or_else(|| fallback_session_title(prompt, selected_skills));
-    store.set_session_title(session_id, &title)?;
+    let _ = store.set_session_title_if_empty(session_id, &title)?;
     Ok(())
 }
 

@@ -23,8 +23,9 @@ headless `pevo serve` API server.
 - Source-selecting requests carry explicit scope, and thread-id anchored
   methods authorize through stored thread/cwd binding.
 - Derived source keys avoid exposing raw local paths.
-- SIGINT/SIGTERM reaches bounded graceful runtime-host shutdown, uses bounded
-  forced shutdown as fallback, and leaves no direct-runtime subprocess behind.
+- SIGINT/SIGTERM reaches bounded graceful `AgentSessionHost` shutdown, uses
+  bounded forced shutdown as fallback, and leaves no resident ACP Agent or
+  owned callback subprocess behind.
 - Library callers retain explicit signal ownership; binding or ordinary
   `BoundGatewayWebServer::run` does not install process-global signal handlers.
 
@@ -55,9 +56,9 @@ with isolated config and database state.
 - `thread/start`, source-default `thread/resume`, `turn/start`, `thread/list`,
   and thread-id anchored operations enforce the documented scope rules.
 - Source keys in responses are stable while avoiding raw local path exposure.
-- A deterministic fake direct runtime is started under a real `pevo serve`
-  subprocess; SIGTERM must stop both the server and that exact child without an
-  orphan.
+- A deterministic outbound ACP Agent is started under a real `pevo serve`
+  subprocess; SIGTERM must stop the Gateway, its resident ACP process, and that
+  process's owned callback children without an orphan.
 
 ## Validation Boundaries
 

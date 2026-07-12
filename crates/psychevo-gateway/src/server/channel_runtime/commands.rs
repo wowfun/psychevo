@@ -2,7 +2,6 @@ use super::paths::channel_cwd;
 use super::state::ChannelInteractionKind;
 use super::*;
 use crate::server::commands::record_gateway_mission_metadata_for_parent;
-use sha2::{Digest, Sha256};
 
 pub(super) enum ChannelCommandAction {
     Reply(String),
@@ -37,14 +36,23 @@ pub(super) async fn route_channel_command(
     };
     let reply = match command.as_str() {
         "stop" => {
-            let interrupted = state
-                .inner
-                .gateway
-                .interrupt_turn(GatewayThreadSelector::source(source.source_key()));
-            if interrupted {
-                "Stop requested for this channel thread.".to_string()
-            } else {
-                "No active turn is running for this channel thread.".to_string()
+            match run_channel_thread_action(
+                state,
+                runtime,
+                connection,
+                source,
+                wire::ThreadActionInput::Interrupt,
+            )
+            .await
+            {
+                Ok(wire::ThreadActionRunResult::Interrupt {
+                    interrupted,
+                    cleared,
+                    ..
+                }) if interrupted || cleared > 0 => {
+                    "Stop requested for this channel thread.".to_string()
+                }
+                _ => "No active turn is running for this channel thread.".to_string(),
             }
         }
         "approve" | "allow" => {
@@ -55,9 +63,9 @@ pub(super) async fn route_channel_command(
                 connection,
                 source,
                 token,
-                PermissionApprovalDecision::allow_once(),
+                PermissionDecision::AllowOnce,
                 "approve",
-            )
+            )?
         }
         "deny" => {
             let token = args.split_whitespace().next().unwrap_or("");
@@ -67,9 +75,9 @@ pub(super) async fn route_channel_command(
                 connection,
                 source,
                 token,
-                PermissionApprovalDecision::deny(),
+                PermissionDecision::Deny,
                 "deny",
-            )
+            )?
         }
         "answer" => {
             let (token, answer) = split_first_arg(args);
@@ -80,22 +88,34 @@ pub(super) async fn route_channel_command(
                 .is_some_and(|question_count| question_count > 1)
             {
                 channel_multi_question_guidance(token)
-            } else if let Some(route) = runtime.take_interaction_token(
+            } else if let Some(route) = runtime.interaction_route(
                 &connection.id,
                 &source.source_key(),
                 ChannelInteractionKind::Clarify,
                 token,
-            ) && submit_channel_clarify(
-                state,
-                &route,
-                source,
-                ClarifyResult::Answered(ClarifyResponse {
-                    answers: vec![ClarifyAnswer {
-                        answers: vec![answer.to_string()],
-                    }],
-                }),
             ) {
-                format!("Answered request {token}.")
+                match submit_channel_interaction(
+                    state,
+                    source,
+                    &route,
+                    GatewayActionKind::Clarify,
+                    wire::ThreadInteractionResponse::Clarify {
+                        answers: vec![vec![answer.to_string()]],
+                    },
+                ) {
+                    Ok(true) => {
+                        runtime.consume_interaction_token(
+                            &connection.id,
+                            &source.source_key(),
+                            ChannelInteractionKind::Clarify,
+                            token,
+                            &route.action_id,
+                        );
+                        format!("Answered request {token}.")
+                    }
+                    Ok(false) => format!("Request {token} was not accepted."),
+                    Err(error) => format!("Request {token} was not accepted: {error}"),
+                }
             } else {
                 "No matching Ask request token.".to_string()
             }
@@ -104,23 +124,42 @@ pub(super) async fn route_channel_command(
             let token = args.split_whitespace().next().unwrap_or("");
             if token.is_empty() {
                 "Usage: /cancel <token>".to_string()
-            } else if let Some(route) = runtime.take_interaction_token(
+            } else if let Some(route) = runtime.interaction_route(
                 &connection.id,
                 &source.source_key(),
                 ChannelInteractionKind::Clarify,
                 token,
-            ) && submit_channel_clarify(state, &route, source, ClarifyResult::Cancelled)
-            {
-                format!("Cancelled request {token}.")
+            ) {
+                match submit_channel_interaction(
+                    state,
+                    source,
+                    &route,
+                    GatewayActionKind::Clarify,
+                    wire::ThreadInteractionResponse::CancelClarify,
+                ) {
+                    Ok(true) => {
+                        runtime.consume_interaction_token(
+                            &connection.id,
+                            &source.source_key(),
+                            ChannelInteractionKind::Clarify,
+                            token,
+                            &route.action_id,
+                        );
+                        format!("Cancelled request {token}.")
+                    }
+                    Ok(false) => format!("Request {token} was not accepted."),
+                    Err(error) => format!("Request {token} was not accepted: {error}"),
+                }
             } else {
                 "No matching Ask request token.".to_string()
             }
         }
+        "agent" => channel_agent_reply(state, connection, source, args).await?,
         "profile" => channel_profile_reply(state, connection, source, args).await?,
         "reset" => reset_channel_source_reply(state, source)?,
         "" => return Ok(None),
         _ => {
-            return route_shared_channel_command(state, runtime, connection, source, text);
+            return route_shared_channel_command(state, runtime, connection, source, text).await;
         }
     };
     Ok(Some(ChannelCommandAction::Reply(reply)))
@@ -132,81 +171,80 @@ fn channel_permission_reply(
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     token: &str,
-    decision: PermissionApprovalDecision,
+    decision: PermissionDecision,
     command: &str,
-) -> String {
+) -> psychevo_runtime::Result<String> {
     if token.is_empty() {
-        return format!("Usage: /{command} <token>");
+        return Ok(format!("Usage: /{command} <token>"));
     }
-    let Some(route) = runtime.take_interaction_token(
+    let Some(route) = runtime.interaction_route(
         &connection.id,
         &source.source_key(),
         ChannelInteractionKind::Permission,
         token,
     ) else {
-        return "No matching permission request token.".to_string();
+        return Ok("No matching permission request token.".to_string());
     };
-    if submit_channel_permission(state, &route, source, decision) {
-        if command == "deny" {
-            format!("Denied request {token}.")
-        } else {
-            format!("Approved request {token}.")
+    let response = wire::ThreadInteractionResponse::Permission { decision };
+    match submit_channel_interaction(
+        state,
+        source,
+        &route,
+        GatewayActionKind::Permission,
+        response,
+    ) {
+        Ok(true) => {
+            runtime.consume_interaction_token(
+                &connection.id,
+                &source.source_key(),
+                ChannelInteractionKind::Permission,
+                token,
+                &route.action_id,
+            );
+            if command == "deny" {
+                Ok(format!("Denied request {token}."))
+            } else {
+                Ok(format!("Approved request {token}."))
+            }
         }
-    } else {
-        "No matching permission request token.".to_string()
+        Ok(false) => Ok(format!("Request {token} was not accepted.")),
+        Err(error) => Ok(format!("Request {token} was not accepted: {error}")),
     }
 }
 
-fn channel_interaction_selector(
+fn channel_interaction_thread_id(
+    state: &WebState,
     route: &super::state::ChannelInteractionRoute,
     source: &GatewaySource,
-) -> GatewayThreadSelector {
+) -> psychevo_runtime::Result<String> {
     route
         .thread_id
         .clone()
-        .map(GatewayThreadSelector::thread_id)
-        .unwrap_or_else(|| GatewayThreadSelector::source(source.source_key()))
+        .or(state.inner.gateway.resolve_source_thread(source)?)
+        .ok_or_else(|| {
+            Error::Message("The interaction is not bound to a public Thread.".to_string())
+        })
 }
 
-fn submit_channel_permission(
+fn submit_channel_interaction(
     state: &WebState,
-    route: &super::state::ChannelInteractionRoute,
     source: &GatewaySource,
-    decision: PermissionApprovalDecision,
-) -> bool {
-    let primary = channel_interaction_selector(route, source);
-    state
-        .inner
-        .gateway
-        .submit_permission(primary, &route.action_id, decision.clone())
-        || (route.thread_id.is_some()
-            && state.inner.gateway.submit_permission(
-                GatewayThreadSelector::source(source.source_key()),
-                &route.action_id,
-                decision,
-            ))
+    route: &super::state::ChannelInteractionRoute,
+    expected_kind: GatewayActionKind,
+    response: wire::ThreadInteractionResponse,
+) -> psychevo_runtime::Result<bool> {
+    channel_interaction_thread_id(state, route, source)?;
+    thread_routed_interaction_respond_for_selector(
+        state,
+        GatewayThreadSelector::source(source.source_key()),
+        &route.action_id,
+        expected_kind,
+        response,
+    )
+    .map(|result| result.accepted)
 }
 
-fn submit_channel_clarify(
-    state: &WebState,
-    route: &super::state::ChannelInteractionRoute,
-    source: &GatewaySource,
-    result: ClarifyResult,
-) -> bool {
-    let primary = channel_interaction_selector(route, source);
-    state
-        .inner
-        .gateway
-        .submit_clarify(primary, &route.action_id, result.clone())
-        || (route.thread_id.is_some()
-            && state.inner.gateway.submit_clarify(
-                GatewayThreadSelector::source(source.source_key()),
-                &route.action_id,
-                result,
-            ))
-}
-
-fn route_shared_channel_command(
+async fn route_shared_channel_command(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     connection: &ChannelRuntimeConnection,
@@ -241,7 +279,7 @@ fn route_shared_channel_command(
                 SlashCommandSurface::Messaging,
                 active_turn,
             ) {
-                Ok(effect) => channel_command_action_from_effect(&context, action, effect)?,
+                Ok(effect) => channel_command_action_from_effect(&context, action, effect).await?,
                 Err(message) => ChannelCommandAction::Reply(message),
             }
         }
@@ -251,7 +289,8 @@ fn route_shared_channel_command(
                     &context,
                     SlashCommandAction::SkillInvoke,
                     effect,
-                )?
+                )
+                .await?
             } else {
                 ChannelCommandAction::Reply(format!(
                     "Unsupported channel command /{}. Send /help for available commands.",
@@ -264,20 +303,16 @@ fn route_shared_channel_command(
     Ok(Some(action))
 }
 
-fn channel_command_action_from_effect(
+async fn channel_command_action_from_effect(
     context: &ChannelCommandContext<'_>,
     action: SlashCommandAction,
     effect: SlashCommandEffect,
 ) -> psychevo_runtime::Result<ChannelCommandAction> {
     let action = match effect {
         SlashCommandEffect::LocalText => match action {
-            SlashCommandAction::Help => ChannelCommandAction::Reply(channel_help_text(
-                context.state,
-                context.scope,
-                context.source,
-                context.connection,
-                context.runtime,
-            )?),
+            SlashCommandAction::Help => {
+                ChannelCommandAction::Reply(channel_help_text(context).await?)
+            }
             SlashCommandAction::Status => ChannelCommandAction::Reply(channel_status_text(
                 context.state,
                 context.runtime,
@@ -318,15 +353,36 @@ fn channel_command_action_from_effect(
             ChannelCommandAction::Compact { instructions }
         }
         SlashCommandEffect::Steer(text) => {
-            let message = RuntimeMessage::User {
-                content: vec![UserContentBlock::text(text)],
-                timestamp_ms: gateway_now_ms(),
+            let expected_turn_id = context
+                .state
+                .activity(
+                    context.source,
+                    context
+                        .state
+                        .inner
+                        .gateway
+                        .resolve_source_thread(context.source)?
+                        .as_deref(),
+                )
+                .active_turn_id;
+            let accepted = if let Some(expected_turn_id) = expected_turn_id {
+                matches!(
+                    run_channel_thread_action(
+                        context.state,
+                        context.runtime,
+                        context.connection,
+                        context.source,
+                        wire::ThreadActionInput::Steer {
+                            expected_turn_id,
+                            text,
+                        },
+                    )
+                    .await,
+                    Ok(wire::ThreadActionRunResult::Steer { accepted: true, .. })
+                )
+            } else {
+                false
             };
-            let accepted = context.state.inner.gateway.steer_foreign_turn(
-                GatewayThreadSelector::source(context.source.source_key()),
-                None,
-                message,
-            );
             ChannelCommandAction::Reply(if accepted {
                 "Steer message sent to the active channel turn.".to_string()
             } else {
@@ -334,9 +390,22 @@ fn channel_command_action_from_effect(
             })
         }
         SlashCommandEffect::PendingCancel => {
-            let selector = GatewayThreadSelector::source(context.source.source_key());
-            let cleared = context.state.inner.gateway.clear_queue(selector.clone());
-            let interrupted = context.state.inner.gateway.interrupt_turn(selector);
+            let (interrupted, cleared) = match run_channel_thread_action(
+                context.state,
+                context.runtime,
+                context.connection,
+                context.source,
+                wire::ThreadActionInput::Interrupt,
+            )
+            .await
+            {
+                Ok(wire::ThreadActionRunResult::Interrupt {
+                    interrupted,
+                    cleared,
+                    ..
+                }) => (interrupted, cleared),
+                _ => (false, 0),
+            };
             ChannelCommandAction::Reply(format!(
                 "Pending work updated: interrupted={}, cleared queued turns={}.",
                 interrupted, cleared
@@ -365,15 +434,50 @@ fn channel_command_action_from_effect(
         SlashCommandEffect::Agents => {
             ChannelCommandAction::Reply(channel_agents_text(context.state, context.scope)?)
         }
+        SlashCommandEffect::ShowModel => ChannelCommandAction::Reply(
+            channel_runtime_control_reply(context, wire::ThreadControlSurfaceRoleView::Model, None)
+                .await?,
+        ),
+        SlashCommandEffect::SetModel { model, variant } => {
+            let mut reply = channel_runtime_control_reply(
+                context,
+                wire::ThreadControlSurfaceRoleView::Model,
+                Some(&model),
+            )
+            .await?;
+            if let Some(variant) = variant {
+                let variant_reply = channel_runtime_control_reply(
+                    context,
+                    wire::ThreadControlSurfaceRoleView::Reasoning,
+                    Some(&variant),
+                )
+                .await?;
+                reply.push('\n');
+                reply.push_str(&variant_reply);
+            }
+            ChannelCommandAction::Reply(reply)
+        }
+        SlashCommandEffect::SetVariant(variant) => ChannelCommandAction::Reply(
+            channel_runtime_control_reply(
+                context,
+                wire::ThreadControlSurfaceRoleView::Reasoning,
+                Some(&variant),
+            )
+            .await?,
+        ),
+        SlashCommandEffect::SetMode(mode) => ChannelCommandAction::Reply(
+            channel_runtime_control_reply(
+                context,
+                wire::ThreadControlSurfaceRoleView::Mode,
+                Some(&mode),
+            )
+            .await?,
+        ),
         SlashCommandEffect::Unsupported(message) => ChannelCommandAction::Reply(message),
         SlashCommandEffect::Diff
         | SlashCommandEffect::SessionsList
         | SlashCommandEffect::ResumeSession { .. }
         | SlashCommandEffect::Btw { .. }
-        | SlashCommandEffect::ShowModel
-        | SlashCommandEffect::SetModel { .. }
-        | SlashCommandEffect::SetVariant(_)
-        | SlashCommandEffect::SetMode(_)
         | SlashCommandEffect::PermissionsShow
         | SlashCommandEffect::PermissionAdd { .. }
         | SlashCommandEffect::PermissionRemove { .. }
@@ -391,6 +495,215 @@ fn channel_command_action_from_effect(
         )),
     };
     Ok(action)
+}
+
+async fn channel_runtime_control_reply(
+    context: &ChannelCommandContext<'_>,
+    role: wire::ThreadControlSurfaceRoleView,
+    requested: Option<&str>,
+) -> psychevo_runtime::Result<String> {
+    let (runtime_ref, runtime_context) =
+        channel_runtime_context(context).await.map_err(|error| {
+            Error::Message(format!(
+                "Runtime context is unavailable for {}: {}",
+                channel_runtime_control_command_role_label(role),
+                redact_channel_error(&error.to_string())
+            ))
+        })?;
+    let Some(control) = runtime_context.controls.into_iter().find(|control| {
+        control.surface_role == role
+            && control.stability == wire::RuntimeStabilityView::Stable
+            && control.channel_safe
+    }) else {
+        return Ok(format!(
+            "Runtime Profile `{runtime_ref}` does not expose a stable, channel-safe {} control.",
+            channel_runtime_control_command_role_label(role)
+        ));
+    };
+
+    let current = control
+        .effective_value
+        .as_ref()
+        .and_then(Value::as_str)
+        .unwrap_or("runtime default");
+    let choices = control
+        .choices
+        .iter()
+        .filter_map(|choice| choice.value.as_str())
+        .collect::<Vec<_>>();
+    let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
+        let choices = if choices.is_empty() {
+            String::new()
+        } else {
+            format!(" Choices: {}.", choices.join(", "))
+        };
+        return Ok(format!(
+            "{} is `{current}` for Runtime Profile `{runtime_ref}`.{choices}",
+            control.label
+        ));
+    };
+
+    if control.mutability != wire::ThreadControlMutabilityView::Selectable {
+        return Ok(format!(
+            "{} is read-only for this runtime session. Send /new, then set it before the next prompt.",
+            control.label
+        ));
+    }
+    let Some(choice) = control
+        .choices
+        .iter()
+        .find(|choice| choice.value.as_str() == Some(requested))
+    else {
+        return Ok(if choices.is_empty() {
+            format!("{} does not advertise selectable values.", control.label)
+        } else {
+            format!(
+                "Unknown {} `{requested}`. Choose one of: {}.",
+                channel_runtime_control_role_label(role),
+                choices.join(", ")
+            )
+        });
+    };
+
+    let value = choice
+        .value
+        .as_str()
+        .expect("channel runtime controls only expose string choices");
+    let binding = runtime_context.binding;
+    if binding.is_some() {
+        if control.apply_scope != wire::ThreadControlApplyScopeView::Session {
+            return Ok(format!(
+                "{} applies when a thread starts. Send /new, set it, then send the next prompt.",
+                control.label
+            ));
+        }
+    } else if control.apply_scope != wire::ThreadControlApplyScopeView::TurnDraft {
+        return Ok(format!(
+            "{} requires a bound runtime session; send a prompt first, then retry.",
+            control.label
+        ));
+    }
+    let result = thread_control_set_result(
+        context.state,
+        context.scope,
+        wire::ThreadControlSetParams {
+            thread_id: binding.as_ref().map(|binding| binding.thread_id.clone()),
+            target_id: runtime_context.target_id.clone(),
+            control_id: control.id.clone(),
+            value: Value::String(value.to_string()),
+            expected_capability_revision: control.capability_revision.clone(),
+            expected_binding_revision: binding
+                .as_ref()
+                .map(|binding| binding.binding_revision)
+                .unwrap_or_default(),
+            expected_context_revision: runtime_context.context_revision,
+            expected_control_revision: runtime_context.control_revision,
+            scope: Some(context.scope.to_wire_scope()),
+        },
+    )
+    .await?;
+    Ok(if binding.is_some() {
+        if result.changed {
+            format!("{} is now `{value}`.", control.label)
+        } else {
+            format!("{} is already `{value}`.", control.label)
+        }
+    } else {
+        format!(
+            "{} `{value}` is saved for the next channel thread.",
+            control.label
+        )
+    })
+}
+
+async fn channel_runtime_context(
+    context: &ChannelCommandContext<'_>,
+) -> psychevo_runtime::Result<(String, wire::ThreadContextReadResult)> {
+    let default_runtime_ref = context
+        .connection
+        .runtime_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("native");
+    let target = runnable_target_for_source(
+        context.state,
+        context.scope,
+        context.source,
+        default_runtime_ref,
+    )?;
+    let runtime_ref = target.runtime_profile_ref.clone();
+    let thread_id = context
+        .state
+        .inner
+        .gateway
+        .resolve_source_thread(context.source)?;
+    let runtime_context = thread_context_read_result_for_target_id(
+        context.state,
+        context.scope,
+        thread_id,
+        &target.target_id,
+    )
+    .await?;
+    Ok((runtime_ref, runtime_context))
+}
+
+pub(super) async fn run_channel_thread_action(
+    state: &WebState,
+    runtime: &ChannelRuntimeState,
+    connection: &ChannelRuntimeConnection,
+    source: &GatewaySource,
+    action: wire::ThreadActionInput,
+) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
+    let thread_id = state
+        .inner
+        .gateway
+        .resolve_source_thread(source)?
+        .or_else(|| {
+            state
+                .activity(source, None)
+                .running
+                .then(|| runtime.observed_source_thread(&connection.id, &source.source_key()))
+                .flatten()
+        });
+    let Some(thread_id) = thread_id else {
+        return Err(Error::Message(
+            "No public Thread is bound to this channel source.".to_string(),
+        ));
+    };
+    let scope = channel_resolved_scope(state, connection, source)?;
+    let (out_tx, _out_rx) = mpsc::unbounded_channel();
+    run_routed_thread_action(
+        state,
+        &scope,
+        wire::ThreadActionRunParams {
+            scope: scope.to_wire_scope(),
+            thread_id,
+            action,
+        },
+        out_tx,
+    )
+    .await
+}
+
+fn channel_runtime_control_role_label(role: wire::ThreadControlSurfaceRoleView) -> &'static str {
+    match role {
+        wire::ThreadControlSurfaceRoleView::Mode => "mode",
+        wire::ThreadControlSurfaceRoleView::Model => "model",
+        wire::ThreadControlSurfaceRoleView::Reasoning => "reasoning variant",
+        wire::ThreadControlSurfaceRoleView::Advanced => "advanced",
+    }
+}
+
+fn channel_runtime_control_command_role_label(
+    role: wire::ThreadControlSurfaceRoleView,
+) -> &'static str {
+    match role {
+        wire::ThreadControlSurfaceRoleView::Mode => "mode",
+        wire::ThreadControlSurfaceRoleView::Model => "model",
+        wire::ThreadControlSurfaceRoleView::Reasoning => "variant",
+        wire::ThreadControlSurfaceRoleView::Advanced => "advanced",
+    }
 }
 
 fn ensure_channel_mission_thread(
@@ -436,31 +749,56 @@ fn channel_action_visible(action: SlashCommandAction) -> bool {
             | SlashCommandAction::Mission
             | SlashCommandAction::Compact
             | SlashCommandAction::Voice
+            | SlashCommandAction::ModelShow
+            | SlashCommandAction::VariantSet
+            | SlashCommandAction::ModeSet
             | SlashCommandAction::SkillInvoke
     )
 }
 
-fn channel_help_text(
-    state: &WebState,
-    scope: &ResolvedScope,
-    source: &GatewaySource,
-    connection: &ChannelRuntimeConnection,
-    runtime: &ChannelRuntimeState,
+async fn channel_help_text(
+    context: &ChannelCommandContext<'_>,
 ) -> psychevo_runtime::Result<String> {
-    let thread_id = state.inner.gateway.resolve_source_thread(source)?;
-    let active_turn = state.activity(source, thread_id.as_deref()).running;
-    let dynamic = dynamic_slash_commands(state, scope)?;
+    let thread_id = context
+        .state
+        .inner
+        .gateway
+        .resolve_source_thread(context.source)?;
+    let active_turn = context
+        .state
+        .activity(context.source, thread_id.as_deref())
+        .running;
+    let dynamic = dynamic_slash_commands(context.state, context.scope)?;
     let available = available_slash_commands_for_surface(
         &channel_command_capabilities(),
         active_turn,
         &dynamic,
         32,
     );
-    let mut lines = vec![format!("Channel {} commands:", connection.label.trim())];
+    let (_, runtime_context) = channel_runtime_context(context).await?;
+    let stable_channel_roles = runtime_context
+        .controls
+        .into_iter()
+        .filter(|control| {
+            control.stability == wire::RuntimeStabilityView::Stable
+                && control.channel_safe
+                && matches!(
+                    control.surface_role,
+                    wire::ThreadControlSurfaceRoleView::Model
+                        | wire::ThreadControlSurfaceRoleView::Reasoning
+                        | wire::ThreadControlSurfaceRoleView::Mode
+                )
+        })
+        .map(|control| control.surface_role)
+        .collect::<Vec<_>>();
+    let mut lines = vec![format!(
+        "Channel {} commands:",
+        context.connection.label.trim()
+    )];
     for command in available
         .commands
         .iter()
-        .filter(|command| channel_action_visible(command.action))
+        .filter(|command| channel_help_action_visible(command.action, &stable_channel_roles))
         .take(16)
     {
         lines.push(format!("/{} - {}", command.name, command.summary));
@@ -471,12 +809,49 @@ fn channel_help_text(
             available.hidden_dynamic
         ));
     }
-    lines.push(
-        "Controls: /stop, /reset, /profile, /approve <token>, /deny <token>, /answer <token> <text>, /cancel <token>."
-            .to_string(),
-    );
-    lines.push(channel_status_text(state, runtime, connection, source)?);
+    let mut controls = Vec::new();
+    if stable_channel_roles.contains(&wire::ThreadControlSurfaceRoleView::Model) {
+        controls.push("/model");
+    }
+    if stable_channel_roles.contains(&wire::ThreadControlSurfaceRoleView::Reasoning) {
+        controls.push("/variant <value>");
+    }
+    if stable_channel_roles.contains(&wire::ThreadControlSurfaceRoleView::Mode) {
+        controls.push("/mode <value>");
+    }
+    controls.extend([
+        "/stop",
+        "/reset",
+        "/profile",
+        "/approve <token>",
+        "/deny <token>",
+        "/answer <token> <text>",
+        "/cancel <token>",
+    ]);
+    lines.push(format!("Controls: {}.", controls.join(", ")));
+    lines.push(channel_status_text(
+        context.state,
+        context.runtime,
+        context.connection,
+        context.source,
+    )?);
     Ok(lines.join("\n"))
+}
+
+fn channel_help_action_visible(
+    action: SlashCommandAction,
+    stable_channel_roles: &[wire::ThreadControlSurfaceRoleView],
+) -> bool {
+    if !channel_action_visible(action) {
+        return false;
+    }
+    let required_role = match action {
+        SlashCommandAction::ModelShow => Some(wire::ThreadControlSurfaceRoleView::Model),
+        SlashCommandAction::VariantSet => Some(wire::ThreadControlSurfaceRoleView::Reasoning),
+        SlashCommandAction::ModeSet => Some(wire::ThreadControlSurfaceRoleView::Mode),
+        _ => None,
+    };
+    required_role.is_none_or(|role| stable_channel_roles.contains(&role))
 }
 
 fn channel_voice_reply(
@@ -522,14 +897,11 @@ fn channel_status_text(
     source: &GatewaySource,
 ) -> psychevo_runtime::Result<String> {
     let runner = runtime.runner_view(&connection.id);
-    let thread = state
-        .inner
-        .gateway
-        .resolve_source_thread(source)?
-        .unwrap_or_else(|| "none".to_string());
-    let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
+    let thread = state.inner.gateway.resolve_source_thread(source)?;
+    let profile_ref = channel_effective_profile_ref(state, connection, source)?;
+    let history = channel_history_status(state, thread.as_deref())?;
     Ok(format!(
-        "Channel {} is {}{}; config {}; runtime {}; thread {}.",
+        "Channel {} is {}{}; config {}; profile {}; thread {}; history {}.",
         connection.label,
         runner.state,
         runner
@@ -538,9 +910,20 @@ fn channel_status_text(
             .map(|reason| format!(" ({reason})"))
             .unwrap_or_default(),
         connection.config_status,
-        runtime_ref,
-        thread
+        profile_ref,
+        thread.as_deref().unwrap_or("none"),
+        history,
     ))
+}
+
+fn channel_history_status(
+    _state: &WebState,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<String> {
+    let Some(_thread_id) = thread_id else {
+        return Ok("unavailable".to_string());
+    };
+    Ok("psychevo/full".to_string())
 }
 
 async fn channel_profile_reply(
@@ -566,7 +949,20 @@ async fn channel_profile_reply(
             if !profile.enabled {
                 return Ok(format!("Runtime Profile `{requested}` is disabled."));
             }
-            match channel_bind_runtime_ref(state, source, requested)? {
+            let target =
+                match runnable_target_for_source_profile(state, &scope, source, Some(requested)) {
+                    Ok(target) => target,
+                    Err(_) if !matches!(profile.health.status.as_str(), "ready" | "unchecked") => {
+                        return Ok(profile.health.summary.clone());
+                    }
+                    Err(error) => return Err(error),
+                };
+            if !target.ready {
+                return Ok(target.unavailable_reason.unwrap_or_else(|| {
+                    format!("Agent target `{}` is unavailable.", target.label)
+                }));
+            }
+            match channel_bind_target_draft(state, source, &target)? {
                 Some(thread_id) => Ok(format!(
                     "Started a new channel thread ({thread_id}) with Runtime Profile `{requested}`. The previous thread is unchanged."
                 )),
@@ -582,7 +978,14 @@ async fn channel_profile_reply(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .unwrap_or("native");
-            match channel_bind_runtime_ref(state, source, runtime_ref)? {
+            let target =
+                runnable_target_for_source_profile(state, &scope, source, Some(runtime_ref))?;
+            if !target.ready {
+                return Ok(target.unavailable_reason.unwrap_or_else(|| {
+                    format!("Agent target `{}` is unavailable.", target.label)
+                }));
+            }
+            match channel_bind_target_draft(state, source, &target)? {
                 Some(thread_id) => Ok(format!(
                     "Started a new channel thread ({thread_id}) with the default Runtime Profile `{runtime_ref}`. The previous thread is unchanged."
                 )),
@@ -591,159 +994,99 @@ async fn channel_profile_reply(
                 )),
             }
         }
-        "sessions" => channel_profile_sessions_text(state, connection, source, &scope).await,
-        "resume" => {
-            let short_handle = rest.split_whitespace().next().unwrap_or("");
-            if short_handle.is_empty() {
-                return Ok("Usage: /profile resume <short-handle>".to_string());
-            }
-            let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
-            let sessions = runtime_session_list_result_live(
-                state,
-                &scope,
-                wire::RuntimeSessionListParams {
-                    runtime_ref: Some(runtime_ref.clone()),
-                    cursor: None,
-                    scope: Some(scope.to_wire_scope()),
-                },
-            )
-            .await?;
-            if !sessions.supported {
-                return Ok(format!(
-                    "Runtime Profile `{runtime_ref}` does not expose resumable sessions here."
-                ));
-            }
-            let matches = sessions
-                .sessions
-                .iter()
-                .filter(|session| {
-                    runtime_session_short_handle(&runtime_ref, session) == short_handle
-                })
-                .collect::<Vec<_>>();
-            let [session] = matches.as_slice() else {
-                return Ok(if matches.is_empty() {
-                    format!(
-                        "Unknown session handle `{short_handle}` for Runtime Profile `{runtime_ref}`."
-                    )
-                } else {
-                    format!(
-                        "Session handle `{short_handle}` is ambiguous; open the GUI to choose a session."
-                    )
-                });
-            };
-            if session.ownership == wire::RuntimeSessionOwnershipView::Active {
-                return Ok(format!(
-                    "Session `{short_handle}` is active and cannot be taken over from a Channel. Open it in the GUI or Fork it."
-                ));
-            }
-            let native_session_id = session.native_session_id.clone();
-            let result = runtime_session_resume_result_live(
-                state,
-                &scope,
-                wire::RuntimeSessionParams {
-                    runtime_ref: runtime_ref.clone(),
-                    native_session_id,
-                    scope: Some(scope.to_wire_scope()),
-                },
-            )
-            .await?;
-            if result.supported && result.changed {
-                Ok(format!(
-                    "Resumed `{short_handle}` on Runtime Profile `{runtime_ref}`."
-                ))
-            } else {
-                Ok(result.message.unwrap_or_else(|| {
-                    format!("Runtime Profile `{runtime_ref}` cannot resume native sessions here.")
-                }))
-            }
-        }
-        _ => Ok(
-            "Usage: /profile [list|status|sessions|use <id>|resume <short-handle>|reset]"
-                .to_string(),
-        ),
+        _ => Ok("Usage: /profile [list|status|use <id>|reset]".to_string()),
     }
 }
 
-async fn channel_profile_sessions_text(
+async fn channel_agent_reply(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
-    scope: &ResolvedScope,
+    args: &str,
 ) -> psychevo_runtime::Result<String> {
-    let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
-    let sessions = runtime_session_list_result_live(
+    let scope = channel_resolved_scope(state, connection, source)?;
+    let default_runtime_ref = connection
+        .runtime_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("native");
+    let selected_target = runnable_target_for_source(state, &scope, source, default_runtime_ref)?;
+    let runtime_ref = selected_target.runtime_profile_ref.clone();
+    let thread_id = state.inner.gateway.resolve_source_thread(source)?;
+    let context = thread_context_read_result_for_target_id(
         state,
-        scope,
-        wire::RuntimeSessionListParams {
-            runtime_ref: Some(runtime_ref.clone()),
-            cursor: None,
-            scope: Some(scope.to_wire_scope()),
-        },
+        &scope,
+        thread_id,
+        &selected_target.target_id,
     )
     .await?;
-    if !sessions.supported {
+    let candidates = context
+        .compatible_targets
+        .iter()
+        .filter(|target| target.runtime_profile_ref == runtime_ref)
+        .collect::<Vec<_>>();
+    let requested = args.trim();
+    if requested.is_empty() || requested == "list" || requested == "status" {
+        let selected = context
+            .binding
+            .as_ref()
+            .and_then(|binding| binding.agent_ref.clone())
+            .or(channel_draft_agent_ref(state, source)?)
+            .unwrap_or_else(|| "default".to_string());
+        let mut lines = vec![format!(
+            "Top-level Agent for Runtime Profile `{runtime_ref}`: `{selected}`."
+        )];
+        for target in candidates
+            .iter()
+            .filter(|target| target.agent_ref.is_some())
+        {
+            let status = if target.ready { "ready" } else { "unavailable" };
+            lines.push(format!(
+                "{} - {} ({status}){}",
+                target.agent_ref.as_deref().unwrap_or("default"),
+                target.label,
+                target
+                    .unavailable_reason
+                    .as_deref()
+                    .map(|reason| format!(": {reason}"))
+                    .unwrap_or_default()
+            ));
+        }
+        lines.push(
+            "Use /agent <name> or /agent reset. /agents still lists callable subagents."
+                .to_string(),
+        );
+        return Ok(lines.join("\n"));
+    }
+    let requested = requested.strip_prefix("use ").unwrap_or(requested).trim();
+    let requested_agent = (!matches!(requested, "reset" | "default" | "none")).then_some(requested);
+    let target = candidates
+        .iter()
+        .find(|target| target.agent_ref.as_deref() == requested_agent);
+    let Some(target) = target else {
         return Ok(format!(
-            "Runtime Profile `{runtime_ref}` does not expose resumable sessions here."
+            "Agent `{}` is not compatible with Runtime Profile `{runtime_ref}`. Send /agent to list compatible targets.",
+            requested_agent.unwrap_or("default")
         ));
+    };
+    if !target.ready {
+        return Ok(target
+            .unavailable_reason
+            .clone()
+            .unwrap_or_else(|| format!("{} is unavailable.", target.label)));
     }
-    if sessions.sessions.is_empty() {
-        return Ok(format!(
-            "No sessions are available for Runtime Profile `{runtime_ref}`."
-        ));
-    }
-    let mut lines = vec![format!("Sessions for Runtime Profile `{runtime_ref}`:")];
-    for session in sessions.sessions.iter().take(20) {
-        let handle = runtime_session_short_handle(&runtime_ref, session);
-        let title = channel_runtime_session_title(session);
-        let ownership = match session.ownership {
-            wire::RuntimeSessionOwnershipView::ReadWrite => "resumable",
-            wire::RuntimeSessionOwnershipView::ReadOnly => "read-only",
-            wire::RuntimeSessionOwnershipView::Active => "active; GUI or Fork only",
-        };
-        let fidelity = match session.fidelity {
-            wire::RuntimeHistoryFidelityView::Full => "full history",
-            wire::RuntimeHistoryFidelityView::Summary => "summary history",
-            wire::RuntimeHistoryFidelityView::Partial => "partial history",
-        };
-        let archived = if session.archived { " · archived" } else { "" };
-        lines.push(format!(
-            "{handle}: {title} · {ownership} · {fidelity}{archived}"
-        ));
-    }
-    if sessions.sessions.len() > 20 || sessions.next_cursor.is_some() {
-        lines.push("More sessions are available in Workbench.".to_string());
-    }
-    lines.push("Resume with /profile resume <short-handle>.".to_string());
-    Ok(lines.join("\n"))
-}
-
-fn channel_runtime_session_title(session: &wire::RuntimeSessionView) -> String {
-    let title = session.title.as_deref().unwrap_or_default().trim();
-    if title.is_empty()
-        || (!session.native_session_id.is_empty() && title.contains(&session.native_session_id))
-        || (!session.native_dedup_key.is_empty() && title.contains(&session.native_dedup_key))
-    {
-        return "Untitled session".to_string();
-    }
-    let single_line = title.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut chars = single_line.chars();
-    let bounded = chars.by_ref().take(80).collect::<String>();
-    if chars.next().is_some() {
-        format!("{bounded}…")
-    } else {
-        bounded
-    }
-}
-
-fn runtime_session_short_handle(runtime_ref: &str, session: &wire::RuntimeSessionView) -> String {
-    let digest = Sha256::digest(
-        format!(
-            "channel-session\0{runtime_ref}\0{}",
-            session.native_dedup_key
-        )
-        .as_bytes(),
-    );
-    format!("rs_{:x}", digest).chars().take(15).collect()
+    let new_thread = channel_bind_target_draft(state, source, target)?;
+    Ok(match new_thread {
+        Some(thread_id) => format!(
+            "Started a new channel thread ({thread_id}) with top-level Agent `{}` and Runtime Profile `{runtime_ref}`. The previous thread is unchanged.",
+            target.agent_ref.as_deref().unwrap_or("default")
+        ),
+        None => format!(
+            "Top-level Agent `{}` is saved for the next channel thread with Runtime Profile `{runtime_ref}`.",
+            target.agent_ref.as_deref().unwrap_or("default")
+        ),
+    })
 }
 
 fn channel_profile_status_text(
@@ -752,15 +1095,15 @@ fn channel_profile_status_text(
     source: &GatewaySource,
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<String> {
-    let runtime_ref = channel_effective_runtime_ref(state, connection, source)?;
+    let profile_ref = channel_effective_profile_ref(state, connection, source)?;
     let profiles = runtime_profile_list_result(state, scope)?.profiles;
-    let Some(profile) = profiles.iter().find(|profile| profile.id == runtime_ref) else {
+    let Some(profile) = profiles.iter().find(|profile| profile.id == profile_ref) else {
         return Ok(format!(
-            "Runtime Profile `{runtime_ref}` is not configured."
+            "Runtime Profile `{profile_ref}` is not configured."
         ));
     };
     Ok(format!(
-        "Runtime Profile `{}`: {} ({}) - {}. Use /profile sessions to list resumable handles.",
+        "Runtime Profile `{}`: {} ({}) - {}.",
         profile.id, profile.label, profile.runtime, profile.health.summary
     ))
 }
@@ -869,7 +1212,7 @@ fn reset_channel_source_reply(
     })
 }
 
-fn channel_resolved_scope(
+pub(super) fn channel_resolved_scope(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
@@ -906,52 +1249,4 @@ fn split_first_arg(value: &str) -> (&str, &str) {
     let split_at = value.find(char::is_whitespace).unwrap_or(value.len());
     let (first, rest) = value.split_at(split_at);
     (first, rest.trim())
-}
-
-#[cfg(test)]
-mod runtime_session_handle_tests {
-    use super::*;
-
-    fn session(native_dedup_key: &str) -> wire::RuntimeSessionView {
-        wire::RuntimeSessionView {
-            native_session_id: "raw-native-id".to_string(),
-            thread_id: None,
-            title: None,
-            archived: false,
-            updated_at_ms: None,
-            parent_thread_id: None,
-            status: None,
-            native_dedup_key: native_dedup_key.to_string(),
-            fidelity: wire::RuntimeHistoryFidelityView::Full,
-            ownership: wire::RuntimeSessionOwnershipView::ReadWrite,
-            actions: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn channel_session_handle_is_opaque_stable_and_runtime_scoped() {
-        let first = runtime_session_short_handle("codex", &session("native-session-secret"));
-        assert_eq!(
-            first,
-            runtime_session_short_handle("codex", &session("native-session-secret"))
-        );
-        assert_ne!(
-            first,
-            runtime_session_short_handle("opencode", &session("native-session-secret"))
-        );
-        assert!(first.starts_with("rs_"));
-        assert!(!first.contains("native"));
-        assert_eq!(first.len(), 15);
-    }
-
-    #[test]
-    fn channel_session_title_never_echoes_native_identity() {
-        let mut raw = session("native-session-secret");
-        raw.native_session_id = "native-session-secret".to_string();
-        raw.title = Some("native-session-secret".to_string());
-        assert_eq!(channel_runtime_session_title(&raw), "Untitled session");
-
-        raw.title = Some("Review\nthis workspace".to_string());
-        assert_eq!(channel_runtime_session_title(&raw), "Review this workspace");
-    }
 }

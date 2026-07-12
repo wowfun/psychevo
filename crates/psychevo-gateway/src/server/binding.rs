@@ -309,37 +309,6 @@ struct WebState {
     inner: Arc<WebStateInner>,
 }
 
-#[derive(Clone)]
-struct RuntimeSessionCursorEntry {
-    runtime_ref: String,
-    cwd: String,
-    native_session_id: String,
-    native_cursor: String,
-}
-
-#[derive(Clone)]
-struct RuntimeSessionHandleEntry {
-    runtime_ref: String,
-    cwd: String,
-    native_session_id: String,
-}
-
-#[derive(Clone)]
-struct RuntimeSessionListCursorEntry {
-    runtime_ref: String,
-    cwd: String,
-    native_cursor: String,
-}
-
-#[derive(Clone)]
-struct RuntimeSessionRevisionEntry {
-    runtime_ref: String,
-    cwd: String,
-    native_session_id: String,
-    native_page_cursor: Option<String>,
-    native_message_id: String,
-}
-
 struct WebStateInner {
     gateway: Gateway,
     state: StateRuntime,
@@ -359,11 +328,88 @@ struct WebStateInner {
     mcp_oauth_sessions: Mutex<HashMap<String, McpOAuthSession>>,
     voice_policies: Mutex<HashMap<String, wire::VoicePolicyMode>>,
     realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
-    runtime_session_cursors: Mutex<HashMap<String, RuntimeSessionCursorEntry>>,
-    runtime_session_handles: Mutex<HashMap<String, RuntimeSessionHandleEntry>>,
-    runtime_session_list_cursors: Mutex<HashMap<String, RuntimeSessionListCursorEntry>>,
-    runtime_session_revisions: Mutex<HashMap<String, RuntimeSessionRevisionEntry>>,
+    agent_session_imports: Mutex<AgentSessionImportRegistry>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
+}
+
+const AGENT_SESSION_IMPORT_TTL_MS: i64 = 10 * 60 * 1_000;
+const MAX_AGENT_SESSION_IMPORT_HANDLES: usize = 2_048;
+
+#[derive(Debug, Clone)]
+struct AgentSessionImportCandidate {
+    native_session_id: String,
+    runtime_profile_ref: String,
+    cwd: PathBuf,
+    title: Option<String>,
+    expires_at_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+struct AgentSessionImportCursor {
+    cursor: String,
+    runtime_profile_ref: String,
+    expires_at_ms: i64,
+}
+
+#[derive(Debug, Default)]
+struct AgentSessionImportRegistry {
+    candidates: HashMap<String, AgentSessionImportCandidate>,
+    cursors: HashMap<String, AgentSessionImportCursor>,
+}
+
+impl AgentSessionImportRegistry {
+    fn retain_live(&mut self, now_ms: i64) {
+        self.candidates
+            .retain(|_, candidate| candidate.expires_at_ms > now_ms);
+        self.cursors.retain(|_, cursor| cursor.expires_at_ms > now_ms);
+        while self.candidates.len() + self.cursors.len() >= MAX_AGENT_SESSION_IMPORT_HANDLES {
+            if let Some(key) = self.candidates.keys().next().cloned() {
+                self.candidates.remove(&key);
+            } else if let Some(key) = self.cursors.keys().next().cloned() {
+                self.cursors.remove(&key);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn insert_candidate(
+        &mut self,
+        runtime_profile_ref: String,
+        cwd: PathBuf,
+        native_session_id: String,
+        title: Option<String>,
+    ) -> String {
+        let now_ms = gateway_now_ms();
+        self.retain_live(now_ms);
+        let id = format!("candidate:{}", Uuid::now_v7());
+        self.candidates.insert(
+            id.clone(),
+            AgentSessionImportCandidate {
+                native_session_id,
+                runtime_profile_ref,
+                cwd,
+                title,
+                expires_at_ms: now_ms + AGENT_SESSION_IMPORT_TTL_MS,
+            },
+        );
+        id
+    }
+
+    fn insert_cursor(&mut self, runtime_profile_ref: String, cursor: String) -> String {
+        let now_ms = gateway_now_ms();
+        self.retain_live(now_ms);
+        let id = format!("cursor:{}", Uuid::now_v7());
+        self.cursors.insert(
+            id.clone(),
+            AgentSessionImportCursor {
+                cursor,
+                runtime_profile_ref,
+                expires_at_ms: now_ms + AGENT_SESSION_IMPORT_TTL_MS,
+            },
+        );
+        id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -429,15 +475,13 @@ impl WebState {
                 mcp_oauth_sessions: Mutex::new(HashMap::new()),
                 voice_policies: Mutex::new(HashMap::new()),
                 realtime_sessions: Mutex::new(HashMap::new()),
-                runtime_session_cursors: Mutex::new(HashMap::new()),
-                runtime_session_handles: Mutex::new(HashMap::new()),
-                runtime_session_list_cursors: Mutex::new(HashMap::new()),
-                runtime_session_revisions: Mutex::new(HashMap::new()),
+                agent_session_imports: Mutex::new(AgentSessionImportRegistry::default()),
                 channel_runtime,
             }),
         };
         channel_runtime::reconcile(web_state.clone());
         automations::reconcile(web_state.clone());
+        reconcile_acknowledged_session_deletes(&web_state);
         web_state
     }
 
@@ -520,6 +564,32 @@ impl WebState {
                 thread_id.clone(),
             ),
         }
+    }
+
+    fn thread_turn_request(
+        &self,
+        cwd: PathBuf,
+        thread_id: Option<String>,
+        input: Vec<GatewayInputPart>,
+    ) -> crate::ThreadTurnRequest {
+        let mut inherited_env = self.inner.inherited_env.clone();
+        inherited_env
+            .entry("PSYCHEVO_HOME".to_string())
+            .or_insert_with(|| self.inner.home.to_string_lossy().into_owned());
+        let mut request = crate::ThreadTurnRequest::new(cwd.clone(), input);
+        request.thread_id = thread_id.clone();
+        request.policy.snapshot_root = Some(self.inner.home.join("snapshots"));
+        request.policy.extract_prompt_image_sources = true;
+        request.policy.config_path = self.inner.config_path.clone();
+        request.policy.permission_mode = Some(PermissionMode::Default);
+        request.policy.clarify_enabled = true;
+        request.policy.inherited_env = Some(inherited_env);
+        request.set_runtime_tools(automations::automation_runtime_tools(
+            self.clone(),
+            cwd,
+            thread_id,
+        ));
+        request
     }
 
     #[cfg(test)]

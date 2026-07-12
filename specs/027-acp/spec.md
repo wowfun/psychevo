@@ -3,15 +3,17 @@ name: 027. ACP
 psychevo_self_edit: deny
 ---
 
-# 027. ACP
+# 027. Inbound ACP
 
-Define Psychevo's Agent Client Protocol boundary.
+Define the inbound Agent Client Protocol Adapter through which an ACP client
+uses Psychevo.
 
-ACP is a protocol interface over `psychevo-gateway` and `psychevo-runtime`. It maps protocol requests
-and notifications to gateway threads, runtime sessions, invocations, observations, permissions,
-auth, commands, model and mode controls, config controls, and capability source
-inputs. ACP does not own agent execution, provider behavior, tool semantics,
-runtime permission policy, durable storage, or MCP semantics.
+Inbound ACP is a caller-side Adapter over `psychevo-gateway`. It maps protocol
+requests and notifications to the same Thread Application Interface used by
+Workbench and Channels. It does not own agent execution, Adapter selection,
+provider behavior, tool semantics, runtime permission policy, durable storage,
+or MCP semantics. Outbound ACP Agent execution has the opposite protocol role
+and is defined by [052 Agent Runtimes](../052-agent-runtimes/spec.md).
 
 ## Scope
 
@@ -31,25 +33,24 @@ Out of scope:
 - filesystem or terminal delegation to an ACP client
 - replacing runtime permissions with client-side policy
 - plugin marketplace, install, update, or trusted-script extension mechanics
+- outbound ACP process/session supervision and Agent capability packs
 
 ## Protocol Boundary
 
-An ACP implementation accepts protocol requests, translates them into gateway
-inputs, projects gateway/runtime observations back to ACP updates, and keeps transport
-state for active ACP sessions.
+An inbound ACP implementation accepts protocol requests, translates them into
+Gateway Thread Application inputs, projects Gateway observations back to ACP
+updates, and keeps transport state for active ACP sessions.
 
-ACP implementations must call `psychevo-gateway` for normal prompting,
-cancellation, permission, clarify, queue, steer, reset, and source-to-thread
-behavior. They may call `psychevo-runtime` directly for non-interactive
-administrative projections that are not gateway semantics. ACP must not shell
-out through a CLI command for normal prompting, cancellation, permission, MCP,
-command, model, config, or session behavior.
+Inbound ACP must call `psychevo-gateway` for context, prompting, cancellation,
+interactions, queue, actions, controls, history, and source-to-thread behavior.
+It must not call a runtime Adapter directly or shell out through a CLI command
+for normal interactive behavior.
 
 Concrete product specs choose how Psychevo exposes an ACP server. This topic
 owns the protocol mapping, not the product process that hosts it.
 
-When Psychevo exposes an ACP server, the server uses the SDK's ACP v2 agent
-builder and v2 typed request, response, and notification surface. ACP v1
+Psychevo pins `agent-client-protocol = 1.2.0`. The inbound server uses the SDK's
+ACP v2 agent builder and typed request, response, and notification surface. ACP v1
 clients are served through the SDK compatibility layer when the requested
 operation can be represented in both protocol versions. V1-only request paths
 such as `session/set_mode` are not registered by the server; mode is exposed as
@@ -58,13 +59,11 @@ clients receive the best available compatibility projection.
 
 ## Sessions
 
-ACP session ids identify active ACP session actors. Each actor maps to a
-Psychevo runtime session id once runtime creates or loads the backing session.
-New ACP sessions use gateway source kind `acp` and runtime source `acp` for
-persistence. A newly created ACP session may remain transport-local until the
-first model-backed prompt creates the durable runtime session; the ACP id must
-remain stable for the client and must be linked to the runtime id once that id
-exists.
+ACP session ids identify inbound transport actors. Each actor maps to a
+Psychevo public thread once the first prompt captures a `RunnableTarget` and
+creates or loads the backing thread. New ACP sessions use Gateway source kind
+`acp`. The ACP id remains stable and links to the public thread id; it never
+exposes a Native or outbound-ACP session id.
 
 ACP uses a `Persistent` Gateway source lifetime. Source-to-thread binding is
 therefore durable across reconnects, while active turns and queued turns remain
@@ -78,7 +77,7 @@ session remains absent until the first model-backed prompt creates it.
 `session/close` closes the ACP actor and aborts any active invocation for that
 actor.
 
-Session history replay uses sanitized runtime messages and ACP session updates.
+Session history replay uses the Gateway History Interface and ACP session updates.
 Replay is presentation, not new evidence. `session/load` must replay history
 before returning the load response. Replay is best effort: corrupt, older, or
 unsupported message shapes produce visible placeholder updates and a structured
@@ -92,19 +91,19 @@ content is preserved in order. A single text block that starts with `/` may be
 handled as an ACP slash command; prompts with multiple blocks, images, or
 resources are model prompts even when a text block starts with `/`.
 
-Image content maps to runtime image blocks when the source is usable. Image
-data becomes a data URL; non-empty image URIs pass through as image URLs.
-Image file resources use the runtime image pipeline. Audio and unsupported
-resources degrade to explicit visible text.
+Image content maps to structured Gateway image blocks when the source is usable.
+Image data becomes a data URL; non-empty image URIs remain image references.
+Image file resources use the shared workspace pipeline. Audio and unsupported
+resources return a bounded protocol error before delivery; they are not
+silently converted to text.
 
 Text resource links are resolved only when they are local paths or file URIs
 inside the session cwd context. All text resources are capped at 512 KiB
 after decoding. Remote HTTP(S) resource links are not fetched proactively and
-degrade to a visible resource-link note. Resource handling records
-prompt-scoped summaries in runtime context evidence; text that is actually
-inlined for the model is persisted in the user message for new runs. ACP v2
-schema 0.13.6 does not expose the v1 client filesystem callback surface, so
-server-side prompt resource resolution must not depend on client fs callbacks.
+remain typed resource links for a capable target; otherwise admission rejects
+them. Resource handling records prompt-scoped summaries in context evidence;
+text actually inlined for the Agent is persisted in the accepted user intent.
+Server-side resource resolution must not depend on client fs callbacks.
 
 Gateway transcript observation maps to ACP session updates:
 
@@ -136,69 +135,24 @@ ACP layer must not delegate command execution to client `terminal/create`, and
 must not use client terminal presentation to bypass runtime `exec_command`,
 `write_stdin`, yield-session, persistence, permission, or accounting semantics.
 When the negotiated protocol is ACP v2, terminal-style presentation is limited
-to textual command/output content plus reserved metadata because v2 schema
-0.13.6 removed the v1 `ToolCallContent::Terminal` variant.
+to the shapes available in the current v2 schema and must not assume the v1
+`ToolCallContent::Terminal` variant.
 
-When Psychevo is the ACP client for a configured peer agent, the same
-observation semantics apply in reverse at the peer boundary: ACP
-`session/update` `agent_message_chunk` text is an incremental assistant text
-stream, and `agent_thought_chunk` text is incremental reasoning. The peer-client
-bridge prefers the newest ACP protocol version supported by the SDK and peer,
-falling back to ACP v1 only when initialization proves the peer cannot negotiate
-the newer version. With the Rust ACP SDK line used by Psychevo, this means
-`agent-client-protocol` 0.14.0 with schema 0.13.6: the peer bridge first tries
-ACP protocol v2 and falls back to v1 for peers such as older OpenCode builds
-that still negotiate v1. It must forward updates into Gateway live events before the
-prompt stop reason and persist their accumulated semantic content for reload. It
-must not use an SDK convenience path that ignores non-text updates or withholds
-text chunks until the turn is complete. Standard ACP tool-call and plan updates
-are projected into Gateway live transcript structures where possible, and all
-standard session-update variants are retained as structured peer events for
-diagnostics and future surface support. Newer ACP updates without a dedicated
-Psychevo projection must still be retained as raw structured peer events when
-the negotiated SDK layer can decode them.
+When Psychevo is the ACP client for an external Agent, the protocol direction,
+stable-v1 default, process/session lifecycle, control application, callbacks,
+replay/live reduction, capability packs, and delegated subagent behavior are
+owned by [052 Agent Runtimes](../052-agent-runtimes/spec.md) and [051 ACP
+Agents](../051-agents/peer-agents.md). The inbound server defined here must not
+share transport actors, native ids, or callback state with that outbound
+Adapter.
 
-When the peer exposes session config options, Psychevo maps its active
-turn-level controls onto the peer before sending the prompt. A Workbench or
-Gateway `model` value is applied to the peer's `model` session config option
-when that option exists and contains a matching select value. A
-`reasoning_effort` value is applied to the peer's `effort` session config
-option when present. If the peer does not expose the option or the selected
-value is not offered, Psychevo leaves the peer default unchanged and records a
-structured diagnostic event instead of failing the turn. This mapping is a
-session configuration step, not a prompt-prefix convention, and must happen
-before `session/prompt`.
-When Gateway acts as an ACP client, `runtimeOptions.mode` is the current peer
-runtime mode. It maps to the peer's `mode` session config option or `mode`
-category before `session/prompt`, using the same unmatched-value diagnostic
-behavior as model and effort. OpenCode exposes its primary/all agents through
-that ACP `mode` option; Psychevo must present those values as OpenCode runtime
-modes rather than Psychevo agent definitions.
-
-ACP peer backends may also be used as explicit delegated subagents when a
-native Psychevo runtime invokes the `Agent` tool for an agent definition whose
-`backend.ref` names an enabled backend and whose `entrypoints` include
-`subagent`. In that case Gateway acts as the ACP client for the child
-delegation: it starts or reuses the backend session, applies the same
-model/effort/runtime-option mapping supported for peer turns, streams peer
-message, thought, tool, plan, and usage updates into the parent turn's live
-observation path, and persists the delegated child run as peer-backed evidence
-with provider `acp:<backend-id>`. This is an ACP-as-tool path, not a peer
-runtime selection shortcut. When the selected runtime itself is a peer backend,
-literal `@agent` text is passed to that peer as prompt text unless a client
-submits an explicit structured Psychevo agent mention; the peer owns whether
-that text has meaning.
-
-ACP v2 `plan_update` maps to the same live Plan/status projection as v1 `plan`
-when it carries item entries. V2 `usage_update`, `config_option_update`,
-`available_commands_update`, and unknown/future session updates are retained as
-structured `acp_peer_session_update` records, with `usage_update` also mirrored
-as a live Gateway usage event. In SDK schema 0.13.6, v2 no longer advertises the
-v1 client `fs` and `terminal` capabilities, and v1 filesystem request methods
-do not convert to v2. Psychevo therefore does not claim those callbacks on the
-v2 initialization path; filesystem callbacks remain available on v1 fallback
-only, gated by backend `client_capabilities`, selected-agent tool policy, and
-Gateway permission checks.
+For that outbound Adapter, the resident snapshot keeps full projection,
+control, and admission freshness distinct. Stable-v1 notifications such as
+`available_commands_update`, `session_info_update`, and `usage_update` advance
+the full projection but do not invalidate a Model, Reasoning, or Mode mutation
+whose target, binding, admission capabilities, and control catalog are still
+current. Config-option or mode updates continue to advance control freshness.
+No ACP wire extension is used for this distinction.
 
 Runtime usage and accounting are projected at the ACP prompt boundary. When the
 ACP SDK exposes unstable usage fields, Psychevo sends `PromptResponse.usage`
@@ -321,6 +275,15 @@ ACP may expose model selection, current-runtime mode selection, and session
 config options when runtime can honor those inputs for future prompts in the
 same ACP session.
 
+For outbound ACP targets, an explicit product draft preparation may create an
+unpublished `session/new` before the first prompt. Its stable-v1
+`configOptions` are the authoritative prospective Model, Reasoning, and Mode
+catalog. The first product turn promotes that same session into the public
+Thread binding; it must not create a replacement session. Cache-only context
+reads never perform this preparation. A prepared config mutation uses
+`session/set_config_option` and returns the Agent's updated options before the
+product reports the value as observed.
+
 ACP initializes and loads sessions with a model state derived from local config
 and cache-first model metadata. It must not fetch provider catalogs during ACP
 initialize, new-session, or load-session. The current selected model is always
@@ -329,11 +292,10 @@ catalogs. ACP model ids use `provider/model`; bare model ids are accepted for
 model switching only when they unambiguously resolve to one configured
 provider.
 
-Mode and config updates change ACP session state first. The next runtime
-invocation receives the resolved state through normal runtime inputs. For peer
-runtimes, the selected mode is forwarded as a peer session config option rather
-than being injected into prompt text. Unsupported model, mode, or config values
-must return bounded protocol errors instead of falling back silently.
+Mode and config updates call `thread/control/set`. The next turn receives the
+resolved thread preference through normal Thread Application inputs, and the
+selected Adapter applies it before prompt delivery. Unsupported model, mode, or
+config values return bounded protocol errors instead of falling back silently.
 
 ## MCP
 

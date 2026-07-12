@@ -164,12 +164,6 @@ fn session_control_agent(
         return Ok(None);
     };
     let metadata = state.inner.state.store().session_metadata(thread_id)?;
-    if let Some(selection) = crate::bound_direct_agent_selection(thread_id, metadata.as_ref())? {
-        return Ok(match selection {
-            crate::BoundDirectAgentSelection::Default => None,
-            crate::BoundDirectAgentSelection::Named(agent) => Some(agent),
-        });
-    }
     Ok(match main_agent_from_session_metadata(metadata.as_ref()) {
         LoadedMainAgent::Agent(agent) => Some(agent),
         LoadedMainAgent::Default | LoadedMainAgent::Missing => None,

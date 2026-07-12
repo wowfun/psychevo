@@ -1,4 +1,4 @@
-pub(crate) use std::collections::BTreeSet;
+pub(crate) use std::collections::{BTreeMap, BTreeSet};
 pub(crate) use std::fs;
 pub(crate) use std::path::Path;
 pub(crate) use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,8 +23,8 @@ pub(crate) use crate::types::{
     SessionSummary, TuiMessageSummary,
 };
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 26;
-pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 24;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 28;
+pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 28;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -106,7 +106,9 @@ pub struct GatewaySourceBindingRecord {
     pub thread_id: String,
     pub backend_kind: String,
     pub backend_native_id: Option<String>,
-    pub draft_runtime_ref: Option<String>,
+    pub draft_agent_ref: Option<String>,
+    pub draft_profile_ref: Option<String>,
+    pub draft_control_values: BTreeMap<String, String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub lineage: Option<Value>,
@@ -119,7 +121,9 @@ pub struct GatewaySourceLaneInput<'a> {
     pub raw_identity: Value,
     pub visible_name: Option<&'a str>,
     pub thread_id: Option<&'a str>,
-    pub draft_runtime_ref: Option<&'a str>,
+    pub draft_agent_ref: Option<&'a str>,
+    pub draft_profile_ref: Option<&'a str>,
+    pub draft_control_values: &'a BTreeMap<String, String>,
     pub lineage: Option<Value>,
 }
 
@@ -130,10 +134,61 @@ pub struct GatewaySourceLaneRecord {
     pub raw_identity: Value,
     pub visible_name: Option<String>,
     pub thread_id: Option<String>,
-    pub draft_runtime_ref: Option<String>,
+    pub draft_agent_ref: Option<String>,
+    pub draft_profile_ref: Option<String>,
+    pub draft_control_values: BTreeMap<String, String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub lineage: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayTurnDeliveryInput<'a> {
+    pub turn_id: &'a str,
+    pub thread_id: &'a str,
+    pub runtime_ref: &'a str,
+    pub input_json: &'a str,
+    pub input_hash: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayTurnDeliveryRecord {
+    pub turn_id: String,
+    pub thread_id: String,
+    pub runtime_ref: String,
+    pub status: String,
+    pub input_json: Option<String>,
+    pub input_hash: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub delivery_confirmed_at_ms: Option<i64>,
+    pub terminal_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayChannelOutboxInput<'a> {
+    pub delivery_id: &'a str,
+    pub thread_id: &'a str,
+    pub turn_id: &'a str,
+    pub connection_id: &'a str,
+    pub source_key: &'a str,
+    pub payload_text: &'a str,
+    pub payload_hash: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayChannelOutboxRecord {
+    pub delivery_id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub connection_id: String,
+    pub source_key: String,
+    pub status: String,
+    pub payload_text: Option<String>,
+    pub payload_hash: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub acknowledged_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,6 +240,9 @@ impl GatewayRuntimeBindingOwnership {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayRuntimeBindingInput<'a> {
     pub thread_id: &'a str,
+    pub agent_ref: Option<&'a str>,
+    pub agent_fingerprint: &'a str,
+    pub agent_definition_json: &'a str,
     pub runtime_ref: &'a str,
     pub backend_kind: &'a str,
     pub native_kind: &'a str,
@@ -203,6 +261,9 @@ pub struct GatewayRuntimeBindingInput<'a> {
 pub struct GatewayRuntimeBindingRecord {
     pub thread_id: String,
     pub status: GatewayRuntimeBindingStatus,
+    pub agent_ref: Option<String>,
+    pub agent_fingerprint: Option<String>,
+    pub agent_definition_json: Option<String>,
     pub runtime_ref: Option<String>,
     pub backend_kind: Option<String>,
     pub native_kind: Option<String>,
@@ -216,9 +277,20 @@ pub struct GatewayRuntimeBindingRecord {
     pub ownership: GatewayRuntimeBindingOwnership,
     pub parent_thread_id: Option<String>,
     pub binding_revision: i64,
+    pub thread_preferences: BTreeMap<String, Value>,
+    pub runtime_observed: BTreeMap<String, Value>,
+    pub control_revision: i64,
     pub unresolved_reason: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GatewayRuntimeControlStatePatch<'a> {
+    /// Replaces the complete stored Thread preference map when present.
+    pub thread_preferences: Option<&'a BTreeMap<String, Value>>,
+    /// Replaces the complete Adapter-observed map when present.
+    pub runtime_observed: Option<&'a BTreeMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -558,6 +630,8 @@ pub(crate) mod store_gateway_bindings;
 pub(crate) mod store_lifecycle;
 #[path = "store/runtime_bindings.rs"]
 pub(crate) mod store_runtime_bindings;
+#[path = "store/turn_delivery.rs"]
+pub(crate) mod store_turn_delivery;
 #[allow(unused_imports)]
 use store_lifecycle::*;
 #[path = "store/retry.rs"]

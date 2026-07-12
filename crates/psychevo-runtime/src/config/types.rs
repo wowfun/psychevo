@@ -107,8 +107,6 @@ impl Default for WorkspacesConfig {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProfileKind {
     Native,
-    Codex,
-    OpenCode,
     Acp,
 }
 
@@ -116,8 +114,6 @@ impl RuntimeProfileKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Native => "native",
-            Self::Codex => "codex",
-            Self::OpenCode => "opencode",
             Self::Acp => "acp",
         }
     }
@@ -125,8 +121,6 @@ impl RuntimeProfileKind {
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value.trim() {
             "native" => Some(Self::Native),
-            "codex" => Some(Self::Codex),
-            "opencode" => Some(Self::OpenCode),
             "acp" => Some(Self::Acp),
             _ => None,
         }
@@ -159,9 +153,6 @@ pub struct RuntimeProfileConfig {
     pub enabled: bool,
     pub label: String,
     pub backend_ref: Option<String>,
-    pub command: Option<String>,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
     pub default_model: Option<String>,
     pub default_mode: Option<String>,
     pub default_agent: Option<String>,

@@ -21,9 +21,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "0.14.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5efba6592048ef8a9ac97de8d79b2d9933d8ac4d94f7a2de102348fed0c61103"
+checksum = "882b815ffa67b023e1b40e7ea3bab3f05869654e8565d6811870c5545285e1d3"
 dependencies = [
  "agent-client-protocol-derive",
  "agent-client-protocol-schema",
@@ -31,7 +31,6 @@ dependencies = [
  "blocking",
  "futures",
  "futures-concurrency",
- "jsonrpcmsg",
  "rustc-hash",
  "schemars 1.2.1",
  "serde",
@@ -39,13 +38,14 @@ dependencies = [
  "shell-words",
  "tracing",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "agent-client-protocol-derive"
-version = "0.14.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d176a10d4cb06e0262a738c3c5bf21ff0968db13a666e31cbca94a3d3d72e7c"
+checksum = "dd5ca63f112bd2459bcaf9eda0683b9ba95fc3b5e5fdd9036ca941c6a09345b1"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -53,12 +53,13 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "0.13.6"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c290bfa00c6b52339db66f8e9cf711d5f08530800529f7d619ff24d6cba253d0"
+checksum = "06679e1542356341f4550ccfb16338b64f37f6af70de2105446ef6fbb078234c"
 dependencies = [
  "anyhow",
  "derive_more",
+ "diffy",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -885,6 +886,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 
 [[package]]
+name = "diffy"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05264ab2aab4fb952fc4b0f3f6eff1ddfb4563064053a4ea174d91537584a769"
+dependencies = [
+ "hashbrown 0.17.0",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1445,6 +1455,9 @@ name = "hashbrown"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+dependencies = [
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "hashlink"
@@ -1971,16 +1984,6 @@ dependencies = [
  "futures-util",
  "once_cell",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "jsonrpcmsg"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d833a15225c779251e13929203518c2ff26e2fe0f322d584b213f4f4dad37bd"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2802,8 +2805,10 @@ name = "psychevo-gateway"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "agent-client-protocol-schema",
  "axum",
  "base64",
+ "chrono",
  "feishu-sdk",
  "futures",
  "http",
@@ -2812,8 +2817,8 @@ dependencies = [
  "psychevo-ai",
  "psychevo-gateway-protocol",
  "psychevo-runtime",
- "psychevo-runtime-host",
  "qrcode",
+ "regex-lite",
  "reqwest",
  "rusqlite",
  "serde",
@@ -2874,26 +2879,6 @@ dependencies = [
  "toml",
  "tree-sitter",
  "tree-sitter-bash",
- "uuid",
-]
-
-[[package]]
-name = "psychevo-runtime-host"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64",
- "bytes",
- "futures",
- "getrandom 0.4.2",
- "psychevo-runtime",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
  "uuid",
 ]
 

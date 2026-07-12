@@ -1,7 +1,8 @@
 
     use psychevo_ai::Outcome;
     use psychevo_runtime::{
-        Message, PermissionMode, RunMode, UserContentBlock, UserShellContextOptions,
+        AssistantBlock, Message, PermissionMode, RunMode, UserContentBlock,
+        UserShellContextOptions,
     };
     use tokio::sync::{Notify, mpsc};
 
@@ -10,6 +11,11 @@
         prompt: String,
         session: Option<String>,
         cwd: PathBuf,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
+        mode: RunMode,
+        permission_mode: Option<PermissionMode>,
+        runtime_options: BTreeMap<String, String>,
     }
 
     #[derive(Debug, Clone)]
@@ -22,9 +28,12 @@
     #[derive(Default)]
     struct FakeBackendInner {
         runs: Mutex<Vec<FakeRun>>,
+        binding_before_run: Mutex<Vec<bool>>,
         next_run: AtomicUsize,
         wait_first: Mutex<Option<WaitFirst>>,
         request_permission: AtomicBool,
+        emit_stream_terminal: AtomicBool,
+        persist_history: AtomicBool,
         context_snapshot: Mutex<Option<psychevo_runtime::ContextSnapshot>>,
     }
 
@@ -39,6 +48,14 @@
                 .runs
                 .lock()
                 .expect("fake run lock poisoned")
+                .clone()
+        }
+
+        fn binding_before_run(&self) -> Vec<bool> {
+            self.inner
+                .binding_before_run
+                .lock()
+                .expect("fake binding observation lock poisoned")
                 .clone()
         }
 
@@ -65,13 +82,16 @@
             self.inner.request_permission.store(true, Ordering::SeqCst);
         }
 
-        fn set_context_snapshot(&self, snapshot: psychevo_runtime::ContextSnapshot) {
-            *self
-                .inner
-                .context_snapshot
-                .lock()
-                .expect("fake context snapshot lock poisoned") = Some(snapshot);
+        fn emit_stream_terminal(&self) {
+            self.inner
+                .emit_stream_terminal
+                .store(true, Ordering::SeqCst);
         }
+
+        fn persist_history(&self) {
+            self.inner.persist_history.store(true, Ordering::SeqCst);
+        }
+
     }
 
     impl fmt::Debug for FakeBackend {
@@ -82,7 +102,7 @@
 
     impl GatewayBackend for FakeBackend {
         fn kind(&self) -> BackendKind {
-            BackendKind::Psychevo
+            BackendKind::Native
         }
 
         fn run_turn(
@@ -92,12 +112,41 @@
             let inner = Arc::clone(&self.inner);
             Box::pin(async move {
                 let run_number = inner.next_run.fetch_add(1, Ordering::SeqCst) + 1;
+                let binding_before_run = request
+                    .options
+                    .session
+                    .as_deref()
+                    .and_then(|thread_id| {
+                        request
+                            .options
+                            .state
+                            .store()
+                            .gateway_runtime_binding(thread_id)
+                            .ok()
+                            .flatten()
+                    })
+                    .is_some_and(|binding| {
+                        binding.status == GatewayRuntimeBindingStatus::Resolved
+                            && binding.runtime_ref.as_deref() == Some("native")
+                            && binding.native_session_id.as_deref()
+                                == request.options.session.as_deref()
+                    });
+                inner
+                    .binding_before_run
+                    .lock()
+                    .expect("fake binding observation lock poisoned")
+                    .push(binding_before_run);
                 {
                     let mut runs = inner.runs.lock().expect("fake run lock poisoned");
                     runs.push(FakeRun {
                         prompt: request.options.prompt.clone(),
                         session: request.options.session.clone(),
                         cwd: request.options.cwd.clone(),
+                        model: request.options.model.clone(),
+                        reasoning_effort: request.options.reasoning_effort.clone(),
+                        mode: request.options.mode,
+                        permission_mode: request.options.permission_mode,
+                        runtime_options: request.options.runtime_options.clone(),
                     });
                 }
 
@@ -106,14 +155,27 @@
                     .lock()
                     .expect("fake wait lock poisoned")
                     .clone();
+                let mut aborted = false;
                 if let Some(wait) = wait_first
                     && run_number == wait.run_number
                 {
                     wait.started.notify_one();
-                    wait.release.notified().await;
+                    if let Some(mut abort) = request
+                        .control
+                        .as_ref()
+                        .map(psychevo_runtime::RunControl::abort_signal)
+                    {
+                        tokio::select! {
+                            _ = wait.release.notified() => {}
+                            _ = abort.wait_for_abort() => aborted = true,
+                        }
+                    } else {
+                        wait.release.notified().await;
+                    }
                 }
 
-                if inner.request_permission.load(Ordering::SeqCst)
+                if !aborted
+                    && inner.request_permission.swap(false, Ordering::SeqCst)
                     && let Some(handler) = request.options.approval_handler.clone()
                 {
                     let _decision = handler
@@ -142,12 +204,51 @@
                         None,
                     )?
                 };
+                let outcome = if aborted {
+                    Outcome::Aborted
+                } else {
+                    Outcome::Normal
+                };
+                let final_answer = format!("answer {run_number}");
+                if outcome == Outcome::Normal && inner.persist_history.load(Ordering::SeqCst) {
+                    let timestamp_ms = crate::gateway_now_ms();
+                    request.options.state.store().append_message(
+                        &session_id,
+                        &Message::User {
+                            content: vec![UserContentBlock::text(request.options.prompt.clone())],
+                            timestamp_ms,
+                        },
+                    )?;
+                    request.options.state.store().append_message(
+                        &session_id,
+                        &Message::Assistant {
+                            content: vec![AssistantBlock::Text {
+                                text: final_answer.clone(),
+                            }],
+                            timestamp_ms: timestamp_ms.saturating_add(1),
+                            finish_reason: Some("stop".to_string()),
+                            outcome,
+                            model: Some("fake-model".to_string()),
+                            provider: Some("fake-provider".to_string()),
+                        },
+                    )?;
+                }
+                if inner.emit_stream_terminal.load(Ordering::SeqCst)
+                    && let Some(stream) = request.stream.as_ref()
+                {
+                    stream(RunStreamEvent::value(json!({
+                        "type": "turn_complete",
+                        "session_id": session_id.clone(),
+                        "source": "native_conformance_fake",
+                        "outcome": outcome.as_str(),
+                    })));
+                }
 
                 Ok(RunResult {
                     session_id,
-                    outcome: Outcome::Normal,
+                    outcome,
                     terminal_reason: None,
-                    final_answer: format!("answer {run_number}"),
+                    final_answer,
                     db_path: request.options.state.db_path().to_path_buf(),
                     cwd: request.options.cwd,
                     provider: "fake-provider".to_string(),
@@ -191,6 +292,20 @@
             state,
             gateway,
         }
+    }
+
+    fn test_python_command_toml(cwd: &std::path::Path) -> String {
+        let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
+        let python = psychevo_runtime::resolve_executable_path(
+            "python3",
+            cwd,
+            &psychevo_runtime::ExecutableResolveOptions {
+                platform: psychevo_runtime::HostPlatform::current(),
+                env: &host_env,
+            },
+        )
+        .expect("resolve ACP test fixture python");
+        serde_json::to_string(&python.to_string_lossy()).expect("quote ACP fixture python")
     }
 
     fn run_options(harness: &Harness, prompt: &str) -> RunOptions {
@@ -238,6 +353,7 @@
             bind_source: None,
             reset_source_binding: false,
             input: Vec::new(),
+            initial_thread_preferences: BTreeMap::new(),
             options: run_options(harness, prompt),
             runtime_source: Some("test".to_string()),
             continue_sources: vec!["test".to_string()],
@@ -257,13 +373,16 @@
         std::fs::create_dir_all(&home).expect("home");
         std::fs::write(
             home.join("config.toml"),
-            r#"[agents.backends.fake]
+            format!(
+                r#"[agents.backends.fake]
 kind = "acp"
 description = "Fake ACP agent."
-command = "python3"
+command = {}
 args = ["fake_acp.py"]
 entrypoints = ["subagent"]
 "#,
+                test_python_command_toml(&harness.cwd),
+            ),
         )
         .expect("config");
         let agents_dir = harness.cwd.join(".psychevo").join("agents");
@@ -311,6 +430,7 @@ Delegate.
                     AbortSignal::new(abort_rx)
                 },
             },
+            "test-profile-fingerprint",
         )
         .expect("delegate peer");
         assert_eq!(peer.backend.id, "fake");

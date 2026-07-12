@@ -7,10 +7,12 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
-use psychevo_gateway::{Gateway, GatewaySource, SendTurnRequest, TranscriptBlockKind};
+use psychevo_gateway::{
+    Gateway, GatewayInputPart, GatewaySource, ThreadTurnRequest, TranscriptBlockKind,
+};
 use psychevo_runtime::{
     ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode,
-    ProjectContextInstructionMode, RunMode, RunOptions, RunWarning, StateRuntime,
+    ProjectContextInstructionMode, RunMode, RunWarning, StateRuntime,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
@@ -101,57 +103,30 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             "cwd": cwd.display().to_string(),
         }));
 
-    let turn_result = gateway
-        .send_turn(SendTurnRequest {
-            thread_id: args.session.clone(),
-            source: Some(source),
-            bind_source: None,
-            reset_source_binding: false,
-            input: Vec::new(),
-            options: RunOptions {
-                state,
-                cwd,
-                snapshot_root: Some(home.join("snapshots")),
-                session: args.session.clone(),
-                continue_latest: args.continue_latest,
-                prompt,
-                image_inputs: Vec::new(),
-                extract_prompt_image_sources: true,
-                prompt_display: None,
-                max_context_messages: None,
-                config_path,
-                project_context_override,
-                model: args.model.clone(),
-                reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
-                runtime_ref,
-                runtime_session_id: None,
-                runtime_options,
-                external_agent_delegate: None,
-                include_reasoning: args.include_reasoning,
-                mode: run_mode,
-                permission_mode,
-                sandbox_override: None,
-                approval_mode: None,
-                approval_handler,
-                clarify_enabled: false,
-                inherited_env: Some(env_map),
-                agent: args.agent.clone(),
-                no_agents: args.no_agents,
-                no_skills: args.no_skills,
-                selected_capability_roots: Vec::new(),
-                skill_inputs: args.skill.clone(),
-                mcp_servers: Vec::new(),
-                runtime_tools: Vec::new(),
-            },
-            runtime_source: Some("run".to_string()),
-            continue_sources: vec!["run".to_string()],
-            stream: None,
-            event_sink: None,
-            control_handle: None,
-            control: None,
-            lineage: None,
-        })
-        .await?;
+    let mut request = ThreadTurnRequest::new(cwd, vec![GatewayInputPart::Text { text: prompt }]);
+    request.thread_id = args.session.clone();
+    request.source = Some(source);
+    request.policy.snapshot_root = Some(home.join("snapshots"));
+    request.policy.continue_latest = args.continue_latest;
+    request.policy.extract_prompt_image_sources = true;
+    request.policy.config_path = config_path;
+    request.policy.project_context_override = project_context_override;
+    request.policy.model = args.model.clone();
+    request.policy.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
+    request.policy.runtime_profile_ref = runtime_ref;
+    request.policy.control_values = runtime_options;
+    request.policy.include_reasoning = args.include_reasoning;
+    request.policy.mode = run_mode;
+    request.policy.permission_mode = permission_mode;
+    request.policy.approval_handler = approval_handler;
+    request.policy.inherited_env = Some(env_map);
+    request.policy.agent_ref = args.agent.clone();
+    request.policy.no_agents = args.no_agents;
+    request.policy.no_skills = args.no_skills;
+    request.policy.skill_inputs = args.skill.clone();
+    request.runtime_source = Some("run".to_string());
+    request.continue_sources = vec!["run".to_string()];
+    let turn_result = gateway.run_turn(request).await?;
     let committed_entries = turn_result.committed_entries;
     let result = turn_result.result;
 

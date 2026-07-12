@@ -6,8 +6,9 @@ psychevo_self_edit: deny
 # 130. Context Compaction Testing
 
 Define deterministic acceptance coverage for runtime-owned context compaction,
-checkpoint persistence, compacted context projection, summary generation, TUI
-`/compact` behavior, and Gateway/Workbench/Channels compaction routing.
+native Psychevo checkpoint persistence, compacted context projection, summary
+generation, TUI `/compact` behavior, and Gateway/Workbench/Channels compaction
+routing.
 
 CI/CD vocabulary and generic validation boundaries follow
 [065 CI/CD](../065-ci-cd/spec.md).
@@ -19,8 +20,8 @@ CI/CD vocabulary and generic validation boundaries follow
 - Disabled compaction, disabled automatic compaction, below-threshold context,
   side chats, missing sessions, insufficient history, and unsafe cut points
   leave the transcript and checkpoint table unchanged.
-- Completed compaction appends a checkpoint without deleting or rewriting
-  original transcript messages.
+- Completed native Psychevo compaction appends a checkpoint without deleting or
+  rewriting original transcript messages.
 - Runtime selects the latest checkpoint that is valid for the current transcript
   boundary and ignores later checkpoints invalidated by undo or revert state.
 - Compacted context projection prepends hidden summary context and then includes
@@ -45,20 +46,20 @@ CI/CD vocabulary and generic validation boundaries follow
   the configured threshold or reserve-space rule.
 - Context-overflow recovery may compact and retry the same prompt once. A
   second overflow is reported normally.
-- Gateway `thread/compact/start`, Workbench `/compact`, and Channels `/compact`
+- Gateway `thread/action/run` compact, Workbench `/compact`, and Channels `/compact`
   all route through native runtime compaction rather than ordinary prompt
   submission.
-- Direct Codex waits past `thread/compact/start` acknowledgement for the
-  matching `contextCompaction` item completion. EOF/process exit before that
-  item completes returns one typed failure and never a false compacted result.
-- Direct Codex rejects custom summary instructions before native delivery and,
-  on success, records one projection-only divider without hiding or rewriting
-  local messages. Context assembly ignores that marker.
-- Direct OpenCode returns an explicit unavailable result until adapter-owned
-  compaction exists.
+- An ACP Agent compaction waits past command acknowledgement for the matching
+  terminal update. EOF/process exit before completion returns one typed failure
+  and never a false compacted result.
+- An ACP command without custom-instruction support rejects instructions before
+  delivery and, on success, returns transient structured completion without
+  rewriting Native messages, appending `session_compactions`, fabricating
+  summary/token facts, or projecting a local checkpoint divider.
+- An ACP Agent without a certified compaction action returns unavailable.
 - Gateway derives compaction backend identity from its authoritative
   thread/source binding; an omitted or forged native `runtimeRef` cannot compact
-  a direct or peer-backed mirror transcript.
+  an Agent-owned ACP transcript.
 - A Channels `/compact` accepted during an active turn is atomically queued
   ahead of later prompts while result waiting and reply delivery do not block
   the channel poll loop.
@@ -110,22 +111,24 @@ Required TUI and command coverage:
   display-only summary row.
 - Scripted TUI prints bounded compaction feedback without requiring a terminal
   UI.
-- Gateway `thread/compact/start` resolves an explicit thread id or source-bound
-  thread, serializes behind active work, returns structured compact/no-op/error
+- Gateway `thread/action/run` resolves an explicit public Thread, checks its
+  action descriptor, serializes behind active work, returns structured compact/no-op/error
   results, and refreshes transcript projection from the checkpoint table.
 - Gateway compact-boundary coverage binds a thread/source to a peer or direct
   backend and proves that omitted or forged native runtime assertions return
   unavailable without writing a checkpoint.
 - Workbench `/compact [instructions]` command execution returns a compact action
-  and calls `thread/compact/start`; it does not call `turn/start`.
+  and calls `thread/action/run`; it does not call `turn/start`.
 - Workbench transcript rendering shows the divider as collapsed read-only
   checkpoint detail with the generated summary behind disclosure.
 - Channels `/compact [instructions]` calls the same Gateway operation and sends
   concise result text; it does not enqueue `Compact this session` as a prompt.
   Active-turn coverage proves the request is accepted, the poll loop remains
   responsive to approval/stop work, and compaction runs before a later prompt.
-- Runtime profile compaction coverage verifies native and direct Codex route to
-  their runtime-owned operations, while OpenCode profiles report unavailable.
+- Runtime Profile compaction coverage verifies Native and ACP route to their
+  owning operations, proves successful Agent-owned compaction leaves
+  `session_compactions` empty and returns no local checkpoint/summary/token
+  fields, and proves an unsupported ACP profile reports unavailable.
 - Gateway native auto-compaction after a completed turn performs a bounded
   precheck, shows transient compacting status when due, and projects the
   exact newly-created checkpoint divider in live `committedEntries` on success.

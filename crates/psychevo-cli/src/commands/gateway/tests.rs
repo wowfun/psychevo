@@ -2,7 +2,8 @@ use std::net::SocketAddr;
 
 use super::managed::{
     ExecutableFingerprint, ManagedBindPolicy, ManagedServerState, ProcessExecutable,
-    force_kill_pid, managed_stale_reason, managed_status_value,
+    force_kill_pid, managed_paths, managed_stale_reason, managed_startup_error,
+    managed_status_value,
 };
 
 #[cfg(target_os = "linux")]
@@ -140,6 +141,44 @@ fn managed_status_reports_stale_reason() {
     assert_eq!(value["running"], false);
     assert_eq!(value["stale"], true);
     assert_eq!(value["staleReason"], "pid_not_running");
+}
+
+#[test]
+fn managed_startup_error_reports_only_the_current_launch_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let gateway_dir = temp.path().join("gateway");
+    let log_path = gateway_dir.join("server.log");
+    std::fs::create_dir_all(&gateway_dir).expect("gateway dir");
+    let old_output = "old launch sentinel\n";
+    let current_output = "error: current launch failed\n";
+    std::fs::write(&log_path, format!("{old_output}{current_output}")).expect("server log");
+
+    let error = managed_startup_error(&managed_paths(temp.path()), old_output.len() as u64, None)
+        .to_string();
+
+    assert!(error.contains("managed gateway did not become ready"));
+    assert!(error.contains(current_output.trim()));
+    assert!(error.contains(&log_path.display().to_string()));
+    assert!(!error.contains("old launch sentinel"));
+}
+
+#[test]
+fn managed_startup_error_bounds_large_current_launch_output() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let gateway_dir = temp.path().join("gateway");
+    let log_path = gateway_dir.join("server.log");
+    std::fs::create_dir_all(&gateway_dir).expect("gateway dir");
+    let output = format!(
+        "early startup marker\n{}\nlatest startup marker\n",
+        "x".repeat(20 * 1024)
+    );
+    std::fs::write(&log_path, output).expect("server log");
+
+    let error = managed_startup_error(&managed_paths(temp.path()), 0, None).to_string();
+
+    assert!(error.contains("[earlier startup output omitted]"));
+    assert!(error.contains("latest startup marker"));
+    assert!(!error.contains("early startup marker"));
 }
 
 #[test]

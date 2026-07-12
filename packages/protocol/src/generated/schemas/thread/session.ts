@@ -153,6 +153,54 @@ export const threadSessionSchemas = {
       ],
       "type": "object"
     },
+    "SessionLifecycleActionKind": {
+      "enum": [
+        "fork",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "SessionLifecycleActionView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/definitions/SessionLifecycleActionKind"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "id"
+      ],
+      "type": "object"
+    },
+    "SessionLifecycleView": {
+      "properties": {
+        "actions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/SessionLifecycleActionView"
+          },
+          "type": "array"
+        },
+        "targetLabel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "SessionProjectView": {
       "properties": {
         "cwd": {
@@ -221,6 +269,16 @@ export const threadSessionSchemas = {
     },
     "id": {
       "type": "string"
+    },
+    "lifecycle": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SessionLifecycleView"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "messageCount": {
       "format": "uint",
@@ -291,6 +349,100 @@ export const threadSessionSchemas = {
     "visibleEntryCount"
   ],
   "title": "SessionSummaryView",
+  "type": "object"
+},
+  SessionLifecycleActionKind: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "fork",
+    "delete"
+  ],
+  "title": "SessionLifecycleActionKind",
+  "type": "string"
+},
+  SessionLifecycleActionView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SessionLifecycleActionKind": {
+      "enum": [
+        "fork",
+        "delete"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "id": {
+      "$ref": "#/definitions/SessionLifecycleActionKind"
+    },
+    "unavailableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "enabled",
+    "id"
+  ],
+  "title": "SessionLifecycleActionView",
+  "type": "object"
+},
+  SessionLifecycleView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SessionLifecycleActionKind": {
+      "enum": [
+        "fork",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "SessionLifecycleActionView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/definitions/SessionLifecycleActionKind"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "actions": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/SessionLifecycleActionView"
+      },
+      "type": "array"
+    },
+    "targetLabel": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "SessionLifecycleView",
   "type": "object"
 },
   SessionUsageSummaryView: {

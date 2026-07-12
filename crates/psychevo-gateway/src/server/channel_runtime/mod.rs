@@ -9,6 +9,7 @@ use crate::im::{
     ImOutboundMessage, gateway_input_parts_for_im, gateway_source_for_im,
 };
 use psychevo_runtime::{ChannelRuntimeConnection, channel_runtime_connections};
+use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 
 const CHANNEL_POLL_BACKOFF_MS: u64 = 5_000;
@@ -33,23 +34,25 @@ pub(super) use paths::redact_channel_error;
 pub(super) use reconcile::reconcile;
 pub(super) use state::ChannelRuntimeState;
 
-pub(super) fn channel_effective_runtime_ref(
+pub(super) fn channel_effective_profile_ref(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
 ) -> psychevo_runtime::Result<String> {
-    Ok(channel_bound_runtime_ref(state, source)?
+    Ok(channel_bound_profile_ref(state, source)?
         .or_else(|| connection.runtime_ref.clone())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "native".to_string()))
 }
 
-pub(super) fn channel_bind_runtime_ref(
+pub(super) fn channel_bind_target_draft(
     state: &WebState,
     source: &GatewaySource,
-    runtime_ref: &str,
+    target: &wire::RunnableTargetView,
 ) -> psychevo_runtime::Result<Option<String>> {
+    let agent_ref = target.agent_ref.as_deref();
+    let profile_ref = target.runtime_profile_ref.as_str();
     let source_key = source.source_key();
     let lane = state
         .inner
@@ -67,7 +70,9 @@ pub(super) fn channel_bind_runtime_ref(
                 raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
                 visible_name: source.visible_name.as_deref(),
                 thread_id: None,
-                draft_runtime_ref: Some(runtime_ref),
+                draft_agent_ref: agent_ref,
+                draft_profile_ref: Some(profile_ref),
+                draft_control_values: &BTreeMap::new(),
                 lineage: Some(json!({"reason": "channel_profile_draft"})),
             })?;
         state.inner.gateway.bump_source_generation_key(&source_key);
@@ -87,16 +92,6 @@ pub(super) fn channel_bind_runtime_ref(
         "pending",
         None,
     )?;
-    let mut options = state.run_options(PathBuf::from(&current.cwd), Some(new_thread_id.clone()));
-    options.runtime_ref = Some(runtime_ref.to_string());
-    let (profile, revision, fingerprint) = crate::resolve_gateway_runtime_profile(&options)?;
-    crate::ensure_gateway_runtime_binding(
-        &state.inner.state,
-        &new_thread_id,
-        &profile,
-        revision,
-        &fingerprint,
-    )?;
     state
         .inner
         .state
@@ -107,9 +102,11 @@ pub(super) fn channel_bind_runtime_ref(
             raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
             visible_name: source.visible_name.as_deref(),
             thread_id: Some(&new_thread_id),
-            draft_runtime_ref: None,
+            draft_agent_ref: agent_ref,
+            draft_profile_ref: Some(profile_ref),
+            draft_control_values: &BTreeMap::new(),
             lineage: Some(json!({
-                "reason": "channel_profile_switch",
+                "reason": "channel_target_switch",
                 "previousThreadId": current_thread_id,
             })),
         })?;
@@ -117,7 +114,19 @@ pub(super) fn channel_bind_runtime_ref(
     Ok(Some(new_thread_id))
 }
 
-fn channel_bound_runtime_ref(
+pub(super) fn channel_draft_agent_ref(
+    state: &WebState,
+    source: &GatewaySource,
+) -> psychevo_runtime::Result<Option<String>> {
+    Ok(state
+        .inner
+        .state
+        .store()
+        .gateway_source_lane(&source.source_key().0)?
+        .and_then(|lane| lane.draft_agent_ref))
+}
+
+fn channel_bound_profile_ref(
     state: &WebState,
     source: &GatewaySource,
 ) -> psychevo_runtime::Result<Option<String>> {
@@ -134,21 +143,10 @@ fn channel_bound_runtime_ref(
         .transpose()?
         .flatten()
         .and_then(|binding| binding.runtime_ref);
-    Ok(bound
-        .or_else(|| {
-            lane.as_ref()
-                .and_then(|lane| lane.draft_runtime_ref.clone())
-        })
-        .or_else(|| {
-            // Read legacy source lineage only when no immutable thread binding exists.
-            lane.and_then(|lane| lane.lineage).and_then(|lineage| {
-                lineage
-                    .get("runtimeRef")
-                    .or_else(|| lineage.get("runtime_ref"))
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-            })
-        }))
+    Ok(bound.or_else(|| {
+        lane.as_ref()
+            .and_then(|lane| lane.draft_profile_ref.clone())
+    }))
 }
 
 #[cfg(test)]

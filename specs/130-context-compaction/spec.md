@@ -47,7 +47,10 @@ runtime must leave the session unchanged and report the compaction failure.
 
 ## Checkpoints
 
-Compaction stores completed checkpoints separately from transcript messages.
+Native Psychevo compaction stores completed checkpoints separately from
+transcript messages. An ACP Agent's compaction remains Agent-owned when a
+certified typed action or command is advertised and does not create a Psychevo
+checkpoint.
 Original session messages remain authoritative transcript material and are not
 deleted or rewritten by compaction.
 
@@ -67,13 +70,15 @@ hidden summary context and then includes retained messages from the checkpoint's
 first retained message sequence onward. It does not expose the summary as a
 durable user prompt, assistant answer, or visible transcript message.
 
-Gateway transcript projection exposes completed checkpoints as durable
-diagnostic divider entries. The divider label is `Session compacted`; it is not
-a user or assistant message and must not be included in future model-visible
-context. The divider stores checkpoint facts in metadata/detail, including the
-reason, trigger, token estimates, provider/model, timestamp, checkpoint id, and
-first kept session sequence. Generated summary text is reviewable only as
-collapsed detail.
+For native Psychevo sessions, Gateway transcript projection exposes completed
+checkpoints as durable diagnostic divider entries. The divider label is
+`Session compacted`; it is not a user or assistant message and must not be
+included in future model-visible context. The divider stores checkpoint facts
+in metadata/detail, including the reason, trigger, token estimates,
+provider/model, timestamp, checkpoint id, and first kept session sequence.
+Generated summary text is reviewable only as collapsed detail. Agent-owned ACP
+compaction does not project a local divider because the Agent owns its history
+and context.
 
 Persisted transcript messages remain ordered by their authoritative
 `session_seq`; wall-clock timestamps must not reorder messages. Synthetic
@@ -125,20 +130,18 @@ context and retry the same prompt once. A second overflow is reported normally.
 
 ## Gateway Operation
 
-Gateway exposes `thread/compact/start` for native Psychevo and direct Codex
-session compaction. Params are
-`{ scope?, threadId?, instructions?, runtimeRef? }`. When `threadId` is absent,
-Gateway resolves the active thread for the source in `scope`. The operation
+Gateway exposes manual compaction only through descriptor-gated
+`thread/action/run` with action
+`{ kind: "compact", instructions? }` for a concrete public Thread. The operation
 serializes through the same per-thread/source activity queue as turns, so manual
 compaction waits behind an active turn and ahead of later queued prompts.
 
 The Gateway compaction boundary derives the effective backend identity from the
 authoritative thread/source runtime binding. Client-supplied `runtimeRef` is a
 consistency assertion only: omission, the native default, or a forged native
-value must never authorize Psychevo compaction of a direct or peer-backed mirror
-transcript. A direct Codex binding routes through its immutable effective
-Profile and native session; direct OpenCode and ACP bindings return the
-runtime-owned unavailable result.
+value must never authorize Psychevo compaction of an Agent-owned ACP transcript.
+An ACP binding routes through its immutable effective Profile and negotiated
+typed action; a binding without certified compaction returns unavailable.
 
 During an active Channels turn, `/compact` is accepted and atomically enqueued
 before the command handler returns. The channel poll loop waits for the
@@ -154,21 +157,14 @@ created. Missing sessions, side chats, disabled compaction, no safe cut point,
 and below-threshold automatic attempts return accepted but uncompacted results
 without mutating state.
 
-Direct runtime profiles are runtime-owned. Codex routes compaction through its
-typed runtime-host `Compaction` intent and reports success only after the
-matching native `contextCompaction` item completes; the method acknowledgement
-is not completion. OpenCode returns an explicit unavailable result until its
-adapter owns a native compaction API. Psychevo must never mirror-compact a direct
-runtime transcript.
-
-Codex's stable compaction method has no custom-instructions field. A direct
-Codex `/compact <instructions>` request therefore returns typed unsupported
-guidance before native delivery. After a matching native completion, Gateway
-stores one projection-only checkpoint marker: it retains every local public
-message, contains no fabricated native summary, and records only safe
-Runtime-Profile facts plus observed token totals. The marker renders the normal
-read-only divider but is ignored by context assembly and later native execution.
-EOF or failure produces no marker.
+ACP compaction routes through the Agent Session action descriptor and reports
+success only after the Agent's terminal command/update proves completion; an
+acknowledgement alone is not observation. If the advertised command does not
+accept custom instructions, `/compact <instructions>` returns typed unsupported
+guidance before delivery. Agent-owned completion returns transient structured
+status only: it does not read or rewrite local Native messages, append a
+`session_compactions` row, fabricate summary/token facts, or project a local
+checkpoint divider. EOF or failure likewise produces no local checkpoint state.
 
 ## TUI Command
 
@@ -184,7 +180,7 @@ transcript message.
 ## Workbench and Channels
 
 Workbench keeps manual compaction slash-only in this slice. `/compact
-[instructions]` routes through `thread/compact/start`; it must not submit
+[instructions]` routes through `thread/action/run`; it must not submit
 `Compact this session` or any other ordinary user prompt. The composer context
 popover does not add a compact button in this slice.
 

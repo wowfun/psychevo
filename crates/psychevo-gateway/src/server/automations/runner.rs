@@ -133,6 +133,7 @@ async fn execute_automation_run(
         Err(err) => {
             let next = next_run_after_now(&task).unwrap_or(None);
             let error = err.to_string();
+            let error_view = agent_error_view(error.clone(), err.structured_data());
             let _ = state
                 .inner
                 .state
@@ -149,7 +150,14 @@ async fn execute_automation_run(
             if let Some(out_tx) = out_tx {
                 let _ = out_tx.send(rpc_notification(
                     "turn/error",
-                    json!({"message": error, "threadId": task.target_thread_id}),
+                    serde_json::to_value(wire::TurnErrorPayload {
+                        error: error_view,
+                        thread_id: task.target_thread_id.clone(),
+                        turn_id: None,
+                    })
+                    .unwrap_or_else(|_| {
+                        json!({"error": {"message": error, "delivery": "unknown"}, "threadId": task.target_thread_id})
+                    }),
                 ));
             }
         }
@@ -174,43 +182,34 @@ async fn send_automation_turn(
             (Some(thread_id), None, None)
         }
     };
-    let mut options = state.run_options(cwd, thread_id.clone());
-    options.model = task.model.clone();
-    options.reasoning_effort = task.reasoning_effort.clone();
-    options.runtime_tools.clear();
+    let mut request = state.thread_turn_request(
+        cwd,
+        thread_id,
+        vec![GatewayInputPart::Text {
+            text: task.prompt.clone(),
+        }],
+    );
+    request.source = source;
+    request.bind_source = bind_source;
+    request.policy.model = task.model.clone();
+    request.policy.reasoning_effort = task.reasoning_effort.clone();
+    request.set_runtime_tools(Vec::new());
     match automation_execution_from_value(task.execution.clone())?.policy {
         wire::AutomationExecutionPolicy::AutoSandbox => {
-            options.permission_mode = Some(PermissionMode::BypassPermissions);
-            options.sandbox_override = Some(RunSandboxOverride::workspace_write());
+            request.policy.permission_mode = Some(PermissionMode::BypassPermissions);
+            request.policy.sandbox_override = Some(RunSandboxOverride::workspace_write());
         }
         wire::AutomationExecutionPolicy::AskFirst => {
-            options.permission_mode = Some(PermissionMode::Default);
+            request.policy.permission_mode = Some(PermissionMode::Default);
         }
     }
-    state
-        .inner
-        .gateway
-        .send_turn(crate::SendTurnRequest {
-            thread_id,
-            source,
-            bind_source,
-            reset_source_binding: false,
-            input: vec![GatewayInputPart::Text {
-                text: task.prompt.clone(),
-            }],
-            options,
-            runtime_source: Some("automation".to_string()),
-            continue_sources: vec![
-                "run".to_string(),
-                "tui".to_string(),
-                "web".to_string(),
-                "automation".to_string(),
-            ],
-            stream: None,
-            event_sink: None,
-            control_handle: None,
-            control: None,
-            lineage: Some(json!({"automationId": task.id})),
-        })
-        .await
+    request.runtime_source = Some("automation".to_string());
+    request.continue_sources = vec![
+        "run".to_string(),
+        "tui".to_string(),
+        "web".to_string(),
+        "automation".to_string(),
+    ];
+    request.lineage = Some(json!({"automationId": task.id}));
+    state.inner.gateway.run_turn(request).await
 }

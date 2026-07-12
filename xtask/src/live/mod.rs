@@ -341,7 +341,8 @@ fn execute_live(
     artifact_root: Option<PathBuf>,
 ) -> Result<LiveRunOutput> {
     let use_default_artifact_root = artifact_root.is_none();
-    let artifact_root = artifact_root.unwrap_or_else(|| default_artifact_root(root));
+    let invocation_cwd = std::env::current_dir().context("read xtask invocation directory")?;
+    let artifact_root = resolve_live_artifact_root(root, &invocation_cwd, artifact_root);
     fs::create_dir_all(artifact_root.join("live"))
         .with_context(|| format!("create artifact root {}", artifact_root.display()))?;
     let plan = plan_output(selection, env_mode, Some(&artifact_root))?;
@@ -411,6 +412,18 @@ fn execute_live(
         warn_if_ci_retention_cleanup_fails(root, &artifact_root);
     }
     Ok(run)
+}
+
+fn resolve_live_artifact_root(
+    root: &Path,
+    invocation_cwd: &Path,
+    artifact_root: Option<PathBuf>,
+) -> PathBuf {
+    match artifact_root {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => invocation_cwd.join(path),
+        None => default_artifact_root(root),
+    }
 }
 
 fn providers_for_checks(
@@ -522,7 +535,7 @@ fn run_deterministic_playwright_check(
         return failed_result(
             log,
             format!(
-                "deterministic runtime Playwright spec is missing: {}",
+                "deterministic Agent Playwright spec is missing: {}",
                 spec_path.display()
             ),
             None,
@@ -579,7 +592,7 @@ fn run_deterministic_playwright_check(
         .current_dir(root)
         .env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path);
     let build_outcome = run_logged_process(
-        "workbench deterministic runtime build",
+        "workbench deterministic Agent build",
         &mut build,
         Arc::clone(&log),
     )?;
@@ -610,7 +623,7 @@ fn run_deterministic_playwright_check(
     let outcome = run_logged_process(check.id, &mut test, log)?;
     check_result_from_outcome(
         outcome,
-        &format!("deterministic runtime Playwright check {} failed", check.id),
+        &format!("deterministic Agent Playwright check {} failed", check.id),
         Some(environment),
     )
 }
@@ -1493,6 +1506,46 @@ mod tests {
     }
 
     #[test]
+    fn relative_explicit_artifact_root_makes_deterministic_context_paths_absolute() {
+        let repo_root = std::env::temp_dir().join("psychevo-repo");
+        let invocation_cwd = repo_root.join("nested");
+        let artifact_root = resolve_live_artifact_root(
+            &repo_root,
+            &invocation_cwd,
+            Some(PathBuf::from("artifacts/agent-live")),
+        );
+        let check_dir = artifact_root
+            .join("live")
+            .join("agent-managed-codex-offline");
+
+        assert_eq!(artifact_root, invocation_cwd.join("artifacts/agent-live"));
+        for path in [
+            check_dir.clone(),
+            check_dir.join("home"),
+            check_dir.join("home/config.toml"),
+            check_dir.join("state.db"),
+            check_dir.join("cwd"),
+        ] {
+            assert!(
+                path.is_absolute(),
+                "context path must be absolute: {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn absolute_explicit_artifact_root_is_preserved() {
+        let repo_root = std::env::temp_dir().join("psychevo-repo");
+        let invocation_cwd = repo_root.join("nested");
+        let explicit = repo_root.join("review-artifacts");
+
+        assert_eq!(
+            resolve_live_artifact_root(&repo_root, &invocation_cwd, Some(explicit.clone())),
+            explicit
+        );
+    }
+
+    #[test]
     fn plan_expands_desktop_suite_with_provider_live_check() {
         let plan = plan_output(
             &LiveSelection {
@@ -1534,11 +1587,11 @@ mod tests {
     }
 
     #[test]
-    fn runtime_suite_plan_uses_only_deterministic_fakes_and_no_provider() {
+    fn agent_suite_plan_uses_only_deterministic_fakes_and_no_provider() {
         let plan = plan_output(
             &LiveSelection {
                 checks: Vec::new(),
-                suites: vec!["runtimes".to_string()],
+                suites: vec!["agents".to_string()],
                 all: false,
                 providers: Vec::new(),
             },

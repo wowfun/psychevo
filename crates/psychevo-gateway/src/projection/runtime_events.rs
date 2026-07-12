@@ -81,6 +81,22 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
                 committed_entries: Vec::new(),
             }
         }
+        Some("session_title_changed") => {
+            let thread_id = value
+                .get("session_id")
+                .and_then(Value::as_str)
+                .filter(|thread_id| !thread_id.trim().is_empty())?
+                .to_string();
+            let title = value
+                .get("title")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            GatewayEvent::TitleChanged {
+                thread_id,
+                title: title.clone(),
+                display_title: title,
+            }
+        }
         Some("message_update") => {
             let message = value.get("message");
             if runtime_message_role(message) == Some("assistant") {
@@ -572,11 +588,13 @@ fn gateway_turn_error_from_runtime_value(
         .or_else(|| value.get("message").and_then(Value::as_str))
         .map(str::trim)
         .filter(|message| !message.is_empty())?;
-    Some(GatewayTurnError {
+    Some(AgentErrorView {
         message: message.to_string(),
         code: None,
         stage: None,
         retry_class: None,
+        delivery: AgentDeliveryStatusView::Unknown,
+        recovery_action: None,
         diagnostic_ref: None,
     })
 }

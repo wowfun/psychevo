@@ -7,10 +7,12 @@ psychevo_self_edit: deny
 
 Define Psychevo's shared transcript projection contract. Transcript fact
 ownership is defined by
-[030 Transcript State](../030-state-and-data-model/transcript-state.md):
-runtime `messages` are the only durable ordinary transcript source. This topic
-defines how product surfaces project those facts into shared transcript entries
-and how live presentation events are reconciled with committed history.
+[030 Transcript State](../030-state-and-data-model/transcript-state.md): Native
+history is Psychevo-authoritative, while an outbound ACP Agent that implements
+load/resume owns its native history and Gateway stores a product-safe
+projection/checkpoint. This topic defines how product surfaces project either
+owner into shared transcript entries and reconcile live presentation events
+with authoritative history.
 
 ## Scope
 
@@ -41,7 +43,10 @@ sequence, role, status, ordering, title/body/preview/detail text, and typed
 metadata. They must not store ratatui `Line`s, terminal ANSI color,
 viewport-dependent wrapping, or layout cache rows.
 
-Committed history is rebuilt by projecting messages ordered by `session_seq`.
+Committed Native history is rebuilt by projecting messages ordered by
+`session_seq`. Agent-authoritative ACP history is rebuilt by projecting typed
+replay facts in declared order. The owners use the same public entry/block
+vocabulary but are never merged as content sources.
 For an assistant message, visible reasoning, visible assistant text, and
 tool-call blocks follow the original assistant `content[]` order. A later
 `tool_result` message is attached to the matching assistant tool-call block by
@@ -50,14 +55,25 @@ metadata, and timestamps.
 
 Runtime may emit live `started`, `updated`, and `completed` observations while
 a turn is active. These events are presentation-only. On turn completion the
-Gateway transcript projection materializes the completed turn from durable
-messages; clients discard live overlay state for that turn and replace it with
-those committed entries. Client-local optimistic prompt rows are part of the
-same live overlay and must be replaced by the committed user entry for the turn.
+Gateway transcript projection materializes the completed turn from the owning
+history source; clients discard live overlay state for that turn and replace it
+with those authoritative entries. Client-local optimistic prompt rows are part
+of the same live overlay and must be replaced by the owner's user entry for the
+turn. A terminal clears retained live snapshots; later recovery loads the
+declared history owner rather than inventing a local content copy.
+
+A message-derived committed user entry replaces its optimistic owner as soon as
+that entry is observed, including through `entryStarted`, `entryUpdated`, or
+`entryCompleted`; the client does not wait for the terminal event to remove the
+duplicate prompt. Replacement first matches the same non-empty Thread and turn
+identity. Exact normalized text is only a fallback for the most recent detached
+optimistic prompt that has not received a turn identity. Text equality never
+merges two committed user entries, so separate turns may intentionally repeat
+the same prompt.
 The canonical runtime event stream, live-preview contract, snapshot recovery,
 and delivery diagnostics are defined by [035 Event
 Stream](../035-event-stream/spec.md).
-Live assistant `message_update` observations carry the current assistant
+Live assistant observations carry the current assistant
 segment snapshot. Gateway must not treat them as additive block deltas: when
 the current snapshot changes block positions, removed or moved provisional
 text, reasoning, and tool blocks must not remain visible beside the current
@@ -80,6 +96,11 @@ observations for that same turn must be ignored and must not recreate a
 snapshot refresh is also a terminal presentation barrier when the incoming
 snapshot reports no active turn: the client must not inherit the previous
 client snapshot's stale `activeTurnId` to retain same-thread live overlay rows.
+When a terminal carries no committed slice, every writable surface refreshes
+the authoritative Thread snapshot and history before treating its retained
+live projection as settled history. The refreshed activity is authoritative;
+an idle Thread cannot keep a local running timer or active-turn affordance. A
+stale local active-turn id cannot suppress this same-Thread terminal refresh.
 During an active turn, ordinary transcript snapshot refreshes must not be used
 as the primary live display mechanism. If a snapshot or reconnect does include
 message-derived entries for the in-progress turn, the client reconciler removes
@@ -91,16 +112,19 @@ replacement is reserved for reload, resume, rewind, and session switching.
 When live observations cross a process boundary, the owning Gateway may retain
 low-frequency boundary events and coalesced latest-entry snapshots as a
 short-lived delivery buffer. That buffer does not change transcript fact
-ownership: committed runtime `messages` are still the only ordinary durable
-transcript source, and live entries must still be discarded or reconciled when
-committed entries arrive.
+ownership: Native committed messages or ACP Agent replay remain the declared
+ordinary history source, and live entries must still be discarded or reconciled
+when authoritative entries arrive.
 The owning Gateway activity for a Web turn is rooted in the parent transcript
-thread. Scoped child-agent live observations keep their own child thread ids for
-child-thread inspection, but they must not rebind the parent turn's durable
-activity thread or active queue alias. Parent transcript snapshots depend on
-that root ownership to stamp committed in-progress messages with the active
-turn id and assistant segment ordinal before replaying any remaining live
-overlay.
+thread. Scoped in-process child-agent live observations keep their own child
+thread ids for inspection, but they must not rebind the parent turn's durable
+activity thread or active queue alias. An outbound ACP Agent Tool child also
+owns a distinct child activity and turn identity; the parent remains active
+independently while it waits for the tool result. Child entries and controls use
+the child identity, and the child activity is idle before its terminal is
+observable. A renderer must never infer child running state from parent
+activity. Parent transcript snapshots still depend on root ownership to stamp
+committed in-progress parent messages before replaying any remaining overlay.
 Workbench and TUI both consume retained boundary events and latest-entry
 snapshots for sessions they display. A foreign live observation is applied only
 when its thread identity matches the visible session or an explicitly tracked
@@ -204,6 +228,27 @@ For assistant message snapshots, render order follows the actual
 `call_index` remain tool-call assembly and identity metadata, but they must not
 act as transcript text block identity or override visual ordering for the
 current assistant snapshot.
+
+Entry `liveOrder` is turn-local. It may order an optimistic user entry before
+assistant/tool streaming from the same non-empty turn, but it must not move a
+later turn ahead of visible entries retained from an earlier turn. Across turn
+identities, or while either entry is not yet turn-bound, clients use the
+timeline before stable identity fallback. Committed `messageSeq` remains the
+authoritative cross-turn ordering signal.
+
+Agent-authoritative transcript blocks may carry a positive `phaseOrdinal`.
+Phase/item identity, not rendered text, owns replacement and order. The UI
+groups a single phase without extra chrome. A turn containing more than one
+phase shows one collapsed `Show agent phases` affordance; expansion labels
+groups only as `Phase 1`, `Phase 2`, and so on. Adapter protocol phase names and
+ids never enter the public display model.
+
+Agent Tool blocks consume the canonical closed status set `pending`,
+`running`, `completed`, `failed`, and `cancelled`; terminal materialization
+closes every unfinished tool. Plan and Diff blocks are replacement values.
+Clearing either removes the block, and empty values never render synthetic
+placeholder evidence.
+
 Tool-call assistant text may be marked as an `assistant_phase` live projection
 while the turn is active. It is a block-level projection hint inside the live
 assistant segment, not a cross-owner dedupe rule. Client reconciliation must use
@@ -278,6 +323,12 @@ Gateway exposes typed transcript entries in snapshots, committed turn results,
 and typed live lifecycle events. Live entry events are overlay records; the
 committed entries returned at turn completion are authoritative for that turn's
 ordinary transcript projection.
+
+Session-list projection may include a target label and lifecycle descriptors
+for `fork` and `delete`. These are display-ready product facts: each descriptor
+contains an enabled state and optional unavailable reason. Renderers must not
+derive lifecycle availability from provider, model, Runtime Profile id, or ACP
+Agent name. Agent-native ids and list cursors are never display-model fields.
 
 ACP/WebUI/IM adapters may map transcript entries into client-native update shapes,
 but must not require TUI-specific layout fields.

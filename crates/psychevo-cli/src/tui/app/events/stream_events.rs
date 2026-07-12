@@ -566,7 +566,9 @@ impl TuiApp {
         event: RunStreamEvent,
     ) {
         match event {
-            RunStreamEvent::Scoped { session_id, event } => {
+            RunStreamEvent::Scoped {
+                session_id, event, ..
+            } => {
                 self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
             }
             other => {
@@ -622,7 +624,10 @@ impl TuiApp {
         owner_session: Option<&str>,
         event: RunStreamEvent,
     ) -> bool {
-        if let RunStreamEvent::Scoped { session_id, event } = event {
+        if let RunStreamEvent::Scoped {
+            session_id, event, ..
+        } = event
+        {
             return self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
         }
         let event_has_session = stream_event_session_id(&event).is_some();
@@ -658,7 +663,10 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         event: RunStreamEvent,
     ) -> bool {
-        if let RunStreamEvent::Scoped { session_id, event } = event {
+        if let RunStreamEvent::Scoped {
+            session_id, event, ..
+        } = event
+        {
             return self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
         }
         let event_session_id = stream_event_session_id(&event).map(str::to_string);

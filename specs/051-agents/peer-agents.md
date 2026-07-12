@@ -1,45 +1,44 @@
 ---
-name: 051. Peer Agents
+name: 051. ACP Agents
 psychevo_self_edit: deny
 ---
 
-Define external peer-agent backend registration and ACP-compatible agent
-execution for Psychevo.
+Define external ACP Agent backend registration, capability policy, and
+execution through Gateway's first-class Agent Session seam.
 
 ## Scope
 
-- configured external agent backends
-- generated agent identities from backend registrations
-- Markdown `backend.ref` integration with existing agent definitions
-- top-level peer-thread and subagent execution semantics
-- ACP client capabilities, command projection, session import, and diagnostics
+- configured ACP Agent backends
+- generated and Markdown Agent Definitions referencing a backend
+- top-level and managed subagent execution
+- ACP client callback policy
+- managed Codex ACP and local executable shortcuts
+- commands, history, interactions, diagnostics, and session lifecycle
 
 Out of scope:
 
-- network relay, LAN exposure, cloud agent registries, and broad automatic
-  discovery beyond the localhost executable shortcuts defined below
-- durable cron or scheduled peer-agent execution
-- broad built-in templates for specific ACP agents beyond explicitly supported
-  product shortcuts such as OpenCode
-- making external agents model providers
+- making ACP Agents model providers
+- direct Codex app-server or OpenCode HTTP/SSE integration
+- browser-owned Agent processes
+- automatic network discovery
+- treating ACP as Psychevo's internal application interface
 
 ## Backend Registration
 
-External executable backends are configured under `[agents.backends.<id>]`.
-The first supported backend kind is `acp`.
+External executable backends use `[agents.backends.<id>]` and `kind = "acp"`:
 
 ```toml
 [agents.backends.cursor]
 kind = "acp"
 enabled = true
 label = "Cursor"
-description = "Cursor ACP coding agent."
 command = "cursor-agent"
 args = ["--acp"]
 env = {}
 entrypoints = ["peer", "subagent"]
 client_capabilities = ["fs.read", "fs.write", "terminal"]
 cwd = "invocation"
+protocol = "stable_v1"
 ```
 
 Defaults are:
@@ -48,38 +47,24 @@ Defaults are:
 - `entrypoints = ["peer", "subagent"]`
 - `client_capabilities = ["fs.read", "fs.write", "terminal"]`
 - `cwd = "invocation"`
-- `args = []`
-- `env = {}`
-- `label = <backend id>` as the effective display fallback when no explicit
-  label is configured
+- `protocol = "stable_v1"`
+- empty args and env
+- label equal to backend id when omitted
 
-`description` is optional metadata. Generated agent descriptions fall back to
-the effective label and then the backend id, so an enabled backend can generate
-a model-visible agent without duplicating the backend name in a description
-field.
+`command` is one executable, never a shell command line. Arguments and
+environment remain structured. Bare commands use native executable lookup,
+including Windows `PATHEXT`; stored configuration stays platform-neutral.
 
-`command` is a user-facing executable setting, not an arbitrary shell command
-line. Gateway resolves it against the effective launch environment before
-starting the ACP process. On Windows Git Bash, a bare command such as
-`opencode` must resolve through native executable lookup including `PATHEXT`
-entries like `opencode.cmd`, while the persisted config continues to store the
-bare command string. `args` remain structured process arguments and are not
-joined into shell text.
+Profile and Project configuration use the normal deep-merge rules. A disabled,
+unresolvable, or protocol-incompatible backend stays catalog-visible with a
+safe diagnostic and makes dependent targets non-runnable.
 
-Profile-global and project config use the normal deep-merge behavior. The active
-profile's `$PSYCHEVO_HOME/config.toml` supplies reusable backends for that
-profile, while the current cwd's `.psychevo/config.toml` may add or
-override command-bearing backends. If an invocation uses an explicit
-`PSYCHEVO_CONFIG`, that file replaces the active profile config for backend
-loading, but the current cwd overlay still applies afterward. Workbench may
-edit either the active profile config or the current project overlay, but it
-must not switch profiles inside one Gateway process. `enabled = false` disables
-the generated agent and makes Markdown definitions that reference the backend
-non-runnable with a diagnostic.
+Executable configuration belongs only to the backend. Runtime Profiles refer
+to it through `backend_ref` and must not duplicate command, args, or env.
 
-## Agent Definitions
+## Agent Definitions And Targets
 
-Markdown agent definitions reference an external backend with `backend.ref`:
+A Markdown Agent Definition may reference a backend:
 
 ```yaml
 ---
@@ -91,181 +76,214 @@ entrypoints: [subagent]
 tools: [read, write, edit]
 mcpServers: [repo]
 ---
-Review the requested changes and return a concise finding list.
+Review the requested changes and return concise findings.
 ```
 
-Markdown files must not declare `command`, `args`, or executable backend
-details. A command-bearing Markdown definition is invalid and should surface a
-diagnostic. Markdown definitions may define identity, body instructions,
-entrypoints, skills, MCP scope, model preference, effort, background behavior,
-and tool policy.
+Markdown must not declare executable details. Each enabled backend generates a
+default Agent Definition using the backend id. A same-name Markdown definition
+shadows it and supplies product identity and policy.
 
-Each enabled backend generates a default agent definition
-using the backend id as the agent name. Generated agents default to the
-backend's `entrypoints`, have no instruction body, and send no extra prompt
-wrapper. A same-name Markdown definition shadows the generated definition and
-becomes the editable source of identity and policy.
-
-All peer/subagent execution is agent-targeted. Public APIs target `agentName`;
-direct task execution by backend id is not supported.
+Execution is Agent-targeted through a Gateway-validated
+`RunnableTarget { agentRef, runtimeProfileRef }`. Callers never execute a
+backend id directly and never pair definitions and profiles themselves.
 
 ## Capability And Policy
 
-`client_capabilities` declares the backend hard ceiling for ACP client
-callbacks:
+`client_capabilities` is the backend hard ceiling:
 
 - `fs.read`
 - `fs.write`
 - `terminal`
 
-When omitted, the provider-passthrough default enables all three. The selected
-agent's `tools` policy then narrows the effective callbacks:
+The captured Agent Definition narrows it: read enables filesystem read,
+write/edit enables filesystem write, and exec/write-stdin enables terminal.
+Gateway workspace, permission, source interaction, and secret policy narrow it
+again. An unsupported callback fails closed.
 
-- `read` maps to `fs.read`
-- `write` and `edit` map to `fs.write`
-- `exec_command` and `write_stdin` map to `terminal`
+When terminal is effective, the client implements the complete stable-v1
+terminal lifecycle: create, output, wait-for-exit, kill, and release. Create
+uses direct argv execution, a canonical cwd inside the captured workspace,
+bounded environment entries, the captured process environment, and a Gateway
+permission decision before spawn. Output is UTF-8-safe and bounded by the
+requested byte limit. Terminal ids are scoped to the requesting ACP session;
+kill, release, connection loss, and process shutdown terminate the owned child
+tree and cannot address another session's terminal.
 
-For peer agents, `mcpServers` are passed to ACP `session/new` only when they are
-explicitly declared by the backend or selected Markdown agent. Psychevo runtime
-tools are not automatically exposed to external ACP agents.
+Agent-declared MCP servers are passed only when the same server name is present
+in the captured backend allow-list and the captured Agent Definition. The
+Adapter resolves those names from the effective profile, enabled plugin, and
+selected capability-root MCP declarations; a missing, disabled, duplicated, or
+backend-disallowed declaration fails before prompt delivery instead of being
+silently omitted. Native Psychevo tools are not implicitly exposed to external
+Agents.
 
-External ACP `session/request_permission` requests are projected as Gateway
-permission requests. If no interactive approval handler is available, requests
-fail closed and the peer timeline records a diagnostic.
+For stable ACP v1 the Adapter sends the same resolved server declarations on
+both `session/new` and `session/load`. Stdio declarations carry an Adapter-
+resolved absolute executable path, args, and their explicit environment.
+Streamable HTTP declarations lower to ACP HTTP
+only when the Agent advertises `mcpCapabilities.http`; configured headers and a
+bearer token resolved from the named environment variable or Psychevo's MCP
+OAuth store remain in process memory and are never projected or logged. An
+unsupported transport, an explicit stdio cwd different from the session cwd,
+or a Native-only per-server tool/startup policy fails closed because stable ACP
+has no field that can preserve that policy.
 
-Workbench exposes configured Profile ACP backends in
-`Capabilities > Agents > ACP Backends` as an app-level peer-agent configuration
-surface. Users can add, edit, delete, enable, disable, choose
-`peer`/`subagent` entrypoints, and run backend diagnostics for Profile-level
-registrations. Project-level backend definitions can still be read by Gateway
-and affect runtime behavior, but Workbench does not edit them from this GUI
-surface. Backend management is configuration editing; it does not grant
-execution permission beyond the existing selected-agent policy and Gateway
-permission flow.
+ACP permission and elicitation requests enter the shared Gateway interaction
+broker. They retain option id, kind, scope, safe metadata, expiry, and source
+policy. A missing interactive handler rejects the request safely.
 
-Workbench uses a generic ACP backend add action rather than an OpenCode-specific
-shortcut. The editor represents `command`, `args`, and `env` as one JSON input,
-for example `{ "command": "opencode", "args": ["acp"], "env": {} }`, and writes
-the parsed values to the normal backend registration fields.
+The outbound client advertises ACP form elicitation only when it can route the
+request through that broker. Session-scoped primitive form properties are
+projected as typed clarify questions and accepted answers are validated back
+against the requested schema before the ACP response is sent. URL mode,
+request-scoped forms without a public Thread, unknown property types, and
+unrenderable schemas are not advertised or are declined; they never become a
+raw JSON prompt or an automatically accepted response.
 
-Gateway may materialize product-specific localhost shortcuts before returning
-the backend catalog. If the effective launch environment resolves `opencode`
-and no effective `opencode` backend already exists, Gateway writes a Profile ACP
-backend with command `opencode` and args `["acp"]`. If the environment resolves
-`hermes` and no effective `hermes` backend already exists, Gateway writes a
-Profile ACP backend with command `hermes` and args `["acp"]`. Auto-created
-shortcuts use the normal defaults for enablement, entrypoints, client
-capabilities, cwd, diagnostics, generated agent identity, and
-`Capabilities > Agents > ACP Backends` display. Gateway must not overwrite
-existing Profile or Project backend definitions, and it must not create config
-from network discovery or browser-only environment assumptions.
+An effective feature is the intersection of Agent negotiation, Adapter
+implementation, Psychevo certification, and binding grant. Standard ACP is the
+baseline. Reviewed Codex/OpenCode capability packs activate only for the exact
+stable Agent versions whose local source was audited (`codex-acp 1.1.2` and
+`OpenCode 1.17.18`). Future patch versions, prereleases, and build-qualified
+versions remain standard ACP until separately reviewed. Raw or unknown `_meta`
+never becomes a product action.
 
-## Execution Semantics
+## Process And Session Lifecycle
 
-Top-level peer threads use a Psychevo-local thread id as the durable public
-identifier. ACP native session ids are stored as backend metadata. Surfaces may
-display an alias of the form `acp:<backend-id>:<native-session-id>` for search,
-debugging, and imported sessions.
+Gateway owns every outbound ACP process. Workbench, Channels, and inbound
+`psychevo-acp` never launch or supervise one.
 
-ACP process lifecycle is per session:
+A supervisor generation is keyed by captured backend/profile fingerprint,
+canonical workspace, and auth scope. It owns a resident process and ACP
+connection. Public threads own independent session actors and native session
+ids. Sessions may share a connection only when the Agent supports routing them
+safely.
 
-- a top-level peer thread owns one ACP process and native session until closed
-- each subagent run starts a fresh ACP process and native session
-- different peer threads and subagent runs may run concurrently
+Generation startup is atomic. Leases and reference counts prevent an old
+generation from terminating active sessions in a replacement generation. Idle
+eviction requires zero active turns and zero pending interactions.
 
-Gateway queueing is per thread. Peer turns support queue and interrupt. Live
-steering is unsupported for ACP peers in the first version. Cancel first sends
-the cooperative ACP close/cancel operation when available, then kills the peer
-process after a timeout and marks the turn interrupted.
+The stable-v1 lifecycle is initialize, authenticate when needed,
+new/load/resume, apply required config, prompt, stream updates, terminal, and
+capability-gated list/fork/close/delete. The v1 `session/fork` extension is used
+only when the initialize response advertises it; enabling the SDK's unstable
+request type does not negotiate protocol v2. Every lifecycle request uses the
+same ordered notification barrier as load/prompt and is serialized by the
+owning public-thread session actor. Unsupported operations fail before a wire
+request with `delivery=notDelivered`.
 
-Subagent results use the existing compact subagent result contract. The parent
-agent receives a compact summary; the full peer transcript remains in the child
-thread timeline.
+`session/list` preserves the exact absolute-cwd filter and opaque cursor.
+`session/resume` and `session/fork` receive the exact resolved MCP declaration
+set captured for the session; neither may silently substitute an empty set or
+re-resolve mutable configuration. Resume creates a new session epoch without
+claiming history replay. Fork creates a distinct public-thread/native-session
+pair and reduces any response-preceding replay before publishing its snapshot.
 
-## ACP Projection
+Close and delete first cooperatively cancel active work, then issue their
+advertised request under the same per-session lock. A successful close/delete
+removes the resident session, callback context, and every owned terminal.
+Delete may also target a listed non-resident native session. Failed lifecycle
+requests do not fabricate successful cleanup. Generation shutdown closes
+resident sessions when supported and always clears callback contexts and kills
+owned terminals before the process is reaped.
 
-Psychevo acts as an ACP client for peer agents. It starts stdio processes,
-initializes ACP, creates or loads sessions, sends prompts, maps session updates
-to Gateway events, and persists normalized semantic timeline rows. Gateway
-uses `agent-client-protocol` 0.14.0 and prefers ACP protocol v2, falling back to
-ACP v1 only when the peer cannot negotiate that version. Live ACP updates
-provide immediacy; Psychevo's normalized timeline is authoritative for reloads
-across TUI, Web, Desktop, and future surfaces.
+An Agent `AuthRequired` error from a pre-delivery session lifecycle or config
+request becomes product error `acp_auth_required`, remains
+`delivery=notDelivered`, and points to `backend/doctor`. Other Agent request
+errors retain only the numeric ACP code and a bounded single-line message.
+Untrusted ACP error `data` is never copied to product errors, events, or
+diagnostics.
 
-ACP peer execution must consume the standard `session/update` event stream while
-the prompt is active. It must not collapse a peer turn through a final-string
-helper that discards intermediate updates. `agent_message_chunk` text updates
-map to incremental assistant text events before the final stop reason, and the
-final persisted assistant message contains the accumulated text.
-When the peer runs as a subagent, every incremental and terminal projection uses
-the pre-created Psychevo child thread id as its live scope. Opening that child in
-TUI or Workbench must show retained pre-open activity and future updates without
-waiting for the delegated turn or its parent turn to finish.
-`agent_thought_chunk` text updates map to Gateway reasoning deltas so Workbench
-and other live surfaces show a running `Thinking` block; the completed
-reasoning text is persisted as an assistant reasoning block for history
-reloads. `tool_call` and `tool_call_update` updates map to live transcript tool
-blocks with ACP raw input, output, status, locations, display title, and
-original update metadata retained; persisted tool results keep enough peer
-display metadata for history reloads to preserve the ACP tool title. V1 `plan`
-and v2 `plan_update` item updates map to a live plan/status block. Newer
-plan-operation updates are retained as structured ACP peer events, and when
-they carry a complete display body they may be projected through the same
-plan/status path. Session metadata, available-command, mode, config, usage, and
-future ACP update variants are retained as structured ACP peer runtime events
-even when they do not yet have a dedicated visible Workbench control.
-`usage_update` is additionally forwarded as a live usage event for observability
-surfaces. Unsupported variants must not block supported message, thought, tool,
-and plan streaming from continuing.
+Interrupt sends cooperative `session/cancel`; process termination is a timeout
+fallback. A process exit wakes all waiters and never triggers an automatic
+resend.
 
-When a peer native session is loaded or resumed, ACP history notifications
-received before the new prompt is active are resume material, not live output
-for the new Psychevo turn. Gateway must drain or ignore those notifications
-before constructing the turn accumulator. The live accumulator is ordered by
-current-turn ACP update arrival: adjacent message/thought chunks may append to
-the current text slot, while tool-call updates refresh the matching tool slot
-by ACP tool-call id without moving it behind later text. The committed
-assistant content for the turn uses that observed slot order instead of
-grouping all reasoning, answer text, and tools by type.
+The binding and native session id are persisted before prompt delivery.
+Top-level and subagent turns use the same Adapter Interface, with distinct
+public thread identity and interaction policy.
 
-Markdown body instructions are delivered by first trying a supported ACP
-config/system-like option. If unavailable, the body is prepended to the first
-prompt in a new ACP session only. Generated agents have no body and therefore
-send no instruction prefix.
+## ACP Protocol And Projection
 
-Existing ACP native sessions may be listed through a resume/import picker when
-the peer supports `session/list`. Import creates a Psychevo thread bound to the
-ACP native session id. Native sessions are not auto-imported.
+Gateway uses `agent-client-protocol = 1.2.0`. Outbound ACP wire v1 is the only
+certified protocol and the initialize response version is validated.
+`experimental_v2` is rejected with `unsupported_protocol`; no v2-first attempt
+or fallback is allowed.
 
-ACP `available_commands_update` entries are projected into the shared command
-catalog as namespaced peer commands. Users type `/agent:command`; Gateway
-removes the namespace before sending the slash command to that peer. Psychevo
-core commands keep their names and are never overridden by peer commands.
+The SDK's `unstable` aggregate does not forward its schema crate's
+`unstable_llm_providers` feature. Gateway therefore pins the SDK's exact
+`agent-client-protocol-schema = 1.4.0` dependency with that feature so a
+reviewed stable-v1 `agentCapabilities.providers` declaration remains a typed
+negotiated fact. Provider capability-pack behavior still requires the exact
+reviewed Agent identity, version, capability shape, and authentication method;
+the schema feature alone never activates a product capability.
 
-Initial Gateway implementation slice:
+Prompt input preserves supported text, image, resource, resource-link, and
+embedded-context blocks. Unsupported content is rejected before delivery.
 
-- `turn/start` accepts optional `agentName`; when it resolves to an ACP backend
-  agent with the `peer` entrypoint, Gateway routes the turn to the ACP peer.
-- The first execution slice starts a stdio ACP process per turn and reloads the
-  stored ACP native session id when present. A later slice may keep the process
-  resident for the lifetime of the Psychevo thread.
-- Gateway persists prompt and assistant timeline rows plus session metadata with
-  the selected agent, backend id, and ACP native session id.
-- V1 client callbacks advertise and implement `fs.read` and `fs.write` when
-  allowed by backend capabilities and the selected agent tool policy.
-  `terminal` is not advertised until terminal lifecycle projection lands. ACP
-  v2 in SDK schema 0.13.6 removes the v1 `fs` and `terminal` client
-  capabilities, so the v2 initialization path must not claim those callbacks;
-  filesystem callbacks are available only on v1 fallback.
-- ACP permission requests and write-file callbacks use the existing Gateway
-  approval handler when available; otherwise they fail closed.
+Stable session config options drive typed model, effort, and mode controls.
+Gateway applies required values before prompt and distinguishes a successful
+set response from a later authoritative observation. Config failure blocks the
+turn.
 
-## Diagnostics And CLI
+ACP updates map to bounded product facts:
 
-Backend probing is lazy. Normal startup must not spawn every configured peer.
-`pevo agents backend doctor` may run explicit local diagnostics with short
-timeouts: command resolution, process spawn, ACP initialize, session/new,
-reported models/modes, commands, and capability status.
+- Agent message and thought chunks
+- tool call and tool call update
+- plan/status
+- available commands
+- mode and config options
+- usage and session information
+- permission, elicitation, auth, and terminal lifecycle
 
-`pevo agents backend add` supports a generic ACP backend template in the first
-version and writes global config by default.
+Unknown updates are tolerated and bounded in diagnostics. Raw ACP envelopes,
+ids, secrets, or arbitrary metadata do not enter product transcript state.
+
+Replay and live updates use the same reducer with explicit origin, process
+generation, session epoch, and completion barrier. Time-based notification
+draining is forbidden. An Agent that supports load/resume remains history
+authoritative; Gateway stores product-safe projections and checkpoints. An
+Agent without load/resume is explicitly non-resumable after process loss.
+
+Available commands enter the shared command catalog through a namespaced typed
+descriptor. Psychevo core commands cannot be overridden.
+
+## Product Shortcuts
+
+Gateway exposes a `codex` ACP backend backed by the managed
+`@agentclientprotocol/codex-acp` version defined in [052 Agent
+Runtimes](../052-agent-runtimes/spec.md). It remains visible when uninstalled and
+provides an install recovery action.
+
+If `opencode` resolves and no effective backend shadows it, Gateway writes a
+Profile ACP backend with command `opencode` and args `["acp"]`. The existing
+Hermes shortcut follows the same rule. Auto-materialization never overwrites
+Profile or Project configuration and never downloads software.
+
+## Management And Diagnostics
+
+Workbench exposes Profile ACP backends under `Capabilities > Agents > ACP
+Backends`. Backend administration edits configuration; it does not grant
+execution permission.
+
+Catalog and context reads are cache-only. `backend/doctor` performs explicit,
+bounded checks for executable resolution, managed installation, initialize,
+protocol/capability compatibility, auth, and a disposable session when needed.
+Managed adapters additionally support `backend/install`, `backend/repair`, and
+`backend/upgrade`.
+
+CLI backend add/write commands keep structured command, args, and env fields.
+Diagnostics are product-safe and redact environment values, credentials,
+native ids, and raw protocol payloads.
+
+## Acceptance Criteria
+
+- Native and ACP top-level turns traverse the same Thread Application Interface.
+- Two ACP threads can execute independently without per-turn process startup.
+- Required v1 config is applied before prompt; failure prevents delivery.
+- Images/resources are preserved or rejected, never textualized or omitted.
+- Replay cannot leak into a new live turn or create duplicate transcript rows.
+- Permission and terminal callbacks obey captured capability and workspace policy.
+- Workbench and Channels do not branch on backend or Agent product names.
+- Codex/OpenCode direct transports and fallback paths do not exist.
+- Deterministic fake ACP Agents cover protocol, lifecycle, history, controls,
+  interactions, process failure, and cleanup.

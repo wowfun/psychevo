@@ -293,6 +293,28 @@ impl SqliteStore {
         Ok(title)
     }
 
+    pub fn set_session_title_if_empty(
+        &self,
+        session_id: &str,
+        title: &str,
+    ) -> Result<Option<String>> {
+        let title = normalize_session_title(title)
+            .ok_or_else(|| Error::Message("session title is empty".to_string()))?;
+        let changed = self.write_retry(|conn| {
+            conn.execute(
+                "UPDATE sessions SET title = ?1 WHERE id = ?2 AND (title IS NULL OR trim(title) = '')",
+                params![&title, session_id],
+            )
+        })?;
+        if changed > 0 {
+            return Ok(Some(title));
+        }
+        if self.session_summary(session_id)?.is_none() {
+            return Err(Error::Message(format!("session not found: {session_id}")));
+        }
+        Ok(None)
+    }
+
     pub fn archive_session(&self, session_id: &str) -> Result<()> {
         let now = now_ms();
         let changed = self.write_retry(|conn| {

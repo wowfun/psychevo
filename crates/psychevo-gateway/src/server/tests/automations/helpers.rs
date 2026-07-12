@@ -180,6 +180,7 @@ struct AutomationFakeRun {
     prompt: String,
     session: Option<String>,
     runtime_tools: Vec<String>,
+    mode: RunMode,
     permission_mode: Option<PermissionMode>,
     sandbox_override: Option<RunSandboxOverride>,
 }
@@ -202,7 +203,7 @@ impl std::fmt::Debug for AutomationFakeBackend {
 
 impl crate::GatewayBackend for AutomationFakeBackend {
     fn kind(&self) -> BackendKind {
-        BackendKind::Psychevo
+        BackendKind::Native
     }
 
     fn run_turn(
@@ -250,6 +251,7 @@ impl crate::GatewayBackend for AutomationFakeBackend {
             prompt: request.options.prompt.clone(),
             session,
             runtime_tools,
+            mode: request.options.mode,
             permission_mode: request.options.permission_mode,
             sandbox_override: request.options.sandbox_override.clone(),
         });

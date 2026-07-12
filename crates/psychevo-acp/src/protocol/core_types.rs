@@ -14,14 +14,13 @@ pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdat
                 .get("tool_name")
                 .and_then(Value::as_str)
                 .unwrap_or("tool");
-            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-                call_id.to_string(),
-                ToolCallUpdateFields::new()
+            SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new(call_id.to_string())
                     .title(tool_title(tool_name))
                     .kind(tool_kind(tool_name))
                     .status(ToolCallStatus::Pending)
                     .raw_input(tool_call_pending_raw_input(value)),
-            ))
+            )
         }
         "tool_execution_start" => {
             let call_id = value
@@ -33,7 +32,8 @@ pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdat
                 .and_then(Value::as_str)
                 .unwrap_or("tool");
             let args = value.get("args").cloned();
-            let mut tool_call = ToolCall::new(call_id.to_string(), tool_title(tool_name))
+            let mut tool_call = ToolCallUpdate::new(call_id.to_string())
+                .title(tool_title(tool_name))
                 .kind(tool_kind(tool_name))
                 .status(ToolCallStatus::InProgress)
                 .raw_input(args);
@@ -41,7 +41,7 @@ pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdat
             {
                 tool_call = tool_call.meta(meta);
             }
-            SessionUpdate::ToolCall(tool_call)
+            SessionUpdate::ToolCallUpdate(tool_call)
         }
         "tool_execution_end" => {
             let call_id = value
@@ -63,18 +63,15 @@ pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdat
                 .filter(|text| !text.is_empty())
                 .map(|text| vec![ToolCallContent::from(text)])
                 .unwrap_or_default();
-            let mut update = ToolCallUpdate::new(
-                call_id.to_string(),
-                ToolCallUpdateFields::new()
-                    .title(tool_title(tool_name))
-                    .status(if failed {
-                        ToolCallStatus::Failed
-                    } else {
-                        ToolCallStatus::Completed
-                    })
-                    .content(content)
-                    .raw_output(result),
-            );
+            let mut update = ToolCallUpdate::new(call_id.to_string())
+                .title(tool_title(tool_name))
+                .status(if failed {
+                    ToolCallStatus::Failed
+                } else {
+                    ToolCallStatus::Completed
+                })
+                .content(content)
+                .raw_output(result);
             if let Some(meta) = tool_timing_meta("elapsedMs", value.get("elapsed_ms").cloned()) {
                 update = update.meta(meta);
             }

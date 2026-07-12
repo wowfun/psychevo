@@ -1,19 +1,79 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendKind": {
+      "enum": [
+        "native",
+        "acp"
+      ],
+      "type": "string"
+    },
+    "GatewayBackendInfo": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/BackendKind"
+        },
+        "runtimeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionHandle": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewayThread": {
+      "properties": {
+        "backend": {
+          "$ref": "#/definitions/GatewayBackendInfo"
+        },
+        "id": {
+          "type": "string"
+        },
+        "sourceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend",
+        "id"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "accepted": {
       "type": "boolean"
     },
+    "thread": {
+      "$ref": "#/definitions/GatewayThread"
+    },
     "threadId": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": "string"
+    },
+    "turnId": {
+      "type": "string"
     }
   },
   "required": [
-    "accepted"
+    "accepted",
+    "thread",
+    "threadId",
+    "turnId"
   ],
   "title": "TurnStartResult",
   "type": "object"

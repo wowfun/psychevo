@@ -107,6 +107,89 @@ export const clientRequestTurnStartSchema = {
             "visibleToModel"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "blob": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mimeType": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "resource"
+              ],
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "uri"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "description": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mimeType": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "size": {
+              "default": null,
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "resourceLink"
+              ],
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "uri"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -333,9 +416,34 @@ export const clientRequestTurnStartSchema = {
       ],
       "type": "string"
     },
+    "RunnableTargetInput": {
+      "properties": {
+        "agentRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimeProfileRef": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeProfileRef"
+      ],
+      "type": "object"
+    },
     "TurnStartParams": {
       "properties": {
-        "agentName": {
+        "expectedContextRevision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedControlRevision": {
           "default": null,
           "type": [
             "string",
@@ -356,64 +464,19 @@ export const clientRequestTurnStartSchema = {
           },
           "type": "array"
         },
-        "mode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "permissionMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reasoningEffort": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "runtimeOptions": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "type": "object"
-        },
-        "runtimeRef": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "runtimeSessionId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "scope": {
           "$ref": "#/definitions/GatewayRequestScope"
         },
-        "text": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RunnableTargetInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "threadId": {
           "default": null,
@@ -421,6 +484,11 @@ export const clientRequestTurnStartSchema = {
             "string",
             "null"
           ]
+        },
+        "turnOverrides": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
         }
       },
       "required": [

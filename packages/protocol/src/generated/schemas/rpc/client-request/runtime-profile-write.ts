@@ -82,21 +82,7 @@ export const clientRequestRuntimeProfileWriteSchema = {
             "null"
           ]
         },
-        "args": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "backendRef": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "command": {
           "default": null,
           "type": [
             "string",
@@ -130,13 +116,6 @@ export const clientRequestRuntimeProfileWriteSchema = {
             "boolean",
             "null"
           ]
-        },
-        "env": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "type": "object"
         },
         "id": {
           "type": "string"

@@ -192,7 +192,7 @@ fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("ThreadTrace") {
         return "thread/trace";
     }
-    if name.starts_with("Thread") {
+    if name.starts_with("Thread") || name == "RunnableTargetView" {
         return "thread/controls";
     }
     if name.starts_with("Session") || name == "GatewayActivityView" {
@@ -212,23 +212,18 @@ fn schema_group_module(name: &str) -> &'static str {
     }
     if matches!(
         name,
-        "TurnStartParams"
-            | "TurnSteerParams"
-            | "TurnInterruptParams"
-            | "TurnTakeoverParams"
+        "RunnableTargetInput"
+            | "TurnStartParams"
             | "TurnStartResult"
-            | "TurnControlResult"
-            | "TurnTakeoverResult"
     ) {
         return "turn/control";
     }
-    if name == "GatewayTurnError" || name.starts_with("Turn") {
+    if name.starts_with("Turn") {
         return "turn/result";
     }
     if name.starts_with("Permission")
         || name.starts_with("Clarify")
         || name.starts_with("Pending")
-        || name == "InteractionRespondResult"
     {
         return "interaction";
     }

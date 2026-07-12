@@ -2,6 +2,7 @@ use super::*;
 use crate::im::FakeImAdapter;
 use futures::future::BoxFuture;
 use psychevo_runtime::{Outcome, RunResult, StateRuntime};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -10,222 +11,6 @@ struct TestBackend {
     prompts: Arc<Mutex<Vec<String>>>,
     runs: AtomicUsize,
     request_permission: AtomicBool,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ChannelQuestionRuntime {
-    pending: Arc<Mutex<Option<tokio::sync::oneshot::Sender<Value>>>>,
-    responses: Arc<Mutex<Vec<Value>>>,
-    interactions: Arc<AtomicUsize>,
-}
-
-impl psychevo_runtime_host::RuntimeModule for ChannelQuestionRuntime {
-    fn snapshot(
-        &self,
-        _query: psychevo_runtime_host::SnapshotQuery,
-    ) -> psychevo_runtime_host::RuntimeFuture<psychevo_runtime_host::RuntimeSnapshot> {
-        Box::pin(async {
-            Err(psychevo_runtime_host::RuntimeError::new(
-                "unsupported",
-                psychevo_runtime_host::RuntimeErrorStage::Discovery,
-                psychevo_runtime_host::RetryClass::UserAction,
-                "snapshot is outside the Channel interaction test",
-            ))
-        })
-    }
-
-    fn execute(
-        &self,
-        request: psychevo_runtime_host::ExecuteRequest,
-        observer: psychevo_runtime_host::RuntimeObserver,
-        _control: psychevo_runtime_host::RuntimeControl,
-    ) -> psychevo_runtime_host::RuntimeFuture<psychevo_runtime_host::ExecuteResult> {
-        let pending = Arc::clone(&self.pending);
-        let responses = Arc::clone(&self.responses);
-        let interactions = Arc::clone(&self.interactions);
-        Box::pin(async move {
-            match request.intent {
-                psychevo_runtime_host::RuntimeIntent::Turn(turn) => {
-                    let interaction_number = interactions.fetch_add(1, Ordering::SeqCst) + 1;
-                    let gui_advanced_only = turn.prompt.contains("experimental");
-                    assert_eq!(
-                        turn.interaction_exposure,
-                        psychevo_runtime_host::RuntimeInteractionExposure::Standard
-                    );
-                    let native_session_id = format!("question-native:{}", turn.thread_id);
-                    observer
-                        .bind_native_session(psychevo_runtime_host::RuntimeSessionBinding {
-                            runtime_ref: request.profile.id.clone(),
-                            thread_id: turn.thread_id.clone(),
-                            native_session_id: native_session_id.clone(),
-                            cwd: turn.cwd.clone(),
-                            binding_epoch: turn.binding_epoch,
-                            process_epoch: 1,
-                            instance_epoch: Some(1),
-                        })
-                        .await?;
-                    let (sender, receiver) = tokio::sync::oneshot::channel();
-                    *pending.lock().expect("question pending poisoned") = Some(sender);
-                    let mut questions = vec![psychevo_runtime_host::RuntimeInteractionQuestion {
-                        header: Some("Workspace".to_string()),
-                        question: "Which workspace should I use?".to_string(),
-                        options: vec![
-                            psychevo_runtime_host::RuntimeInteractionQuestionOption {
-                                label: "Repository root".to_string(),
-                                description: "Use the current repository".to_string(),
-                            },
-                            psychevo_runtime_host::RuntimeInteractionQuestionOption {
-                                label: "Another directory".to_string(),
-                                description: "Choose a different workspace".to_string(),
-                            },
-                        ],
-                        multiple: false,
-                        custom: true,
-                        secret: false,
-                    }];
-                    if turn.prompt.contains("multiple") {
-                        questions.push(psychevo_runtime_host::RuntimeInteractionQuestion {
-                            header: Some("Checks".to_string()),
-                            question: "Which checks should I run?".to_string(),
-                            options: vec![
-                                psychevo_runtime_host::RuntimeInteractionQuestionOption {
-                                    label: "Tests".to_string(),
-                                    description: "Run focused tests".to_string(),
-                                },
-                                psychevo_runtime_host::RuntimeInteractionQuestionOption {
-                                    label: "Clippy".to_string(),
-                                    description: "Run lint checks".to_string(),
-                                },
-                            ],
-                            multiple: true,
-                            custom: false,
-                            secret: false,
-                        });
-                    }
-                    if gui_advanced_only {
-                        questions[0].question =
-                            "channel-native-experimental-question-secret".to_string();
-                    }
-                    observer.emit(psychevo_runtime_host::RuntimeObservation::Interaction(
-                        Box::new(psychevo_runtime_host::RuntimeInteraction {
-                            id: format!("native-question-{interaction_number}"),
-                            policy: psychevo_runtime_host::RuntimeInteractionPolicy {
-                                kind: psychevo_runtime_host::RuntimeInteractionKind::Question,
-                                stability: if gui_advanced_only {
-                                    psychevo_runtime_host::RuntimeStability::Experimental
-                                } else {
-                                    psychevo_runtime_host::RuntimeStability::Stable
-                                },
-                                exposure: if gui_advanced_only {
-                                    psychevo_runtime_host::RuntimeInteractionExposure::GuiAdvancedOnly
-                                } else {
-                                    psychevo_runtime_host::RuntimeInteractionExposure::Standard
-                                },
-                            },
-                            kind: "question".to_string(),
-                            runtime_ref: request.profile.id,
-                            thread_id: turn.thread_id.clone(),
-                            native_session_id: native_session_id.clone(),
-                            parent_native_session_id: None,
-                            child_native_session_id: None,
-                            process_epoch: 1,
-                            instance_epoch: Some(1),
-                            prompt: if gui_advanced_only {
-                                "channel-native-experimental-question-secret".to_string()
-                            } else {
-                                "Which workspace should I use?".to_string()
-                            },
-                            questions,
-                            choices: Vec::new(),
-                            authorization_lifetime: None,
-                            expires_at_ms: None,
-                            metadata: None,
-                        }),
-                    ));
-                    let response = receiver.await.map_err(|_| {
-                        psychevo_runtime_host::RuntimeError::new(
-                            "interaction_cancelled",
-                            psychevo_runtime_host::RuntimeErrorStage::Interaction,
-                            psychevo_runtime_host::RetryClass::Never,
-                            "question response channel closed",
-                        )
-                    })?;
-                    let cancelled = response
-                        .get("reject")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false);
-                    responses
-                        .lock()
-                        .expect("question responses poisoned")
-                        .push(response);
-                    Ok(psychevo_runtime_host::ExecuteResult::Turn(
-                        psychevo_runtime_host::RuntimeTurnResult {
-                            turn_id: turn.turn_id,
-                            thread_id: turn.thread_id,
-                            native_session_id,
-                            outcome: psychevo_runtime_host::RuntimeTurnOutcome::Completed,
-                            final_answer: if gui_advanced_only && cancelled {
-                                "experimental question declined".to_string()
-                            } else if cancelled {
-                                "question cancelled".to_string()
-                            } else {
-                                "question answered".to_string()
-                            },
-                            provider: "opencode".to_string(),
-                            model: "fake-opencode".to_string(),
-                            history_fidelity: psychevo_runtime_host::HistoryFidelity::Partial,
-                            process_epoch: 1,
-                            instance_epoch: Some(1),
-                            terminal_error: None,
-                            metadata: None,
-                        },
-                    ))
-                }
-                psychevo_runtime_host::RuntimeIntent::Interaction(response) => {
-                    let sender = pending
-                        .lock()
-                        .expect("question pending poisoned")
-                        .take()
-                        .ok_or_else(|| {
-                            psychevo_runtime_host::RuntimeError::new(
-                                "interaction_expired",
-                                psychevo_runtime_host::RuntimeErrorStage::Interaction,
-                                psychevo_runtime_host::RetryClass::UserAction,
-                                "question is no longer pending",
-                            )
-                        })?;
-                    sender.send(response.response).map_err(|_| {
-                        psychevo_runtime_host::RuntimeError::new(
-                            "interaction_expired",
-                            psychevo_runtime_host::RuntimeErrorStage::Interaction,
-                            psychevo_runtime_host::RetryClass::UserAction,
-                            "question receiver closed",
-                        )
-                    })?;
-                    Ok(psychevo_runtime_host::ExecuteResult::Interaction(
-                        psychevo_runtime_host::RuntimeInteractionResult {
-                            accepted: true,
-                            expired: false,
-                            message: None,
-                        },
-                    ))
-                }
-                _ => Err(psychevo_runtime_host::RuntimeError::new(
-                    "unsupported",
-                    psychevo_runtime_host::RuntimeErrorStage::Configuration,
-                    psychevo_runtime_host::RetryClass::UserAction,
-                    "unsupported Channel question intent",
-                )),
-            }
-        })
-    }
-
-    fn shutdown(
-        &self,
-        _mode: psychevo_runtime_host::ShutdownMode,
-    ) -> psychevo_runtime_host::RuntimeFuture<()> {
-        Box::pin(async { Ok(()) })
-    }
 }
 
 impl TestBackend {
@@ -241,6 +26,36 @@ impl TestBackend {
 #[derive(Debug)]
 struct ErrorImAdapter {
     polls: Arc<AtomicUsize>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct FailOnceImAdapter {
+    attempts: Arc<AtomicUsize>,
+    sent: Arc<Mutex<Vec<ImOutboundMessage>>>,
+}
+
+impl crate::im::ImAdapter for FailOnceImAdapter {
+    fn platform(&self) -> &str {
+        "wechat"
+    }
+
+    fn poll(&self) -> BoxFuture<'static, psychevo_runtime::Result<Vec<ImInboundMessage>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn send(&self, message: ImOutboundMessage) -> BoxFuture<'static, psychevo_runtime::Result<()>> {
+        let attempts = Arc::clone(&self.attempts);
+        let sent = Arc::clone(&self.sent);
+        Box::pin(async move {
+            if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(Error::Message(
+                    "deterministic first send failure".to_string(),
+                ));
+            }
+            sent.lock().expect("sent messages poisoned").push(message);
+            Ok(())
+        })
+    }
 }
 
 impl crate::im::ImAdapter for ErrorImAdapter {
@@ -269,7 +84,7 @@ impl crate::im::ImAdapter for ErrorImAdapter {
 
 impl crate::GatewayBackend for TestBackend {
     fn kind(&self) -> BackendKind {
-        BackendKind::Psychevo
+        BackendKind::Native
     }
 
     fn run_turn(
@@ -350,7 +165,7 @@ fn ready_wechat_connection(cwd: Option<String>) -> ChannelRuntimeConnection {
         transport: "polling".to_string(),
         cwd,
         runtime_ref: None,
-        model: None,
+        model: Some("fake-model".to_string()),
         permission_mode: None,
         require_mention: true,
         credential: None,
@@ -440,6 +255,113 @@ async fn channel_message_runs_gateway_turn_and_sends_final_answer() {
 }
 
 #[tokio::test]
+async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let backend = Arc::new(TestBackend::default());
+    let runs = Arc::clone(&backend);
+    let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let gateway = Gateway::with_backend(state_runtime, backend);
+    let state = WebState::new(GatewayWebServerConfig::new(
+        gateway,
+        home,
+        cwd.clone(),
+        None,
+        BTreeMap::new(),
+        temp.path().join("static"),
+    ));
+    let adapter = FailOnceImAdapter::default();
+    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+        "wechat",
+        Arc::new(adapter.clone()),
+        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+    )]);
+    let runtime = ChannelRuntimeState::new(temp.path());
+    let connection = ready_wechat_connection(None);
+    let message = wechat_message("original prompt must not rerun", "wx-outbox");
+    let source = gateway_source_for_im(&message);
+    let thread_id = state
+        .inner
+        .state
+        .store()
+        .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
+        .expect("thread");
+    state
+        .inner
+        .state
+        .store()
+        .upsert_gateway_source_lane(GatewaySourceLaneInput {
+            source_key: &source.source_key().0,
+            source_kind: &source.kind,
+            raw_identity: source.raw_identity.clone().expect("raw identity"),
+            visible_name: source.visible_name.as_deref(),
+            thread_id: Some(&thread_id),
+            draft_agent_ref: None,
+            draft_profile_ref: None,
+            draft_control_values: &BTreeMap::new(),
+            lineage: None,
+        })
+        .expect("source lane");
+    let payload = "saved final answer";
+    let payload_hash = format!("{:x}", Sha256::digest(payload.as_bytes()));
+    state
+        .inner
+        .state
+        .store()
+        .upsert_gateway_channel_outbox(psychevo_runtime::GatewayChannelOutboxInput {
+            delivery_id: "out-retry",
+            thread_id: &thread_id,
+            turn_id: "turn-already-completed",
+            connection_id: "wechat",
+            source_key: &source.source_key().0,
+            payload_text: payload,
+            payload_hash: &payload_hash,
+        })
+        .expect("outbox");
+    runner::retry_unacknowledged_channel_outbox(&state, &runtime, &connection, &channel_gateway)
+        .await
+        .expect_err("first outbox delivery fails");
+    let failed = state
+        .inner
+        .state
+        .store()
+        .gateway_channel_outbox("out-retry")
+        .expect("failed outbox read")
+        .expect("failed outbox row");
+    assert_eq!(failed.status, "failed");
+    assert_eq!(failed.payload_text.as_deref(), Some(payload));
+    assert_eq!(runs.runs.load(Ordering::SeqCst), 0);
+
+    let delivered = runner::retry_unacknowledged_channel_outbox(
+        &state,
+        &runtime,
+        &connection,
+        &channel_gateway,
+    )
+    .await
+    .expect("outbox retry");
+
+    assert_eq!(delivered, 1);
+    assert_eq!(runs.runs.load(Ordering::SeqCst), 0);
+    let sent = adapter.sent.lock().expect("sent messages poisoned");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].thread_id, thread_id);
+    assert_eq!(sent[0].text, payload);
+    let acknowledged = state
+        .inner
+        .state
+        .store()
+        .gateway_channel_outbox("out-retry")
+        .expect("outbox read")
+        .expect("outbox row");
+    assert_eq!(acknowledged.status, "acknowledged");
+    assert_eq!(acknowledged.payload_text, None);
+    assert_eq!(acknowledged.payload_hash, payload_hash);
+}
+
+#[tokio::test]
 async fn channel_mission_records_team_metadata_before_running_prompt() {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
@@ -524,59 +446,6 @@ async fn channel_mission_records_team_metadata_before_running_prompt() {
     assert_eq!(team.team_name, "release");
     assert_eq!(team.max_parallel_agents, 2);
     assert_eq!(mission.goal, "Ship it");
-}
-
-#[tokio::test]
-async fn channel_help_command_replies_without_running_gateway_turn() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let cwd = temp.path().join("work");
-    let home = temp.path().join("home");
-    std::fs::create_dir_all(&cwd).expect("cwd");
-    std::fs::create_dir_all(&home).expect("home");
-    let backend = Arc::new(TestBackend::default());
-    let prompts = Arc::clone(&backend.prompts);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let env = BTreeMap::from([
-        ("HOME".to_string(), home.to_string_lossy().to_string()),
-        (
-            "PSYCHEVO_HOME".to_string(),
-            home.to_string_lossy().to_string(),
-        ),
-        ("PSYCHEVO_CHANNEL_RUNTIME".to_string(), "0".to_string()),
-    ]);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
-        cwd,
-        None,
-        env,
-        temp.path().join("static"),
-    ));
-    let adapter = FakeImAdapter::new("wechat");
-    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
-        "wechat",
-        Arc::new(adapter.clone()),
-        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
-    )]);
-    let runtime = ChannelRuntimeState::new(temp.path());
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &ready_wechat_connection(None),
-        &channel_gateway,
-        wechat_message("/help", "wx-help"),
-    )
-    .await
-    .expect("help handled");
-
-    assert!(prompts.lock().expect("prompts poisoned").is_empty());
-    let sent = wait_for_sent(&adapter, 1).await;
-    assert_eq!(sent.len(), 1);
-    assert!(sent[0].text.contains("/status"));
-    assert!(sent[0].text.contains("/compact"));
-    assert!(sent[0].thread_id.starts_with("im.wechat:"));
 }
 
 #[tokio::test]
@@ -948,13 +817,17 @@ entrypoints = ["peer"]
 }
 
 #[tokio::test]
-async fn channel_profile_command_starts_new_immutably_bound_thread() {
+async fn channel_profile_command_starts_new_unbound_target_draft() {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(home.join("config.toml"), "").expect("config");
+    std::fs::write(
+        home.join("config.toml"),
+        "[agents.backends.opencode]\nkind = \"acp\"\ncommand = \"opencode\"\nentrypoints = [\"peer\", \"subagent\"]\n",
+    )
+    .expect("config");
     let backend = Arc::new(TestBackend::default());
     let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
     let env = BTreeMap::from([
@@ -1037,9 +910,19 @@ async fn channel_profile_command_starts_new_immutably_bound_thread() {
         .state
         .store()
         .gateway_runtime_binding(&binding.thread_id)
-        .expect("runtime binding")
-        .expect("runtime binding exists");
-    assert_eq!(runtime_binding.runtime_ref.as_deref(), Some("opencode"));
+        .expect("runtime binding");
+    assert!(
+        runtime_binding.is_none(),
+        "selection must bind only at turn delivery"
+    );
+    let lane = state
+        .inner
+        .state
+        .store()
+        .gateway_source_lane(&source_key)
+        .expect("source lane")
+        .expect("source lane exists");
+    assert_eq!(lane.draft_profile_ref.as_deref(), Some("opencode"));
     assert!(
         state
             .inner
@@ -1064,7 +947,7 @@ async fn channel_profile_command_starts_new_immutably_bound_thread() {
 }
 
 #[tokio::test]
-async fn channel_profile_command_saves_pre_thread_lane_preference() {
+async fn channel_profile_command_rejects_unavailable_pre_thread_target() {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
@@ -1104,7 +987,78 @@ async fn channel_profile_command_saves_pre_thread_lane_preference() {
     .expect("profile draft handled");
 
     let sent = wait_for_sent(&adapter, 1).await;
-    assert!(sent[0].text.contains("saved for the next channel thread"));
+    assert!(sent[0].text.contains("backend/install"));
+    let lane = state
+        .inner
+        .state
+        .store()
+        .gateway_source_lane(&source.source_key().0)
+        .expect("lane");
+    assert!(
+        lane.is_none(),
+        "unavailable targets must not mutate the source draft"
+    );
+}
+
+#[tokio::test]
+async fn channel_agent_command_rotates_to_an_unbound_top_level_target() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(cwd.join(".psychevo/agents")).expect("agents");
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::write(home.join("config.toml"), "").expect("config");
+    std::fs::write(
+        cwd.join(".psychevo/agents/reviewer.md"),
+        "---\ndescription: Review the top-level task.\n---\n\nReview carefully.\n",
+    )
+    .expect("agent");
+    let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let state = WebState::new(GatewayWebServerConfig::new(
+        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+        home,
+        cwd,
+        None,
+        BTreeMap::from([(
+            "HOME".to_string(),
+            temp.path().to_string_lossy().to_string(),
+        )]),
+        temp.path().join("static"),
+    ));
+    let adapter = FakeImAdapter::new("wechat");
+    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+        "wechat",
+        Arc::new(adapter.clone()),
+        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+    )]);
+    let runtime = ChannelRuntimeState::new(temp.path());
+    let connection = ready_wechat_connection(None);
+
+    let first = wechat_message("hello", "wx-agent-1");
+    let source = gateway_source_for_im(&first);
+    handle_channel_message(&state, &runtime, &connection, &channel_gateway, first)
+        .await
+        .expect("first turn");
+    let sent = wait_for_sent(&adapter, 1).await;
+    assert_eq!(sent[0].text, "answer 1");
+    let previous_thread_id = state
+        .inner
+        .gateway
+        .resolve_source_thread(&source)
+        .expect("source")
+        .expect("bound thread");
+
+    handle_channel_message(
+        &state,
+        &runtime,
+        &connection,
+        &channel_gateway,
+        wechat_message("/agent reviewer", "wx-agent-2"),
+    )
+    .await
+    .expect("agent select");
+    let sent = wait_for_sent(&adapter, 2).await;
+    assert!(sent[1].text.contains("top-level Agent `reviewer`"));
     let lane = state
         .inner
         .state
@@ -1112,8 +1066,19 @@ async fn channel_profile_command_saves_pre_thread_lane_preference() {
         .gateway_source_lane(&source.source_key().0)
         .expect("lane")
         .expect("lane exists");
-    assert_eq!(lane.thread_id, None);
-    assert_eq!(lane.draft_runtime_ref.as_deref(), Some("codex"));
+    assert_ne!(lane.thread_id.as_deref(), Some(previous_thread_id.as_str()));
+    assert_eq!(lane.draft_agent_ref.as_deref(), Some("reviewer"));
+    assert_eq!(lane.draft_profile_ref.as_deref(), Some("native"));
+    assert!(
+        state
+            .inner
+            .state
+            .store()
+            .gateway_runtime_binding(lane.thread_id.as_deref().expect("draft thread"))
+            .expect("runtime binding")
+            .is_none(),
+        "Agent/Profile selection must remain an unbound target until the next turn"
+    );
 }
 
 #[tokio::test]
@@ -1403,262 +1368,6 @@ async fn channel_answer_command_reports_missing_ask_request() {
 }
 
 #[tokio::test]
-async fn channel_question_tokens_answer_and_cancel_without_exposing_gateway_ids() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let cwd = temp.path().join("work");
-    let home = temp.path().join("home");
-    std::fs::create_dir_all(&cwd).expect("cwd");
-    std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(home.join("config.toml"), "").expect("config");
-    let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
-    let question_runtime = Arc::new(ChannelQuestionRuntime::default());
-    let responses = Arc::clone(&question_runtime.responses);
-    let host = psychevo_runtime_host::RuntimeHost::new();
-    host.register(
-        psychevo_runtime_host::RuntimeKind::OpenCode,
-        question_runtime.clone(),
-    );
-    host.register(psychevo_runtime_host::RuntimeKind::Codex, question_runtime);
-    let env = BTreeMap::from([
-        (
-            "HOME".to_string(),
-            temp.path().to_string_lossy().to_string(),
-        ),
-        (
-            "PSYCHEVO_HOME".to_string(),
-            state_runtime
-                .db_path()
-                .parent()
-                .expect("state parent")
-                .display()
-                .to_string(),
-        ),
-    ]);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend_and_runtime_host(
-            state_runtime,
-            Arc::new(TestBackend::default()),
-            host,
-        ),
-        home,
-        cwd,
-        None,
-        env,
-        temp.path().join("static"),
-    ));
-    let adapter = FakeImAdapter::new("wechat");
-    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
-        "wechat",
-        Arc::new(adapter.clone()),
-        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
-    )]);
-    let runtime = ChannelRuntimeState::new(temp.path());
-    let mut connection = ready_wechat_connection(None);
-    connection.runtime_ref = Some("opencode".to_string());
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message("ask me", "wx-question-answer"),
-    )
-    .await
-    .expect("question turn accepted");
-    let sent = wait_for_sent(&adapter, 1).await;
-    assert!(sent[0].text.contains("Which workspace should I use?"));
-    assert!(!sent[0].text.contains("native-question"));
-    assert!(!sent[0].text.contains("rt_"));
-    let answer_token = sent[0]
-        .text
-        .split("/answer ")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .expect("answer token")
-        .to_string();
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message(
-            &format!("/answer {answer_token} use the repo root"),
-            "wx-question-answer-response",
-        ),
-    )
-    .await
-    .expect("question answered");
-    let sent = wait_for_sent(&adapter, 3).await;
-    assert!(
-        sent.iter()
-            .any(|message| message.text == format!("Answered request {answer_token}.")),
-        "{sent:#?}"
-    );
-    assert!(
-        sent.iter()
-            .any(|message| message.text == "question answered")
-    );
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message("ask again", "wx-question-cancel"),
-    )
-    .await
-    .expect("second question turn accepted");
-    let sent = wait_for_sent(&adapter, 4).await;
-    let second_prompt = sent
-        .iter()
-        .skip(3)
-        .find(|message| message.text.contains("Psychevo asks:"))
-        .expect("second question prompt");
-    let cancel_token = second_prompt
-        .text
-        .split("/cancel ")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .map(|token| token.trim_end_matches('.'))
-        .expect("cancel token")
-        .to_string();
-    assert_ne!(answer_token, cancel_token);
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message(
-            &format!("/cancel {cancel_token}"),
-            "wx-question-cancel-response",
-        ),
-    )
-    .await
-    .expect("question cancelled");
-    let sent = wait_for_sent(&adapter, 6).await;
-    assert!(
-        sent.iter()
-            .any(|message| message.text == format!("Cancelled request {cancel_token}."))
-    );
-    assert!(
-        sent.iter()
-            .any(|message| message.text == "question cancelled")
-    );
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message("ask multiple", "wx-question-multiple"),
-    )
-    .await
-    .expect("multiple-question turn accepted");
-    let sent = wait_for_sent(&adapter, 7).await;
-    let multi_prompt = sent.last().expect("multiple-question guidance");
-    let multi_token = multi_prompt
-        .text
-        .split("/cancel ")
-        .nth(1)
-        .map(|token| token.trim_end_matches('.'))
-        .expect("multiple-question cancel token")
-        .to_string();
-    assert_eq!(
-        multi_prompt.text,
-        channel_multi_question_guidance(&multi_token)
-    );
-    assert!(!multi_prompt.text.contains("/answer"));
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message(
-            &format!("/answer {multi_token} Tests"),
-            "wx-question-multiple-partial",
-        ),
-    )
-    .await
-    .expect("partial multi-question answer rejected");
-    let sent = wait_for_sent(&adapter, 8).await;
-    assert_eq!(
-        sent.last().expect("partial-answer guidance").text,
-        channel_multi_question_guidance(&multi_token)
-    );
-    assert_eq!(
-        responses.lock().expect("question responses poisoned").len(),
-        2,
-        "Channel must not answer only the first native question"
-    );
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message(
-            &format!("/cancel {multi_token}"),
-            "wx-question-multiple-cancel",
-        ),
-    )
-    .await
-    .expect("multiple-question request cancelled");
-    let sent = wait_for_sent(&adapter, 10).await;
-    assert!(
-        sent.iter()
-            .any(|message| message.text == format!("Cancelled request {multi_token}."))
-    );
-
-    {
-        let responses = responses.lock().expect("question responses poisoned");
-        assert_eq!(responses[0]["answers"][0][0], "use the repo root");
-        assert_eq!(responses[1]["reject"], true);
-        assert_eq!(responses[1]["decision"], "cancel");
-        assert_eq!(responses[2]["reject"], true);
-    }
-
-    connection.runtime_ref = Some("codex".to_string());
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message(
-            "ask experimental question",
-            "wx-question-experimental-blocked",
-        ),
-    )
-    .await
-    .expect("experimental question is declined without blocking the turn");
-    let sent = wait_for_sent(&adapter, 12).await;
-    let blocked_turn_messages = &sent[10..];
-    assert!(blocked_turn_messages.iter().any(|message| {
-        message.text
-            == "A runtime interaction requires GUI Advanced mode and was declined on this Channel."
-    }));
-    assert!(
-        blocked_turn_messages
-            .iter()
-            .any(|message| message.text == "experimental question declined"),
-        "declining the native request must preserve final progress: {blocked_turn_messages:#?}"
-    );
-    let blocked_text = blocked_turn_messages
-        .iter()
-        .map(|message| message.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!blocked_text.contains("/answer"));
-    assert!(!blocked_text.contains("ia_"));
-    assert!(!blocked_text.contains("channel-native-experimental-question-secret"));
-    let responses = responses.lock().expect("question responses poisoned");
-    assert_eq!(responses.len(), 4);
-    assert_eq!(responses[3], json!({"reject": true, "decision": "cancel"}));
-}
-
-#[tokio::test]
 async fn channel_event_sink_sends_clarify_prompt() {
     let adapter = FakeImAdapter::new("wechat");
     let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
@@ -1736,83 +1445,6 @@ async fn channel_event_sink_sends_clarify_prompt() {
         1,
         "expired actions must not mint tokens"
     );
-}
-
-#[tokio::test]
-async fn channel_profile_sessions_lists_opaque_handles_that_resume() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let cwd = temp.path().join("work");
-    let home = temp.path().join("home");
-    std::fs::create_dir_all(&cwd).expect("cwd");
-    let state_runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
-        home,
-        cwd,
-        None,
-        BTreeMap::new(),
-        temp.path().join("static"),
-    ));
-    let adapter = FakeImAdapter::new("wechat");
-    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
-        "wechat",
-        Arc::new(adapter.clone()),
-        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
-    )]);
-    let runtime = ChannelRuntimeState::new(temp.path());
-    let connection = ready_wechat_connection(None);
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message("create a resumable session", "wx-session-create"),
-    )
-    .await
-    .expect("session turn accepted");
-    let sent = wait_for_sent(&adapter, 1).await;
-    let public_thread_id = sent[0].thread_id.clone();
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message("/profile sessions", "wx-session-list"),
-    )
-    .await
-    .expect("sessions listed");
-    let sent = wait_for_sent(&adapter, 2).await;
-    assert!(
-        sent[1]
-            .text
-            .contains("Sessions for Runtime Profile `native`:")
-    );
-    assert!(!sent[1].text.contains(&public_thread_id));
-    let handle = sent[1]
-        .text
-        .split_whitespace()
-        .find(|word| word.starts_with("rs_"))
-        .expect("opaque resume handle")
-        .trim_end_matches(':')
-        .to_string();
-
-    handle_channel_message(
-        &state,
-        &runtime,
-        &connection,
-        &channel_gateway,
-        wechat_message(&format!("/profile resume {handle}"), "wx-session-resume"),
-    )
-    .await
-    .expect("session resumed from listed handle");
-    let sent = wait_for_sent(&adapter, 3).await;
-    assert_eq!(
-        sent[2].text,
-        format!("Resumed `{handle}` on Runtime Profile `native`.")
-    );
-    assert!(!sent[2].text.contains(&public_thread_id));
 }
 
 #[tokio::test]

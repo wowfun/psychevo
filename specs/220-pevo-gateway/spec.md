@@ -67,10 +67,17 @@ Managed `open`, `start`, and `restart` spawn the `serve` child as an
 independent long-lived process. The child must keep running after the opener
 command exits, so a ready `server.json` cannot immediately become stale because
 the caller's shell, terminal, or test harness closed its process group.
+If that child does not become ready, the invoking command exits non-zero and
+writes a bounded excerpt of the stdout/stderr produced by that startup attempt
+to terminal stderr together with the full `server.log` path. Because
+`server.log` is append-only across launches, the excerpt must start at the
+current attempt rather than replaying output from older managed servers. If no
+new output can be read, the failure still reports the full log path.
 `stop` sends the managed `serve` child SIGTERM and waits for its bounded
 signal-aware cleanup before reporting success and removing managed state. That
-cleanup performs graceful runtime-host shutdown with forced fallback, so direct
-Codex/OpenCode children cannot survive as orphans. If the managed child still
+cleanup gracefully shuts down the Agent Session Host and its resident ACP
+process pool with a forced fallback, so managed Agent adapter children cannot
+survive as orphans. If the managed child still
 does not exit after the complete bounded cleanup window, `stop` forcibly
 terminates that exact managed Unix process group or platform-equivalent process
 tree, then reports an error if it cannot prove the managed pid exited. It never

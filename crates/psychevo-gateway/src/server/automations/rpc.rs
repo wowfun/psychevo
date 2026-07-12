@@ -71,17 +71,28 @@ pub(super) async fn automation_draft_result(
     options.sandbox_override = Some(RunSandboxOverride::read_only());
     options.runtime_tools.clear();
 
+    let profile = crate::generated_gateway_runtime_profiles()
+        .into_iter()
+        .find(|profile| profile.runtime == RuntimeProfileKind::Native)
+        .expect("generated Native Agent profile");
     let result = state
         .inner
         .gateway
-        .backend
-        .run_turn(crate::BackendTurnRequest {
-            options,
-            runtime_source: "automation-draft".to_string(),
-            continue_sources: vec!["automation-draft".to_string()],
-            stream: None,
-            control: None,
-        })
+        .run_internal_agent_turn(
+            None,
+            profile,
+            None,
+            crate::BackendTurnRequest {
+                options,
+                input: Vec::new(),
+                runtime_source: "automation-draft".to_string(),
+                continue_sources: vec!["automation-draft".to_string()],
+                stream: None,
+                control: None,
+            },
+            Uuid::now_v7().to_string(),
+            None,
+        )
         .await?;
     let draft =
         parse_automation_draft_response(&result.final_answer, current_thread_id.as_deref())?;

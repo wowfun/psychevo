@@ -90,36 +90,6 @@ impl Gateway {
             ));
         }
 
-        // Only pre-runtime-binding sessions may consult the legacy source-row
-        // evidence below. Current source lanes deliberately clear backend
-        // identity and are never an execution-identity authority.
-        for binding in self
-            .state
-            .store()
-            .gateway_source_bindings_for_thread(thread_id)?
-        {
-            let bound_runtime_ref = binding
-                .lineage
-                .as_ref()
-                .and_then(|lineage| {
-                    lineage
-                        .get("runtimeRef")
-                        .or_else(|| lineage.get("runtime_ref"))
-                })
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|runtime_ref| !runtime_ref.is_empty());
-            if binding.backend_kind != BackendKind::Psychevo.as_str()
-                || bound_runtime_ref.is_some_and(|runtime_ref| runtime_ref != "native")
-            {
-                return Ok(Some(
-                    bound_runtime_ref
-                        .unwrap_or(binding.backend_kind.as_str())
-                        .to_string(),
-                ));
-            }
-        }
-
         let summary = self
             .state
             .store()
@@ -289,7 +259,9 @@ impl Gateway {
                         raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
                         visible_name: source.visible_name.as_deref(),
                         thread_id: Some(&result.session_id),
-                        draft_runtime_ref: None,
+                        draft_agent_ref: None,
+                        draft_profile_ref: None,
+                        draft_control_values: &Default::default(),
                         lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
                     })?;
             }

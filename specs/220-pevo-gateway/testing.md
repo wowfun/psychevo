@@ -26,7 +26,7 @@ Define acceptance expectations and validation scenarios for the managed
 - Direct visits to the managed base URL without a valid browser session show a
   launch-required diagnostic rather than mounting a broken Workbench.
 - `stop` waits for the managed SIGTERM cleanup path and proves both the managed
-  server pid and an exercised fake direct-runtime child have exited before
+  server pid and an exercised fake ACP Agent child have exited before
   reporting success.
 
 ## Current Implementation Slice
@@ -46,6 +46,9 @@ Manual real-provider validation is not required for this lifecycle topic.
   `pevo web` preserve the JSON stdout contract.
 - Managed state with missing, stale, mismatched, or deleted executable metadata
   is rotated or reported stale instead of reused as healthy.
+- Managed startup failure leaves stdout unpolluted and reports both the bounded
+  current-attempt child output and the full `server.log` path on stderr without
+  replaying earlier appended log entries.
 - Default bind fallback and explicit bind strictness are observable in
   lifecycle responses.
 - `--dir`, `--default-workspace`, `--print-url`, and `--no-browser` produce a
@@ -54,7 +57,7 @@ Manual real-provider validation is not required for this lifecycle topic.
   browser-session cookie.
 - Direct visits to the managed base URL without a valid browser session show a
   launch-required diagnostic rather than mounting a broken Workbench.
-- A real managed `serve` subprocess starts a deterministic direct runtime;
+- A real managed `serve` subprocess starts a deterministic resident ACP Agent;
   `gateway stop` must leave neither process alive and must remove managed state
   only after the server exits.
 - The final managed-stop fallback targets the exact process group/tree created

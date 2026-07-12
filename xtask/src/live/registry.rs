@@ -153,7 +153,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         suites: &["web"],
         action: LiveCheckAction::Playwright {
             spec: "apps/workbench/e2e/workbench.live.spec.ts",
-            grep: "opens live translate subagent sessions from the GUI @live",
+            grep: "opens a live translate subagent session from the GUI @live",
             needs_opencode: false,
             needs_skill_cwd: false,
         },
@@ -203,57 +203,151 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         },
     },
     LiveCheck {
-        id: "runtime-codex-gui-smoke",
-        description: "Run direct Codex GUI smoke validation with a deterministic stdio fake",
-        suites: &["runtimes"],
-        action: LiveCheckAction::DeterministicPlaywright {
-            spec: "apps/workbench/e2e/runtime-live.spec.ts",
-            grep: "runs direct Codex through the GUI with a deterministic fake @live",
+        id: "opencode-acp-session-lifecycle-live",
+        description: "Validate real OpenCode ACP list, fork, close, resume, and delete capability projection",
+        suites: &["acp"],
+        action: LiveCheckAction::Playwright {
+            spec: "apps/workbench/e2e/opencode-acp-live.spec.ts",
+            grep: "creates and uses OpenCode ACP from the GUI @live",
+            needs_opencode: true,
+            needs_skill_cwd: false,
         },
     },
     LiveCheck {
-        id: "runtime-opencode-gui-smoke",
-        description: "Run direct OpenCode GUI smoke validation with a deterministic HTTP/SSE fake",
-        suites: &["runtimes"],
-        action: LiveCheckAction::DeterministicPlaywright {
-            spec: "apps/workbench/e2e/runtime-live.spec.ts",
-            grep: "runs direct OpenCode through the GUI with a deterministic fake @live",
+        id: "codex-acp-session-lifecycle-live",
+        description: "Create, list, resume, close, and delete a test-owned real Codex ACP session",
+        suites: &["acp"],
+        action: LiveCheckAction::Playwright {
+            spec: "apps/workbench/e2e/codex-acp-session-lifecycle-live.spec.ts",
+            grep: "creates and deletes only its test-owned Codex ACP session @live",
+            needs_opencode: false,
+            needs_skill_cwd: false,
         },
     },
     LiveCheck {
-        id: "runtime-codex-steer-smoke",
-        description: "Steer a direct Codex turn through Gateway with a deterministic stdio fake",
-        suites: &["runtimes"],
+        id: "agent-acp-gui-parity",
+        description: "Run Codex ACP and OpenCode ACP through one deterministic Workbench path",
+        suites: &["agents"],
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
-            grep: "steers an active direct Codex turn through the public control path @live",
+            grep: "runs Codex ACP and OpenCode ACP through one GUI control path @live",
         },
     },
     LiveCheck {
-        id: "runtime-ready-milestone-smoke",
-        description: "Prove the dual Codex/OpenCode Stable readiness milestone with deterministic fakes",
-        suites: &["runtimes"],
+        id: "agent-acp-session-lifecycle",
+        description: "Discover, import, fork, close, restore, and capability-gate ACP sessions through Workbench",
+        suites: &["agents", "acp"],
         action: LiveCheckAction::DeterministicPlaywright {
-            spec: "apps/workbench/e2e/runtime-live.spec.ts",
-            grep: "proves the dual direct runtime Ready milestone with deterministic fakes @live",
+            spec: "apps/workbench/e2e/agent-application-visual.spec.ts",
+            grep: "imports Agent-owned sessions and renders negotiated lifecycle actions",
         },
     },
     LiveCheck {
-        id: "runtime-codex-channel-smoke",
-        description: "Run a Channel-origin direct Codex turn with a deterministic stdio fake",
-        suites: &["runtimes"],
+        id: "agent-native-application-surface-parity",
+        description: "Compare Native GUI and Channel binding, intent, and history through the public Thread contract",
+        suites: &["agents"],
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
-            grep: "routes a Channel-origin turn through direct Codex with a deterministic fake @live",
+            grep: "proves Native GUI and Channel equivalent binding intent and history semantics @live",
         },
     },
     LiveCheck {
-        id: "runtime-opencode-channel-smoke",
-        description: "Run a Channel-origin direct OpenCode turn with a deterministic HTTP/SSE fake",
-        suites: &["runtimes"],
+        id: "agent-acp-capability-pack-version",
+        description: "Activate only exact reviewed ACP capability-pack identities and versions",
+        suites: &["agents"],
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
-            grep: "routes a Channel-origin turn through direct OpenCode with a deterministic fake @live",
+            grep: "disables an incompatible reviewed ACP capability pack with an explicit diagnostic @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-acp-history-reconnect",
+        description: "Restore agent-owned ACP history and preserve MCP declarations across new/load",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "reuses one ACP process and restores agent-owned history without duplicate turns @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-acp-process-ephemeral-history",
+        description: "Expose process-owned partial ACP history and refuse fake recovery after restart",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "keeps process-ephemeral ACP history partial after restart and refuses fake recovery @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-acp-channel-parity",
+        description: "Apply Channel controls through the same ACP preference and delivery path",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "applies Channel controls through the same ACP preference and delivery path @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-acp-client-callback-fidelity",
+        description: "Validate ACP filesystem and permission callbacks with terminal explicitly unsupported",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "routes ACP filesystem permissions once through Channel and keeps terminal explicitly unsupported @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-application-surface-parity",
+        description: "Compare GUI and Channel binding, controls, delivery, and history through the public Thread contract",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "proves GUI and Channel equivalent binding control delivery and history semantics @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-channel-interaction-once",
+        description: "Consume ACP permission and elicitation Channel tokens exactly once",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "consumes Channel approve and answer tokens exactly once for ACP interactions @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-acp-active-turn-next-control",
+        description: "Queue an ACP control changed during an active turn for the next turn only",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "queues an active-turn ACP model change for the next turn without mutating the current turn @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-acp-terminal-callback-fidelity",
+        description: "Validate granted ACP terminal create, output, wait, kill, and release callbacks",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "runs the granted ACP terminal lifecycle through Channel approval and typed callbacks @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-acp-unknown-delivery",
+        description: "Reconcile an accepted ACP prompt without retrying unknown delivery",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "does not retry an ACP prompt after unknown delivery and reconciles from load @live",
+        },
+    },
+    LiveCheck {
+        id: "agent-managed-codex-offline",
+        description: "Launch the pinned managed Codex ACP adapter from an offline absolute path",
+        suites: &["agents"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "launches the pinned managed Codex ACP adapter from an offline absolute path @live",
         },
     },
 ];
@@ -288,8 +382,8 @@ pub(crate) const LIVE_SUITES: &[LiveSuite] = &[
         description: "Gateway and Workbench automation live checks",
     },
     LiveSuite {
-        id: "runtimes",
-        description: "Deterministic direct Codex and OpenCode GUI/Channel checks",
+        id: "agents",
+        description: "Deterministic Native and ACP Agent GUI, Channel, history, and delivery checks",
     },
     LiveSuite {
         id: "all",
@@ -518,36 +612,48 @@ mod tests {
             providers: Vec::new(),
         })
         .expect("checks");
-        assert_eq!(
-            checks.iter().map(|check| check.id).collect::<Vec<_>>(),
-            vec![
-                "pevo-acp-server-live",
-                "opencode-acp-gui-live",
-                "opencode-acp-delegate-live",
-            ]
-        );
+        let ids = checks.iter().map(|check| check.id).collect::<BTreeSet<_>>();
+        for expected in [
+            "pevo-acp-server-live",
+            "opencode-acp-gui-live",
+            "opencode-acp-delegate-live",
+            "opencode-acp-session-lifecycle-live",
+            "codex-acp-session-lifecycle-live",
+            "agent-acp-session-lifecycle",
+        ] {
+            assert!(ids.contains(expected), "ACP suite is missing {expected}");
+        }
     }
 
     #[test]
-    fn runtimes_suite_covers_gui_channel_control_and_dual_readiness() {
+    fn agents_suite_covers_native_acp_gui_channel_packs_callbacks_history_delivery_and_managed_codex()
+     {
         let checks = select_checks(&LiveSelection {
             checks: Vec::new(),
-            suites: vec!["runtimes".to_string()],
+            suites: vec!["agents".to_string()],
             all: false,
             providers: Vec::new(),
         })
         .expect("checks");
-        assert_eq!(
-            checks.iter().map(|check| check.id).collect::<Vec<_>>(),
-            vec![
-                "runtime-codex-gui-smoke",
-                "runtime-opencode-gui-smoke",
-                "runtime-codex-steer-smoke",
-                "runtime-ready-milestone-smoke",
-                "runtime-codex-channel-smoke",
-                "runtime-opencode-channel-smoke",
-            ]
-        );
+        let ids = checks.iter().map(|check| check.id).collect::<BTreeSet<_>>();
+        for expected in [
+            "agent-acp-gui-parity",
+            "agent-acp-session-lifecycle",
+            "agent-native-application-surface-parity",
+            "agent-acp-capability-pack-version",
+            "agent-acp-history-reconnect",
+            "agent-acp-process-ephemeral-history",
+            "agent-acp-channel-parity",
+            "agent-acp-client-callback-fidelity",
+            "agent-application-surface-parity",
+            "agent-channel-interaction-once",
+            "agent-acp-active-turn-next-control",
+            "agent-acp-terminal-callback-fidelity",
+            "agent-acp-unknown-delivery",
+            "agent-managed-codex-offline",
+        ] {
+            assert!(ids.contains(expected), "Agents suite is missing {expected}");
+        }
         assert!(checks.iter().all(|check| matches!(
             check.action,
             LiveCheckAction::DeterministicPlaywright { .. }
@@ -555,8 +661,8 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_runtime_plan_does_not_claim_a_real_runtime_command() {
-        let check = check_by_id("runtime-opencode-gui-smoke").expect("runtime check");
+    fn deterministic_agent_plan_does_not_claim_a_direct_or_latest_runtime_command() {
+        let check = check_by_id("agent-acp-gui-parity").expect("agent check");
         let command = command_for_plan(check);
         assert_eq!(
             command[0..2],
@@ -565,7 +671,7 @@ mod tests {
         assert!(
             !command
                 .iter()
-                .any(|part| part == "opencode" || part == "codex")
+                .any(|part| matches!(part.as_str(), "opencode" | "codex" | "npx" | "latest"))
         );
     }
 

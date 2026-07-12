@@ -1141,6 +1141,15 @@ pub(super) fn materialize_local_acp_backends(
     let existing_backends =
         load_agent_backend_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     let config_dir = active_profile_config_dir(state, scope);
+    if !existing_backends.contains_key(crate::managed_acp::CODEX_ACP_BACKEND_ID) {
+        let paths =
+            crate::managed_acp::managed_codex_acp_paths(&state.inner.home, HostPlatform::current());
+        set_config_value(
+            config_dir.clone(),
+            "agents.backends.codex",
+            managed_codex_acp_backend_config_json(&paths.executable),
+        )?;
+    }
     for shortcut in local_acp_backend_shortcuts() {
         if existing_backends.contains_key(shortcut.id) {
             continue;
@@ -1162,6 +1171,22 @@ pub(super) fn materialize_local_acp_backends(
         )?;
     }
     Ok(())
+}
+
+fn managed_codex_acp_backend_config_json(command: &Path) -> Value {
+    json!({
+        "kind": "acp",
+        "enabled": true,
+        "label": "Codex",
+        "description": "Codex through the managed ACP adapter.",
+        "command": command.display().to_string(),
+        "args": [],
+        "env": {},
+        "cwd": "invocation",
+        "entrypoints": ["peer", "subagent"],
+        "client_capabilities": ["fs.read", "fs.write", "terminal"],
+        "mcp_servers": []
+    })
 }
 
 struct LocalAcpBackendShortcut {
@@ -1525,12 +1550,58 @@ fn backend_diagnostics(backend: &AgentBackendConfig) -> Vec<wire::BackendDiagnos
     diagnostics
 }
 
-pub(super) fn backend_doctor_value(
-    backend: &AgentBackendConfig,
-    env: &BTreeMap<String, String>,
-    cwd: &Path,
-) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
-    backend_doctor_value_for_platform(backend, env, cwd, HostPlatform::current())
+pub(super) async fn manage_backend_value(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::BackendManageParams,
+    operation: &str,
+) -> psychevo_runtime::Result<Value> {
+    if params.id != crate::managed_acp::CODEX_ACP_BACKEND_ID {
+        return Err(agent_session_error(
+            "unsupported",
+            AgentErrorStage::Configuration,
+            "user_action",
+            "not_delivered",
+            format!(
+                "Backend `{}` is not managed by Psychevo; install or repair it with its own package manager.",
+                params.id
+            ),
+            Some(format!("backend:{}", params.id)),
+        ));
+    }
+    let platform = HostPlatform::current();
+    let npm = resolve_command_path("npm", &state.inner.inherited_env, &scope.cwd, platform)
+        .ok_or_else(|| {
+            agent_session_error(
+                "npm_missing",
+                AgentErrorStage::Configuration,
+                "user_action",
+                "not_delivered",
+                "Node.js/npm is required to install the managed Codex ACP adapter.",
+                Some("backend:codex".to_string()),
+            )
+        })?;
+    let before = crate::managed_acp::inspect_managed_codex_acp(&state.inner.home, platform);
+    let paths = crate::managed_acp::install_managed_codex_acp(
+        &state.inner.home,
+        &npm,
+        platform,
+        &state.inner.inherited_env,
+    )
+    .await?;
+    materialize_local_acp_backends(state, scope)?;
+    Ok(serde_json::to_value(wire::BackendManageResult {
+        id: params.id,
+        operation: operation.to_string(),
+        changed: !matches!(before, crate::managed_acp::ManagedCodexAcpStatus::Ready(_))
+            || operation != "install",
+        status: "ready".to_string(),
+        path: paths.root.display().to_string(),
+        message: format!(
+            "Managed Codex ACP {} is ready.",
+            crate::managed_acp::CODEX_ACP_VERSION
+        ),
+    })?)
 }
 
 pub(super) fn backend_doctor_value_for_platform(
@@ -1596,6 +1667,238 @@ pub(super) fn backend_doctor_value_for_platform(
         ok,
         checks,
     })
+}
+
+pub(super) fn managed_backend_doctor_value(
+    state: &WebState,
+    scope: &ResolvedScope,
+    backend: &AgentBackendConfig,
+) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
+    let platform = HostPlatform::current();
+    let mut result = backend_doctor_value_for_platform(
+        backend,
+        &state.inner.inherited_env,
+        &scope.cwd,
+        platform,
+    )?;
+    if backend.id != crate::managed_acp::CODEX_ACP_BACKEND_ID {
+        return Ok(result);
+    }
+    for program in ["node", "npm"] {
+        let resolved =
+            resolve_command_path(program, &state.inner.inherited_env, &scope.cwd, platform);
+        result.checks.push(wire::BackendDoctorCheck {
+            name: program.to_string(),
+            ok: resolved.is_some(),
+            message: if resolved.is_some() {
+                format!("{program} resolved")
+            } else {
+                format!("{program} is required for managed Codex ACP installation")
+            },
+            path: resolved.map(|path| path.display().to_string()),
+        });
+    }
+    let managed =
+        match crate::managed_acp::inspect_managed_codex_acp_full(&state.inner.home, platform) {
+            crate::managed_acp::ManagedCodexAcpStatus::Ready(paths) => wire::BackendDoctorCheck {
+                name: "managedAdapter".to_string(),
+                ok: true,
+                message: format!(
+                    "managed Codex ACP {} is installed and verified",
+                    crate::managed_acp::CODEX_ACP_VERSION
+                ),
+                path: Some(paths.executable.display().to_string()),
+            },
+            crate::managed_acp::ManagedCodexAcpStatus::Missing { paths } => {
+                wire::BackendDoctorCheck {
+                    name: "managedAdapter".to_string(),
+                    ok: false,
+                    message: "managed Codex ACP is not installed; run backend/install".to_string(),
+                    path: Some(paths.root.display().to_string()),
+                }
+            }
+            crate::managed_acp::ManagedCodexAcpStatus::Invalid { paths, reason } => {
+                wire::BackendDoctorCheck {
+                    name: "managedAdapter".to_string(),
+                    ok: false,
+                    message: format!("{reason}; run backend/repair"),
+                    path: Some(paths.root.display().to_string()),
+                }
+            }
+        };
+    result.checks.push(managed);
+    result.ok = result.checks.iter().all(|check| check.ok);
+    Ok(result)
+}
+
+pub(super) async fn managed_backend_doctor_value_with_auth(
+    state: &WebState,
+    scope: &ResolvedScope,
+    backend: &AgentBackendConfig,
+) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
+    let mut result = managed_backend_doctor_value(state, scope, backend)?;
+    if !result.ok {
+        result.checks.push(wire::BackendDoctorCheck {
+            name: "protocol".to_string(),
+            ok: true,
+            message: "protocol compatibility unchecked because backend launch prerequisites failed"
+                .to_string(),
+            path: None,
+        });
+        result.checks.push(wire::BackendDoctorCheck {
+            name: "authentication".to_string(),
+            ok: true,
+            message: "authentication unchecked because backend launch prerequisites failed"
+                .to_string(),
+            path: None,
+        });
+        return Ok(result);
+    }
+
+    let mut options = state.run_options(scope.cwd.clone(), None);
+    options.runtime_ref = Some(backend.id.clone());
+    let (protocol_check, auth_check) = match crate::resolve_peer_turn(&options) {
+        Ok(Some(peer)) => match state
+            .inner
+            .gateway
+            .probe_acp_backend_protocol_compatibility(peer.clone(), scope.cwd.clone())
+            .await
+        {
+            Ok(crate::acp_peer::AcpProtocolDoctorStatus::Compatible { version }) => {
+                let protocol_check = wire::BackendDoctorCheck {
+                    name: "protocol".to_string(),
+                    ok: true,
+                    message: format!("stable ACP protocol v{version} negotiated"),
+                    path: None,
+                };
+                let auth_check = match state
+                    .inner
+                    .gateway
+                    .probe_acp_backend_authentication(peer, scope.cwd.clone())
+                    .await
+                {
+                    Ok(crate::acp_peer::AcpAuthDoctorStatus::Authenticated(method)) => {
+                        let method = match method {
+                            crate::acp_peer::AcpAuthenticatedKind::ApiKey => "api-key",
+                            crate::acp_peer::AcpAuthenticatedKind::ChatGpt => "chat-gpt",
+                            crate::acp_peer::AcpAuthenticatedKind::Gateway => "gateway",
+                        };
+                        wire::BackendDoctorCheck {
+                            name: "authentication".to_string(),
+                            ok: true,
+                            message: format!(
+                                "authenticated according to Codex ACP authentication/status ({method})"
+                            ),
+                            path: None,
+                        }
+                    }
+                    Ok(crate::acp_peer::AcpAuthDoctorStatus::Required) => {
+                        wire::BackendDoctorCheck {
+                            name: "authentication".to_string(),
+                            ok: false,
+                            message: "authentication required".to_string(),
+                            path: None,
+                        }
+                    }
+                    Ok(crate::acp_peer::AcpAuthDoctorStatus::Unchecked) => {
+                        wire::BackendDoctorCheck {
+                            name: "authentication".to_string(),
+                            ok: true,
+                            message: "authentication unchecked; this ACP Agent has no source-proven side-effect-free credential-status request"
+                                .to_string(),
+                            path: None,
+                        }
+                    }
+                    Err(error) => wire::BackendDoctorCheck {
+                        name: "authentication".to_string(),
+                        ok: false,
+                        message: format!(
+                            "authentication probe failed: {}",
+                            bounded_backend_doctor_message(&error.to_string())
+                        ),
+                        path: None,
+                    },
+                };
+                (protocol_check, auth_check)
+            }
+            Ok(crate::acp_peer::AcpProtocolDoctorStatus::Incompatible {
+                expected_version,
+                actual_version,
+            }) => (
+                wire::BackendDoctorCheck {
+                    name: "protocol".to_string(),
+                    ok: false,
+                    message: format!(
+                        "protocol incompatible: expected stable ACP v{expected_version}, Agent returned v{actual_version}"
+                    ),
+                    path: None,
+                },
+                unchecked_authentication_for_protocol(),
+            ),
+            Err(error) => (
+                wire::BackendDoctorCheck {
+                    name: "protocol".to_string(),
+                    ok: false,
+                    message: format!(
+                        "protocol probe failed: {}",
+                        bounded_backend_doctor_message(&error.to_string())
+                    ),
+                    path: None,
+                },
+                unchecked_authentication_for_protocol(),
+            ),
+        },
+        Ok(None) => (
+            wire::BackendDoctorCheck {
+                name: "protocol".to_string(),
+                ok: false,
+                message: "protocol probe could not resolve an ACP Agent for this backend"
+                    .to_string(),
+                path: None,
+            },
+            unchecked_authentication_for_protocol(),
+        ),
+        Err(error) => (
+            wire::BackendDoctorCheck {
+                name: "protocol".to_string(),
+                ok: false,
+                message: format!(
+                    "protocol probe could not resolve the backend: {}",
+                    bounded_backend_doctor_message(&error.to_string())
+                ),
+                path: None,
+            },
+            unchecked_authentication_for_protocol(),
+        ),
+    };
+    result.checks.push(protocol_check);
+    result.checks.push(auth_check);
+    result.ok = result.checks.iter().all(|check| check.ok);
+    Ok(result)
+}
+
+fn unchecked_authentication_for_protocol() -> wire::BackendDoctorCheck {
+    wire::BackendDoctorCheck {
+        name: "authentication".to_string(),
+        ok: true,
+        message: "authentication unchecked because ACP protocol is incompatible or unavailable"
+            .to_string(),
+        path: None,
+    }
+}
+
+fn bounded_backend_doctor_message(message: &str) -> String {
+    message
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(1_024)
+        .collect()
 }
 
 fn resolve_command_path(

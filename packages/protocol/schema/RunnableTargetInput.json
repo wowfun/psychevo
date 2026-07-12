@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "agentRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtimeProfileRef": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtimeProfileRef"
+  ],
+  "title": "RunnableTargetInput",
+  "type": "object"
+}

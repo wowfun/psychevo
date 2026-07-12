@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "allowed": {
+      "type": "boolean"
+    },
+    "reason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recoveryAction": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "allowed"
+  ],
+  "title": "ThreadSendabilityView",
+  "type": "object"
+}

@@ -6,7 +6,102 @@ use std::process::Command;
 use chardetng::EncodingDetector;
 use encoding_rs::{Encoding, GBK, IBM866, WINDOWS_1251, WINDOWS_1252};
 
-use crate::{Error, Result};
+use crate::{Error, HostPlatform, Result};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostProcessLaunch {
+    pub(crate) program: PathBuf,
+    pub(crate) args: Vec<OsString>,
+    pub(crate) windows_raw_arg: Option<OsString>,
+}
+
+pub(crate) fn host_process_launch(
+    program: &Path,
+    args: &[OsString],
+    platform: HostPlatform,
+    env_map: &BTreeMap<String, String>,
+) -> Result<HostProcessLaunch> {
+    if platform != HostPlatform::Windows || !is_windows_command_script(program) {
+        return Ok(HostProcessLaunch {
+            program: program.to_path_buf(),
+            args: args.to_vec(),
+            windows_raw_arg: None,
+        });
+    }
+    let command_processor = env_value_case_insensitive(env_map, "COMSPEC")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("cmd.exe"));
+    Ok(HostProcessLaunch {
+        program: command_processor,
+        args: vec![
+            OsString::from("/D"),
+            OsString::from("/S"),
+            OsString::from("/V:OFF"),
+            OsString::from("/C"),
+        ],
+        windows_raw_arg: Some(OsString::from(windows_command_script_line(program, args)?)),
+    })
+}
+
+pub fn tokio_host_process_command(
+    program: &Path,
+    args: &[OsString],
+    platform: HostPlatform,
+    env_map: &BTreeMap<String, String>,
+) -> Result<tokio::process::Command> {
+    let launch = host_process_launch(program, args, platform, env_map)?;
+    let mut command = tokio::process::Command::new(launch.program);
+    command.args(launch.args);
+    if let Some(raw_arg) = launch.windows_raw_arg {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.as_std_mut().raw_arg(raw_arg);
+        }
+        #[cfg(not(windows))]
+        {
+            // Preserve a deterministic command shape for Windows-platform
+            // tests running on other hosts. Windows builds use raw_arg above.
+            command.arg(raw_arg);
+        }
+    }
+    Ok(command)
+}
+
+fn is_windows_command_script(program: &Path) -> bool {
+    program
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+        })
+}
+
+fn windows_command_script_line(program: &Path, args: &[OsString]) -> Result<String> {
+    let mut command_line = String::from("\"");
+    command_line.push_str(&windows_command_script_token(program.as_os_str())?);
+    for arg in args {
+        command_line.push(' ');
+        command_line.push_str(&windows_command_script_token(arg)?);
+    }
+    command_line.push('"');
+    Ok(command_line)
+}
+
+fn windows_command_script_token(value: &std::ffi::OsStr) -> Result<String> {
+    let value = value.to_str().ok_or_else(|| {
+        Error::Message("Windows command-script paths and arguments must be Unicode".to_string())
+    })?;
+    if value.contains(['\0', '\r', '\n', '"', '%']) {
+        return Err(Error::Message(
+            "Windows command-script paths and arguments cannot contain NUL, newlines, quotes, or percent expansion"
+                .to_string(),
+        ));
+    }
+    Ok(format!("\"{value}\""))
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProcessEnvOptions<'a> {
@@ -446,6 +541,69 @@ mod tests {
                 PathBuf::from("tool")
             ]
         );
+    }
+
+    #[test]
+    fn windows_command_scripts_use_captured_comspec_with_one_quoted_command_line() {
+        let env = BTreeMap::from([(
+            "ComSpec".to_string(),
+            r"C:\Windows\System32\cmd.exe".to_string(),
+        )]);
+        let launch = host_process_launch(
+            Path::new(r"C:\Program Files\nodejs\npm.cmd"),
+            &[OsString::from("ci"), OsString::from("--omit=dev")],
+            HostPlatform::Windows,
+            &env,
+        )
+        .expect("Windows command-script launch");
+
+        assert_eq!(
+            launch.program,
+            PathBuf::from(r"C:\Windows\System32\cmd.exe")
+        );
+        assert_eq!(
+            launch.args,
+            vec![
+                OsString::from("/D"),
+                OsString::from("/S"),
+                OsString::from("/V:OFF"),
+                OsString::from("/C"),
+            ]
+        );
+        assert_eq!(
+            launch.windows_raw_arg,
+            Some(OsString::from(
+                r#"""C:\Program Files\nodejs\npm.cmd" "ci" "--omit=dev"""#,
+            ))
+        );
+    }
+
+    #[test]
+    fn windows_executables_and_posix_programs_bypass_command_processor() {
+        let args = [OsString::from("--version")];
+        for (program, platform) in [
+            (Path::new(r"C:\Tools\node.exe"), HostPlatform::Windows),
+            (Path::new("/usr/bin/npm"), HostPlatform::Posix),
+        ] {
+            let launch = host_process_launch(program, &args, platform, &BTreeMap::new())
+                .expect("direct launch");
+            assert_eq!(launch.program, program);
+            assert_eq!(launch.args, args);
+            assert_eq!(launch.windows_raw_arg, None);
+        }
+    }
+
+    #[test]
+    fn windows_command_script_launch_rejects_percent_expansion() {
+        let error = host_process_launch(
+            Path::new(r"C:\Tools\npm.cmd"),
+            &[OsString::from("%UNTRUSTED%")],
+            HostPlatform::Windows,
+            &BTreeMap::new(),
+        )
+        .expect_err("percent expansion must be rejected");
+
+        assert!(error.to_string().contains("percent expansion"), "{error}");
     }
 
     #[test]

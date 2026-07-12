@@ -472,25 +472,33 @@ pub(crate) fn parse_runtime_profile_config(
     let object = value
         .as_object()
         .ok_or_else(|| Error::Config(format!("runtime_profiles.{id} must be an object")))?;
-    let runtime_raw = optional_string_field(object, "runtime")?.unwrap_or_else(|| {
-        if matches!(id, "native" | "codex" | "opencode") {
-            id.to_string()
-        } else {
-            "acp".to_string()
-        }
-    });
+    let configured_runtime = optional_string_field(object, "runtime")?;
+    if matches!(configured_runtime.as_deref(), Some("codex" | "opencode"))
+        || configured_runtime.is_none() && matches!(id, "codex" | "opencode")
+    {
+        return Err(Error::Config(format!(
+            "adapter_removed: runtime_profiles.{id} uses the retired direct {id} adapter; configure an ACP backend and set runtime = \"acp\" with backend_ref instead"
+        )));
+    }
+    let runtime_raw = configured_runtime
+        .unwrap_or_else(|| if id == "native" { "native" } else { "acp" }.to_string());
     let runtime = RuntimeProfileKind::parse(&runtime_raw).ok_or_else(|| {
         Error::Config(format!(
-            "runtime_profiles.{id}.runtime `{runtime_raw}` must be native, codex, opencode, or acp"
+            "runtime_profiles.{id}.runtime `{runtime_raw}` must be native or acp"
         ))
     })?;
+    if ["command", "args", "env"]
+        .iter()
+        .any(|field| object.contains_key(*field))
+    {
+        return Err(Error::Config(format!(
+            "profile_launch_config_removed: runtime_profiles.{id} must not declare command, args, or env; configure launch settings under agents.backends and reference that backend with backend_ref"
+        )));
+    }
     let enabled = optional_bool_field(object, "enabled")?.unwrap_or(true);
     let label = optional_string_field(object, "label")?.unwrap_or_else(|| id.to_string());
     let backend_ref = optional_string_alias_field(object, "backend_ref", "backendRef")?;
     validate_runtime_profile_backend_ref(id, runtime, backend_ref.as_deref())?;
-    let command = optional_string_field(object, "command")?;
-    let args = string_array_field(object, "args", &format!("runtime_profiles.{id}.args"))?;
-    let env = string_map_field(object, "env", &format!("runtime_profiles.{id}.env"))?;
     let default_model = optional_string_alias_field(object, "default_model", "defaultModel")?;
     let default_mode = optional_string_alias_field(object, "default_mode", "defaultMode")?;
     let default_agent = optional_string_alias_field(object, "default_agent", "defaultAgent")?;
@@ -509,9 +517,6 @@ pub(crate) fn parse_runtime_profile_config(
         enabled,
         label,
         backend_ref,
-        command,
-        args,
-        env,
         default_model,
         default_mode,
         default_agent,

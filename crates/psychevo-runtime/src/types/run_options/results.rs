@@ -21,8 +21,8 @@ pub struct RunResult {
     pub warnings: Vec<RunWarning>,
 }
 
-/// Product-safe direct-runtime terminal classification carried through the
-/// ordinary run result without exposing adapter-native terminal metadata.
+/// Product-safe agent terminal classification carried through the ordinary
+/// run result without exposing implementation-native terminal metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunTerminalError {

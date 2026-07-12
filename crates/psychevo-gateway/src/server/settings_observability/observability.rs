@@ -20,6 +20,23 @@ fn context_read_result(
     let Some(thread_id) = thread_id else {
         return Ok(context_unavailable("No active session"));
     };
+    let acp = state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding(&thread_id)?
+        .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"));
+    if acp {
+        let usage = state
+            .inner
+            .state
+            .store()
+            .session_metadata(&thread_id)?
+            .as_ref()
+            .and_then(acp_peer_usage_update)
+            .and_then(acp_peer_context_read_result);
+        return Ok(usage.unwrap_or_else(|| context_unavailable("Agent context is unavailable")));
+    }
     let snapshot = match context_snapshot(ContextOptions {
         state: state.inner.state.clone(),
         cwd: scope.cwd.clone(),
@@ -32,6 +49,19 @@ fn context_read_result(
             return Ok(context_unavailable(&err.to_string()));
         }
     };
+    Ok(context_read_result_from_snapshot(&snapshot))
+}
+
+fn context_read_result_from_snapshot(
+    snapshot: &psychevo_runtime::ContextSnapshot,
+) -> wire::ContextReadResult {
+    let status = if snapshot.status == "partial" {
+        "partial"
+    } else if snapshot.total.estimated {
+        "estimated"
+    } else {
+        "exact"
+    };
     let categories = snapshot
         .categories
         .iter()
@@ -41,25 +71,31 @@ fn context_read_result(
             label: category.label.clone(),
             tokens: category.tokens,
             estimated: category.estimated,
-            status: category.status.clone(),
+            status: if category.status == "partial" {
+                "partial".to_string()
+            } else if category.estimated {
+                "estimated".to_string()
+            } else {
+                "exact".to_string()
+            },
             percent: category.percent,
             details: Some(category.details.clone()),
         })
         .collect::<Vec<_>>();
-    Ok(wire::ContextReadResult {
+    wire::ContextReadResult {
         available: true,
-        label: format_context_total_value(&snapshot),
-        status: snapshot.status,
+        label: format_context_total_value(snapshot),
+        status: status.to_string(),
         used_tokens: snapshot.total.tokens,
         context_limit: snapshot.context_limit,
         percent: snapshot.total.percent,
         categories,
         advice: snapshot
             .advice
-            .into_iter()
-            .map(|advice| advice.message)
+            .iter()
+            .map(|advice| advice.message.clone())
             .collect(),
-    })
+    }
 }
 
 fn observability_read_value(
@@ -130,7 +166,7 @@ fn acp_peer_context_read_result(usage: &Value) -> Option<wire::ContextReadResult
     Some(wire::ContextReadResult {
         available: true,
         label: format_context_total_value_parts(used, false, Some(size), percent),
-        status: "reported by ACP peer".to_string(),
+        status: "exact".to_string(),
         used_tokens: used,
         context_limit: Some(size),
         percent,

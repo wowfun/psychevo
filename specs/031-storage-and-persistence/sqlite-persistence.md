@@ -37,6 +37,8 @@ The default first-slice SQLite shape contains:
 - `gateway_live_snapshots`
 - `gateway_control_commands`
 - `gateway_turn_terminals`
+- `gateway_turn_deliveries`
+- `gateway_channel_outbox`
 - `automations`
 - `automation_runs`
 
@@ -99,6 +101,8 @@ Required semantics include:
 - raw source identity retained for routing and local debugging
 - optional visible label retained for UI projection
 - backend kind and optional backend-native id for future peer-agent backends
+- an unbound source draft for the top-level Agent Definition, Runtime Profile,
+  and typed control values; binding clears the draft atomically
 - timestamps and lineage metadata for reset/rebind audit
 
 The first implementation slice stores these columns:
@@ -110,6 +114,9 @@ The first implementation slice stores these columns:
 - `thread_id` text foreign key
 - `backend_kind` text
 - `backend_native_id` text nullable
+- `draft_agent_ref` text nullable
+- `draft_profile_ref` text nullable
+- `draft_control_values_json` text nullable
 - `created_at_ms` integer
 - `updated_at_ms` integer
 - `lineage_json` text nullable
@@ -120,6 +127,23 @@ Gateway runtime coordination tables persist local coordination facts needed for
 cross-surface status, recovery, and control. They are not ordinary transcript
 material and must not become model-visible context.
 
+`gateway_runtime_bindings` stores the immutable `RunnableTarget` captured for a
+public thread. A resolved row contains nullable `agent_ref` (`NULL` denotes the
+explicit default Agent), non-null `agent_fingerprint` and
+`agent_definition_json`, Runtime Profile identity/fingerprint/revision/snapshot,
+Adapter identity, ownership, optional native session identity, and binding
+revision. Repeating the same capture is idempotent; changing either Agent or
+Runtime Profile evidence is an immutable-binding conflict. Schema v28 is a
+reset cutover, so no legacy row is accepted without Agent snapshot evidence.
+
+The row also owns the common Thread control state. `thread_preferences_json`
+stores user preferences independently from `runtime_observed_json`, and
+`control_revision` advances through compare-and-set writes without mutating the
+immutable binding revision. Callers must supply both expected binding and
+control revisions. A stored preference, an Adapter acknowledgement, and a
+runtime observation remain distinct facts; an acknowledgement never writes an
+observed value unless the Adapter supplied that observation.
+
 `gateway_activities` stores the active or recently settled Gateway activity
 claim for a running turn or shell command. Required semantics include:
 - durable ownership for a running activity across surfaces
@@ -129,6 +153,12 @@ claim for a running turn or shell command. Required semantics include:
 - lease and owner fields sufficient to detect stale foreign owners
 - queued-turn count for status projection
 - optional intent metadata for local recovery/debug projection
+
+For Agent turns, `gateway_activities.intent_json` may retain non-content routing
+and recovery fields, but it must not outlive the bounded delivery ledger as
+another copy of user content. Confirmed delivery removes input from both the
+delivery and generic activity rows in one store transaction. The unique
+terminal performs the same scrub as a fallback.
 
 `gateway_live_events` stores a bounded retained boundary-event relay buffer for
 foreign-surface replay. It is an observation buffer, not the transcript source
@@ -160,6 +190,21 @@ Required semantics include:
 Failed and interrupted terminal facts may be projected as diagnostic/status
 rows by product transcript views. They must not be stored as assistant messages
 or counted as loop-visible transcript messages.
+
+`gateway_turn_deliveries` is the implementation-neutral bounded delivery ledger
+for accepted Agent prompts. It retains prompt content only until the selected
+Adapter confirms delivery. Confirmation clears content and preserves the hash,
+delivery state, binding revision, and timestamps. Unknown delivery keeps enough
+state for reconciliation but never authorizes an automatic resend.
+
+`gateway_channel_outbox` retains an Agent final payload only while the
+target platform has not acknowledged delivery. Acknowledgement clears the
+payload and preserves its hash, delivery state, and timestamps. Neither table
+is transcript content, model context, or an alternate history owner.
+
+Rows in `gateway_live_events` and `gateway_live_snapshots` are transient
+cross-process delivery material. The unique terminal clears them; reconnect
+obtains content from the thread's declared History owner.
 
 ## Automations
 
@@ -414,7 +459,7 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 23`, WAL, foreign keys,
+The current implementation uses `PRAGMA user_version = 28`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)` every 50 successful writes.
 
@@ -426,12 +471,18 @@ avoid idle high-frequency database polling; live agent reload checks are
 rate-limited to at most once every 250 ms while preserving immediate checks
 after session switches.
 
+Version 28 is the pre-release Native/ACP Application Architecture cutover. The
+minimum supported version is also 28. Earlier schemas, captured direct bindings,
+and direct-only coordination rows are intentionally not migrated; opening them
+fails with the standard `pevo init --reset-state` recovery instruction, whose
+backup-before-recreate behavior remains unchanged.
+
 The version 23 slice adds local product automation definition and run
 coordination tables.
 
-The version 22 slice adds `gateway_live_snapshots` for coalesced live transcript
-observation replay and clears retained live relay buffers when migrating from
-earlier supported development databases.
+The historical version 22 slice added `gateway_live_snapshots` for coalesced
+live transcript observation replay. Its migration path is no longer reachable
+through the version-28 minimum.
 
 The pre-release current-working-directory naming cutover to `cwd` is a state
 reset boundary, not a compatibility migration. Development databases created
@@ -439,12 +490,9 @@ with the former column name must be rebuilt with `pevo init --reset-state`
 instead of being silently rewritten on open; the runtime then creates the
 current `cwd` schema from first principles.
 
-The version 21 slice adds structured cost status, pricing missing-reason, and
-pricing version columns for local accounting projections. Because the product
-is pre-release, version 21 remains the supported cutover boundary for current
-development state; older development databases may be reset instead of carried
-through compatibility migrations when the shape would preserve misleading
-accounting semantics.
+The historical version 21 slice added structured cost status, pricing
+missing-reason, and pricing version columns for local accounting projections.
+It is documentation of schema lineage, not a supported opening boundary.
 
 The version 11 slice creates `session_compactions` for completed context
 compaction checkpoints. The checkpoints affect runtime context projection but
@@ -454,15 +502,9 @@ The version 8 slice creates `agent_edges` for durable parent-to-child agent
 coordination. The edge tracks `open`/`closed` coordination state separately
 from child session completion.
 
-The version 7 slice creates contextual-user grouping columns in
-`context_evidence` for new databases and supported migrations. It still migrates
-version 6 databases by adding those columns, still migrates version 4 databases
-by adding message accounting columns, and still migrates version 3 state
-databases by adding `sessions.archived_at_ms` before applying version 5
-additions. It does not
-automatically migrate version 1 or version 2 state databases. Opening an older
-state database must fail with an explicit cutover/reset instruction instead of
-silently mutating retained state.
+The historical version 7 slice added contextual-user grouping columns in
+`context_evidence`; earlier version-3/4/6 migration steps are retained only as
+schema lineage. No schema below version 28 is accepted by the current opener.
 
 ## Retrieval
 

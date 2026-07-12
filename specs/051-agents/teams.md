@@ -116,8 +116,8 @@ member's configured agent definition. It must not infer a member from
 `task_name`.
 
 Runtime enforces the effective per-team/session concurrent child-turn cap. The
-default cap is `4`, chosen to match the existing low-noise child-agent posture
-and the observed Codex default. The cap applies to active team child turns and
+default cap is `4`, chosen to preserve the existing low-noise child-agent
+posture. The cap applies to active team child turns and
 does not require worktree isolation.
 
 ## Status And Control
@@ -157,15 +157,16 @@ runtimeProfileRevision. Activation captures a missing revision into the durable
 Team run. Immediately before a member starts, Gateway resolves the current
 Profile again, requires the captured Profile revision, and lets the adapter
 revalidate model, mode, catalog-backed per-turn, and safety values against its
-current capability contract. Codex model overrides and its stable
-`effort`/`personality`/`serviceTier` Advanced options require exact selectable
-choices from the cached `model/list` observation for the effective model.
+current capability contract. ACP model/effort/mode and versioned capability-pack
+options require exact selectable choices from the cached Thread Context for the
+effective model.
 Reasoning summary, arbitrary feature keys, and output schemas are not Team
 options because the stable catalog does not enumerate them. Unsupported values
 are never ignored.
 
-The stable bridge is leader-first: a native Psychevo leader may dispatch
-Runtime Profile-backed managed members. Direct Codex/OpenCode leaders do not
-receive Psychevo Team tools. The Team surface groups controllable
-Psychevo-managed members separately from read-only runtime-native activity.
+The stable bridge is leader-first: a Native Psychevo leader may dispatch
+Runtime Profile-backed managed members. An ACP leader receives Psychevo Team
+tools only when the effective capability contract explicitly grants them. The
+Team surface groups controllable Psychevo-managed members separately from
+capability-gated Agent-native activity.
 Only managed members use agent/control.

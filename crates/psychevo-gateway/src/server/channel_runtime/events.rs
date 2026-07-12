@@ -19,6 +19,9 @@ pub(super) fn channel_event_sink(
     fallback_source_key: SourceKey,
 ) -> GatewayEventSink {
     Arc::new(move |event| {
+        if let Some(thread_id) = channel_event_public_thread_id(&event) {
+            runtime.observe_source_thread(&connection_id, &fallback_source_key, thread_id);
+        }
         let token = match &event {
             GatewayEvent::ActionRequested { action }
                 if action.kind == GatewayActionKind::Permission =>
@@ -86,6 +89,25 @@ pub(super) fn channel_event_sink(
             }
         });
     })
+}
+
+fn channel_event_public_thread_id(event: &GatewayEvent) -> Option<&str> {
+    match event {
+        GatewayEvent::TurnStarted { thread_id, .. }
+        | GatewayEvent::TurnQueued { thread_id, .. }
+        | GatewayEvent::TurnCompleted { thread_id, .. }
+        | GatewayEvent::ActivityChanged { thread_id, .. } => thread_id.as_deref(),
+        GatewayEvent::EntryStarted { entry, .. }
+        | GatewayEvent::EntryUpdated { entry, .. }
+        | GatewayEvent::EntryCompleted { entry, .. } => {
+            (!entry.thread_id.trim().is_empty()).then_some(entry.thread_id.as_str())
+        }
+        GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
+            action.thread_id.as_deref()
+        }
+        GatewayEvent::TitleChanged { thread_id, .. } => Some(thread_id),
+        _ => None,
+    }
 }
 
 fn channel_action_token_expiry(action: &PendingActionView) -> Option<i64> {
@@ -194,5 +216,49 @@ fn channel_event_thread_id(event: &GatewayEvent, fallback_source_key: &SourceKey
             .or_else(|| action.source_key.clone())
             .unwrap_or_else(|| fallback_source_key.0.clone()),
         _ => fallback_source_key.0.clone(),
+    }
+}
+
+#[cfg(test)]
+mod delivery_filter_tests {
+    use super::*;
+
+    #[test]
+    fn transcript_thinking_events_never_become_channel_messages() {
+        let reasoning = GatewayEvent::EntryUpdated {
+            turn_id: "turn-1".to_string(),
+            entry: TranscriptEntry {
+                id: "entry-1".to_string(),
+                thread_id: "thread-1".to_string(),
+                turn_id: Some("turn-1".to_string()),
+                message_seq: None,
+                role: TranscriptEntryRole::Assistant,
+                status: TranscriptBlockStatus::Running,
+                source: "runtime.profile".to_string(),
+                blocks: vec![TranscriptBlock {
+                    id: "block-1".to_string(),
+                    kind: TranscriptBlockKind::Reasoning,
+                    status: TranscriptBlockStatus::Running,
+                    order: 0,
+                    phase_ordinal: Some(1),
+                    source: "runtime.profile".to_string(),
+                    title: Some("Thinking".to_string()),
+                    preview: Some("private reasoning".to_string()),
+                    body: Some("private reasoning".to_string()),
+                    detail: Some("private reasoning".to_string()),
+                    artifact_ids: Vec::new(),
+                    metadata: None,
+                    result: None,
+                    created_at_ms: 1,
+                    updated_at_ms: 1,
+                }],
+                metadata: None,
+                usage: None,
+                accounting: None,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            },
+        };
+        assert_eq!(channel_event_reply_text(&reasoning, None), None);
     }
 }

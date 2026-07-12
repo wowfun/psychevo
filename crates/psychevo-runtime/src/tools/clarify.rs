@@ -239,7 +239,14 @@ pub(crate) fn parse_clarify_request(call_id: String, args: Value) -> Result<Clar
             }
             options.push(ClarifyQuestionOption { label, description });
         }
-        questions.push(ClarifyQuestion { question, options });
+        questions.push(ClarifyQuestion {
+            header: String::new(),
+            question,
+            options,
+            multiple: false,
+            custom: true,
+            secret: false,
+        });
     }
     Ok(ClarifyRequestEvent { call_id, questions })
 }

@@ -1,4 +1,7 @@
 impl PermissionRuntime {
+    // PermissionRuntime's public decision path owns ToolOutput by value; keep
+    // that established error ABI instead of boxing only this private helper.
+    #[allow(clippy::result_large_err)]
     fn sandbox_write_grant_request(
         &self,
         action: &PermissionAction,

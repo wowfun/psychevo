@@ -136,30 +136,26 @@ Workbench shells center the visible composer input band on the same reading
 column as ordinary transcript rows on wide surfaces so prompt entry remains
 visually connected to the transcript.
 Attachment entry is exposed as a compact `+` menu in the composer action row.
-The menu contains an `Add images and files` file/image picker action and the
-runtime mode switch. Plan mode is toggled from this menu rather than from the
-footer: default mode renders the switch off, plan mode renders it on and shows a
-quiet `Plan` chip immediately to the right of the Agent selector. Hovering or
-focusing that chip reveals a close control that returns the session to default
-mode. Composer send and interrupt controls live in the same footer row as the
-`+`, Agent, and `Plan` controls, aligned to the row's right edge with a stable
-height so the composer does not gain an extra row when Plan is active. Model,
-Variant, and context-usage controls sit immediately to the left of that
-send/interrupt slot; the model indicator displays the resolved
-provider-qualified `provider/model` value, retains that full value for
-submission, and leaves native selector options as full `provider/model` values.
+The menu contains icon-led `Add images and files`, `Auto-speak`, and `Realtime
+voice` rows. Its width follows the longest row up to the viewport limit, and
+switch tracks stay adjacent to their labels instead of occupying a fixed-width
+drawer gutter. Composer send and interrupt controls live in the same footer row
+as `+` and Agent controls, aligned to the row's right edge with a stable height.
+The grouped Model/Reasoning and context-usage controls sit immediately to the
+left of that send/interrupt slot. The model picker keeps full
+provider-qualified values for submission while showing the compact model and
+provider-group presentation shared with Settings > Models. The prompt textarea
+does not draw an additional focus outline inside the persistent input frame.
 The model control must not display ambiguous placeholder text such as `model` or
 `Default model` as if it were the active model. If Gateway cannot resolve an
 actual provider and model, the control displays an explicit unavailable or
 selection-required state and prompt-turn submission is blocked until the user
-chooses a concrete `provider/model`. Variant controls reflect the current
-Workbench override state; an unselected/default variant must not be materialized
-from the resolved model's configured default reasoning effort and then submitted
-as a user override.
-The model label must reserve space for the native selector affordance so selected
-characters are not covered, and the model label and context-usage popover must
-not clip their selected value, summary, or visible usage details at desktop or
-narrow Workbench widths.
+chooses a concrete `provider/model`. Reasoning presentation reflects the
+selected target descriptor: selectable choices remain interactive, a read-only
+effective value is non-interactive, and an absent descriptor produces no
+Reasoning group or invented default. The model label and context-usage popover
+must not clip their selected value, summary, or visible usage details at desktop
+or narrow Workbench widths.
 Context and session observability controls are display-only chrome. Compact
 surfaces may show context percent, session tokens, cache-read percent, and
 estimated cost. The composer context popover remains compact and must not show
@@ -189,45 +185,48 @@ square stop glyph inside the same circular button. The prompt textarea grows wit
 message line count until its bounded maximum height, then scrolls internally.
 The composer does not expose the browser's native textarea resize grip.
 
-Workbench composer controls distinguish Agent persona from execution Runtime
-while presenting them through one compact `Agent` control. Opening the control
-shows two flat, directly selectable row groups separated by a divider: the
-upper group configures the Psychevo main agent, and the lower group configures
-the execution runtime (`native` or an enabled ACP peer backend). The popover
-must not contain nested native select menus for these two groups. If the
-selected runtime cannot accept a Psychevo agent persona, the upper agent group
-is disabled and the turn is submitted without `agentName`; this is not treated
-as a submit-time conflict.
-The existing composer `Plan mode` affordance represents the current runtime's
-base `default`/`plan` mode pair. Native runtime maps it to Psychevo
-`RunMode`; a peer runtime that exposes `plan` maps it to ACP
-`runtimeOptions.mode = "plan"`, while the off/default state maps to that
-runtime's active default mode. Runtime session options are conditionally
-displayed after the combined Agent control only for peer modes outside that
-base pair. For OpenCode ACP, peer-provided ACP `mode` values such as `build` or
-`review` are displayed as OpenCode runtime modes, not Psychevo agents; `plan`
-is handled by the shared Plan affordance instead of a duplicate selector.
-Workbench likewise projects the native Runtime Context `mode` descriptor only
-through this shared Plan affordance; it must not render a second native
-`default`/`plan` selector whose value submission ignores. On narrow surfaces,
-the Plan chip remains beside the Agent selector and enabling Plan must not add
-an otherwise empty control row.
-Runtime options are scoped to the current draft/session and must not be stored
-in Settings. The controls stay compact, list-like, keyboard accessible, and
-responsive; visual validation must cover desktop and a narrow mobile width with
-the OpenCode mode selector open.
+Workbench presents Agent Definition and Runtime Profile through one compact
+target control. Its rows come from Gateway-compatible `RunnableTarget` choices;
+the browser does not pair them or infer persona compatibility. The popover
+keeps identity and execution provenance visually distinct without nested native
+select menus. After binding it becomes an immutable provenance capsule, and its
+change action starts a new thread.
+
+The target control keys rows by opaque `targetId` and renders only the
+Gateway-projected `agentLabel`, `profileLabel`, readiness, and unavailable
+reason. React does not consume the independent Agent/Profile catalogs to derive
+row identity, availability, labels, or an implicit target. Changing an unbound
+target re-reads Thread Context with that exact prospective target before any
+control or send affordance becomes active.
+
+The existing `Plan mode` affordance renders only a semantic mode descriptor
+whose catalog contains the shared default/plan pair. Native and ACP Agents use
+the same descriptor path. Additional Agent modes remain an adjacent typed
+selector. Model, reasoning, and advanced controls likewise render from Thread
+Context roles, provenance, mutability, dependencies, and confirmation state;
+no control placement or submission branch uses a runtime name. On narrow
+surfaces the Plan chip remains beside the Agent selector and enabling Plan must
+not add an otherwise empty row.
+
+Text, attachment, and structured Agent-mention affordances are admitted from
+`ThreadContext.inputCapabilities` for the selected target. Disabled affordances
+surface the descriptor's recovery reason; submission fails closed when context
+is absent, sendability is false, any input part is disabled, or structured
+mentions are not admitted. The headless Thread controller performs the same
+admission before creating optimistic state so React and command-triggered turns
+cannot diverge.
+
+Draft and thread-preference controls are not Settings. The controls stay compact,
+list-like, keyboard accessible, and responsive; visual validation covers Native,
+Codex ACP, OpenCode ACP, managed-adapter recovery, and narrow mobile width.
 
 Completion popovers are shared controlled components. `/` lists Gateway slash
 commands, `$` lists skills, local agents, and ACP capability mentions, and `@`
 lists cwd file references plus subagent-capable agent names. Accepted `@`
 agent entries keep visible `@agent-name` text and submit structured Gateway
-agent mentions while still allowing the runtime's text scanner to recognize
-the same prompt form as TUI when the current runtime can orchestrate Psychevo
-agent delegation. Native runtime supports this structured `@agent` path. Peer
-runtime prompts may still contain literal `@agent-name` text, but Workbench
-does not offer Psychevo agent completion or submit structured Psychevo agent
-mentions for a runtime that cannot orchestrate them; that text is left for the
-peer runtime to interpret. Arrow keys, Ctrl+N/Ctrl+P, Tab, Enter, Escape, and
+agent mentions only when the selected target's Thread Context declares Agent
+delegation support. Literal `@agent-name` remains prompt text for targets that
+do not support structured delegation. Arrow keys, Ctrl+N/Ctrl+P, Tab, Enter, Escape, and
 pointer selection have the same semantics on every shell that has a keyboard.
 Keyboard navigation must keep the active completion option scrolled into view
 inside the popover, including long `$` skill/agent lists whose active item moves
@@ -475,7 +474,7 @@ message-derived transcript visibility rules as reconnect and live completion:
 non-empty user and assistant text blocks remain visible, while only truly empty
 reasoning/text blocks are filtered from the rendered transcript.
 
-TUI direct runtime rendering follows the same transcript rule as Gateway
+TUI Agent-authoritative runtime rendering follows the same transcript rule as Gateway
 transcript rendering. Assistant text that is later confirmed to be part of a
 `tool_calls` message remains assistant text in its observed position; only
 provider/model reasoning is allowed to become a visible Thinking row.

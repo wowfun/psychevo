@@ -14,20 +14,25 @@ impl SqliteStore {
             conn.execute(
                 r#"
                 INSERT INTO gateway_runtime_bindings (
-                    thread_id, resolution_status, runtime_ref, backend_kind,
-                    native_kind, native_session_id, cwd, profile_fingerprint,
-                    profile_revision, profile_config_json, adapter_kind,
-                    adapter_revision, ownership,
-                    parent_thread_id, binding_revision, unresolved_reason,
+                    thread_id, resolution_status, agent_ref, agent_fingerprint,
+                    agent_definition_json, runtime_ref, backend_kind, native_kind,
+                    native_session_id, cwd, profile_fingerprint, profile_revision,
+                    profile_config_json, adapter_kind, adapter_revision, ownership,
+                    parent_thread_id, binding_revision, thread_preferences_json,
+                    runtime_observed_json, control_revision, unresolved_reason,
                     created_at_ms, updated_at_ms
                 ) VALUES (
                     ?1, 'resolved', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                    ?11, ?12, ?13, 1, NULL, ?14, ?14
+                    ?11, ?12, ?13, ?14, ?15, ?16, 1, NULL, NULL, 1, NULL,
+                    ?17, ?17
                 )
                 ON CONFLICT(thread_id) DO NOTHING
                 "#,
                 params![
                     input.thread_id,
+                    input.agent_ref,
+                    input.agent_fingerprint,
+                    input.agent_definition_json,
                     input.runtime_ref,
                     input.backend_kind,
                     input.native_kind,
@@ -81,34 +86,43 @@ impl SqliteStore {
                 r#"
                 UPDATE gateway_runtime_bindings
                 SET resolution_status = 'resolved',
-                    runtime_ref = ?2,
-                    backend_kind = ?3,
-                    native_kind = ?4,
-                    native_session_id = ?5,
-                    cwd = ?6,
-                    profile_fingerprint = ?7,
-                    profile_revision = ?8,
-                    profile_config_json = ?9,
-                    adapter_kind = ?10,
-                    adapter_revision = ?11,
-                    ownership = ?12,
-                    parent_thread_id = ?13,
+                    agent_ref = ?2,
+                    agent_fingerprint = ?3,
+                    agent_definition_json = ?4,
+                    runtime_ref = ?5,
+                    backend_kind = ?6,
+                    native_kind = ?7,
+                    native_session_id = ?8,
+                    cwd = ?9,
+                    profile_fingerprint = ?10,
+                    profile_revision = ?11,
+                    profile_config_json = ?12,
+                    adapter_kind = ?13,
+                    adapter_revision = ?14,
+                    ownership = ?15,
+                    parent_thread_id = ?16,
                     binding_revision = binding_revision + 1,
                     unresolved_reason = NULL,
-                    updated_at_ms = ?14
+                    updated_at_ms = ?17
                 WHERE thread_id = ?1
                   AND resolution_status = 'unresolved'
-                  AND binding_revision = ?15
-                  AND (runtime_ref IS NULL OR runtime_ref = ?2)
-                  AND (backend_kind IS NULL OR backend_kind = ?3)
-                  AND (native_kind IS NULL OR native_kind = ?4)
-                  AND (native_session_id IS NULL OR native_session_id IS ?5)
-                  AND cwd = ?6
-                  AND ownership = ?12
-                  AND (parent_thread_id IS NULL OR parent_thread_id IS ?13)
+                  AND binding_revision = ?18
+                  AND (agent_ref IS NULL OR agent_ref IS ?2)
+                  AND (agent_fingerprint IS NULL OR agent_fingerprint = ?3)
+                  AND (agent_definition_json IS NULL OR agent_definition_json = ?4)
+                  AND (runtime_ref IS NULL OR runtime_ref = ?5)
+                  AND (backend_kind IS NULL OR backend_kind = ?6)
+                  AND (native_kind IS NULL OR native_kind = ?7)
+                  AND (native_session_id IS NULL OR native_session_id IS ?8)
+                  AND cwd = ?9
+                  AND ownership = ?15
+                  AND (parent_thread_id IS NULL OR parent_thread_id IS ?16)
                 "#,
                 params![
                     input.thread_id,
+                    input.agent_ref,
+                    input.agent_fingerprint,
+                    input.agent_definition_json,
                     input.runtime_ref,
                     input.backend_kind,
                     input.native_kind,
@@ -284,11 +298,152 @@ impl SqliteStore {
             "runtime binding conflict for thread `{thread_id}`: native session identity is immutable"
         )))
     }
+
+    pub fn compare_and_set_gateway_runtime_control_state(
+        &self,
+        thread_id: &str,
+        expected_binding_revision: i64,
+        expected_control_revision: i64,
+        patch: GatewayRuntimeControlStatePatch<'_>,
+    ) -> Result<GatewayRuntimeBindingRecord> {
+        if expected_binding_revision < 1 {
+            return Err(Error::Message(
+                "expected binding revision must be positive".to_string(),
+            ));
+        }
+        if expected_control_revision < 1 {
+            return Err(Error::Message(
+                "expected control revision must be positive".to_string(),
+            ));
+        }
+        if patch.thread_preferences.is_none() && patch.runtime_observed.is_none() {
+            return Err(Error::Message(
+                "runtime control state patch must contain preferences or observations".to_string(),
+            ));
+        }
+        if let Some(values) = patch.thread_preferences {
+            validate_runtime_control_map("thread preference", values)?;
+        }
+        if let Some(values) = patch.runtime_observed {
+            validate_runtime_control_map("runtime observation", values)?;
+        }
+
+        let before = self.gateway_runtime_binding(thread_id)?.ok_or_else(|| {
+            Error::Message(format!(
+                "runtime binding not found for thread `{thread_id}`"
+            ))
+        })?;
+        validate_runtime_control_cas(
+            &before,
+            expected_binding_revision,
+            expected_control_revision,
+        )?;
+        let preferences_unchanged = patch
+            .thread_preferences
+            .is_none_or(|values| *values == before.thread_preferences);
+        let observed_unchanged = patch
+            .runtime_observed
+            .is_none_or(|values| *values == before.runtime_observed);
+        if preferences_unchanged && observed_unchanged {
+            return Ok(before);
+        }
+
+        let preferences_json = patch
+            .thread_preferences
+            .map(serde_json::to_string)
+            .transpose()?;
+        let observed_json = patch
+            .runtime_observed
+            .map(serde_json::to_string)
+            .transpose()?;
+        let now = now_ms();
+        let changed = self.write_retry(|conn| {
+            conn.execute(
+                r#"
+                UPDATE gateway_runtime_bindings
+                SET thread_preferences_json = CASE WHEN ?1 THEN ?2 ELSE thread_preferences_json END,
+                    runtime_observed_json = CASE WHEN ?3 THEN ?4 ELSE runtime_observed_json END,
+                    control_revision = control_revision + 1,
+                    updated_at_ms = ?5
+                WHERE thread_id = ?6
+                  AND resolution_status = 'resolved'
+                  AND ownership = 'read_write'
+                  AND binding_revision = ?7
+                  AND control_revision = ?8
+                "#,
+                params![
+                    patch.thread_preferences.is_some(),
+                    preferences_json,
+                    patch.runtime_observed.is_some(),
+                    observed_json,
+                    now,
+                    thread_id,
+                    expected_binding_revision,
+                    expected_control_revision,
+                ],
+            )
+        })?;
+        let after = self.gateway_runtime_binding(thread_id)?.ok_or_else(|| {
+            Error::Message(format!(
+                "runtime binding not found for thread `{thread_id}`"
+            ))
+        })?;
+        if changed > 0 {
+            return Ok(after);
+        }
+        validate_runtime_control_cas(&after, expected_binding_revision, expected_control_revision)?;
+        Err(Error::Message(format!(
+            "runtime control state for thread `{thread_id}` was not updated"
+        )))
+    }
+}
+
+fn validate_runtime_control_cas(
+    record: &GatewayRuntimeBindingRecord,
+    expected_binding_revision: i64,
+    expected_control_revision: i64,
+) -> Result<()> {
+    if record.status != GatewayRuntimeBindingStatus::Resolved {
+        return Err(Error::Message(format!(
+            "runtime binding for thread `{}` is unresolved",
+            record.thread_id
+        )));
+    }
+    if record.ownership != GatewayRuntimeBindingOwnership::ReadWrite {
+        return Err(Error::Message(format!(
+            "runtime binding for thread `{}` is read-only",
+            record.thread_id
+        )));
+    }
+    if record.binding_revision != expected_binding_revision {
+        return Err(Error::Message(format!(
+            "stale runtime binding revision for thread `{}`: expected {expected_binding_revision}, current {}",
+            record.thread_id, record.binding_revision
+        )));
+    }
+    if record.control_revision != expected_control_revision {
+        return Err(Error::Message(format!(
+            "stale runtime control revision for thread `{}`: expected {expected_control_revision}, current {}",
+            record.thread_id, record.control_revision
+        )));
+    }
+    Ok(())
+}
+
+fn validate_runtime_control_map(label: &str, values: &BTreeMap<String, Value>) -> Result<()> {
+    if values.keys().any(|key| key.trim().is_empty()) {
+        return Err(Error::Message(format!(
+            "{label} control id must not be empty"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_runtime_binding_input(input: &GatewayRuntimeBindingInput<'_>) -> Result<()> {
     for (field, value) in [
         ("thread_id", input.thread_id),
+        ("agent_fingerprint", input.agent_fingerprint),
+        ("agent_definition_json", input.agent_definition_json),
         ("runtime_ref", input.runtime_ref),
         ("backend_kind", input.backend_kind),
         ("native_kind", input.native_kind),
@@ -304,6 +459,11 @@ fn validate_runtime_binding_input(input: &GatewayRuntimeBindingInput<'_>) -> Res
                 "runtime binding {field} must not be empty"
             )));
         }
+    }
+    if input.agent_ref.is_some_and(|value| value.trim().is_empty()) {
+        return Err(Error::Message(
+            "runtime binding agent_ref must not be empty".to_string(),
+        ));
     }
     if input
         .native_session_id
@@ -342,6 +502,9 @@ fn runtime_binding_matches_input(
     input: &GatewayRuntimeBindingInput<'_>,
 ) -> bool {
     record.status == GatewayRuntimeBindingStatus::Resolved
+        && record.agent_ref.as_deref() == input.agent_ref
+        && record.agent_fingerprint.as_deref() == Some(input.agent_fingerprint)
+        && record.agent_definition_json.as_deref() == Some(input.agent_definition_json)
         && record.runtime_ref.as_deref() == Some(input.runtime_ref)
         && record.backend_kind.as_deref() == Some(input.backend_kind)
         && record.native_kind.as_deref() == Some(input.native_kind)
@@ -359,11 +522,12 @@ fn runtime_binding_matches_input(
 fn runtime_binding_select_sql(where_clause: &str) -> String {
     format!(
         r#"
-        SELECT thread_id, resolution_status, runtime_ref, backend_kind,
-               native_kind, native_session_id, cwd, profile_fingerprint,
-               profile_revision, profile_config_json, adapter_kind,
-               adapter_revision, ownership,
-               parent_thread_id, binding_revision, unresolved_reason,
+        SELECT thread_id, resolution_status, agent_ref, agent_fingerprint,
+               agent_definition_json, runtime_ref, backend_kind, native_kind,
+               native_session_id, cwd, profile_fingerprint, profile_revision,
+               profile_config_json, adapter_kind, adapter_revision, ownership,
+               parent_thread_id, binding_revision, thread_preferences_json,
+               runtime_observed_json, control_revision, unresolved_reason,
                created_at_ms, updated_at_ms
         FROM gateway_runtime_bindings
         {where_clause}
@@ -375,31 +539,60 @@ fn gateway_runtime_binding_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<GatewayRuntimeBindingRecord> {
     let status_raw: String = row.get(1)?;
-    let ownership_raw: String = row.get(12)?;
+    let ownership_raw: String = row.get(15)?;
     let status = GatewayRuntimeBindingStatus::parse(&status_raw)
         .ok_or_else(|| invalid_runtime_binding_enum(1, "resolution_status", &status_raw))?;
     let ownership = GatewayRuntimeBindingOwnership::parse(&ownership_raw)
-        .ok_or_else(|| invalid_runtime_binding_enum(12, "ownership", &ownership_raw))?;
+        .ok_or_else(|| invalid_runtime_binding_enum(15, "ownership", &ownership_raw))?;
     Ok(GatewayRuntimeBindingRecord {
         thread_id: row.get(0)?,
         status,
-        runtime_ref: row.get(2)?,
-        backend_kind: row.get(3)?,
-        native_kind: row.get(4)?,
-        native_session_id: row.get(5)?,
-        cwd: row.get(6)?,
-        profile_fingerprint: row.get(7)?,
-        profile_revision: row.get(8)?,
-        profile_config_json: row.get(9)?,
-        adapter_kind: row.get(10)?,
-        adapter_revision: row.get(11)?,
+        agent_ref: row.get(2)?,
+        agent_fingerprint: row.get(3)?,
+        agent_definition_json: row.get(4)?,
+        runtime_ref: row.get(5)?,
+        backend_kind: row.get(6)?,
+        native_kind: row.get(7)?,
+        native_session_id: row.get(8)?,
+        cwd: row.get(9)?,
+        profile_fingerprint: row.get(10)?,
+        profile_revision: row.get(11)?,
+        profile_config_json: row.get(12)?,
+        adapter_kind: row.get(13)?,
+        adapter_revision: row.get(14)?,
         ownership,
-        parent_thread_id: row.get(13)?,
-        binding_revision: row.get(14)?,
-        unresolved_reason: row.get(15)?,
-        created_at_ms: row.get(16)?,
-        updated_at_ms: row.get(17)?,
+        parent_thread_id: row.get(16)?,
+        binding_revision: row.get(17)?,
+        thread_preferences: decode_runtime_control_map(
+            row.get::<_, Option<String>>(18)?.as_deref(),
+            18,
+        )?,
+        runtime_observed: decode_runtime_control_map(
+            row.get::<_, Option<String>>(19)?.as_deref(),
+            19,
+        )?,
+        control_revision: row.get(20)?,
+        unresolved_reason: row.get(21)?,
+        created_at_ms: row.get(22)?,
+        updated_at_ms: row.get(23)?,
     })
+}
+
+fn decode_runtime_control_map(
+    value: Option<&str>,
+    column: usize,
+) -> rusqlite::Result<BTreeMap<String, Value>> {
+    value
+        .map(serde_json::from_str)
+        .transpose()
+        .map(Option::unwrap_or_default)
+        .map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(err),
+            )
+        })
 }
 
 fn invalid_runtime_binding_enum(index: usize, field: &str, value: &str) -> rusqlite::Error {

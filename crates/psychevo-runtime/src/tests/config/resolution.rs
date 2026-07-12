@@ -173,27 +173,25 @@ pub(crate) fn runtime_profile_configs_merge_profile_and_project_overlay() {
     write_config(
         home.join("config.toml"),
         r#"
-[runtime_profiles.codex]
-runtime = "codex"
-label = "Codex"
-command = "codex"
-args = ["app-server", "--stdio"]
-default_mode = "default"
+    [runtime_profiles.cursor]
+    runtime = "acp"
+    backend_ref = "cursor"
+    label = "Cursor"
+    default_mode = "default"
 "#,
     )
     .expect("home config");
     write_config(
         project_dir.join("config.toml"),
         r#"
-[runtime_profiles.codex]
-enabled = false
-default_mode = "auto-review"
+    [runtime_profiles.cursor]
+    enabled = false
+    default_mode = "auto-review"
 
-[runtime_profiles.opencode]
-runtime = "opencode"
-command = "opencode"
-args = ["serve"]
-default_agent = "build"
+    [runtime_profiles.opencode]
+    runtime = "acp"
+    backend_ref = "opencode"
+    default_agent = "build"
 "#,
     )
     .expect("project config");
@@ -204,13 +202,13 @@ default_agent = "build"
 
     let profiles = load_runtime_profile_configs(&home, &options.cwd, &env).expect("profiles");
 
-    let codex = profiles.get("codex").expect("codex");
-    assert_eq!(codex.runtime, RuntimeProfileKind::Codex);
-    assert!(!codex.enabled);
-    assert_eq!(codex.default_mode.as_deref(), Some("auto-review"));
-    assert_eq!(codex.args, vec!["app-server", "--stdio"]);
+    let cursor = profiles.get("cursor").expect("cursor");
+    assert_eq!(cursor.runtime, RuntimeProfileKind::Acp);
+    assert!(!cursor.enabled);
+    assert_eq!(cursor.default_mode.as_deref(), Some("auto-review"));
     let opencode = profiles.get("opencode").expect("opencode");
-    assert_eq!(opencode.runtime, RuntimeProfileKind::OpenCode);
+    assert_eq!(opencode.runtime, RuntimeProfileKind::Acp);
+    assert_eq!(opencode.backend_ref.as_deref(), Some("opencode"));
     assert_eq!(opencode.default_agent.as_deref(), Some("build"));
 }
 
@@ -240,18 +238,30 @@ pub(crate) fn runtime_profile_backend_ref_validation_is_fail_closed() {
             .contains("runtime_profiles.cursor-acp.backend_ref is required")
     );
 
-    let forbidden = crate::config::parse_runtime_profile_configs(&json!({
+    let removed = crate::config::parse_runtime_profile_configs(&json!({
         "codex-local": {
             "runtime": "codex",
             "backend_ref": "legacy-codex"
         }
     }))
-    .expect_err("direct backend_ref is forbidden");
-    assert!(
-        forbidden
-            .to_string()
-            .contains("runtime_profiles.codex-local.backend_ref is only allowed")
-    );
+    .expect_err("direct adapter is removed");
+    assert!(removed.to_string().contains("adapter_removed"));
+
+    let inferred_removed = crate::config::parse_runtime_profile_configs(&json!({
+        "opencode": { "label": "Legacy OpenCode" }
+    }))
+    .expect_err("legacy inferred direct adapter is removed");
+    assert!(inferred_removed.to_string().contains("adapter_removed"));
+
+    let launch = crate::config::parse_runtime_profile_configs(&json!({
+        "cursor-acp": {
+            "runtime": "acp",
+            "backend_ref": "cursor",
+            "command": "cursor-agent"
+        }
+    }))
+    .expect_err("profile launch config moved to the backend");
+    assert!(launch.to_string().contains("profile_launch_config_removed"));
 }
 
 #[test]

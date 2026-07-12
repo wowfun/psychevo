@@ -5,11 +5,18 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{PluginPolicyConfig, ToolsetContribution};
+use crate::config::{
+    PluginPolicyConfig, ToolsetContribution, load_mcp_oauth_access_token, load_run_config,
+    resolve_psychevo_home,
+};
 use crate::contribution_projection::ContributionProjection;
 use crate::hooks::HookSourceDescriptor;
+use crate::host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path};
+use crate::paths::canonical_cwd;
 use crate::plugins::{load_enabled_plugin_contributions, load_plugin_manifest};
-use crate::types::{McpServerInput, RunWarning, RuntimeTool};
+use crate::types::{
+    McpServerInput, McpTransportInput, ResolvedMcpServerInput, RunOptions, RunWarning, RuntimeTool,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectedCapabilityRoot {
@@ -345,6 +352,102 @@ impl ExtensionAssembly {
     }
 }
 
+/// Resolves the named MCP declarations through the same effective config and
+/// extension assembly used by the Native runtime, without starting an MCP
+/// client. Agent adapters use this to hand an explicitly selected subset to an
+/// external Agent.
+pub fn resolve_mcp_server_handoffs(
+    options: &RunOptions,
+    names: &std::collections::BTreeSet<String>,
+) -> crate::Result<Vec<ResolvedMcpServerInput>> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let cwd = canonical_cwd(&options.cwd)?;
+    let loaded = load_run_config(options, &cwd)?;
+    let home = resolve_psychevo_home(&loaded.env)?;
+    let mut mcp_servers = options.mcp_servers.clone();
+    mcp_servers.extend(loaded.config.mcp_servers.clone());
+    let assembly = assemble_extensions(ExtensionAssemblyInput {
+        home: &home,
+        cwd: &cwd,
+        env: &loaded.env,
+        plugin_policy: &loaded.config.plugins,
+        selected_capability_roots: &options.selected_capability_roots,
+        mcp_servers,
+        runtime_tools: Vec::new(),
+    });
+    let available = assembly.registry.mcp_servers();
+    let mut resolved = Vec::with_capacity(names.len());
+    for name in names {
+        let mut matches = available.iter().filter(|server| server.name == *name);
+        let mut server = matches.next().cloned().ok_or_else(|| {
+            crate::Error::Config(format!(
+                "Agent MCP server `{name}` is not declared in the effective configuration"
+            ))
+        })?;
+        if matches.next().is_some() {
+            return Err(crate::Error::Config(format!(
+                "Agent MCP server `{name}` has multiple effective declarations"
+            )));
+        }
+        if !server.policy.enabled {
+            return Err(crate::Error::Config(format!(
+                "Agent MCP server `{name}` is disabled in the effective configuration"
+            )));
+        }
+        if let McpTransportInput::Stdio {
+            command,
+            env: server_env,
+            ..
+        } = &mut server.transport
+        {
+            let mut executable_env = loaded.env.clone();
+            executable_env.extend(server_env.clone());
+            let command_text = command.to_string_lossy().into_owned();
+            let resolved_command = resolve_executable_path(
+                &command_text,
+                &cwd,
+                &ExecutableResolveOptions {
+                    platform: HostPlatform::current(),
+                    env: &executable_env,
+                },
+            )
+            .ok_or_else(|| {
+                crate::Error::Config(format!(
+                    "Agent MCP server `{name}` command `{command_text}` was not found"
+                ))
+            })?;
+            *command = resolved_command;
+        }
+        let bearer_token = match &server.transport {
+            McpTransportInput::StreamableHttp {
+                url,
+                bearer_token_env_var,
+                ..
+            } => bearer_token_env_var
+                .as_ref()
+                .and_then(|env_var| loaded.env.get(env_var))
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    load_mcp_oauth_access_token(&home, &server.name, url)
+                        .ok()
+                        .flatten()
+                }),
+            _ => None,
+        };
+        resolved.push(ResolvedMcpServerInput {
+            server,
+            bearer_token,
+        });
+    }
+    Ok(resolved)
+}
+
 pub(crate) fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> ExtensionAssembly {
     let plugin_assembly =
         load_enabled_plugin_contributions(input.home, input.cwd, input.env, input.plugin_policy);
@@ -602,6 +705,62 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn mcp_handoff_resolves_named_secret_without_debug_leak_and_rejects_duplicates() {
+        let temp = tempfile::tempdir().expect("temp");
+        let mut options = crate::tests::base_options(&temp);
+        fs::create_dir_all(&options.cwd).expect("workspace");
+        fs::write(
+            crate::tests::home_dir(&temp).join("config.toml"),
+            "# initialized\n",
+        )
+        .expect("initialized config");
+        options
+            .inherited_env
+            .as_mut()
+            .expect("isolated env")
+            .insert(
+                "REPO_MCP_TOKEN".to_string(),
+                "bearer-test-secret".to_string(),
+            );
+        let server = McpServerInput::new(
+            "repo",
+            McpTransportInput::StreamableHttp {
+                url: "https://example.test/mcp".to_string(),
+                headers: BTreeMap::from([(
+                    "X-Test-Secret".to_string(),
+                    "header-test-secret".to_string(),
+                )]),
+                bearer_token_env_var: Some("REPO_MCP_TOKEN".to_string()),
+                scopes: Vec::new(),
+                oauth_resource: None,
+                oauth_client_id: None,
+            },
+        );
+        options.mcp_servers.push(server.clone());
+        let names = std::collections::BTreeSet::from(["repo".to_string()]);
+
+        let resolved = resolve_mcp_server_handoffs(&options, &names).expect("handoff");
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved[0].bearer_token.as_deref(),
+            Some("bearer-test-secret")
+        );
+        let debug = format!("{:?}", resolved[0]);
+        assert!(!debug.contains("bearer-test-secret"));
+        assert!(!debug.contains("header-test-secret"));
+
+        options.mcp_servers.push(server);
+        let error = resolve_mcp_server_handoffs(&options, &names)
+            .expect_err("ambiguous declaration must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("multiple effective declarations")
+        );
     }
 
     #[test]

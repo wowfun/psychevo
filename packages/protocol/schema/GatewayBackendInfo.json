@@ -3,9 +3,8 @@
   "definitions": {
     "BackendKind": {
       "enum": [
-        "psychevo",
-        "peerAgent",
-        "runtime"
+        "native",
+        "acp"
       ],
       "type": "string"
     }

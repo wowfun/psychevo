@@ -63,6 +63,22 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
             .is_none()
     );
     let (tx, mut rx) = mpsc::unbounded_channel();
+    let context = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("turn-context")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "target": {"agentRef": null, "runtimeProfileRef": "native"}
+            })),
+        },
+    )
+    .await
+    .expect("prospective Thread Context");
 
     let accepted = handle_rpc(
         state.clone(),
@@ -75,7 +91,11 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
             params: Some(json!({
                 "scope": scope,
                 "threadId": null,
-                "text": "每分钟发一条你认为最有价值的软件工程 tip"
+                "target": {"agentRef": null, "runtimeProfileRef": "native"},
+                "input": [{"type": "text", "text": "每分钟发一条你认为最有价值的软件工程 tip"}],
+                "turnOverrides": {"model": "fake-model"},
+                "expectedContextRevision": context["contextRevision"],
+                "expectedControlRevision": context["controlRevision"]
             })),
         },
     )

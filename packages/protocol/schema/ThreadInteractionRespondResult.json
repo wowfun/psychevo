@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayActionOutcome": {
+      "enum": [
+        "accepted",
+        "rejected",
+        "cancelled",
+        "timedOut",
+        "completed"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "interactionId": {
+      "type": "string"
+    },
+    "outcome": {
+      "$ref": "#/definitions/GatewayActionOutcome"
+    }
+  },
+  "required": [
+    "accepted",
+    "interactionId",
+    "outcome"
+  ],
+  "title": "ThreadInteractionRespondResult",
+  "type": "object"
+}

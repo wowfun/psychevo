@@ -19,231 +19,332 @@ include!("protocol/agents_backend_rpc.rs");
 include!("protocol/codegen.rs");
 
 #[cfg(test)]
-mod runtime_contract_tests {
+mod thread_application_contract_tests {
     use super::*;
 
     #[test]
-    fn runtime_context_and_revision_methods_are_typed() {
+    fn thread_context_and_control_requests_are_closed_typed_methods() {
         let context: ClientRequest = serde_json::from_value(serde_json::json!({
-            "method": "runtime/context/read",
+            "method": "thread/context/read",
             "params": {
                 "threadId": "thread-1",
+                "target": {
+                    "agentRef": "reviewer",
+                    "runtimeProfileRef": "codex"
+                },
                 "scope": {
                     "cwd": "/tmp/workspace",
-                    "source": { "kind": "web", "rawId": "runtime-test" }
+                    "source": { "kind": "web", "rawId": "thread-test" }
                 }
             }
         }))
-        .expect("runtime context request");
+        .expect("Thread Context request");
         assert!(matches!(
             context,
-            ClientRequest::RuntimeContextRead(RuntimeContextReadParams {
+            ClientRequest::ThreadContextRead(ThreadContextReadParams {
                 thread_id: Some(ref thread_id),
+                target: Some(RunnableTargetInput {
+                    agent_ref: Some(ref agent_ref),
+                    ref runtime_profile_ref,
+                }),
                 ..
-            }) if thread_id == "thread-1"
+            }) if thread_id == "thread-1" && agent_ref == "reviewer" && runtime_profile_ref == "codex"
         ));
 
-        let read: ClientRequest = serde_json::from_value(serde_json::json!({
-            "method": "runtime/session/read",
-            "params": {
-                "runtimeRef": "opencode",
-                "sessionHandle": "rts_opaque_1",
-                "cursor": "rtc_opaque_page_2"
-            }
-        }))
-        .expect("runtime paginated read request");
-        assert!(matches!(
-            read,
-            ClientRequest::RuntimeSessionRead(RuntimeSessionReadParams {
-                cursor: Some(ref cursor),
-                ..
-            }) if cursor == "rtc_opaque_page_2"
-        ));
-        let raw_read_id = serde_json::from_value::<ClientRequest>(serde_json::json!({
-            "method": "runtime/session/read",
-            "params": {
-                "runtimeRef": "opencode",
-                "sessionHandle": "rts_opaque_1",
-                "messageID": "msg_native_secret"
-            }
-        }));
-        assert!(raw_read_id.is_err(), "raw native read ids must be rejected");
-
-        let attach: ClientRequest = serde_json::from_value(serde_json::json!({
-            "method": "runtime/session/attach",
-            "params": {
-                "runtimeRef": "codex",
-                "sessionHandle": "rts_active_opaque"
-            }
-        }))
-        .expect("runtime read-only attach request");
-        assert!(matches!(
-            attach,
-            ClientRequest::RuntimeSessionAttach(RuntimeSessionParams {
-                native_session_id: ref session_handle,
-                ..
-            }) if session_handle == "rts_active_opaque"
-        ));
-        let raw_attach_id = serde_json::from_value::<ClientRequest>(serde_json::json!({
-            "method": "runtime/session/attach",
-            "params": {
-                "runtimeRef": "codex",
-                "sessionHandle": "rts_active_opaque",
-                "nativeSessionId": "native-secret"
-            }
-        }));
-        assert!(
-            raw_attach_id.is_err(),
-            "raw native attach ids must be rejected"
-        );
-
-        let revert: ClientRequest = serde_json::from_value(serde_json::json!({
-            "method": "runtime/session/revert",
-            "params": {
-                "runtimeRef": "opencode",
-                "sessionHandle": "rts_opaque_1",
-                "revisionHandle": "rtr_opaque_1"
-            }
-        }))
-        .expect("runtime revert request");
-        assert!(matches!(
-            revert,
-            ClientRequest::RuntimeSessionRevert(RuntimeSessionRevisionParams {
-                runtime_ref,
-                native_session_id,
-                revision_handle: Some(revision_handle),
-                ..
-            }) if runtime_ref == "opencode"
-                && native_session_id == "rts_opaque_1"
-                && revision_handle == "rtr_opaque_1"
-        ));
-
-        let raw_native_id = serde_json::from_value::<ClientRequest>(serde_json::json!({
-            "method": "runtime/session/revert",
-            "params": {
-                "runtimeRef": "opencode",
-                "sessionHandle": "rts_opaque_1",
-                "itemId": "msg_native_secret"
-            }
-        }));
-        assert!(
-            raw_native_id.is_err(),
-            "raw native item ids must be rejected"
-        );
-    }
-
-    #[test]
-    fn direct_runtime_backend_and_structured_error_serialize_without_native_guessing() {
-        assert_eq!(BackendKind::Runtime.as_str(), "runtime");
-        let error = RuntimeErrorView {
-            code: "process_exit".to_string(),
-            stage: "transport".to_string(),
-            retry_class: RuntimeRetryClassView::Reconnect,
-            message: "The Codex runtime stopped.".to_string(),
-            diagnostic_ref: Some("runtime:codex:7".to_string()),
-        };
-        let value = serde_json::to_value(error).expect("runtime error");
-        assert_eq!(value["retryClass"], "reconnect");
-        assert_eq!(value["diagnosticRef"], "runtime:codex:7");
-    }
-
-    #[test]
-    fn codex_goal_and_rate_limit_methods_are_closed_typed_requests() {
-        let set: ClientRequest = serde_json::from_value(serde_json::json!({
-            "method": "runtime/goal/set",
+        let opaque_revision = "5db92a55f2f24d87";
+        let control: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/control/set",
             "params": {
                 "threadId": "thread-1",
-                "objective": "Ship evidence",
-                "status": "active",
-                "tokenBudget": 12000,
-                "clearTokenBudget": false
+                "targetId": "target:opaque-reviewer-codex",
+                "controlId": "mode",
+                "value": "review",
+                "expectedCapabilityRevision": opaque_revision,
+                "expectedBindingRevision": 7,
+                "expectedContextRevision": "11",
+                "expectedControlRevision": "13"
             }
         }))
-        .expect("typed goal set request");
+        .expect("Thread control request");
         assert!(matches!(
-            set,
-            ClientRequest::RuntimeGoalSet(RuntimeGoalSetParams {
+            control,
+            ClientRequest::ThreadControlSet(ThreadControlSetParams {
                 thread_id: Some(ref thread_id),
-                status: Some(RuntimeGoalStatusView::Active),
-                token_budget: Some(12_000),
+                target_id,
+                expected_capability_revision,
+                expected_binding_revision: 7,
+                expected_context_revision,
+                expected_control_revision,
                 ..
             }) if thread_id == "thread-1"
+                && target_id == "target:opaque-reviewer-codex"
+                && expected_capability_revision == opaque_revision
+                && expected_context_revision == "11"
+                && expected_control_revision == "13"
         ));
 
-        let unknown_status = serde_json::from_value::<ClientRequest>(serde_json::json!({
-            "method": "runtime/goal/set",
-            "params": { "threadId": "thread-1", "status": "native_future_status" }
-        }));
-        assert!(unknown_status.is_err(), "goal statuses are a closed enum");
-
-        let adapter_shaped_goal = serde_json::from_value::<ClientRequest>(serde_json::json!({
-            "method": "runtime/goal/read",
+        let numeric_revision = serde_json::from_value::<ClientRequest>(serde_json::json!({
+            "method": "thread/control/set",
             "params": {
-                "threadId": "thread-1",
-                "runtimeRef": "codex",
-                "nativeSessionId": "native-secret"
+                "targetId": "target:opaque-reviewer-codex",
+                "controlId": "mode",
+                "value": "review",
+                "expectedCapabilityRevision": 9007199254740993_u64,
+                "expectedBindingRevision": 7,
+                "expectedContextRevision": "11",
+                "expectedControlRevision": "13"
             }
         }));
         assert!(
-            adapter_shaped_goal.is_err(),
-            "goal requests must derive runtime and native identity from binding"
+            numeric_revision.is_err(),
+            "JSON numbers must not enter the opaque-string capability revision path"
         );
+    }
 
-        let rate_limits: ClientRequest = serde_json::from_value(serde_json::json!({
-            "method": "runtime/account/rateLimits/read",
-            "params": { "runtimeRef": "codex", "threadId": null }
+    #[test]
+    fn action_interaction_and_history_requests_are_closed_typed_methods() {
+        let action: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/action/run",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "thread-test" }
+                },
+                "threadId": "thread-1",
+                "action": {
+                    "kind": "steer",
+                    "expectedTurnId": "turn-1",
+                    "text": "Use the smaller patch."
+                }
+            }
         }))
-        .expect("typed account rate-limit request");
+        .expect("typed Thread action");
         assert!(matches!(
-            rate_limits,
-            ClientRequest::RuntimeAccountRateLimitsRead(RuntimeAccountRateLimitsReadParams {
-                runtime_ref: Some(ref runtime_ref),
-                thread_id: None,
+            action,
+            ClientRequest::ThreadActionRun(ThreadActionRunParams {
+                action: ThreadActionInput::Steer { ref expected_turn_id, ref text },
                 ..
-            }) if runtime_ref == "codex"
+            }) if expected_turn_id == "turn-1" && text == "Use the smaller patch."
+        ));
+
+        let interaction: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/interaction/respond",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "thread-test" }
+                },
+                "threadId": "thread-1",
+                "interactionId": "permission-1",
+                "response": { "kind": "permission", "decision": "allowOnce" }
+            }
+        }))
+        .expect("typed Thread interaction response");
+        assert!(matches!(
+            interaction,
+            ClientRequest::ThreadInteractionRespond(ThreadInteractionRespondParams {
+                response: ThreadInteractionResponse::Permission {
+                    decision: PermissionDecision::AllowOnce
+                },
+                ..
+            })
+        ));
+
+        let history: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/history/read",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "thread-test" }
+                },
+                "threadId": "thread-1",
+                "cursor": "message:7",
+                "limit": 25
+            }
+        }))
+        .expect("typed Thread history read");
+        assert!(matches!(
+            history,
+            ClientRequest::ThreadHistoryRead(ThreadHistoryReadParams {
+                ref thread_id,
+                ref cursor,
+                limit: Some(25),
+                ..
+            }) if thread_id == "thread-1" && cursor.as_deref() == Some("message:7")
+        ));
+
+        let open_command = serde_json::from_value::<ClientRequest>(serde_json::json!({
+            "method": "thread/action/run",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "thread-test" }
+                },
+                "threadId": "thread-1",
+                "action": { "kind": "adapterCommand", "operation": "anything" }
+            }
+        }));
+        assert!(
+            open_command.is_err(),
+            "open adapter commands must fail closed"
+        );
+    }
+
+    #[test]
+    fn turn_errors_preserve_unknown_delivery_as_structured_data() {
+        let notification = ServerNotification::TurnError(TurnErrorPayload {
+            error: AgentErrorView {
+                message: "The ACP connection closed after dispatch.".to_string(),
+                code: Some("unknown_delivery".to_string()),
+                stage: Some("delivery".to_string()),
+                retry_class: Some("reconcile".to_string()),
+                delivery: AgentDeliveryStatusView::Unknown,
+                recovery_action: Some("thread/history/read".to_string()),
+                diagnostic_ref: Some("turn:7".to_string()),
+            },
+            thread_id: Some("thread-1".to_string()),
+            turn_id: Some("turn-7".to_string()),
+        });
+        let value = serde_json::to_value(notification).expect("turn/error notification");
+        assert_eq!(value["params"]["error"]["delivery"], "unknown");
+        assert_eq!(
+            value["params"]["error"]["recoveryAction"],
+            "thread/history/read"
+        );
+        assert!(value["params"]["error"].get("message").is_some());
+        let decoded = serde_json::from_value::<ServerNotification>(value)
+            .expect("structured turn/error remains decodable");
+        assert!(matches!(
+            decoded,
+            ServerNotification::TurnError(TurnErrorPayload {
+                error: AgentErrorView {
+                    delivery: AgentDeliveryStatusView::Unknown,
+                    ..
+                },
+                ..
+            })
         ));
     }
 
     #[test]
-    fn runtime_profile_and_capability_revisions_round_trip_above_js_safe_integer() {
+    fn retired_runtime_application_methods_are_not_client_requests() {
+        for method in [
+            "runtime/options",
+            "runtime/context/read",
+            "runtime/control/set",
+            "runtime/auth/action",
+            "runtime/goal/read",
+            "runtime/goal/set",
+            "runtime/goal/clear",
+            "runtime/account/rateLimits/read",
+            "runtime/snapshot",
+            "runtime/health/check",
+            "runtime/session/list",
+            "runtime/session/read",
+            "runtime/session/attach",
+            "runtime/session/resume",
+            "runtime/session/archive",
+            "runtime/session/unarchive",
+            "runtime/session/delete",
+            "runtime/session/rename",
+            "runtime/session/fork",
+            "runtime/session/revert",
+            "runtime/session/unrevert",
+            "permission/respond",
+            "clarify/respond",
+        ] {
+            let request = serde_json::from_value::<ClientRequest>(serde_json::json!({
+                "method": method,
+                "params": {}
+            }));
+            assert!(
+                request.is_err(),
+                "{method} must be absent from ClientRequest"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_session_import_and_fork_are_closed_typed_methods() {
+        let list: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/import/list",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "import-test" }
+                },
+                "cursors": { "opencode": "cursor:opaque" }
+            }
+        }))
+        .expect("typed Agent session import list");
+        assert!(matches!(
+            list,
+            ClientRequest::ThreadImportList(ThreadImportListParams { ref cursors, .. })
+                if cursors.get("opencode").map(String::as_str) == Some("cursor:opaque")
+        ));
+
+        let import: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/import",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "import-test" }
+                },
+                "candidateId": "candidate:opaque",
+                "targetId": "target:opaque"
+            }
+        }))
+        .expect("typed Agent session import");
+        assert!(matches!(
+            import,
+            ClientRequest::ThreadImport(ThreadImportParams {
+                ref candidate_id,
+                ref target_id,
+                ..
+            }) if candidate_id == "candidate:opaque" && target_id == "target:opaque"
+        ));
+
+        let fork: ThreadActionInput =
+            serde_json::from_value(serde_json::json!({"kind": "fork"})).expect("typed fork action");
+        assert_eq!(fork.kind(), ThreadActionKind::Fork);
+        let value = serde_json::to_value(fork).expect("serialize typed fork action");
+        assert!(value.get("nativeSessionId").is_none());
+    }
+
+    #[test]
+    fn profile_and_thread_control_revisions_remain_decimal_strings() {
         let above_js_safe = "9007199254740993";
         let profile: RuntimeProfileView = serde_json::from_value(serde_json::json!({
             "id": "codex",
-            "runtime": "codex",
+            "runtime": "acp",
             "enabled": true,
             "label": "Codex",
             "generated": true,
+            "backendRef": "codex",
             "profileRevision": "18446744073709551615",
             "capabilityRevision": above_js_safe,
-            "health": { "status": "ready", "summary": "Ready" }
+            "health": { "status": "unchecked", "summary": "Configured" }
         }))
         .expect("large decimal-string Profile revisions");
         let value = serde_json::to_value(profile).expect("serialize Profile revisions");
         assert_eq!(value["profileRevision"], "18446744073709551615");
         assert_eq!(value["capabilityRevision"], above_js_safe);
         assert!(value["capabilityRevision"].is_string());
+    }
 
-        let control: RuntimeControlSetParams = serde_json::from_value(serde_json::json!({
-            "runtimeRef": "codex",
-            "controlId": "mode",
-            "value": "review",
-            "expectedCapabilityRevision": above_js_safe,
-            "expectedBindingRevision": 7
-        }))
-        .expect("large expected capability revision");
-        assert_eq!(control.expected_capability_revision, above_js_safe);
-        assert_eq!(control.expected_binding_revision, 7);
-
-        let numeric = serde_json::from_value::<RuntimeControlSetParams>(serde_json::json!({
-            "runtimeRef": "codex",
-            "controlId": "mode",
-            "value": "review",
-            "expectedCapabilityRevision": 9007199254740993_u64,
-            "expectedBindingRevision": 7
-        }));
-        assert!(
-            numeric.is_err(),
-            "JSON numbers must not enter the u64 revision path"
-        );
+    #[test]
+    fn backend_kind_and_structured_error_are_implementation_neutral() {
+        assert_eq!(BackendKind::Native.as_str(), "native");
+        assert_eq!(BackendKind::Acp.as_str(), "acp");
+        let error = RuntimeErrorView {
+            code: "process_exit".to_string(),
+            stage: "transport".to_string(),
+            retry_class: RuntimeRetryClassView::Reconnect,
+            message: "The Agent session stopped.".to_string(),
+            diagnostic_ref: Some("agent-session:7".to_string()),
+        };
+        let value = serde_json::to_value(error).expect("structured error");
+        assert_eq!(value["retryClass"], "reconnect");
+        assert_eq!(value["diagnosticRef"], "agent-session:7");
     }
 }

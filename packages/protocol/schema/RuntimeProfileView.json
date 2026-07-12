@@ -33,6 +33,13 @@
         },
         "stability": {
           "$ref": "#/definitions/RuntimeStabilityView"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -127,13 +134,6 @@
         "null"
       ]
     },
-    "args": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
     "backendRef": {
       "default": null,
       "type": [
@@ -151,13 +151,6 @@
     "capabilityRevision": {
       "default": "",
       "type": "string"
-    },
-    "command": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
     },
     "configured": {
       "default": false,
@@ -193,13 +186,6 @@
     },
     "enabled": {
       "type": "boolean"
-    },
-    "envKeys": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
     },
     "generated": {
       "type": "boolean"

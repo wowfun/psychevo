@@ -3,7 +3,6 @@ members = [
     "crates/psychevo-ai",
     "crates/psychevo-agent-core",
     "crates/psychevo-runtime",
-    "crates/psychevo-runtime-host",
     "crates/psychevo-gateway-protocol",
     "crates/psychevo-gateway",
     "crates/psychevo-acp",
@@ -19,7 +18,8 @@ license = "MIT"
 
 [workspace.dependencies]
 anyhow = "1.0"
-agent-client-protocol = { version = "=0.14.0", features = ["unstable", "unstable_protocol_v2"] }
+agent-client-protocol = { version = "=1.2.0", features = ["unstable", "unstable_protocol_v2"] }
+agent-client-protocol-schema = { version = "=1.4.0", features = ["unstable_llm_providers"] }
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22.1"
 bytes = "1.9"

@@ -17,33 +17,28 @@ fn thread_snapshot(
         .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
     let pending_actions = prune_pending_actions(state, &selector, thread_id)?;
     let activity = snapshot_activity(state, &scope.source, thread_id)?;
-    let entries = match thread_id {
-        Some(thread_id) => {
-            let mut entries = state.inner.gateway.thread_transcript(thread_id)?;
-            if let Some((turn_id, first_committed_seq)) =
-                active_turn_projection_window(state, thread_id, &activity)?
-            {
-                transcript::stamp_committed_entries_for_turn_window(
-                    &mut entries,
-                    transcript::TurnProjectionWindow {
-                        turn_id: &turn_id,
-                        first_committed_seq,
-                    },
-                );
-            }
-            replay_running_live_transcript_overlay(state, thread_id, &activity, &mut entries)?;
-            entries
-        }
-        None => Vec::new(),
-    };
+    let entries = thread_id
+        .map(|thread_id| authoritative_history_projection(state, scope, thread_id))
+        .transpose()?
+        .unwrap_or_default();
+    let history = authoritative_history_view(state, thread_id)?;
     Ok(json!({
         "source": scope.source,
         "scope": scope.to_wire_scope(),
         "thread": thread,
+        "history": history,
         "entries": entries,
         "activity": activity,
         "pendingActions": pending_actions,
     }))
+}
+
+async fn thread_snapshot_live(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: Option<&str>,
+) -> psychevo_runtime::Result<Value> {
+    thread_snapshot(state, scope, thread_id)
 }
 
 fn snapshot_activity(
@@ -55,9 +50,16 @@ fn snapshot_activity(
     let Some(thread_id) = thread_id else {
         return Ok(activity);
     };
-    if activity.running
-        || activity.active_turn_id.is_some()
-        || activity.takeover_state.is_some()
+    if activity.running || activity.active_turn_id.is_some() || activity.takeover_state.is_some() {
+        return Ok(activity);
+    }
+
+    if state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding(thread_id)?
+        .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"))
     {
         return Ok(activity);
     }
@@ -65,8 +67,7 @@ fn snapshot_activity(
     let Some(edge) = state.inner.state.store().find_agent_edge(thread_id)? else {
         return Ok(activity);
     };
-    if edge.child_session_id != thread_id
-        || edge.status != psychevo_runtime::AgentEdgeStatus::Open
+    if edge.child_session_id != thread_id || edge.status != psychevo_runtime::AgentEdgeStatus::Open
     {
         return Ok(activity);
     }
@@ -292,20 +293,23 @@ fn merge_live_tool_block(current: &mut TranscriptBlock, live: &TranscriptBlock) 
     current.updated_at_ms = current.updated_at_ms.max(live.updated_at_ms);
 }
 
-fn merge_optional_string(current: &mut Option<String>, live: &Option<String>, live_can_replace: bool) {
+fn merge_optional_string(
+    current: &mut Option<String>,
+    live: &Option<String>,
+    live_can_replace: bool,
+) {
     let Some(live) = live.as_ref() else {
         return;
     };
-    let current_missing = current.as_deref().is_none_or(|value| value.trim().is_empty());
+    let current_missing = current
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty());
     if live_can_replace || current_missing {
         *current = Some(live.clone());
     }
 }
 
-fn live_overlay_can_replace(
-    current: TranscriptBlockStatus,
-    live: TranscriptBlockStatus,
-) -> bool {
+fn live_overlay_can_replace(current: TranscriptBlockStatus, live: TranscriptBlockStatus) -> bool {
     !terminal_tool_status(current) && status_rank(live) >= status_rank(current)
 }
 

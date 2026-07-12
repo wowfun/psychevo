@@ -23,7 +23,7 @@ ACP, Web, Desktop, native Floating, IM adapters, and peer-agent backends.
 - typed live observation projection without generic raw debug persistence
 - local loopback HTTP/WebSocket facade for product and API clients
 - generic IM source adapter boundary for first-party Gateway integration
-- backend boundary for Psychevo runtime and future peer-agent executors
+- Gateway application Module and Native/ACP Agent Session seam
 - Runtime Profile selection and native runtime identity projection, as defined
   by [052 Agent Runtimes](../052-agent-runtimes/spec.md)
 
@@ -34,35 +34,38 @@ Out of scope:
 - public internet, LAN, relay, TLS, or installer service behavior
 - concrete IM platform SDKs, stdio, native desktop bridge, or mobile shell
   transport adapters
-- external peer-agent implementation beyond the backend boundary
+- external ACP Agent implementation behind the Agent Session seam
 - provider/model resolution semantics owned by runtime and provider specs
 - capability selection semantics owned by runtime and capability specs
 
 ## Architecture Boundary
 
-`psychevo-gateway` depends on `psychevo-runtime`. Product entrypoints such as
-CLI, TUI, ACP, future Web/Desktop daemons, and IM adapters should call Gateway
-for interactive work instead of assembling runtime turns directly.
+`psychevo-gateway` is the application kernel. Product entrypoints such as CLI,
+TUI, inbound ACP, Web/Desktop, and Channels call one `ThreadApplication`
+Interface instead of assembling turns, controls, interactions, or history
+themselves.
 
-Runtime remains the execution and persistence kernel. Gateway does not own
-agent-loop behavior, provider behavior, tool semantics, permission policy,
-capability selection, context assembly, or durable evidence schemas. Gateway
-normalizes caller inputs and delegates execution to a backend.
+The concrete turn Interface accepts typed input plus caller intent and lowers
+it inside `ThreadApplication` to runtime-internal `RunOptions` and a private
+queue envelope. CLI, TUI, inbound ACP, Web/Desktop, Channels, and automation
+ingress must not construct either internal type or call a lower send primitive.
 
-The first backend is the Psychevo runtime backend. Gateway defines a backend
-trait so future external peer agents can be added as agent executors without
-treating them as AI providers.
+Gateway owns the `AgentSessionHost` seam with two production Adapters: Native
+Psychevo runtime and outbound ACP Agents. `psychevo-runtime` remains the Native
+execution kernel and owns Native agent-loop, provider, tool, context, and
+durable-evidence semantics. Gateway owns public thread identity, immutable
+binding, queueing, delivery classification, interactions, and product
+projection. ACP is external at the Adapter seam and is not Gateway's internal
+application Interface.
 
 ## Threads, Turns, And Identity
 
-Gateway exposes a native Thread/Turn model. For Psychevo-native threads,
-`GatewayThread.id` is the runtime session id. For Runtime Profiles backed by
-Codex, OpenCode, ACP, or future runtimes, `GatewayThread.id` remains the public
-Psychevo thread id. Gateway records `runtimeRef`, backend identity, and optional
-internal native-session identity in the immutable runtime binding. Public
-thread/backend/session projections expose only the Psychevo thread id and an
-opaque Gateway session handle; raw adapter-native ids never cross the product
-contract.
+Gateway exposes one public Thread/Turn model for Native and ACP Agents.
+`GatewayThread.id` is always the Psychevo public thread id. Gateway records the
+captured Agent Definition, Runtime Profile, implementation kind, backend
+identity, and optional internal native-session identity in an immutable
+binding. Public projections expose only the public thread id and opaque Gateway
+handles; raw Adapter-native ids never cross the product contract.
 
 Gateway HTTP session artifact downloads require an authenticated caller. Browser
 surfaces may use the launch-created browser session cookie; Desktop and other
@@ -73,7 +76,8 @@ Source identity is distinct from thread identity. A source describes the
 transport or adapter origin of input, such as CLI run, TUI session, ACP actor,
 Web client, desktop window, or IM chat/thread. Gateway stores a deterministic
 `source_key`, raw source identity, an optional visible label, the bound thread
-id, optional draft Runtime Profile, and lineage metadata for reset/rebind
+id, optional draft top-level Agent Definition and Runtime Profile, typed
+control drafts, and lineage metadata for reset/rebind
 operations. Backend/native identity belongs only to the thread runtime binding;
 legacy source columns are migration evidence and are cleared on every new lane
 write.
@@ -106,10 +110,12 @@ platform, channel, thread, or participant context.
 ## Input And Control
 
 Gateway turn input is a list of transport-neutral parts plus optional structured
-mentions resolved by the client. The first slice supports text, image, explicit
-context parts, and `GatewayMention` records for visible inline references. Text
-and images map to runtime prompt and image inputs. Context parts are included
-only when the caller explicitly marks them model-visible.
+mentions resolved by the client. The stable set supports text, image, resource,
+resource link, explicit embedded context, and `GatewayMention` records for
+visible inline references. Each part is faithfully lowered by the selected
+Adapter or rejected before delivery; textual placeholders and silent omission
+are forbidden. Context parts are included only when the caller explicitly
+marks them model-visible.
 Voice ASR/TTS and provider-native realtime requests are Gateway RPCs owned by
 [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md). Realtime audio frames,
 partial transcripts, SDP, and output audio are live-only transport data; only
@@ -120,8 +126,8 @@ show `$reviewer`, `@src/main.rs`, or `$acp-agent` in the composer while sending
 a structured mention that records the sigil, label, replacement range, target
 kind, and target id/path/URI. Skill mentions are mapped to runtime explicit
 skill inputs. Agent and ACP-capability mentions provide capability metadata and
-disambiguation for the turn, but they do not override the explicit top-level
-`agentName` used to choose the executor for the turn.
+disambiguation for the turn, but they do not override the unbound turn's
+explicit `RunnableTarget`.
 
 Each gateway thread has at most one active turn. Normal inputs submitted while
 a turn is active enter a Gateway-owned FIFO queue for the same source/thread
@@ -244,9 +250,11 @@ bindings according to the source lifetime.
 waiting callers with a queue-cleared error. ACP cancel/stop semantics map to
 `interrupt` plus `clear_queue`.
 
-Transport-level `turn/steer` must include an `expected_turn_id`. Gateway rejects
-or ignores stale steering when the expected turn id does not match the active
-turn.
+Public steering crosses `thread/action/run` with action kind `steer` and an
+`expectedTurnId`. Gateway rejects or ignores stale steering when that id does
+not match the active turn. Interrupt and compact use the same descriptor-gated
+Thread Application action boundary; there are no parallel public turn-control
+RPCs.
 
 ## Interaction Requests
 
@@ -317,17 +325,27 @@ First-slice JSON-RPC methods include:
 - `agent/write`
 - `agent/delete`
 - `backend/list`
+- `backend/write`
 - `backend/doctor`
+- `backend/install`
+- `backend/repair`
+- `backend/upgrade`
 - `command/list`
 - `command/execute`
 - `completion/list`
 - `slash/settings/read`
 - `slash/settings/update`
-- `peerSession/list`
-- `peerSession/import`
 - `thread/start`
 - `thread/resume`
 - `thread/read`
+- `thread/context/read`
+- `thread/draft/prepare`
+- `thread/control/set`
+- `thread/action/run`
+- `thread/interaction/respond`
+- `thread/history/read`
+- `thread/import/list`
+- `thread/import`
 - `thread/list`
 - `thread/browser`
 - `thread/rename`
@@ -335,18 +353,22 @@ First-slice JSON-RPC methods include:
 - `thread/restore`
 - `thread/delete`
 - `turn/start`
-- `turn/steer`
-- `turn/interrupt`
-- `turn/takeover`
 - `source/reset`
-- `permission/respond`
-- `clarify/respond`
 
-`thread/start` may start a local Psychevo thread or a top-level peer-agent
-thread. Peer-agent starts target `agentName`; Gateway resolves generated and
-Markdown agent definitions, validates that the definition has the `peer`
-entrypoint, and routes to the referenced backend. Direct backend-id task starts
-are not supported.
+`thread/start` creates an unbound public thread or rebinds a source lane.
+`turn/start` against an unbound thread supplies one Gateway-validated
+`RunnableTarget`; Gateway captures the Agent Definition and Runtime Profile,
+persists the immutable binding, attaches the Native or ACP Agent, and only then
+delivers the prompt. Direct backend-id task starts are not supported.
+
+`thread/import/list` is the only public discovery entrypoint for Agent-owned
+sessions. It accepts a normal Gateway scope, probes enabled ACP Runtime Profiles
+only after this explicit request, and returns per-Profile partial results with
+opaque candidate/cursor handles. `thread/import` accepts one candidate plus a
+compatible opaque `targetId`, publishes a public Thread only after Agent resume
+and history replay complete, and returns its `ThreadSnapshot`. Raw ACP ids and
+SDK payloads are never public protocol fields. `thread/action/run` carries the
+capability-gated `fork` action for an existing bound Thread.
 
 `completion/list` is the shared input-completion endpoint for Web, Desktop,
 Mobile, and other GUI clients. It accepts `scope`, optional `threadId`, `text`,
@@ -374,20 +396,25 @@ clipboard or download may return a structured client action for the surface to
 perform. Unsupported commands return structured feedback rather than silently
 falling back to prompt text.
 
-`turn/start` returns whether Gateway accepted the turn and the materialized
-thread id when a thread is available. Source-started first turns may pass a null
+`turn/start` returns whether Gateway accepted the turn plus the required
+Gateway-allocated `turnId`, materialized thread id, and authoritative Thread.
+The materialized id is non-null and must equal the authoritative Thread's id;
+clients fail closed instead of selecting between conflicting identities.
+Source-started first turns may pass a null
 `threadId` request; Gateway creates or resolves the human-visible thread before
 returning the accepted result, so compact clients such as Floating can correlate
 subsequent events and follow-up turns without first calling `thread/start`.
 
-Transport-level `turn/steer` includes `expected_turn_id` and is rejected when
-the supplied id does not match the active turn. `turn/takeover` targets a thread
-or source selector; it supersedes stale durable activity directly or records a
-cooperative takeover command for a still-leased foreign owner. `thread/resume`
+`thread/action/run` steering includes `expectedTurnId` and is rejected when the
+supplied id does not match the active turn. Durable activity takeover remains
+an internal Gateway ownership mechanism: it may supersede stale activity or
+record a cooperative command for a still-leased foreign owner, but it is not a
+public client RPC. `thread/resume`
 may resolve by source instead of by thread id; reconnecting clients use it to
 recover the current Gateway-owned snapshot after WebSocket reconnection. The
-snapshot is a transport projection of the current thread transcript, active turn
-id, queued turn count, and pending permission/clarify requests. It is not
+snapshot is a transport projection of the current thread transcript, its
+explicit history owner/fidelity/cursor, active turn id, queued turn count, and
+pending permission/clarify requests. It is not
 durable evidence.
 For source-started turns whose concrete thread id materializes before source
 binding is committed, Gateway must make pending interaction requests recoverable
@@ -432,7 +459,9 @@ include per-session activity so multi-client shells can show background
 running state. A `SessionSummaryView` carries enough display projection for
 every surface to render the same row: stable id, cwd/project metadata,
 title, fallback display title, preview, visible-entry count, persisted counts,
-archive timestamp, and activity.
+archive timestamp, activity, Agent target label, and lifecycle action
+availability. Availability is a product projection with an explanatory reason;
+clients do not infer it from runtime names.
 
 After the first successful turn of a newly created human-visible top-level
 session, Gateway/runtime persists a concise `title` when the title is still
@@ -444,7 +473,13 @@ configured auxiliary title-generation model and then fall back to the first user
 prompt; peer-agent sessions prefer the peer-provided title and otherwise use the
 prompt fallback without invoking a local title model. Title generation is
 display metadata only and must not append transcript messages, tool rows, usage
-rows, or evidence.
+rows, or evidence. For streaming interactive turns, the main Agent terminal
+releases Thread activity without waiting for auxiliary title generation. Title
+generation continues as detached work and publishes
+`titleChanged` after the new title is persisted; its latency or failure must not
+keep Session activity, the Composer interrupt state, or the per-thread turn
+queue running. Non-streamed `pevo run` may continue to await its title before
+returning.
 
 `thread/browser` is the paged session-browser contract for product surfaces. By
 default it groups sessions by workspace, shows sessions updated within the last
@@ -502,14 +537,16 @@ defined by [250 UI Display Model](../250-ui-display-model/spec.md). The
 model uses a Psychevo-owned thread/turn/entry contract and omits backend-specific
 fields unless they are required for Psychevo semantics.
 
-Gateway snapshots expose message-derived transcript entries as the ordinary
-transcript. Gateway events include thread lifecycle, turn lifecycle, typed
-entry started/updated/completed observations, permission requests and
-resolutions, clarify requests and resolutions, status, warnings, and terminal
-turn outcomes. Ordinary Gateway events do not include raw runtime event
-fallbacks. Raw or unclassified runtime/provider observations are ignored by the
-ordinary Gateway stream unless another spec assigns them explicit typed
-semantics.
+Gateway snapshots expose owner-derived transcript entries as the ordinary
+transcript. Native history is Psychevo-authoritative. ACP history is
+Agent-authoritative when load/resume is negotiated and process-ephemeral
+otherwise. Every snapshot identifies owner, fidelity, resumability, and cursor;
+unavailability preserves public thread metadata without fabricating content.
+Gateway events include thread lifecycle, turn lifecycle, typed entry
+started/updated/completed observations, interaction requests and resolutions,
+status, warnings, and terminal outcomes. Ordinary events do not include raw
+runtime or ACP fallbacks. Raw or unclassified observations are ignored unless
+another spec assigns them explicit typed semantics.
 
 Gateway events are live observations, not durable evidence. Durable records
 remain owned by runtime and storage specs. [035 Event
@@ -524,7 +561,7 @@ running entry until the committed turn slice or next snapshot refresh arrives.
 Preview text and incremental updates may only update an existing live entry by
 id; clients must not invent durable records from previews alone. A subsequent
 `thread/read` or `thread/resume` snapshot remains authoritative and may replace
-live ids with message-derived entry ids.
+live ids with authoritative owner-derived entry ids.
 
 When `thread/read` or explicit `thread/resume` targets a non-stale running
 thread, the snapshot must include the durable `GatewayActivityView` timestamps
@@ -551,36 +588,69 @@ kind/body replacement in place by id, not keep both the provisional assistant
 row and the completed preamble row. Non-tool assistant completions remain
 assistant text entries and must never be projected into a Thinking row.
 
-## Runtime Host And Immutable Bindings
+## Agent Session Host And Immutable Bindings
 
-Gateway owns public thread identity and crosses the direct-runtime seam through
-the three-method psychevo-runtime-host interface defined by
-[052 Agent Runtimes](../052-agent-runtimes/spec.md). It does not expose an
-adapter command bus or keep adding runtime-specific methods to GatewayBackend.
+Gateway owns public thread identity and crosses one `AgentSessionHost` seam
+through Native and outbound ACP Adapters as defined by [052 Agent
+Runtimes](../052-agent-runtimes/spec.md). It does not expose an Adapter command
+bus or runtime-name-specific methods.
 
-Before Gateway delivers a first prompt to a non-native runtime, it persists the
-thread binding, including runtimeRef, backend/native kinds, cwd, profile
-fingerprint, the complete effective execution/safety Profile snapshot, adapter
-revision, ownership, and binding revision. The binding is immutable. Source
-lanes may point to a new thread, but they cannot rewrite an existing thread's
-runtime identity.
+`AgentSessionHost.attach` captures the public thread id, binding revision, and
+immutable binding fingerprints. Reattaching the same capture is idempotent;
+reusing the same thread/revision for a different target is rejected before an
+Adapter command. Ordering has exactly one owner: the Thread Application active
+queue for Native execution and the outbound ACP process pool's resident
+per-session actor for ACP execution. The Host is the identity-and-routing seam,
+not a second mailbox layered over either authority.
 
-runtime/context/read is the coherent read interface for Composer and Channels.
-It returns draft or bound selection, cached Profile choices and readiness,
-three-state controls, active native-session context, and revisions. It is
-cache-only and cannot spawn or contact a provider.
+Before Gateway delivers a first prompt, it persists the thread binding,
+including Agent Definition and Runtime Profile snapshots, implementation kind,
+backend reference, cwd, profile fingerprint, safety policy, Adapter revision,
+ownership, and binding revision. The binding is immutable. A newly created or
+resumed ACP native session id is also persisted before delivery. Source lanes
+may point to a new thread, but cannot rewrite an existing thread identity.
 
-Runtime turns preserve the normal Gateway lifecycle and interaction model.
-Every accepted turn receives exactly one terminal. Process exit closes waiters;
-uncertain delivery is not retried; direct failures never fall back to native.
-Runtime errors and interactions carry typed stage, retry, diagnostic, runtime,
-thread, and optional child origin. RuntimeStateChanged and RuntimeChildChanged
-are normalized events; raw JSON-RPC, HTTP, SSE, ids, and secrets remain private.
+`thread/context/read` is the coherent cache-only read for every caller. For an
+unbound source it accepts an optional prospective `RunnableTarget` and scopes
+input admission, controls, and sendability to that exact pair; for a bound
+Thread the immutable binding is authoritative. It returns draft or bound
+target, compatible choices and readiness, typed input, control and action
+descriptors, sendability, history state, interactions, and
+revisions. It cannot create a session or contact a provider; explicit refresh
+or Doctor owns probes.
 
-Stable runtime-native children receive read-only public child bindings and lazy
-history. They are navigable through the same child-thread projection but are not
-controllable through send, steer, stop, or agent/control unless a future
-runtime contract explicitly proves that capability.
+`thread/draft/prepare` is the explicit side-effecting preparation boundary for
+an unbound source and one opaque `targetId`. Native targets only replace the
+source draft. ACP targets create or reuse one unpublished resident Agent
+session and return its authoritative config-option projection as a complete
+Thread Context. Repeating the same source/target/cwd/fingerprint is idempotent;
+preparing a different target replaces and releases the prior draft. The native
+draft session id is process-local, is never persisted or exposed, and is
+promoted into the immutable binding by the first accepted `turn/start` without
+a second `session/new`.
+
+`thread/control/set` names the same opaque `targetId` returned by that context.
+For an unbound source, Gateway resolves and stores the complete prospective
+Agent/Profile pair before returning the authoritative receipt; a Runtime
+Profile id alone is not sufficient control identity. When that source owns a
+prepared ACP draft, the mutation is also sent to the resident Agent and the
+receipt reflects its config-option acknowledgement.
+
+Every accepted turn receives exactly one terminal. Process exit closes
+waiters; uncertain delivery is not retried; one Adapter never falls back to the
+other. Errors carry typed stage, retry, delivery, diagnostic, thread, and
+optional child origin. Raw ACP messages, native ids, process handles, and
+secrets remain private.
+
+Opening or reading an uncertain Thread remains cache-only. For Agent-owned
+resumable history, the next explicit turn attaches and loads the Agent session,
+reconciles any terminal already owned by the Agent, and then delivers only the
+new input. Gateway never replays the input whose delivery was uncertain.
+
+Capability-proven Agent-native children may receive read-only public child
+bindings and lazy history. They are navigable through the same child-thread
+projection but are not controllable unless a negotiated, implemented,
+certified, and granted action descriptor proves that capability.
 
 ## IM Adapter Boundary
 

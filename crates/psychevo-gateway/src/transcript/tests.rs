@@ -186,6 +186,68 @@
     }
 
     #[test]
+    fn projector_materializes_acp_plan_metadata_as_a_display_only_status_block() {
+        let mut assistant = summary(
+            1,
+            Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: "Plan accepted.".to_string(),
+                }],
+                timestamp_ms: 10,
+                finish_reason: Some("end_turn".to_string()),
+                outcome: Outcome::Normal,
+                model: Some("OpenCode".to_string()),
+                provider: Some("acp:opencode".to_string()),
+            },
+        );
+        assistant.metadata = Some(json!({
+            "acp": {
+                "messageIds": ["assistant-1"],
+                "origin": "live",
+                "turnId": "turn-plan",
+                "plan": {
+                    "body": "- [x] Inspect repo\n- [~] Persist the latest plan",
+                    "update": {
+                        "sessionUpdate": "plan",
+                        "entries": [
+                            {"content": "Inspect repo", "priority": "high", "status": "completed"},
+                            {"content": "Persist the latest plan", "priority": "high", "status": "in_progress"}
+                        ]
+                    }
+                }
+            }
+        }));
+
+        let entries = project_transcript_entries("thread-1", &[assistant]);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0]
+                .blocks
+                .iter()
+                .map(|block| block.kind)
+                .collect::<Vec<_>>(),
+            vec![TranscriptBlockKind::Text, TranscriptBlockKind::Status]
+        );
+        let plan = &entries[0].blocks[1];
+        assert_eq!(plan.id, "turn:turn-plan:acp-peer-plan");
+        assert_eq!(plan.status, TranscriptBlockStatus::Completed);
+        assert_eq!(plan.title.as_deref(), Some("Plan"));
+        assert_eq!(
+            plan.body.as_deref(),
+            Some("- [x] Inspect repo\n- [~] Persist the latest plan")
+        );
+        assert_eq!(plan.metadata.as_ref().unwrap()["projection"], "acp_peer_plan");
+        assert_eq!(plan.metadata.as_ref().unwrap()["origin"], "acp_peer");
+        assert_eq!(plan.metadata.as_ref().unwrap()["source"], "acp_peer");
+        assert_eq!(plan.metadata.as_ref().unwrap()["turnId"], "turn-plan");
+        assert_eq!(
+            plan.metadata.as_ref().unwrap()["plan"]["entries"][1]["content"],
+            "Persist the latest plan"
+        );
+    }
+
+    #[test]
     fn projector_promotes_generated_image_tool_result_to_artifact_block() {
         let content = json!({
             "status": "completed",

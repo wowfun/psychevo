@@ -157,12 +157,9 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            blocks.extend(direct_runtime_observation_blocks(
-                thread_id,
-                summary,
-                *timestamp_ms,
-                content.len() as i64,
-            ));
+            if let Some(plan) = acp_plan_block(summary, status, *timestamp_ms, &blocks) {
+                blocks.push(plan);
+            }
             Some(entry(
                 thread_id,
                 summary,
@@ -176,85 +173,48 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
     }
 }
 
-fn direct_runtime_observation_blocks(
-    thread_id: &str,
+fn acp_plan_block(
     summary: &TuiMessageSummary,
+    status: TranscriptBlockStatus,
     timestamp_ms: i64,
-    content_order: i64,
-) -> Vec<TranscriptBlock> {
-    let Some(metadata) = summary.metadata.as_ref() else {
-        return Vec::new();
-    };
-    let Some(runtime_ref) = metadata.get("runtimeRef").and_then(Value::as_str) else {
-        return Vec::new();
-    };
-    let mut blocks = Vec::new();
-    if let Some(plan) = metadata
-        .get("runtimePlan")
-        .cloned()
-        .and_then(|value| {
-            serde_json::from_value::<psychevo_runtime_host::RuntimePlanUpdate>(value).ok()
-        })
-        .filter(|plan| {
-            plan.runtime_ref == runtime_ref
-                && plan.thread_id == thread_id
-                && !plan.turn_id.trim().is_empty()
-                && (plan.explanation.as_deref().is_some_and(|value| !value.trim().is_empty())
-                    || !plan.steps.is_empty())
-        })
+    existing_blocks: &[TranscriptBlock],
+) -> Option<TranscriptBlock> {
+    let acp = summary.metadata.as_ref()?.get("acp")?;
+    let turn_id = acp.get("turnId")?.as_str()?.trim();
+    let projection = acp.get("plan")?;
+    let body = projection.get("body")?.as_str()?.trim();
+    let update = projection.get("update")?;
+    if turn_id.is_empty()
+        || body.is_empty()
+        || update.get("sessionUpdate").and_then(Value::as_str) != Some("plan")
     {
-        let body = crate::direct_runtime_plan_body(&plan);
-        blocks.push(block(
-            format!("message:{}:runtime-plan", summary.session_seq),
-            TranscriptBlockKind::Status,
-            TranscriptBlockStatus::Completed,
-            content_order + 10,
-            "runtime.profile",
-            Some("Plan".to_string()),
-            Some(body.clone()),
-            Some(body),
-            Some(json!({
-                "projection": "runtime_plan",
-                "origin": "runtime_profile",
-                "runtimeRef": runtime_ref,
-                "plan": plan,
-            })),
-            timestamp_ms,
-        ));
+        return None;
     }
-    if let Some(diff) = metadata
-        .get("runtimeDiff")
-        .cloned()
-        .and_then(|value| {
-            serde_json::from_value::<psychevo_runtime_host::RuntimeDiffUpdate>(value).ok()
-        })
-        .filter(|diff| {
-            diff.runtime_ref == runtime_ref
-                && diff.thread_id == thread_id
-                && !diff.turn_id.trim().is_empty()
-                && !diff.diff.trim().is_empty()
-        })
-    {
-        blocks.push(block(
-            format!("message:{}:runtime-diff", summary.session_seq),
-            TranscriptBlockKind::Diff,
-            TranscriptBlockStatus::Completed,
-            content_order + 20,
-            "runtime.profile",
-            Some("Diff".to_string()),
-            Some(diff.diff.clone()),
-            Some(diff.diff),
-            Some(json!({
-                "projection": "runtime_diff",
-                "origin": "runtime_profile",
-                "runtimeRef": runtime_ref,
-                "threadId": diff.thread_id,
-                "turnId": diff.turn_id,
-            })),
-            timestamp_ms,
-        ));
-    }
-    blocks
+    let order = existing_blocks
+        .iter()
+        .map(|block| block.order)
+        .max()
+        .unwrap_or(-1)
+        .saturating_add(1);
+    let metadata = json!({
+        "projection": "acp_peer_plan",
+        "origin": "acp_peer",
+        "source": "acp_peer",
+        "turnId": turn_id,
+        "plan": update,
+    });
+    Some(block(
+        format!("turn:{turn_id}:acp-peer-plan"),
+        TranscriptBlockKind::Status,
+        status,
+        order,
+        "runtime.message",
+        Some("Plan".to_string()),
+        Some(body.to_string()),
+        Some(body.to_string()),
+        Some(metadata),
+        timestamp_ms,
+    ))
 }
 
 fn tool_call_title(tool_name: &str, arguments: &Value) -> String {
@@ -386,6 +346,7 @@ fn block(
         kind,
         status,
         order,
+        phase_ordinal: None,
         source: source.to_string(),
         title,
         preview: body

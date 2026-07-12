@@ -11,57 +11,29 @@ struct PendingGatewayLiveSnapshot {
     dirty: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct GatewayRuntimeSnapshotCacheKey {
-    runtime_ref: String,
-    profile_fingerprint: String,
-    scope: GatewayRuntimeSnapshotScopeKey,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum GatewayRuntimeSnapshotScopeKey {
-    Profile,
-    Workspace {
-        cwd: PathBuf,
-    },
-    Session {
-        cwd: PathBuf,
-        thread_id: String,
-        native_session_id: Option<String>,
-    },
-}
-
 #[derive(Clone)]
-pub struct Gateway {
+pub struct ThreadApplication {
     state: StateRuntime,
-    backend: Arc<dyn GatewayBackend>,
-    runtime_host: RuntimeHost,
-    runtime_snapshots: Arc<Mutex<HashMap<GatewayRuntimeSnapshotCacheKey, RuntimeSnapshot>>>,
+    agent_sessions: AgentSessionHost,
     active: Arc<Mutex<HashMap<String, ActiveThreadState>>>,
     active_aliases: Arc<Mutex<HashMap<String, String>>>,
     process_bindings: Arc<Mutex<HashMap<String, String>>>,
     source_generations: Arc<Mutex<HashMap<String, u64>>>,
     live_snapshots: Arc<Mutex<HashMap<String, PendingGatewayLiveSnapshot>>>,
     pending_permissions: PendingPermissionMap,
-    pending_runtime_interactions: PendingRuntimeInteractionMap,
     owner_id: Arc<String>,
 }
 
-impl fmt::Debug for Gateway {
+/// Compatibility-free internal application kernel. The public `Gateway` name is
+/// an API-facing alias; caller adapters do not own Agent execution policy.
+pub type Gateway = ThreadApplication;
+
+impl fmt::Debug for ThreadApplication {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("Gateway")
+            .debug_struct("ThreadApplication")
             .field("state", &self.state)
-            .field("backend", &self.backend)
-            .field("runtime_host", &self.runtime_host)
-            .field(
-                "runtime_snapshot_count",
-                &self
-                    .runtime_snapshots
-                    .lock()
-                    .expect("gateway runtime snapshot cache poisoned")
-                    .len(),
-            )
+            .field("agent_sessions", &self.agent_sessions)
             .finish_non_exhaustive()
     }
 }

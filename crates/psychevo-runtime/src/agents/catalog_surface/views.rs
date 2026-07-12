@@ -133,7 +133,7 @@ pub(crate) fn default_peer_client_capabilities() -> BTreeSet<String> {
         .collect()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentDiagnostic {
     pub kind: String,
     pub message: String,
@@ -163,7 +163,7 @@ impl AgentDiagnostic {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentToolPolicy {
     pub allowed: Option<BTreeSet<String>>,
     pub denied: BTreeSet<String>,
@@ -212,7 +212,7 @@ impl AgentContribution {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentDefinition {
     pub name: String,
     pub description: String,

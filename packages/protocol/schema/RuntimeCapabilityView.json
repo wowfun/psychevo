@@ -19,6 +19,13 @@
     },
     "stability": {
       "$ref": "#/definitions/RuntimeStabilityView"
+    },
+    "unavailableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentDeliveryStatusView": {
+      "enum": [
+        "notDelivered",
+        "unknown",
+        "delivered"
+      ],
+      "type": "string"
+    },
+    "AgentErrorView": {
+      "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivery": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentDeliveryStatusView"
+            }
+          ],
+          "default": "unknown"
+        },
+        "diagnosticRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "recoveryAction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "RunnableTargetView": {
+      "properties": {
+        "agentLabel": {
+          "type": "string"
+        },
+        "agentRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "profileLabel": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "runtimeProfileRef": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentLabel",
+        "label",
+        "profileLabel",
+        "ready",
+        "runtimeProfileRef",
+        "targetId"
+      ],
+      "type": "object"
+    },
+    "ThreadImportCandidateView": {
+      "properties": {
+        "candidateId": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "candidateId",
+        "cwd"
+      ],
+      "type": "object"
+    },
+    "ThreadImportProfileView": {
+      "properties": {
+        "alreadyImportedCount": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentErrorView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "nextCursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profileLabel": {
+          "type": "string"
+        },
+        "runtimeProfileRef": {
+          "type": "string"
+        },
+        "sessions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadImportCandidateView"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        },
+        "targets": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RunnableTargetView"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "profileLabel",
+        "runtimeProfileRef",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "profiles": {
+      "items": {
+        "$ref": "#/definitions/ThreadImportProfileView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "profiles"
+  ],
+  "title": "ThreadImportListResult",
+  "type": "object"
+}

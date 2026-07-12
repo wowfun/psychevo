@@ -48,6 +48,14 @@ impl Gateway {
                 "{error}; failed to persist the accepted turn terminal: {terminal_error}"
             )));
         }
+        if result.is_err()
+            && let Err(delivery_error) = self.state.store().finish_gateway_turn_delivery(&turn_id)
+        {
+            return Err(Error::Message(format!(
+                "{}; failed to finalize the accepted turn delivery ledger: {delivery_error}",
+                result.as_ref().expect_err("result is an error")
+            )));
+        }
         result
     }
 
@@ -76,6 +84,11 @@ impl Gateway {
         } else {
             request.continue_sources.clone()
         };
+        let input = request.input.clone();
+        let initial_thread_preferences = request.initial_thread_preferences.clone();
+        let delivery_input = gateway_delivery_input_parts(&request);
+        let delivery_input_json = serde_json::to_string(&delivery_input)?;
+        let delivery_input_hash = format!("{:x}", Sha256::digest(delivery_input_json.as_bytes()));
         let mut options = request.options;
         options.state = self.state.clone();
         apply_input_parts(&mut options, &request.input)?;
@@ -95,8 +108,10 @@ impl Gateway {
         if active_thread_id.is_none() {
             options.cwd = psychevo_runtime::canonicalize_cwd(&options.cwd)?;
             if options.continue_latest {
-                let continue_source_refs =
-                    continue_sources.iter().map(String::as_str).collect::<Vec<_>>();
+                let continue_source_refs = continue_sources
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>();
                 active_thread_id = self
                     .state
                     .store()
@@ -104,15 +119,13 @@ impl Gateway {
             }
         }
         if active_thread_id.is_none() {
-            active_thread_id = Some(
-                self.state.store().create_session_with_metadata(
-                    &options.cwd,
-                    &source_name,
-                    "pending",
-                    "pending",
-                    None,
-                )?,
-            );
+            active_thread_id = Some(self.state.store().create_session_with_metadata(
+                &options.cwd,
+                &source_name,
+                "pending",
+                "pending",
+                None,
+            )?);
         }
         if let Some(thread_id) = active_thread_id.clone() {
             options.cwd = self.thread_cwd(&thread_id)?;
@@ -135,7 +148,7 @@ impl Gateway {
                 .store()
                 .gateway_source_lane(&source.source_key().0)?
         {
-            options.runtime_ref = lane.draft_runtime_ref;
+            options.runtime_ref = lane.draft_profile_ref;
         }
         let durable_source_key = if request.thread_id.is_some() {
             None
@@ -145,6 +158,10 @@ impl Gateway {
                 .or(bind_source.as_ref())
                 .map(|source| source.source_key().0)
         };
+        let draft_source_key = queue_source
+            .as_ref()
+            .or(bind_source.as_ref())
+            .map(|source| source.source_key().0);
         let first_committed_seq = active_thread_id
             .as_deref()
             .and_then(|thread_id| {
@@ -221,10 +238,34 @@ impl Gateway {
         let auto_inherited_env = options.inherited_env.clone();
         // Everything after the durable claim is funneled through one result so configuration,
         // binding, and adapter failures all produce the same single terminal lifecycle.
-        let backend_result = async {
-            let (profile_config, profile_revision, profile_fingerprint) =
-                resolve_gateway_runtime_profile(&options)?;
+        let backend_result: psychevo_runtime::Result<(RunResult, GatewayBackendInfo)> = async {
+            let bound_target = resolve_bound_gateway_agent_target(
+                &options,
+                options.runtime_ref.as_deref(),
+            )?;
+            let (profile_config, profile_revision, profile_fingerprint) = match bound_target.as_ref()
+            {
+                Some(target) => (
+                    target.profile.clone(),
+                    target.revision,
+                    target.fingerprint.clone(),
+                ),
+                None => resolve_gateway_runtime_profile(&options)?,
+            };
             options.runtime_ref = Some(profile_config.id.clone());
+            let existing_binding = match bound_target.as_ref() {
+                Some(target) => Some(target.binding.clone()),
+                None => self.state.store().gateway_runtime_binding(
+                    active_thread_id.as_deref().expect("gateway thread exists"),
+                )?,
+            };
+            let agent_binding = resolve_gateway_agent_binding_snapshot(
+                &options,
+                &profile_config,
+                existing_binding.as_ref(),
+                AgentEntrypoint::Peer,
+            )?;
+            options.agent = agent_binding.agent_ref.clone();
             if options.approval_handler.is_none()
                 && let Some(event_sink) = event_sink_for_completion.clone()
             {
@@ -238,14 +279,76 @@ impl Gateway {
                     session_authorization_lifetime,
                 )));
             }
-            let binding = ensure_gateway_runtime_binding(
+            let mut binding = ensure_gateway_runtime_binding(
                 &self.state,
                 active_thread_id.as_deref().expect("gateway thread exists"),
+                &agent_binding,
                 &profile_config,
                 profile_revision,
                 &profile_fingerprint,
             )?;
-            let peer = if profile_config.runtime == RuntimeProfileKind::Acp {
+            if existing_binding.is_none() && !initial_thread_preferences.is_empty() {
+                let preferences = initial_thread_preferences
+                    .iter()
+                    .map(|(control_id, value)| {
+                        (control_id.clone(), Value::String(value.clone()))
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                binding = self
+                    .state
+                    .store()
+                    .compare_and_set_gateway_runtime_control_state(
+                        &binding.thread_id,
+                        binding.binding_revision,
+                        binding.control_revision,
+                        GatewayRuntimeControlStatePatch {
+                            thread_preferences: Some(&preferences),
+                            runtime_observed: None,
+                        },
+                    )?;
+            }
+            if existing_binding.is_none()
+                && profile_config.runtime == RuntimeProfileKind::Acp
+                && let Some(source_key) = draft_source_key.as_deref()
+                && let Some(native_session_id) = self
+                    .agent_sessions
+                    .promote_prepared(
+                        source_key,
+                        binding.agent_ref.as_deref(),
+                        &profile_config.id,
+                        &profile_fingerprint,
+                        &binding.thread_id,
+                    )
+                    .await?
+            {
+                self.state.store().attach_gateway_runtime_native_session(
+                    &binding.thread_id,
+                    binding.binding_revision,
+                    &native_session_id,
+                )?;
+                options.runtime_session_id = Some(native_session_id);
+                binding = self
+                    .state
+                    .store()
+                    .gateway_runtime_binding(&binding.thread_id)?
+                    .ok_or_else(|| {
+                        agent_session_configuration_error(
+                            "Promoted ACP draft lost its immutable Thread binding.",
+                        )
+                    })?;
+            }
+            self.state
+                .store()
+                .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
+                    turn_id: &turn_id,
+                    thread_id: &binding.thread_id,
+                    runtime_ref: &profile_config.id,
+                    input_json: &delivery_input_json,
+                    input_hash: &delivery_input_hash,
+                })?;
+            let peer = if let Some(target) = bound_target {
+                target.peer
+            } else if profile_config.runtime == RuntimeProfileKind::Acp {
                 let mut peer_options = options.clone();
                 peer_options.runtime_ref = profile_config.backend_ref.clone();
                 resolve_peer_turn(&peer_options)?
@@ -265,107 +368,32 @@ impl Gateway {
                     event_sink: event_sink_for_completion.clone(),
                 }));
             }
-            let requested_runtime_ref = Some(profile_config.id.clone());
-            let mut backend_request = BackendTurnRequest {
+            let backend_request = BackendTurnRequest {
                 options,
+                input,
                 runtime_source: source_name,
                 continue_sources,
                 stream,
                 control,
             };
-            match profile_config.runtime {
-                RuntimeProfileKind::Codex | RuntimeProfileKind::OpenCode => {
-                    let pairing = resolve_direct_agent_pairing_for_thread(
-                        &self.state,
-                        active_thread_id.as_deref().expect("gateway thread exists"),
-                        &backend_request.options,
-                    )?;
-                    // `agentName` selects a Psychevo Agent Definition. A runtime-native agent
-                    // control is an independent Profile option and must not inherit that value.
-                    backend_request.options.agent = backend_request
-                        .options
-                        .runtime_options
-                        .get("agent")
-                        .cloned();
-                    run_direct_runtime_turn(
-                        self,
-                        DirectRuntimeTurnInput {
-                            profile_config: profile_config.clone(),
-                            profile_revision,
-                            profile_fingerprint,
-                            binding: binding.clone(),
-                            request: backend_request,
-                            turn_id: turn_id.clone(),
-                            event_sink: event_sink_for_completion.clone(),
-                            instructions: pairing.instructions,
-                        },
-                    )
-                    .await
-                    .map(|result| {
-                        let session_handle = runtime_session_handle(
-                            &profile_config.id,
-                            &result.run.cwd,
-                            &result.native_session_id,
-                        );
-                        (
-                            result.run,
-                            GatewayBackendInfo {
-                                kind: BackendKind::Runtime,
-                                runtime_ref: requested_runtime_ref.clone(),
-                                native_id: Some(session_handle),
-                            },
-                        )
-                    })
-                }
-                RuntimeProfileKind::Acp => {
-                    apply_acp_profile_turn_controls(
-                        &mut backend_request.options,
-                        &profile_config,
-                    );
-                    let peer = peer.ok_or_else(|| {
-                        runtime_host_configuration_error(format!(
-                            "ACP Runtime Profile `{}` references an unavailable backend.",
-                            profile_config.id
-                        ))
-                    })?;
-                    acp_peer::run_acp_peer_turn(peer, backend_request, turn_id.clone())
-                        .await
-                        .and_then(|result| {
-                            self.state.store().attach_gateway_runtime_native_session(
-                                &binding.thread_id,
-                                binding.binding_revision,
-                                &result.native_session_id,
-                            )?;
-                            let session_handle = runtime_session_handle(
-                                &profile_config.id,
-                                &result.run.cwd,
-                                &result.native_session_id,
-                            );
-                            Ok((
-                                result.run,
-                                GatewayBackendInfo {
-                                    kind: BackendKind::PeerAgent,
-                                    runtime_ref: requested_runtime_ref.clone(),
-                                    native_id: Some(session_handle),
-                                },
-                            ))
-                        })
-                }
-                RuntimeProfileKind::Native => {
-                    self.backend.run_turn(backend_request).await.map(|result| {
-                        (
-                            result,
-                            GatewayBackendInfo {
-                                kind: self.backend.kind(),
-                                runtime_ref: requested_runtime_ref
-                                    .clone()
-                                    .or_else(|| Some("native".to_string())),
-                                native_id: None,
-                            },
-                        )
-                    })
-                }
-            }
+            let attached = self
+                .agent_sessions
+                .attach(CapturedAgentSessionTarget::bound(
+                    &binding,
+                    profile_config.clone(),
+                    peer,
+                )?)?;
+            let session_ready = (profile_config.runtime == RuntimeProfileKind::Acp)
+                .then(|| acp_session_ready_for_binding(self.state.clone(), binding));
+            let output = attached
+                .transact(AgentSessionCommand::SubmitTurn {
+                    request: Box::new(backend_request),
+                    turn_id: turn_id.clone(),
+                    session_ready,
+                })
+                .await?
+                .into_turn()?;
+            Ok((output.run, output.backend))
         }
         .await;
         let (result, backend_info) = match backend_result {
@@ -425,7 +453,7 @@ impl Gateway {
             }
         };
         let mut auto_compaction = None;
-        if backend_info.kind == BackendKind::Psychevo
+        if backend_info.kind == BackendKind::Native
             && backend_info
                 .runtime_ref
                 .as_deref()
@@ -484,6 +512,7 @@ impl Gateway {
             last_committed_seq: Some(last_committed_seq),
             durable_activity: durable_activity.as_ref(),
         })?;
+        self.state.store().finish_gateway_turn_delivery(&turn_id)?;
         let mut committed_entries = transcript::project_committed_turn_window_entries(
             &result.session_id,
             &summaries,
@@ -510,6 +539,10 @@ impl Gateway {
             ));
         }
         committed_entries.extend(self.project_terminal_entry_for_turn(&turn_id));
+        self.finish_durable_gateway_activity(
+            durable_activity.as_ref(),
+            durable_activity_status_for_turn(turn_status),
+        );
         if let Some(event_sink) = event_sink_for_completion {
             event_sink(GatewayEvent::TurnCompleted {
                 thread_id: Some(result.session_id.clone()),
@@ -525,11 +558,6 @@ impl Gateway {
                 });
             }
         }
-        self.finish_durable_gateway_activity(
-            durable_activity.as_ref(),
-            durable_activity_status_for_turn(turn_status),
-        );
-
         if let Some(source) = &bind_source {
             self.bind_source_to_result(
                 source,
@@ -580,7 +608,20 @@ impl Gateway {
         event_sink: Option<&GatewayEventSink>,
         error: &Error,
     ) -> psychevo_runtime::Result<()> {
-        if self.state.store().gateway_turn_terminal(turn_id)?.is_some() {
+        if let Some(terminal) = self.state.store().gateway_turn_terminal(turn_id)? {
+            self.mark_active_turn_terminal(turn_id);
+            if let Some(activity) = self.state.store().gateway_activity(turn_id)? {
+                self.finish_durable_gateway_activity(
+                    Some(&DurableGatewayActivity {
+                        activity_id: activity.activity_id,
+                        owner_id: activity.owner_id,
+                        generation: activity.generation,
+                        turn_id: activity.turn_id,
+                        kind: activity.kind,
+                    }),
+                    &terminal.status,
+                );
+            }
             return Ok(());
         }
         let activity_record = self.state.store().gateway_activity(turn_id)?;
@@ -616,6 +657,7 @@ impl Gateway {
             durable_activity: durable_activity.as_ref(),
         })?;
         let committed_entries = self.project_terminal_entry_for_turn(turn_id);
+        self.finish_durable_gateway_activity(durable_activity.as_ref(), "failed");
         if let Some(event_sink) = event_sink {
             event_sink(GatewayEvent::TurnCompleted {
                 thread_id: Some(thread_id),
@@ -624,7 +666,6 @@ impl Gateway {
                 committed_entries,
             });
         }
-        self.finish_durable_gateway_activity(durable_activity.as_ref(), "failed");
         Ok(())
     }
 
@@ -642,15 +683,12 @@ impl Gateway {
             thread_id: input.thread_id.map(str::to_string),
             status: input.status,
             outcome: input.outcome.map(str::to_string),
-            error: input
-                .classified_error
-                .cloned()
-                .or_else(|| {
-                    input
-                        .error_message
-                        .filter(|message| !message.trim().is_empty())
-                        .map(|message| gateway_turn_error(message, input.error_data))
-                }),
+            error: input.classified_error.cloned().or_else(|| {
+                input
+                    .error_message
+                    .filter(|message| !message.trim().is_empty())
+                    .map(|message| gateway_turn_error(message, input.error_data))
+            }),
             started_at_ms,
             completed_at_ms: Some(completed_at_ms),
         };
@@ -778,8 +816,7 @@ impl Gateway {
                 })?
             }
         };
-        let bound_profile =
-            resolve_bound_gateway_runtime_profile(&self.state, &thread_id, None)?;
+        let bound_profile = resolve_bound_gateway_runtime_profile(&self.state, &thread_id, None)?;
         if let Some(bound) = bound_profile.as_ref()
             && let Some(requested) = request
                 .runtime_ref
@@ -788,15 +825,17 @@ impl Gateway {
                 .filter(|value| !value.is_empty() && *value != "native")
             && requested != bound.profile.id
         {
-            return Err(runtime_host_error(RuntimeError::new(
+            return Err(agent_session_error(
                 "immutable_binding",
-                RuntimeErrorStage::Binding,
-                RetryClass::UserAction,
+                AgentErrorStage::Binding,
+                "user_action",
+                "not_delivered",
                 format!(
                     "Thread `{thread_id}` is bound to Runtime Profile `{}`; compaction cannot use `{requested}`.",
                     bound.profile.id
                 ),
-            )));
+                Some(format!("agent-binding:{thread_id}")),
+            ));
         }
         let legacy_non_native_runtime = if bound_profile.is_none() {
             self.non_native_compaction_runtime(&request, &thread_id)?
@@ -844,24 +883,9 @@ impl Gateway {
         }
 
         let result = match bound_profile {
-            Some(bound) if bound.profile.runtime == RuntimeProfileKind::Codex => {
-                execute_gateway_runtime_compaction(
-                    self,
-                    bound,
-                    &thread_id,
-                    cwd,
-                    request.reason,
-                    request.instructions,
-                )
-                .await
-            }
-            Some(bound) if bound.profile.runtime != RuntimeProfileKind::Native => {
-                Ok(unavailable_compaction_result(
-                    &thread_id,
-                    request.reason,
-                    &bound.profile.id,
-                ))
-            }
+            Some(bound) if bound.profile.runtime == RuntimeProfileKind::Acp => Ok(
+                unavailable_compaction_result(&thread_id, request.reason, &bound.profile.id),
+            ),
             None if legacy_non_native_runtime.is_some() => Ok(unavailable_compaction_result(
                 &thread_id,
                 request.reason,
@@ -869,19 +893,21 @@ impl Gateway {
                     .as_deref()
                     .expect("checked legacy runtime identity"),
             )),
-            _ => psychevo_runtime::compact_session(psychevo_runtime::CompactSessionOptions {
-                state: self.state.clone(),
-                cwd,
-                session: thread_id,
-                config_path: request.config_path,
-                model: request.model,
-                reasoning_effort: request.reasoning_effort,
-                inherited_env: request.inherited_env,
-                reason: request.reason,
-                instructions: request.instructions,
-                force: request.force,
-            })
-            .await,
+            _ => {
+                psychevo_runtime::compact_session(psychevo_runtime::CompactSessionOptions {
+                    state: self.state.clone(),
+                    cwd,
+                    session: thread_id,
+                    config_path: request.config_path,
+                    model: request.model,
+                    reasoning_effort: request.reasoning_effort,
+                    inherited_env: request.inherited_env,
+                    reason: request.reason,
+                    instructions: request.instructions,
+                    force: request.force,
+                })
+                .await
+            }
         };
         self.finish_durable_gateway_activity(
             durable_activity.as_ref(),
@@ -1040,7 +1066,7 @@ impl Gateway {
             .or(active_thread_id)
             .ok_or_else(|| Error::Message("shell command did not resolve a session".to_string()))?;
         let backend = GatewayBackendInfo {
-            kind: BackendKind::Psychevo,
+            kind: BackendKind::Native,
             runtime_ref: Some("native".to_string()),
             native_id: Some(session_id.clone()),
         };
@@ -1098,6 +1124,29 @@ impl Gateway {
     }
 }
 
+fn gateway_delivery_input_parts(request: &SendTurnRequest) -> Vec<GatewayInputPart> {
+    if !request.input.is_empty() {
+        return request.input.clone();
+    }
+    let mut input = Vec::new();
+    if !request.options.prompt.is_empty() {
+        input.push(GatewayInputPart::Text {
+            text: request.options.prompt.clone(),
+        });
+    }
+    input.extend(request.options.image_inputs.iter().cloned().map(|image| {
+        GatewayInputPart::Image {
+            input: match image {
+                ImageInput::LocalPath(path) => GatewayImageInput::LocalPath {
+                    path: path.display().to_string(),
+                },
+                ImageInput::ImageUrl(url) => GatewayImageInput::Url { url },
+            },
+        }
+    }));
+    input
+}
+
 fn persisted_gateway_activity(
     state: &StateRuntime,
     activity: &DurableGatewayActivity,
@@ -1145,9 +1194,9 @@ fn terminal_message_for_result(result: &RunResult) -> Option<String> {
         .map(|error| error.message.clone())
         .or_else(|| {
             result
-        .terminal_reason
-        .as_ref()
-        .map(|reason| format!("{reason:?}"))
+                .terminal_reason
+                .as_ref()
+                .map(|reason| format!("{reason:?}"))
         })
         .or_else(|| match result.outcome {
             Outcome::Failed => Some("The turn failed.".to_string()),
@@ -1157,33 +1206,24 @@ fn terminal_message_for_result(result: &RunResult) -> Option<String> {
 }
 
 fn classified_terminal_error_for_result(result: &RunResult) -> Option<GatewayTurnError> {
-    result
-        .terminal_error
-        .as_ref()
-        .map(|error| GatewayTurnError {
-            message: error.message.clone(),
-            code: Some(error.code.clone()),
-            stage: Some(error.stage.clone()),
-            retry_class: Some(error.retry_class.clone()),
-            diagnostic_ref: Some(error.diagnostic_ref.clone()),
-        })
+    result.terminal_error.as_ref().map(|error| AgentErrorView {
+        message: error.message.clone(),
+        code: Some(error.code.clone()),
+        stage: Some(error.stage.clone()),
+        retry_class: Some(error.retry_class.clone()),
+        delivery: AgentDeliveryStatusView::Unknown,
+        recovery_action: None,
+        diagnostic_ref: Some(error.diagnostic_ref.clone()),
+    })
 }
 
 fn gateway_turn_error(message: &str, data: Option<&Value>) -> GatewayTurnError {
-    let nested_error = data.and_then(|data| data.get("error"));
-    let field = |name: &str| {
-        data.and_then(|data| data.get(name))
-            .or_else(|| nested_error.and_then(|error| error.get(name)))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    };
-    GatewayTurnError {
-        // Adapter metadata is classification evidence, never public copy.
-        // The caller supplies the already-sanitized product message.
-        message: message.to_string(),
-        code: field("code"),
-        stage: field("stage").or_else(|| data.map(|_| "prompt".to_string())),
-        retry_class: field("retryClass").or_else(|| data.map(|_| "never".to_string())),
-        diagnostic_ref: field("diagnosticRef"),
-    }
+    let mut error = agent_error_view(message, data);
+    // Adapter metadata is classification evidence, never public copy. The
+    // caller supplies the already-sanitized product message.
+    error.stage = error.stage.or_else(|| data.map(|_| "prompt".to_string()));
+    error.retry_class = error
+        .retry_class
+        .or_else(|| data.map(|_| "never".to_string()));
+    error
 }

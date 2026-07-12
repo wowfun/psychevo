@@ -791,6 +791,7 @@ pub enum RunStreamEvent {
     ClarifyResolved(ClarifyResolvedEvent),
     Scoped {
         session_id: String,
+        turn_id: Option<String>,
         event: Box<RunStreamEvent>,
     },
 }
@@ -807,6 +808,19 @@ impl RunStreamEvent {
     pub fn scoped(session_id: impl Into<String>, event: RunStreamEvent) -> Self {
         Self::Scoped {
             session_id: session_id.into(),
+            turn_id: None,
+            event: Box::new(event),
+        }
+    }
+
+    pub fn scoped_turn(
+        session_id: impl Into<String>,
+        turn_id: impl Into<String>,
+        event: RunStreamEvent,
+    ) -> Self {
+        Self::Scoped {
+            session_id: session_id.into(),
+            turn_id: Some(turn_id.into()),
             event: Box::new(event),
         }
     }
@@ -838,8 +852,31 @@ pub struct ClarifyQuestionOption {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClarifyQuestion {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub header: String,
     pub question: String,
     pub options: Vec<ClarifyQuestionOption>,
+    #[serde(default, skip_serializing_if = "clarify_question_false")]
+    pub multiple: bool,
+    #[serde(
+        default = "clarify_question_custom_default",
+        skip_serializing_if = "clarify_question_custom_default_value"
+    )]
+    pub custom: bool,
+    #[serde(default, skip_serializing_if = "clarify_question_false")]
+    pub secret: bool,
+}
+
+fn clarify_question_custom_default() -> bool {
+    true
+}
+
+fn clarify_question_custom_default_value(value: &bool) -> bool {
+    *value
+}
+
+fn clarify_question_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -862,6 +899,14 @@ pub struct ClarifyResponse {
 pub enum ClarifyResult {
     Answered(ClarifyResponse),
     Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClarifyInteractionOutcome {
+    Answered(ClarifyResponse),
+    Cancelled,
+    TimedOut,
+    TurnFinished,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -944,6 +989,83 @@ impl RunControlHandle {
     pub fn submit_clarify_result(&self, call_id: &str, result: ClarifyResult) -> bool {
         self.clarify.submit(call_id, result)
     }
+
+    /// Runs a product clarification through the same pending-interaction broker
+    /// used by Native tools. Adapters use this instead of owning a second
+    /// response registry or emitting transport-specific interaction events.
+    pub async fn request_clarification(
+        &self,
+        request: ClarifyRequestEvent,
+        stream: RunStreamSink,
+        abort: Option<AbortSignal>,
+    ) -> ClarifyInteractionOutcome {
+        let call_id = request.call_id.clone();
+        let receiver = self.clarify.register(call_id.clone());
+        stream(RunStreamEvent::session(SessionEvent::new(
+            SessionEventPayload::BlockingActionRequested {
+                action_id: call_id.clone(),
+                kind: BlockingActionKind::Clarify,
+                payload: serde_json::to_value(request).unwrap_or(Value::Null),
+            },
+        )));
+        let timeout = tokio::time::sleep(std::time::Duration::from_secs(600));
+        tokio::pin!(timeout);
+        let abort = wait_for_optional_clarify_abort(abort);
+        tokio::pin!(abort);
+
+        let (outcome, reason) = tokio::select! {
+            result = receiver => match result {
+                Ok(ClarifyResult::Answered(response)) => (
+                    ClarifyInteractionOutcome::Answered(response),
+                    ClarifyResolvedReason::Answered,
+                ),
+                Ok(ClarifyResult::Cancelled) => (
+                    ClarifyInteractionOutcome::Cancelled,
+                    ClarifyResolvedReason::Cancelled,
+                ),
+                Err(_) => (
+                    ClarifyInteractionOutcome::TurnFinished,
+                    ClarifyResolvedReason::TurnFinished,
+                ),
+            },
+            _ = &mut timeout => {
+                self.clarify.remove(&call_id);
+                (
+                    ClarifyInteractionOutcome::TimedOut,
+                    ClarifyResolvedReason::TimedOut,
+                )
+            }
+            _ = &mut abort => {
+                self.clarify.remove(&call_id);
+                (
+                    ClarifyInteractionOutcome::TurnFinished,
+                    ClarifyResolvedReason::TurnFinished,
+                )
+            }
+        };
+        stream(RunStreamEvent::session(SessionEvent::new(
+            SessionEventPayload::BlockingActionResolved {
+                action_id: call_id,
+                kind: BlockingActionKind::Clarify,
+                reason: match reason {
+                    ClarifyResolvedReason::Answered => "answered",
+                    ClarifyResolvedReason::Cancelled => "cancelled",
+                    ClarifyResolvedReason::TimedOut => "timed_out",
+                    ClarifyResolvedReason::TurnFinished => "turn_finished",
+                }
+                .to_string(),
+            },
+        )));
+        outcome
+    }
+}
+
+async fn wait_for_optional_clarify_abort(abort: Option<AbortSignal>) {
+    if let Some(mut abort) = abort {
+        abort.wait_for_abort().await;
+    } else {
+        std::future::pending::<()>().await;
+    }
 }
 
 impl fmt::Debug for RunControlHandle {
@@ -960,6 +1082,10 @@ pub struct RunControl {
 }
 
 impl RunControl {
+    pub fn handle(&self) -> RunControlHandle {
+        self.handle.clone()
+    }
+
     pub fn abort_signal(&self) -> AbortSignal {
         self.receivers.abort_signal()
     }

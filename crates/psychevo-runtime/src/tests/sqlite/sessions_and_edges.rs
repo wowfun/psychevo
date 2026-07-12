@@ -1,10 +1,11 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 use crate::store::{PromptPrefixRecord, PromptPrefixSlotRecord};
+use psychevo_agent_core::now_ms;
 
 #[test]
-pub(crate) fn sqlite_schema_v25_rejects_pre_v24_state_databases() {
-    for version in 1..=23 {
+pub(crate) fn sqlite_schema_v28_rejects_legacy_state_databases_with_reset_guidance() {
+    for version in 1..=27 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
         {
@@ -23,13 +24,13 @@ pub(crate) fn sqlite_schema_v25_rejects_pre_v24_state_databases() {
             err.to_string()
                 .contains(&format!("schema version {version}"))
         );
-        assert!(err.to_string().contains("--reset-state"));
+        assert!(err.to_string().contains("pevo init --reset-state"));
         assert!(err.to_string().contains("PSYCHEVO_DB"));
     }
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v25_rejects_unknown_state_database() {
+pub(crate) fn sqlite_schema_v28_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -45,11 +46,11 @@ pub(crate) fn sqlite_schema_v25_rejects_unknown_state_database() {
         Err(err) => err,
     };
     assert!(err.to_string().contains("schema version 99"));
-    assert!(err.to_string().contains("--reset-state"));
+    assert!(err.to_string().contains("pevo init --reset-state"));
 }
 
 #[test]
-pub(crate) fn sqlite_schema_v26_stores_gateway_coordination_without_runtime_debug() {
+pub(crate) fn sqlite_schema_v28_creates_current_gateway_coordination_schema() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
@@ -71,7 +72,7 @@ pub(crate) fn sqlite_schema_v26_stores_gateway_coordination_without_runtime_debu
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 26);
+    assert_eq!(user_version, 28);
     assert!(sqlite_columns(&conn, "timeline_items").is_empty());
     assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
     assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());
@@ -90,13 +91,33 @@ pub(crate) fn sqlite_schema_v26_stores_gateway_coordination_without_runtime_debu
     assert!(
         sqlite_columns(&conn, "gateway_source_bindings")
             .iter()
-            .any(|name| name == "draft_runtime_ref")
+            .any(|name| name == "draft_profile_ref")
+    );
+    assert!(
+        sqlite_columns(&conn, "gateway_source_bindings")
+            .iter()
+            .any(|name| name == "draft_control_values_json")
     );
     assert!(
         sqlite_columns(&conn, "gateway_runtime_bindings")
             .iter()
             .any(|name| name == "binding_revision")
     );
+    for column in [
+        "agent_ref",
+        "agent_fingerprint",
+        "agent_definition_json",
+        "thread_preferences_json",
+        "runtime_observed_json",
+        "control_revision",
+    ] {
+        assert!(
+            sqlite_columns(&conn, "gateway_runtime_bindings")
+                .iter()
+                .any(|name| name == column),
+            "missing gateway_runtime_bindings.{column}"
+        );
+    }
     assert!(
         sqlite_columns(&conn, "gateway_turn_terminals")
             .iter()
@@ -106,6 +127,16 @@ pub(crate) fn sqlite_schema_v26_stores_gateway_coordination_without_runtime_debu
         sqlite_columns(&conn, "gateway_live_snapshots")
             .iter()
             .any(|name| name == "revision")
+    );
+    assert!(
+        sqlite_columns(&conn, "gateway_turn_deliveries")
+            .iter()
+            .any(|name| name == "input_hash")
+    );
+    assert!(
+        sqlite_columns(&conn, "gateway_channel_outbox")
+            .iter()
+            .any(|name| name == "payload_hash")
     );
     assert!(
         sqlite_columns(&conn, "agent_team_runs")
@@ -119,225 +150,6 @@ pub(crate) fn sqlite_schema_v26_stores_gateway_coordination_without_runtime_debu
     );
 }
 
-#[test]
-pub(crate) fn sqlite_schema_v24_migrates_source_evidence_without_guessing_profile_snapshot() {
-    let temp = tempdir().expect("temp");
-    let db = temp.path().join("v24.db");
-    {
-        let conn = Connection::open(&db).expect("db");
-        conn.execute_batch(
-            r#"
-            CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                source TEXT NOT NULL,
-                parent_session_id TEXT,
-                cwd TEXT NOT NULL,
-                model TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                started_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL,
-                ended_at_ms INTEGER,
-                end_reason TEXT,
-                archived_at_ms INTEGER,
-                message_count INTEGER NOT NULL DEFAULT 0,
-                tool_call_count INTEGER NOT NULL DEFAULT 0,
-                title TEXT,
-                metadata_json TEXT
-            );
-            CREATE TABLE gateway_source_bindings (
-                source_key TEXT PRIMARY KEY,
-                source_kind TEXT NOT NULL,
-                raw_identity_json TEXT NOT NULL,
-                visible_name TEXT,
-                thread_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                backend_kind TEXT NOT NULL,
-                backend_native_id TEXT,
-                created_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL,
-                lineage_json TEXT
-            );
-            CREATE INDEX idx_gateway_source_bindings_thread
-                ON gateway_source_bindings(thread_id, updated_at_ms);
-            INSERT INTO sessions (
-                id, source, cwd, model, provider, started_at_ms, updated_at_ms,
-                metadata_json
-            ) VALUES
-                ('thread-native', 'web', '/work', 'model', 'provider', 1, 1, NULL),
-                (
-                    'thread-acp', 'peer_agent', '/work', 'opencode', 'acp:opencode', 2, 2,
-                    '{"peer_agent":{"backendKind":"acp","backendId":"opencode","nativeSessionId":"native-acp"}}'
-                ),
-                ('thread-ambiguous', 'peer_agent', '/work', 'unknown', 'acp:unknown', 3, 3, NULL);
-            INSERT INTO gateway_source_bindings (
-                source_key, source_kind, raw_identity_json, visible_name,
-                thread_id, backend_kind, backend_native_id, created_at_ms,
-                updated_at_ms, lineage_json
-            ) VALUES
-                (
-                    'web:native', 'web', '{}', 'Native', 'thread-native',
-                    'psychevo', 'thread-native', 1, 1, '{"runtimeRef":"native"}'
-                ),
-                (
-                    'web:acp', 'web', '{}', 'ACP', 'thread-acp',
-                    'peer_agent', 'native-acp', 2, 2, '{"runtimeRef":"opencode"}'
-                ),
-                (
-                    'web:ambiguous', 'web', '{}', 'Ambiguous', 'thread-ambiguous',
-                    'peer_agent', 'native-unknown', 3, 3, '{"runtimeRef":"unknown"}'
-                );
-            PRAGMA user_version = 24;
-            "#,
-        )
-        .expect("v24 schema");
-    }
-
-    let store = SqliteStore::open(&db).expect("migrate v24");
-    let native = store
-        .gateway_runtime_binding("thread-native")
-        .expect("native binding")
-        .expect("native binding exists");
-    assert_eq!(native.status, GatewayRuntimeBindingStatus::Unresolved);
-    assert_eq!(native.runtime_ref.as_deref(), Some("native"));
-    assert_eq!(
-        native.unresolved_reason.as_deref(),
-        Some("legacy_v24_profile_snapshot_required")
-    );
-
-    let acp = store
-        .gateway_runtime_binding("thread-acp")
-        .expect("ACP binding")
-        .expect("ACP binding exists");
-    assert_eq!(acp.status, GatewayRuntimeBindingStatus::Unresolved);
-    assert_eq!(acp.runtime_ref.as_deref(), Some("acp:opencode"));
-    assert_eq!(acp.native_kind.as_deref(), Some("acp"));
-    assert_eq!(acp.native_session_id.as_deref(), Some("native-acp"));
-    assert_eq!(
-        acp.unresolved_reason.as_deref(),
-        Some("legacy_v24_profile_snapshot_required")
-    );
-
-    let ambiguous = store
-        .gateway_runtime_binding("thread-ambiguous")
-        .expect("ambiguous binding")
-        .expect("ambiguous binding exists");
-    assert_eq!(ambiguous.status, GatewayRuntimeBindingStatus::Unresolved);
-    assert_eq!(ambiguous.runtime_ref, None);
-    assert_eq!(ambiguous.native_session_id, None);
-    assert_eq!(
-        ambiguous.unresolved_reason.as_deref(),
-        Some("legacy_v24_backend_ambiguous")
-    );
-
-    let lane = store
-        .gateway_source_lane("web:acp")
-        .expect("source lane")
-        .expect("source lane exists");
-    assert_eq!(lane.thread_id.as_deref(), Some("thread-acp"));
-    assert_eq!(lane.draft_runtime_ref, None);
-
-    let conn = Connection::open(&db).expect("db");
-    let user_version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("version");
-    assert_eq!(user_version, 26);
-}
-
-#[test]
-pub(crate) fn sqlite_schema_v25_marks_snapshotless_resolved_bindings_unresolved() {
-    let temp = tempdir().expect("temp");
-    let db = temp.path().join("v25.db");
-    {
-        let conn = Connection::open(&db).expect("db");
-        conn.execute_batch(
-            r#"
-            CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                source TEXT NOT NULL,
-                parent_session_id TEXT,
-                cwd TEXT NOT NULL,
-                model TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                started_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL,
-                ended_at_ms INTEGER,
-                end_reason TEXT,
-                archived_at_ms INTEGER,
-                message_count INTEGER NOT NULL DEFAULT 0,
-                tool_call_count INTEGER NOT NULL DEFAULT 0,
-                title TEXT,
-                metadata_json TEXT
-            );
-            CREATE TABLE gateway_runtime_bindings (
-                thread_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-                resolution_status TEXT NOT NULL CHECK (resolution_status IN ('resolved', 'unresolved')),
-                runtime_ref TEXT,
-                backend_kind TEXT,
-                native_kind TEXT,
-                native_session_id TEXT,
-                cwd TEXT NOT NULL,
-                profile_fingerprint TEXT,
-                profile_revision TEXT,
-                adapter_kind TEXT,
-                adapter_revision TEXT,
-                ownership TEXT NOT NULL CHECK (ownership IN ('read_write', 'read_only')),
-                parent_thread_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
-                binding_revision INTEGER NOT NULL CHECK (binding_revision > 0),
-                unresolved_reason TEXT,
-                created_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL,
-                CHECK (
-                    (resolution_status = 'resolved'
-                        AND runtime_ref IS NOT NULL
-                        AND backend_kind IS NOT NULL
-                        AND native_kind IS NOT NULL
-                        AND profile_fingerprint IS NOT NULL
-                        AND profile_revision IS NOT NULL
-                        AND adapter_kind IS NOT NULL
-                        AND adapter_revision IS NOT NULL
-                        AND unresolved_reason IS NULL)
-                    OR
-                    (resolution_status = 'unresolved' AND unresolved_reason IS NOT NULL)
-                )
-            );
-            INSERT INTO sessions (
-                id, source, cwd, model, provider, started_at_ms, updated_at_ms
-            ) VALUES ('thread-codex', 'web', '/work', 'pending', 'codex', 1, 1);
-            INSERT INTO gateway_runtime_bindings (
-                thread_id, resolution_status, runtime_ref, backend_kind,
-                native_kind, native_session_id, cwd, profile_fingerprint,
-                profile_revision, adapter_kind, adapter_revision, ownership,
-                parent_thread_id, binding_revision, unresolved_reason,
-                created_at_ms, updated_at_ms
-            ) VALUES (
-                'thread-codex', 'resolved', 'codex', 'runtime', 'codex',
-                'native-secret', '/work', 'legacy-fingerprint', '1', 'codex',
-                'legacy-adapter', 'read_write', NULL, 1, NULL, 1, 1
-            );
-            PRAGMA user_version = 25;
-            "#,
-        )
-        .expect("v25 schema");
-    }
-
-    let store = SqliteStore::open(&db).expect("migrate v25");
-    let binding = store
-        .gateway_runtime_binding("thread-codex")
-        .expect("binding")
-        .expect("binding exists");
-    assert_eq!(binding.status, GatewayRuntimeBindingStatus::Unresolved);
-    assert_eq!(binding.runtime_ref.as_deref(), Some("codex"));
-    assert_eq!(binding.profile_config_json, None);
-    assert_eq!(
-        binding.unresolved_reason.as_deref(),
-        Some("legacy_v25_profile_snapshot_required")
-    );
-    let conn = Connection::open(&db).expect("db");
-    let user_version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("version");
-    assert_eq!(user_version, 26);
-}
-
 fn gateway_runtime_binding_input<'a>(
     thread_id: &'a str,
     cwd: &'a str,
@@ -346,15 +158,18 @@ fn gateway_runtime_binding_input<'a>(
 ) -> GatewayRuntimeBindingInput<'a> {
     GatewayRuntimeBindingInput {
         thread_id,
+        agent_ref: Some("reviewer"),
+        agent_fingerprint: "agent-fingerprint",
+        agent_definition_json: r#"{"name":"reviewer"}"#,
         runtime_ref,
-        backend_kind: "runtime",
-        native_kind: "codex",
+        backend_kind: "acp",
+        native_kind: "acp",
         native_session_id,
         cwd,
         profile_fingerprint: "profile-fingerprint",
         profile_revision: "profile-revision",
         profile_config_json: "{}",
-        adapter_kind: "codex",
+        adapter_kind: "acp",
         adapter_revision: "adapter-revision",
         ownership: GatewayRuntimeBindingOwnership::ReadWrite,
         parent_thread_id: None,
@@ -377,6 +192,11 @@ pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_ca
         ))
         .expect("create binding");
     assert_eq!(created.binding_revision, 1);
+    assert_eq!(created.agent_ref.as_deref(), Some("reviewer"));
+    assert_eq!(
+        created.agent_fingerprint.as_deref(),
+        Some("agent-fingerprint")
+    );
     assert_eq!(created.native_session_id, None);
     let same = store
         .create_gateway_runtime_binding(gateway_runtime_binding_input(
@@ -384,6 +204,19 @@ pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_ca
         ))
         .expect("idempotent create");
     assert_eq!(same, created);
+
+    let mut different_agent = gateway_runtime_binding_input(&thread_id, &cwd_text, "codex", None);
+    different_agent.agent_ref = Some("other-reviewer");
+    different_agent.agent_fingerprint = "other-agent-fingerprint";
+    different_agent.agent_definition_json = r#"{"name":"other-reviewer"}"#;
+    let agent_conflict = store
+        .create_gateway_runtime_binding(different_agent)
+        .expect_err("immutable Agent Definition identity");
+    assert!(
+        agent_conflict
+            .to_string()
+            .contains("bindings are immutable")
+    );
 
     let conflict = store
         .create_gateway_runtime_binding(gateway_runtime_binding_input(
@@ -419,6 +252,113 @@ pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_ca
             .expect("native lookup")
             .expect("native binding"),
         attached
+    );
+}
+
+#[test]
+pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_and_cas_revision() {
+    let temp = tempdir().expect("temp");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let cwd_text = cwd.display().to_string();
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let thread_id = store
+        .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .expect("session");
+    let created = store
+        .create_gateway_runtime_binding(gateway_runtime_binding_input(
+            &thread_id, &cwd_text, "codex", None,
+        ))
+        .expect("create binding");
+    assert_eq!(created.binding_revision, 1);
+    assert_eq!(created.control_revision, 1);
+    assert!(created.thread_preferences.is_empty());
+    assert!(created.runtime_observed.is_empty());
+
+    let preferences = BTreeMap::from([
+        ("model".to_string(), json!("gpt-5")),
+        ("reasoning".to_string(), json!("high")),
+    ]);
+    let stored = store
+        .compare_and_set_gateway_runtime_control_state(
+            &thread_id,
+            1,
+            1,
+            GatewayRuntimeControlStatePatch {
+                thread_preferences: Some(&preferences),
+                runtime_observed: None,
+            },
+        )
+        .expect("store preferences");
+    assert_eq!(stored.binding_revision, 1);
+    assert_eq!(stored.control_revision, 2);
+    assert_eq!(stored.thread_preferences, preferences);
+    assert!(stored.runtime_observed.is_empty());
+
+    let idempotent = store
+        .compare_and_set_gateway_runtime_control_state(
+            &thread_id,
+            1,
+            2,
+            GatewayRuntimeControlStatePatch {
+                thread_preferences: Some(&preferences),
+                runtime_observed: None,
+            },
+        )
+        .expect("same preference is idempotent");
+    assert_eq!(idempotent.control_revision, 2);
+
+    let stale = store
+        .compare_and_set_gateway_runtime_control_state(
+            &thread_id,
+            1,
+            1,
+            GatewayRuntimeControlStatePatch {
+                thread_preferences: Some(&preferences),
+                runtime_observed: None,
+            },
+        )
+        .expect_err("stale control revision");
+    assert!(stale.to_string().contains("stale runtime control revision"));
+
+    let observed = BTreeMap::from([
+        ("model".to_string(), json!("gpt-5")),
+        ("reasoning".to_string(), json!("medium")),
+    ]);
+    let observed_record = store
+        .compare_and_set_gateway_runtime_control_state(
+            &thread_id,
+            1,
+            2,
+            GatewayRuntimeControlStatePatch {
+                thread_preferences: None,
+                runtime_observed: Some(&observed),
+            },
+        )
+        .expect("record runtime observation");
+    assert_eq!(observed_record.control_revision, 3);
+    assert_eq!(observed_record.thread_preferences, preferences);
+    assert_eq!(observed_record.runtime_observed, observed);
+
+    let attached = store
+        .attach_gateway_runtime_native_session(&thread_id, 1, "native-codex")
+        .expect("binding revision advances independently");
+    assert_eq!(attached.binding_revision, 2);
+    assert_eq!(attached.control_revision, 3);
+    let stale_binding = store
+        .compare_and_set_gateway_runtime_control_state(
+            &thread_id,
+            1,
+            3,
+            GatewayRuntimeControlStatePatch {
+                thread_preferences: Some(&BTreeMap::new()),
+                runtime_observed: None,
+            },
+        )
+        .expect_err("stale binding revision");
+    assert!(
+        stale_binding
+            .to_string()
+            .contains("stale runtime binding revision")
     );
 }
 
@@ -460,6 +400,10 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
 
+    let draft_control_values = BTreeMap::from([
+        ("model".to_string(), "gpt-fixture".to_string()),
+        ("effort".to_string(), "high".to_string()),
+    ]);
     let draft = store
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: "im.wechat:user-1",
@@ -467,12 +411,16 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
             raw_identity: json!({"connectionId": "wechat", "chatId": "user-1"}),
             visible_name: Some("WeChat user 1"),
             thread_id: None,
-            draft_runtime_ref: Some("codex"),
+            draft_agent_ref: Some("reviewer"),
+            draft_profile_ref: Some("codex"),
+            draft_control_values: &draft_control_values,
             lineage: None,
         })
         .expect("draft lane");
     assert_eq!(draft.thread_id, None);
-    assert_eq!(draft.draft_runtime_ref.as_deref(), Some("codex"));
+    assert_eq!(draft.draft_agent_ref.as_deref(), Some("reviewer"));
+    assert_eq!(draft.draft_profile_ref.as_deref(), Some("codex"));
+    assert_eq!(draft.draft_control_values, draft_control_values);
     assert!(
         store
             .gateway_source_binding("im.wechat:user-1")
@@ -490,7 +438,9 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
             raw_identity: json!({"connectionId": "wechat", "chatId": "user-1"}),
             visible_name: Some("WeChat user 1"),
             thread_id: Some(&thread_id),
-            draft_runtime_ref: Some("codex"),
+            draft_agent_ref: None,
+            draft_profile_ref: None,
+            draft_control_values: &Default::default(),
             lineage: None,
         })
         .expect("bound lane");
@@ -504,7 +454,360 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
         .expect("lane")
         .expect("lane exists");
     assert_eq!(cleared.thread_id, None);
-    assert_eq!(cleared.draft_runtime_ref.as_deref(), Some("codex"));
+    assert_eq!(cleared.draft_profile_ref, None);
+    assert!(cleared.draft_control_values.is_empty());
+}
+
+#[test]
+pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads() {
+    let temp = tempdir().expect("temp");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let thread_id = store
+        .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
+        .expect("session");
+
+    store
+        .claim_gateway_activity(GatewayActivityClaimInput {
+            activity_id: "turn-1",
+            thread_id: Some(&thread_id),
+            source_key: Some("agent:test-1"),
+            turn_id: Some("turn-1"),
+            kind: "turn",
+            owner_id: "owner",
+            owner_surface: Some("test"),
+            lease_expires_at_ms: now_ms() + 60_000,
+            queued_turns: 0,
+            superseded_activity_id: None,
+            intent: Some(json!({
+                "kind": "turn",
+                "threadId": thread_id,
+                "runtimeSource": "test",
+                "input": [{"type": "text", "text": "private prompt"}],
+            })),
+        })
+        .expect("activity intent");
+
+    let not_delivered = store
+        .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
+            turn_id: "turn-1",
+            thread_id: &thread_id,
+            runtime_ref: "agent-profile",
+            input_json: r#"[{"type":"text","text":"private prompt"}]"#,
+            input_hash: "input-hash",
+        })
+        .expect("delivery");
+    assert_eq!(not_delivered.status, "not_delivered");
+    assert!(
+        not_delivered
+            .input_json
+            .as_deref()
+            .is_some_and(|value| value.contains("private prompt"))
+    );
+    assert!(
+        store
+            .mark_gateway_turn_delivery_unknown("turn-1")
+            .expect("unknown")
+    );
+    assert!(
+        store
+            .gateway_turn_delivery("turn-1")
+            .expect("read unknown")
+            .expect("delivery")
+            .input_json
+            .as_deref()
+            .is_some_and(|value| value.contains("private prompt"))
+    );
+    assert!(
+        store
+            .gateway_activity("turn-1")
+            .expect("read unknown activity")
+            .expect("activity")
+            .intent
+            .expect("activity intent")
+            .get("input")
+            .is_some(),
+        "unknown delivery must retain the recoverable prompt"
+    );
+    assert!(
+        !store
+            .finish_gateway_turn_delivery("turn-1")
+            .expect("unknown terminal must not scrub"),
+        "a terminal projection cannot erase input while delivery remains unknown"
+    );
+    assert!(
+        store
+            .gateway_turn_delivery("turn-1")
+            .expect("read terminal unknown")
+            .expect("delivery")
+            .input_json
+            .is_some(),
+        "unknown input remains available for explicit recovery"
+    );
+    assert!(
+        store
+            .confirm_gateway_turn_delivery("turn-1")
+            .expect("confirm")
+    );
+    let delivered = store
+        .gateway_turn_delivery("turn-1")
+        .expect("read delivered")
+        .expect("delivery");
+    assert_eq!(delivered.status, "delivered");
+    assert_eq!(delivered.input_json, None);
+    assert_eq!(delivered.input_hash, "input-hash");
+    assert!(delivered.delivery_confirmed_at_ms.is_some());
+    let correlated_activity = store
+        .gateway_activity("turn-1")
+        .expect("read correlated activity")
+        .expect("activity")
+        .intent
+        .expect("routing metadata remains");
+    assert!(
+        correlated_activity.get("input").is_none(),
+        "the correlation transaction must scrub the generic activity copy"
+    );
+    assert_eq!(correlated_activity["runtimeSource"], "test");
+    assert!(
+        store
+            .finish_gateway_turn_delivery("turn-1")
+            .expect("finish")
+    );
+
+    store
+        .claim_gateway_activity(GatewayActivityClaimInput {
+            activity_id: "turn-2",
+            thread_id: None,
+            source_key: Some("agent:test-2"),
+            turn_id: Some("turn-2"),
+            kind: "turn",
+            owner_id: "owner",
+            owner_surface: Some("test"),
+            lease_expires_at_ms: now_ms() + 60_000,
+            queued_turns: 0,
+            superseded_activity_id: None,
+            intent: Some(json!({
+                "kind": "turn",
+                "runtimeSource": "test",
+                "input": [{"type": "text", "text": "uncorrelated prompt"}],
+            })),
+        })
+        .expect("uncorrelated activity intent");
+    store
+        .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
+            turn_id: "turn-2",
+            thread_id: &thread_id,
+            runtime_ref: "agent-profile",
+            input_json: r#"[{"type":"text","text":"uncorrelated prompt"}]"#,
+            input_hash: "uncorrelated-hash",
+        })
+        .expect("uncorrelated intent");
+    assert!(
+        store
+            .finish_gateway_turn_delivery("turn-2")
+            .expect("terminal fallback")
+    );
+    assert_eq!(
+        store
+            .gateway_turn_delivery("turn-2")
+            .expect("read terminal delivery")
+            .expect("delivery")
+            .input_json,
+        None
+    );
+    assert!(
+        store
+            .gateway_activity("turn-2")
+            .expect("read terminal activity")
+            .expect("activity")
+            .intent
+            .expect("routing metadata remains")
+            .get("input")
+            .is_none(),
+        "terminal must scrub an uncorrelated generic activity copy"
+    );
+
+    let pending = store
+        .upsert_gateway_channel_outbox(GatewayChannelOutboxInput {
+            delivery_id: "delivery-1",
+            thread_id: &thread_id,
+            turn_id: "turn-1",
+            connection_id: "telegram",
+            source_key: "im.telegram:user-1",
+            payload_text: "final answer",
+            payload_hash: "payload-hash",
+        })
+        .expect("outbox");
+    assert_eq!(pending.status, "pending");
+    assert_eq!(pending.payload_text.as_deref(), Some("final answer"));
+    let retryable = store
+        .retryable_gateway_channel_outbox("telegram")
+        .expect("pending outbox list");
+    assert_eq!(retryable.as_slice(), std::slice::from_ref(&pending));
+    assert!(
+        store
+            .fail_gateway_channel_outbox("delivery-1")
+            .expect("mark failed")
+    );
+    let retryable = store
+        .retryable_gateway_channel_outbox("telegram")
+        .expect("failed outbox list");
+    assert_eq!(retryable.len(), 1);
+    assert_eq!(retryable[0].status, "failed");
+    assert!(
+        store
+            .acknowledge_gateway_channel_outbox("delivery-1")
+            .expect("ack")
+    );
+    let acknowledged = store
+        .gateway_channel_outbox("delivery-1")
+        .expect("read outbox")
+        .expect("outbox");
+    assert_eq!(acknowledged.status, "acknowledged");
+    assert_eq!(acknowledged.payload_text, None);
+    assert_eq!(acknowledged.payload_hash, "payload-hash");
+    assert!(
+        store
+            .retryable_gateway_channel_outbox("telegram")
+            .expect("acknowledged outbox list")
+            .is_empty()
+    );
+}
+
+#[test]
+pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() {
+    let temp = tempdir().expect("temp");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let thread_id = store
+        .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
+        .expect("session");
+
+    store
+        .claim_gateway_activity(GatewayActivityClaimInput {
+            activity_id: "turn-unknown",
+            thread_id: Some(&thread_id),
+            source_key: Some("agent:test"),
+            turn_id: Some("turn-unknown"),
+            kind: "turn",
+            owner_id: "owner",
+            owner_surface: Some("test"),
+            lease_expires_at_ms: now_ms() + 60_000,
+            queued_turns: 0,
+            superseded_activity_id: None,
+            intent: Some(json!({
+                "kind": "turn",
+                "runtimeSource": "acp",
+                "input": [{"type": "text", "text": "do not replay me"}],
+            })),
+        })
+        .expect("activity intent");
+    store
+        .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
+            turn_id: "turn-unknown",
+            thread_id: &thread_id,
+            runtime_ref: "acp-profile",
+            input_json: r#"[{"type":"text","text":"do not replay me"}]"#,
+            input_hash: "unknown-input-hash",
+        })
+        .expect("delivery");
+    assert!(
+        store
+            .mark_gateway_turn_delivery_unknown("turn-unknown")
+            .expect("mark unknown")
+    );
+    store
+        .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
+            turn_id: "turn-unknown",
+            thread_id: &thread_id,
+            status: "failed",
+            outcome: Some("failed"),
+            error_message: Some("ACP response boundary became uncertain"),
+            started_at_ms: Some(10),
+            completed_at_ms: 20,
+            metadata: Some(json!({"source": "transport_failure"})),
+        })
+        .expect("provisional failed terminal");
+
+    let unknown = store
+        .unknown_gateway_turn_deliveries_for_thread(&thread_id, "turn-new")
+        .expect("unknown deliveries");
+    assert_eq!(unknown.len(), 1);
+    assert_eq!(unknown[0].turn_id, "turn-unknown");
+    assert!(
+        unknown[0]
+            .input_json
+            .as_deref()
+            .is_some_and(|value| value.contains("do not replay me"))
+    );
+
+    let reconciliation_metadata = json!({
+        "reconciledFrom": "agent_history",
+        "messageIds": ["assistant-message-1"],
+    });
+    assert!(
+        store
+            .reconcile_unknown_gateway_turn_delivery(
+                "turn-unknown",
+                &thread_id,
+                Some(&reconciliation_metadata),
+            )
+            .expect("reconcile unknown delivery")
+    );
+
+    let delivery = store
+        .gateway_turn_delivery("turn-unknown")
+        .expect("read delivery")
+        .expect("delivery");
+    assert_eq!(delivery.status, "terminal");
+    assert_eq!(delivery.input_json, None);
+    assert_eq!(delivery.input_hash, "unknown-input-hash");
+    assert!(delivery.delivery_confirmed_at_ms.is_some());
+    assert!(delivery.terminal_at_ms.is_some());
+    let activity_intent = store
+        .gateway_activity("turn-unknown")
+        .expect("read activity")
+        .expect("activity")
+        .intent
+        .expect("routing intent remains");
+    assert!(activity_intent.get("input").is_none());
+    assert_eq!(activity_intent["runtimeSource"], "acp");
+
+    let terminal = store
+        .gateway_turn_terminal("turn-unknown")
+        .expect("read terminal")
+        .expect("terminal");
+    assert_eq!(terminal.status, "completed");
+    assert_eq!(terminal.outcome.as_deref(), Some("normal"));
+    assert_eq!(terminal.error_message, None);
+    assert_eq!(terminal.started_at_ms, Some(10));
+    assert_eq!(terminal.metadata.as_ref(), Some(&reconciliation_metadata));
+
+    assert!(
+        store
+            .unknown_gateway_turn_deliveries_for_thread(&thread_id, "turn-new")
+            .expect("no unknown deliveries")
+            .is_empty()
+    );
+    assert!(
+        !store
+            .reconcile_unknown_gateway_turn_delivery(
+                "turn-unknown",
+                &thread_id,
+                Some(&json!({"mustNotOverwrite": true})),
+            )
+            .expect("idempotent reconciliation")
+    );
+    assert_eq!(
+        store
+            .gateway_turn_terminal("turn-unknown")
+            .expect("read terminal after retry")
+            .expect("terminal")
+            .metadata
+            .as_ref(),
+        Some(&reconciliation_metadata),
+        "a repeated reconciliation must not rewrite the durable terminal"
+    );
 }
 
 #[test]

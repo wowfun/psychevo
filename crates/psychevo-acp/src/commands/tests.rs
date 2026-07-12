@@ -85,7 +85,12 @@ mod tests {
             &[],
             ACP_COMMAND_ADVERTISEMENT_LIMIT,
         );
-        assert!(!available.commands.iter().any(|command| command.name == "btw"));
+        assert!(
+            !available
+                .commands
+                .iter()
+                .any(|command| command.name == "btw")
+        );
 
         let SlashCommandParse::Known(invocation) = parse_slash_command_line("/btw explain") else {
             panic!("expected /btw to parse");
@@ -133,18 +138,21 @@ mod tests {
         let (start, completed) = diff_tool_call_updates("slash_diff_test", &diff);
 
         match start {
-            SessionUpdate::ToolCall(call) => {
-                assert_eq!(call.title, "Workspace diff");
-                assert_eq!(call.kind, ToolKind::Read);
-                assert_eq!(call.status, ToolCallStatus::InProgress);
+            SessionUpdate::ToolCallUpdate(call) => {
+                assert_eq!(
+                    call.title.value().map(String::as_str),
+                    Some("Workspace diff")
+                );
+                assert_eq!(call.kind.value(), Some(&ToolKind::Read));
+                assert_eq!(call.status.value(), Some(&ToolCallStatus::InProgress));
                 assert_eq!(
                     call.raw_input
-                        .as_ref()
+                        .value()
                         .and_then(|value| value.get("command"))
                         .and_then(Value::as_str),
                     Some("/diff")
                 );
-                assert!(call.content.is_empty());
+                assert!(call.content.value().is_none());
             }
             SessionUpdate::AgentMessageChunk(_) => panic!("diff must not use assistant text"),
             other => panic!("unexpected start update: {other:?}"),
@@ -152,21 +160,31 @@ mod tests {
 
         match completed {
             SessionUpdate::ToolCallUpdate(update) => {
-                assert_eq!(update.fields.title.as_deref(), Some("Workspace diff"));
-                assert_eq!(update.fields.kind, Some(ToolKind::Read));
-                assert_eq!(update.fields.status, Some(ToolCallStatus::Completed));
-                let content = update.fields.content.expect("diff content");
+                assert_eq!(
+                    update.title.value().map(String::as_str),
+                    Some("Workspace diff")
+                );
+                assert_eq!(update.kind.value(), Some(&ToolKind::Read));
+                assert_eq!(update.status.value(), Some(&ToolCallStatus::Completed));
+                let content = update.content.take().expect("diff content");
                 assert_eq!(content.len(), 1);
                 match &content[0] {
                     ToolCallContent::Diff(diff) => {
-                        assert_eq!(diff.path, PathBuf::from("src/lib.rs"));
-                        assert_eq!(diff.old_text.as_deref(), Some("old body\n"));
-                        assert_eq!(diff.new_text, "new body\n");
+                        assert_eq!(diff.changes.len(), 1);
+                        let DiffChangeOperation::Modify(change) = &diff.changes[0].operation else {
+                            panic!("expected modified-file change");
+                        };
+                        assert_eq!(change.path, PathBuf::from("src/lib.rs"));
+                        assert!(
+                            diff.patch
+                                .as_ref()
+                                .is_some_and(|patch| patch.diff.contains("UNIFIED_PATCH_BODY"))
+                        );
                     }
                     other => panic!("unexpected content: {other:?}"),
                 }
 
-                let raw = update.fields.raw_output.expect("raw output");
+                let raw = update.raw_output.take().expect("raw output");
                 assert_eq!(raw.get("status").and_then(Value::as_str), Some("ok"));
                 assert_eq!(raw.get("file_count").and_then(Value::as_u64), Some(1));
                 assert_eq!(
@@ -235,21 +253,20 @@ mod tests {
             panic!("unexpected update: {update:?}");
         };
         assert_eq!(
-            update.fields.title.as_deref(),
+            update.title.value().map(String::as_str),
             Some("exec_command cargo test")
         );
-        assert_eq!(update.fields.kind, Some(ToolKind::Execute));
-        assert_eq!(update.fields.status, Some(ToolCallStatus::InProgress));
+        assert_eq!(update.kind.value(), Some(&ToolKind::Execute));
+        assert_eq!(update.status.value(), Some(&ToolCallStatus::InProgress));
         assert_eq!(
             update
-                .fields
                 .raw_input
-                .as_ref()
+                .value()
                 .and_then(|value| value.pointer("/args/cmd"))
                 .and_then(Value::as_str),
             Some("cargo test\n--workspace")
         );
-        let content = update.fields.content.expect("tool content");
+        let content = update.content.take().expect("tool content");
         assert_eq!(
             tool_content_text(&content[0]),
             Some("$ cargo test\n--workspace\n\nrunning tests\n")
@@ -277,9 +294,9 @@ mod tests {
         let SessionUpdate::ToolCallUpdate(update) = update else {
             panic!("unexpected update: {update:?}");
         };
-        let content = update.fields.content.expect("terminal content");
+        let content = update.content.take().expect("terminal content");
         assert_eq!(tool_content_text(&content[0]), Some("$ python fetch.py"));
-        let meta = update.meta.expect("terminal meta");
+        let meta = update.meta.take().expect("terminal meta");
         assert_eq!(meta["terminal_info"]["terminal_id"], "call_exec");
         assert_eq!(
             meta["terminal_output"]["data"],
@@ -292,7 +309,7 @@ mod tests {
         let SessionUpdate::ToolCallUpdate(update) = update else {
             panic!("unexpected update: {update:?}");
         };
-        let meta = update.meta.expect("terminal meta");
+        let meta = update.meta.take().expect("terminal meta");
         assert_eq!(meta["terminal_output"]["data"], "second\n");
 
         block.status = TranscriptBlockStatus::Completed;
@@ -308,7 +325,7 @@ mod tests {
         let SessionUpdate::ToolCallUpdate(update) = update else {
             panic!("unexpected update: {update:?}");
         };
-        let meta = update.meta.expect("terminal meta");
+        let meta = update.meta.take().expect("terminal meta");
         assert_eq!(meta["terminal_output"]["data"], "third\n");
         assert_eq!(meta["terminal_exit"]["terminal_id"], "call_exec");
         assert_eq!(meta["terminal_exit"]["exit_code"].as_i64(), Some(0));
@@ -365,6 +382,7 @@ mod tests {
             kind,
             status,
             order: 0,
+            phase_ordinal: None,
             source: "live".to_string(),
             title: title.map(ToString::to_string),
             body: body.map(ToString::to_string),

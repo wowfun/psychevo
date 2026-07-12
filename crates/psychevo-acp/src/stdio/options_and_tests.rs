@@ -94,24 +94,37 @@ no_auth = true
             .v2()
             .connect_with(TestAcpServer(agent), async move |cx| {
                 let initialize = cx
-                    .send_request(InitializeRequest::new(ProtocolVersion::V2).capabilities(
-                        ClientCapabilities::new().auth(
+                    .send_request(
+                        InitializeRequest::new(
+                            ProtocolVersion::V2,
+                            Implementation::new("psychevo-acp-test-client", "1"),
+                        )
+                        .capabilities(ClientCapabilities::new().auth(
                             AuthCapabilities::new().terminal(TerminalAuthCapabilities::new()),
-                        ),
-                    ))
+                        )),
+                    )
                     .block_task()
                     .await?;
                 assert_eq!(initialize.protocol_version, ProtocolVersion::V2);
-                assert!(initialize.capabilities.prompt.embedded_context.is_some());
-                assert!(initialize.capabilities.session.load.is_some());
+                let session_capabilities = initialize
+                    .capabilities
+                    .session
+                    .as_ref()
+                    .expect("session capabilities");
+                assert!(
+                    session_capabilities
+                        .prompt
+                        .as_ref()
+                        .is_some_and(|prompt| prompt.embedded_context.is_some())
+                );
 
                 let session = cx
                     .send_request(NewSessionRequest::new(cwd))
                     .block_task()
                     .await?;
-                let options = session.config_options.expect("session config options");
+                let options = session.config_options;
                 assert!(options.iter().any(|option| {
-                    option.id.to_string() == "mode"
+                    option.config_id.to_string() == "mode"
                         && matches!(option.category, Some(SessionConfigOptionCategory::Mode))
                 }));
                 let options_value = serde_json::to_value(&options).expect("options json");
@@ -165,7 +178,13 @@ no_auth = true
         options
             .as_array()?
             .iter()
-            .find(|option| option.get("id").and_then(Value::as_str) == Some(id))?
+            .find(|option| {
+                option
+                    .get("configId")
+                    .or_else(|| option.get("id"))
+                    .and_then(Value::as_str)
+                    == Some(id)
+            })?
             .get("currentValue")
             .and_then(Value::as_str)
             .map(ToString::to_string)

@@ -123,50 +123,34 @@ provider rows avoid repeating values already visible in controls; and fetched
 catalog rows appear immediately in Settings and the composer without persisting
 each row to config. The page must not silently hot-swap the currently running
 turn or move session-scoped composer controls into Settings.
-The composer also exposes execution runtime separately from Agent persona,
-although compact GUI surfaces may present both controls through one grouped
-Agent popover. The default runtime is `native`; ACP backend runtimes are
-identified by their backend id. Selecting a peer runtime such as `opencode`
-does not make that backend's internal agents into Psychevo agent definitions.
-Instead, peer-owned selectors such as OpenCode's ACP `mode` option are surfaced
-as runtime session options. If a peer runtime exposes `plan`, Workbench maps
-its shared Plan-mode control to `runtimeOptions.mode = "plan"` and maps the off
-state to the peer runtime's active default mode. Peer modes outside that
-default/plan pair are exposed only when present. `turn/start` accepts optional
-`runtimeRef` and `runtimeOptions` fields; old clients that omit them run on
-`native`. The legacy `mode` field remains the native Psychevo `RunMode`
-control. When `runtimeRef` names an ACP backend, Gateway validates that the
-selected Psychevo Agent is compatible with that runtime. Local Psychevo agent
-definitions such as `translate` are incompatible with OpenCode ACP unless a
-future backend explicitly advertises external agent definition support; GUI
-clients that know a selected runtime cannot accept agent personas should disable
-the Agent persona control and submit no `agentName` instead of relying on
-submit-time prompt-prefix emulation.
+The composer presents Agent Definition and Runtime Profile through one grouped
+target selector. Before binding, the headless `ThreadController` receives
+compatible `RunnableTarget` choices from `thread/context/read`; React does not
+pair targets or infer compatibility. After binding, the selector becomes
+immutable provenance and changing either identity starts a new public thread.
+Visible target labels stay single-line and Agent-first: Native shows
+`agentLabel`, ACP shows `agentLabel (ACP)`, and Runtime Profile identity remains
+diagnostic provenance rather than repeated secondary copy.
 
-Workbench loads peer runtime options on demand through `runtime/options`.
-The request carries the current scope, optional thread id, and runtime ref.
-Gateway initializes or loads the peer ACP session as needed and returns a
-bounded projection of ACP session config options, including id, name,
-description, category, type, current value, and selectable values. Workbench
-uses only the `mode` category/id for the first runtime-mode control, normalizes
-default/plan to the shared composer mode affordance when possible, and keeps
-additional peer modes as a separate runtime mode selector. The selection is
-scoped to the current draft/session and is sent back as `runtimeOptions`, not
-persisted in Settings.
+Model, mode, reasoning, and advanced options are typed control descriptors from
+Thread Context. An unbound choice becomes a source draft. A bound choice calls
+`thread/control/set` as a sticky next-turn preference. Applied and observed
+values remain distinct, and unsupported or unavailable controls carry Gateway
+reasons. `turn/start` submits structured input, the selected target only when
+unbound, typed one-turn overrides, and expected revisions; it has no Native-only
+top-level control fields or string `runtimeOptions` map.
+Workbench routes Model and Reasoning descriptors through its shared grouped
+picker instead of recreating ACP choices from Settings or rendering independent
+native selects. Model choices remain target-authoritative; effective Settings
+metadata may enrich display names and provider groups only. Missing Reasoning is
+omitted, while a read-only descriptor shows only its authoritative value.
 
-`@agent` has two distinct meanings depending on runtime capability. With
-`runtimeRef = native`, Workbench may submit structured
-`GatewayMentionTarget::Agent` mentions and Gateway/runtime may use the `Agent`
-tool to delegate a task to a local child agent or a backend-backed ACP
-subagent. With `runtimeRef` naming an ACP peer backend, Workbench must not offer
-Psychevo agent completion or submit structured Psychevo agent mentions because
-the peer runtime cannot be assumed to orchestrate Psychevo agents. Literal
-`@agent` text is still allowed in the prompt and is passed through to the peer.
-If an older client submits a structured agent mention whose backend is the same
-as the selected peer runtime, Gateway rejects it with guidance to either remove
-the self-delegation mention or switch back to native runtime for ACP-as-tool
-delegation.
-`turn/interrupt` is a thread/source-scoped active-turn control, not only a
+Agent mentions and delegation are capability-driven. Workbench offers a
+structured Agent mention only when Thread Context declares it accepted for the
+selected target. Literal mention text remains ordinary prompt text. Gateway
+rejects structured self-delegation or unsupported delegation before delivery.
+`thread/action/run` with action kind `interrupt` is a descriptor-gated,
+thread-scoped active-turn control, not only a
 top-level model-request abort. When a native turn is awaiting a foreground
 `spawn_agent` child invocation, interrupting the parent thread must abort that
 child invocation and settle the parent turn promptly. Persisted child-agent
@@ -281,9 +265,11 @@ scoped interaction requests, not global Web server chrome. The Web shell keeps
 optional pending metadata such as thread id, turn id, activity id, owner id, and
 lease expiry with each permission request so reconnects can keep still-valid
 foreign approvals visible while pruning stale, completed, interrupted, expired,
-or wrong-thread requests before snapshot serialization. If `permission/respond`
-returns `accepted: false`, Workbench must show a composer-scoped transient error
-and refresh the snapshot instead of making the approval buttons appear inert.
+or wrong-thread requests before snapshot serialization. If
+`thread/interaction/respond` rejects a stale, hidden, or already consumed
+interaction, Workbench must show a composer-scoped transient error and refresh
+the snapshot instead of making the approval buttons appear inert. Successful
+responses are accepted exactly once.
 Permission and clarify live request events must also update Workbench's current
 snapshot immediately. Workbench may then issue a targeted `thread/read` for the
 request's thread or activity context, but it must not depend on source-default
@@ -304,19 +290,15 @@ options. `runtimeOptions.mode` maps to the peer's `mode` option or `mode`
 category before the same prompt. Unsupported or unmatched peer options leave
 the peer default in place and emit diagnostic events; they do not fail the user
 turn.
-ACP peer `usage_update` events are retained as structured ACP peer events and
-projected into Status observability for the peer session when they include a
+ACP Agent `usage_update` events are retained as bounded typed Agent facts and
+projected into Status observability for the Agent session when they include a
 usable `used`/`size` context pair. The Status context total then reflects the
-peer-reported context window rather than the local prompt estimate, and the
-session usage summary uses the peer-reported used tokens and cost when no
-durable provider accounting exists for that peer turn. That projection is not a
-long-lived session identity: starting a non-ACP-peer turn on the same Psychevo
-session clears the retained peer usage projection while preserving the peer
-native session id so a later peer turn can still resume the ACP backend session.
-Starting a new source draft or switching from a peer runtime back to native
-must clear peer-specific Status labels and usage projections from the visible
-observability panel so stale `reported by ACP peer` state is not shown for a
-native or empty draft session.
+Agent-reported context window rather than the local prompt estimate, and the
+session usage summary uses Agent-reported used tokens and cost when no durable
+provider accounting exists. The projection is scoped to the immutable binding;
+starting a new source draft or switching targets clears it from the visible
+observability panel so stale ACP-derived context is not shown for another
+thread.
 
 `thread/trace` reads the selected thread's persisted observability trace when a
 sidecar exists. It accepts `threadId`, optional `afterSeq`, and optional `limit`.
@@ -551,7 +533,7 @@ and reconcile pending tool/reasoning rows as failed or interrupted.
 
 Interrupt actions are scoped to the current thread or opened child thread.
 Workbench may show immediate local interrupting state after sending
-`turn/interrupt`, but final UI settlement comes from the same terminal turn
+the interrupt Thread action, but final UI settlement comes from the same terminal turn
 status used by TUI and history reload. Refreshes after interrupt must read the
 target thread explicitly; they must not resume an unscoped draft or unrelated
 source binding.

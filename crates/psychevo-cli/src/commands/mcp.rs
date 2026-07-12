@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -7,10 +6,8 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
-use psychevo_gateway::{Gateway, GatewaySource, SendTurnRequest};
-use psychevo_runtime::{
-    PermissionMode, ProjectContextInstructionMode, RunMode, RunOptions, StateRuntime,
-};
+use psychevo_gateway::{Gateway, GatewayInputPart, GatewaySource, ThreadTurnRequest};
+use psychevo_runtime::{PermissionMode, ProjectContextInstructionMode, RunMode, StateRuntime};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -232,57 +229,26 @@ async fn run_cli_mcp_turn(
             "entrypoint": "mcp serve",
             "cwd": cwd.display().to_string(),
         }));
-    let turn_result = gateway
-        .send_turn(SendTurnRequest {
-            thread_id: request.session_id.clone(),
-            source: Some(source),
-            bind_source: None,
-            reset_source_binding: false,
-            input: Vec::new(),
-            options: RunOptions {
-                state,
-                cwd,
-                snapshot_root: Some(home.join("snapshots")),
-                session: request.session_id,
-                continue_latest: false,
-                prompt,
-                image_inputs: Vec::new(),
-                extract_prompt_image_sources: true,
-                prompt_display: None,
-                max_context_messages: None,
-                config_path,
-                project_context_override,
-                model: args.model,
-                reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
-                runtime_ref: None,
-                runtime_session_id: None,
-                runtime_options: BTreeMap::new(),
-                external_agent_delegate: None,
-                include_reasoning: false,
-                mode: run_mode,
-                permission_mode,
-                sandbox_override: None,
-                approval_mode: None,
-                approval_handler: interactive_approval_handler(),
-                clarify_enabled: false,
-                inherited_env: Some(env_map),
-                agent: args.agent,
-                no_agents: args.no_agents,
-                no_skills: args.no_skills,
-                selected_capability_roots: Vec::new(),
-                skill_inputs: args.skill,
-                mcp_servers: Vec::new(),
-                runtime_tools: Vec::new(),
-            },
-            runtime_source: Some("mcp".to_string()),
-            continue_sources: vec!["mcp".to_string()],
-            stream: None,
-            event_sink: None,
-            control_handle: None,
-            control: None,
-            lineage: None,
-        })
-        .await?;
+    let mut turn = ThreadTurnRequest::new(cwd, vec![GatewayInputPart::Text { text: prompt }]);
+    turn.thread_id = request.session_id;
+    turn.source = Some(source);
+    turn.policy.snapshot_root = Some(home.join("snapshots"));
+    turn.policy.extract_prompt_image_sources = true;
+    turn.policy.config_path = config_path;
+    turn.policy.project_context_override = project_context_override;
+    turn.policy.model = args.model;
+    turn.policy.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
+    turn.policy.mode = run_mode;
+    turn.policy.permission_mode = permission_mode;
+    turn.policy.approval_handler = interactive_approval_handler();
+    turn.policy.inherited_env = Some(env_map);
+    turn.policy.agent_ref = args.agent;
+    turn.policy.no_agents = args.no_agents;
+    turn.policy.no_skills = args.no_skills;
+    turn.policy.skill_inputs = args.skill;
+    turn.runtime_source = Some("mcp".to_string());
+    turn.continue_sources = vec!["mcp".to_string()];
+    let turn_result = gateway.run_turn(turn).await?;
     let result = turn_result.result;
     Ok(PsychevoMcpTurnResult {
         session_id: result.session_id,

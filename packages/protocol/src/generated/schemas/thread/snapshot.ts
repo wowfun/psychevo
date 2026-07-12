@@ -6,9 +6,8 @@ export const threadSnapshotSchemas = {
   "definitions": {
     "BackendKind": {
       "enum": [
-        "psychevo",
-        "peerAgent",
-        "runtime"
+        "native",
+        "acp"
       ],
       "type": "string"
     },
@@ -288,6 +287,52 @@ export const threadSnapshotSchemas = {
       ],
       "type": "object"
     },
+    "ThreadHistoryFidelityView": {
+      "enum": [
+        "full",
+        "summary",
+        "partial",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryOwnerView": {
+      "enum": [
+        "psychevo",
+        "agent",
+        "process"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryView": {
+      "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fidelity": {
+          "$ref": "#/definitions/ThreadHistoryFidelityView"
+        },
+        "hint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "$ref": "#/definitions/ThreadHistoryOwnerView"
+        }
+      },
+      "required": [
+        "fidelity",
+        "owner"
+      ],
+      "type": "object"
+    },
     "TranscriptBlock": {
       "properties": {
         "artifactIds": {
@@ -322,6 +367,14 @@ export const threadSnapshotSchemas = {
         "order": {
           "format": "int64",
           "type": "integer"
+        },
+        "phaseOrdinal": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "preview": {
           "type": [
@@ -520,6 +573,9 @@ export const threadSnapshotSchemas = {
       },
       "type": "array"
     },
+    "history": {
+      "$ref": "#/definitions/ThreadHistoryView"
+    },
     "pendingActions": {
       "items": {
         "$ref": "#/definitions/PendingActionView"
@@ -547,6 +603,7 @@ export const threadSnapshotSchemas = {
   "required": [
     "activity",
     "entries",
+    "history",
     "pendingActions",
     "scope",
     "source"

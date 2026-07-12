@@ -1,4 +1,42 @@
 impl PsychevoAcpAgent {
+    pub(crate) fn thread_turn_request(
+        &self,
+        session: &AcpSession,
+        prompt: String,
+        image_inputs: Vec<ImageInput>,
+        approval_handler: Option<Arc<dyn ApprovalHandler>>,
+    ) -> ThreadTurnRequest {
+        let mut input = Vec::with_capacity(1 + image_inputs.len());
+        if !prompt.is_empty() {
+            input.push(GatewayInputPart::Text { text: prompt });
+        }
+        input.extend(
+            image_inputs
+                .into_iter()
+                .map(|image| GatewayInputPart::Image {
+                    input: match image {
+                        ImageInput::LocalPath(path) => GatewayImageInput::LocalPath {
+                            path: path.display().to_string(),
+                        },
+                        ImageInput::ImageUrl(url) => GatewayImageInput::Url { url },
+                    },
+                }),
+        );
+        let mut request = ThreadTurnRequest::new(session.cwd.clone(), input);
+        request.thread_id = session.runtime_session_id.clone();
+        request.policy.snapshot_root = Some(self.options.home.join("snapshots"));
+        request.policy.config_path = self.options.config_path.clone();
+        request.policy.model = session.model.clone();
+        request.policy.reasoning_effort = session.reasoning_effort.clone();
+        request.policy.include_reasoning = true;
+        request.policy.mode = session.mode;
+        request.policy.permission_mode = session.permission_mode;
+        request.policy.approval_mode = Some(ApprovalMode::Manual);
+        request.policy.approval_handler = approval_handler;
+        request.policy.inherited_env = Some(self.options.inherited_env.clone());
+        request.policy.mcp_servers = session.mcp_servers.clone();
+        request
+    }
 
     pub(crate) fn run_options(
         &self,
