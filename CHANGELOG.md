@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-07-12
+
+- Fixed ACP child and side-thread continuity across delegated and follow-up
+  turns, including immutable Agent/Profile bindings, transcript reconciliation,
+  controls, activity, interactions, lifecycle actions, and first-turn Agent
+  instructions.
+
+## 2026-07-11
+
+- Replaced the direct Codex and OpenCode runtime paths with first-class ACP
+  Agents behind the shared Thread Application contract, with a resident ACP
+  process/session host, immutable bindings, typed inputs and controls, history,
+  interactions, delivery recovery, and removal of the retired Runtime Host.
+- Added managed Codex ACP and OpenCode ACP setup, draft-session preparation,
+  session discovery and import, and capability-gated fork, archive, restore,
+  and deletion across Workbench and Channels.
+- Simplified the Workbench Composer around capability-aware Agent, Model,
+  Reasoning, and Mode controls, and fixed stale draft controls, duplicate
+  OpenCode modes, optimistic history reconciliation, and Native activity
+  completion.
+- Fixed managed Web startup failures to report the current child-process error
+  in the terminal, and resolved explicit relative live artifact roots once at
+  the xtask boundary for reliable cross-process fixtures and installers.
+
 ## 2026-07-10
 
 - Added direct Codex and OpenCode Runtime Profiles behind a shared Runtime Host,
