@@ -487,6 +487,7 @@ mod capability_pack_tests {
                 native_session_id: "native-pack".to_string(),
                 modes: None,
                 config_options: Vec::new(),
+                legacy_models: None,
                 session_epoch: 1,
                 loaded_from_agent: false,
                 mcp_servers: Vec::new(),

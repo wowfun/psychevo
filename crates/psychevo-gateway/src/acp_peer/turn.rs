@@ -36,6 +36,12 @@ fn acp_message_turn_id(metadata: Option<&Value>) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+fn acp_replay_id(metadata: Option<&Value>) -> Option<&str> {
+    metadata
+        .and_then(|metadata| metadata.pointer("/acp/replayId"))
+        .and_then(Value::as_str)
+}
+
 fn acp_message_metadata(
     message_ids: &[String],
     origin: &str,
@@ -68,6 +74,23 @@ fn acp_message_metadata(
     Some(json!({ "acp": acp }))
 }
 
+fn acp_history_message_metadata(
+    replay_id: &str,
+    message_ids: &[String],
+    turn_id: Option<&str>,
+    plan: Option<&AcpPeerPlanProjection>,
+) -> Value {
+    let mut metadata = acp_message_metadata(message_ids, "history", turn_id, plan)
+        .unwrap_or_else(|| json!({"acp": {"messageIds": [], "origin": "history"}}));
+    if let Some(acp) = metadata.get_mut("acp").and_then(Value::as_object_mut) {
+        acp.insert(
+            "replayId".to_string(),
+            Value::String(replay_id.to_string()),
+        );
+    }
+    metadata
+}
+
 fn commit_acp_replay_and_current_input(
     state: &psychevo_runtime::StateRuntime,
     peer: &ResolvedPeerTurn,
@@ -76,9 +99,45 @@ fn commit_acp_replay_and_current_input(
     replay: &AcpHistoryReplayProjection,
     current_user_text: &str,
 ) -> psychevo_runtime::Result<()> {
+    commit_acp_replay(
+        state,
+        peer,
+        session_id,
+        Some(current_turn_id),
+        replay,
+    )?;
+    state.store().append_message(
+        session_id,
+        &Message::User {
+            content: vec![UserContentBlock::text(current_user_text.to_string())],
+            timestamp_ms: gateway_now_ms(),
+        },
+    )
+}
+
+pub(crate) fn commit_imported_acp_replay(
+    state: &psychevo_runtime::StateRuntime,
+    peer: &ResolvedPeerTurn,
+    session_id: &str,
+    replay: &AcpHistoryReplayProjection,
+) -> psychevo_runtime::Result<()> {
+    commit_acp_replay(state, peer, session_id, None, replay)
+}
+
+fn commit_acp_replay(
+    state: &psychevo_runtime::StateRuntime,
+    peer: &ResolvedPeerTurn,
+    session_id: &str,
+    current_turn_id: Option<&str>,
+    replay: &AcpHistoryReplayProjection,
+) -> psychevo_runtime::Result<()> {
     let store = state.store();
-    let unknown = store
-        .unknown_gateway_turn_deliveries_for_thread(session_id, current_turn_id)?;
+    let unknown = match current_turn_id {
+        Some(current_turn_id) => {
+            store.unknown_gateway_turn_deliveries_for_thread(session_id, current_turn_id)?
+        }
+        None => Vec::new(),
+    };
     if unknown.len() > 1 {
         return Err(crate::agent_session_error(
             "multiple_unknown_deliveries",
@@ -90,56 +149,97 @@ fn commit_acp_replay_and_current_input(
         ));
     }
     let prior_unknown = unknown.first();
-    let replay_ids = replay
-        .assistant_messages
+    let replay_message_ids = replay
+        .entries
         .iter()
-        .map(|message| message.message_id.clone())
+        .filter(|entry| matches!(entry, AcpHistoryReplayEntry::Assistant { .. }))
+        .flat_map(replay_entry_delivery_message_ids)
         .collect::<BTreeSet<_>>();
     let existing = store.load_tui_message_summaries(session_id)?;
-    let mut existing_ids = BTreeSet::new();
+    let mut existing_replay_ids = BTreeSet::new();
     let mut reconciliation_evidence = BTreeSet::new();
     for summary in &existing {
         let ids = acp_message_ids(summary.metadata.as_ref());
-        existing_ids.extend(ids.iter().cloned());
+        if let Some(replay_id) = acp_replay_id(summary.metadata.as_ref()) {
+            existing_replay_ids.insert(replay_id.to_string());
+        } else {
+            existing_replay_ids.extend(ids.iter().cloned());
+        }
         if prior_unknown.is_some_and(|unknown| {
             acp_message_turn_id(summary.metadata.as_ref()) == Some(unknown.turn_id.as_str())
         }) {
             reconciliation_evidence.extend(
                 ids.into_iter()
-                    .filter(|message_id| replay_ids.contains(message_id)),
+                    .filter(|message_id| replay_message_ids.contains(message_id)),
             );
         }
     }
 
-    for message in &replay.assistant_messages {
-        if existing_ids.contains(&message.message_id) || message.text.trim().is_empty() {
+    for entry in &replay.entries {
+        let replay_id = replay_entry_identity(entry);
+        if existing_replay_ids.contains(replay_id) {
             continue;
         }
+        let delivery_message_ids = replay_entry_delivery_message_ids(entry);
         let turn_id = prior_unknown.map(|unknown| unknown.turn_id.as_str());
-        store.append_message_with_metrics(
-            session_id,
-            &Message::Assistant {
-                content: vec![AssistantBlock::Text {
-                    text: message.text.clone(),
-                }],
-                timestamp_ms: gateway_now_ms(),
-                finish_reason: Some("end_turn".to_string()),
-                outcome: Outcome::Normal,
-                model: Some(peer.agent.name.clone()),
-                provider: Some(format!("acp:{}", peer.backend.id)),
-            },
-            None,
-            acp_message_metadata(
-                std::slice::from_ref(&message.message_id),
-                "history",
-                turn_id,
-                None,
-            ),
-        )?;
-        existing_ids.insert(message.message_id.clone());
-        if prior_unknown.is_some() {
-            reconciliation_evidence.insert(message.message_id.clone());
+        let replay_turn_id = turn_id.or(Some(replay_id));
+        match entry {
+            AcpHistoryReplayEntry::User { text, .. } => {
+                if text.trim().is_empty() {
+                    continue;
+                }
+                store.append_message_with_metrics(
+                    session_id,
+                    &Message::User {
+                        content: vec![UserContentBlock::text(text.clone())],
+                        timestamp_ms: gateway_now_ms(),
+                    },
+                    None,
+                    Some(acp_history_message_metadata(
+                        replay_id,
+                        &delivery_message_ids,
+                        replay_turn_id,
+                        None,
+                    )),
+                )?;
+            }
+            AcpHistoryReplayEntry::Assistant {
+                content_slots,
+                tools,
+                plan,
+                ..
+            } => {
+                let content = persisted_assistant_content(content_slots, tools);
+                if content.is_empty() && plan.is_none() {
+                    continue;
+                }
+                store.append_message_with_metrics(
+                    session_id,
+                    &Message::Assistant {
+                        content,
+                        timestamp_ms: gateway_now_ms(),
+                        finish_reason: Some("end_turn".to_string()),
+                        outcome: Outcome::Normal,
+                        model: Some(peer.agent.name.clone()),
+                        provider: Some(format!("acp:{}", peer.backend.id)),
+                    },
+                    None,
+                    Some(acp_history_message_metadata(
+                        replay_id,
+                        &delivery_message_ids,
+                        replay_turn_id,
+                        plan.as_ref(),
+                    )),
+                )?;
+                for message in persisted_tool_result_messages(content_slots, tools) {
+                    store.append_message(session_id, &message)?;
+                }
+                if prior_unknown.is_some() {
+                    reconciliation_evidence.extend(delivery_message_ids.iter().cloned());
+                }
+            }
         }
+        existing_replay_ids.insert(replay_id.to_string());
     }
 
     if let Some(prior_unknown) = prior_unknown
@@ -166,13 +266,7 @@ fn commit_acp_replay_and_current_input(
         }
     }
 
-    store.append_message(
-        session_id,
-        &Message::User {
-            content: vec![UserContentBlock::text(current_user_text.to_string())],
-            timestamp_ms: gateway_now_ms(),
-        },
-    )
+    Ok(())
 }
 
 pub(crate) async fn run_acp_peer_turn(

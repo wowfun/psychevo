@@ -947,7 +947,7 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
 }
 
 #[tokio::test]
-async fn channel_profile_command_rejects_unavailable_pre_thread_target() {
+async fn channel_profile_command_rejects_unknown_pre_thread_target() {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
@@ -987,7 +987,7 @@ async fn channel_profile_command_rejects_unavailable_pre_thread_target() {
     .expect("profile draft handled");
 
     let sent = wait_for_sent(&adapter, 1).await;
-    assert!(sent[0].text.contains("backend/install"));
+    assert_eq!(sent[0].text, "Unknown Runtime Profile `codex`.");
     let lane = state
         .inner
         .state

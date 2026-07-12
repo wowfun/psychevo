@@ -141,6 +141,14 @@ pub(crate) fn committed_turn_entries_replace_live_overlay_and_optimistic_prompt(
         "{:?}",
         ui.transcript
     );
+    assert!(
+        ui.transcript
+            .iter()
+            .find(|row| row.kind == TranscriptKind::Thinking && row.text == "durable thinking")
+            .is_some_and(|row| row.details_collapsed),
+        "{:?}",
+        ui.transcript
+    );
     assert_eq!(
         ui.transcript
             .iter()

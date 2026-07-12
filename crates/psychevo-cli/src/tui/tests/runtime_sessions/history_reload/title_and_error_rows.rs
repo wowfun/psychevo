@@ -456,6 +456,7 @@ pub(crate) fn fullscreen_loads_current_session_history() {
     assert_eq!(ui.transcript[0].text, "hello");
     assert_eq!(ui.transcript[1].kind, TranscriptKind::Thinking);
     assert_eq!(ui.transcript[1].text, "folded thought");
+    assert!(ui.transcript[1].details_collapsed);
     assert_eq!(ui.transcript[2].kind, TranscriptKind::Answer);
     assert_eq!(ui.transcript[2].text, "hi");
     assert!(

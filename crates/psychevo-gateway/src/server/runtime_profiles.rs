@@ -491,7 +491,7 @@ pub(super) fn thread_context_read_result(
                         let ready = matches!(profile.health.status.as_str(), "ready" | "unchecked");
                         runnable_target_view(
                             binding.agent_ref.clone(),
-                            binding.agent_ref.as_deref().unwrap_or("Default Agent"),
+                            binding.agent_ref.as_deref().unwrap_or("Psychevo"),
                             profile,
                             ready,
                             (!ready).then(|| profile.health.summary.clone()),
@@ -1054,6 +1054,11 @@ pub(super) fn cached_thread_history_descriptor(
             "History is unavailable until the Agent target binding is resolved.",
         ));
     }
+    if binding.backend_kind.as_deref() == Some("acp")
+        && let Some(snapshot) = persisted_acp_session_snapshot(state, thread_id)?
+    {
+        return Ok(acp_session_agent_surface_descriptor(&snapshot, String::new()).history);
+    }
     let profile = bound_runtime_profile_record(&binding)?;
     Ok(profile_agent_surface_descriptor(
         &profile.config,
@@ -1595,13 +1600,8 @@ fn compatible_runnable_targets(
             profile.enabled && matches!(profile.health.status.as_str(), "ready" | "unchecked");
         let unavailable_reason = (!ready).then(|| profile.health.summary.clone());
         if record.config.runtime == RuntimeProfileKind::Native {
-            let target = runnable_target_view(
-                None,
-                "Default Agent",
-                profile,
-                ready,
-                unavailable_reason.clone(),
-            );
+            let target =
+                runnable_target_view(None, "Psychevo", profile, ready, unavailable_reason.clone());
             target_revisions.insert(
                 target.target_id.clone(),
                 runnable_target_context_revision(&target, &record.config, None, None, profile),
@@ -1921,6 +1921,7 @@ fn runtime_profile_records(
     state: &WebState,
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<BTreeMap<String, RuntimeProfileRecord>> {
+    materialize_local_acp_backends(state, scope)?;
     let configured =
         load_runtime_profile_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     let backends =
@@ -1928,7 +1929,7 @@ fn runtime_profile_records(
     for config in configured.values() {
         validate_native_runtime_profile_identity(&config.id, config.runtime.as_str())?;
     }
-    let generated = generated_runtime_profiles();
+    let generated = generated_runtime_profiles_for_backends(&backends);
     let referenced_backends = configured
         .values()
         .chain(generated.iter())
@@ -2244,6 +2245,20 @@ pub(super) fn generated_runtime_profiles() -> Vec<RuntimeProfileConfig> {
             options: Value::Null,
         },
     ]
+}
+
+fn generated_runtime_profiles_for_backends(
+    backends: &BTreeMap<String, AgentBackendConfig>,
+) -> Vec<RuntimeProfileConfig> {
+    generated_runtime_profiles()
+        .into_iter()
+        .filter(|profile| {
+            profile
+                .backend_ref
+                .as_deref()
+                .is_none_or(|backend_ref| backends.contains_key(backend_ref))
+        })
+        .collect()
 }
 
 fn runtime_profile_view(
@@ -2774,7 +2789,7 @@ fn native_agent_surface_descriptor(
             "permissionMode",
             "Permission mode",
             wire::ThreadControlSurfaceRoleView::Advanced,
-            None,
+            Some("default".to_string()),
             ["default", "acceptEdits", "dontAsk", "bypassPermissions"]
                 .into_iter()
                 .map(|value| wire::ThreadControlChoiceView {
@@ -3295,6 +3310,11 @@ fn acp_session_agent_surface_descriptor(
                     "This ACP Agent history is process-ephemeral and cannot be resumed after restart."
                         .to_string(),
                 )
+            } else if snapshot.history.loaded_from_agent && !snapshot.history.replay_complete {
+                Some(
+                    "ACP Agent history replay is incomplete because some content lacked stable identity or exceeded product projection limits."
+                        .to_string(),
+                )
             } else if !snapshot.history.loaded_from_agent {
                 Some(
                     "History is Agent-authoritative and resumable; this process has not loaded a prior session."
@@ -3379,7 +3399,12 @@ fn populate_native_control_catalog(
         .iter_mut()
         .find(|control| control.id == "reasoning")
         && reasoning_control.effective_value.is_none()
-        && let Some(reasoning) = options.reasoning_effort
+        && let Some(reasoning) = options.reasoning_effort.clone().or_else(|| {
+            selected_configured_model(&options)
+                .ok()
+                .flatten()
+                .and_then(|model| model.reasoning_effort)
+        })
     {
         reasoning_control.effective_value = Some(Value::String(reasoning));
         reasoning_control.effective_source = wire::ThreadControlEffectiveSourceView::RuntimeDefault;
@@ -3784,6 +3809,7 @@ backend_ref = "ephemeral"
             available_commands: Vec::new(),
             available_modes: Vec::new(),
             current_mode_id: None,
+            legacy_models: None,
             history: crate::acp_peer::AcpHistorySnapshot {
                 owner: crate::acp_peer::AcpHistoryOwnerSnapshot::Process,
                 resumable: false,

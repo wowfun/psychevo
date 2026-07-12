@@ -21,14 +21,14 @@ impl Gateway {
             .await
     }
 
-    pub(crate) async fn resume_imported_agent_session(
+    pub(crate) async fn load_imported_agent_session(
         &self,
         profile: RuntimeProfileConfig,
         peer: ResolvedPeerTurn,
         options: RunOptions,
         local_session_id: String,
         native_session_id: String,
-    ) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
+    ) -> psychevo_runtime::Result<acp_peer::AcpSessionLoadOutput> {
         let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
         self.agent_sessions
             .attach(CapturedAgentSessionTarget::invocation(
@@ -36,15 +36,24 @@ impl Gateway {
                 profile,
                 Some(peer),
             ))?
-            .transact(AgentSessionCommand::ResumeSession(AgentSessionRef {
+            .transact(AgentSessionCommand::LoadSession(AgentSessionRef {
                 cwd: options.cwd,
                 local_session_id,
                 native_session_id,
                 mcp_servers,
             }))
             .await
-            .and_then(AgentSessionResponse::into_resumed)?
-            .into_acp()
+            .and_then(AgentSessionResponse::into_loaded)
+    }
+
+    pub(crate) async fn release_imported_agent_session(
+        &self,
+        local_session_id: String,
+        native_session_id: String,
+    ) -> psychevo_runtime::Result<()> {
+        self.agent_sessions
+            .release_acp_session(local_session_id, native_session_id)
+            .await
     }
 
     pub(crate) async fn resume_bound_agent_session(

@@ -74,11 +74,13 @@ impl<'a> FullscreenUi<'a> {
                 let tool_calls = history_tool_calls_from_message(message);
                 let has_reasoning =
                     if let Some(reasoning) = assistant_reasoning_from_message(message) {
-                        self.transcript.push(TranscriptRow::with_title(
+                        let mut row = TranscriptRow::with_title(
                             TranscriptKind::Thinking,
                             "Thinking",
                             reasoning,
-                        ));
+                        );
+                        row.collapse_thinking_details();
+                        self.transcript.push(row);
                         true
                     } else {
                         false

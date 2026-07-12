@@ -16,6 +16,10 @@ const ACP_MAX_AUTH_METHODS: usize = 32;
 const ACP_MAX_AUTH_METHOD_ID_CHARS: usize = 128;
 const ACP_MAX_AUTH_METHOD_NAME_CHARS: usize = 256;
 const ACP_MAX_AUTH_METHOD_DESCRIPTION_CHARS: usize = 1_024;
+const ACP_MAX_LEGACY_MODELS: usize = 512;
+const ACP_MAX_LEGACY_MODEL_ID_CHARS: usize = 1_024;
+const ACP_MAX_LEGACY_MODEL_NAME_CHARS: usize = 256;
+const ACP_MAX_LEGACY_MODEL_DESCRIPTION_CHARS: usize = 1_024;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AcpAgentIdentitySnapshot {
@@ -89,6 +93,19 @@ pub(crate) struct AcpSessionModeSnapshot {
     pub(crate) description: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct AcpLegacyModelSnapshot {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct AcpLegacyModelState {
+    pub(crate) current_model_id: String,
+    pub(crate) available_models: Vec<AcpLegacyModelSnapshot>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum AcpHistoryOwnerSnapshot {
     Agent,
@@ -125,6 +142,8 @@ pub(crate) struct AcpSessionSnapshot {
     pub(crate) available_commands: Vec<AcpAvailableCommandSnapshot>,
     pub(crate) available_modes: Vec<AcpSessionModeSnapshot>,
     pub(crate) current_mode_id: Option<String>,
+    #[serde(default)]
+    pub(crate) legacy_models: Option<AcpLegacyModelState>,
     pub(crate) history: AcpHistorySnapshot,
     pub(crate) session_info: AcpSessionInfoSnapshot,
     pub(crate) generation: u64,
@@ -185,6 +204,7 @@ struct AcpResidentSession {
     available_commands: Vec<AcpAvailableCommandSnapshot>,
     available_modes: Vec<AcpSessionModeSnapshot>,
     current_mode_id: Option<String>,
+    legacy_models: Option<AcpLegacyModelState>,
     history: AcpHistorySnapshot,
     session_info: AcpSessionInfoSnapshot,
     session_epoch: u64,
@@ -222,6 +242,7 @@ struct AcpResidentSessionInput {
     native_session_id: String,
     modes: Option<SessionModeState>,
     config_options: Vec<SessionConfigOption>,
+    legacy_models: Option<AcpLegacyModelState>,
     session_epoch: u64,
     loaded_from_agent: bool,
     mcp_servers: Vec<McpServer>,
@@ -481,6 +502,29 @@ async fn acp_response_with_projection_barrier<T: agent_client_protocol::JsonRpcR
     Ok((response, barrier))
 }
 
+async fn acp_session_response_with_legacy_models<T, P>(
+    cx: &ConnectionTo<Agent>,
+    method: &str,
+    params: P,
+    notification_ingress: &AcpNotificationIngress,
+) -> Result<(T, Option<AcpLegacyModelState>, u64), agent_client_protocol::Error>
+where
+    T: serde::de::DeserializeOwned,
+    P: serde::Serialize,
+{
+    let request = UntypedMessage::new(method, params)?;
+    let (raw, barrier) =
+        acp_response_with_projection_barrier(cx.send_request(request), notification_ingress)
+            .await?;
+    let legacy_models = project_legacy_model_state(raw.get("models"));
+    let response = serde_json::from_value(raw).map_err(|error| {
+        agent_client_protocol::Error::internal_error().data(format!(
+            "ACP {method} response failed stable schema decoding: {error}"
+        ))
+    })?;
+    Ok((response, legacy_models, barrier))
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct AcpInboundReduction {
     barrier: Option<u64>,
@@ -575,6 +619,7 @@ fn new_acp_resident_session(
         available_commands: Vec::new(),
         available_modes,
         current_mode_id,
+        legacy_models: input.legacy_models,
         history: AcpHistorySnapshot {
             owner: if load_supported || resume_supported {
                 AcpHistoryOwnerSnapshot::Agent
@@ -609,6 +654,102 @@ fn next_acp_session_epoch(next_session_epoch: &AtomicU64) -> psychevo_runtime::R
 
 fn bounded_acp_text(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
+}
+
+fn project_legacy_model_state(value: Option<&Value>) -> Option<AcpLegacyModelState> {
+    let value = value?.as_object()?;
+    let current_model_id = value
+        .get("currentModelId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| bounded_acp_text(id, ACP_MAX_LEGACY_MODEL_ID_CHARS))?;
+    let mut seen = BTreeSet::new();
+    let available_models = value
+        .get("availableModels")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(|model| {
+            let id = model
+                .get("modelId")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(|id| bounded_acp_text(id, ACP_MAX_LEGACY_MODEL_ID_CHARS))?;
+            if !seen.insert(id.clone()) {
+                return None;
+            }
+            let name = model
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(|name| bounded_acp_text(name, ACP_MAX_LEGACY_MODEL_NAME_CHARS))?;
+            Some(AcpLegacyModelSnapshot {
+                id,
+                name,
+                description: model
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|description| !description.is_empty())
+                    .map(|description| {
+                        bounded_acp_text(description, ACP_MAX_LEGACY_MODEL_DESCRIPTION_CHARS)
+                    }),
+            })
+        })
+        .take(ACP_MAX_LEGACY_MODELS)
+        .collect::<Vec<_>>();
+    if available_models.is_empty()
+        || !available_models
+            .iter()
+            .any(|model| model.id == current_model_id)
+    {
+        return None;
+    }
+    Some(AcpLegacyModelState {
+        current_model_id,
+        available_models,
+    })
+}
+
+fn has_stable_model_config_option(config_options: &[SessionConfigOption]) -> bool {
+    config_options.iter().any(|option| {
+        option.id.to_string() == "model"
+            || option.category.as_ref() == Some(&SessionConfigOptionCategory::Model)
+    })
+}
+
+fn effective_legacy_models<'a>(
+    config_options: &[SessionConfigOption],
+    legacy_models: Option<&'a AcpLegacyModelState>,
+) -> Option<&'a AcpLegacyModelState> {
+    (!has_stable_model_config_option(config_options))
+        .then_some(legacy_models)
+        .flatten()
+}
+
+fn legacy_model_runtime_option(
+    legacy_models: &AcpLegacyModelState,
+) -> wire::RuntimeConfigOptionView {
+    wire::RuntimeConfigOptionView {
+        id: "model".to_string(),
+        name: "Model".to_string(),
+        description: Some("Reported by the ACP Agent's legacy model selector.".to_string()),
+        category: Some("model".to_string()),
+        option_type: "select".to_string(),
+        current_value: Some(legacy_models.current_model_id.clone()),
+        values: legacy_models
+            .available_models
+            .iter()
+            .map(|model| wire::RuntimeConfigOptionValueView {
+                value: model.id.clone(),
+                name: model.name.clone(),
+                description: model.description.clone(),
+                group: None,
+            })
+            .collect(),
+    }
 }
 
 fn project_session_modes(
@@ -870,6 +1011,10 @@ async fn drain_acp_notification_subscription(
 
 fn acp_session_snapshot(session: &AcpResidentSession, generation: u64) -> AcpSessionSnapshot {
     let encoded_options = serde_json::to_vec(&session.config_options).unwrap_or_default();
+    let effective_legacy_models =
+        effective_legacy_models(&session.config_options, session.legacy_models.as_ref());
+    let encoded_legacy_models =
+        serde_json::to_vec(&effective_legacy_models).unwrap_or_default();
     let encoded_modes = serde_json::to_vec(
         &session
             .available_modes
@@ -888,6 +1033,7 @@ fn acp_session_snapshot(session: &AcpResidentSession, generation: u64) -> AcpSes
     control_revision.update(generation.to_be_bytes());
     control_revision.update(session.session_epoch.to_be_bytes());
     control_revision.update(&encoded_options);
+    control_revision.update(&encoded_legacy_models);
     control_revision.update(&encoded_modes);
     control_revision.update(
         session
@@ -942,6 +1088,7 @@ fn acp_session_snapshot(session: &AcpResidentSession, generation: u64) -> AcpSes
                 "mcpAcp": session.capabilities.mcp_acp,
             },
             "configOptions": serde_json::from_slice::<Value>(&encoded_options).unwrap_or(Value::Null),
+            "legacyModels": serde_json::from_slice::<Value>(&encoded_legacy_models).unwrap_or(Value::Null),
             "commands": commands,
             "availableModes": serde_json::from_slice::<Value>(&encoded_modes).unwrap_or(Value::Null),
             "currentModeId": session.current_mode_id,
@@ -967,16 +1114,22 @@ fn acp_session_snapshot(session: &AcpResidentSession, generation: u64) -> AcpSes
         .unwrap_or_default(),
     );
 
+    let mut options = project_acp_runtime_options(
+        serde_json::to_value(&session.config_options).unwrap_or(Value::Null),
+    );
+    if let Some(legacy_models) = effective_legacy_models {
+        options.push(legacy_model_runtime_option(legacy_models));
+    }
+
     AcpSessionSnapshot {
         native_session_id: session.native_session_id.clone(),
         agent: session.agent.clone(),
         capabilities: session.capabilities.clone(),
-        options: project_acp_runtime_options(
-            serde_json::to_value(&session.config_options).unwrap_or(Value::Null),
-        ),
+        options,
         available_commands: session.available_commands.clone(),
         available_modes: session.available_modes.clone(),
         current_mode_id: session.current_mode_id.clone(),
+        legacy_models: effective_legacy_models.cloned(),
         history: session.history.clone(),
         session_info: session.session_info.clone(),
         generation,

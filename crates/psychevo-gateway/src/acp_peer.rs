@@ -15,19 +15,20 @@ use agent_client_protocol::schema::v1::{
     ElicitationAcceptAction, ElicitationAction, ElicitationCapabilities, ElicitationContentValue,
     ElicitationFormCapabilities, ElicitationMode, ElicitationPropertySchema, ElicitationScope,
     EmbeddedResource, EmbeddedResourceResource, EnvVariable, FileSystemCapabilities,
-    ForkSessionRequest, HttpHeader, ImageContent, Implementation, InitializeRequest,
-    KillTerminalRequest, KillTerminalResponse, ListSessionsRequest, LoadSessionRequest, McpServer,
-    McpServerHttp, McpServerStdio, MultiSelectItems, NewSessionRequest, PermissionOption,
+    ForkSessionRequest, ForkSessionResponse, HttpHeader, ImageContent, Implementation,
+    InitializeRequest, KillTerminalRequest, KillTerminalResponse, ListSessionsRequest,
+    LoadSessionRequest, LoadSessionResponse, McpServer, McpServerHttp, McpServerStdio,
+    MultiSelectItems, NewSessionRequest, NewSessionResponse, PermissionOption,
     PermissionOptionKind, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
-    Response as AcpJsonRpcResponse, ResumeSessionRequest, SelectedPermissionOutcome,
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
-    SessionConfigSelectOptions, SessionModeState, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, StringFormat, TerminalExitStatus,
-    TerminalOutputRequest, TerminalOutputResponse, TextContent, TextResourceContents,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    Response as AcpJsonRpcResponse, ResumeSessionRequest, ResumeSessionResponse,
+    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigOptionValue, SessionConfigSelectOptions, SessionModeState, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, StringFormat,
+    TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, TextContent,
+    TextResourceContents, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::{
     Agent, BoxFuture, ByteStreams, Channel, Client, ConnectTo, ConnectionTo, Dispatch, Handled,
@@ -203,6 +204,385 @@ include!("acp_peer/metadata_permissions.rs");
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    fn reduce_history_update(projection: &mut AcpHistoryReplayProjection, value: Value) {
+        let update = serde_json::from_value::<SessionUpdate>(value.clone())
+            .expect("stable ACP history update");
+        projection.reduce_update(update, value);
+    }
+
+    #[test]
+    fn history_replay_reducer_preserves_projectable_content_order_and_identity() {
+        let mut replay = AcpHistoryReplayProjection::default();
+        for update in [
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "user-1",
+                "content": {"type": "text", "text": "question"}
+            }),
+            json!({
+                "sessionUpdate": "agent_thought_chunk",
+                "messageId": "assistant-1",
+                "content": {"type": "text", "text": "reasoning"}
+            }),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "assistant-1",
+                "content": {"type": "text", "text": "answer"}
+            }),
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tool-1",
+                "title": "Inspect",
+                "kind": "execute",
+                "status": "pending",
+                "rawInput": {"cmd": "true"}
+            }),
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-1",
+                "status": "completed",
+                "rawOutput": {"output": "done"}
+            }),
+            json!({
+                "sessionUpdate": "plan",
+                "entries": [{"content": "Verify", "priority": "high", "status": "completed"}]
+            }),
+        ] {
+            reduce_history_update(&mut replay, update);
+        }
+
+        assert_eq!(replay.entries.len(), 3);
+        assert!(matches!(
+            &replay.entries[0],
+            AcpHistoryReplayEntry::User { replay_id, delivery_message_id, text }
+                if replay_id == "user-1"
+                    && delivery_message_id.as_deref() == Some("user-1")
+                    && text == "question"
+        ));
+        let AcpHistoryReplayEntry::Assistant {
+            replay_id,
+            delivery_message_id,
+            content_slots,
+            tools,
+            ..
+        } = &replay.entries[1]
+        else {
+            panic!("assistant replay entry");
+        };
+        assert_eq!(replay_id, "assistant-1");
+        assert_eq!(delivery_message_id.as_deref(), Some("assistant-1"));
+        assert!(matches!(
+            content_slots.as_slice(),
+            [
+                AcpPeerContentSlot::Reasoning { text: reasoning },
+                AcpPeerContentSlot::Text { text: answer, .. },
+                AcpPeerContentSlot::Tool { tool_call_id }
+            ] if reasoning == "reasoning" && answer == "answer" && tool_call_id == "tool-1"
+        ));
+        assert_eq!(tools["tool-1"]["status"], "completed");
+        assert!(matches!(
+            &replay.entries[2],
+            AcpHistoryReplayEntry::Assistant { plan: Some(plan), .. }
+                if plan.body == "- [x] Verify"
+        ));
+    }
+
+    #[test]
+    fn history_replay_reducer_deduplicates_chunks_and_enforces_bounds() {
+        let mut replay = AcpHistoryReplayProjection::default();
+        let oversized = "x".repeat(ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS + 32);
+        reduce_history_update(
+            &mut replay,
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "bounded-user",
+                "content": {"type": "text", "text": oversized}
+            }),
+        );
+        reduce_history_update(
+            &mut replay,
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "bounded-user",
+                "content": {"type": "text", "text": "must-not-overflow"}
+            }),
+        );
+        for index in 0..(ACP_MAX_HISTORY_REPLAY_MESSAGES + 16) {
+            reduce_history_update(
+                &mut replay,
+                json!({
+                    "sessionUpdate": "agent_message_chunk",
+                    "messageId": format!("assistant-{index}"),
+                    "content": {"type": "text", "text": "answer"}
+                }),
+            );
+        }
+
+        assert_eq!(replay.entries.len(), ACP_MAX_HISTORY_REPLAY_MESSAGES);
+        assert!(matches!(
+            &replay.entries[0],
+            AcpHistoryReplayEntry::User { text, .. }
+                if text.chars().count() == ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS
+        ));
+        assert!(
+            !replay.is_complete(),
+            "bounded replay loss must be explicit"
+        );
+    }
+
+    #[test]
+    fn history_replay_marks_missing_message_identity_partial_and_keeps_reliable_entries() {
+        let mut replay = AcpHistoryReplayProjection::default();
+        for update in [
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "content": {"type": "text", "text": "unidentified user"}
+            }),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "unidentified assistant"}
+            }),
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "user-reliable",
+                "content": {"type": "text", "text": "reliable user"}
+            }),
+        ] {
+            reduce_history_update(&mut replay, update);
+        }
+
+        assert!(!replay.is_complete());
+        assert_eq!(replay.entries.len(), 3);
+        assert!(matches!(
+            &replay.entries[0],
+            AcpHistoryReplayEntry::User { replay_id, delivery_message_id: None, text }
+                if replay_id == "anonymous:user:1" && text == "unidentified user"
+        ));
+        assert!(matches!(
+            &replay.entries[1],
+            AcpHistoryReplayEntry::Assistant {
+                replay_id,
+                delivery_message_id: None,
+                content_slots,
+                ..
+            } if replay_id == "anonymous:assistant:2"
+                && matches!(
+                    content_slots.as_slice(),
+                    [AcpPeerContentSlot::Text { text, .. }] if text == "unidentified assistant"
+                )
+        ));
+        assert!(matches!(
+            &replay.entries[2],
+            AcpHistoryReplayEntry::User { replay_id, delivery_message_id, text }
+                if replay_id == "user-reliable"
+                    && delivery_message_id.as_deref() == Some("user-reliable")
+                    && text == "reliable user"
+        ));
+    }
+
+    #[test]
+    fn history_replay_marks_unprojectable_content_partial() {
+        let mut replay = AcpHistoryReplayProjection::default();
+        reduce_history_update(
+            &mut replay,
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "assistant-image",
+                "content": {
+                    "type": "image",
+                    "data": "AA==",
+                    "mimeType": "image/png"
+                }
+            }),
+        );
+
+        assert!(!replay.is_complete());
+        assert!(replay.entries.is_empty());
+    }
+
+    #[test]
+    fn history_replay_unidentified_assistant_fact_starts_a_new_active_segment() {
+        let mut replay = AcpHistoryReplayProjection::default();
+        for update in [
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "assistant-before-loss",
+                "content": {"type": "text", "text": "before"}
+            }),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "unidentified"}
+            }),
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tool-after-loss",
+                "title": "Inspect",
+                "kind": "execute",
+                "status": "completed",
+                "rawOutput": {"output": "done"}
+            }),
+        ] {
+            reduce_history_update(&mut replay, update);
+        }
+
+        assert!(!replay.is_complete());
+        assert_eq!(replay.entries.len(), 2);
+        assert!(matches!(
+            &replay.entries[0],
+            AcpHistoryReplayEntry::Assistant {
+                delivery_message_id: Some(message_id),
+                content_slots,
+                ..
+            } if message_id == "assistant-before-loss" && content_slots.len() == 1
+        ));
+        assert!(matches!(
+            &replay.entries[1],
+            AcpHistoryReplayEntry::Assistant {
+                replay_id,
+                delivery_message_id: None,
+                content_slots,
+                ..
+            } if replay_id == "anonymous:assistant:1" && matches!(
+                content_slots.as_slice(),
+                [
+                    AcpPeerContentSlot::Text { text, .. },
+                    AcpPeerContentSlot::Tool { tool_call_id }
+                ] if text == "unidentified" && tool_call_id == "tool-after-loss"
+            )
+        ));
+    }
+
+    #[test]
+    fn history_replay_preserves_text_tool_text_order_inside_active_assistant() {
+        let mut replay = AcpHistoryReplayProjection::default();
+        for update in [
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "assistant-ordered",
+                "content": {"type": "text", "text": "before"}
+            }),
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tool-ordered",
+                "title": "Inspect",
+                "kind": "execute",
+                "status": "pending",
+                "rawInput": {"cmd": "true"}
+            }),
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-ordered",
+                "status": "completed",
+                "rawOutput": {"output": "done"}
+            }),
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "assistant-ordered",
+                "content": {"type": "text", "text": "after"}
+            }),
+        ] {
+            reduce_history_update(&mut replay, update);
+        }
+
+        assert!(replay.is_complete());
+        assert_eq!(replay.entries.len(), 1);
+        let AcpHistoryReplayEntry::Assistant {
+            content_slots,
+            tools,
+            ..
+        } = &replay.entries[0]
+        else {
+            panic!("ordered assistant replay entry");
+        };
+        assert!(matches!(
+            content_slots.as_slice(),
+            [
+                AcpPeerContentSlot::Text { text: before, .. },
+                AcpPeerContentSlot::Tool { tool_call_id },
+                AcpPeerContentSlot::Text { text: after, .. }
+            ] if before == "before" && tool_call_id == "tool-ordered" && after == "after"
+        ));
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools["tool-ordered"]["status"], "completed");
+    }
+
+    #[test]
+    fn history_replay_replaces_plan_snapshots_in_one_logical_entry() {
+        let mut replay = AcpHistoryReplayProjection::default();
+        for (content, status) in [
+            ("Inspect", "pending"),
+            ("Implement", "in_progress"),
+            ("Verify", "completed"),
+        ] {
+            reduce_history_update(
+                &mut replay,
+                json!({
+                    "sessionUpdate": "plan",
+                    "entries": [{
+                        "content": content,
+                        "priority": "high",
+                        "status": status
+                    }]
+                }),
+            );
+        }
+
+        assert!(replay.is_complete());
+        assert_eq!(replay.entries.len(), 1);
+        assert!(matches!(
+            &replay.entries[0],
+            AcpHistoryReplayEntry::Assistant { replay_id, delivery_message_id: None, plan: Some(plan), .. }
+                if replay_id == "plan:legacy-v1"
+                    && plan.body == "- [x] Verify"
+                    && plan.update["entries"][0]["status"] == "completed"
+        ));
+    }
+
+    #[test]
+    fn history_replay_exposes_only_real_message_ids_as_delivery_evidence() {
+        let mut replay = AcpHistoryReplayProjection::default();
+        for update in [
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "assistant-real",
+                "content": {"type": "text", "text": "answer"}
+            }),
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "user-closes-assistant",
+                "content": {"type": "text", "text": "next"}
+            }),
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tool-synthetic",
+                "title": "Inspect",
+                "kind": "execute",
+                "status": "completed",
+                "rawOutput": {"output": "done"}
+            }),
+            json!({
+                "sessionUpdate": "plan",
+                "entries": [{"content": "Verify", "priority": "high", "status": "completed"}]
+            }),
+        ] {
+            reduce_history_update(&mut replay, update);
+        }
+
+        assert_eq!(
+            replay
+                .entries
+                .iter()
+                .map(replay_entry_delivery_message_ids)
+                .collect::<Vec<_>>(),
+            vec![
+                vec!["assistant-real".to_string()],
+                vec!["user-closes-assistant".to_string()],
+                Vec::new(),
+                Vec::new(),
+            ]
+        );
+    }
 
     fn test_peer(command: &str, env: BTreeMap<String, String>) -> ResolvedPeerTurn {
         ResolvedPeerTurn {
@@ -606,6 +986,7 @@ mod tests {
                 native_session_id: "native-fixture".to_string(),
                 modes: None,
                 config_options: Vec::new(),
+                legacy_models: None,
                 session_epoch: 11,
                 loaded_from_agent: true,
                 mcp_servers: Vec::new(),
@@ -630,6 +1011,7 @@ mod tests {
                 native_session_id: "native-fixture".to_string(),
                 modes: None,
                 config_options: Vec::new(),
+                legacy_models: None,
                 session_epoch: 12,
                 loaded_from_agent: true,
                 mcp_servers: Vec::new(),
@@ -1303,6 +1685,178 @@ for line in sys.stdin:
         );
     }
 
+    #[tokio::test]
+    async fn legacy_models_survive_lifecycle_and_route_model_controls() {
+        let temp = tempfile::tempdir().expect("temp");
+        let (peer, log) = lifecycle_fixture_peer(&temp, "legacy-models");
+        let pool = AcpProcessPool::new(Duration::from_secs(30));
+
+        let loaded = pool
+            .inspect(
+                peer.clone(),
+                temp.path().to_path_buf(),
+                "local-loaded".to_string(),
+                "native-loaded".to_string(),
+                Vec::new(),
+            )
+            .await
+            .expect("load legacy models");
+        assert_eq!(loaded.options.len(), 1);
+        assert_eq!(loaded.options[0].id, "model");
+        assert_eq!(
+            loaded.options[0].current_value.as_deref(),
+            Some("test/default")
+        );
+        assert_eq!(loaded.options[0].values.len(), 2);
+
+        let changed = pool
+            .set_control(AcpSetControlInput {
+                peer: peer.clone(),
+                cwd: temp.path().to_path_buf(),
+                local_session_id: "local-loaded".to_string(),
+                native_session_id: "native-loaded".to_string(),
+                mcp_servers: Vec::new(),
+                control_id: "model".to_string(),
+                value: json!("test/second"),
+            })
+            .await
+            .expect("set legacy model");
+        assert_eq!(
+            changed.options[0].current_value.as_deref(),
+            Some("test/second")
+        );
+        assert_ne!(changed.control_revision, loaded.control_revision);
+
+        let resumed_ref = AcpResidentSessionRef {
+            local_session_id: "local-resumed".to_string(),
+            native_session_id: "native-resumed".to_string(),
+        };
+        let resumed = pool
+            .resume_session(
+                peer.clone(),
+                temp.path().to_path_buf(),
+                resumed_ref.clone(),
+                Vec::new(),
+            )
+            .await
+            .expect("resume legacy models");
+        assert_eq!(
+            resumed.options[0].current_value.as_deref(),
+            Some("test/second")
+        );
+        let forked = pool
+            .fork_session(
+                peer.clone(),
+                temp.path().to_path_buf(),
+                resumed_ref,
+                "local-forked".to_string(),
+            )
+            .await
+            .expect("fork legacy models");
+        assert_eq!(
+            forked.options[0].current_value.as_deref(),
+            Some("test/second")
+        );
+
+        pool.shutdown(false).await.expect("shutdown legacy fixture");
+        let entries = read_lifecycle_log(&log);
+        assert_eq!(lifecycle_requests(&entries, "session/load").len(), 1);
+        assert_eq!(lifecycle_requests(&entries, "session/set_model").len(), 1);
+        assert_eq!(lifecycle_requests(&entries, "session/resume").len(), 1);
+        assert_eq!(lifecycle_requests(&entries, "session/fork").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn stable_model_config_precedes_legacy_and_rejected_switch_preserves_state() {
+        let stable_temp = tempfile::tempdir().expect("stable temp");
+        let (stable_peer, stable_log) =
+            lifecycle_fixture_peer(&stable_temp, "legacy-models-and-config");
+        let stable_pool = AcpProcessPool::new(Duration::from_secs(30));
+        let stable = stable_pool
+            .inspect(
+                stable_peer.clone(),
+                stable_temp.path().to_path_buf(),
+                "local-stable".to_string(),
+                "native-stable".to_string(),
+                Vec::new(),
+            )
+            .await
+            .expect("load stable and legacy models");
+        assert!(stable.legacy_models.is_none());
+        stable_pool
+            .set_control(AcpSetControlInput {
+                peer: stable_peer,
+                cwd: stable_temp.path().to_path_buf(),
+                local_session_id: "local-stable".to_string(),
+                native_session_id: "native-stable".to_string(),
+                mcp_servers: Vec::new(),
+                control_id: "model".to_string(),
+                value: json!("test/second"),
+            })
+            .await
+            .expect("stable model config wins");
+        stable_pool
+            .shutdown(false)
+            .await
+            .expect("shutdown stable fixture");
+        let stable_entries = read_lifecycle_log(&stable_log);
+        assert_eq!(
+            lifecycle_requests(&stable_entries, "session/set_config_option").len(),
+            1
+        );
+        assert!(lifecycle_requests(&stable_entries, "session/set_model").is_empty());
+
+        let error_temp = tempfile::tempdir().expect("error temp");
+        let (error_peer, _error_log) = lifecycle_fixture_peer(&error_temp, "legacy-models-error");
+        let error_pool = AcpProcessPool::new(Duration::from_secs(30));
+        error_pool
+            .inspect(
+                error_peer.clone(),
+                error_temp.path().to_path_buf(),
+                "local-error".to_string(),
+                "native-error".to_string(),
+                Vec::new(),
+            )
+            .await
+            .expect("load rejected legacy model fixture");
+        let error = error_pool
+            .set_control(AcpSetControlInput {
+                peer: error_peer.clone(),
+                cwd: error_temp.path().to_path_buf(),
+                local_session_id: "local-error".to_string(),
+                native_session_id: "native-error".to_string(),
+                mcp_servers: Vec::new(),
+                control_id: "model".to_string(),
+                value: json!("test/second"),
+            })
+            .await
+            .expect_err("legacy switch rejection");
+        assert_eq!(
+            error
+                .structured_data()
+                .and_then(|data| data["code"].as_str()),
+            Some("acp_control_rejected")
+        );
+        let unchanged = error_pool
+            .inspect(
+                error_peer,
+                error_temp.path().to_path_buf(),
+                "local-error".to_string(),
+                "native-error".to_string(),
+                Vec::new(),
+            )
+            .await
+            .expect("resident legacy model state");
+        assert_eq!(
+            unchanged.options[0].current_value.as_deref(),
+            Some("test/default")
+        );
+        error_pool
+            .shutdown(false)
+            .await
+            .expect("shutdown rejected fixture");
+    }
+
     #[test]
     fn successful_turn_clears_an_observed_generic_auth_requirement() {
         let observation = Arc::new(Mutex::new(AcpObservedAuthState::Required));
@@ -1353,5 +1907,52 @@ for line in sys.stdin:
         assert!(*first_kill_rx.borrow());
         assert!(!*second_kill_rx.borrow());
         assert_eq!(registry.records.lock().expect("terminal records").len(), 1);
+    }
+
+    #[test]
+    fn legacy_model_projection_is_bounded_deduplicated_and_stable_config_wins() {
+        let raw = json!({
+            "currentModelId": "legacy/current",
+            "availableModels": [
+                {"modelId": "legacy/current", "name": "Current", "description": "active"},
+                {"modelId": "legacy/current", "name": "Duplicate"},
+                {"modelId": "legacy/other", "name": "Other"},
+                {"modelId": "legacy/nameless"}
+            ]
+        });
+        let projected = project_legacy_model_state(Some(&raw)).expect("legacy model state");
+        assert_eq!(projected.current_model_id, "legacy/current");
+        assert_eq!(projected.available_models.len(), 2);
+        assert_eq!(projected.available_models[1].id, "legacy/other");
+
+        let stable: Vec<SessionConfigOption> = serde_json::from_value(json!([{
+            "id": "preferred-model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "stable/current",
+            "options": [{"value": "stable/current", "name": "Stable"}]
+        }]))
+        .expect("stable model config option");
+        assert!(effective_legacy_models(&stable, Some(&projected)).is_none());
+    }
+
+    #[test]
+    fn malformed_legacy_model_state_is_ignored() {
+        assert!(
+            project_legacy_model_state(Some(&json!({
+                "currentModelId": "legacy/missing",
+                "availableModels": [{"modelId": "legacy/current", "name": "Current"}]
+            })))
+            .is_none()
+        );
+        assert!(
+            project_legacy_model_state(Some(&json!({
+                "currentModelId": "legacy/current",
+                "availableModels": []
+            })))
+            .is_none()
+        );
+        assert!(project_legacy_model_state(Some(&json!({"availableModels": []}))).is_none());
     }
 }

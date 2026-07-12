@@ -52,7 +52,7 @@ fn ensure_local_session(
     })
 }
 
-fn peer_session_metadata(
+pub(crate) fn peer_session_metadata(
     peer: &ResolvedPeerTurn,
     native_session_id: Option<&str>,
     usage_update: Option<&Value>,

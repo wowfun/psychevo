@@ -62,7 +62,7 @@ pub(super) async fn run_routed_turn(
                     agent_label: binding
                         .agent_ref
                         .clone()
-                        .unwrap_or_else(|| "Default Agent".to_string()),
+                        .unwrap_or_else(|| "Psychevo".to_string()),
                     profile_label: context.runtime_profile_ref.clone(),
                     label: context.runtime_profile_ref.clone(),
                     ready: context.sendability.allowed,

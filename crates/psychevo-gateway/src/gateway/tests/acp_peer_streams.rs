@@ -728,6 +728,27 @@ for line in sys.stdin:
     elif method == "session/load":
         state = load_state()
         record(method, sessionId=params.get("sessionId"))
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": params.get("sessionId"),
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "replayed-tool-only",
+                "title": "Replay tool-only fact",
+                "kind": "execute",
+                "status": "completed"
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": params.get("sessionId"),
+            "update": {
+                "sessionUpdate": "plan",
+                "entries": [{
+                    "content": "Replay replacement plan",
+                    "priority": "high",
+                    "status": "completed"
+                }]
+            }
+        }})
         for replay in state["messages"]:
             update(params.get("sessionId"), replay["id"], replay["text"])
         send({"jsonrpc": "2.0", "id": mid, "result": {}})
@@ -875,35 +896,56 @@ entrypoints: [peer]
     assert_eq!(reconciled_terminal.status, "completed");
     assert_eq!(reconciled_terminal.outcome.as_deref(), Some("normal"));
     assert_eq!(reconciled_terminal.error_message, None);
+    assert_eq!(
+        reconciled_terminal
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("replayMessageIds")),
+        Some(&json!(["assistant-1"])),
+        "tool and Plan replay ids are not delivery evidence"
+    );
 
     let messages = harness
         .state
         .store()
         .load_tui_message_summaries(&thread_id)
         .expect("reconciled messages");
-    assert_eq!(messages.len(), 4);
-    assert!(matches!(messages[0].message, Message::User { .. }));
-    assert!(matches!(messages[1].message, Message::Assistant { .. }));
-    assert!(matches!(messages[2].message, Message::User { .. }));
-    assert!(matches!(messages[3].message, Message::Assistant { .. }));
-    assert!(
-        serde_json::to_string(&messages[1].message)
-            .expect("replayed message json")
-            .contains("reconciled answer 1")
-    );
     assert_eq!(
-        messages[1]
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.pointer("/acp/turnId"))
-            .and_then(Value::as_str),
-        Some(first_turn_id)
+        messages
+            .iter()
+            .filter(|summary| matches!(summary.message, Message::User { .. }))
+            .count(),
+        2
     );
     assert!(
-        serde_json::to_string(&messages[2].message)
-            .expect("new input json")
-            .contains("new input after reconciliation")
+        messages.iter().any(|summary| {
+            serde_json::to_string(&summary.message)
+                .expect("replayed message json")
+                .contains("reconciled answer 1")
+        })
     );
+    assert!(
+        messages.iter().any(|summary| {
+            summary
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.pointer("/acp/turnId"))
+                .and_then(Value::as_str)
+                == Some(first_turn_id)
+                && summary
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.pointer("/acp/messageIds"))
+                    == Some(&json!(["assistant-1"]))
+        }),
+        "the reconciled assistant carries only its real ACP message id"
+    );
+    assert!(messages.iter().any(|summary| {
+        matches!(summary.message, Message::User { .. })
+            && serde_json::to_string(&summary.message)
+                .expect("new input json")
+                .contains("new input after reconciliation")
+    }));
 
     harness
         .gateway
@@ -923,7 +965,7 @@ entrypoints: [peer]
         .store()
         .load_tui_message_summaries(&thread_id)
         .expect("deduplicated messages");
-    assert_eq!(deduplicated.len(), 6);
+    assert_eq!(deduplicated.len(), 8);
     let encoded_messages = deduplicated
         .iter()
         .map(|summary| serde_json::to_string(&summary.message).expect("message json"))
@@ -939,6 +981,34 @@ entrypoints: [peer]
         encoded_messages
             .iter()
             .filter(|message| message.contains("reconciled answer 2"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        deduplicated
+            .iter()
+            .filter(|summary| {
+                summary
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.pointer("/acp/replayId"))
+                    .and_then(Value::as_str)
+                    == Some("tool:replayed-tool-only")
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        deduplicated
+            .iter()
+            .filter(|summary| {
+                summary
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.pointer("/acp/replayId"))
+                    .and_then(Value::as_str)
+                    == Some("plan:legacy-v1")
+            })
             .count(),
         1
     );

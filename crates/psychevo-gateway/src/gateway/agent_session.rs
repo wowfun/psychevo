@@ -215,6 +215,7 @@ enum AgentSessionCommand {
         turn_id: String,
         session_ready: Option<acp_peer::AcpSessionReadyCallback>,
     },
+    LoadSession(AgentSessionRef),
     ResumeSession(AgentSessionRef),
     ForkSession {
         source: AgentSessionRef,
@@ -241,6 +242,7 @@ enum AgentSessionResponse {
     Inspected(AgentSessionSnapshot),
     ControlSet(AgentSessionSnapshot),
     TurnSubmitted(Box<AgentTurnOutput>),
+    SessionLoaded(Box<acp_peer::AcpSessionLoadOutput>),
     SessionResumed(AgentSessionSnapshot),
     SessionForked(AgentSessionSnapshot),
     SessionClosed,
@@ -253,6 +255,7 @@ impl AgentSessionResponse {
             Self::Inspected(_) => "inspection",
             Self::ControlSet(_) => "control",
             Self::TurnSubmitted(_) => "turn",
+            Self::SessionLoaded(_) => "session-loaded",
             Self::SessionResumed(_) => "session-resumed",
             Self::SessionForked(_) => "session-forked",
             Self::SessionClosed => "session-closed",
@@ -299,6 +302,13 @@ impl AgentSessionResponse {
         match self {
             Self::SessionResumed(snapshot) => Ok(snapshot),
             response => Err(Self::mismatch("session-resumed", response.kind())),
+        }
+    }
+
+    fn into_loaded(self) -> psychevo_runtime::Result<acp_peer::AcpSessionLoadOutput> {
+        match self {
+            Self::SessionLoaded(output) => Ok(*output),
+            response => Err(Self::mismatch("session-loaded", response.kind())),
         }
     }
 
@@ -722,6 +732,19 @@ impl AgentSessionHost {
             .await
     }
 
+    async fn release_acp_session(
+        &self,
+        local_session_id: String,
+        native_session_id: String,
+    ) -> psychevo_runtime::Result<()> {
+        self.acp
+            .release_session(acp_peer::AcpResidentSessionRef {
+                local_session_id,
+                native_session_id,
+            })
+            .await
+    }
+
     // Protocol and authentication diagnosis belong to backend administration,
     // not to an attached public Thread session, so they deliberately stay
     // outside the sealed AgentSessionCommand family.
@@ -809,6 +832,7 @@ impl AttachedAgent {
                 turn_id,
                 session_ready,
             } => self.run_turn(*request, turn_id, session_ready).await,
+            AgentSessionCommand::LoadSession(session) => self.load_session(session).await,
             AgentSessionCommand::ResumeSession(session) => self.resume_session(session).await,
             AgentSessionCommand::ForkSession {
                 source,
@@ -856,6 +880,27 @@ impl AttachedAgent {
                 .map(|snapshot| {
                     AgentSessionResponse::SessionResumed(AgentSessionSnapshot::Acp(Box::new(snapshot)))
                 }),
+        }
+    }
+
+    async fn load_session(
+        &self,
+        session: AgentSessionRef,
+    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+        match &self.target {
+            AgentSessionTarget::Native { profile } => self.unsupported_lifecycle(profile, "load"),
+            AgentSessionTarget::Acp { peer, .. } => self
+                .host
+                .acp
+                .load_session(
+                    peer.as_ref().clone(),
+                    session.cwd,
+                    session.local_session_id,
+                    session.native_session_id,
+                    session.mcp_servers,
+                )
+                .await
+                .map(|output| AgentSessionResponse::SessionLoaded(Box::new(output))),
         }
     }
 

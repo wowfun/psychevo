@@ -19,37 +19,7 @@ struct AcpPeerPlanProjection {
 
 impl AcpTurnOutput {
     fn persisted_assistant_content(&self) -> Vec<AssistantBlock> {
-        let mut content = Vec::new();
-        for slot in &self.content_slots {
-            match slot {
-                AcpPeerContentSlot::Reasoning { text } if !text.trim().is_empty() => {
-                    content.push(AssistantBlock::Reasoning {
-                        text: text.clone(),
-                        provider_evidence: None,
-                    });
-                }
-                AcpPeerContentSlot::Text { text, .. } if !text.trim().is_empty() => {
-                    content.push(AssistantBlock::Text { text: text.clone() });
-                }
-                AcpPeerContentSlot::Tool { tool_call_id } => {
-                    let Some(tool) = self.tools.get(tool_call_id) else {
-                        continue;
-                    };
-                    let call_index = content
-                        .iter()
-                        .filter(|block| matches!(block, AssistantBlock::ToolCall(_)))
-                        .count();
-                    let content_index = content.len();
-                    content.push(AssistantBlock::ToolCall(acp_tool_call_block(
-                        tool,
-                        content_index,
-                        call_index,
-                    )));
-                }
-                _ => {}
-            }
-        }
-        content
+        persisted_assistant_content(&self.content_slots, &self.tools)
     }
 
     fn persisted_assistant_message_ids(&self) -> Vec<String> {
@@ -72,36 +42,79 @@ impl AcpTurnOutput {
     }
 
     fn persisted_tool_result_messages(&self) -> Vec<Message> {
-        self.content_slots
-            .iter()
-            .filter_map(|slot| match slot {
-                AcpPeerContentSlot::Tool { tool_call_id } => self.tools.get(tool_call_id),
-                _ => None,
-            })
-            .filter_map(|tool| {
-                let status = tool
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .unwrap_or("pending");
-                if !matches!(status, "completed" | "failed") {
-                    return None;
-                }
-                let content = acp_tool_output(tool).unwrap_or_default();
-                if content.trim().is_empty() && status != "failed" {
-                    return None;
-                }
-                let content =
-                    serde_json::to_string_pretty(&acp_tool_result(tool)).unwrap_or(content);
-                Some(Message::ToolResult {
-                    tool_call_id: acp_tool_call_id(tool),
-                    tool_name: acp_tool_runtime_name(tool),
-                    content,
-                    is_error: status == "failed",
-                    timestamp_ms: gateway_now_ms(),
-                })
-            })
-            .collect()
+        persisted_tool_result_messages(&self.content_slots, &self.tools)
     }
+}
+
+fn persisted_assistant_content(
+    content_slots: &[AcpPeerContentSlot],
+    tools: &BTreeMap<String, Value>,
+) -> Vec<AssistantBlock> {
+    let mut content = Vec::new();
+    for slot in content_slots {
+        match slot {
+            AcpPeerContentSlot::Reasoning { text } if !text.trim().is_empty() => {
+                content.push(AssistantBlock::Reasoning {
+                    text: text.clone(),
+                    provider_evidence: None,
+                });
+            }
+            AcpPeerContentSlot::Text { text, .. } if !text.trim().is_empty() => {
+                content.push(AssistantBlock::Text { text: text.clone() });
+            }
+            AcpPeerContentSlot::Tool { tool_call_id } => {
+                let Some(tool) = tools.get(tool_call_id) else {
+                    continue;
+                };
+                let call_index = content
+                    .iter()
+                    .filter(|block| matches!(block, AssistantBlock::ToolCall(_)))
+                    .count();
+                let content_index = content.len();
+                content.push(AssistantBlock::ToolCall(acp_tool_call_block(
+                    tool,
+                    content_index,
+                    call_index,
+                )));
+            }
+            _ => {}
+        }
+    }
+    content
+}
+
+fn persisted_tool_result_messages(
+    content_slots: &[AcpPeerContentSlot],
+    tools: &BTreeMap<String, Value>,
+) -> Vec<Message> {
+    content_slots
+        .iter()
+        .filter_map(|slot| match slot {
+            AcpPeerContentSlot::Tool { tool_call_id } => tools.get(tool_call_id),
+            _ => None,
+        })
+        .filter_map(|tool| {
+            let status = tool
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("pending");
+            if !matches!(status, "completed" | "failed") {
+                return None;
+            }
+            let content = acp_tool_output(tool).unwrap_or_default();
+            if content.trim().is_empty() && status != "failed" {
+                return None;
+            }
+            let content = serde_json::to_string_pretty(&acp_tool_result(tool)).unwrap_or(content);
+            Some(Message::ToolResult {
+                tool_call_id: acp_tool_call_id(tool),
+                tool_name: acp_tool_runtime_name(tool),
+                content,
+                is_error: status == "failed",
+                timestamp_ms: gateway_now_ms(),
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -123,52 +136,328 @@ enum AcpPeerContentSlot {
 const ACP_MAX_HISTORY_REPLAY_MESSAGES: usize = 256;
 const ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS: usize = 262_144;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct AcpHistoryReplayProjection {
-    assistant_messages: Vec<AcpHistoryReplayMessage>,
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct AcpHistoryReplayProjection {
+    entries: Vec<AcpHistoryReplayEntry>,
+    lossy: bool,
+    active_assistant_index: Option<usize>,
+    tool_entry_indices: BTreeMap<String, usize>,
+    plan_entry_index: Option<usize>,
+    anonymous_fact_sequence: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AcpHistoryReplayMessage {
-    message_id: String,
-    text: String,
+#[derive(Debug, Clone, PartialEq)]
+enum AcpHistoryReplayEntry {
+    User {
+        replay_id: String,
+        delivery_message_id: Option<String>,
+        text: String,
+    },
+    Assistant {
+        replay_id: String,
+        delivery_message_id: Option<String>,
+        content_slots: Vec<AcpPeerContentSlot>,
+        tools: BTreeMap<String, Value>,
+        plan: Option<AcpPeerPlanProjection>,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) struct AcpSessionLoadOutput {
+    pub(crate) snapshot: AcpSessionSnapshot,
+    pub(crate) replay: AcpHistoryReplayProjection,
 }
 
 impl AcpHistoryReplayProjection {
-    fn reduce_agent_message_chunk(&mut self, chunk: ContentChunk) {
-        let Some(message_id) = chunk.message_id.as_ref().map(ToString::to_string) else {
-            // Stable ACP permits a missing messageId for tolerant clients, but
-            // a replay fact without stable identity cannot safely reconcile or
-            // deduplicate durable product history.
-            return;
-        };
+    fn is_complete(&self) -> bool {
+        !self.lossy
+    }
+
+    fn mark_partial(&mut self) {
+        self.lossy = true;
+    }
+
+    fn next_anonymous_replay_id(&mut self, role: &str) -> String {
+        self.anonymous_fact_sequence = self.anonymous_fact_sequence.saturating_add(1);
+        format!("anonymous:{role}:{}", self.anonymous_fact_sequence)
+    }
+
+    fn reduce_update(&mut self, update: SessionUpdate, update_value: Value) {
+        match update {
+            SessionUpdate::UserMessageChunk(chunk) => self.reduce_user_message_chunk(chunk),
+            SessionUpdate::AgentMessageChunk(chunk) => {
+                self.reduce_assistant_chunk(chunk, false)
+            }
+            SessionUpdate::AgentThoughtChunk(chunk) => self.reduce_assistant_chunk(chunk, true),
+            SessionUpdate::ToolCall(_) | SessionUpdate::ToolCallUpdate(_) => {
+                self.reduce_tool(update_value)
+            }
+            SessionUpdate::Plan(_) => self.reduce_plan(update_value),
+            SessionUpdate::AvailableCommandsUpdate(_)
+            | SessionUpdate::CurrentModeUpdate(_)
+            | SessionUpdate::ConfigOptionUpdate(_)
+            | SessionUpdate::SessionInfoUpdate(_)
+            | SessionUpdate::UsageUpdate(_) => {}
+            #[allow(unreachable_patterns)]
+            _ => {}
+        }
+    }
+
+    fn reduce_user_message_chunk(&mut self, chunk: ContentChunk) {
+        self.active_assistant_index = None;
+        let delivery_message_id = replay_message_id(&chunk);
+        if delivery_message_id.is_none() {
+            // Stable ACP permits a missing messageId for tolerant clients. Keep
+            // projectable display content under an internal replay identity,
+            // but never promote that identity to delivery evidence.
+            self.mark_partial();
+        }
         let Some(text) = acp_content_chunk_text(chunk) else {
+            self.mark_partial();
             return;
         };
         if text.is_empty() {
             return;
         }
-        if let Some(existing) = self
-            .assistant_messages
-            .iter_mut()
-            .find(|message| message.message_id == message_id)
+        if let Some(AcpHistoryReplayEntry::User {
+            delivery_message_id: existing_message_id,
+            text: existing,
+            ..
+        }) = self.entries.last_mut()
+            && delivery_message_id.is_some()
+            && existing_message_id == &delivery_message_id
         {
             let remaining = ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS
-                .saturating_sub(existing.text.chars().count());
-            existing.text.extend(text.chars().take(remaining));
+                .saturating_sub(existing.chars().count());
+            if text.chars().count() > remaining {
+                self.lossy = true;
+            }
+            existing.extend(text.chars().take(remaining));
             return;
         }
-        if self.assistant_messages.len() >= ACP_MAX_HISTORY_REPLAY_MESSAGES {
+        if self.entries.len() >= ACP_MAX_HISTORY_REPLAY_MESSAGES {
+            self.mark_partial();
             return;
         }
-        self.assistant_messages.push(AcpHistoryReplayMessage {
-            message_id,
+        if text.chars().count() > ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS {
+            self.mark_partial();
+        }
+        let replay_id = delivery_message_id
+            .clone()
+            .unwrap_or_else(|| self.next_anonymous_replay_id("user"));
+        self.entries.push(AcpHistoryReplayEntry::User {
+            replay_id,
+            delivery_message_id,
             text: text
                 .chars()
                 .take(ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS)
                 .collect(),
         });
     }
+
+    fn reduce_assistant_chunk(&mut self, chunk: ContentChunk, reasoning: bool) {
+        let delivery_message_id = replay_message_id(&chunk);
+        if delivery_message_id.is_none() {
+            self.mark_partial();
+        }
+        let Some(text) = acp_content_chunk_text(chunk) else {
+            self.active_assistant_index = None;
+            self.mark_partial();
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        if let Some(active_index) = self.active_assistant_index
+            && let Some(AcpHistoryReplayEntry::Assistant {
+                delivery_message_id: Some(active_message_id),
+                content_slots,
+                ..
+            }) = self.entries.get_mut(active_index)
+            && delivery_message_id.as_deref() == Some(active_message_id.as_str())
+        {
+            if !append_bounded_replay_slot(content_slots, text, reasoning) {
+                self.lossy = true;
+            }
+            return;
+        }
+        if self.entries.len() >= ACP_MAX_HISTORY_REPLAY_MESSAGES {
+            self.mark_partial();
+            return;
+        }
+        let mut content_slots = Vec::new();
+        if !append_bounded_replay_slot(&mut content_slots, text, reasoning) {
+            self.mark_partial();
+        }
+        let replay_id = delivery_message_id
+            .clone()
+            .unwrap_or_else(|| self.next_anonymous_replay_id("assistant"));
+        self.entries.push(AcpHistoryReplayEntry::Assistant {
+            replay_id,
+            delivery_message_id,
+            content_slots,
+            tools: BTreeMap::new(),
+            plan: None,
+        });
+        self.active_assistant_index = Some(self.entries.len() - 1);
+    }
+
+    fn reduce_tool(&mut self, update: Value) {
+        let tool_call_id = acp_tool_call_id(&update);
+        if let Some(entry_index) = self.tool_entry_indices.get(&tool_call_id).copied()
+            && let Some(AcpHistoryReplayEntry::Assistant {
+                content_slots,
+                tools,
+                ..
+            }) = self.entries.get_mut(entry_index)
+        {
+            if !content_slots.iter().any(|slot| {
+                matches!(slot, AcpPeerContentSlot::Tool { tool_call_id: existing } if existing == &tool_call_id)
+            }) {
+                content_slots.push(AcpPeerContentSlot::Tool {
+                    tool_call_id: tool_call_id.clone(),
+                });
+            }
+            let merged = tools
+                .get(&tool_call_id)
+                .map(|existing| acp_merge_tool_update(existing, &update))
+                .unwrap_or(update);
+            tools.insert(tool_call_id, merged);
+            return;
+        }
+        let entry_index = match self.active_assistant_index {
+            Some(index) if matches!(self.entries.get(index), Some(AcpHistoryReplayEntry::Assistant { plan: None, .. })) => index,
+            _ => {
+                if self.entries.len() >= ACP_MAX_HISTORY_REPLAY_MESSAGES {
+                    self.mark_partial();
+                    return;
+                }
+                self.entries.push(AcpHistoryReplayEntry::Assistant {
+                    replay_id: format!("tool:{tool_call_id}"),
+                    delivery_message_id: None,
+                    content_slots: Vec::new(),
+                    tools: BTreeMap::new(),
+                    plan: None,
+                });
+                self.entries.len() - 1
+            }
+        };
+        let Some(AcpHistoryReplayEntry::Assistant {
+            content_slots,
+            tools,
+            ..
+        }) = self.entries.get_mut(entry_index)
+        else {
+            return;
+        };
+        content_slots.push(AcpPeerContentSlot::Tool {
+            tool_call_id: tool_call_id.clone(),
+        });
+        tools.insert(tool_call_id.clone(), update);
+        self.tool_entry_indices.insert(tool_call_id, entry_index);
+    }
+
+    fn reduce_plan(&mut self, update: Value) {
+        let projection = AcpPeerPlanProjection {
+            body: acp_plan_body(&update),
+            update,
+        };
+        if let Some(entry_index) = self.plan_entry_index
+            && let Some(AcpHistoryReplayEntry::Assistant { plan, .. }) =
+                self.entries.get_mut(entry_index)
+        {
+            *plan = Some(projection);
+            return;
+        }
+        if self.entries.len() >= ACP_MAX_HISTORY_REPLAY_MESSAGES {
+            self.mark_partial();
+            return;
+        }
+        self.entries.push(AcpHistoryReplayEntry::Assistant {
+            replay_id: "plan:legacy-v1".to_string(),
+            delivery_message_id: None,
+            content_slots: Vec::new(),
+            tools: BTreeMap::new(),
+            plan: Some(projection),
+        });
+        self.plan_entry_index = Some(self.entries.len() - 1);
+    }
+}
+
+fn replay_message_id(chunk: &ContentChunk) -> Option<String> {
+    chunk
+        .message_id
+        .as_ref()
+        .map(ToString::to_string)
+        .filter(|message_id| !message_id.trim().is_empty())
+}
+
+fn replay_entry_identity(entry: &AcpHistoryReplayEntry) -> &str {
+    match entry {
+        AcpHistoryReplayEntry::User { replay_id, .. }
+        | AcpHistoryReplayEntry::Assistant { replay_id, .. } => replay_id,
+    }
+}
+
+fn replay_entry_delivery_message_ids(entry: &AcpHistoryReplayEntry) -> Vec<String> {
+    match entry {
+        AcpHistoryReplayEntry::User {
+            delivery_message_id: Some(message_id),
+            ..
+        } => vec![message_id.clone()],
+        AcpHistoryReplayEntry::User {
+            delivery_message_id: None,
+            ..
+        } => Vec::new(),
+        AcpHistoryReplayEntry::Assistant {
+            delivery_message_id: Some(message_id),
+            ..
+        } => vec![message_id.clone()],
+        AcpHistoryReplayEntry::Assistant {
+            delivery_message_id: None,
+            ..
+        } => Vec::new(),
+    }
+}
+
+fn append_bounded_replay_slot(
+    content_slots: &mut Vec<AcpPeerContentSlot>,
+    text: String,
+    reasoning: bool,
+) -> bool {
+    let used = content_slots
+        .iter()
+        .map(|slot| match slot {
+            AcpPeerContentSlot::Reasoning { text }
+            | AcpPeerContentSlot::Text { text, .. } => text.chars().count(),
+            AcpPeerContentSlot::Tool { .. } => 0,
+        })
+        .sum::<usize>();
+    let remaining = ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS.saturating_sub(used);
+    let lossless = text.chars().count() <= remaining;
+    let bounded = text
+        .chars()
+        .take(remaining)
+        .collect::<String>();
+    if bounded.is_empty() {
+        return lossless;
+    }
+    match (reasoning, content_slots.last_mut()) {
+        (true, Some(AcpPeerContentSlot::Reasoning { text })) => text.push_str(&bounded),
+        (
+            false,
+            Some(AcpPeerContentSlot::Text {
+                text,
+                message_id: _,
+            }),
+        ) => text.push_str(&bounded),
+        (true, _) => content_slots.push(AcpPeerContentSlot::Reasoning { text: bounded }),
+        (false, _) => content_slots.push(AcpPeerContentSlot::Text {
+            text: bounded,
+            message_id: None,
+        }),
+    }
+    lossless
 }
 
 struct AcpPeerStreamState {
@@ -240,9 +529,14 @@ impl AcpPeerStreamState {
         // durably committed to the prior turn before a new prompt is sent and
         // must never be mistaken for the new turn's assistant output.
         if origin == AcpFactOrigin::History {
-            if let SessionUpdate::AgentMessageChunk(chunk) = notification.update {
-                self.history_replay.reduce_agent_message_chunk(chunk);
-            }
+            let update_value = acp_product_json(&notification.update).unwrap_or_else(|err| {
+                json!({
+                    "sessionUpdate": "decode_error",
+                    "error": err.to_string(),
+                })
+            });
+            self.history_replay
+                .reduce_update(notification.update, update_value);
             return;
         }
         // Pre-prompt live facts remain observable, but only facts observed

@@ -7,6 +7,11 @@ pub(super) struct AcpPeerConfigSelection {
     requested: String,
 }
 
+pub(super) struct AcpSessionControlState<'a> {
+    pub(super) config_options: &'a mut Vec<SessionConfigOption>,
+    pub(super) legacy_models: &'a mut Option<AcpLegacyModelState>,
+}
+
 pub(super) fn requested_acp_config_selections(
     turn: &AcpPeerTurnContext,
 ) -> Vec<AcpPeerConfigSelection> {
@@ -48,14 +53,42 @@ pub(super) fn requested_acp_config_selections(
 pub(super) async fn apply_acp_v1_config_options(
     cx: &ConnectionTo<Agent>,
     notification_ingress: &AcpNotificationIngress,
-    config_options: &mut Vec<SessionConfigOption>,
+    state: AcpSessionControlState<'_>,
     native_session_id: &str,
     local_session_id: &str,
     stream: &Option<RunStreamSink>,
     selections: Vec<AcpPeerConfigSelection>,
 ) -> psychevo_runtime::Result<()> {
     for selection in selections {
-        let option = matching_acp_config_option(config_options, &selection).ok_or_else(|| {
+        let option = matching_acp_config_option(state.config_options, &selection);
+        if option.is_none()
+            && selection.category == Some(SessionConfigOptionCategory::Model)
+            && effective_legacy_models(state.config_options, state.legacy_models.as_ref()).is_some()
+        {
+            apply_legacy_model_selection(
+                cx,
+                notification_ingress,
+                state.config_options,
+                state.legacy_models,
+                native_session_id,
+                &selection.requested,
+            )
+            .await?;
+            emit_runtime_event(
+                stream,
+                json!({
+                    "type": "acp_peer_config_option_set",
+                    "session_id": local_session_id,
+                    "source": "acp_peer",
+                    "protocol_version": "1",
+                    "config_id": "model",
+                    "value": selection.requested,
+                    "transport": "session/set_model",
+                }),
+            );
+            continue;
+        }
+        let option = option.ok_or_else(|| {
             acp_not_delivered_error(
                 "acp_control_invalid",
                 format!(
@@ -83,7 +116,7 @@ pub(super) async fn apply_acp_v1_config_options(
                 &error,
             )
         })?;
-        *config_options = response.config_options;
+        *state.config_options = response.config_options;
         emit_runtime_event(
             stream,
             json!({
@@ -97,6 +130,53 @@ pub(super) async fn apply_acp_v1_config_options(
         );
     }
     Ok(())
+}
+
+pub(super) async fn apply_legacy_model_selection(
+    cx: &ConnectionTo<Agent>,
+    notification_ingress: &AcpNotificationIngress,
+    config_options: &[SessionConfigOption],
+    legacy_models: &mut Option<AcpLegacyModelState>,
+    native_session_id: &str,
+    requested: &str,
+) -> psychevo_runtime::Result<u64> {
+    let state =
+        effective_legacy_models(config_options, legacy_models.as_ref()).ok_or_else(|| {
+            acp_not_delivered_error(
+                "acp_control_not_found",
+                "ACP session does not expose a legacy model selector",
+            )
+        })?;
+    if !state
+        .available_models
+        .iter()
+        .any(|model| model.id == requested)
+    {
+        return Err(acp_not_delivered_error(
+            "acp_control_invalid",
+            format!("ACP legacy model selector does not expose `{requested}`"),
+        ));
+    }
+    let request = UntypedMessage::new(
+        "session/set_model",
+        json!({
+            "sessionId": native_session_id,
+            "modelId": requested,
+        }),
+    )
+    .map_err(|error| {
+        acp_agent_not_delivered_error("acp_control_rejected", "session/set_model", &error)
+    })?;
+    let (_, response_barrier) =
+        acp_response_with_projection_barrier(cx.send_request(request), notification_ingress)
+            .await
+            .map_err(|error| {
+                acp_agent_not_delivered_error("acp_control_rejected", "session/set_model", &error)
+            })?;
+    if let Some(state) = legacy_models.as_mut() {
+        state.current_model_id = requested.to_string();
+    }
+    Ok(response_barrier)
 }
 
 fn matching_acp_config_option<'a>(

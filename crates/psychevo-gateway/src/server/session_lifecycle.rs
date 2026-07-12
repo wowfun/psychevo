@@ -272,11 +272,17 @@ pub(super) async fn import_agent_session(
         "pending",
         Some(json!({IMPORT_STATE_METADATA_KEY: "pending"})),
     )?;
+    let imported_native_session_id = candidate.native_session_id.clone();
     let result = import_agent_session_into_thread(
         state, scope, &target, profile, peer, candidate, &thread_id,
     )
     .await;
     if result.is_err() {
+        let _ = state
+            .inner
+            .gateway
+            .release_imported_agent_session(thread_id.clone(), imported_native_session_id)
+            .await;
         let _ = state.inner.state.delete_session(&thread_id);
     }
     result
@@ -294,27 +300,34 @@ async fn import_agent_session_into_thread(
     let mut options = state.run_options(candidate.cwd.clone(), Some(thread_id.to_string()));
     options.runtime_ref = Some(profile.id.clone());
     options.agent = target.agent_ref.clone();
-    let snapshot = state
+    let loaded = state
         .inner
         .gateway
-        .resume_imported_agent_session(
+        .load_imported_agent_session(
             profile.clone(),
-            peer,
+            peer.clone(),
             options.clone(),
             thread_id.to_string(),
             candidate.native_session_id.clone(),
         )
         .await?;
+    let snapshot = loaded.snapshot;
     if snapshot.native_session_id != candidate.native_session_id {
         return Err(agent_session_error(
-            "agent_session_resume_identity_mismatch",
+            "agent_session_load_identity_mismatch",
             AgentErrorStage::Binding,
             "never",
             "unknown",
-            "The ACP Agent resumed a different native session than requested.",
+            "The ACP Agent loaded a different native session than requested.",
             None,
         ));
     }
+    crate::acp_peer::commit_imported_acp_replay(
+        &state.inner.state,
+        &peer,
+        thread_id,
+        &loaded.replay,
+    )?;
     let agent =
         resolve_gateway_agent_binding_snapshot(&options, &profile, None, AgentEntrypoint::Peer)?;
     let fingerprint = runtime_profile_config_fingerprint(&profile);
@@ -336,6 +349,17 @@ async fn import_agent_session_into_thread(
             binding.binding_revision,
             &candidate.native_session_id,
         )?;
+    state.inner.state.store().set_session_metadata_field(
+        thread_id,
+        ACP_PEER_METADATA_KEY,
+        Some(crate::acp_peer::peer_session_metadata(
+            &peer,
+            Some(&candidate.native_session_id),
+            None,
+            &options.runtime_options,
+            Some(&snapshot),
+        )),
+    )?;
     persist_lifecycle_projection(state, thread_id, target, &snapshot)?;
     if let Some(title) = candidate
         .title

@@ -114,6 +114,7 @@ impl<'a> FullscreenUi<'a> {
         if let Some(started) = row.tool_started.take() {
             row.tool_elapsed = Some(started.elapsed());
         }
+        row.collapse_thinking_details();
     }
 
     pub(crate) fn apply_assistant_preamble_text(&mut self, text: String, completed: bool) {

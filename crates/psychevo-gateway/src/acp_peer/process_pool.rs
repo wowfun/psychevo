@@ -294,6 +294,41 @@ impl AcpProcessPool {
         result
     }
 
+    pub(crate) async fn load_session(
+        &self,
+        peer: ResolvedPeerTurn,
+        cwd: PathBuf,
+        local_session_id: String,
+        native_session_id: String,
+        mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
+    ) -> psychevo_runtime::Result<AcpSessionLoadOutput> {
+        let handle = self.actor(&peer, &cwd)?;
+        let resident_local_session_id = local_session_id.clone();
+        let (reply_tx, reply_rx) = tokio_oneshot::channel();
+        handle
+            .command_tx
+            .send(AcpProcessCommand::LoadSession {
+                local_session_id,
+                native_session_id,
+                cwd,
+                mcp_servers,
+                reply: reply_tx,
+            })
+            .map_err(|_| acp_process_unavailable_error("ACP process mailbox closed"))?;
+        let result = reply_rx.await.map_err(|_| {
+            acp_process_unavailable_error("ACP process ended while loading Agent history")
+        })?;
+        if result.is_ok() {
+            self.inner
+                .resident_actors
+                .lock()
+                .map_err(|_| Error::Message("ACP resident actor registry poisoned".to_string()))?
+                .insert(resident_local_session_id, handle.clone());
+        }
+        observe_acp_auth_result(&handle.auth_observation, &result, false);
+        result
+    }
+
     pub(crate) async fn inspect_cached(
         &self,
         local_session_id: String,
@@ -856,6 +891,13 @@ enum AcpProcessCommand {
         cwd: PathBuf,
         mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionSnapshot>>,
+    },
+    LoadSession {
+        local_session_id: String,
+        native_session_id: String,
+        cwd: PathBuf,
+        mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
+        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionLoadOutput>>,
     },
     InspectCached {
         local_session_id: String,
@@ -1618,6 +1660,55 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                 tasks.spawn(async move {
                                     let _session_guard = session_lock.lock().await;
                                     let result = inspect_resident_acp_session(
+                                        &cx,
+                                        &initialized,
+                                        &peer,
+                                        &contexts,
+                                        &sessions,
+                                        &notification_ingress,
+                                        &mut subscription,
+                                        &next_session_epoch,
+                                        generation,
+                                        local_session_id,
+                                        native_session_id,
+                                        cwd,
+                                        mcp_servers,
+                                    ).await;
+                                    drain_acp_notification_subscription(
+                                        &mut subscription,
+                                        &sessions,
+                                        generation,
+                                    ).await;
+                                    let _ = reply.send(result);
+                                });
+                            }
+                            AcpProcessCommand::LoadSession { local_session_id, native_session_id, cwd, mcp_servers, reply } => {
+                                let session_lock = match acp_session_lock(&session_locks, &local_session_id) {
+                                    Ok(lock) => lock,
+                                    Err(error) => {
+                                        let _ = reply.send(Err(error));
+                                        continue;
+                                    }
+                                };
+                                let mut subscription = match notification_router
+                                    .subscribe(Some(native_session_id.clone()))
+                                {
+                                    Ok(subscription) => subscription,
+                                    Err(error) => {
+                                        let _ = reply.send(Err(error));
+                                        continue;
+                                    }
+                                };
+                                let cx = cx.clone();
+                                let initialized = Arc::clone(&initialized);
+                                let peer = peer_for_connection.clone();
+                                let contexts = Arc::clone(&contexts);
+                                let sessions = Arc::clone(&sessions);
+                                let notification_ingress = notification_ingress.clone();
+                                let next_session_epoch = Arc::clone(&next_session_epoch);
+                                tasks.spawn(async move {
+                                    let _session_guard = session_lock.lock().await;
+                                    let result = load_resident_acp_session(
                                         &cx,
                                         &initialized,
                                         &peer,

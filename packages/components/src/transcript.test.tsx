@@ -118,6 +118,62 @@ describe("TranscriptPanel Markdown rendering", () => {
   });
 });
 
+describe("TranscriptPanel Thinking lifecycle", () => {
+  function reasoningEntry(status: TranscriptBlock["status"], body = "Inspect the workspace"): TranscriptEntry {
+    return transcriptEntry([transcriptBlock({
+      id: "reasoning-1",
+      kind: "reasoning",
+      status,
+      body,
+      metadata: null
+    })]);
+  }
+
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "collapses Thinking when running reasoning becomes %s",
+    (status) => {
+      const { rerender } = render(<TranscriptPanel entries={[reasoningEntry("running")]} />);
+
+      expect(screen.getByRole("button", { name: /Thinking/ }).getAttribute("aria-expanded")).toBe("true");
+      expect(screen.getByText("Inspect the workspace")).toBeTruthy();
+
+      rerender(<TranscriptPanel entries={[reasoningEntry(status)]} />);
+
+      expect(screen.getByRole("button", { name: /Thinking/ }).getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByText("Inspect the workspace")).toBeNull();
+    }
+  );
+
+  it("preserves manual folding choices across same-state updates", () => {
+    const { rerender } = render(<TranscriptPanel entries={[reasoningEntry("running")]} />);
+    const header = screen.getByRole("button", { name: /Thinking/ });
+
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+
+    rerender(<TranscriptPanel entries={[reasoningEntry("running", "Inspect the workspace again")]} />);
+    expect(screen.getByRole("button", { name: /Thinking/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Inspect the workspace again")).toBeNull();
+
+    rerender(<TranscriptPanel entries={[reasoningEntry("completed", "Inspection complete")]} />);
+    const completedHeader = screen.getByRole("button", { name: /Thinking/ });
+    fireEvent.click(completedHeader);
+    expect(completedHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Inspection complete")).toBeTruthy();
+
+    rerender(<TranscriptPanel entries={[reasoningEntry("completed", "Inspection remains complete")]} />);
+    expect(screen.getByRole("button", { name: /Thinking/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Inspection remains complete")).toBeTruthy();
+  });
+
+  it("loads terminal Thinking collapsed", () => {
+    render(<TranscriptPanel entries={[reasoningEntry("completed")]} />);
+
+    expect(screen.getByRole("button", { name: /Thinking/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Inspect the workspace")).toBeNull();
+  });
+});
+
 describe("TranscriptPanel externally owned history", () => {
   it("keeps a retained earlier-turn live answer before a later detached optimistic prompt", () => {
     const firstQuestion: TranscriptEntry = {

@@ -265,6 +265,12 @@ impl TranscriptRow {
         self.expanded = self.full_text.is_some() && keep_expanded;
         self.details_collapsed = keep_details_collapsed && self.is_expandable();
     }
+
+    pub(crate) fn collapse_thinking_details(&mut self) {
+        if self.kind == TranscriptKind::Thinking {
+            self.details_collapsed = self.is_expandable();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

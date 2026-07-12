@@ -181,7 +181,7 @@ command = "cursor-agent"
 }
 
 #[tokio::test]
-async fn runtime_profile_rpc_exposes_native_and_acp_profiles_without_launch_fields() {
+async fn runtime_profile_rpc_omits_launch_fields_from_visible_profiles() {
     let (_temp, state) = web_state();
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
@@ -212,20 +212,8 @@ command = "reviewer-agent"
         .iter()
         .find(|profile| profile["id"] == "native")
         .expect("native profile");
-    let codex = profiles
-        .iter()
-        .find(|profile| profile["id"] == "codex")
-        .expect("codex ACP profile");
-    let opencode = profiles
-        .iter()
-        .find(|profile| profile["id"] == "opencode")
-        .expect("opencode ACP profile");
     assert_eq!(native["runtime"], "native");
-    assert_eq!(codex["runtime"], "acp");
-    assert_eq!(codex["backendRef"], "codex");
-    assert_eq!(opencode["runtime"], "acp");
-    assert_eq!(opencode["backendRef"], "opencode");
-    for profile in [native, codex, opencode] {
+    for profile in profiles {
         assert!(profile.get("command").is_none());
         assert!(profile.get("args").is_none());
         assert!(profile.get("envKeys").is_none());
@@ -877,6 +865,75 @@ entrypoints = ["peer", "subagent"]
 }
 
 #[tokio::test]
+async fn native_thread_context_reports_effective_permission_and_reasoning_values() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        r#"model = "deepseek/deepseek-chat"
+
+[provider.deepseek.models."deepseek-chat"]
+reasoning_effort = "high"
+"#,
+    )
+    .expect("model config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let context = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        mpsc::unbounded_channel().0,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("native-effective-controls")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({
+                "scope": scope.to_wire_scope(),
+                "target": {"agentRef": null, "runtimeProfileRef": "native"}
+            })),
+        },
+    )
+    .await
+    .expect("thread/context/read");
+
+    let controls = context["controls"].as_array().expect("controls");
+    let permission = controls
+        .iter()
+        .find(|control| control["id"] == "permissionMode")
+        .expect("permission control");
+    assert_eq!(permission["effectiveValue"], "default");
+    assert_eq!(permission["effectiveSource"], "runtimeDefault");
+    let reasoning = controls
+        .iter()
+        .find(|control| control["id"] == "reasoning")
+        .expect("reasoning control");
+    assert_eq!(reasoning["effectiveValue"], "high");
+
+    let updated = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        mpsc::unbounded_channel().0,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("native-permission-change")),
+            method: "thread/control/set".to_string(),
+            params: Some(json!({
+                "scope": scope.to_wire_scope(),
+                "targetId": context["targetId"],
+                "controlId": "permissionMode",
+                "value": "dontAsk",
+                "expectedCapabilityRevision": permission["capabilityRevision"],
+                "expectedBindingRevision": 0,
+                "expectedContextRevision": context["contextRevision"],
+                "expectedControlRevision": context["controlRevision"]
+            })),
+        },
+    )
+    .await
+    .expect("thread/control/set");
+    assert_eq!(updated["control"]["effectiveValue"], "dontAsk");
+}
+
+#[tokio::test]
 async fn thread_context_catalog_pairs_agent_definitions_with_runtime_profiles() {
     let (_temp, state) = web_state();
     write_runnable_target_catalog_fixture(&state);
@@ -913,7 +970,7 @@ async fn thread_context_catalog_pairs_agent_definitions_with_runtime_profiles() 
         default["label"]
             .as_str()
             .unwrap_or_default()
-            .contains("Default Agent")
+            .contains("Psychevo")
     );
     assert!(has_pair(Some("native-peer"), "native"));
     assert!(has_pair(Some("cursor"), "acp:cursor"));
@@ -1469,6 +1526,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
 #[tokio::test]
 async fn backend_list_auto_creates_detected_local_acp_backends() {
     let bin = tempfile::tempdir().expect("bin tempdir");
+    write_command_shim(&bin.path().join("codex"));
     write_command_shim(&bin.path().join("opencode"));
     write_command_shim(&bin.path().join("hermes"));
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
@@ -1491,6 +1549,14 @@ async fn backend_list_auto_creates_detected_local_acp_backends() {
     .await
     .expect("backend/list");
     let records = backends["backends"].as_array().expect("backends");
+    let codex = records
+        .iter()
+        .find(|backend| backend["id"] == "codex")
+        .expect("codex backend");
+    assert_eq!(codex["sourceTargets"], json!(["profile"]));
+    assert!(codex["command"]
+        .as_str()
+        .is_some_and(|command| command.contains("runtime-adapters")));
     let opencode = records
         .iter()
         .find(|backend| backend["id"] == "opencode")
@@ -1533,6 +1599,148 @@ async fn backend_list_auto_creates_detected_local_acp_backends() {
             .any(|agent| agent["name"] == "opencode")
     );
     assert!(agent_records.iter().any(|agent| agent["name"] == "hermes"));
+}
+
+#[tokio::test]
+async fn backend_list_hides_undetected_known_local_acp_backends_and_profiles() {
+    let bin = tempfile::tempdir().expect("bin tempdir");
+    let (_temp, state) = web_state_with_env(BTreeMap::from([(
+        "PATH".to_string(),
+        bin.path().display().to_string(),
+    )]));
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let backends = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("undetected-backends")),
+            method: "backend/list".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("backend/list");
+    let ids = backends["backends"]
+        .as_array()
+        .expect("backends")
+        .iter()
+        .filter_map(|backend| backend["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(!ids.contains(&"codex"));
+    assert!(!ids.contains(&"opencode"));
+    assert!(!ids.contains(&"hermes"));
+
+    let profiles = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("undetected-profiles")),
+            method: "runtime/profile/list".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("runtime/profile/list");
+    let profile_ids = profiles["profiles"]
+        .as_array()
+        .expect("profiles")
+        .iter()
+        .filter_map(|profile| profile["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(!profile_ids.contains(&"codex"));
+    assert!(!profile_ids.contains(&"opencode"));
+
+    let imports = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("undetected-imports")),
+            method: "thread/import/list".to_string(),
+            params: Some(json!({"scope": scope, "cursors": {}})),
+        },
+    )
+    .await
+    .expect("thread/import/list");
+    let import_ids = imports["profiles"]
+        .as_array()
+        .expect("import profiles")
+        .iter()
+        .filter_map(|profile| profile["runtimeProfileRef"].as_str())
+        .collect::<Vec<_>>();
+    assert!(!import_ids.contains(&"codex"));
+    assert!(!import_ids.contains(&"opencode"));
+}
+
+#[tokio::test]
+async fn backend_list_retains_existing_known_backend_when_cli_is_absent() {
+    let bin = tempfile::tempdir().expect("bin tempdir");
+    let (_temp, state) = web_state_with_env(BTreeMap::from([(
+        "PATH".to_string(),
+        bin.path().display().to_string(),
+    )]));
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        r#"[agents.backends.codex]
+kind = "acp"
+label = "Review Codex"
+command = "custom-codex-acp"
+args = []
+"#,
+    )
+    .expect("existing backend config");
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let backends = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("retained-backend")),
+            method: "backend/list".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("backend/list");
+    let codex = backends["backends"]
+        .as_array()
+        .expect("backends")
+        .iter()
+        .find(|backend| backend["id"] == "codex")
+        .expect("retained Codex backend");
+    assert_eq!(codex["label"], "Review Codex");
+    assert_eq!(codex["command"], "custom-codex-acp");
+
+    let profiles = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("retained-profile")),
+            method: "runtime/profile/list".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("runtime/profile/list");
+    assert!(profiles["profiles"]
+        .as_array()
+        .expect("profiles")
+        .iter()
+        .any(|profile| profile["id"] == "codex"));
 }
 
 #[tokio::test]
@@ -2593,6 +2801,198 @@ async fn thread_draft_prepare_projects_opencode_controls_before_first_prompt() {
         line.contains("\"method\":\"session/prompt\"")
             && line.contains("\"sessionId\":\"draft-native\"")
     }));
+}
+
+#[tokio::test]
+async fn thread_draft_prepare_projects_and_applies_legacy_acp_models() {
+    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
+    let host_cwd = std::env::current_dir().expect("host cwd");
+    let python = ["python3", "python"]
+        .into_iter()
+        .find_map(|command| {
+            resolve_executable_path(
+                command,
+                &host_cwd,
+                &ExecutableResolveOptions {
+                    platform: HostPlatform::current(),
+                    env: &host_env,
+                },
+            )
+        })
+        .expect("Python is required by the ACP fixture");
+    let (_temp, state) = web_state();
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
+    let log = state.inner.cwd.join("legacy-model-draft.jsonl");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("write-legacy-model-fixture")),
+            method: "backend/write".to_string(),
+            params: Some(json!({
+                "id": "legacy-hermes",
+                "target": "project",
+                "command": python,
+                "args": [fixture],
+                "env": {
+                    "ACP_LIFECYCLE_LOG": log,
+                    "ACP_LIFECYCLE_MODE": "legacy-models"
+                },
+                "entrypoints": ["peer", "subagent"]
+            })),
+        },
+    )
+    .await
+    .expect("backend/write");
+
+    let before = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("context-before-legacy-prepare")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({"threadId": null, "scope": scope})),
+        },
+    )
+    .await
+    .expect("thread/context/read");
+    let target = before["compatibleTargets"]
+        .as_array()
+        .expect("targets")
+        .iter()
+        .find(|target| target["agentRef"] == "legacy-hermes")
+        .expect("legacy Hermes target")
+        .clone();
+    let target_id = target["targetId"].as_str().expect("target id");
+
+    let prepared = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("prepare-legacy-hermes")),
+            method: "thread/draft/prepare".to_string(),
+            params: Some(json!({"targetId": target_id, "scope": scope})),
+        },
+    )
+    .await
+    .expect("thread/draft/prepare");
+    let model = prepared["context"]["controls"]
+        .as_array()
+        .expect("controls")
+        .iter()
+        .find(|control| control["surfaceRole"] == "model")
+        .expect("legacy model control");
+    assert_eq!(model["effectiveValue"], "test/default");
+    assert_eq!(model["choices"].as_array().map(Vec::len), Some(2));
+
+    let changed = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("set-legacy-model")),
+            method: "thread/control/set".to_string(),
+            params: Some(json!({
+                "threadId": null,
+                "targetId": target_id,
+                "controlId": "model",
+                "value": "test/second",
+                "expectedCapabilityRevision": model["capabilityRevision"],
+                "expectedBindingRevision": 0,
+                "expectedContextRevision": prepared["context"]["contextRevision"],
+                "expectedControlRevision": prepared["context"]["controlRevision"],
+                "scope": scope
+            })),
+        },
+    )
+    .await
+    .expect("thread/control/set legacy model");
+    assert_eq!(changed["status"], "observed");
+    assert_eq!(changed["control"]["effectiveValue"], "test/second");
+
+    let accepted = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("turn-with-legacy-model")),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "threadId": null,
+                "target": {
+                    "agentRef": target["agentRef"],
+                    "runtimeProfileRef": target["runtimeProfileRef"]
+                },
+                "input": [{"type": "text", "text": "use the legacy model"}],
+                "turnOverrides": {},
+                "expectedContextRevision": changed["contextRevision"],
+                "expectedControlRevision": changed["controlRevision"]
+            })),
+        },
+    )
+    .await
+    .expect("turn/start with legacy model");
+    assert_eq!(accepted["accepted"], true);
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let content = std::fs::read_to_string(&log).unwrap_or_default();
+            if content.contains("\"method\":\"session/prompt\"") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("legacy prompt");
+    let entries = std::fs::read_to_string(&log)
+        .expect("legacy fixture log")
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect::<Vec<_>>();
+    let methods = entries
+        .iter()
+        .filter(|entry| entry["event"] == "request")
+        .filter_map(|entry| entry["method"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        methods.iter().filter(|method| **method == "session/new").count(),
+        1,
+        "the first turn must reuse the prepared legacy session"
+    );
+    let prompt_index = methods
+        .iter()
+        .position(|method| *method == "session/prompt")
+        .expect("session/prompt request");
+    let model_indices = methods
+        .iter()
+        .enumerate()
+        .filter_map(|(index, method)| (*method == "session/set_model").then_some(index))
+        .collect::<Vec<_>>();
+    assert!(!model_indices.is_empty());
+    assert!(model_indices.iter().all(|index| *index < prompt_index));
+
+    state
+        .inner
+        .gateway
+        .shutdown_runtimes(false)
+        .await
+        .expect("shutdown legacy model fixture");
 }
 
 #[test]

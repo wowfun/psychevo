@@ -389,15 +389,17 @@ async fn resume_resident_acp_session(
     )?;
     let request = ResumeSessionRequest::new(session_ref.native_session_id.clone(), &cwd)
         .mcp_servers(mcp_servers.clone());
-    let response = acp_response_with_projection_barrier(
-        cx.send_request(request),
+    let response = acp_session_response_with_legacy_models::<ResumeSessionResponse, _>(
+        cx,
+        "session/resume",
+        request,
         notification_ingress,
     )
     .await
     .map_err(|error| {
         acp_agent_not_delivered_error("acp_session_resume_failed", "session/resume", &error)
     });
-    let (response, response_barrier) = match response {
+    let (response, legacy_models, response_barrier) = match response {
         Ok(response) => response,
         Err(error) => {
             let _ = remove_acp_context(contexts, &session_ref.native_session_id);
@@ -410,6 +412,7 @@ async fn resume_resident_acp_session(
             native_session_id: session_ref.native_session_id.clone(),
             modes: response.modes,
             config_options: response.config_options.unwrap_or_default(),
+            legacy_models,
             session_epoch,
             loaded_from_agent: true,
             mcp_servers,
@@ -498,8 +501,11 @@ async fn fork_resident_acp_session(
     };
     let request = ForkSessionRequest::new(source.native_session_id.clone(), &cwd)
         .mcp_servers(source_session.mcp_servers.clone());
-    let (response, response_barrier) = acp_response_with_projection_barrier(
-        cx.send_request(request),
+    let (response, legacy_models, response_barrier) =
+        acp_session_response_with_legacy_models::<ForkSessionResponse, _>(
+        cx,
+        "session/fork",
+        request,
         notification_ingress,
     )
     .await
@@ -532,6 +538,7 @@ async fn fork_resident_acp_session(
             native_session_id: native_session_id.clone(),
             modes: response.modes,
             config_options: response.config_options.unwrap_or_default(),
+            legacy_models,
             session_epoch,
             loaded_from_agent: true,
             mcp_servers: source_session.mcp_servers,

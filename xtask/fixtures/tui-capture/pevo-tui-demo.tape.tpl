@@ -88,15 +88,20 @@ Wait+Screen /Ask pevo/
 Sleep 200 ms
 Type "Reasoning-only table bottom scroll fixture"
 Enter
-Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
+Wait+Screen /▸ details/
 Sleep 300 ms
 Screenshot "06-reasoning-only-collapsed.png"
+Ctrl+T
+Enter
+Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
 PageUp 8
 Sleep 100 ms
 PageDown 80
 Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
 Sleep 300 ms
 Screenshot "07-reasoning-only-bottom-scroll.png"
+Escape
+Wait+Screen /Ask pevo/
 Type "Visible write preamble fixture"
 Enter
 Wait+Screen /Now I have all the data needed/

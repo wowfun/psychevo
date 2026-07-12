@@ -1141,7 +1141,15 @@ pub(super) fn materialize_local_acp_backends(
     let existing_backends =
         load_agent_backend_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     let config_dir = active_profile_config_dir(state, scope);
-    if !existing_backends.contains_key(crate::managed_acp::CODEX_ACP_BACKEND_ID) {
+    if !existing_backends.contains_key(crate::managed_acp::CODEX_ACP_BACKEND_ID)
+        && resolve_command_path(
+            "codex",
+            &state.inner.inherited_env,
+            &scope.cwd,
+            HostPlatform::current(),
+        )
+        .is_some()
+    {
         let paths =
             crate::managed_acp::managed_codex_acp_paths(&state.inner.home, HostPlatform::current());
         set_config_value(

@@ -448,6 +448,7 @@ function TranscriptBlockView({
   const shouldDefaultOpen = defaultBlockOpen(block, display);
   const [open, setOpen] = useState(shouldDefaultOpen);
   const [copied, setCopied] = useState(false);
+  const wasRunningReasoningRef = useRef(block.kind === "reasoning" && block.status === "running");
   const status = statusLabel(block);
   const artifactIds = transcriptArtifactIds(block);
   useEffect(() => {
@@ -455,6 +456,13 @@ function TranscriptBlockView({
       setOpen(true);
     }
   }, [block.id, shouldDefaultOpen]);
+  useEffect(() => {
+    const runningReasoning = block.kind === "reasoning" && block.status === "running";
+    if (wasRunningReasoningRef.current && !runningReasoning) {
+      setOpen(false);
+    }
+    wasRunningReasoningRef.current = runningReasoning;
+  }, [block.id, block.kind, block.status]);
 
   if (block.kind === "text" && entry.role === "user") {
     return (
@@ -523,7 +531,12 @@ function TranscriptBlockView({
         data-has-body={text.trim() ? "true" : "false"}
         {...transcriptBlockDataAttributes(entry, block)}
       >
-        <button className={`pevo-reasoningHeader ${runningReasoning ? "is-runningActivity" : ""}`} onClick={() => setOpen((value) => !value)} type="button">
+        <button
+          aria-expanded={open}
+          className={`pevo-reasoningHeader ${runningReasoning ? "is-runningActivity" : ""}`}
+          onClick={() => setOpen((value) => !value)}
+          type="button"
+        >
           {runningReasoning ? (
             <span className="pevo-evidenceSpinner" aria-hidden="true">
               {ACTIVITY_SPINNER[activityTick % ACTIVITY_SPINNER.length]}

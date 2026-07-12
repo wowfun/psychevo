@@ -39,6 +39,32 @@ def config_options():
     ]
 
 
+def legacy_models():
+    return {
+        "currentModelId": session_config["model"],
+        "availableModels": [
+            {
+                "modelId": "test/default",
+                "name": "Default model",
+                "description": "Legacy default",
+            },
+            {
+                "modelId": "test/second",
+                "name": "Second model",
+                "description": "Legacy second",
+            },
+        ],
+    }
+
+
+def uses_legacy_models():
+    return MODE in {
+        "legacy-models",
+        "legacy-models-error",
+        "legacy-models-and-config",
+    }
+
+
 def emit(value):
     print(json.dumps(value, separators=(",", ":")), flush=True)
 
@@ -120,7 +146,7 @@ for raw_line in sys.stdin:
                 ),
             },
             "agentCapabilities": {
-                "loadSession": True,
+                "loadSession": MODE != "resume-only",
                 "promptCapabilities": {
                     "image": is_codex,
                     "embeddedContext": is_codex,
@@ -141,10 +167,12 @@ for raw_line in sys.stdin:
         else:
             fail(message_id, -32601, "authentication/status is unavailable")
     elif method == "session/new":
-        respond(message_id, {
-            "sessionId": "draft-native",
-            "configOptions": config_options(),
-        })
+        result = {"sessionId": "draft-native"}
+        if MODE != "legacy-models" and MODE != "legacy-models-error":
+            result["configOptions"] = config_options()
+        if uses_legacy_models():
+            result["models"] = legacy_models()
+        respond(message_id, result)
         # OpenCode schedules this notification after returning session/new.
         # Keep it after the response so the prepared receipt and resident
         # projection observe the same ordering as the real Agent.
@@ -168,6 +196,12 @@ for raw_line in sys.stdin:
             "used": 12,
             "size": 100,
         })
+    elif method == "session/set_model":
+        if MODE == "legacy-models-error":
+            fail(message_id, -32001, "legacy model switch rejected")
+        else:
+            session_config["model"] = params.get("modelId")
+            respond(message_id, {})
     elif method == "session/prompt":
         session_id = params["sessionId"]
         if MODE == "blocking-prompt":
@@ -181,26 +215,131 @@ for raw_line in sys.stdin:
         })
         respond(message_id, {"stopReason": "end_turn"})
     elif method == "session/load":
-        respond(message_id, {"configOptions": config_options()})
+        session_id = params["sessionId"]
+        if session_id == "listed-native" and MODE == "history-replay-review":
+            session_update(session_id, {
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "history-user-reliable",
+                "content": {"type": "text", "text": "Reliable imported question"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "user_message_chunk",
+                "content": {"type": "text", "text": "Unidentified imported question"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "history-assistant-ordered",
+                "content": {"type": "text", "text": "Before tool"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "history-tool-ordered",
+                "title": "Inspect ordered history",
+                "kind": "execute",
+                "status": "pending",
+                "rawInput": {"cmd": "printf ordered"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "history-tool-ordered",
+                "status": "completed",
+                "rawOutput": {"output": "ordered tool output\n"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "history-assistant-ordered",
+                "content": {"type": "text", "text": "After tool"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "Unidentified imported answer"},
+            })
+            for content, status in [
+                ("Inspect replay", "pending"),
+                ("Implement replay", "in_progress"),
+                ("Verify replay", "completed"),
+            ]:
+                session_update(session_id, {
+                    "sessionUpdate": "plan",
+                    "entries": [{
+                        "content": content,
+                        "priority": "high",
+                        "status": status,
+                    }],
+                })
+        elif session_id == "listed-native":
+            session_update(session_id, {
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "history-user-1",
+                "content": {"type": "text", "text": "Imported user question"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "agent_thought_chunk",
+                "messageId": "history-assistant-1",
+                "content": {"type": "text", "text": "Imported reasoning"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "history-assistant-1",
+                "content": {"type": "text", "text": "Imported assistant answer"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "history-tool-1",
+                "title": "Inspect imported history",
+                "kind": "execute",
+                "status": "pending",
+                "rawInput": {"cmd": "printf imported"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "history-tool-1",
+                "status": "completed",
+                "content": [{
+                    "type": "content",
+                    "content": {"type": "text", "text": "imported tool output\n"},
+                }],
+                "rawOutput": {"output": "imported tool output\n"},
+            })
+            session_update(session_id, {
+                "sessionUpdate": "plan",
+                "entries": [{
+                    "content": "Verify imported replay",
+                    "priority": "high",
+                    "status": "completed",
+                }],
+            })
+        result = {}
+        if MODE != "legacy-models" and MODE != "legacy-models-error":
+            result["configOptions"] = config_options()
+        if uses_legacy_models():
+            result["models"] = legacy_models()
+        respond(message_id, result)
     elif method == "session/resume":
         session_id = params["sessionId"]
         session_update(session_id, {
             "sessionUpdate": "current_mode_update",
             "currentModeId": "resume-mode",
         })
-        respond(message_id, {
+        result = {
             "modes": {
                 "currentModeId": "resume-mode",
                 "availableModes": [{"id": "resume-mode", "name": "Resume mode"}],
             },
             "configOptions": [],
-        })
+        }
+        if uses_legacy_models():
+            result["models"] = legacy_models()
+        respond(message_id, result)
     elif method == "session/fork":
         session_update("fork-native", {
             "sessionUpdate": "agent_message_chunk",
             "content": {"type": "text", "text": "forked history"},
         })
-        respond(message_id, {"sessionId": "fork-native", "configOptions": []})
+        result = {"sessionId": "fork-native", "configOptions": []}
+        if uses_legacy_models():
+            result["models"] = legacy_models()
+        respond(message_id, result)
     elif method == "session/list":
         if MODE == "auth-list":
             fail(

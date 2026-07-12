@@ -437,6 +437,13 @@ impl TuiApp {
             (_, TranscriptBlockKind::Reasoning) => {
                 let text = transcript_block_text(&block);
                 let existing_idx = gateway_block_row_index(ui, &block.id).or(ui.reasoning_row);
+                let inserted_terminal_row = existing_idx.is_none()
+                    && matches!(
+                        block.status,
+                        TranscriptBlockStatus::Completed
+                            | TranscriptBlockStatus::Failed
+                            | TranscriptBlockStatus::Cancelled
+                    );
                 if text.trim().is_empty() && existing_idx.is_none() {
                     return false;
                 }
@@ -477,13 +484,21 @@ impl TuiApp {
                 }
                 tag_gateway_transcript_row(ui, idx, entry_meta, &block);
                 ui.reasoning_row = Some(idx);
+                let was_running = ui.transcript[idx].tool_started.is_some();
                 if !text.trim().is_empty() {
                     ui.transcript[idx].set_evidence_body_text(text);
                     ui.turn_had_reasoning = true;
                     ui.remove_turn_meta();
                 }
-                if block.status == TranscriptBlockStatus::Completed {
-                    ui.finish_thinking_row(idx);
+                if matches!(
+                    block.status,
+                    TranscriptBlockStatus::Completed
+                        | TranscriptBlockStatus::Failed
+                        | TranscriptBlockStatus::Cancelled
+                ) {
+                    if inserted_terminal_row || was_running {
+                        ui.finish_thinking_row(idx);
+                    }
                     if ui.reasoning_row == Some(idx) {
                         ui.reasoning_row = None;
                     }

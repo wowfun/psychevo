@@ -174,15 +174,15 @@ async fn ensure_resident_acp_session(
             .lock()
             .map_err(|_| Error::Message("ACP session context lock poisoned".to_string()))?
             .insert(native_session_id.to_string(), Arc::clone(&client_context));
-        let loaded = acp_response_with_projection_barrier(
-            cx.send_request(
-                LoadSessionRequest::new(native_session_id.to_string(), cwd)
-                    .mcp_servers(mcp_servers.clone()),
-            ),
+        let loaded = acp_session_response_with_legacy_models::<LoadSessionResponse, _>(
+            cx,
+            "session/load",
+            LoadSessionRequest::new(native_session_id.to_string(), cwd)
+                .mcp_servers(mcp_servers.clone()),
             notification_ingress,
         )
         .await;
-        let (loaded, response_barrier) = match loaded {
+        let (loaded, legacy_models, response_barrier) = match loaded {
             Ok(loaded) => loaded,
             Err(error) => {
                 let _ = remove_acp_context(contexts, native_session_id);
@@ -202,6 +202,7 @@ async fn ensure_resident_acp_session(
                     native_session_id: native_session_id.to_string(),
                     modes,
                     config_options,
+                    legacy_models,
                     session_epoch: next_acp_session_epoch(next_session_epoch)?,
                     loaded_from_agent: true,
                     mcp_servers: mcp_servers.clone(),
@@ -211,8 +212,11 @@ async fn ensure_resident_acp_session(
             response_barrier,
         )
     } else {
-        let (created, response_barrier) = acp_response_with_projection_barrier(
-            cx.send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers.clone())),
+        let (created, legacy_models, response_barrier) =
+            acp_session_response_with_legacy_models::<NewSessionResponse, _>(
+            cx,
+            "session/new",
+            NewSessionRequest::new(cwd).mcp_servers(mcp_servers.clone()),
             notification_ingress,
         )
         .await
@@ -233,6 +237,7 @@ async fn ensure_resident_acp_session(
                     native_session_id,
                     modes,
                     config_options,
+                    legacy_models,
                     session_epoch: next_acp_session_epoch(next_session_epoch)?,
                     loaded_from_agent: false,
                     mcp_servers,
@@ -268,11 +273,14 @@ async fn ensure_resident_acp_session(
         response_barrier,
         loaded_from_agent.then_some(native_session_id.as_str()),
         Some(&native_session_id),
-        active_state,
+        active_state.as_deref_mut(),
     )
     .await?;
+    let replay_complete = active_state
+        .as_deref()
+        .is_none_or(|state| state.history_replay.is_complete());
     if loaded_from_agent && let Some(session) = sessions.lock().await.get_mut(local_session_id) {
-        session.history.replay_complete = true;
+        session.history.replay_complete = replay_complete;
     }
     sessions
         .lock()
@@ -358,7 +366,10 @@ async fn execute_resident_acp_turn(
     session_controls::apply_acp_v1_config_options(
         cx,
         notification_ingress,
-        &mut session.config_options,
+        session_controls::AcpSessionControlState {
+            config_options: &mut session.config_options,
+            legacy_models: &mut session.legacy_models,
+        },
         &native_session_id,
         &turn.local_session_id,
         &turn.stream,
@@ -567,6 +578,51 @@ async fn inspect_resident_acp_session(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn load_resident_acp_session(
+    cx: &ConnectionTo<Agent>,
+    initialized: &InitializeResponse,
+    peer: &ResolvedPeerTurn,
+    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
+    sessions: &AcpResidentSessions,
+    notification_ingress: &AcpNotificationIngress,
+    notification_rx: &mut AcpNotificationSubscription,
+    next_session_epoch: &AtomicU64,
+    generation: u64,
+    local_session_id: String,
+    native_session_id: String,
+    cwd: PathBuf,
+    mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
+) -> psychevo_runtime::Result<AcpSessionLoadOutput> {
+    let mut state = AcpPeerStreamState::new(None, local_session_id.clone());
+    let session = ensure_resident_acp_session(
+        cx,
+        initialized,
+        peer,
+        contexts,
+        sessions,
+        notification_ingress,
+        notification_rx,
+        next_session_epoch,
+        generation,
+        &local_session_id,
+        Some(&native_session_id),
+        &cwd,
+        &mcp_servers,
+        None,
+        None,
+        None,
+        None,
+        Some(&mut state),
+    )
+    .await?;
+    state.finish();
+    Ok(AcpSessionLoadOutput {
+        snapshot: acp_session_snapshot(&session, generation),
+        replay: state.history_replay,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn prepare_resident_acp_session(
     cx: &ConnectionTo<Agent>,
     initialized: &InitializeResponse,
@@ -649,6 +705,53 @@ async fn set_resident_acp_control(
         .iter()
         .find(|option| option.id.to_string() == control_id)
         .cloned();
+    if option.is_none()
+        && control_id == "model"
+        && effective_legacy_models(&session.config_options, session.legacy_models.as_ref()).is_some()
+    {
+        let requested_model = value
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                acp_not_delivered_error(
+                    "acp_control_invalid",
+                    "ACP legacy model selector requires a non-empty string value",
+                )
+            })?;
+        let response_barrier = session_controls::apply_legacy_model_selection(
+            cx,
+            notification_ingress,
+            &session.config_options,
+            &mut session.legacy_models,
+            &native_session_id,
+            requested_model,
+        )
+        .await?;
+        sessions
+            .lock()
+            .await
+            .insert(local_session_id.clone(), session);
+        reduce_acp_notifications_through_barrier(
+            notification_rx,
+            sessions,
+            generation,
+            response_barrier,
+            None,
+            Some(&native_session_id),
+            None,
+        )
+        .await?;
+        let session = sessions
+            .lock()
+            .await
+            .get(&local_session_id)
+            .cloned()
+            .ok_or_else(|| {
+                Error::Message("resident ACP session disappeared after model update".to_string())
+            })?;
+        return Ok(acp_session_snapshot(&session, generation));
+    }
     if option.is_none() && control_id == "mode" {
         let requested_mode = value
             .as_str()

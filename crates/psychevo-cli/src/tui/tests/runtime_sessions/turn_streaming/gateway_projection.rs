@@ -1010,6 +1010,81 @@ pub(crate) fn typed_gateway_reasoning_update_uses_middle_fold_preview() {
 }
 
 #[test]
+pub(crate) fn typed_gateway_reasoning_collapses_once_for_every_terminal_status() {
+    for status in [
+        TranscriptBlockStatus::Completed,
+        TranscriptBlockStatus::Failed,
+        TranscriptBlockStatus::Cancelled,
+    ] {
+        let temp = tempdir().expect("temp");
+        let mut app = test_app(&temp);
+        app.current_session = Some("session-1".to_string());
+        let mut ui = FullscreenUi::new(&app);
+
+        app.apply_gateway_transcript_entry(
+            &mut ui,
+            Some("session-1"),
+            gateway_test_entry(
+                "live:turn-1:reasoning:0",
+                TranscriptBlockKind::Reasoning,
+                TranscriptBlockStatus::Running,
+                Some("Thinking"),
+                "live thinking",
+            ),
+        );
+        let idx = ui
+            .transcript
+            .iter()
+            .position(|row| row.kind == TranscriptKind::Thinking)
+            .expect("thinking row");
+        assert!(!ui.transcript[idx].details_collapsed, "{status:?}");
+
+        toggle_transcript_row_details(&mut ui.transcript[idx]);
+        app.apply_gateway_transcript_entry(
+            &mut ui,
+            Some("session-1"),
+            gateway_test_entry(
+                "live:turn-1:reasoning:0",
+                TranscriptBlockKind::Reasoning,
+                TranscriptBlockStatus::Running,
+                Some("Thinking"),
+                "live thinking continues",
+            ),
+        );
+        assert!(ui.transcript[idx].details_collapsed, "{status:?}");
+        toggle_transcript_row_details(&mut ui.transcript[idx]);
+
+        app.apply_gateway_transcript_entry(
+            &mut ui,
+            Some("session-1"),
+            gateway_test_entry(
+                "live:turn-1:reasoning:0",
+                TranscriptBlockKind::Reasoning,
+                status,
+                Some("Thinking"),
+                "terminal thinking",
+            ),
+        );
+        assert!(ui.transcript[idx].details_collapsed, "{status:?}");
+
+        toggle_transcript_row_details(&mut ui.transcript[idx]);
+        assert!(!ui.transcript[idx].details_collapsed, "{status:?}");
+        app.apply_gateway_transcript_entry(
+            &mut ui,
+            Some("session-1"),
+            gateway_test_entry(
+                "live:turn-1:reasoning:0",
+                TranscriptBlockKind::Reasoning,
+                status,
+                Some("Thinking"),
+                "terminal thinking remains",
+            ),
+        );
+        assert!(!ui.transcript[idx].details_collapsed, "{status:?}");
+    }
+}
+
+#[test]
 pub(crate) fn streaming_thinking_preview_tail_updates_while_collapsed() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
@@ -1043,10 +1118,19 @@ pub(crate) fn streaming_thinking_preview_tail_updates_while_collapsed() {
     assert!(row.text.contains("line 9"), "{}", row.text);
     assert!(row.text.contains("line 12"), "{}", row.text);
     assert!(!row.text.contains("line 8"), "{}", row.text);
+
+    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    let row = &mut ui.transcript[idx];
+    assert!(row.details_collapsed);
+
+    toggle_transcript_row_details(row);
+    assert!(!row.details_collapsed);
+    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    assert!(!ui.transcript[idx].details_collapsed);
 }
 
 #[test]
-pub(crate) fn typed_gateway_assistant_preamble_defaults_to_middle_fold_preview() {
+pub(crate) fn typed_gateway_terminal_preamble_keeps_preview_behind_collapsed_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     app.current_session = Some("session-1".to_string());
@@ -1072,6 +1156,7 @@ pub(crate) fn typed_gateway_assistant_preamble_defaults_to_middle_fold_preview()
         .expect("thinking row");
     assert_eq!(row.title, "Thinking");
     assert!(!row.expanded);
+    assert!(row.details_collapsed);
     assert_eq!(row.full_text.as_deref(), Some(long.as_str()));
     assert!(row.text.contains("... 6 more lines"), "{}", row.text);
     assert!(row.text.contains("line 12"), "{}", row.text);
